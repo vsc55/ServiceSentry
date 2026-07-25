@@ -25,8 +25,8 @@ async function renderSyslog() {
       <!-- Filters (schema-driven markup; controls wired imperatively below) -->
       ${buildFilterBar(_SYSLOG_FILTER_SCHEMA)}
 
-      <!-- Statistics -->
-      <div class="ss-card mb-3">
+      <!-- Statistics (no margin: inside the full-bleed pane the panels stack as one surface) -->
+      <div class="ss-card">
         <div class="card-body py-2 px-3">
           <div id="sl-stats"></div>
         </div>
@@ -38,7 +38,7 @@ async function renderSyslog() {
         <div class="ss-card-header">
           <span id="sl-status" class="me-auto small mb-0"></span>
           ${_buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols')}
-          <button class="btn btn-secondary btn-sm" onclick="_syslogReload()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+          <!-- Unified refresh: split-button (main = reload, caret = auto-refresh interval). -->
           <span id="sl-auto-refresh"></span>
           {# Clearing the store is offered in Config → General → Maintenance, not here. #}
         </div>

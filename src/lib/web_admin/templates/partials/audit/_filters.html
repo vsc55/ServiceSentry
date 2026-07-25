@@ -85,6 +85,13 @@ function toggleAuditSortDir() {
     applyAuditControls();
 }
 
+/** Badge on the (usually folded) filter header: how many filters are actually narrowing the
+ *  list, so a collapsed bar never hides that the table is filtered. */
+function _auditUpdateFilterCount() {
+    setFilterBarCount('audit', ['event', 'user', 'ip', 'dateFrom', 'dateTo', 'detail']
+        .filter(k => _auditFilters[k]).length);
+}
+
 function applyAuditControls() {
     const sf = document.getElementById('auditSortField');
     const gb = document.getElementById('auditGroupBy');
@@ -96,8 +103,7 @@ function applyAuditControls() {
     _auditFilters.dateFrom = document.getElementById('auditFilterFrom')?.value   || '';
     _auditFilters.dateTo   = document.getElementById('auditFilterTo')?.value     || '';
     _auditFilters.detail   = document.getElementById('auditFilterDetail')?.value || '';
-    const hasFilters = _auditFilters.event || _auditFilters.user || _auditFilters.ip ||
-                       _auditFilters.dateFrom || _auditFilters.dateTo;
+    _auditUpdateFilterCount();
     _auditPage = 1;
     _saveAuditUiState();
     renderAuditTable();

@@ -5,6 +5,11 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Configurable browser→server connectivity heartbeat (`web_admin|conn_check_secs`, default 6 s).**
+  The web UI pings `/api/v1/health` on this interval (2–120 s) with a short timeout to detect a lost
+  connection and raise the "No connection to the server" overlay. Editable in Config → Interface →
+  Connection. It is distinct from `services|health_poll_secs` ("Health check interval"), which is the
+  *backend* evaluator of monitored-service liveness — a different layer.
 - **The standalone Syslog receiver now enforces the internal fail2ban.** A syslog container running
   on its own (Docker, no WebAdmin) previously never dropped jailed IPs or reported offenses — the
   `is_banned`/`on_offense` callbacks were only wired when syslog ran embedded in the web admin.
@@ -17,16 +22,15 @@ All notable changes to **ServiceSentry** are documented in this file.
   (`web_admin|ipban_*`, incl. `SS_IPBAN_ENABLED`/`SS_IPBAN_WHITELIST`) is applied on boot and
   reconciled every 15 s so a web-side toggle converges without a restart. (Events stays out: it has
   no network listener and no ban action.)
-- **History and Syslog became standalone section pages, like Overview.** They are no longer tabs
-  inside the admin panel: `/history` and `/syslog` are whole pages of their own, declared once in
-  the `HOME_PAGES` registry with a `standalone` spec (pane, render entry point, required
-  permission, navbar icon/label). One generic route factory serves them all, the navbar builds its
-  buttons from the same data, and each is selectable as a landing page. A standalone page renders
-  **only its own pane** — the admin tab bar and the other sections' markup are not emitted at all,
-  rather than shipped and hidden with CSS. `/history` accepts a shareable deep link
-  (`?module=&key=`), which is what the "see this check's history" jump from Infrastructure now
-  uses. The navbar always shows the same four buttons in the same order (Overview, History, Syslog,
-  Admin); the section being viewed stays in place, highlighted, instead of disappearing.
+- **History and Syslog became their own sections, like Overview.** They are no longer sub-tabs
+  inside the admin panel: `/history` and `/syslog` are top-level sections with their own URLs,
+  declared once in the `HOME_PAGES` registry with a `standalone` spec (pane, render entry point,
+  required permission, sidebar icon/label). One generic route factory serves them all, the sidebar
+  builds its section buttons from the same data, and each is selectable as a landing page.
+  `/history` accepts a shareable deep link (`?module=&key=`), which is what the "see this check's
+  history" jump from Infrastructure uses. (Their URLs serve the single SPA shell — see *the whole
+  web admin is a single SPA shell* under Changed — so opening one from the panel is a reload-free
+  tab switch, not a page load.)
 - **Destructive data wipes gathered in Config → General → Maintenance.** *Clear All History*,
   *Clear a Series* and *Clear Syslog Messages* left the toolbars of the very sections they erase —
   pages that stay open all day, one stray click from deleting everything. The Maintenance card has
@@ -373,6 +377,92 @@ All notable changes to **ServiceSentry** are documented in this file.
   background).
 
 ### Changed
+- **The web-admin partials follow one naming convention.** The tree had drifted into three
+  different names for "the section's list" (`clusters/_table`, `sessions/_render`, everyone
+  else's `_list`), while `_table` also meant *column state* in `events`/`syslog` — so the same
+  name covered two things and the same thing had three names. Now: `_render` is the section
+  shell, `_list` its list, `_columns` the hand-built column state, `_modal` the editor, and
+  `_<concern>` an extracted concern. `_table` is retired. `ipban/_render.html` (908 lines,
+  three sub-sections in one file) was split into `_bans` / `_history` / `_whitelist` behind a
+  thin shell — a pure move, no code changed. `account/_modal.html` became `_render.html` (it
+  stopped rendering a modal when Account became a page), `status_body.html` gained the `_`
+  prefix every other partial has, and the old top `_navbar.html` — dead since the sidebar
+  replaced it — was deleted. Documented in `docs/explica-arquitectura.md` (including the
+  markup-vs-script split that makes `modals/_user` and `users/_modal` different animals) and
+  enforced by `tests/test_wa_partials_convention.py`: names, one shell per folder, no orphan
+  partials, no double includes, and a line cap on shells.
+- **The boot splash now waits for the landing section's data.** It used to lift as soon as
+  `init()` finished, so the first thing you saw was an empty section with a second spinner: init
+  activates the landing tab, but the render that fires from `shown.bs.tab` was never awaited (the
+  event system discards its return value, and with fade panes the event lands after the CSS
+  transition). The section render entry points now publish their promise, and init awaits it as
+  its very last step — everything else is already wired, so a slow section only delays the reveal.
+  Capped at 8 s, and a sidebar-level fallback releases the splash for any section whose render is
+  not tracked, so a stalled or untracked one can never pin it on screen.
+- **The boot overlay became a brand splash.** A bare Bootstrap spinner over "Loading…" was all the
+  first paint showed. It is now the app lockup — the sidebar's shield inside a ring with a bright
+  arc sweeping around it, the ServiceSentry wordmark, and an indeterminate progress sweep (boot has
+  no measurable percentage). It sits straight on the dimmed, blurred backdrop instead of in a card,
+  and every animation is dropped under `prefers-reduced-motion`.
+- **Audit's toolbar was reorganised like every other section.** Its bespoke controls bar mixed
+  three unrelated things in one block above the table. Now: the sort/group/filter controls wear the
+  shared collapsible filter-strip design (folded by default, with the active-filter badge);
+  **Refresh** and **Export** moved into the table's own header, between the accent strip and the
+  pagination band, where every other section keeps its tools; and **Delete All Audit Events** left
+  the toolbar for Config → General → Maintenance, joining the other data wipes — contributed
+  declaratively as a `CONFIG_ACTION` from `lib/core/audit/manifest.py` and gated on `audit_delete`,
+  so the panel needs no audit-specific glue. Its label is now self-describing, since in the
+  Maintenance card "Delete all events" said nothing about *which* events.
+- **The shared filter bar folds away, and starts folded.** The field row (Syslog, fail2ban → Ban
+  history) costs a lot of vertical space the table wants, and filtering is occasional — so it is
+  now a thin always-visible header ("Filters" + caret) over a collapsible body, collapsed by
+  default. The header carries a badge with the number of active filters, so a folded bar is never
+  a silent filter, and the state is remembered per bar across renders and reloads. Its spacing
+  moved out of the markup into `.ss-filterbar`: standalone it keeps its gap, but inside a
+  full-bleed pane it butts straight against the table below, the two reading as one surface
+  instead of two floating cards.
+- **Events dropped its dismissible intro banner.** "Notify selected channels when matching audit
+  or syslog events occur." explained the section on every visit until dismissed, costing a row of
+  vertical space above the rules table; the section is self-evident from the rule editor. The
+  `event_hint` string and its `ss_ev_hint_dismissed` sessionStorage flag are gone.
+- **Every section runs full-bleed, like History.** Infrastructure (Servers, Clusters,
+  Credentials), Access (Users, Groups, Roles, Sessions), both Events sub-sections (Rules and Log),
+  all three fail2ban sub-sections (Banned IPs, Ban history, Whitelist), Syslog and Audit lost
+  their card chrome — no border,
+  rounding or shadow — and now span the full width and height available, so the table gets the
+  whole area instead of floating inside the content gutters, with its accent strip flush against
+  the breadcrumb line. The edge-to-edge margins became a reusable `.ss-fullbleed` utility
+  (+ `.ss-fullbleed-top`, which eats the shell's top padding — valid for these panes because the
+  sidebar drives their sub-tabs, so `#infraSubTabs`/`#accessSubTabs` are hidden). History now uses
+  the same utility instead of its own bespoke margins. Since all seven tables built on
+  `createListTable` are full-bleed, flush became the factory's **default** rather than a per-table
+  flag; a caller that wants card chrome back passes `cardClass: 'ss-card'`.
+- **Navigation moved to a collapsible left sidebar.** The top bar of section buttons + the admin
+  panel's horizontal tab strip were replaced by a single left sidebar: the sections
+  (Overview / History / Syslog) at the top, the admin panel's tabs grouped under a **Settings**
+  accordion (whose open/closed state is remembered), and the user block pinned at the bottom
+  (account, dark-mode quick toggle, logout). It collapses to an icons-only *mini* mode on desktop
+  (state persisted) and to an off-canvas drawer on mobile. The tabs with sub-tabs (Infrastructure,
+  Access, Events, fail2ban) expose their sub-tabs as a **hover flyout** to the right (the in-pane
+  sub-tab bars are hidden, so the flyout is the single control); exactly one sub-item is
+  highlighted, always the one belonging to the section currently loaded, restored deterministically
+  on reload from each pane's own saved sub-tab. Dark mode is now a one-click toggle in the user menu.
+- **The whole web admin is a single SPA shell — no full-page reload on any navigation.** Previously
+  Overview / History / Syslog were served as *standalone pages* that shipped only their own pane, so
+  moving between them (or back to the panel) was a full document load. Now every URL — `/admin` and
+  every section URL (`/overview`, `/history`, `/syslog`, `/account`) — renders the **same** full
+  shell with all panes; the client opens the pane the URL points at (`_sbPaneIdFromPath`) and every
+  section switch is a Bootstrap tab change that syncs the URL with `pushState` (Back/Forward and
+  reload/deep-link all land on the right pane). The section routes stay for shareable URLs and keep
+  their permission gating. This reverses the earlier "each standalone page ships only its own pane"
+  optimisation in favour of reload-free navigation (the `standalone` template flag is now always
+  empty; the section render runs on its tab's first `shown.bs.tab`).
+- **Account settings is its own page (`/account`), not a modal.** Personal preferences (language,
+  landing page) and the change-password form moved out of the `accountSettingsModal` into a pane
+  (`partials/account/_page.html`) reached from the user menu, opening in place like any section
+  (SPA, URL synced to `/account`, no reload; Cancel just goes Back). The dark-mode selector was
+  removed from it (the user-menu quick toggle owns that now), so the page saves only lang + landing
+  (+ optional password) and the merging preferences endpoint leaves dark mode untouched.
 - **Pinned dependency versions for reproducible builds (`requirements.lock`).** Every dependency
   in `requirements.txt` used an open `>=` range and nothing was locked, so each `docker build` /
   `pip install` pulled whatever satisfied the minimum — two builds on different days could ship
@@ -457,6 +547,33 @@ All notable changes to **ServiceSentry** are documented in this file.
   lockout, LDAP fallback and all SSO paths — 151 auth/LDAP/OIDC/SAML/Teams-SSO/security-regression tests pass.
 
 ### Fixed
+- **Visiting History no longer breaks the layout of every other section.** The History pane was
+  styled through an unqualified `#tab-history` selector, and an id (specificity 1-0-0) outranks
+  Bootstrap's `.tab-content > .tab-pane { display: none }` — so once rendered, the (tall) History
+  pane stayed displayed *under* whatever section you switched to. Reloading straight onto Syslog,
+  Servers, Clusters or Services looked fine (History was still an empty spinner), but opening
+  History once and coming back pushed the section far down a page-tall gap and dragged the sticky
+  sidebar out of view. The full-bleed `display:flex` is now scoped to `#tab-history.active`; the
+  negative full-bleed margins stay unconditional (harmless while hidden).
+- **The content column is now the only scroll container.** With the shell fixed at `100vh`, a
+  section taller than the viewport (a plain flowing table such as Servers or Services) grew the
+  document itself, page-scrolling the whole shell and detaching the sidebar. `.ss-main` scrolls its
+  own overflow instead, so the sidebar stays put; sections that fill exactly never trigger it.
+- **Connection-lost detection now works behind a reverse proxy and blocks the whole page.** Three
+  problems: (1) with a proxy in front, a downed backend makes the proxy answer **502/503/504** — a
+  *resolved* HTTP response, so the fetch wrapper read it as "reachable" and the overlay never fired
+  (it only worked on a direct connection, where the fetch rejects). The wrapper and the heartbeat now
+  treat 502/503/504 as unreachable (`_connGatewayDown`). (2) Detection was slow/none between the
+  60 s reload poll and the keepalive; a dedicated **connectivity heartbeat** (`/api/v1/health`, short
+  abort timeout, interval = `web_admin|conn_check_secs`) now flips the overlay within seconds and
+  also catches a *hanging* connection. (3) The `#conn-lost-overlay` was nested inside the sticky
+  header's stacking context, so it sat **below the sidebar** (still clickable); it now lives at top
+  level and covers/blurs the entire page, blocking interaction until the connection returns.
+- **Section tables load on access, not from init cache.** In the single SPA shell the panel no longer
+  pre-renders section tables at init; each section fetches its data when its tab is opened (Config /
+  Modules re-fetch only when they have no unsaved edits). So a section never shows stale rows, and
+  opening one with the backend down triggers a failing fetch → the connection-lost overlay. (API GETs
+  already send `Cache-Control: no-store`; the client also sets `cache: 'no-store'` on same-origin GETs.)
 - **`ConfigControl.is_changed` could miss a real edit (timestamp race).** It compared two
   `datetime.now()` marks (`_update > _load`), so a read-then-modify inside a single clock tick —
   fast code paths, coarse clocks — reported *unchanged* for data that had in fact changed. It

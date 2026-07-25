@@ -19,6 +19,41 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Tras visitar Historial, las demás secciones aparecen al fondo de una página kilométrica
+
+**Fecha:** 2026-07-25 · **Área:** web-admin / frontend (`static/css/web_admin.css`,
+`templates/dashboard.html`)
+
+**Síntoma** — recargando con F5 sobre `/syslog` la sección se veía bien, pero si se
+navegaba a Historial y luego se volvía, Syslog (y también Servidores, Clusters y
+Servicios) aparecía **al final de una página con scroll enorme**, precedida de una franja
+vacía de miles de píxeles, y la barra lateral —que es `sticky` dentro de un shell de
+`100vh`— se quedaba anclada arriba en vez de acompañar al contenido.
+
+**Diagnóstico** — la pista decisiva la dio el propio patrón: *F5 bien, tras pasar por
+Historial mal*. Eso descarta la sección afectada (su cadena `.ss-vfill`/`.ss-vscroll`
+estaba intacta) y apunta a algo que Historial deja atrás. Revisando las reglas de panel
+en el CSS: `#tab-history { display: flex; … }`.
+
+**Causa raíz** — un selector **por id** tiene especificidad 1-0-0 y gana a la regla de
+Bootstrap `.tab-content > .tab-pane { display: none }` (0-2-0). El panel de Historial
+quedaba por tanto **siempre renderizado**, debajo de la sección activa. Recién cargada la
+página aún estaba vacío (sólo el spinner) y no se notaba; tras visitarlo una vez pasaba a
+contener la gráfica y la lista de series, y empujaba todo lo demás fuera del viewport.
+
+**Solución** — acotar la regla de layout al estado activo (`#tab-history.active`) y dejar
+los márgenes full-bleed sin cualificar (son inocuos con el panel oculto). Además `.ss-main`
+pasó a hacer scroll de su propio desbordamiento, para que ningún contenido alto vuelva a
+hacer scroll del documento entero y despegue la barra lateral. Test de regresión en
+`tests/test_wa_ui.py::TestPaneDisplayRules`, que recorre el CSS y falla ante cualquier
+`#tab-*` sin cualificar que fije `display`.
+
+**Lección** — en un SPA donde Bootstrap decide la visibilidad por clase, **cualquier regla
+por id que toque `display` secuestra el mecanismo**. Las reglas de layout de un panel se
+cualifican con `.active`, o mejor se escriben con clases. Un corolario: si el fallo depende
+de *qué visitaste antes* y no de la sección que falla, el culpable es un estado global que
+la sección anterior deja atrás — no la que se ve mal.
+
 ## Las páginas independientes se quedan en el spinner; y el navegador pide confirmación al salir
 
 **Fecha:** 2026-07-22 · **Área:** web-admin / frontend (`partials/init/_wiring.html`,

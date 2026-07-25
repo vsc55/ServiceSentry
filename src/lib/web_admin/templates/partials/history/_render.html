@@ -186,22 +186,18 @@ function _historyStopTimer() {
     if (_histCountId)  { clearInterval(_histCountId); _histCountId = null; }
 }
 
+// One auto-refresh tick — soft-reload the chart/compare while History is the active pane.
+function _historyAutoTick() {
+    const pane = document.getElementById('tab-history');
+    if (!pane || !pane.classList.contains('active')) return;
+    if (_historyCompare) { if (_historyCompareSel.length) _historyLoadCompare(true); }
+    else if (_historyMod && _historyKey) _historyLoadChart(true);
+}
+
 function setHistoryAutoRefresh(seconds) {
     _historyStopTimer();
     try { localStorage.setItem(_HLS_AUTO, String(seconds || 0)); } catch (e) {}
-    if (seconds > 0) {
-        const id = setInterval(() => {
-            const pane = document.getElementById('tab-history');
-            if (!pane || !pane.classList.contains('active')) return;
-            // Only refresh when there is something to redraw, per current mode.
-            if (_historyCompare) {
-                if (_historyCompareSel.length) _historyLoadCompare(true);
-            } else if (_historyMod && _historyKey) {
-                _historyLoadChart(true);
-            }
-        }, seconds * 1000);
-        _historyTimer = { _id: id, _interval: seconds };
-    }
+    if (seconds > 0) _historyTimer = { _id: setInterval(_historyAutoTick, seconds * 1000), _interval: seconds };
     _historyRenderAutoRefresh();
 }
 
@@ -210,7 +206,7 @@ function _historyRenderAutoRefresh() {
     const el = document.getElementById('history-auto-refresh');
     if (el) el.innerHTML = _autoRefreshControl({
         id: 'hist', interval: _historyTimer?._interval || 0,
-        setFn: 'setHistoryAutoRefresh',
+        setFn: 'setHistoryAutoRefresh', refreshFn: '_historyRefresh',
         countId: 'hist-refresh-count', fillId: 'hist-refresh-fill',
     });
     _startHistoryCountdown(_historyTimer?._interval || 0);
@@ -239,28 +235,38 @@ function _historyRenderLayout() {
     cont.innerHTML = `<div class="ss-card ss-vfill">
 <div class="ss-accent ss-accent-blue"></div>
 
-<!-- Header: title + search + Clear All (matches the other sections' toolbar) -->
+<!-- Header: active-series title (left) + chart tools + actions (right). The series search
+     moved to the sidebar filter; the chart's tools live here now, not in a separate band. -->
 <div class="ss-card-header" id="history-tab-header">
-  <h6 class="mb-0 me-2 flex-shrink-0 text-nowrap"><i class="bi bi-graph-up me-2"></i>${esc(t('tab_history'))}</h6>
-  <!-- Search expands to fill the free space between the title and the actions. -->
-  <div class="input-group input-group-sm flex-grow-1">
-    <span class="input-group-text"><i class="bi bi-search"></i></span>
-    <input type="text" class="form-control" id="history-search"
-           placeholder="${esc(t('history_search'))}" oninput="_historyOnSearch(this.value)">
+  <h6 class="mb-0 me-auto flex-shrink-0 text-nowrap"><i class="bi bi-graph-up me-2"></i><span id="history-title">${esc(t('tab_history'))}</span></h6>
+  <!-- Chart tools — shown once a series (or compare) is active: field selector, time range,
+       export. Toggled as a group by _historyShowToolbar/_historyHideToolbar. -->
+  <div class="d-flex flex-nowrap align-items-center gap-2 flex-shrink-0" id="history-toolbar" style="display:none!important">
+    <select class="form-select form-select-sm" id="history-field-sel"
+            style="width:auto;display:none" onchange="_historyOnFieldChange(this.value)"></select>
+    <span id="history-range"></span>
+    <div class="btn-group btn-group-sm">
+      <button type="button" class="btn btn-sm btn-secondary dropdown-toggle"
+              data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('export'))}">
+        <i class="bi bi-download me-1"></i>${esc(t('export'))}
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end p-1 ss-fs-3">
+        <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportPNG()">
+          <i class="bi bi-image"></i>PNG</button></li>
+        <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportCSV()">
+          <i class="bi bi-filetype-csv"></i>CSV</button></li>
+      </ul>
+    </div>
   </div>
-  <!-- Right-aligned actions: Compare (acts on the series list), refresh,
-       auto-refresh and Clear All. Kept on one line; search shrinks instead. -->
-  <div class="d-flex flex-nowrap align-items-center gap-2 ms-2 flex-shrink-0">
+  <!-- Always-on actions: Compare, refresh, auto-refresh. (Data wipes live in
+       Config → General → Maintenance, away from a page kept open all day.) -->
+  <div class="d-flex flex-nowrap align-items-center gap-2 flex-shrink-0">
     <button class="btn btn-sm btn-secondary" id="history-compare-btn"
             onclick="_historyToggleCompareMode()" title="${escAttr(t('history_compare_tt'))}">
       <i class="bi bi-bar-chart-steps me-1"></i>${esc(t('history_compare'))}
     </button>
-    <button class="btn btn-sm btn-secondary" onclick="_historyRefresh()" title="${escAttr(t('refresh'))}">
-      <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}
-    </button>
+    <!-- Unified refresh: main button refreshes now, caret sets the auto-refresh interval. -->
     <span id="history-auto-refresh" class="d-flex align-items-center gap-2"></span>
-    {# Data wipes are not offered here: they live in Config → General → Maintenance,
-       away from a page that stays open all day. #}
   </div>
 </div>
 
@@ -270,50 +276,24 @@ function _historyRenderLayout() {
   <!-- Series sidebar — distinct panel -->
   <div class="ss-history-sidebar d-flex flex-column">
     <div class="ss-history-sidebar-title text-muted">${esc(t('history_series'))}</div>
-    <div class="px-1 pt-1">
-      <div class="input-group input-group-sm w-100">
-        <button class="btn btn-secondary flex-fill text-truncate" onclick="_historyExpandAll()" title="${esc(t('history_expand_all'))}">
-          <i class="bi bi-arrows-expand me-1"></i>${esc(t('history_expand_all'))}
-        </button>
-        <button class="btn btn-secondary flex-fill text-truncate" onclick="_historyCollapseAll()" title="${esc(t('history_collapse_all'))}">
-          <i class="bi bi-arrows-collapse me-1"></i>${esc(t('history_collapse_all'))}
-        </button>
+    <div class="px-1 pt-1 d-flex gap-1 align-items-center">
+      <!-- Filter the series list; shares _historyOnSearch with the top search (kept in sync). -->
+      <div class="input-group input-group-sm flex-grow-1">
+        <span class="input-group-text px-2"><i class="bi bi-funnel"></i></span>
+        <input type="search" class="form-control" id="history-series-filter"
+               placeholder="${escAttr(t('history_search'))}" value="${escAttr(_historyFilter)}"
+               oninput="_historyOnSearch(this.value)">
       </div>
+      <button class="btn btn-sm btn-secondary flex-shrink-0" onclick="_historyExpandAll()"
+              title="${escAttr(t('history_expand_all'))}"><i class="bi bi-arrows-expand"></i></button>
+      <button class="btn btn-sm btn-secondary flex-shrink-0" onclick="_historyCollapseAll()"
+              title="${escAttr(t('history_collapse_all'))}"><i class="bi bi-arrows-collapse"></i></button>
     </div>
     <div id="history-series-list" class="flex-grow-1 overflow-y-auto p-1"></div>
   </div>
 
-  <!-- Chart panel -->
+  <!-- Chart panel (its toolbar moved up into the section header) -->
   <div class="ss-history-main flex-grow-1 d-flex flex-column overflow-hidden">
-
-    <!-- Toolbar band — sits above the drawing zone, visually separated -->
-    <div class="ss-card-band ss-card-band-top d-flex flex-wrap align-items-center gap-2"
-         id="history-toolbar" style="display:none!important">
-      <span class="fw-semibold text-truncate me-auto" id="history-title" style="max-width:320px"></span>
-
-      <!-- Field selector -->
-      <select class="form-select form-select-sm" id="history-field-sel"
-              style="width:auto;display:none" onchange="_historyOnFieldChange(this.value)">
-      </select>
-
-      <!-- Time range — dropdown (presets + custom hours/days), populated by JS -->
-      <span id="history-range"></span>
-
-      <!-- Export chart as PNG (image) or CSV (data) -->
-      <div class="btn-group btn-group-sm">
-        <button type="button" class="btn btn-sm btn-secondary dropdown-toggle"
-                data-bs-toggle="dropdown" aria-expanded="false" title="${escAttr(t('export'))}">
-          <i class="bi bi-download me-1"></i>${esc(t('export'))}
-        </button>
-        <ul class="dropdown-menu dropdown-menu-end p-1 ss-fs-3">
-          <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportPNG()">
-            <i class="bi bi-image"></i>PNG</button></li>
-          <li><button type="button" class="dropdown-item d-flex align-items-center gap-2" onclick="_historyExportCSV()">
-            <i class="bi bi-filetype-csv"></i>CSV</button></li>
-        </ul>
-      </div>
-
-    </div>
 
     <!-- Padded drawing zone + stats -->
     <div class="flex-grow-1 d-flex flex-column gap-2 p-2 overflow-hidden" style="min-height:0">

@@ -119,7 +119,8 @@ function _hostLogsRenderAutoRefresh() {
     const live = _hostLogsState.auto === 'live';
     el.innerHTML = _autoRefreshControl({
         id: 'hostlogs', interval: live ? 0 : (parseInt(_hostLogsState.auto, 10) || 0),
-        setFn: 'setHostLogsAutoRefresh', liveFn: 'toggleHostLogsLive', liveActive: live, hideAuto: true,
+        setFn: 'setHostLogsAutoRefresh', refreshFn: '_hostLogsFetch',
+        liveFn: 'toggleHostLogsLive', liveActive: live, hideAuto: true,
         countId: 'hml-refresh-count', fillId: 'hml-refresh-fill',
     });
 }
@@ -154,8 +155,8 @@ async function _loadHostLogs() {
             <div class="d-flex align-items-end"><span id="hml-auto-refresh"></span></div>
         </div>
         <div id="hml-pager-top" class="mb-1"></div>
-        <div class="table-responsive rounded border" style="background:var(--ss-pagination-bg, var(--bs-secondary-bg));flex:1 1 auto;min-height:0;overflow:auto">
-        <table class="table table-sm table-striped table-hover align-middle mb-0" style="font-size:.8rem;--bs-table-bg:transparent">
+        <div class="table-responsive rounded border sl-log-wrap">
+        <table class="table table-sm table-striped table-hover align-middle mb-0">
             <thead><tr>
                 <th class="text-nowrap">${esc(t('syslog_time'))}</th>
                 <th>${esc(t('syslog_severity'))}</th>
@@ -163,8 +164,8 @@ async function _loadHostLogs() {
                 <th>${esc(t('syslog_app'))}</th>
                 <th style="width:55%">${esc(t('syslog_message'))}</th>
             </tr></thead><tbody id="hml-rows"></tbody>
-        </table></div>
-        <div id="hml-empty" class="text-center text-muted py-3" style="display:none">${esc(t('host_logs_none'))}</div>
+        </table>
+        <div id="hml-state" class="sl-log-state" style="display:none"></div></div>
         <div id="hml-pager" class="mt-2"></div>`;
     // restore + wire filters
     const fromEl = document.getElementById('hml-from'), toEl = document.getElementById('hml-to');
@@ -195,6 +196,13 @@ async function _hostLogsFetch() {
     const st = _hostLogsState;
     const tbody = document.getElementById('hml-rows');
     if (!st || !tbody) return;
+    const stateEl = document.getElementById('hml-state');
+    // Loading spinner overlay — only when there is nothing on screen to keep, so an
+    // auto-refresh tick doesn't wipe/flicker the current rows.
+    if (stateEl && !tbody.children.length) {
+        stateEl.innerHTML = `<div class="spinner-border spinner-border-sm"></div>`;
+        stateEl.style.display = '';
+    }
     const all = !st.pageSize;
     const limit = all ? 5000 : st.pageSize;
     const offset = all ? 0 : (st.page - 1) * st.pageSize;
@@ -207,8 +215,11 @@ async function _hostLogsFetch() {
         const pages = Math.max(1, Math.ceil(total / st.pageSize));
         if (st.page > pages) { st.page = pages; return _hostLogsFetch(); }
     }
-    document.getElementById('hml-empty').style.display = msgs.length ? 'none' : '';
-    tbody.innerHTML = msgs.map(m => {
+    if (stateEl) {
+        stateEl.style.display = msgs.length ? 'none' : '';
+        if (!msgs.length) stateEl.innerHTML = `<i class="bi bi-inbox"></i><div>${esc(t('host_logs_none'))}</div>`;
+    }
+    tbody.innerHTML = !msgs.length ? '' : msgs.map(m => {
         const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
         const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
         const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');

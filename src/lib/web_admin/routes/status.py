@@ -173,6 +173,6 @@ def register(app, wa):
         )
         # AJAX auto-refresh fetches just the dynamic body fragment (no full page reload).
         if request.args.get('fragment'):
-            return render_template('partials/status_body.html', **_ctx)
+            return render_template('partials/_status_body.html', **_ctx)
         return render_template('status.html', **_ctx)
 

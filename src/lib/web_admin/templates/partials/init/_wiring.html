@@ -1,3 +1,37 @@
+// ── Boot splash: hold it until the landing section has its data ───────────────────────────
+// The overlay used to go as soon as init() finished, so the first thing you saw was an empty
+// section with its own spinner. Section renders are fired by Bootstrap's shown.bs.tab, whose
+// return value the event system discards — and with fade panes that event lands AFTER the CSS
+// transition, so we cannot simply await the .show() call. Instead the render entry points are
+// wrapped here (before the listeners below capture their references, hence the position at the
+// top of this file, which is included last) so each publishes its promise.
+let _bootRenderPromise = null;
+let _bootRenderStarted;
+const _bootRenderSeen = new Promise(res => { _bootRenderStarted = res; });
+const _bootTrack = fn => function (...args) {
+    const p = fn.apply(this, args);
+    if (p && typeof p.then === 'function') _bootRenderPromise = p;
+    _bootRenderStarted();
+    return p;
+};
+for (const n of ['renderOverview', 'renderHistory', 'renderSyslog', 'renderAudit', 'renderEvents',
+                 'renderFail2ban', 'renderServices', 'initAccountPage',
+                 'reloadConfig', 'reloadModules', 'reloadHosts']) {
+    if (typeof window[n] === 'function') window[n] = _bootTrack(window[n]);
+}
+// Safety net for any landing section whose render is not on that list: the sidebar sees the
+// event bubble up AFTER the button's own handlers ran, so by then a promise (if any) is
+// published. Without this, an untracked section would sit behind the splash until the cap.
+document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', () => _bootRenderStarted(),
+                                                        { once: true });
+/** Wait for the landing section's first render, capped so a slow — or never-firing — section
+ *  cannot pin the splash on screen forever. Never rejects: a failed render still lets us in. */
+async function _bootWaitFirstRender(capMs) {
+    const cap = new Promise(res => setTimeout(res, capMs));
+    await Promise.race([_bootRenderSeen, cap]);
+    if (_bootRenderPromise) await Promise.race([_bootRenderPromise.catch(() => {}), cap]);
+}
+
 document.getElementById('btnAddItemOk').addEventListener('click', confirmAddItem);
 document.getElementById('addItemModal').addEventListener('keydown', e => {
 if (e.key === 'Enter') { e.preventDefault(); confirmAddItem(); }
@@ -57,11 +91,23 @@ renderRoles();
 renderGroups();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
-document.getElementById('btn-tab-history')?.addEventListener('shown.bs.tab', renderHistory);
-document.getElementById('btn-tab-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
+document.getElementById('btn-nav-history')?.addEventListener('shown.bs.tab', renderHistory);
+document.getElementById('btn-nav-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
+// Account page as an SPA pane: (re)populate its fields from currentUser each time it opens.
+document.getElementById('btn-nav-account')?.addEventListener('shown.bs.tab', initAccountPage);
 document.getElementById('btn-tab-ipban')?.addEventListener('shown.bs.tab', renderFail2ban);
 document.getElementById('btn-tab-services')?.addEventListener('shown.bs.tab', renderServices);
 document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', renderEvents);
+// Load-on-access: re-fetch a section's data every time its tab is opened (no stale cache). A
+// failed fetch (backend down) flows through the fetch wrapper → connection-lost overlay. Config
+// and Modules carry unsaved-edit state, so skip the refetch while dirty (it would clobber
+// in-progress edits — the already-rendered view stays put until saved/reverted).
+document.getElementById('btn-tab-config')?.addEventListener('shown.bs.tab', () => {
+    if (!_isDirty('config')) reloadConfig(true);
+});
+document.getElementById('btn-tab-modules')?.addEventListener('shown.bs.tab', () => {
+    if (!_isDirty('modules')) reloadModules(true);
+});
 // Re-fetch host status every time the Servers tab is shown, so the Status column
 // reflects a "Run all" or a status "clean" done from the Status tab (both leave
 // hostsData stale until reloaded).
@@ -87,13 +133,14 @@ document.getElementById('btnResetPasswordOk').addEventListener('click', resetUse
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
 document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
 
-document.getElementById('btn-tab-overview')?.addEventListener('shown.bs.tab', renderOverview);
-// Credentials now lives under Infrastructure: render + persist under the infra key.
-document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', () => {
+document.getElementById('btn-nav-overview')?.addEventListener('shown.bs.tab', renderOverview);
+// Credentials now lives under Infrastructure: re-fetch on open (load-on-access) + persist key.
+document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', async () => {
     localStorage.setItem('ss_active_subtab_infra', '#subtab-credentials');
+    await loadCredentials();
     renderCredentials();
 });
-document.getElementById('mainTabs')?.addEventListener('shown.bs.tab', e => {
+document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', e => {
     localStorage.setItem('ss_active_tab', e.target.dataset.bsTarget);
     // Stamp the login this tab was remembered under (see _resolveLandingTab): a new
     // login resets to the configured landing; a reload (same login) restores this tab.
@@ -111,10 +158,19 @@ function _resolveLandingTab() {
         return !!(btn && btn.closest('li')?.style.display !== 'none');
     };
     const firstVisible = () => {
-        const li = [...document.querySelectorAll('#mainTabs > li.nav-item')]
+        const li = [...document.querySelectorAll('#ss-sb-settings > li.nav-item')]
             .find(el => el.style.display !== 'none');
         return li ? li.querySelector('[data-bs-target]')?.dataset.bsTarget : null;
     };
+    // Deep link: /admin?tab=config opens directly on that tab — used by the sidebar's
+    // Settings sub-items when navigating in from a standalone page (where the panes don't
+    // exist, so they are links rather than tab toggles). Wins over the remembered tab.
+    const qTab = new URLSearchParams(window.location.search).get('tab');
+    if (qTab && tabVisible('#tab-' + qTab)) {
+        localStorage.setItem('ss_active_tab', '#tab-' + qTab);
+        localStorage.setItem('ss_active_tab_login', (currentUser && currentUser.login_id) || '');
+        return '#tab-' + qTab;
+    }
     // Default tab: Services (falls back to the first visible tab without Services access).
     const home = tabVisible('#tab-services') ? '#tab-services' : firstVisible();
     const savedTab   = localStorage.getItem('ss_active_tab');
@@ -134,7 +190,7 @@ document.getElementById('btn-tab-config')?.addEventListener('hide.bs.tab', () =>
     });
 });
 // Warn when leaving a tab that has unsaved changes
-document.getElementById('mainTabs')?.addEventListener('hide.bs.tab', e => {
+document.getElementById('ss-sidebar')?.addEventListener('hide.bs.tab', e => {
     const leaving = e.target?.dataset?.bsTarget;
     const dirtyTarget = (leaving === '#tab-modules' && _isDirty('modules')) ? 'modules'
                       : (leaving === '#tab-config'  && _isDirty('config'))  ? 'config'
@@ -225,48 +281,31 @@ try {
     clearDirty('config'); // ensure config starts clean regardless of loadConfig side-effects
     if (currentUser.restart_pending) _showRestartBanner();
     _startVersionPoll();
-    // Panel-only work: a standalone section page renders ONLY its own section, so it
-    // never draws (nor pays for) the panel's other tabs.
-    if (!window.SS_STANDALONE_PAGE) {
-        renderModules();
-        renderConfig();
-        renderServers();
-    }
+    // Load-on-access: DON'T pre-render the section tables at init. Each section paints (and
+    // re-fetches) when its tab is first shown (shown.bs.tab) — so nothing shows stale rows, and
+    // opening a section with the backend down triggers a failing fetch → connection-lost overlay.
     applyRoleRestrictions();
-    if (window.SS_STANDALONE_PAGE) {
-        // Standalone section page: no tabs to activate — call the render entry point the
-        // HOME_PAGES registry declares for it. Resolved from THIS scope (all the section
-        // partials are concatenated into the same <script>), not via window[...]: a
-        // top-level `function` is only a global in a classic script, and relying on that
-        // silently leaves the section's spinner spinning if it ever stops being one.
-        const _RENDERERS = {
-            renderOverview: typeof renderOverview === 'function' ? renderOverview : null,
-            renderHistory:  typeof renderHistory  === 'function' ? renderHistory  : null,
-            renderSyslog:   typeof renderSyslog   === 'function' ? renderSyslog   : null,
-        };
-        const _spec = (window.SS_STANDALONE_PAGES || [])
-            .find(p => p.id === window.SS_STANDALONE_PAGE);
-        const _fn = _spec && (_RENDERERS[_spec.render] || window[_spec.render]);
-        if (typeof _fn === 'function') {
-            // Hand over from the boot overlay to the section's own skeleton: the render
-            // paints it synchronously before yielding, so dropping the overlay here means
-            // one indicator at a time, with neither a gap nor two spinners at once. Same
-            // meaning the overlay has on the panel — it covers booting, not fetching.
-            document.getElementById('loading')?.remove();
-            await _fn();   // awaited so a rejection lands in the catch below
-        } else {
-            console.error('Standalone page has no render entry point:',
-                          window.SS_STANDALONE_PAGE, _spec);
-        }
-    } else {
-        // Admin panel: the default tab (Services) on a fresh login; the last visited tab
-        // on reload (F5) or navigation within the same login.
-        const _landingTab = _resolveLandingTab();
-        if (_landingTab) {
-            const _tabBtn = document.querySelector(`[data-bs-target="${_landingTab}"]`);
-            if (_tabBtn && _tabBtn.closest('li')?.style.display !== 'none') {
-                bootstrap.Tab.getOrCreateInstance(_tabBtn).show();
-            }
+    // Reveal the Settings ("Administration panel") group now that its sub-tabs' visibility is
+    // decided — showing it only if the user can open at least one panel tab. It starts hidden
+    // so it doesn't flash as the lone sidebar item behind the boot overlay.
+    const _settingsGrp = document.getElementById('ss-sb-settings-group');
+    if (_settingsGrp) {
+        const _anyPanel = [...document.querySelectorAll('#ss-sb-settings > li.nav-item')]
+            .some(li => li.style.display !== 'none');
+        _settingsGrp.style.display = _anyPanel ? '' : 'none';
+    }
+    // Open the pane the URL points at: a section URL (/overview, /history, /syslog, /account)
+    // maps straight to its pane; /admin falls back to the remembered/landing tab. Activating
+    // the tab fires its shown.bs.tab, which runs that section's render — no full reload, and
+    // the same code path whether we arrived by link, reload or Back/Forward.
+    const _pathPane = _sbPaneIdFromPath();
+    const _landingTab = _pathPane ? ('#' + _pathPane) : _resolveLandingTab();
+    let _landingShown = false;
+    if (_landingTab) {
+        const _tabBtn = document.querySelector(`[data-bs-target="${_landingTab}"]`);
+        if (_tabBtn && _tabBtn.closest('li')?.style.display !== 'none') {
+            bootstrap.Tab.getOrCreateInstance(_tabBtn).show();
+            _landingShown = true;
         }
     }
     // Keep --ss-top-offset in sync with the sticky header height (navbar + visible banners)
@@ -275,6 +314,10 @@ try {
         _updateStickyOffset();
         new ResizeObserver(_updateStickyOffset).observe(_stickyTop);
     }
+    // Last: keep the splash up until the landing section has actually painted its data (see
+    // _bootTrack), so the boot indicator hands over to content instead of to a second spinner.
+    // Everything above is already wired, so a slow section only delays the reveal, nothing else.
+    if (_landingShown) await _bootWaitFirstRender(8000);
 } catch (e) {
     console.error('Init error:', e);
 } finally {

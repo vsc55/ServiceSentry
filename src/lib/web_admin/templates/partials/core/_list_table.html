@@ -47,6 +47,10 @@ function createListTable(spec) {
     const lsCols  = 'ss_' + spec.key + '_cols';
     const lsOrder = 'ss_' + spec.key + '_col_order';
     const lsW     = 'ss_' + spec.key + '_col_w';
+    // Card chrome is decided by the pane, not here: inside a .ss-fullbleed pane every .ss-card
+    // goes flush automatically (see web_admin.css), which is how every list section renders
+    // edge-to-edge today. No per-table flag to keep in sync.
+    const cardClass = spec.cardClass || 'ss-card';
 
     const _cols   = (ctx) => (typeof spec.columns === 'function' ? spec.columns(ctx) : spec.columns);
     const _defVis = (ctx) => (typeof spec.defaultVisible === 'function' ? spec.defaultVisible(ctx) : spec.defaultVisible);
@@ -171,7 +175,6 @@ function createListTable(spec) {
             ${headerBtns}
         </div>`;
 
-        const cardClass = spec.cardClass || 'ss-card';
         if (!total) {
             // emptyBody → card + header + body; emptyState → bare (no card).
             // The empty card still fills its pane (.ss-vfill + .ss-vscroll body) so an
@@ -262,7 +265,7 @@ function createListTable(spec) {
             // minimal empty state (e.g. a table whose emptyBody/prepare threw).
             console.error(`list-table[${spec.key}] render failed:`, err);
             if (!c.innerHTML.trim())
-                c.innerHTML = `<div class="${spec.cardClass || 'ss-card'} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
+                c.innerHTML = `<div class="${cardClass} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
         }
     }
 

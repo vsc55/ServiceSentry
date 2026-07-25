@@ -86,7 +86,7 @@ class TestMaintenanceCard:
         card = self._card()
         assert card.get('fields') == [], 'the Maintenance card must have no fields of its own'
         assert {a['id'] for a in card['actions']} == {
-            'history_clear_series', 'history_clear_all', 'syslog_clear'}
+            'history_clear_series', 'history_clear_all', 'syslog_clear', 'audit_clear_all'}
 
     def test_every_wipe_is_permission_gated(self):
         """A user without the delete permission must not even see the button."""
@@ -113,12 +113,16 @@ class TestMaintenanceCard:
                 f"{act['id']} names {act['fn']}(), which no template defines"
 
     def test_the_buttons_left_the_section_toolbars(self):
-        """The whole point of the move: they are gone from History and Syslog."""
+        """The whole point of the move: they are gone from History, Syslog and Audit."""
         for path, text in self._templates().items():
             if 'history' in path or 'syslog' in path:
                 assert 'history-clear-all-wrap' not in text
                 assert 'id="history-clear-btn"' not in text
                 assert "onclick=\"_syslogClear()\"" not in text
+        # Audit's wipe lived in the panel's own markup, not under a section folder.
+        joined = '\n'.join(self._templates().values())
+        assert 'id="btnClearAudit"' not in joined, \
+            'the Audit toolbar still offers the log wipe'
 
 
 class TestGroupLabel:

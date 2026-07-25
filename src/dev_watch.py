@@ -17,7 +17,8 @@ load_dotenv(ROOT / '.env.dev', override=True)
 
 
 class _SourceFilter(DefaultFilter):
-    """Only react to .py / .html / .json changes; ignore generated/runtime dirs."""
+    """Only react to .py / .html / .json changes; ignore generated/runtime dirs.
+    (.css needs no restart: it is served with a mtime ``?v=`` cache-buster.)"""
 
     allowed_extensions = ('.py', '.html', '.json')
     _skip = {'.venv', '__pycache__', 'data', 'tests', '.vscode', '.git', '.pytest_cache'}

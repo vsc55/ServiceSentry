@@ -4,6 +4,11 @@
    ================================================================ #}
 
 // ──────────────────────────── API ─────────────────────────────────
+// Gateway statuses a reverse proxy returns when the backend is down (the proxy itself stays
+// up and answers). Used by the fetch wrapper and the connectivity heartbeat to flag "no
+// connection" even though the HTTP request technically succeeded.
+function _connGatewayDown(status) { return status === 502 || status === 503 || status === 504; }
+
 // CSRF: transparently attach the double-submit token to every same-origin
 // state-changing fetch, so callers (apiPost/apiPut/apiDelete + any ad-hoc fetch)
 // need no changes. Cross-origin requests are left untouched.
@@ -25,11 +30,25 @@
             if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', CSRF_TOKEN);
             init = Object.assign({}, init, { headers: h });
         }
+        // Bypass the HTTP cache for same-origin API GETs. Without this the browser can serve a
+        // GET from its cache when the backend is down — the fetch then RESOLVES with stale data
+        // instead of rejecting, so the page shows old rows AND the connection-lost overlay never
+        // fires. no-store forces a real network hit every time: fresh data on each access, and a
+        // genuine failure surfaces as a rejected fetch → the overlay.
+        if (sameOrigin && (method === 'GET' || method === 'HEAD')) {
+            init = Object.assign({}, init, { cache: 'no-store' });
+        }
         // Drive the connection-lost overlay from real traffic: any response → reachable,
         // a network error (not an abort) → unreachable. This shows/hides the overlay on the
         // first failing/succeeding request instead of flooding "connection error" toasts.
         return _origFetch.call(this, input, init).then(
-            (r) => { if (typeof _setConnLost === 'function') _setConnLost(false); return r; },
+            (r) => {
+                // A reverse proxy in front of the app stays up when the backend is down and
+                // answers a gateway error (502/503/504) — a RESOLVED response, not a rejection.
+                // Treat those as unreachable too; any other response means the backend answered.
+                if (typeof _setConnLost === 'function') _setConnLost(_connGatewayDown(r.status));
+                return r;
+            },
             (e) => {
                 if (e && e.name !== 'AbortError' && typeof _setConnLost === 'function') _setConnLost(true);
                 throw e;

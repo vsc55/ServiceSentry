@@ -248,12 +248,16 @@ class TestApiOverview:
         assert len(rows) <= 10
 
     def test_dashboard_has_overview_tab(self, client):
-        """The dashboard HTML contains the overview tab."""
+        """The dashboard HTML contains the overview pane and its sidebar trigger.
+
+        Overview is a top-level SECTION, so the sidebar builds its button as
+        `btn-nav-overview` (the `btn-tab-*` ids belong to the admin panel's own tabs) —
+        see test_wa_ui.py, which asserts the old id is gone."""
         _login(client)
         resp = client.get("/admin")
         html = resp.data.decode()
         assert 'id="tab-overview"' in html
-        assert 'btn-tab-overview' in html
+        assert 'btn-nav-overview' in html
 
     # ---- groups summary ----
 

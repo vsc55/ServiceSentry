@@ -102,7 +102,7 @@ function _syslogRenderAutoRefresh() {
     const el = document.getElementById('sl-auto-refresh');
     if (el) el.innerHTML = _autoRefreshControl({
         id: 'syslog', interval: _syslogLive ? 0 : (_syslogTimer?._interval || 0),
-        setFn: 'setSyslogAutoRefresh',
+        setFn: 'setSyslogAutoRefresh', refreshFn: '_syslogManualRefresh',
         liveFn: 'toggleSyslogLive', liveActive: _syslogLive, hideAuto: true,
         countId: 'sl-refresh-count', fillId: 'sl-refresh-fill',
     });
@@ -164,6 +164,19 @@ function _syslogCopyFallback(text, ok) {
 }
 
 function _syslogReload() { _loadSyslogFacets(); _loadSyslog(); }
+
+// Manual refresh from the split-button: reload + restart the auto-refresh countdown from the
+// top (re-arm the timer WITHOUT re-rendering the control, so the fill bar transitions smoothly
+// to 100% like the natural reset — same design as History).
+function _syslogManualRefresh() {
+    _syslogReload();
+    if (_syslogTimer && _syslogTimer._interval && !_syslogLive) {
+        const secs = _syslogTimer._interval;
+        clearInterval(_syslogTimer._id);
+        _syslogTimer = { _id: setInterval(_syslogAutoTick, secs * 1000), _interval: secs };
+        _syslogStartCountdown(secs);
+    }
+}
 
 // Offered in Config → General → Maintenance (see lib/services/syslog/manifest.py), so it
 // usually runs with the Syslog table off screen — only reload it when it is there.

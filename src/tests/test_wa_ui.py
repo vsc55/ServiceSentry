@@ -39,6 +39,41 @@ class TestPackageWebAssets:
         assert b'snmp' in client.get("/admin").data
 
 
+# ──────────────────────── SPA shell stylesheet ────────────────────────
+
+class TestPaneDisplayRules:
+    """The SPA shell shows exactly one pane at a time via Bootstrap's
+    `.tab-content > .tab-pane { display: none }`.  That rule is class-based (0-1-0), so ANY
+    unqualified `#tab-*` rule setting `display` (1-0-0) outranks it and pins that pane on
+    screen underneath every other section — which is what History did: once opened, its tall
+    pane stayed rendered below Syslog/Servers/Services, pushing them off the viewport and
+    dragging the sticky sidebar away.  Layout rules for a pane must be scoped to `.active`."""
+
+    def _css(self):
+        from pathlib import Path
+        import lib.web_admin as wa
+        return (Path(wa.__file__).parent / 'static' / 'css' / 'web_admin.css').read_text(
+            encoding='utf-8')
+
+    def test_no_unqualified_pane_display_rule(self):
+        import re
+        css = self._css()
+        # Selector blocks whose selector list contains a bare `#tab-<name>` (no `.active`,
+        # no descendant/child part) — those are top-level SPA panes.
+        for sel, body in re.findall(r'([^{}]+)\{([^}]*)\}', css):
+            selectors = [s.strip() for s in sel.split(',')]
+            bare_pane = [s for s in selectors if re.fullmatch(r'#tab-[a-z0-9-]+', s)]
+            if bare_pane and re.search(r'(^|;)\s*display\s*:', body):
+                pytest.fail(
+                    f'{bare_pane[0]} sets `display` unqualified — it beats Bootstrap\'s '
+                    f'.tab-pane{{display:none}} and pins the pane on screen. Scope it to '
+                    f'{bare_pane[0]}.active')
+
+    def test_history_fullbleed_display_is_scoped(self):
+        """The History pane's full-bleed flex layout stays, but only while active."""
+        assert '#tab-history.active {' in self._css()
+
+
 # ──────────────────────────── Dark mode ────────────────────────────
 
 class TestDarkMode:
@@ -315,18 +350,20 @@ class TestI18n:
 class TestUIReorganisation:
     """Verify the user-menu dropdown, password modals and users tab."""
 
-    def test_navbar_has_user_dropdown(self, client):
-        """Navbar contains a user dropdown menu with account settings."""
+    def test_user_menu_opens_the_account_page(self, client):
+        """The sidebar user menu opens the Account page (SPA pane on /admin)."""
         _login(client)
         html = client.get("/admin").data
-        assert b"openAccountSettingsModal()" in html
+        assert b"openAccountPage()" in html
         assert b"bi-person-circle" in html
 
-    def test_account_settings_modal_has_password_fields(self, client):
-        """Account settings modal contains password change fields."""
+    def test_account_page_has_password_fields(self, client):
+        """Account settings is a page now: its pane carries the password fields, and the
+        old modal is gone."""
         _login(client)
         html = client.get("/admin").data
-        assert b'id="accountSettingsModal"' in html
+        assert b'id="accountSettingsModal"' not in html
+        assert b'id="tab-account"' in html
         assert b'id="settingsPwCurrent"' in html
         assert b'id="settingsPwNew"' in html
 
@@ -362,18 +399,20 @@ class TestUIReorganisation:
             admin._users["resetme"]["password_hash"], "brandnew"
         )
 
-    def test_language_selector_in_account_settings(self, client):
-        """Language selector is inside the account settings modal."""
+    def test_language_selector_on_the_account_page(self, client):
+        """Language selector lives on the account page (not in a modal anymore)."""
         _login(client)
         html = client.get("/admin").data
-        assert b'accountSettingsModal' in html
+        assert b'accountSettingsModal' not in html
         assert b'id="settingsLang"' in html
 
-    def test_dark_mode_selector_in_account_settings(self, client):
-        """Dark mode selector (3 options) is present in the account settings modal."""
+    def test_dark_mode_moved_from_account_to_the_user_menu(self, client):
+        """Dark mode is no longer an account-settings selector — it is the quick toggle in
+        the user menu (_toggleTheme). The account page keeps only lang + landing + password."""
         _login(client)
         html = client.get("/admin").data
-        assert b'id="settingsDarkMode"' in html
+        assert b'id="settingsDarkMode"' not in html
+        assert b'_toggleTheme()' in html
         assert b'saveAccountPreferences' in html
 
 
@@ -385,21 +424,23 @@ class TestOverviewPage:
     def test_admin_panel_has_no_overview_tab(self, client):
         _login(client)
         html = client.get("/admin").get_data(as_text=True)
-        # the rendered overview tab toggle is gone (the string only lives in JS now,
-        # so check the literal nav markup, not any occurrence of the id)
-        assert 'data-bs-target="#tab-overview"' not in html
+        # Overview is a section (its own page + an SPA pane opened from the sidebar section
+        # button), NOT a Settings sub-tab. So there is no Settings sub-item for it…
+        assert 'id="btn-tab-overview"' not in html
+        # …but it is a sidebar section button (btn-nav-overview).
+        assert 'id="btn-nav-overview"' in html
         assert 'window.SS_STANDALONE_PAGE = ""' in html   # rendered as the admin panel
 
-    def test_overview_route_renders_standalone(self, client):
-        """The overview-only flag became the generic one shared by every standalone
-        section page; the rest of that contract lives in test_wa_standalone_pages.py."""
+    def test_overview_route_renders_the_shell_with_the_overview_pane(self, client):
+        """/overview serves the single SPA shell (all panes); the client opens the overview
+        pane from the URL. The rest of that contract lives in test_wa_standalone_pages.py."""
         _login(client)
         resp = client.get("/overview")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
         assert "overview-container" in html                    # the widget grid
-        assert 'window.SS_STANDALONE_PAGE = "overview"' in html
-        assert "overview-page" in html                         # body marker
+        assert 'window.SS_STANDALONE_PAGE = ""' in html        # it is the panel, not a page
+        assert 'id="tab-overview"' in html                     # the pane the URL opens
 
     def test_overview_requires_login(self, client):
         # page route → redirects to /login when unauthenticated (like /admin)

@@ -98,7 +98,9 @@ function _updateConfigPageSizes() {
     if (configSchema['web_admin|default_page_size'])
         configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
 }
-async function reloadModules() {
+// silent=true: no "reloaded" toast — used by the load-on-access tab handlers, which re-fetch
+// every time the section is opened (the manual Reload button keeps the toast).
+async function reloadModules(silent = false) {
     const data = await apiGet('/api/v1/modules');
     if (!data) return;
     modulesData = data;
@@ -106,9 +108,9 @@ async function reloadModules() {
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules');
     _renderModulesSurface();
-    showToast(t('modules_reloaded'));
+    if (!silent) showToast(t('modules_reloaded'));
 }
-async function reloadConfig() {
+async function reloadConfig(silent = false) {
     const data = await loadConfig(); // side effect: updates _fieldVersions
     if (!data) return;
     configData = data;
@@ -116,5 +118,5 @@ async function reloadConfig() {
     _updateConfigPageSizes();
     clearDirty('config'); // also clears _dirtyFields, _configConflicts, _serverChangedDirtyPaths
     renderConfig();
-    showToast(t('config_reloaded'));
+    if (!silent) showToast(t('config_reloaded'));
 }

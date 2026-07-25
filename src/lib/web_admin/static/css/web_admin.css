@@ -172,10 +172,43 @@
     box-shadow: 0 1px 6px rgba(0,0,0,.06);
     /* overflow: visible so dropdowns inside the card are not clipped */
 }
+/* Flush card: no border / rounding / shadow — fills its area edge-to-edge (History).
+   The header keeps its own distinct band (.ss-card-header background).
+   Inside a .ss-fullbleed pane EVERY card is flush automatically: rounded corners and a
+   shadow read as a floating panel, which is exactly what full-bleed removes. That covers
+   the list-table cards, the Events cards and buildFilterBar's filter strip alike — so a
+   section goes edge-to-edge by adding one class to its pane, with no markup churn. */
+.ss-card.ss-card-flush,
+.ss-fullbleed .ss-card { border: 0; border-radius: 0; box-shadow: none; }
+.ss-card.ss-card-flush > .ss-accent,
+.ss-fullbleed .ss-card > .ss-accent { border-radius: 0; }
+/* Full-bleed — generic: cancel the .container-fluid gutters and its bottom padding so a
+   section runs edge-to-edge instead of floating inside them. Pair it with .ss-card-flush on
+   the card inside (no border/rounding/shadow) for the "no card, fills everything" look.
+   .ss-fullbleed-top additionally eats the shell's top padding (.container-fluid pt-2 +
+   .tab-content pt-1 = 0.75rem) so the card's accent strip sits flush against the breadcrumb
+   line. Only for panes with nothing above them — which includes the Infrastructure sub-panes,
+   since the sidebar drives those sub-tabs and #infraSubTabs is display:none. */
+.ss-fullbleed {
+    margin-left:  calc(var(--bs-gutter-x, 1.5rem) * -0.5);
+    margin-right: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
+    margin-bottom: -1rem;
+}
+.ss-fullbleed-top { margin-top: -0.75rem; }
+/* History's pane is a flex column so #history-container (flex:1 1 auto) fills it. This MUST
+   stay scoped to .active: an unqualified #tab-history is an id selector, so it outranks
+   Bootstrap's `.tab-content > .tab-pane { display:none }` and would keep the (tall) History
+   pane rendered under every other section once visited — pushing them all down the page. */
+#tab-history.active {
+    display: flex;
+    flex-direction: column;
+}
+#tab-history > #history-container { flex: 1 1 auto; min-height: 0; }
 
 /* Accent bar — 3px gradient strip at the top of each card */
 .ss-accent {
     height: 3px;
+    flex-shrink: 0;   /* never let the flex column squeeze the colored strip to nothing */
     /* Clip to the card's top rounded corners */
     border-top-left-radius:  var(--bs-border-radius-lg);
     border-top-right-radius: var(--bs-border-radius-lg);
@@ -194,6 +227,7 @@
     padding: .5rem .75rem;
     background: var(--ss-card-header-bg);
     border-bottom: 1px solid var(--bs-border-color);
+    flex-shrink: 0;   /* keep the toolbar height even when the body content is tall */
 }
 
 /* Pagination bands — top and bottom */
@@ -206,16 +240,50 @@
 .ss-collapse-caret { transition: transform .2s ease; }
 .ss-collapse-head.collapsed .ss-collapse-caret { transform: rotate(-90deg); }
 
-/* ── Full-height content layout ───────────────────────────────────────────
-   The active tab fills the viewport below the tabs so short sections don't
-   leave a large empty band of page background underneath.  A single anchor on
-   the main .tab-content sets the available height (viewport minus the sticky
-   navbar via --ss-top-offset, minus the main tab row + padding); everything
-   below fills via flexbox — no per-section magic numbers. */
+/* Shared filter bar (buildFilterBar) — a thin always-visible header over a collapsible body,
+   collapsed by default so the table gets the space until you actually filter.
+   Spacing lives here, not in the markup: standalone it keeps a gap, but inside a full-bleed
+   pane it butts straight against the table card so the two read as one surface.
+   Bootstrap's d-flex/d-none carry !important, so the toggled parts style their layout here. */
+.ss-filterbar { margin-bottom: 1rem; }
+.ss-fullbleed .ss-filterbar { margin-bottom: 0; border-bottom: 1px solid var(--bs-border-color); }
+/* Panels stacked in a full-bleed pane (Syslog: filters → statistics → messages) read as ONE
+   surface: a hairline between them, never a gap. The filter bar draws its own bottom edge
+   (its neighbour may be a wrapper rather than a card, as in fail2ban → Ban history), so the
+   card right after it must not add a second line — hence the override, kept last to win. */
+.ss-fullbleed .ss-card + .ss-card { border-top: 1px solid var(--bs-border-color); }
+.ss-fullbleed .ss-filterbar + .ss-card { border-top: 0; }
+.ss-fb-head {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .3rem .75rem; cursor: pointer; user-select: none;
+    font-size: .8rem; color: var(--bs-secondary-color);
+    background: var(--ss-pagination-bg, var(--bs-secondary-bg));
+}
+.ss-fb-head:hover { color: var(--bs-body-color); }
+.ss-fb-caret { margin-left: auto; transition: transform .2s ease; }
+.ss-filterbar.collapsed .ss-fb-caret { transform: rotate(-90deg); }
+.ss-fb-count { font-size: .65rem; }
+/* The body folds away; the fields keep their wrapping row layout while open. */
+.ss-fb-body { display: block; border-top: 1px solid var(--bs-border-color); }
+.ss-filterbar.collapsed .ss-fb-body { display: none; }
+.ss-fb-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
+
+/* ── Full-height content layout (pure flexbox, no magic numbers) ───────────
+   .ss-layout is min-height:100vh and .ss-main is a flex column, so the content
+   container fills the real space below the sticky header and the active tab fills
+   it — every fillable section (.ss-vfill) then reaches the true viewport bottom,
+   independent of the sticky header's exact height. */
+.ss-main > .container-fluid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
 .container-fluid > .tab-content {
     display: flex;
     flex-direction: column;
-    min-height: calc(100vh - var(--ss-top-offset, 56px) - 5.5rem);
+    flex: 1 1 auto;
+    min-height: 0;
 }
 .container-fluid > .tab-content > .tab-pane.active {
     flex: 1 1 auto;
@@ -242,6 +310,31 @@
    top/bottom while the .ss-vscroll body between them scrolls. */
 .ss-vfill   { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .ss-vscroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* Log tables (host/cluster) loading/empty state: an OVERLAY over the body area (below the
+   header) instead of stretching the table — so the header keeps its natural height and nothing
+   overflows. Centered vertically + horizontally; transparent so the header shows through. */
+.sl-log-wrap {
+    position: relative;
+    flex: 1 1 auto; min-height: 0; overflow: auto;
+    background: var(--ss-pagination-bg, var(--bs-secondary-bg));
+}
+.sl-log-wrap > table { --bs-table-bg: transparent; font-size: .8rem;
+    border-collapse: separate; border-spacing: 0; }
+/* Sticky header: only the data rows scroll. Distinct opaque background (card-header colour) so
+   it stands out and rows pass cleanly behind it; the separator is a box-shadow (not a real
+   border) so a scrolling row's border can't bleed through into the header band. */
+.sl-log-wrap > table > thead > tr > th {
+    position: sticky; top: 0; z-index: 3;
+    background: var(--ss-card-header-bg);
+    border-bottom: 0;
+    box-shadow: inset 0 -1px 0 var(--bs-border-color);
+}
+.sl-log-state {
+    position: absolute; left: 0; right: 0; top: 2.4rem; bottom: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .4rem; text-align: center; color: var(--bs-secondary-color); pointer-events: none;
+}
+.sl-log-state .bi { font-size: 2.4rem; opacity: .4; }
 /* Non-table custom sections fill via their container id (no single card to tag). */
 #overview-container, #modules-container, #config-container, #status-container,
 #history-container {
@@ -276,14 +369,14 @@
 /* ── History tab: two-pane layout inside the section card ──────────────────
    Left sidebar (series list) reads as a distinct panel; the right side is the
    chart drawing zone. */
-/* Cap the History section to the working area so a long SERIES list scrolls
-   inside its own pane (not the whole page) and the chart never grows past the
-   viewport.  Same anchor calc as .tab-content above. */
-#history-container { max-height: calc(100vh - var(--ss-top-offset, 56px) - 5.5rem); }
+/* History fills its pane via the flex chain (#tab-history is a flex column, #history-container
+   is flex:1 1 auto); the long series list scrolls inside its own pane. The old max-height cap
+   (with the stale 5.5rem tab-row reservation) is gone — it left a dead band at the bottom. */
 .ss-history-body { min-height: 0; }
 .ss-history-sidebar {
     width: 230px;
     flex-shrink: 0;
+    min-height: 0;   /* let #history-series-list scroll instead of growing the card */
     background: var(--ss-pagination-bg);
     border-right: 1px solid var(--bs-border-color);
 }
@@ -1230,14 +1323,55 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 #loading {
     position: fixed;
     inset: 0;
-    background: rgba(255, 255, 255, .85);
+    z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 10000;
+    /* Dimmed + blurred backdrop, so the half-built page behind is obscured until init finishes
+       and removes the overlay. The lockup sits straight on it (no card) — the backdrop is dark
+       in both themes, so the splash is styled light-on-dark either way. */
+    background: rgba(0, 0, 0, .55);
+    backdrop-filter: blur(3px);
 }
-[data-bs-theme="dark"] #loading {
-    background: rgba(24, 24, 24, .9);
+.ss-boot {
+    display: flex; flex-direction: column; align-items: center; gap: .9rem;
+    color: #fff; text-align: center;
+}
+/* Logo inside a ring: a faint full track (the border) with a bright arc sweeping around it —
+   a conic gradient masked to the ring's width, which reads better than a plain spinner. */
+.ss-boot-logo {
+    position: relative; width: 96px; height: 96px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, .15);
+}
+.ss-boot-logo::before {
+    content: ''; position: absolute; inset: -3px; border-radius: 50%;
+    background: conic-gradient(from 0turn, transparent 0 55%, #6ea8fe 85%, #0d6efd 100%);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
+    animation: ss-boot-spin 1.1s linear infinite;
+}
+.ss-boot-logo .bi {
+    font-size: 2.6rem; line-height: 1; color: #fff;
+    filter: drop-shadow(0 0 12px rgba(13, 110, 253, .55));
+}
+.ss-boot-name { font-size: 1.35rem; font-weight: 600; letter-spacing: .04em; }
+/* Indeterminate progress: boot has no measurable percentage, so it sweeps rather than fills. */
+.ss-boot-bar {
+    width: 200px; height: 3px; border-radius: 2px; overflow: hidden;
+    background: rgba(255, 255, 255, .15);
+}
+.ss-boot-bar span {
+    display: block; width: 40%; height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, #6ea8fe, #0d6efd);
+    animation: ss-boot-slide 1.4s ease-in-out infinite;
+}
+.ss-boot-text { font-size: .8rem; color: rgba(255, 255, 255, .7); }
+@keyframes ss-boot-spin  { to { transform: rotate(1turn); } }
+@keyframes ss-boot-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(360%); } }
+@media (prefers-reduced-motion: reduce) {
+    .ss-boot-logo::before, .ss-boot-bar span { animation: none; }
 }
 
 
@@ -1319,3 +1453,144 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     padding: 1.75rem 2.25rem;
     max-width: 22rem;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Collapsible left sidebar (replaces the old top navbar of section buttons).
+   Desktop: fixed left column, "mini" mode = icons only. Mobile: off-canvas.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root { --ss-sidebar-w: 240px; --ss-sidebar-mini-w: 56px; }
+
+.ss-layout { display: flex; align-items: stretch; height: 100vh; }
+/* The content column is the ONLY scroll container: the shell is a fixed 100vh, so a section
+   taller than the viewport (a plain flowing table like Servers/Services) scrolls here instead
+   of growing the document — which would page-scroll the whole shell and drag the sidebar out
+   of view. Sections that fill exactly (the .ss-vfill chain) never trigger it. */
+.ss-main   { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+             height: 100vh; overflow-y: auto; }
+
+.ss-sidebar {
+    width: var(--ss-sidebar-w); flex-shrink: 0;
+    position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column;
+    background: #1f2937; color: #cbd5e1;
+    transition: width .15s ease;
+    overflow: hidden; z-index: 1040;
+}
+[data-bs-theme="dark"] .ss-sidebar { background: #111827; }
+/* Content dropdowns (auto-refresh interval, exports, column choosers, …) must open ABOVE the
+   sidebar (z-index 1040) — Bootstrap's default 1000 left menus near the left edge clipped
+   behind it. Stays below Bootstrap modals (1055). */
+.dropdown-menu { z-index: 1045; }
+
+/* brand + toggle */
+/* Shared header height so the sidebar brand's bottom border and the breadcrumb's line up. */
+:root { --ss-header-h: 3.25rem; }
+.ss-sb-brand { display: flex; align-items: center; gap: .6rem; padding: .3rem 1rem;
+    min-height: var(--ss-header-h); box-sizing: border-box;
+    font-weight: 600; color: #fff; border-bottom: 1px solid rgba(255,255,255,.08); }
+.ss-sb-logo { font-size: 1.15rem; flex-shrink: 0; }
+.ss-sb-toggle { margin-left: auto; background: none; border: none; color: #cbd5e1;
+    font-size: 1.15rem; line-height: 1; cursor: pointer; padding: .2rem .35rem; border-radius: .35rem; }
+.ss-sb-toggle:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+/* nav list */
+.ss-sb-nav  { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: .5rem 0; }
+.ss-sb-list, .ss-sb-sub { list-style: none; margin: 0; padding: 0; }
+.ss-sb-item {
+    display: flex; align-items: center; gap: .6rem; width: 100%;
+    padding: .4rem 1rem; border: none; background: none; text-align: left;
+    color: #cbd5e1; text-decoration: none; cursor: pointer; white-space: nowrap;
+    border-left: 3px solid transparent; font-size: .85rem;
+}
+.ss-sb-item:hover { background: rgba(255,255,255,.07); color: #fff; }
+.ss-sb-item.active { background: rgba(13,110,253,.18); color: #fff; border-left-color: var(--bs-primary,#0d6efd); }
+.ss-sb-icon { font-size: .95rem; flex-shrink: 0; width: 1.15rem; text-align: center; }
+.ss-sb-caret { margin-left: auto; font-size: .65rem; transition: transform .15s; }
+.ss-sb-parent[aria-expanded="true"] .ss-sb-caret { transform: rotate(180deg); }
+.ss-sb-subitem { padding-left: 2.35rem; font-size: .8rem; }
+
+/* user block pinned to the bottom */
+.ss-sb-user { border-top: 1px solid rgba(255,255,255,.08); padding: .35rem 0; }
+.ss-sb-user .dropdown-menu { width: calc(var(--ss-sidebar-w) - 1rem); font-size: .85rem; }
+.ss-sb-user .dropdown-item { padding: .35rem .75rem; }
+.ss-sb-user .dropdown-item i { font-size: .95rem; }
+.ss-sb-username .badge { font-size: .62rem; }
+
+/* ── mini (collapsed) mode: icons only ─────────────────────────────────── */
+.ss-layout.ss-mini .ss-sidebar { width: var(--ss-sidebar-mini-w); }
+.ss-layout.ss-mini .ss-sb-label { display: none; }
+.ss-layout.ss-mini .ss-sb-caret { display: none; }
+/* Mini: only the toggle stays in the brand row (centered) — the logo + the two icons side
+   by side were cramped in the 56px rail; the hamburger alone is the expand control. */
+.ss-layout.ss-mini .ss-sb-brand { justify-content: center; padding: .8rem 0; }
+.ss-layout.ss-mini .ss-sb-logo { display: none; }
+.ss-layout.ss-mini .ss-sb-toggle { margin: 0; }
+.ss-layout.ss-mini .ss-sb-item { justify-content: center; gap: 0; padding: .55rem 0; }
+.ss-layout.ss-mini .ss-sb-subitem { padding-left: 0; }
+
+/* ── mobile top bar + off-canvas ───────────────────────────────────────── */
+.ss-topbar { display: flex; align-items: center; gap: .6rem; padding: .4rem .75rem;
+    background: #1f2937; color: #fff; }
+.ss-topbar-brand { font-weight: 600; }
+
+/* Breadcrumb bar (active section path) — page-title header above the content. Same height as
+   the sidebar brand (--ss-header-h) so their bottom borders form one continuous line. */
+.ss-crumb { display: flex; align-items: center; gap: .5rem; padding: .3rem 1rem;
+    min-height: var(--ss-header-h); box-sizing: border-box;
+    background: var(--bs-body-bg); border-bottom: 1px solid var(--bs-border-color);
+    font-weight: 600; font-size: 1.2rem; }
+.ss-crumb-icon { color: var(--bs-secondary-color); font-size: 1.15rem; }
+.ss-crumb-sep { color: var(--bs-secondary-color); font-weight: 400; margin: 0 .15rem; }
+.ss-crumb:has(#ss-breadcrumb:empty) { display: none; }   /* nothing to show → no bar */
+.ss-sb-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1035; }
+
+@media (max-width: 767.98px) {
+    .ss-sidebar { position: fixed; top: 0; left: 0; height: 100vh;
+        transform: translateX(-100%); transition: transform .2s ease;
+        width: var(--ss-sidebar-w); }
+    .ss-layout.ss-open .ss-sidebar { transform: translateX(0); }
+    .ss-layout.ss-open .ss-sb-backdrop { display: block; }
+    /* mini never applies on mobile: labels always show inside the drawer */
+    .ss-layout.ss-mini .ss-sidebar { width: var(--ss-sidebar-w); }
+    .ss-layout.ss-mini .ss-sb-label { display: inline; }
+    .ss-layout.ss-mini .ss-sb-item { justify-content: flex-start; gap: .75rem; padding: .55rem 1rem; }
+    .ss-layout.ss-mini .ss-sb-subitem { padding-left: 2.6rem; }
+}
+.ss-topbar { display: none; }
+@media (max-width: 767.98px) { .ss-topbar { display: flex; } }
+
+/* ── sub-tabs in the sidebar (Infrastructure, Access): hover/click flyout ──── */
+.ss-sb-subsub { font-size: .85rem; }
+/* Flyout: a floating menu to the right of the parent item.
+   position: fixed (JS sets top/left) so it escapes the sidebar's overflow:hidden clip. */
+.ss-sb-flywrap { position: relative; }
+.ss-sb-flyout {
+    display: none; list-style: none; margin: 0; padding: .25rem 0;
+    position: fixed; min-width: 190px; z-index: 1050;
+    background: #1f2937; border: 1px solid rgba(255,255,255,.12);
+    border-radius: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+[data-bs-theme="dark"] .ss-sb-flyout { background: #111827; }
+/* Single source of truth: JS toggles .ss-fly-open (on mouseenter/leave + click). No CSS
+   :hover — mixing it with the JS state + position:fixed left flyouts lingering/overlapping. */
+.ss-sb-flywrap.ss-fly-open .ss-sb-flyout { display: block; }
+
+/* Account settings page (/account): a comfortable reading width for the settings cards. */
+.ss-account-page { max-width: 640px; }
+.ss-sb-flyout .ss-sb-subsub { padding-left: 1rem; }
+/* The flyout always shows full items (icon + label) left-aligned, even in mini mode —
+   otherwise the mini rule (centred icon, no gap) leaves a big gap before the icon. */
+.ss-layout.ss-mini .ss-sb-flyout .ss-sb-label { display: inline; }
+.ss-layout.ss-mini .ss-sb-flyout .ss-sb-item {
+    justify-content: flex-start; gap: .75rem; padding: .45rem 1rem;
+}
+
+/* The in-pane horizontal sub-tab bars are redundant now that the sub-tabs live in the
+   sidebar — hide them (the panes still switch via the same Bootstrap Tab targets).
+   ipban/events build their bar in JS: hide by id (#ipbanSubTabs) and the events rules/log
+   nav-tabs inside #tab-events. */
+#infraSubTabs, #accessSubTabs, #ipbanSubTabs,
+#tab-events .nav-tabs { display: none !important; }
+
+/* Kiosk mode: hide the whole sidebar + top bar */
+body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; }
