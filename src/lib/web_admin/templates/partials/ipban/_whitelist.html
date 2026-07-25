@@ -12,7 +12,7 @@ const _IPBAN_WL_COLS = [
 const _IPBAN_WL_DEFAULT_COLS = new Set(['description', 'created_at', 'created_by']);
 
 let _ipbanWlData = [];
-let _ipbanWlQuery = '';
+let _ipbanWlFilters = { value: '', description: '', created_by: '' };
 let _ipbanWlPage = 1;
 let _ipbanWlPageSize = null;
 let _ipbanWlSort = 'created_at';
@@ -50,14 +50,42 @@ function _sortIpbanWlByCol(field) {
 }
 function _goIpbanWlPage(p) { _ipbanWlPage = p; _ipbanWlRender(); }
 function _changeIpbanWlPageSize(val) { _ipbanWlPageSize = parseInt(val, 10); _ipbanWlPage = 1; _ipbanWlRender(); }
-function _ipbanWlSearchChanged(v) {
-    _ipbanWlQuery = v;
+// Schema-driven filter bar — same declaration style as Ban history / Banned IPs, built by
+// the shared buildFilterBar helpers. It lives OUTSIDE the re-rendered body, which also
+// retires the old focus-restore hack: the previous inline search box was destroyed on every
+// keystroke (the whole card was rebuilt) and had to re-focus itself and replace the caret.
+const _IPBAN_WL_FILTER_SCHEMA = {
+    idPrefix: 'ipbanWlF',
+    onChange: '_ipbanWlFilterChanged',
+    onClear:  '_ipbanWlClearFilters',
+    values:   () => _ipbanWlFilters,
+    fields: [
+        { key: 'value',       label: () => t('ipban_col_ip'),          type: 'search', minWidth: '170px' },
+        { key: 'description', label: () => t('ipban_col_description'), type: 'search', grow: true },
+        { key: 'created_by',  label: () => t('col_created_by'),     type: 'search', minWidth: '150px' },
+    ],
+};
+function _ipbanWlFilterChanged() {
+    _ipbanWlFilters = readFilterBar(_IPBAN_WL_FILTER_SCHEMA);
     _ipbanWlPage = 1;
     _ipbanWlRender();
-    // The whole card is rebuilt on each keystroke, so restore focus + caret to the
-    // freshly-created search box (cursor to end — search is typed left-to-right).
-    const si = document.getElementById('ipbanWlSearch');
-    if (si) { si.focus(); const n = si.value.length; si.setSelectionRange(n, n); }
+}
+function _ipbanWlClearFilters() {
+    clearFilterBar(_IPBAN_WL_FILTER_SCHEMA);
+    _ipbanWlFilters = readFilterBar(_IPBAN_WL_FILTER_SCHEMA);
+    _ipbanWlPage = 1;
+    _ipbanWlRender();
+}
+
+/** Whitelist entries matching the current filter state (drives render + pagination). */
+function _ipbanWlFiltered() {
+    const f = _ipbanWlFilters;
+    const parts = [['value', f.value], ['description', f.description], ['created_by', f.created_by]]
+        .map(([k, v]) => [k, (v || '').trim().toLowerCase()]).filter(([, v]) => v);
+    setFilterBarCount('ipbanWlF', parts.length);
+    if (!parts.length) return _ipbanWlData;
+    return _ipbanWlData.filter(e =>
+        parts.every(([k, v]) => String(e[k] || '').toLowerCase().includes(v)));
 }
 
 function _ipbanWlOrderedCols() {
@@ -73,7 +101,10 @@ function _ipbanWlOrderedCols() {
 function _ipbanWhitelistCard() {
     setTimeout(() => { if (document.getElementById('ipban-wl-pane')) _ipbanWlLoad(); }, 0);
     return `<div id="ipban-wl-pane" class="ss-vfill">
-        <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
+        ${buildFilterBar(_IPBAN_WL_FILTER_SCHEMA)}
+        <div id="ipban-wl-body" class="ss-vfill">
+            <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
+        </div>
     </div>`;
 }
 
@@ -121,7 +152,7 @@ function _ipbanWlTableHtml(rows, tableId) {
 }
 
 function _ipbanWlRender() {
-    const c = document.getElementById('ipban-wl-pane');
+    const c = document.getElementById('ipban-wl-body');
     if (!c) return;
     if (_ipbanWlPageSize === null) _ipbanWlPageSize = _defaultPageSize;
 
@@ -140,21 +171,14 @@ function _ipbanWlRender() {
     </div>`;
     const header = `<div class="ss-card-header">
         <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-shield-check me-1"></i>${esc(t('ipban_wl_title'))}</span>
-        <input id="ipbanWlSearch" type="search" class="form-control form-control-sm" style="max-width:210px"
-            placeholder="${escAttr(t('search'))}" value="${escAttr(_ipbanWlQuery)}" oninput="_ipbanWlSearchChanged(this.value)">
         ${_buildColChooser(_IPBAN_WL_COLS, _ipbanWlVisibleCols, '_ipbanWlToggleCol', '_ipbanWlResetCols', 150)}
         <button class="btn btn-secondary btn-sm" onclick="_ipbanWlLoad()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('ipban_refresh'))}</button>
     </div>`;
 
-    // Client-side search over the visible text fields (IP/CIDR, description, author, uid).
-    const q = _ipbanWlQuery.trim().toLowerCase();
-    const filtered = q
-        ? _ipbanWlData.filter(e => [e.value, e.description, e.created_by, e.uid]
-            .some(x => String(x || '').toLowerCase().includes(q)))
-        : _ipbanWlData;
+    const filtered = _ipbanWlFiltered();
 
     if (!filtered.length) {
-        const msg = q ? t('ipban_wl_no_match') : t('ipban_wl_none');
+        const msg = _ipbanWlData.length ? t('ipban_wl_no_match') : t('ipban_wl_none');
         c.innerHTML = `<div class="ss-card ss-vfill">
             <div class="ss-accent ss-accent-teal"></div>
             ${header}${addForm}

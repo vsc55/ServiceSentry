@@ -9,8 +9,8 @@
 >   [explica-web-admin.md](explica-web-admin.md).
 > - Los **endpoints** de roles/grupos/usuarios están en [ref-api.md](ref-api.md).
 
-El sistema usa **63 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
-código) tiene exactamente esos 63 flags.
+El sistema usa **64 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
+código) tiene exactamente esos 64 flags.
 
 ---
 
@@ -18,7 +18,7 @@ código) tiene exactamente esos 63 flags.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (63 flags) |
+| `admin` | Todos los permisos (64 flags) |
 | `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
 | `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view` (sin `config_view` ni `credentials_view`) |
 
@@ -29,7 +29,7 @@ código) tiene exactamente esos 63 flags.
 
 ## Roles personalizados
 
-Se crean desde **Acceso → Roles** asignando cualquier combinación de los 63 permisos. Se
+Se crean desde **Acceso → Roles** asignando cualquier combinación de los 64 permisos. Se
 persisten en la tabla `roles`.
 
 ## Grupos de usuarios
@@ -47,7 +47,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 
 ---
 
-## Catálogo de permisos (63 flags)
+## Catálogo de permisos (64 flags)
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -96,7 +96,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `events_notify_delete` | Vaciar el log de notificaciones enviadas |
 
 > **IP bans (fail2ban)** añade su propia familia granular `ipban_*` (`ipban_ban_view/add/edit/delete`,
-> `ipban_history_view`, `ipban_whitelist_view/add/delete`, `ipban_watchlist_clear`,
+> `ipban_history_view`, `ipban_history_delete`, `ipban_whitelist_view/add/delete`, `ipban_watchlist_clear`,
 > `ipban_service_edit`). Ver [ref-api.md](ref-api.md#ip-bans-fail2ban--libservicesipbanroutespy).
 
 ### Permisos dinámicos
@@ -111,7 +111,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
 
 ## Estructuras internas
 
-- `PERMISSIONS` — tupla con los 63 flags.
+- `PERMISSIONS` — tupla con los 64 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de
   roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` de los roles integrados.

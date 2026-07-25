@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HTML page views: / (entry redirect), /admin (admin panel), /overview (standalone).
+"""HTML page views: the single-page shell and the URLs that select a pane within it.
+
+Every route here renders the SAME shell (``dashboard.html``); the URL only decides which
+pane starts active, so moving between them is a reload-free tab switch rather than a page
+load.  The section URLs are not hardcoded: one is registered per entry in the ``HOME_PAGES``
+registry that declares a ``standalone`` spec (pane id, render entry point, permission), so a
+new section gets its URL by declaring itself.
 
 The rendered dashboard pulls in the module/host/widget discovery catalogs it needs to build
 the UI.  The lighter session/API endpoints (/lang, /api/v1/me, /api/v1/health) live in
@@ -9,8 +15,9 @@ the UI.  The lighter session/API endpoints (/lang, /api/v1/me, /api/v1/health) l
 Routes registered by this file:
 
     GET /           entry point: anon → /login, else the user's effective landing page
-    GET /admin      the main admin dashboard (all tabs)
-    GET /overview   the Overview dashboard as its own page (tabs hidden)
+    GET /admin      the admin panel (its tabs live in the sidebar's "System" group)
+    GET /account    the signed-in user's own account page
+    GET /<section>  one per HOME_PAGES standalone entry — today /overview, /history, /syslog
 """
 
 from flask import make_response, redirect, render_template, session, url_for

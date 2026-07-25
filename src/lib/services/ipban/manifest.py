@@ -43,10 +43,22 @@ MODULE_PERMISSIONS = {
         {'flag': 'ipban_whitelist_add',    'roles': ()},                     # add a whitelist entry
         {'flag': 'ipban_whitelist_delete', 'roles': ()},                     # remove a whitelist entry
         {'flag': 'ipban_history_view',     'roles': ('editor', 'viewer')},   # view the ban history
+        {'flag': 'ipban_history_delete',   'roles': ()},                     # wipe the ban-history trail
         {'flag': 'ipban_service_edit',     'roles': ('editor',)},            # set per-service block action
         {'flag': 'ipban_config_edit',      'roles': ('editor',)},            # edit fail2ban settings
     ),
 }
+
+
+# Wiping the ban-history trail lives in Config → General → Maintenance with the other data
+# wipes, not in the fail2ban toolbar — it is an audit trail, so erasing it is deliberate.
+# Active bans are in their own table and are untouched. The fn ships with the fail2ban UI.
+CONFIG_ACTIONS = [
+    {'section': 'maintenance', 'id': 'ipban_clear_history',
+     'label_key': 'ipban_hist_clear', 'tooltip_key': 'ipban_hist_clear_tt',
+     'icon': 'bi-trash3', 'variant': 'danger', 'order': 50,
+     'perm': 'ipban_history_delete', 'fn': '_ipbanHistClear'},
+]
 
 
 # ── Overview widgets this package contributes ────────────────────

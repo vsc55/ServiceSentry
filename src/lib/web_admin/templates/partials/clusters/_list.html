@@ -250,6 +250,41 @@ createListTable({
     },
     rowKey: r => r.key,
     record: r => r.item,
+    // Filter strip (shared design — see createListTable's spec.filters). match() takes the
+    // 4th arg (the raw row) because a cluster row carries its module alongside the item.
+    filters: {
+        // `fields` is a function of ctx so the per-module extra columns (declared via
+        // __cluster_columns__ — keepalived's `vip`, anything tomorrow) each get their own
+        // search box, labelled by the module. No module name is hardcoded here.
+        fields: ctx => [
+            { key: 'q',      label: () => t('col_name'), type: 'search', grow: true,
+              placeholder: () => t('cluster_filter_ph') },
+            { key: 'module', label: () => t('col_module'), type: 'select',
+              minWidth: '170px',
+              options: () => [{ value: '', label: t('all') }].concat(
+                  [...new Set(_clusterModules())].sort().map(
+                      m => ({ value: m, label: _modPrettyName(m) }))) },
+            { key: 'state',  label: () => t('col_status'), type: 'select', minWidth: '140px',
+              options: () => [{ value: '', label: t('all') },
+                              { value: '1', label: t('enabled') },
+                              { value: '0', label: t('status_disabled') }] },
+        ].concat(((ctx && ctx.extraCols) || []).map(c => ({
+            key: 'x_' + c.field, label: () => c.label, type: 'search', minWidth: '140px',
+        }))),
+        match: (item, f, ctx, row) => {
+            const q = (f.q || '').toLowerCase();
+            if (q && !(String(row.name || '').toLowerCase().includes(q)
+                       || String(item.description || '').toLowerCase().includes(q))) return false;
+            if (f.module && row.mod !== f.module) return false;
+            if (f.state !== '' && f.state != null
+                && (item.enabled !== false) !== (f.state === '1')) return false;
+            // Extra (module-declared) columns: match the item's own field value.
+            return ((ctx && ctx.extraCols) || []).every(c => {
+                const v = (f['x_' + c.field] || '').trim().toLowerCase();
+                return !v || String(item[c.field] ?? '').toLowerCase().includes(v);
+            });
+        },
+    },
     selectable: false,
     sortValue: (row, sortKey) => _clSortVal(row, sortKey),
     rowAttrs: row => ` style="opacity:${row.item.enabled !== false ? '1' : '.55'}"`,

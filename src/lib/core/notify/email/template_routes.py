@@ -19,18 +19,33 @@ HTML-body endpoints
 GET  /api/v1/notify/html-templates
     Returns stored custom HTML bodies {type: {lang: html}}.
 
-GET  /api/v1/notify/html-templates/<type>/built-in
+GET  /api/v1/notify/html-templates/<tpl_type>/built-in
     Returns the built-in rendered HTML for *type* (sample data, for
     reference when the user wants to start from the default).
 
-PUT  /api/v1/notify/html-templates/<type>/<lang>
+PUT  /api/v1/notify/html-templates/<tpl_type>/<lang>
     Save a full custom HTML body for email type + language.
     Body: {"html": "<!DOCTYPE html>..."}
 
-DELETE /api/v1/notify/html-templates/<type>/<lang>
+DELETE /api/v1/notify/html-templates/<tpl_type>/<lang>
     Remove custom HTML, reverting to the built-in template.
 
+POST /api/v1/notify/html-templates/<tpl_type>/preview
+    Render the POSTed HTML with sample data, so the editor can preview a draft
+    without saving it.  Body: {"html": "..."}
+
 Valid types: "test", "alert", "summary".
+
+Text-package endpoints (every editable notification string, not just email)
+---------------------------------------------------------------------------
+GET  /api/v1/notify/text-packages
+    Discover every editable text package for a language — Core themes, Email
+    strings and one package per watchful module — with defaults + overrides.
+
+PUT  /api/v1/notify/text-packages/<lang>
+    Replace all custom text overrides for a language.  Body: {scoped_key: value}
+    (``email:*`` lands in notif_templates, ``core:*``/``mod:*`` in
+    notif_text_overrides).
 """
 from __future__ import annotations
 

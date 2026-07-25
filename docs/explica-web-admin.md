@@ -23,7 +23,9 @@ lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios
 │   ├── __init__.py           # register_all(app, wa) — registra también los routes de core/servicios/providers
 │   ├── auth.py               # /login, /logout (login local; llama a wa._establish_session, def. en mixins/auth.py)
 │   ├── status.py             # /status (página pública de estado)
-│   ├── pages.py              # vistas HTML: / (entry redirect), /admin, /overview
+│   ├── pages.py              # vistas HTML: TODAS sirven el MISMO shell SPA — /, /admin,
+│   │                         #   /account + una ruta por sección de HOME_PAGES
+│   │                         #   (/overview, /history, /syslog): la URL solo elige panel
 │   ├── ui.py                 # /lang/<code>, /api/v1/me, /api/v1/health
 │   ├── errors.py             # handlers 400, 403, 404, 405, 500
 │   └── util.py               # utilidades de ruta compartidas
@@ -112,15 +114,15 @@ flowchart TD
 | **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [explica-seguridad.md](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | **Página propia** (`/overview`, separada del panel de administración) con tarjetas de resumen (Modules, Checks, Servers, **Services**, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events, **fail2ban**) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente, **IP baneadas**); cada widget enlaza (click-through) a su pestaña del panel; los widgets de tabla con filtro muestran un **indicador del filtro activo** en la cabecera — uno o varios badges (p.ej. Servers "Error + Mantenimiento" pinta ambos; Syslog pinta "≥ nivel"); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin. El widget **Services** cuenta los servicios embebidos activos vs parados |
-| **Secciones independientes** | **Overview**, **Historial** y **Syslog** no son pestañas del panel: son páginas completas (`/overview`, `/history`, `/syslog`) declaradas en el registro `HOME_PAGES` con su descriptor `standalone` (panel a pintar, función de render, permiso, icono y rótulo de nav). Una sola factoría de rutas las sirve y la barra superior se construye del mismo dato. Una página independiente **solo emite su propio panel**: ni la barra de pestañas del panel ni el marcado de las demás secciones llegan al navegador (no se ocultan por CSS, no se dibujan). La barra superior muestra siempre los mismos cuatro botones en el mismo orden (Overview, History, Syslog, Admin) y la sección en la que estás **no desaparece**: se queda resaltada. `/history` acepta enlace profundo `?module=&key=` (es el salto "ver historial de este check" desde Infraestructura) |
+| **Navegación (sidebar + shell SPA)** | La navegación es una **barra lateral colapsable**: arriba las secciones (Overview, History, Syslog) y debajo el grupo **System**, que agrupa las pestañas del panel. **Todas las URLs sirven el MISMO shell** (`dashboard.html`) y la ruta solo elige qué panel arranca activo, así que moverse entre secciones es un cambio de pestaña **sin recarga**, incluida `/account`. Las secciones se declaran en el registro `HOME_PAGES` con su descriptor `standalone` (panel, función de render, permiso, icono y rótulo): una factoría de rutas las sirve y la sidebar se construye del mismo dato. `/history` acepta enlace profundo `?module=&key=` (es el salto "ver historial de este check" desde Infraestructura). Ver §[Layout de la UI](#layout-de-la-ui-sidebar-shell-spa-y-full-bleed) |
 | **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
-| **Mantenimiento (borrado de datos)** | Config → General → **Mantenimiento** reúne los borrados destructivos: *Borrar Una Serie*, *Borrar Todo El Historial* y *Vaciar Mensajes De Syslog*. Antes vivían en la barra de la propia sección que vacían — páginas que se dejan abiertas todo el día. La tarjeta no tiene campos propios: cada dominio aporta su botón como `CONFIG_ACTION` sobre la sección `maintenance`, con el permiso (`history_delete` / `syslog_delete`) que oculta el botón a quien no lo tenga. Elegir *qué* serie borrar abre un modal selector. Ver [explica-descubrimiento.md §7b](explica-descubrimiento.md#7b-acciones-de-config-y-ui-aportadas-por-un-paquete-config_actions--web) |
+| **Mantenimiento (borrado de datos)** | Config → General → **Mantenimiento** reúne los borrados destructivos: *Borrar Una Serie*, *Borrar Todo El Historial*, *Vaciar Mensajes De Syslog*, *Eliminar Todos Los Eventos De Auditoría*, *Borrar El Registro De Notificaciones De Eventos* y *Borrar El Historial De Baneos*. Antes vivían en la barra de la propia sección que vacían — páginas que se dejan abiertas todo el día. La tarjeta no tiene campos propios: cada dominio aporta su botón como `CONFIG_ACTION` sobre la sección `maintenance`, con el permiso (`history_delete`, `syslog_delete`, `audit_delete`, `events_notify_delete`, `ipban_history_delete`) que oculta el botón a quien no lo tenga. Elegir *qué* serie borrar abre un modal selector. Ver [explica-descubrimiento.md §7b](explica-descubrimiento.md#7b-acciones-de-config-y-ui-aportadas-por-un-paquete-config_actions--web) |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 63 flags granulares; activar/desactivar desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 64 flags granulares; activar/desactivar desde el modal |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -140,11 +142,94 @@ flowchart TD
 
 ---
 
+## Layout de la UI (sidebar, shell SPA y full-bleed)
+
+### Un único shell
+
+Todas las rutas HTML renderizan `dashboard.html`. La URL **no** decide qué se envía, solo qué
+panel arranca activo; la navegación posterior es un cambio de pestaña de Bootstrap + `pushState`,
+sin recarga. Consecuencia práctica: cualquier estado del cliente (datos cargados, filtros, scroll)
+sobrevive al moverse entre secciones.
+
+Las secciones **cargan sus datos al entrar**, no de una caché de arranque: así, si el backend cayó
+mientras la pestaña estaba abierta, se ve el fallo de red (y el aviso de conexión) en vez de filas
+viejas.
+
+### Altura: una sola cadena flex
+
+El shell mide `100vh` y **la columna de contenido (`.ss-main`) es el único contenedor con scroll**;
+si crece más que la ventana, scrollea ella y no el documento — si scrollease el documento, la
+sidebar (que es `sticky` dentro de ese `100vh`) se despegaría.
+
+De ahí hacia abajo hay **dos clases genéricas**, nunca reglas por id:
+
+| Clase | Qué hace |
+| ----- | -------- |
+| `.ss-vfill` | columna flex que crece hasta llenar a su padre — se encadena desde el contenedor de sección hasta la tarjeta que debe estirarse |
+| `.ss-vscroll` | crece Y scrollea su propio desbordamiento (el cuerpo de la tabla), dejando fijas las bandas de paginación |
+
+> **Trampa conocida.** Bootstrap decide la visibilidad del panel por clase
+> (`.tab-content > .tab-pane { display: none }`, especificidad 0-1-0). Cualquier regla **por id**
+> que toque `display` (1-0-0) la secuestra y deja ese panel dibujado debajo de los demás. Las
+> reglas de layout de un panel se cualifican con `.active`; lo verifica
+> `tests/test_wa_ui.py::TestPaneDisplayRules`. La ficha completa está en
+> [caso-diagnostico.md](caso-diagnostico.md).
+
+### Full-bleed
+
+Un panel marcado `.ss-fullbleed` cancela los márgenes del contenedor y ocupa el ancho completo;
+**dentro de él, toda `.ss-card` pierde su cromo** (borde, redondeo, sombra) y los paneles apilados
+se separan con un filete en vez de un hueco, leyéndose como una sola superficie. Es una clase en el
+panel: ni CSS por sección ni flags por tabla. `.ss-fullbleed-top` come además el padding superior,
+para paneles que no tienen nada encima (las sub-pestañas las dibuja la sidebar, no la página).
+
+### Barra de filtros compartida
+
+Un único generador, `buildFilterBar(schema)` (`partials/core/_utils.html`), produce **las 14 barras
+de filtro** de la interfaz. La barra es una cabecera fina siempre visible (plegable, **plegada por
+defecto**, con un badge del número de filtros activos para que un filtro plegado nunca filtre en
+silencio) sobre un cuerpo con los campos.
+
+El esquema es dato:
+
+```js
+{
+  idPrefix: 'sl',                    // prefijo de ids + clave del estado plegado
+  onChange: '_fnGlobal',             // nombre de la función a invocar al teclear/elegir
+  onClear:  '_fnGlobal',             // botón "Limpiar filtros"
+  values:   () => estadoActual,      // siembra los campos al construir
+  leadHtml: () => '<div>…</div>',    // (opc.) controles que NO son filtros (Audit: Sort/Group by)
+  fields: [ { key, label:()=>str, type, minWidth?, width?, grow?, options?:()=>[…], listId? } ]
+}
+// type: search | text | number | date | datetime-local | select | datalist
+```
+
+Hay **dos formas de usarla**, según de dónde salga la tabla:
+
+- **Tablas de la fábrica** (`createListTable`): declaran `filters: {fields, match}` y la fábrica se
+  encarga del resto — construir la barra, leer los valores, filtrar y paginar. Lo único propio del
+  dominio es `match(record, values, ctx, row) -> bool`. `fields` puede ser una **función de `ctx`**,
+  para campos derivados de los datos (Clusters genera un campo por columna extra que declare cada
+  módulo vía `__cluster_columns__`, sin nombrar ninguno).
+- **Tablas escritas a mano** (Syslog, fail2ban ×3, Events ×2, Audit): declaran su esquema y sus dos
+  handlers, y filtran en su propio render.
+
+**Regla de oro en ambos casos: la barra vive FUERA del bloque que se re-renderiza.** Si estuviera
+dentro, cada tecla la destruiría y el foco saltaría (fue un bug real, con un apaño que reponía el
+foco y el cursor a mano; hoy no hace falta). Los `<select>` se repueblan **en sitio** en cada
+recarga de datos, así que un host nuevo aporta su etiqueta sin robar el foco.
+
+Cuando un filtro deja la tabla vacía se dice **eso** ("Ninguna fila coincide con estos filtros", con
+el botón de limpiar), no el estado vacío propio de la tabla — que afirmaría que no hay usuarios
+mientras un filtro los esconde.
+
+---
+
 ## Roles, grupos y permisos
 
 ![Gestión de acceso](images/access_tab.svg)
 
-El **catálogo completo** de roles integrados, roles personalizados, grupos y los **63 flags
+El **catálogo completo** de roles integrados, roles personalizados, grupos y los **64 flags
 de permiso** (más los permisos dinámicos por módulo/servidor/cluster y las estructuras
 internas `PERMISSIONS`/`PERMISSION_GROUPS`/`_perm_required`/`_get_effective_permissions`) es
 la fuente única en **[ref-permisos.md](ref-permisos.md)**. La **semántica de seguridad**
@@ -869,7 +954,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 63 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 64 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |

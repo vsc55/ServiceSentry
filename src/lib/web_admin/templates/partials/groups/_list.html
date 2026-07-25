@@ -76,6 +76,24 @@ createListTable({
     columns: _GRP_COLS, defaultVisible: _GROUPS_DEFAULT_COLS,
     thClass: { members: 'text-center ss-th-narrow' }, colChooserMinWidth: 170,
     persist: true, clearLabelKey: 'subtab_groups',
+    // Filter strip (shared design — see createListTable's spec.filters).
+    filters: {
+        fields: [
+            { key: 'q',    label: () => t('col_name'), type: 'search', grow: true,
+              placeholder: () => t('group_filter_ph') },
+            { key: 'role', label: () => t('col_role'), type: 'select', minWidth: '150px',
+              options: () => [{ value: '', label: t('all') }].concat(
+                  Object.entries(rolesData || {})
+                        .map(([uid, rd]) => ({ value: uid, label: (rd && rd.name) || uid }))
+                        .sort((a, b) => a.label.localeCompare(b.label))) },
+        ],
+        match: (g, f, ctx, name) => {
+            const q = (f.q || '').toLowerCase();
+            if (q && !((g.name || name).toLowerCase().includes(q)
+                       || (g.description || '').toLowerCase().includes(q))) return false;
+            return !f.role || (g.roles || []).includes(f.role);
+        },
+    },
     rows: () => Object.keys(groupsData), rowKey: name => name,
     record: name => groupsData[name],
     prepare: () => {

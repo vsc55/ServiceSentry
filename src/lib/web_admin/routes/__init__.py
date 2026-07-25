@@ -40,7 +40,10 @@ registered; every listed file's own header lists its exact per-endpoint routes.
 
 ── web — lib/web_admin/routes/*.py ──────────────────────────────────────────────────
     auth             /login, /logout            (local login; oidc/saml/ldap providers above)
-    pages            /, /admin, /overview       (rendered HTML views)
+    pages            /, /admin, /account        (rendered HTML views; + one route per section
+                                                declared in HOME_PAGES — /overview, /history,
+                                                /syslog. They all serve the SAME single-page
+                                                shell: the URL only selects the active pane.)
     overview2        /overview2                 (experimental Alpine.js Overview — real widgets + data)
     ui               /lang/<code> (navigation), /api/v1/me, /api/v1/health
     status           /status                    (public status page, no auth)

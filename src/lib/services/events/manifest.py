@@ -33,6 +33,17 @@ MODULE_PERMISSIONS = {
 }
 
 
+# Clearing the sent-notifications log lives in Config → General → Maintenance, not in the
+# Events toolbar — the same move the history, syslog and audit wipes made: that page stays
+# open all day, one stray click from erasing the record. The fn ships with the events UI.
+CONFIG_ACTIONS = [
+    {'section': 'maintenance', 'id': 'events_clear_log',
+     'label_key': 'event_log_clear', 'tooltip_key': 'event_log_clear_tt',
+     'icon': 'bi-trash3', 'variant': 'danger', 'order': 40,
+     'perm': 'events_notify_delete', 'fn': '_eventClearLog'},
+]
+
+
 # ── Overview widgets this package contributes ────────────────────
 from .overview_widget import events_stat  # noqa: F401
 

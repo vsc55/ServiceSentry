@@ -13,7 +13,6 @@ function _eventsRender() {
     const c = document.getElementById('events-container');
     if (!c) return;
     const canAdd = _evCan('events_add');
-    const canNotifyDelete = _evCan('events_notify_delete');
     const canRules = _evCanRules();
     const canNotify = _evCan('events_notify_view');
     const rulesChooser = _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols');
@@ -38,13 +37,11 @@ function _eventsRender() {
         </ul>
         <div class="tab-content">
             ${canRules ? `<div class="tab-pane fade${rulesActive ? ' show active' : ''}" id="ev-pane-rules" role="tabpanel">
+                ${buildFilterBar(_EVR_FILTER_SCHEMA)}
                 <div class="ss-card ev-card ss-vfill">
                     <div class="ss-accent ss-accent-purple"></div>
                     <div class="ss-card-header">
                         <h6 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('event_subtab_rules'))}</h6>
-                        <input id="ev-search" type="search" class="form-control form-control-sm" style="max-width:240px"
-                            placeholder="${escAttr(t('event_search'))}" value="${escAttr(_eventSearch)}"
-                            oninput="_eventSearch=this.value;_evrPage=1;_eventRulesBody()">
                         ${rulesChooser}
                         <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
                         ${canAdd ? `<button class="btn btn-sm btn-success" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
@@ -55,16 +52,13 @@ function _eventsRender() {
                 </div>
             </div>` : ''}
             ${canNotify ? `<div class="tab-pane fade${rulesActive ? '' : ' show active'}" id="ev-pane-log" role="tabpanel">
+                ${buildFilterBar(_EVL_FILTER_SCHEMA)}
                 <div class="ss-card ev-card ss-vfill">
                     <div class="ss-accent ss-accent-slate"></div>
                     <div class="ss-card-header">
                         <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
-                        <input id="ev-log-search" type="search" class="form-control form-control-sm" style="max-width:240px"
-                            placeholder="${escAttr(t('event_search'))}" value="${escAttr(_evlSearch)}"
-                            oninput="_evlSearch=this.value;_evlPage=1;_renderEventLog()">
                         ${logChooser}
                         <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
-                        ${canNotifyDelete ? `<button class="btn btn-sm btn-danger" onclick="_eventClearLog()"><i class="bi bi-trash me-1"></i>${esc(t('event_log_clear'))}</button>` : ''}
                     </div>
                     <div class="ss-card-band ss-card-band-top" id="ev-log-pager-top"></div>
                     <div id="ev-log-table-wrap" class="ss-vscroll"></div>
@@ -122,14 +116,17 @@ function _eventRulesBody() {
     if (!tableWrap) return;
     const pagerTopEl = document.getElementById('ev-rules-pager-top');
     const pagerBotEl = document.getElementById('ev-rules-pager-bottom');
-    const q = _eventSearch.trim().toLowerCase();
+    const _f = _evrFilters;
+    const _nq = (_f.name || '').trim().toLowerCase(), _tq = (_f.tags || '').trim().toLowerCase();
+    setFilterBarCount('evrF', [_nq, _f.source, _tq].filter(Boolean).length);
     const canEdit = _evCan('events_edit');
     const canDelete = _evCan('events_delete');
     const canClone = _evCan('events_add');
     const showActions = canEdit || canDelete || canClone;
-    let rows = _eventRules.filter(r => !q || (r.name || '').toLowerCase().includes(q)
-        || (r.source || '').toLowerCase().includes(q)
-        || (r.tags || []).some(tg => tg.toLowerCase().includes(q)));
+    let rows = _eventRules.filter(r =>
+        (!_nq || (r.name || '').toLowerCase().includes(_nq))
+        && (!_f.source || (r.source || 'audit') === _f.source)
+        && (!_tq || (r.tags || []).some(tg => tg.toLowerCase().includes(_tq))));
     rows = rows.slice().sort((a, b) => {
         const va = _evrSortVal(a, _evrSort), vb = _evrSortVal(b, _evrSort);
         const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));

@@ -111,6 +111,32 @@ createListTable({
     columns: _USR_COLS, defaultVisible: _USERS_DEFAULT_COLS,
     thClass: { role: 'text-center', sessions: 'text-center ss-th-narrow' },
     persist: true, clearLabelKey: 'subtab_users',
+    // Filter strip (shared design — see createListTable's spec.filters). `q` searches the
+    // two name columns at once, since which one a user is looking for is not worth a choice.
+    filters: {
+        fields: [
+            { key: 'q',       label: () => t('col_user'), type: 'search', grow: true,
+              placeholder: () => t('user_filter_ph') },
+            { key: 'role',    label: () => t('col_role'), type: 'select', minWidth: '150px',
+              options: () => [{ value: '', label: t('all') }].concat(
+                  Object.entries(rolesData || {})
+                        .map(([uid, rd]) => ({ value: uid, label: (rd && rd.name) || uid }))
+                        .sort((a, b) => a.label.localeCompare(b.label))) },
+            { key: 'enabled', label: () => t('col_status'), type: 'select', minWidth: '130px',
+              options: () => [{ value: '', label: t('all') },
+                              { value: '1', label: t('enabled') },
+                              { value: '0', label: t('status_disabled') }] },
+        ],
+        match: (u, f, ctx, uname) => {
+            const q = (f.q || '').toLowerCase();
+            if (q && !(uname.toLowerCase().includes(q)
+                       || (u.display_name || '').toLowerCase().includes(q))) return false;
+            if (f.role && (u.role || 'viewer') !== f.role) return false;
+            if (f.enabled !== '' && f.enabled != null)
+                return (u.enabled !== false) === (f.enabled === '1');
+            return true;
+        },
+    },
     rows: () => Object.keys(usersData), rowKey: u => u,
     record: uname => usersData[uname], uidOf: uname => usersData[uname].uid || '',
     prepare: () => {

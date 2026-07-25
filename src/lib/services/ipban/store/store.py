@@ -86,6 +86,9 @@ class IpBanStore:
     def ban_history(self, *, limit: int = 500, ip: str | None = None) -> list[dict]:
         return self._history.ban_history(limit=limit, ip=ip)
 
+    def clear_ban_history(self) -> int:
+        return self._history.clear_ban_history()
+
     # ── cross-table operations ──────────────────────────────────────────────────
     def clear_offenses(self, ip: str) -> bool:
         """Forget an IP's counters + attempt log (watchlist removal). True if any existed."""

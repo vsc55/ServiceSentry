@@ -267,6 +267,25 @@
 .ss-fb-body { display: block; border-top: 1px solid var(--bs-border-color); }
 .ss-filterbar.collapsed .ss-fb-body { display: none; }
 .ss-fb-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
+/* Own padding instead of Bootstrap's .py-2/.px-3: those utilities are !important, so the
+   vertical rhythm could not be tuned from here. Symmetric top/bottom — the label's own
+   margin made the top read taller than the bottom. */
+.ss-fb-inner { padding: .5rem .75rem; }
+/* The bar is chrome, not content: keep its type a step below the table it filters, so a bar
+   with many fields stays compact. One place for every bar (14 of them) — never per section. */
+/* display:block is the fix for the top-heavy look, not the font size: Bootstrap's .form-label
+   is inline-block, so the line box around it is sized by the PARENT's strut (~1.5 × 1rem),
+   not by the label's own line-height — which padded a phantom ~6px above the text while the
+   bottom kept only its real padding. As a block it hugs its glyphs and both sides match. */
+.ss-fb-fields .form-label {
+    display: block; line-height: 1.1;
+    font-size: .68rem; margin-bottom: .2rem; opacity: .85;
+}
+.ss-fb-fields .form-control,
+.ss-fb-fields .form-select,
+.ss-fb-fields .input-group-text,
+.ss-fb-fields .btn { font-size: .75rem; padding-top: .18rem; padding-bottom: .18rem; }
+.ss-fb-fields .btn i { font-size: .78rem; }
 
 /* ── Full-height content layout (pure flexbox, no magic numbers) ───────────
    .ss-layout is min-height:100vh and .ss-main is a flex column, so the content

@@ -408,6 +408,7 @@ alimenta a fail2ban:
 | GET | `/api/v1/ipbans/services` | `ipban_service_edit`\|`config_view`\|`config_edit` | Servicios expuestos + block actions |
 | POST | `/api/v1/ipbans/services/action` | `ipban_service_edit`\|`config_edit` | Fijar block action de un servicio |
 | GET | `/api/v1/ipbans/banlog` | `ipban_history_view` | Historial banned/escalated/unbanned |
+| DELETE | `/api/v1/ipbans/banlog` | `ipban_history_delete` | Vaciar el historial de baneos (los baneos activos se conservan); auditado |
 | GET | `/api/v1/ipbans/history` | ban_view/history_view/whitelist_view | Intentos recientes de una IP |
 | POST | `/api/v1/ipbans/action` | `ipban_ban_edit` | Override de respuesta por baneo |
 | POST | `/api/v1/ipbans/clear` | `ipban_watchlist_clear` | Quitar IP de la watchlist |

@@ -8,6 +8,48 @@ let _auditSortDir = 'desc';   // asc | desc
 let _auditGroup   = 'none';   // none | date | event | user | ip
 let _auditFilters = { event: '', user: '', ip: '', dateFrom: '', dateTo: '', detail: '' };
 
+// Schema-driven filter bar — the same shared component every other section uses
+// (buildFilterBar, partials/core/_utils.html). Two things kept Audit hand-written until now
+// and are now part of the component: `datalist` fields (autocomplete over the users/IPs the
+// log actually contains) and `leadHtml`, for controls that are not filters — Audit's Sort and
+// Group by. Every field declares its LEGACY id, so initAuditControls()/clearAuditFilters()
+// keep addressing the same elements and nothing else had to change.
+const _AUDIT_FILTER_SCHEMA = {
+    idPrefix: 'audit',
+    onChange: 'applyAuditControls',
+    onClear:  'clearAuditFilters',
+    values:   () => _auditFilters,
+    leadHtml: () => `
+        <div><label class="form-label small mb-1">${esc(t('sort'))}</label>
+            <div class="input-group input-group-sm">
+                <select class="form-select form-select-sm" id="auditSortField" onchange="applyAuditControls()">
+                    ${['time', 'event', 'user', 'ip'].map(v =>
+                        `<option value="${v}"${_auditSort === v ? ' selected' : ''}>${esc(t('col_' + v))}</option>`).join('')}
+                </select>
+                <button class="btn btn-secondary" id="btnAuditSortDir" onclick="toggleAuditSortDir()" title="${escAttr(t('sort_dir'))}">
+                    <i class="bi bi-sort-${_auditSortDir === 'asc' ? 'up' : 'down'}" id="iconAuditSortDir"></i>
+                </button>
+            </div></div>
+        <div><label class="form-label small mb-1">${esc(t('group_by'))}</label>
+            <select class="form-select form-select-sm" id="auditGroupBy" onchange="applyAuditControls()" style="min-width:130px">
+                <option value="none"${_auditGroup === 'none' ? ' selected' : ''}>${esc(t('none'))}</option>
+                ${['date', 'event', 'user', 'ip'].map(v =>
+                    `<option value="${v}"${_auditGroup === v ? ' selected' : ''}>${esc(t('col_' + (v === 'date' ? 'time' : v)))}</option>`).join('')}
+            </select></div>`,
+    fields: [
+        { key: 'event',    id: 'auditFilterEvent',  label: () => t('col_event'), type: 'select',
+          minWidth: '180px', options: () => [{ value: '', label: t('all_events') }] },
+        { key: 'user',     id: 'auditFilterUser',   label: () => t('col_user'), type: 'datalist',
+          listId: 'auditUserList', minWidth: '140px' },
+        { key: 'ip',       id: 'auditFilterIp',     label: () => t('col_ip'), type: 'datalist',
+          listId: 'auditIpList', minWidth: '130px' },
+        { key: 'dateFrom', id: 'auditFilterFrom',   label: () => t('date_from'), type: 'date', minWidth: '150px' },
+        { key: 'dateTo',   id: 'auditFilterTo',     label: () => t('date_to'),   type: 'date', minWidth: '150px' },
+        { key: 'detail',   id: 'auditFilterDetail', label: () => t('col_detail'), type: 'search',
+          grow: true, placeholder: () => t('filter_detail') },
+    ],
+};
+
 const _AUDIT_UI_KEY = 'ss_audit_ui';
 function _saveAuditUiState() {
     try {

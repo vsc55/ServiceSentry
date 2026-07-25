@@ -11,10 +11,11 @@ Routes registered by this file:
 
     GET    /api/v1/ipbans                      active bans + watchlist (offenders)
     POST   /api/v1/ipbans                      manually ban an IP
-    DELETE /api/v1/ipbans/<ip>                 lift a ban (path-encoded IP)
+    DELETE /api/v1/ipbans/<path:ip>            lift a ban (path-encoded IP)
     POST   /api/v1/ipbans/action               set a per-ban block-action override
     POST   /api/v1/ipbans/clear                drop an IP from the watchlist
     GET    /api/v1/ipbans/banlog               ban/unban history (audit trail)
+    DELETE /api/v1/ipbans/banlog               wipe that history (Maintenance)
     GET    /api/v1/ipbans/history              recent recorded attempts for an IP
     GET    /api/v1/ipbans/services             exposed services + their block actions
     POST   /api/v1/ipbans/services/action      set a service's block action
@@ -44,6 +45,7 @@ def register(app, wa):
     wl_add_req    = wa._perm_required('ipban_whitelist_add')
     wl_del_req    = wa._perm_required('ipban_whitelist_delete')
     hist_view_req = wa._perm_required('ipban_history_view')
+    hist_del_req  = wa._perm_required('ipban_history_delete')
     # An IP's attempt-history modal is opened from the bans/history views.
     any_view_req  = wa._perm_required('ipban_ban_view', 'ipban_history_view', 'ipban_whitelist_view')
     # Exposed services live in Config → fail2ban: setting the per-service action needs
@@ -123,6 +125,20 @@ def register(app, wa):
             return jsonify({'history': []})
         ip = (request.args.get('ip') or '').strip() or None
         return jsonify({'history': mgr.ban_history(limit=500, ip=ip)})
+
+    @app.route('/api/v1/ipbans/banlog', methods=['DELETE'])
+    @hist_del_req
+    def api_ipban_banlog_clear():
+        """Erase the whole ban-history trail (Config → General → Maintenance).
+
+        This is an audit trail, so the wipe is its own permission and is itself audited.
+        Active bans live in another table and survive."""
+        mgr = getattr(wa, '_ipban', None)
+        if mgr is None:
+            return jsonify({'ok': True, 'deleted': 0})
+        n = mgr.clear_ban_history()
+        wa._audit('ipban_history_cleared', detail={'deleted': n})
+        return jsonify({'ok': True, 'deleted': n})
 
     @app.route('/api/v1/ipbans/history', methods=['GET'])
     @any_view_req

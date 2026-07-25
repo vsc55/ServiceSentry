@@ -244,9 +244,10 @@ function _initAuditTableFeatures() {
 async function renderAudit() {
     const c = document.getElementById('audit-container');
     if (!c) return;
-    // The filter strip is static markup (ships collapsed), so restore whatever the user left —
-    // including the active-filter badge, since the restored filters already apply.
-    initFilterBar('audit');
+    // Build the filter strip from its schema. It sits outside #audit-container, which is what
+    // the table re-render rewrites, so typing in a filter never rebuilds (or unfocuses) it.
+    const fb = document.getElementById('audit-filterbar');
+    if (fb && !fb.querySelector('.ss-filterbar')) fb.innerHTML = buildFilterBar(_AUDIT_FILTER_SCHEMA);
     _auditUpdateFilterCount();
     c.innerHTML = `<div class="text-center py-5 text-muted">
         <div class="spinner-border spinner-border-sm me-2"></div>

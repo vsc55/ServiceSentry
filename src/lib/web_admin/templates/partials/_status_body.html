@@ -158,7 +158,9 @@
     </div>
     <div>
       <i class="bi bi-arrow-clockwise"></i>
-      {{ i18n.status_refreshing_in }} <span id="countdown">{{ refresh_secs }}</span>{{ i18n.status_seconds_abbr }}
+      {# Wrapped so the page script can swap the whole phrase for "Refreshing…" while a
+         refresh is actually running (see _stShowRefreshing in status.html). #}
+      <span id="refresh-label">{{ i18n.status_refreshing_in }} <span id="countdown">{{ refresh_secs }}</span>{{ i18n.status_seconds_abbr }}</span>
       <span class="footer-sep">·</span>
       <a href="/login" class="footer-link">{{ i18n.status_admin_link }}</a>
     </div>

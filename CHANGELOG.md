@@ -5,6 +5,47 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Clearing the fail2ban ban history, in Config → General → Maintenance.** The append-only ban
+  trail had no way to be wiped at all. It joins the other data wipes there, contributed as a
+  `CONFIG_ACTION` from `lib/services/ipban/manifest.py`, behind a new **`ipban_history_delete`**
+  permission — reading an audit trail must not imply being able to erase it. Backed by a new
+  `DELETE /api/v1/ipbans/banlog`, which is itself audited. Active bans live in another table and
+  keep blocking after the wipe.
+- **Filters on every table that had none.** Access (Users, Groups, Roles, Sessions),
+  Infrastructure (Servers, Clusters, Credentials) and fail2ban → Banned IPs all gained the strip
+  fail2ban's Ban history already had: a header that folds (collapsed by default) with a badge
+  counting active filters, plus *Clear filters*. Users filters by name (username *or* display name
+  in one box), role and enabled/disabled; Groups by name/description and role; Roles by
+  name/description and built-in vs custom; Sessions by user, IP and user agent; Servers by
+  name/address/description, kind and status; Clusters by name/description, module and enabled;
+  Credentials by name/description/user and type; Banned IPs by IP, level, minimum offenses and
+  reason. Support is generic — `createListTable` gained a `filters: {fields, match}` option, so
+  any table on the factory opts in with a schema plus one predicate; the hand-written tables
+  (Ban history, Banned IPs) use the same `buildFilterBar` component directly. In both cases the
+  bar renders *outside* the re-rendered body, so typing in it never loses focus. Filtering down to
+  nothing now says so ("No rows match these filters", with the clear button) instead of falling
+  back to a table's own empty state, which would claim there are no users while a filter was
+  hiding them. Servers also filters by address, cluster and tag, and Clusters by the extra columns
+  each module declares through `__cluster_columns__` (keepalived's VIP today) — derived, so no
+  module name is hardcoded in the panel. Select choices are rebuilt from live data on every
+  reload, in place, so a new host's tag shows up without stealing focus mid-typing.
+  (Modules, Services and Status render cards rather than tables, so they keep their own layout.)
+- **Audit's filter bar joined the shared component too, so there are no exceptions left.** It was
+  the last one hand-written in the panel's markup — it merely borrowed the CSS classes. Two gaps
+  kept it out and are now part of `buildFilterBar`: a `datalist` field type (free text with
+  autocomplete over the values the log actually holds — the users and IPs seen) and `leadHtml`,
+  for controls that are not filters, which is what Audit's *Sort* and *Group by* are. Its fields
+  declare their legacy ids, so the code that populates the datalists and restores saved state
+  addresses the same elements and did not change. All 14 filter bars now come from one generator.
+- **The one-off search boxes became the same filter strip.** Events (Rules and Log) and
+  fail2ban → Whitelist each had a lone search input wedged into the card header that matched a
+  fixed bag of columns at once. They now use the shared bar with named fields: rules by name,
+  source and tag; the log by rule, source, channel and detail; the whitelist by IP/CIDR,
+  description and author. This also retires a hack the whitelist needed — its search box was
+  destroyed on every keystroke (the whole card was re-rendered) and had to re-focus itself and
+  restore the caret; the bar now sits outside the re-rendered body, so there is nothing to
+  restore. Searches that live inside modals and side panels (host logs, dropped senders, the
+  config field search, the History series list) are unchanged.
 - **Configurable browser→server connectivity heartbeat (`web_admin|conn_check_secs`, default 6 s).**
   The web UI pings `/api/v1/health` on this interval (2–120 s) with a short timeout to detect a lost
   connection and raise the "No connection to the server" overlay. Editable in Config → Interface →
@@ -377,6 +418,15 @@ All notable changes to **ServiceSentry** are documented in this file.
   background).
 
 ### Changed
+- **The docs caught up with the new UI, and the route index is now enforced.** Auditing it turned
+  up 11 endpoints missing from their own module header (plus three documented under a placeholder
+  name that had drifted from the real parameter) and `/account` absent from the surface index in
+  `routes/__init__.py`. All fixed, and `tests/test_routes_documented.py` now fails the build when a
+  route is added without documenting it — in its module header, and under some prefix in the index.
+  `explica-web-admin.md` gained a *Layout de la UI* section (single SPA shell, the `.ss-vfill` /
+  `.ss-vscroll` fill chain, `.ss-main` as the only scroll container, full-bleed, and the shared
+  filter bar with its two usage modes), its navigation and Maintenance rows were rewritten for the
+  sidebar model, and the permission count went from 63 to 64 across every doc that pinned it.
 - **The web-admin partials follow one naming convention.** The tree had drifted into three
   different names for "the section's list" (`clusters/_table`, `sessions/_render`, everyone
   else's `_list`), while `_table` also meant *column state* in `events`/`syslog` — so the same
@@ -404,6 +454,18 @@ All notable changes to **ServiceSentry** are documented in this file.
   arc sweeping around it, the ServiceSentry wordmark, and an indeterminate progress sweep (boot has
   no measurable percentage). It sits straight on the dimmed, blurred backdrop instead of in a card,
   and every animation is dropped under `prefers-reduced-motion`.
+- **Clearing the event-notification log moved to Config → General → Maintenance.** It was a red
+  button in the Events toolbar, a page that stays open all day. It joins the history, syslog and
+  audit wipes, contributed declaratively as a `CONFIG_ACTION` from `lib/services/events/manifest.py`
+  and gated on `events_notify_delete`. Renamed from the bare "Clear log" — in a card listing four
+  different wipes, that said nothing about *which* log.
+- **The filter bars set their type a step smaller, with even top/bottom padding.** Labels, inputs
+  and buttons inside a filter strip are chrome, not content, so a bar with many fields stays
+  compact. The strip also looked top-heavy: Bootstrap's `.form-label` is `inline-block`, so the
+  line box around it was sized by the parent's strut (~1.5 × 1rem) rather than the label's own
+  line-height, padding a phantom gap above the text that the bottom did not have — as a block it
+  hugs its glyphs and both sides match. Its padding moved off the `.py-2`/`.px-3` utilities too,
+  since those are `!important` and left no way to tune the rhythm. One rule, all 14 bars.
 - **Audit's toolbar was reorganised like every other section.** Its bespoke controls bar mixed
   three unrelated things in one block above the table. Now: the sort/group/filter controls wear the
   shared collapsible filter-strip design (folded by default, with the active-filter badge);
@@ -437,6 +499,9 @@ All notable changes to **ServiceSentry** are documented in this file.
   the same utility instead of its own bespoke margins. Since all seven tables built on
   `createListTable` are full-bleed, flush became the factory's **default** rather than a per-table
   flag; a caller that wants card chrome back passes `cardClass: 'ss-card'`.
+- **The sidebar's admin group is now "System" ("Sistema").** "Administration Panel" was long
+  enough to wrap in the sidebar. "Settings" was the obvious short form but the group already
+  contains a *Configuration* entry, so the two would have read as duplicates.
 - **Navigation moved to a collapsible left sidebar.** The top bar of section buttons + the admin
   panel's horizontal tab strip were replaced by a single left sidebar: the sections
   (Overview / History / Syslog) at the top, the admin panel's tabs grouped under a **Settings**
@@ -559,6 +624,22 @@ All notable changes to **ServiceSentry** are documented in this file.
   section taller than the viewport (a plain flowing table such as Servers or Services) grew the
   document itself, page-scrolling the whole shell and detaching the sidebar. `.ss-main` scrolls its
   own overflow instead, so the sidebar stays put; sections that fill exactly never trigger it.
+- **The public status page counted backwards while the backend was down, and took a minute to
+  say so.** Its auto-refresh reset the countdown only once the request *settled* and raised the
+  overlay only from the `catch` — but with a proxy in front, a downed backend leaves the request
+  hanging until the browser's own (very long) timeout. The 1 s ticker kept subtracting, so the
+  page showed "refreshing in **-30s**", and the overlay waited just as long. The countdown now
+  tracks what it claims to: it **holds** while a refresh is in flight and restarts only once that
+  refresh has actually delivered data — never when one is merely fired — announcing itself as
+  "Refreshing…" meanwhile, since sitting at "Refreshing in 0s" for the length of a request reads
+  as a stuck page. It is **frozen**
+  outright while the overlay is up, since "refreshing in Ns" is a promise the page cannot keep
+  with the server gone. A refresh also **aborts after 5 s**, so an unreachable backend is reported
+  promptly instead of when the browser gives up, and refuses to stack while one is running; while
+  disconnected a quiet 5 s retry takes the countdown's place so the page notices the server
+  returning. No heartbeat runs while healthy: the page is public, so the refresh it already makes
+  is the only request it needs — the cost is that a disconnect takes up to one
+  `web_admin|status_refresh_secs` to notice.
 - **Connection-lost detection now works behind a reverse proxy and blocks the whole page.** Three
   problems: (1) with a proxy in front, a downed backend makes the proxy answer **502/503/504** — a
   *resolved* HTTP response, so the fetch wrapper read it as "reachable" and the overlay never fired

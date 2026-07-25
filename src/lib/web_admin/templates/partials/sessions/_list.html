@@ -102,6 +102,24 @@ createListTable({
     columns: _SES_COLS, defaultVisible: _SESSIONS_DEFAULT_COLS,
     persist: true, clearLabelKey: 'subtab_sessions',
     persistExtra: () => ({ view: _sessionsViewMode }),
+    // Filter strip (shared design — see createListTable's spec.filters). User and IP are the
+    // two axes you chase a session by; the free-text one also reaches the user agent.
+    filters: {
+        fields: [
+            { key: 'user', label: () => t('col_user'), type: 'search', minWidth: '160px',
+              placeholder: () => t('col_user') },
+            { key: 'ip',   label: () => t('col_ip'),   type: 'search', minWidth: '150px',
+              placeholder: () => t('col_ip') },
+            { key: 'q',    label: () => t('col_user_agent') || 'User Agent', type: 'search',
+              grow: true, placeholder: () => t('session_filter_ph') },
+        ],
+        match: (s, f) => {
+            const has = (v, needle) => (v || '').toLowerCase().includes(needle.toLowerCase());
+            if (f.user && !has(s.username, f.user)) return false;
+            if (f.ip && !has(s.ip, f.ip)) return false;
+            return !f.q || has(s.user_agent, f.q);
+        },
+    },
     rows: () => Object.keys(sessionsData), rowKey: sid => sid,
     record: sid => sessionsData[sid],
     selectable: true,

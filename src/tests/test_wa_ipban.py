@@ -225,6 +225,8 @@ class TestIpBanIntegration:
         assert client.post("/api/v1/ipbans", json={"ip": "203.0.113.5"}).status_code == 403
         assert client.post("/api/v1/ipbans/whitelist", json={"value": "10.0.0.0/8"}).status_code == 403
         assert client.delete("/api/v1/ipbans/203.0.113.5").status_code == 403
+        # Reading the audit trail must not imply being able to erase it.
+        assert client.delete("/api/v1/ipbans/banlog").status_code == 403
 
     def test_manual_ban_blocks_ip(self, admin, client):
         _login(client)
@@ -398,6 +400,19 @@ class TestIpBanIntegration:
         events = [h["event"] for h in client.get(
             "/api/v1/ipbans/banlog?ip=203.0.113.92").get_json()["history"]]
         assert events == ["unbanned", "escalated", "banned"]     # most recent first
+
+    def test_banlog_can_be_wiped_without_touching_active_bans(self, admin, client):
+        """Offered in Config → General → Maintenance. It erases the audit trail only —
+        an active ban must keep blocking after the history is cleared."""
+        _login(client)
+        admin._ipban.ban("203.0.113.94", duration_secs=900)
+        assert client.get("/api/v1/ipbans/banlog").get_json()["history"]
+        r = client.delete("/api/v1/ipbans/banlog")
+        assert r.status_code == 200 and r.get_json()["deleted"] >= 1
+        assert client.get("/api/v1/ipbans/banlog").get_json()["history"] == []
+        # The ban itself survives the wipe.
+        assert "203.0.113.94" in {b["ip"] for b in client.get("/api/v1/ipbans").get_json()["bans"]}
+        assert admin._ipban.is_banned("203.0.113.94")
 
     def test_unban_reason_recorded(self, admin, client):
         _login(client)
