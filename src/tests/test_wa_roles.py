@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_63_flags(self):
+    def test_permissions_tuple_has_64_flags(self):
         from lib.web_admin.app import PERMISSIONS
-        assert len(PERMISSIONS) == 63
+        assert len(PERMISSIONS) == 64
 
     def test_permissions_are_unique(self):
         from lib.web_admin.app import PERMISSIONS
@@ -54,7 +54,8 @@ class TestPermissionsConstants:
             'ipban_ban_view', 'ipban_ban_add', 'ipban_ban_edit', 'ipban_ban_delete',
             'ipban_watchlist_clear',
             'ipban_whitelist_view', 'ipban_whitelist_add', 'ipban_whitelist_delete',
-            'ipban_history_view', 'ipban_service_edit', 'ipban_config_edit',
+            'ipban_history_view', 'ipban_history_delete',
+            'ipban_service_edit', 'ipban_config_edit',
             'services_view', 'services_control',
             'events_view', 'events_add', 'events_edit', 'events_delete',
             'events_notify_view', 'events_notify_delete',
@@ -62,7 +63,7 @@ class TestPermissionsConstants:
         assert set(PERMISSIONS) == expected
 
     def test_ipban_permissions_come_from_module_discovery(self):
-        # The 11 fail2ban flags are NOT hardcoded in constants: they are declared in
+        # The 12 fail2ban flags are NOT hardcoded in constants: they are declared in
         # lib/services/ipban/permissions.py (MODULE_PERMISSIONS) and merged via
         # discover_permissions, the same self-describing pattern as EMBEDDED_SERVICE.
         # This test locks in that a module owns its own permissions (flags + group +
@@ -73,7 +74,7 @@ class TestPermissionsConstants:
         ipban = next(m for m in discover_permissions()
                      if m['group'] == 'perm_group_ipban')
         flags = [p['flag'] for p in ipban['permissions']]
-        assert len(flags) == 11 and all(f.startswith('ipban_') for f in flags)
+        assert len(flags) == 12 and all(f.startswith('ipban_') for f in flags)
         # merged into the central registry (flags + group + admin-gets-all)
         assert set(flags) <= set(PERMISSIONS)
         assert dict(PERMISSION_GROUPS)['perm_group_ipban'] == flags

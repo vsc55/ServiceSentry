@@ -227,8 +227,17 @@ function buildFilterBar(schema) {
             const style = f.width ? `width:${f.width}` : (f.minWidth ? `min-width:${f.minWidth}` : '');
             const min = (f.type === 'number' && f.min != null) ? ` min="${f.min}"` : '';
             const ph  = f.placeholder ? ` placeholder="${escAttr(f.placeholder())}"` : '';
-            control = `<input id="${id}" type="${f.type || 'search'}" class="form-control form-control-sm"${style ? ` style="${style}"` : ''}${min}${ph}
-                value="${escAttr(cur)}"${onInput}>`;
+            // type 'datalist' = a free-text box with autocomplete over known values. The
+            // <datalist> keeps a stable id (f.listId) so the owner can refill it imperatively
+            // from live data — Audit suggests the users and IPs actually present in the log.
+            const listId = f.type === 'datalist' ? (f.listId || id + 'List') : '';
+            const opts = listId ? ((typeof f.options === 'function' ? f.options() : f.options) || []) : [];
+            control = `<input id="${id}" type="${f.type === 'datalist' ? 'text' : (f.type || 'search')}"
+                class="form-control form-control-sm"${style ? ` style="${style}"` : ''}${min}${ph}
+                ${listId ? ` list="${listId}" autocomplete="off"` : ''}
+                value="${escAttr(cur)}"${onInput}>`
+                + (listId ? `<datalist id="${listId}">${opts.map(o =>
+                    `<option value="${escAttr(o.value != null ? o.value : o)}"></option>`).join('')}</datalist>` : '');
         }
         return `<div class="${f.grow ? 'flex-grow-1' : ''}"><label class="form-label small mb-1">${esc(f.label())}</label>${control}</div>`;
     }).join('');
@@ -255,8 +264,8 @@ function buildFilterBar(schema) {
             ${active ? `<span class="badge text-bg-primary ss-fb-count">${active}</span>` : ''}
             <i class="bi bi-chevron-down ss-collapse-caret ss-fb-caret"></i>
         </div>
-        <div class="ss-fb-body"><div class="card-body py-2 px-3">
-            <div class="ss-fb-fields">${fieldsHtml}${clearBtn}</div>
+        <div class="ss-fb-body"><div class="ss-fb-inner">
+            <div class="ss-fb-fields">${schema.leadHtml ? schema.leadHtml() : ''}${fieldsHtml}${clearBtn}</div>
             ${schema.footerHtml ? schema.footerHtml() : ''}
         </div></div>
     </div>`;
@@ -267,18 +276,6 @@ const _filterBarKey = schema => schema.idPrefix || 'fb';
 const _filterBarCollapsed = schema => {
     try { return localStorage.getItem('ss_fb_' + _filterBarKey(schema)) !== '0'; } catch (e) { return true; }
 };
-
-/** Sync a STATIC filter bar (one written in the template, not built by buildFilterBar) with
- *  its remembered state — the markup ships collapsed, this opens it if the user left it open. */
-function initFilterBar(key) {
-    const el = document.querySelector(`.ss-filterbar[data-fb="${CSS.escape(key)}"]`);
-    if (!el) return;
-    let open = false;
-    try { open = localStorage.getItem('ss_fb_' + key) === '0'; } catch (e) {}
-    el.classList.toggle('collapsed', !open);
-    const head = el.querySelector('.ss-fb-head');
-    if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
 
 /** Show how many filters are active on a folded bar, so it is never a silent filter. */
 function setFilterBarCount(key, n) {

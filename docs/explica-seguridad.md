@@ -473,7 +473,7 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 
 ## Control de Acceso Basado en Roles (RBAC)
 
-> El **catálogo completo** de permisos (63 flags), roles integrados, roles personalizados y
+> El **catálogo completo** de permisos (64 flags), roles integrados, roles personalizados y
 > grupos es la fuente única en **[ref-permisos.md](ref-permisos.md)**. Esta sección cubre solo
 > las **propiedades de seguridad** del RBAC.
 

@@ -314,12 +314,15 @@ function _renderEventLog() {
     if (!tableWrap) return;
     const pagerTopEl = document.getElementById('ev-log-pager-top');
     const pagerBotEl = document.getElementById('ev-log-pager-bottom');
-    const q = _evlSearch.trim().toLowerCase();
-    const rows = _eventLog.filter(e => !q
-            || (e.rule_name || '').toLowerCase().includes(q)
-            || (e.source || '').toLowerCase().includes(q)
-            || (e.channels || '').toLowerCase().includes(q)
-            || (e.message || '').toLowerCase().includes(q))
+    const _f = _evlFilters;
+    const _lc = k => (_f[k] || '').trim().toLowerCase();
+    const _rq = _lc('rule'), _cq = _lc('channels'), _mq = _lc('message');
+    setFilterBarCount('evlF', [_rq, _f.source, _cq, _mq].filter(Boolean).length);
+    const rows = _eventLog.filter(e =>
+            (!_rq || (e.rule_name || '').toLowerCase().includes(_rq))
+            && (!_f.source || (e.source || 'audit') === _f.source)
+            && (!_cq || (e.channels || '').toLowerCase().includes(_cq))
+            && (!_mq || (e.message || '').toLowerCase().includes(_mq)))
         .slice().sort((a, b) => {
             const va = _evlSortVal(a, _evlSort), vb = _evlSortVal(b, _evlSort);
             const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));

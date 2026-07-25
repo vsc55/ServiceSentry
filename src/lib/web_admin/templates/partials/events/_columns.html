@@ -4,7 +4,34 @@
 
 let _eventRules = [];
 let _eventDraft = null;     // rule being edited in the modal
-let _eventSearch = '';
+let _evrFilters = { name: '', source: '', tags: '' };
+// Schema-driven filter bars (shared buildFilterBar helpers) — one per sub-section. They sit
+// in the pane, above the card, so the body re-render on each keystroke never touches them.
+const _EV_SOURCE_OPTIONS = () => [{ value: '', label: t('all') }].concat(
+    ['audit', 'syslog'].map(sv => ({ value: sv, label: t('event_src_' + sv) })));
+const _EVR_FILTER_SCHEMA = {
+    idPrefix: 'evrF',
+    onChange: '_evrFilterChanged',
+    onClear:  '_evrClearFilters',
+    values:   () => _evrFilters,
+    fields: [
+        { key: 'name',   label: () => t('event_name'),     type: 'search', grow: true },
+        { key: 'source', label: () => t('event_source'), type: 'select',
+          minWidth: '170px', options: _EV_SOURCE_OPTIONS },
+        { key: 'tags',   label: () => t('event_tags'),   type: 'search', minWidth: '150px' },
+    ],
+};
+function _evrFilterChanged() {
+    _evrFilters = readFilterBar(_EVR_FILTER_SCHEMA);
+    _evrPage = 1;
+    _eventRulesBody();
+}
+function _evrClearFilters() {
+    clearFilterBar(_EVR_FILTER_SCHEMA);
+    _evrFilters = readFilterBar(_EVR_FILTER_SCHEMA);
+    _evrPage = 1;
+    _eventRulesBody();
+}
 let _eventLog = [];
 let _eventAuditFilter = '';   // filter text for the audit-events multiselect
 
@@ -65,7 +92,32 @@ let _evrPage = 1, _evrPageSize = null;
 let _evlVisibleCols = _evLoadCols('ss_evlog_cols', _EVL_DEFAULT_COLS);
 let _evlColOrder    = _evLoadOrder('ss_evlog_col_order', _EVL_COLS);
 let _evlSort = 'ts', _evlSortDir = 'desc';
-let _evlPage = 1, _evlPageSize = null, _evlSearch = '';
+let _evlPage = 1, _evlPageSize = null;
+let _evlFilters = { rule: '', source: '', channels: '', message: '' };
+const _EVL_FILTER_SCHEMA = {
+    idPrefix: 'evlF',
+    onChange: '_evlFilterChanged',
+    onClear:  '_evlClearFilters',
+    values:   () => _evlFilters,
+    fields: [
+        { key: 'rule',     label: () => t('event_name'),     type: 'search', minWidth: '160px' },
+        { key: 'source',   label: () => t('event_source'),   type: 'select',
+          minWidth: '170px', options: _EV_SOURCE_OPTIONS },
+        { key: 'channels', label: () => t('event_channels'), type: 'search', minWidth: '150px' },
+        { key: 'message',  label: () => t('event_log_detail'), type: 'search', grow: true },
+    ],
+};
+function _evlFilterChanged() {
+    _evlFilters = readFilterBar(_EVL_FILTER_SCHEMA);
+    _evlPage = 1;
+    _renderEventLog();
+}
+function _evlClearFilters() {
+    clearFilterBar(_EVL_FILTER_SCHEMA);
+    _evlFilters = readFilterBar(_EVL_FILTER_SCHEMA);
+    _evlPage = 1;
+    _renderEventLog();
+}
 
 function _evrToggleCol(col) {
     const adding = !_evrVisibleCols.has(col);

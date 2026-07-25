@@ -34,32 +34,80 @@ let remaining = REFRESH_SECS;
 function _stTick() {
     const c = document.getElementById('countdown');
     const f = document.getElementById('refresh-fill');
-    if (c) c.textContent = remaining;
-    if (f) f.style.width = (remaining / REFRESH_SECS * 100) + '%';
+    // Clamped: a refresh that is still in flight must never show a negative countdown.
+    const rem = Math.max(0, remaining);
+    if (c) c.textContent = rem;
+    if (f) f.style.width = (rem / REFRESH_SECS * 100) + '%';
 }
 
+let _stLost = false;
 function _stSetConnLost(lost) {
+    _stLost = lost;
     const ov = document.getElementById('st-conn-overlay');
     if (ov) ov.style.display = lost ? 'flex' : 'none';
 }
 
+// Cap on a single refresh. Without it a downed backend behind a proxy leaves the request
+// hanging until the browser's own (very long) timeout, so the overlay took that long to appear
+// — and the countdown, which kept ticking through the wait, ran on into negative numbers.
+const REFRESH_TIMEOUT_MS = 5000;
+// While disconnected the countdown is frozen (see the ticker), so this is what keeps trying
+// until the server answers again — quietly, and only while the overlay is up.
+const RETRY_SECS = 5;
+let _stBusy = false;
+let _stRetryIn = 0;
+
+// "Refreshing in 0s" would sit there for as long as the request takes, which reads as a stuck
+// page. While one runs, the whole phrase becomes "Refreshing…" and the bar empties. The label
+// is inside #status-body, so a successful refresh restores the countdown markup on its own.
+const LBL_REFRESHING = {{ i18n.status_refreshing_now|tojson }};
+function _stShowRefreshing() {
+    const lbl = document.getElementById('refresh-label');
+    if (lbl) lbl.textContent = LBL_REFRESHING;
+    const f = document.getElementById('refresh-fill');
+    if (f) f.style.width = '0%';
+}
+
 async function _stRefresh() {
+    if (_stBusy) return;        // never stack refreshes on a slow/unreachable backend
+    _stBusy = true;             // ...and the ticker holds the countdown while this runs
+    _stShowRefreshing();
+    const ctl = new AbortController();
+    const kill = setTimeout(() => ctl.abort(), REFRESH_TIMEOUT_MS);
     try {
-        const r = await fetch('/status?fragment=1', { cache: 'no-store' });
+        const r = await fetch('/status?fragment=1', { cache: 'no-store', signal: ctl.signal });
+        // A proxy in front answers 502/503/504 for a downed backend — a resolved response,
+        // so "not ok" is what unreachable looks like here, not a rejected fetch.
         if (!r.ok) throw new Error('http ' + r.status);
         document.getElementById('status-body').innerHTML = await r.text();
         // Reflect the new overall state on <body> (drives the ok/degraded theming).
         const ok = document.querySelector('#status-body .hero')?.dataset.overallOk === 'true';
         document.body.className = ok ? 'st-ok' : 'st-down';
         _stSetConnLost(false);
+        // ONLY here: the countdown measures time until the next refresh, so it may not start
+        // over until this one has actually delivered new data.
+        remaining = REFRESH_SECS;
+        _stTick();
     } catch (_) {
         _stSetConnLost(true);   // unreachable → show the overlay, keep the current content
+        _stRetryIn = RETRY_SECS;
     } finally {
-        remaining = REFRESH_SECS;
+        clearTimeout(kill);
+        _stBusy = false;
     }
 }
 
 setInterval(() => {
+    // Disconnected: freeze the countdown — "refreshing in Ns" is a promise the page cannot
+    // keep while the server is gone. Retry quietly instead; the countdown only restarts once
+    // a refresh actually brings data back.
+    if (_stLost) {
+        if (--_stRetryIn <= 0) { _stRetryIn = RETRY_SECS; _stRefresh(); }
+        return;
+    }
+    // A refresh is in flight: hold at the current value (0) instead of counting into the
+    // next cycle — the data it will show has not arrived yet.
+    if (_stBusy) return;
     remaining--;
     _stTick();
     if (remaining <= 0) _stRefresh();

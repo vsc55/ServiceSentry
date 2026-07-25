@@ -516,6 +516,13 @@ class IpBanManager:
             return []
         return self._store.ban_history(limit=limit, ip=ip)
 
+    def clear_ban_history(self) -> int:
+        """Erase the whole ban-history audit trail; returns the number of rows removed.
+        Active bans live in their own table and are NOT affected."""
+        if self._store is None:
+            return 0
+        return self._store.clear_ban_history()
+
     def list_offenders(self, *, min_count: int = 1) -> list[dict]:
         """Watchlist: IPs accumulating offenses in-window but NOT yet jailed — the
         ones "on the way to a ban". For each, the live per-track count, its threshold

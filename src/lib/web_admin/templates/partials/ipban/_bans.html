@@ -64,11 +64,59 @@ function _ipbanBansOrderedCols() {
         .filter(c => c && (c.always || _ipbanBansVisibleCols.has(c.id)));
 }
 
-/** Empty card container + spinner; schedules the first data load. */
+// Schema-driven filter bar — same declaration style as Ban history's, built/read/cleared by
+// the shared buildFilterBar/readFilterBar/clearFilterBar helpers (partials/core/_utils.html).
+let _ipbanBansFilters = { ip: '', level: '', reason: '', offenses: '' };
+const _IPBAN_BANS_FILTER_SCHEMA = {
+    idPrefix: 'ipbanBansF',
+    onChange: '_ipbanBansFilterChanged',
+    onClear:  '_ipbanBansClearFilters',
+    values:   () => _ipbanBansFilters,
+    fields: [
+        { key: 'ip',       label: () => t('ipban_col_ip'),       type: 'search', minWidth: '140px' },
+        { key: 'level',    label: () => t('ipban_col_level'),    type: 'search', minWidth: '110px' },
+        { key: 'offenses', label: () => t('ipban_col_offenses') + ' ≥', type: 'number', width: '90px', min: 0 },
+        { key: 'reason',   label: () => t('ipban_col_reason'),   type: 'search', minWidth: '130px', grow: true },
+    ],
+};
+function _ipbanBansFilterChanged() {
+    _ipbanBansFilters = readFilterBar(_IPBAN_BANS_FILTER_SCHEMA);
+    _ipbanBansPage = 1;
+    _ipbanBansRender();
+}
+function _ipbanBansClearFilters() {
+    clearFilterBar(_IPBAN_BANS_FILTER_SCHEMA);
+    _ipbanBansFilters = readFilterBar(_IPBAN_BANS_FILTER_SCHEMA);
+    _ipbanBansPage = 1;
+    _ipbanBansRender();
+}
+
+/** Bans matching the current filter state (drives both the render and the pagination). */
+function _ipbanBansFiltered() {
+    const f = _ipbanBansFilters;
+    const ipq = (f.ip || '').trim().toLowerCase();
+    const lvq = (f.level || '').trim().toLowerCase();
+    const rq  = (f.reason || '').trim().toLowerCase();
+    const minOff = f.offenses !== '' && f.offenses != null ? parseInt(f.offenses, 10) : null;
+    const n = [ipq, lvq, rq].filter(Boolean).length + (minOff != null ? 1 : 0);
+    setFilterBarCount('ipbanBansF', n);
+    if (!n) return _ipbanBansData;
+    return _ipbanBansData.filter(b =>
+        (!ipq || String(b.ip || '').toLowerCase().includes(ipq))
+        && (!lvq || String(b.level || '').toLowerCase().includes(lvq))
+        && (!rq  || String(b.reason || '').toLowerCase().includes(rq))
+        && (minOff == null || (b.offenses || 0) >= minOff));
+}
+
+/** Static filter bar + a body container the render function rebuilds. Keeping the bar out of
+ *  the re-rendered body means typing in a filter never loses focus (as in Ban history). */
 function _ipbanManageCard() {
     setTimeout(() => { if (document.getElementById('ipban-bans-pane')) _ipbanLoad(); }, 0);
     return `<div id="ipban-bans-pane" class="ss-vfill">
-        <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
+        ${buildFilterBar(_IPBAN_BANS_FILTER_SCHEMA)}
+        <div id="ipban-bans-body" class="ss-vfill">
+            <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
+        </div>
     </div>`;
 }
 
@@ -134,9 +182,11 @@ function _ipbanOffendersRows() {
 }
 
 function _ipbanBansRender() {
-    const c = document.getElementById('ipban-bans-pane');
+    // Write into the body: the pane also holds the static filter bar, which must survive.
+    const c = document.getElementById('ipban-bans-body');
     if (!c) return;
     if (_ipbanBansPageSize === null) _ipbanBansPageSize = _defaultPageSize;
+    const bans = _ipbanBansFiltered();
 
     const header = `<div class="ss-card-header">
         <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-slash-circle me-1"></i>${esc(t('ipban_manage_title'))}</span>
@@ -173,16 +223,19 @@ function _ipbanBansRender() {
 
     const top = `<div class="ss-accent ss-accent-amber"></div>${header}${addForm}${watch}`;
 
-    if (!_ipbanBansData.length) {
+    if (!bans.length) {
+        // A filter hiding every ban is not the same as having none — say which it is.
+        const filtered = _ipbanBansData.length > 0;
         c.innerHTML = `<div class="ss-card ss-vfill">${top}
             <div class="ss-vscroll"><div class="text-center py-5 text-muted">
-                <i class="bi bi-slash-circle ss-empty-icon"></i><span>${esc(t('ipban_none'))}</span></div></div>
+                <i class="bi ${filtered ? 'bi-funnel' : 'bi-slash-circle'} ss-empty-icon"></i>
+                <span>${esc(filtered ? t('no_filter_matches') : t('ipban_none'))}</span></div></div>
         </div>`;
         setTimeout(_ipbanBansInitFeatures, 0);   // no table, but keeps the flow uniform
         return;
     }
 
-    const sorted = _ipbanBansData.slice().sort((a, b) => {
+    const sorted = bans.slice().sort((a, b) => {
         let av = a[_ipbanBansSort], bv = b[_ipbanBansSort];
         av = av == null ? '' : av; bv = bv == null ? '' : bv;
         const cmp = av < bv ? -1 : av > bv ? 1 : 0;

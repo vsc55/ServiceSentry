@@ -93,6 +93,19 @@ function _srvStatusBadge(host) {
     return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${esc(meta[3])}</span>`;
 }
 
+// ── Filter helpers (the select choices come from the fleet, not a fixed list) ──────
+/** Cluster labels this host belongs to (empty when the cluster UI is not loaded). */
+function _srvClusterLabels(uid) {
+    return (typeof _hostClusterMemberships === 'function' ? _hostClusterMemberships(uid) : [])
+        .map(m => m.label).filter(Boolean);
+}
+const _srvAllTags = () =>
+    [...new Set(Object.values(hostsData).flatMap(h => h.tags || []))].sort();
+const _srvAllClusterLabels = () =>
+    [...new Set(Object.values(hostsData).flatMap(h => _srvClusterLabels(h.uid)))].sort();
+const _srvFilterOptions = values =>
+    [{ value: '', label: t('all') }].concat(values.map(v => ({ value: v, label: v })));
+
 // ── Sort / page state ──────────────────────────────────────────────
 let _serversPage = 1;
 let _serversPageSize = null;
@@ -107,6 +120,39 @@ createListTable({
     columns: _SRV_COLS, defaultVisible: _SERVERS_DEFAULT_COLS,
     thClass: { kind: 'text-center', status: 'text-center', modules: 'text-center' },
     persist: true, clearLabelKey: 'tab_servers',
+    // Filter strip (shared design — see createListTable's spec.filters). The select options are
+    // derived from the fleet itself (tags, cluster memberships), so they follow the data instead
+    // of being a hardcoded list; the factory refreshes them in place on every reload.
+    filters: {
+        fields: [
+            { key: 'q',       label: () => t('col_host_name'), type: 'search', grow: true,
+              placeholder: () => t('host_filter_ph') },
+            { key: 'address', label: () => t('col_host_address'), type: 'search', minWidth: '150px' },
+            { key: 'kind',    label: () => t('col_kind'), type: 'select', minWidth: '140px',
+              options: () => [{ value: '', label: t('all') },
+                              { value: 'local',  label: t('host_kind_local') },
+                              { value: 'remote', label: t('host_kind_remote') }] },
+            { key: 'status',  label: () => t('col_status'), type: 'select', minWidth: '150px',
+              options: () => [{ value: '', label: t('all') }].concat(
+                  ['ok', 'warning', 'error', 'maintenance'].map(s =>
+                      ({ value: s, label: t('host_status_' + s) || s }))) },
+            { key: 'cluster', label: () => t('col_host_cluster') || 'Cluster', type: 'select',
+              minWidth: '160px', options: () => _srvFilterOptions(_srvAllClusterLabels()) },
+            { key: 'tag',     label: () => t('col_host_tags'), type: 'select', minWidth: '150px',
+              options: () => _srvFilterOptions(_srvAllTags()) },
+        ],
+        match: (h, f) => {
+            const q = (f.q || '').toLowerCase();
+            if (q && !['name', 'description'].some(
+                k => String(h[k] || '').toLowerCase().includes(q))) return false;
+            if (f.address && !String(h.address || '').toLowerCase()
+                                   .includes(f.address.toLowerCase())) return false;
+            if (f.kind && (h.kind || 'local') !== f.kind) return false;
+            if (f.status && _srvStatusOf(h) !== f.status) return false;
+            if (f.tag && !(h.tags || []).includes(f.tag)) return false;
+            return !f.cluster || _srvClusterLabels(h.uid).includes(f.cluster);
+        },
+    },
     rows: () => Object.values(hostsData), rowKey: host => host.uid,
     record: host => host,
     prepare: () => {

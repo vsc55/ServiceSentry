@@ -346,88 +346,10 @@
         {% endif %}
         {% if not standalone %}
         <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-audit">
-            {# Filter strip — same shape as every other section's (partials/core/_utils.html
-               buildFilterBar): a thin always-visible header toggles a collapsible body, folded
-               by default. This one is hand-written rather than schema-built because its inputs
-               are datalist-backed, but it wears the same classes so it looks and behaves alike.
-               Refresh/Export moved to the table's own header; wiping the log moved to
-               Config → General → Maintenance (lib/core/audit/manifest.py). #}
-            <div class="ss-card ss-filterbar collapsed" data-fb="audit">
-                <div class="ss-fb-head" role="button" tabindex="0" aria-expanded="false"
-                     onclick="toggleFilterBar('audit')"
-                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleFilterBar('audit')}"
-                     title="{{ i18n.filters_toggle }}">
-                    <i class="bi bi-funnel"></i><span>{{ i18n.filters }}</span>
-                    <span class="badge text-bg-primary ss-fb-count" id="auditFilterCount" hidden>0</span>
-                    <i class="bi bi-chevron-down ss-collapse-caret ss-fb-caret"></i>
-                </div>
-                <div class="ss-fb-body"><div class="card-body py-2 px-3">
-                <div class="row g-2 align-items-center">
-                    <div class="col-auto">
-                        <div class="input-group input-group-sm">
-                            <label class="input-group-text">{{ i18n.sort }}</label>
-                            <select class="form-select form-select-sm" id="auditSortField" onchange="applyAuditControls()">
-                                <option value="time">{{ i18n.col_time }}</option>
-                                <option value="event">{{ i18n.col_event }}</option>
-                                <option value="user">{{ i18n.col_user }}</option>
-                                <option value="ip">{{ i18n.col_ip }}</option>
-                            </select>
-                            <button class="btn btn-secondary" id="btnAuditSortDir" onclick="toggleAuditSortDir()" title="{{ i18n.sort_dir }}">
-                                <i class="bi bi-sort-down" id="iconAuditSortDir"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <div class="input-group input-group-sm">
-                            <label class="input-group-text">{{ i18n.group_by }}</label>
-                            <select class="form-select form-select-sm" id="auditGroupBy" onchange="applyAuditControls()">
-                                <option value="none">{{ i18n.none }}</option>
-                                <option value="date">{{ i18n.col_time }}</option>
-                                <option value="event">{{ i18n.col_event }}</option>
-                                <option value="user">{{ i18n.col_user }}</option>
-                                <option value="ip">{{ i18n.col_ip }}</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div class="row g-2 align-items-center mt-1">
-                    <div class="col-auto">
-                        <select class="form-select form-select-sm" id="auditFilterEvent" onchange="applyAuditControls()" style="max-width:180px">
-                            <option value="">{{ i18n.all_events }}</option>
-                        </select>
-                    </div>
-                    <div class="col-auto">
-                        <input class="form-control form-control-sm" id="auditFilterUser"
-                            placeholder="{{ i18n.col_user }}" oninput="applyAuditControls()"
-                            list="auditUserList" autocomplete="off" style="width:140px">
-                        <datalist id="auditUserList"></datalist>
-                    </div>
-                    <div class="col-auto">
-                        <input class="form-control form-control-sm" id="auditFilterIp"
-                            placeholder="IP" oninput="applyAuditControls()"
-                            list="auditIpList" autocomplete="off" style="width:130px">
-                        <datalist id="auditIpList"></datalist>
-                    </div>
-                    <div class="col-auto">
-                        <div class="input-group input-group-sm">
-                            <label class="input-group-text">{{ i18n.date_from }}</label>
-                            <input type="date" class="form-control form-control-sm" id="auditFilterFrom" onchange="applyAuditControls()">
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <div class="input-group input-group-sm">
-                            <label class="input-group-text">{{ i18n.date_to }}</label>
-                            <input type="date" class="form-control form-control-sm" id="auditFilterTo" onchange="applyAuditControls()">
-                        </div>
-                    </div>
-                    <div class="col">
-                        <input class="form-control form-control-sm w-100" id="auditFilterDetail"
-                            placeholder="{{ i18n.filter_detail }}" oninput="applyAuditControls()"
-                            autocomplete="off">
-                    </div>
-                </div>
-                </div></div>
-            </div>
+            {# Filter strip — built by the shared buildFilterBar from _AUDIT_FILTER_SCHEMA
+               (partials/audit/_filters.html), like every other section. Only the mount point
+               lives here; renderAudit() fills it. #}
+            <div id="audit-filterbar"></div>
 
             <div id="audit-container" class="ss-vfill"></div>
         </div>

@@ -102,18 +102,18 @@
             <li class="ss-sb-group" id="ss-sb-settings-group" style="display:none">
                 {% if standalone %}
                 <a class="ss-sb-item ss-sb-parent" href="/admin" data-nav-section
-                   title="{{ i18n.admin_panel or 'Settings' }}">
+                   title="{{ i18n.admin_panel or 'System' }}">
                     <i class="bi bi-sliders ss-sb-icon"></i>
-                    <span class="ss-sb-label">{{ i18n.admin_panel or 'Settings' }}</span>
+                    <span class="ss-sb-label">{{ i18n.admin_panel or 'System' }}</span>
                     <i class="bi bi-chevron-right ss-sb-caret"></i>
                 </a>
                 {% else %}
                 <a class="ss-sb-item ss-sb-parent" href="#" role="button"
                    data-bs-toggle="collapse" data-bs-target="#ss-sb-settings"
                    aria-expanded="true" onclick="event.preventDefault()"
-                   title="{{ i18n.admin_panel or 'Settings' }}">
+                   title="{{ i18n.admin_panel or 'System' }}">
                     <i class="bi bi-sliders ss-sb-icon"></i>
-                    <span class="ss-sb-label">{{ i18n.admin_panel or 'Settings' }}</span>
+                    <span class="ss-sb-label">{{ i18n.admin_panel or 'System' }}</span>
                     <i class="bi bi-chevron-down ss-sb-caret"></i>
                 </a>
                 {% endif %}

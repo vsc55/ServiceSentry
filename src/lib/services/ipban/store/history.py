@@ -77,6 +77,26 @@ class BanHistoryStore:
                  'level': r[5], 'offenses': r[6], 'banned_at': r[7], 'banned_until': r[8],
                  'by': r[9], 'ts': r[10]} for r in rows]
 
+    def clear_ban_history(self) -> int:
+        """Delete every history row. Returns how many were removed (0 on failure).
+
+        Offered from Config → General → Maintenance, alongside the other data wipes: this
+        is an audit trail, so erasing it is deliberate and permission-gated, never routine.
+        Active bans live in their own table and are untouched.
+        """
+        try:
+            row = self._db.fetchone(f'SELECT COUNT(*) FROM {_TH}')
+            n = int(row[0]) if row and row[0] else 0
+            with self._db.transaction():
+                self._db.execute(f'DELETE FROM {_TH}')
+            return n
+        except Exception:  # pylint: disable=broad-except
+            try:
+                self._db.rollback()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            return 0
+
     def trim(self) -> None:
         """Trim the history to its most recent ``_MAX_HIST`` rows."""
         try:

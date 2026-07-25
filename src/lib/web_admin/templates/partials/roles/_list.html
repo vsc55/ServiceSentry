@@ -84,6 +84,26 @@ createListTable({
     accent: 'purple', icon: 'bi-shield-lock', title: () => t('role_management'),
     columns: _ROL_COLS, defaultVisible: _ROLES_DEFAULT_COLS,
     persist: true, clearLabelKey: 'subtab_roles',
+    // Filter strip (shared design — see createListTable's spec.filters). Built-in vs custom
+    // is the split that actually matters here: the built-ins are noise when auditing your own.
+    filters: {
+        fields: [
+            { key: 'q',    label: () => t('col_name'), type: 'search', grow: true,
+              placeholder: () => t('role_filter_ph') },
+            { key: 'kind', label: () => t('col_type'), type: 'select', minWidth: '150px',
+              options: () => [{ value: '', label: t('all') },
+                              { value: 'builtin', label: t('role_builtin_badge') },
+                              { value: 'custom',  label: t('role_custom') }] },
+        ],
+        match: (r, f, ctx, name) => {
+            const q = (f.q || '').toLowerCase();
+            if (q && !((r.name || name).toLowerCase().includes(q)
+                       || (r.description || '').toLowerCase().includes(q))) return false;
+            if (f.kind === 'builtin') return !!r.builtin;
+            if (f.kind === 'custom')  return !r.builtin;
+            return true;
+        },
+    },
     rows: () => Object.keys(rolesData), rowKey: name => name,
     record: name => rolesData[name],
     prepare: () => {

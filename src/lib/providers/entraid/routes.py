@@ -23,6 +23,9 @@ Routes registered by this file:
     POST   /api/v1/auth/entraid/scim/device-poll          poll SCIM app provisioning result
     POST   /api/v1/auth/entraid/provision/device-code   device-code: generic module app
     POST   /api/v1/auth/entraid/provision/device-poll   poll generic module app provisioning
+    POST   /api/v1/auth/entraid/oidc/secret/device-code   device-code: rotate the OIDC app secret
+    POST   /api/v1/auth/entraid/oidc/secret/device-poll   poll the OIDC secret rotation
+    POST   /api/v1/auth/entraid/check-permissions         verify the app's granted Graph permissions
 """
 
 import secrets

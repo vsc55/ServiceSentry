@@ -52,6 +52,60 @@ function createListTable(spec) {
     // edge-to-edge today. No per-table flag to keep in sync.
     const cardClass = spec.cardClass || 'ss-card';
 
+    // ── Optional filter bar ────────────────────────────────────────────────────────────
+    // A table opts in with spec.filters = { fields, match }: `fields` is the shared
+    // buildFilterBar schema and `match(record, values, ctx, row) -> bool` is the only
+    // domain-specific part. The bar lives OUTSIDE the re-rendered body (see the shell in
+    // render()), so typing in it never loses focus — the same reason fail2ban's Ban history
+    // keeps its bar out of its body. Values live here, in the factory closure, so they
+    // survive every re-render (and a data reload) without touching localStorage.
+    const fbVals = {};
+    const fbKey = spec.key + 'F';
+    let fbCtx = {};      // last prepare() ctx, so `fields` may depend on loaded data
+    const fbSchema = spec.filters && {
+        idPrefix: fbKey,
+        onChange: '_ltFilterChanged_' + spec.key,
+        onClear:  '_ltFilterClear_' + spec.key,
+        values:   () => fbVals,
+        // A getter, and `fields` may be a function of ctx: clusters derive one field per
+        // module-declared extra column, so nothing here has to know about e.g. "vip".
+        get fields() {
+            return typeof spec.filters.fields === 'function'
+                ? spec.filters.fields(fbCtx) : spec.filters.fields;
+        },
+    };
+    /** Re-fill the select options in place. The bar is built once (rebuilding it would steal
+     *  focus mid-typing), but its choices come from live data — new hosts bring new tags. Only
+     *  touches a select whose option list actually changed, and keeps the current value. */
+    function _fbSyncSelects() {
+        for (const f of fbSchema.fields) {
+            if (f.type !== 'select') continue;
+            const el = document.getElementById(_filterFieldId(fbSchema, f));
+            if (!el) continue;
+            const opts = (typeof f.options === 'function' ? f.options() : f.options) || [];
+            const sig = JSON.stringify(opts);
+            if (el.dataset.opts === sig) continue;
+            el.dataset.opts = sig;
+            const cur = el.value;
+            el.innerHTML = opts.map(o =>
+                `<option value="${escAttr(o.value)}"${String(cur) === String(o.value) ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+        }
+    }
+    const _fbActive = () => Object.values(fbVals).filter(v => v !== '' && v != null).length;
+    if (fbSchema) {
+        window['_ltFilterChanged_' + spec.key] = () => {
+            Object.assign(fbVals, readFilterBar(fbSchema));
+            st.page.set(1);          // a narrower result set invalidates the current page
+            render();
+        };
+        window['_ltFilterClear_' + spec.key] = () => {
+            clearFilterBar(fbSchema);
+            Object.keys(fbVals).forEach(k => delete fbVals[k]);
+            st.page.set(1);
+            render();
+        };
+    }
+
     const _cols   = (ctx) => (typeof spec.columns === 'function' ? spec.columns(ctx) : spec.columns);
     const _defVis = (ctx) => (typeof spec.defaultVisible === 'function' ? spec.defaultVisible(ctx) : spec.defaultVisible);
     const _readW  = () => { try { return JSON.parse(localStorage.getItem(lsW) || '{}'); } catch (_) { return {}; } };
@@ -122,12 +176,23 @@ function createListTable(spec) {
         // the same generic classes every table uses (see web_admin.css). Marked here
         // so a new list table inherits it without touching CSS — no per-section ids.
         c.classList.add('ss-vfill');
+        // With filters, the container is a shell: a filter bar that STAYS (so typing keeps
+        // focus) over a body this function rebuilds. `host` is set once ctx is known, since
+        // the bar's fields/options may derive from the loaded data.
+        let host = c;
         try {
         // Materialise dynamic state synchronously (before any await) so getVis()/
         // getOrd() never return null (e.g. cluster' "use defaults" sentinel).
         if (st.visible.get() == null) st.visible.set(new Set());
         if (st.order.get() == null) st.order.set([]);
         const ctx = (spec.prepare ? await spec.prepare() : {}) || {};
+        if (fbSchema) {
+            fbCtx = ctx;
+            if (!c.querySelector('.ss-filterbar'))
+                c.innerHTML = buildFilterBar(fbSchema) + '<div class="ss-lt-body ss-vfill"></div>';
+            else _fbSyncSelects();      // built already: just refresh the choices in place
+            host = c.querySelector('.ss-lt-body');
+        }
         if (st.pageSize.get() == null) st.pageSize.set(_defaultPageSize);
         const cols = _cols(ctx);
 
@@ -143,6 +208,14 @@ function createListTable(spec) {
         }
 
         let rows = spec.rows(ctx).slice();
+        if (fbSchema) {
+            // `rows` may be keys rather than records (users are usernames), so hand match()
+            // the resolved record — and the raw row too, for the rare case it needs it.
+            const n = _fbActive();
+            if (n) rows = rows.filter(r =>
+                spec.filters.match(spec.record ? spec.record(r) : r, fbVals, ctx, r));
+            setFilterBarCount(fbKey, n);
+        }
         const dir = st.sortDir.get();
         rows.sort((a, b) => {
             const va = spec.sortValue(a, st.sort.get(), ctx), vb = spec.sortValue(b, st.sort.get(), ctx);
@@ -176,11 +249,23 @@ function createListTable(spec) {
         </div>`;
 
         if (!total) {
-            // emptyBody → card + header + body; emptyState → bare (no card).
-            // The empty card still fills its pane (.ss-vfill + .ss-vscroll body) so an
-            // empty table stretches exactly like a populated one — no short card.
-            if (spec.emptyBody) c.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}<div class="ss-vscroll">${spec.emptyBody(ctx)}</div></div>`;
-            else c.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
+            // "Nothing matched" is NOT "nothing exists": a table's own empty state says
+            // things like "No users", which is a lie while a filter is hiding them — and it
+            // renders bare, without the header. Filtered-to-zero gets its own state, with the
+            // way out (clear the filters) right there.
+            const emptyHtml = _fbActive()
+                ? `<div class="text-center py-5 text-muted">
+                       <i class="bi bi-funnel ss-empty-icon"></i>
+                       <div>${esc(t('no_filter_matches'))}</div>
+                       <button class="btn btn-secondary btn-sm mt-3" onclick="_ltFilterClear_${spec.key}()">
+                           <i class="bi bi-funnel me-1"></i>${esc(t('clear_filters'))}</button>
+                   </div>`
+                : (spec.emptyBody ? spec.emptyBody(ctx) : null);
+            // emptyBody (and the filtered state) → card + header + body, so the toolbar stays;
+            // emptyState → bare (no card). The empty card still fills its pane (.ss-vfill +
+            // .ss-vscroll body) so an empty table stretches exactly like a populated one.
+            if (emptyHtml != null) host.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}<div class="ss-vscroll">${emptyHtml}</div></div>`;
+            else host.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
             return;
         }
 
@@ -252,7 +337,7 @@ function createListTable(spec) {
         }
 
         const pagination = _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
-        c.innerHTML = `<div class="${cardClass} ss-vfill">
+        host.innerHTML = `<div class="${cardClass} ss-vfill">
         ${accentDiv}
         ${headerHtml}
         <div class="ss-card-band ss-card-band-top">${pagination}</div>
@@ -264,8 +349,8 @@ function createListTable(spec) {
             // Never leave the tab blank on a render/prepare error: log it and show a
             // minimal empty state (e.g. a table whose emptyBody/prepare threw).
             console.error(`list-table[${spec.key}] render failed:`, err);
-            if (!c.innerHTML.trim())
-                c.innerHTML = `<div class="${cardClass} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
+            if (!host.innerHTML.trim())
+                host.innerHTML = `<div class="${cardClass} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
         }
     }
 

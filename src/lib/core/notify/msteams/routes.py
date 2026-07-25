@@ -15,6 +15,8 @@ Routes registered by this file:
     DELETE /api/v1/notify/msteams/channels/<cid>       delete a channel
     POST   /api/v1/notify/msteams/channels/<cid>/test  send a test card to a channel
     POST   /api/v1/notify/msteams/test                 test the configured user delivery
+    GET    /api/v1/notify/msteams/app-package          download the Teams app package
+                                                      (manifest + icons wired to the Graph app)
     POST   /auth/msteams/messages                         Bot Framework inbound (external; CSRF-exempt)
 """
 

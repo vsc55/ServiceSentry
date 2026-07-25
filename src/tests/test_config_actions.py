@@ -86,7 +86,8 @@ class TestMaintenanceCard:
         card = self._card()
         assert card.get('fields') == [], 'the Maintenance card must have no fields of its own'
         assert {a['id'] for a in card['actions']} == {
-            'history_clear_series', 'history_clear_all', 'syslog_clear', 'audit_clear_all'}
+            'history_clear_series', 'history_clear_all', 'syslog_clear', 'audit_clear_all',
+            'events_clear_log', 'ipban_clear_history'}
 
     def test_every_wipe_is_permission_gated(self):
         """A user without the delete permission must not even see the button."""
@@ -123,6 +124,8 @@ class TestMaintenanceCard:
         joined = '\n'.join(self._templates().values())
         assert 'id="btnClearAudit"' not in joined, \
             'the Audit toolbar still offers the log wipe'
+        assert 'onclick="_eventClearLog()"' not in joined, \
+            'the Events toolbar still offers the notification-log wipe'
 
 
 class TestGroupLabel:
