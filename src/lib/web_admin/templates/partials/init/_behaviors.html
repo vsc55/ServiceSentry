@@ -12,9 +12,8 @@ if (btnNewGroup) btnNewGroup.style.display = perms.has('groups_add') ? '' : 'non
 // "New user" button
 const btnNewUser = document.getElementById('btnNewUser');
 if (btnNewUser) btnNewUser.style.display = perms.has('users_add') ? '' : 'none';
-// Audit clear button
-const btnClearAudit = document.getElementById('btnClearAudit');
-if (btnClearAudit) btnClearAudit.style.display = perms.has('audit_delete') ? '' : 'none';
+// (Wiping the audit log moved to Config → General → Maintenance, which gates the button
+//  itself through the action's `perm` — see lib/core/audit/manifest.py.)
 }
 
 // ─── Stacked-modal z-index support ────────────────────────────────────────

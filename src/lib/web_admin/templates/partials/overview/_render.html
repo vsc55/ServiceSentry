@@ -152,13 +152,30 @@ function _autoRefreshControl(o) {
         <button class="btn btn-primary" type="button" onclick="_applyAutoCustom('${o.id}','${o.setFn}')">${esc(t('apply'))}</button>
       </div></li>`;
     const fill = cur > 0 ? `<span${idAttr(o.fillId)} class="ss-ar-fill ${o.fillClass || ''}"></span>` : '';
+    const btnCls = `btn btn-sm ${(cur > 0 || liveActive) ? 'btn-primary ss-ar-btn' : 'btn-dark'}`;
+    const menu = `<ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem;min-width:12rem">${items}</ul>`;
+    // Split-button variant (o.refreshFn): the main button refreshes NOW and shows the
+    // auto-refresh state (OFF / countdown); the caret opens the interval menu — unifying the
+    // separate "Refresh" button and the auto-refresh dropdown into one control.
+    if (o.refreshFn) {
+        return `<div class="btn-group btn-group-sm">
+          <button type="button" class="${btnCls} text-center" style="min-width:6rem"
+                  onclick="${o.refreshFn}()" title="${escAttr(t('refresh'))}">
+            ${fill}<span class="ss-ar-lbl"><i class="bi bi-arrow-repeat me-1"></i>${toggleLbl}</span>
+          </button>
+          <button type="button" class="${btnCls} dropdown-toggle dropdown-toggle-split"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                  title="${escAttr(t('auto_refresh'))}"></button>
+          ${menu}
+        </div>`;
+    }
     return `<div class="btn-group btn-group-sm">
-      <button type="button" class="btn btn-sm ${(cur > 0 || liveActive) ? 'btn-primary ss-ar-btn' : 'btn-dark'} dropdown-toggle text-center"
+      <button type="button" class="${btnCls} dropdown-toggle text-center"
               style="min-width:6rem" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
               title="${escAttr(t('auto_refresh'))}">
         ${fill}<span class="ss-ar-lbl"><i class="bi bi-arrow-repeat me-1"></i>${toggleLbl}</span>
       </button>
-      <ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem;min-width:12rem">${items}</ul>
+      ${menu}
     </div>`;
 }
 
@@ -174,9 +191,9 @@ function _applyAutoCustom(id, setFn) {
 
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '', arOpts = {}) {
     let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
-    h += `<button class="btn btn-sm btn-secondary" onclick="${renderFn}()" title="${escAttr(t('refresh_tt'))}">`;
-    h += `<i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`;
-    h += _autoRefreshControl({ interval: timerGet()?._interval || 0, setFn: timerSet, ...arOpts });
+    // Unified refresh: the split-button's main side runs the manual refresh (renderFn), its
+    // caret opens the auto-refresh interval menu — no separate Refresh button.
+    h += _autoRefreshControl({ interval: timerGet()?._interval || 0, setFn: timerSet, refreshFn: renderFn, ...arOpts });
     if (extraBtns) h += extraBtns;
     h += `</div>`;
     return h;

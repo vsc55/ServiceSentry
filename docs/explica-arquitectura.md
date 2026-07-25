@@ -679,6 +679,46 @@ aritmética/agregación baratas.
 - **`match/case`** (Python 3.10+) para toda la lógica de despacho.
 - **`encoding='utf-8'`** explícito en todas las operaciones de I/O.
 
+### Nombres de los partials del web-admin
+
+Todo lo de `web_admin/templates/partials/` lleva prefijo `_` (nunca se sirve suelto) y se
+nombra por **su rol**, no por su tamaño. Hay **dos familias**, y confundirlas es el error
+clásico del árbol:
+
+- **Partials de *script*** — se concatenan en un **único `<script>`** vía
+  `partials/_js_sections.html`. Son la inmensa mayoría. Como comparten ámbito global, el
+  **orden de inclusión importa** (primero el shell) y **incluir uno dos veces rompe la carga**
+  (redeclara sus `const`).
+- **Partials de *markup*** — Jinja/HTML que va en el `<body>`: `_sidebar`, `_modals` +
+  `modals/*`, `account/_page`, `_status_body`. Los incluye la plantilla de página
+  (`dashboard.html`, `status.html`), no el bundle JS.
+
+Ojo con los homónimos: `modals/_user.html` es **markup** y `users/_modal.html` es **script**;
+`account/_page.html` es markup y `account/_render.html`, script.
+
+Vocabulario dentro de cada carpeta de dominio:
+
+| Fichero | Contiene |
+| ------- | -------- |
+| `_render.html` | el *shell* de la sección: su punto de entrada (`render<Seccion>()`) y el andamiaje (sub-pestañas, chrome). Nada de filas ni de specs de tabla. Uno como mucho por carpeta. |
+| `_list.html` | la lista de la sección: la spec de `createListTable`, o la lista escrita a mano si no usa la fábrica. |
+| `_columns.html` | definición de columnas + estado de visibilidad/orden/anchura, para tablas construidas a mano (`events`, `syslog`). |
+| `_modal.html` | el modal de alta/edición. |
+| `_index.html` | orquestador de carpeta: solo incluye a sus hermanos (`cfg/auth`, `cfg/notify`). |
+| `_macros.html` | biblioteca de macros Jinja; se **importa** (`{% from … import %}`), por eso sí puede usarse desde varias plantillas. |
+| `_<concern>.html` | una preocupación extraída al crecer: `_filters`, `_export`, `_poll`, `_detail`, `_series`, `_bans`… |
+
+> `_table.html` está **retirado**: significaba dos cosas distintas (la lista entera en
+> `clusters`, el estado de columnas en `events`/`syslog`).
+
+Una sección con varias sub-secciones (syslog, events, fail2ban) deja el shell en `_render.html`
+y pone cada sub-sección en su propio fichero (`_bans` / `_history` / `_whitelist`). Si un
+`_render.html` se dispara de tamaño, casi siempre es que arrastra sub-secciones sin separar.
+
+Todo esto lo verifica `tests/test_wa_partials_convention.py`: nombres, un solo `_render` por
+carpeta, sin `_table`, sin partials huérfanos, sin dobles inclusiones y un tope de líneas
+para los shells.
+
 ---
 
 ## Notas Multiplataforma

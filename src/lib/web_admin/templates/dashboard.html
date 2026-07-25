@@ -8,10 +8,16 @@
 {% block body %}
 {# Loading overlay: it is the interaction BLOCKER while the page boots (dims the page so
    the menus cannot be used half-built), not merely a spinner — every page keeps it. #}
-<!-- Loading overlay -->
+<!-- Loading overlay: a centered card (like the connection-lost modal) with spinner + label -->
+{# Boot splash: the brand lockup (same shield as the sidebar) inside a spinning ring, over the
+   dimmed/blurred half-built page. Purely decorative markup — the status text carries the a11y
+   role, and every animation is dropped under prefers-reduced-motion. #}
 <div id="loading">
-    <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">{{ i18n.loading }}</span>
+    <div class="ss-boot" role="status" aria-live="polite">
+        <div class="ss-boot-logo" aria-hidden="true"><i class="bi bi-shield-check"></i></div>
+        <div class="ss-boot-name">ServiceSentry</div>
+        <div class="ss-boot-bar" aria-hidden="true"><span></span></div>
+        <div class="ss-boot-text">{{ i18n.loading }}</div>
     </div>
 </div>
 
@@ -21,9 +27,26 @@
     <i class="bi bi-fullscreen-exit"></i>
 </button>
 
-<!-- Navbar + sticky banners wrapper -->
+<!-- Sidebar + main-content layout (the old top navbar moved into the sidebar) -->
+<div class="ss-layout" id="ss-layout">
+{% include "partials/_sidebar.html" %}
+<div class="ss-main" id="ss-main">
+
+<!-- Sticky banners wrapper (mobile top bar + alert banners) -->
 <div class="sticky-top" id="ss-sticky-top" style="z-index:1020">
-    {% include "partials/_navbar.html" %}
+    <!-- Mobile top bar: hamburger to open the sidebar off-canvas (hidden on desktop) -->
+    <div class="ss-topbar d-md-none">
+        <button type="button" class="btn btn-sm btn-light" onclick="_openSidebar()"
+                aria-label="Open menu"><i class="bi bi-list"></i></button>
+        <span class="ss-topbar-brand"><i class="bi bi-shield-check me-1"></i>ServiceSentry</span>
+    </div>
+
+    <!-- Breadcrumb: the active section's path (e.g. "Access / Groups"), filled by
+         _sbUpdateBreadcrumb() from the active sidebar item + sub-item. -->
+    <div class="ss-crumb" id="ss-breadcrumb-bar">
+        <i class="bi bi-signpost-split ss-crumb-icon"></i>
+        <span id="ss-breadcrumb"></span>
+    </div>
 
     <!-- Restart-pending banner -->
     <div id="restart-pending-banner" class="d-none" role="alert">
@@ -64,84 +87,16 @@
             </button>
         </div>
     </div>
-    <!-- Connection-lost overlay: shown when the server becomes unreachable, auto-hidden on reconnect -->
-    <div id="conn-lost-overlay" class="ss-conn-overlay d-none" role="alertdialog"
-         aria-live="assertive" aria-modal="true">
-        <div class="ss-conn-card text-center">
-            <div class="spinner-border text-warning mb-3" role="status"></div>
-            <div class="fw-semibold ss-fs-6 mb-1" id="conn-lost-title"></div>
-            <div class="text-muted small" id="conn-lost-msg"></div>
-        </div>
-    </div>
 </div>
 
 <!-- Main content -->
-<div class="container-fluid py-3">
-    <!-- Tabs — only the admin panel has them. A standalone section page (/overview,
-         /history, /syslog) is a different page: its tab bar is NOT rendered at all
-         (not merely hidden), so nothing of the panel's navigation reaches the DOM. -->
-    {% if not standalone %}
-    <ul class="nav nav-tabs" id="mainTabs" role="tablist">
-        {# Overview is its own page (/overview), no longer a tab in the admin panel.
-           Services is the leftmost tab and the panel's default landing. #}
-        <li class="nav-item" role="presentation" id="tab-services-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-services" type="button"
-                id="btn-tab-services">
-                <i class="bi bi-hdd-rack me-1"></i>{{ i18n.tab_services }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="tab-modules-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-modules" type="button"
-                id="btn-tab-modules">
-                <i class="bi bi-puzzle me-1"></i>{{ i18n.tab_modules }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="tab-servers-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-servers" type="button"
-                id="btn-tab-servers">
-                <i class="bi bi-hdd-network me-1"></i>{{ i18n.tab_infrastructure }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="tab-status-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-status" type="button"
-                id="btn-tab-status">
-                <i class="bi bi-activity me-1"></i>{{ i18n.tab_status }}
-            </button>
-        </li>
-        {# History is its own page (/history) — reachable from the navbar button. #}
-        <li class="nav-item" role="presentation" id="tab-events-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-events" type="button"
-                id="btn-tab-events">
-                <i class="bi bi-bell me-1"></i>{{ i18n.tab_events }}
-            </button>
-        </li>
-        {# Syslog is its own page (/syslog) — reachable from the navbar button. #}
-        <li class="nav-item" role="presentation" id="tab-ipban-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ipban" type="button"
-                id="btn-tab-ipban">
-                <i class="bi bi-slash-circle me-1"></i>{{ i18n.tab_ipban }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="tab-config-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-config" type="button"
-                id="btn-tab-config">
-                <i class="bi bi-gear me-1"></i>{{ i18n.tab_config }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="tab-access-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-access" type="button" id="btn-tab-access">
-                <i class="bi bi-person-lock me-1"></i>{{ i18n.tab_access }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="tab-audit-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-audit" type="button" id="btn-tab-audit">
-                <i class="bi bi-journal-text me-1"></i>{{ i18n.tab_audit }}
-            </button>
-        </li>
-    </ul>
-    {% endif %}
+<div class="container-fluid pt-2 pb-3">
+    {# The admin panel's tab bar moved into the sidebar's "Settings" accordion
+       (partials/_sidebar.html). The tab-panes below stay here; the sidebar's
+       Settings sub-items are the Bootstrap tab toggles that switch them. A standalone
+       page renders only its own pane (see the {% if %} guards). #}
 
-    <div class="tab-content pt-3">
+    <div class="tab-content pt-1">
         <!-- ==================== Overview Tab =================== -->
         {% if not standalone or standalone == 'overview' %}
         <div class="tab-pane fade{% if standalone == 'overview' %} show active{% endif %}" id="tab-overview">
@@ -208,13 +163,17 @@
                 </li>
             </ul>
             <div class="tab-content">
-                <div class="tab-pane fade" id="subtab-srv-hosts">
+                {# The Infrastructure sub-panes run full-bleed with a flush card (see each
+                   createListTable's cardClass), like History: no card chrome, filling the whole
+                   area. #infraSubTabs is hidden (the sidebar drives these), so they also eat the
+                   shell's top padding — the accent strip sits flush against the breadcrumb. #}
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-hosts">
                     <div id="servers-container"></div>
                 </div>
-                <div class="tab-pane fade" id="subtab-srv-clusters">
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-clusters">
                     <div id="clusters-container"></div>
                 </div>
-                <div class="tab-pane fade" id="subtab-credentials">
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-credentials">
                     <div id="credentials-container"></div>
                 </div>
             </div>
@@ -232,7 +191,7 @@
         <!-- ==================== History Tab ==================== -->
         {% endif %}
         {% if not standalone or standalone == 'history' %}
-        <div class="tab-pane fade{% if standalone == 'history' %} show active{% endif %}" id="tab-history">
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'history' %} show active{% endif %}" id="tab-history">
             <div id="history-container">
                 {% if not standalone %}   {# see #overview-container #}
                 <div class="text-center py-4">
@@ -245,7 +204,10 @@
         <!-- ==================== Events Tab ===================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-events">
+        {# Full-bleed like the other sections: renderEvents() builds its own sub-tabs inside
+           #events-container, and that nav is hidden (the sidebar drives it), so the flush cards
+           run edge-to-edge straight under the breadcrumb. #}
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-events">
             <div id="events-container" class="ss-vfill">
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
@@ -256,7 +218,9 @@
         <!-- ==================== Syslog Tab ===================== -->
         {% endif %}
         {% if not standalone or standalone == 'syslog' %}
-        <div class="tab-pane fade{% if standalone == 'syslog' %} show active{% endif %}" id="tab-syslog">
+        {# Full-bleed: filter bar, statistics and the message list stack as one edge-to-edge
+           surface (separated by hairlines) instead of three floating cards. #}
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'syslog' %} show active{% endif %}" id="tab-syslog">
             <div id="syslog-container" class="ss-vfill">
                 {% if not standalone %}   {# see #overview-container #}
                 <div class="text-center py-4">
@@ -269,7 +233,10 @@
         <!-- ==================== fail2ban Tab ===================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-ipban">
+        {# Full-bleed: renderFail2ban() builds the Banned IPs / Ban history / Whitelist sub-tabs
+           inside #ipban-container and #ipbanSubTabs is hidden (the sidebar drives them), so all
+           three run edge-to-edge — including Ban history's filter strip, which goes flush too. #}
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-ipban">
             <div id="ipban-container" class="ss-vfill ss-subtabs-fill">
                 <div class="text-center py-4">
                     <div class="spinner-border spinner-border-sm"></div>
@@ -352,21 +319,24 @@
                     </button>
                 </li>
             </ul>
+            {# Full-bleed flush cards, like Infrastructure and History: #accessSubTabs is hidden
+               (the sidebar drives these sub-tabs), so each pane also eats the shell's top
+               padding and its table runs edge-to-edge under the breadcrumb. #}
             <div class="tab-content">
                 <!-- Users sub-tab -->
-                <div class="tab-pane fade" id="subtab-users">
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-users">
                     <div id="users-container"></div>
                 </div>
                 <!-- Groups sub-tab -->
-                <div class="tab-pane fade" id="subtab-groups">
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-groups">
                     <div id="groups-container"></div>
                 </div>
                 <!-- Roles sub-tab -->
-                <div class="tab-pane fade" id="subtab-roles">
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-roles">
                     <div id="roles-container"></div>
                 </div>
                 <!-- Sessions sub-tab (card built by the createListTable factory) -->
-                <div class="tab-pane fade" id="subtab-sessions">
+                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-sessions">
                     <div id="sessions-container"></div>
                 </div>
             </div>
@@ -375,11 +345,23 @@
         <!-- ==================== Audit Tab ====================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-audit">
-            <!-- Controls bar — sort/group + actions (refresh/export/clear) on the
-                 right, filters below. Fixed natural height; only #audit-container
-                 expands. -->
-            <div class="card card-body py-2 mb-3 bg-body-secondary flex-grow-0">
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-audit">
+            {# Filter strip — same shape as every other section's (partials/core/_utils.html
+               buildFilterBar): a thin always-visible header toggles a collapsible body, folded
+               by default. This one is hand-written rather than schema-built because its inputs
+               are datalist-backed, but it wears the same classes so it looks and behaves alike.
+               Refresh/Export moved to the table's own header; wiping the log moved to
+               Config → General → Maintenance (lib/core/audit/manifest.py). #}
+            <div class="ss-card ss-filterbar collapsed" data-fb="audit">
+                <div class="ss-fb-head" role="button" tabindex="0" aria-expanded="false"
+                     onclick="toggleFilterBar('audit')"
+                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleFilterBar('audit')}"
+                     title="{{ i18n.filters_toggle }}">
+                    <i class="bi bi-funnel"></i><span>{{ i18n.filters }}</span>
+                    <span class="badge text-bg-primary ss-fb-count" id="auditFilterCount" hidden>0</span>
+                    <i class="bi bi-chevron-down ss-collapse-caret ss-fb-caret"></i>
+                </div>
+                <div class="ss-fb-body"><div class="card-body py-2 px-3">
                 <div class="row g-2 align-items-center">
                     <div class="col-auto">
                         <div class="input-group input-group-sm">
@@ -406,21 +388,6 @@
                                 <option value="ip">{{ i18n.col_ip }}</option>
                             </select>
                         </div>
-                    </div>
-                    <div class="col d-flex gap-1 justify-content-end">
-                        <button class="btn btn-sm btn-secondary" onclick="renderAudit()" title="{{ i18n.refresh_tt }}">
-                            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}</button>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                <i class="bi bi-download me-1"></i>{{ i18n.export }}</button>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li><h6 class="dropdown-header py-1">{{ i18n.export }}</h6></li>
-                                <li><hr class="dropdown-divider my-0"></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportAudit('csv');return false;" title="{{ i18n.export_csv_tt }}"><i class="bi bi-filetype-csv me-2 text-success"></i>{{ i18n.export_csv }}</a></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportAudit('json');return false;" title="{{ i18n.export_json_tt }}"><i class="bi bi-filetype-json me-2 text-warning"></i>{{ i18n.export_json }}</a></li>
-                            </ul>
-                        </div>
-                        <button class="btn btn-sm btn-danger" id="btnClearAudit" onclick="confirmClearAudit()" title="{{ i18n.audit_clear_all }}"><i class="bi bi-trash3"></i></button>
                     </div>
                 </div>
                 <div class="row g-2 align-items-center mt-1">
@@ -459,11 +426,40 @@
                             autocomplete="off">
                     </div>
                 </div>
+                </div></div>
             </div>
 
             <div id="audit-container" class="ss-vfill"></div>
         </div>
         {% endif %}
+
+        <!-- ======= Account (SPA pane on /admin + own page at /account) ====== -->
+        {# Rendered in the panel too (inactive) so the user menu can open it as an SPA
+           pane without a full reload, exactly like the section tabs; active from first
+           paint when served as its own standalone page (/account). #}
+        {% if not standalone or standalone == 'account' %}
+        <div class="tab-pane fade{% if standalone == 'account' %} show active{% endif %}" id="tab-account">
+            {% include "partials/account/_page.html" %}
+        </div>
+        {% endif %}
+    </div>
+</div><!-- /container-fluid -->
+</div><!-- /ss-main -->
+</div><!-- /ss-layout -->
+
+<!-- Sidebar backdrop (shown behind the off-canvas sidebar on mobile) -->
+<div class="ss-sb-backdrop" id="ss-sb-backdrop" onclick="_closeSidebar()"></div>
+
+<!-- Connection-lost overlay: shown when the server becomes unreachable, auto-hidden on
+     reconnect. Kept at top level (NOT inside ss-sticky-top/ss-main) so its z-index covers the
+     WHOLE page — including the sidebar — and blocks interaction until the connection is back;
+     nested inside the sticky wrapper it was trapped below the sidebar's stacking context. -->
+<div id="conn-lost-overlay" class="ss-conn-overlay d-none" role="alertdialog"
+     aria-live="assertive" aria-modal="true">
+    <div class="ss-conn-card text-center">
+        <div class="spinner-border text-warning mb-3" role="status"></div>
+        <div class="fw-semibold ss-fs-6 mb-1" id="conn-lost-title"></div>
+        <div class="text-muted small" id="conn-lost-msg"></div>
     </div>
 </div>
 

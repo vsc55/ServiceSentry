@@ -143,6 +143,10 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=60, max=86400, admin_only=True, card='login_security'),
     Cfg('web_admin|session_check_secs', int, 20, attr='_SESSION_CHECK_SECS',
         min=5, max=300),
+    # Client-side connectivity heartbeat: how often the browser pings the server to detect a
+    # lost connection (and raise the "No connection" overlay). Shown in Interface → Connection.
+    Cfg('web_admin|conn_check_secs', int, 6, attr='_CONN_CHECK_SECS',
+        min=2, max=120, card='connection'),
     Cfg('web_admin|session_idle_minutes', int, 720, attr='_SESSION_IDLE_MINUTES',
         min=0, max=43200, admin_only=True, card='login_security'),  # idle timeout (0=off)
     # Brute-force throttles (per client IP). 0 = disabled.

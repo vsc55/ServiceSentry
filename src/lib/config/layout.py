@@ -117,6 +117,8 @@ CARDS: tuple[dict, ...] = (
      'renderer': 'audit'},
     {'tab': 'interface', 'id': 'tables',      'title_key': 'tables_section',        'icon': 'bi-table',
      'renderer': 'tables'},
+    # Generic: client-side connectivity heartbeat (web_admin|conn_check_secs → Cfg.card).
+    {'tab': 'interface', 'id': 'connection',  'title_key': 'connection_section',    'icon': 'bi-wifi'},
     {'tab': 'interface', 'id': 'live_update', 'title_key': 'live_update_section',   'icon': 'bi-arrow-repeat',
      'renderer': 'live_update'},   # bespoke: force_reload_secs is conditionally shown
     {'tab': 'interface', 'id': 'advanced',    'title_key': 'cfg_advanced_section',  'icon': 'bi-tools',

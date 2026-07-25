@@ -85,44 +85,36 @@ class TestNotTabsAnymore:
             assert pane in html
 
 
-class TestItIsADifferentPage:
-    """A standalone page is a different page, not the panel with things hidden.
+class TestEveryUrlIsTheSameShell:
+    """Single SPA shell: /admin and every section URL (/overview, /history, /syslog, /account)
+    render the SAME full panel with ALL panes; the client opens the pane the URL points at, so
+    navigating between sections never reloads. (Reverses the old 'each page ships only its own
+    pane' design so navigation can be reload-free.)"""
 
-    The admin tab bar and the other sections' panes must NOT be rendered at all — hiding
-    them with CSS would still ship the whole panel's DOM to a page that is not the panel."""
-
-    @pytest.mark.parametrize('path', ['/overview', '/history', '/syslog'])
-    def test_the_tab_bar_is_not_rendered(self, client, path):
+    @pytest.mark.parametrize('path', ['/overview', '/history', '/syslog', '/account'])
+    def test_the_full_shell_is_rendered(self, client, path):
         _login(client)
         html = client.get(path).data.decode('utf-8', 'replace')
-        # `id="btn-tab-…"` are the panel's own tab buttons. (Sub-tabs inside a section and
-        # the modals legitimately use data-bs-toggle="tab", so that is not the marker.)
-        assert 'id="mainTabs"' not in html, f'{path} still renders the admin tab bar'
-        assert 'id="btn-tab-' not in html, f'{path} still renders the panel tab buttons'
+        # Every URL ships the whole panel's panes, not just the section being viewed.
+        for pane in ('tab-modules', 'tab-config', 'tab-access', 'tab-audit',
+                     'tab-servers', 'tab-services', 'tab-ipban', 'tab-events',
+                     'tab-overview', 'tab-history', 'tab-syslog', 'tab-account'):
+            assert f'id="{pane}"' in html, f'{path} is missing the {pane} pane'
 
-    @pytest.mark.parametrize('path,own', [('/overview', 'tab-overview'),
-                                          ('/history', 'tab-history'),
-                                          ('/syslog', 'tab-syslog')])
-    def test_only_its_own_pane_is_rendered(self, client, path, own):
+    @pytest.mark.parametrize('path', ['/admin', '/overview', '/history', '/syslog', '/account'])
+    def test_it_is_always_the_panel_not_a_cut_down_page(self, client, path):
         _login(client)
         html = client.get(path).data.decode('utf-8', 'replace')
-        assert f'id="{own}"' in html, f'{path} does not render its own pane'
-        for foreign in ('tab-modules', 'tab-config', 'tab-access', 'tab-audit',
-                        'tab-servers', 'tab-services', 'tab-ipban', 'tab-events'):
-            assert f'id="{foreign}"' not in html, f'{path} still renders the {foreign} pane'
+        assert 'standalone-page' not in html            # body is never marked a standalone page
+        assert 'window.SS_STANDALONE_PAGE = ""' in html  # always the panel
 
-    @pytest.mark.parametrize('path,pid', [('/overview', 'overview'),
-                                          ('/history', 'history'), ('/syslog', 'syslog')])
-    def test_body_marks_the_page(self, client, path, pid):
-        _login(client)
-        html = client.get(path).data.decode('utf-8', 'replace')
-        assert 'standalone-page' in html and f'{pid}-page' in html
-
-    def test_admin_panel_keeps_its_tab_bar_and_panes(self, client):
+    def test_the_sidebar_and_panes_are_present(self, client):
         _login(client)
         html = client.get('/admin').data.decode('utf-8', 'replace')
-        assert 'standalone-page' not in html
-        assert 'id="mainTabs"' in html
+        # The top tab bar was replaced by the collapsible sidebar; the admin tabs live in
+        # its Settings accordion (#ss-sb-settings).
+        assert 'id="ss-sidebar"' in html
+        assert 'id="ss-sb-settings"' in html
         for pane in ('tab-modules', 'tab-config', 'tab-history', 'tab-syslog'):
             assert f'id="{pane}"' in html
 
@@ -177,12 +169,13 @@ class TestUnsavedChangesGuard:
         return io.open(path, encoding='utf-8', errors='replace').read()
 
     @pytest.mark.parametrize('path', ['/overview', '/history', '/syslog'])
-    def test_the_dirty_badges_are_absent(self, client, path):
-        """The premise of the bug: these elements are simply not on the page."""
+    def test_the_dirty_badges_are_present_in_the_shell(self, client, path):
+        """Every URL now ships the full shell, so the Modules/Config panes — and their dirty
+        badges — exist on all of them (the leave guard runs on tab switches within the shell)."""
         _login(client)
         html = client.get(path).data.decode('utf-8', 'replace')
         for badge in ('badgeModulesDirty', 'badgeConfigDirty'):
-            assert f'id="{badge}"' not in html
+            assert f'id="{badge}"' in html
 
     def test_a_missing_element_is_never_read_as_dirty(self):
         import re
@@ -202,69 +195,41 @@ class TestUnsavedChangesGuard:
         assert "typeof next === 'function'" in self._dirty_js()
 
 
-class TestNavbar:
+class TestSidebarSections:
+    """Overview/History/Syslog are sidebar section items. In the single SPA shell they are
+    Bootstrap tab buttons on EVERY URL (no link-vs-button split anymore), permission-gated and
+    revealed by applyRoleRestrictions(); the client opens the pane the URL points at."""
 
-    def test_navbar_exposes_the_pages_permission_gated(self, client):
-        """Buttons render hidden with their required permission, revealed by
-        applyRoleRestrictions() — so a user without it never sees them flash."""
+    def test_sections_are_permission_gated(self, client):
+        """Each section's <li> renders hidden with its required permission, revealed by
+        applyRoleRestrictions() — so a user without it never sees it flash."""
         _login(client)
         html = client.get('/admin').data.decode('utf-8', 'replace')
         for pid, perm in (('overview', 'overview_view'), ('history', 'history_view'),
                           ('syslog', 'syslog_view')):
-            assert f'id="nav-page-{pid}"' in html, f'{pid} button missing from the navbar'
-            assert f'data-nav-perm="{perm}"' in html, f'{pid} button not permission-gated'
+            assert f'id="nav-page-{pid}-li"' in html, f'{pid} section missing from the sidebar'
+            assert f'data-nav-perm="{perm}"' in html, f'{pid} section not permission-gated'
 
-    @pytest.mark.parametrize('path', ['/admin', '/overview', '/history', '/syslog'])
-    def test_the_buttons_keep_one_fixed_order(self, client, path):
-        """Overview, History, Syslog, then Admin — the same four, same order, every page.
-
-        Nothing is dropped, not even the section being viewed: a nav whose buttons come
-        and go puts each section somewhere different on every page."""
+    @pytest.mark.parametrize('path', ['/admin', '/overview', '/history', '/syslog', '/account'])
+    def test_sections_are_spa_tab_buttons_on_every_url(self, client, path):
+        """Every URL renders the shell, so a section is always a Bootstrap tab button
+        targeting its pane with the URL it syncs to (data-nav-url) — never a reload link."""
         _login(client)
         html = client.get(path).data.decode('utf-8', 'replace')
-        marks = [('overview', 'id="nav-page-overview"'),
-                 ('history', 'id="nav-page-history"'),
-                 ('syslog', 'id="nav-page-syslog"'),
-                 ('admin', 'href="/admin" data-nav-section')]
-        found = [(name, html.find(m)) for name, m in marks]
-        missing = [name for name, at in found if at == -1]
-        assert not missing, f'{path}: navbar is missing {missing}'
-        assert [at for _, at in found] == sorted(at for _, at in found), (
-            f'{path}: navbar order is wrong — expected overview, history, syslog, admin')
+        for pid in ('overview', 'history', 'syslog'):
+            assert f'id="btn-nav-{pid}"' in html
+            assert f'data-bs-target="#tab-{pid}"' in html
+            assert f'data-nav-url="/{pid}"' in html
+        # not full-navigation anchors: the old standalone <a id="nav-page-overview"> is gone
+        assert 'id="nav-page-overview"' not in html
 
-    @pytest.mark.parametrize('path,active', [('/admin', '/admin'), ('/overview', '/overview'),
-                                             ('/history', '/history'), ('/syslog', '/syslog')])
-    def test_the_current_section_stays_and_is_highlighted(self, client, path, active):
-        """Being on a page is shown by colour, not by removing its button."""
-        import re
+    def test_the_client_opens_the_pane_from_the_url(self, client):
+        """The wiring maps a section URL to its pane, so a reload / deep link / Back-Forward
+        lands on it without a full navigation."""
         _login(client)
-        html = client.get(path).data.decode('utf-8', 'replace')
-        tags = re.findall(r'<a[^>]*aria-current="page"[^>]*>', html)
-        assert len(tags) == 1, f'{path}: expected exactly one current section, got {len(tags)}'
-        assert f'href="{active}"' in tags[0], f'{path}: the wrong button is marked current'
-        # Solid variant — this UI does not use outline/transparent buttons.
-        assert 'btn-primary' in tags[0] and 'btn-outline' not in tags[0]
-
-    @pytest.mark.parametrize('path', ['/admin', '/overview', '/history', '/syslog'])
-    def test_no_button_appears_ahead_of_the_others(self, client, path):
-        """All four are revealed by the same applyRoleRestrictions() pass.
-
-        A button that renders visible pops in immediately while the permission-gated ones
-        wait, so the nav visibly assembles itself in two steps on every page load."""
-        import re
-        _login(client)
-        html = client.get(path).data.decode('utf-8', 'replace')
-        tags = re.findall(r'<a[^>]*data-nav-section[^>]*>', html)
-        assert len(tags) == 4, f'{path}: expected 4 nav buttons, found {len(tags)}'
-        for tag in tags:
-            assert 'style="display:none"' in tag, \
-                f'{path}: this button renders before the reveal — {tag[:90]}'
-            assert 'data-nav-perm=' in tag, \
-                f'{path}: this button is outside the reveal pass — {tag[:90]}'
-
-    def test_a_standalone_page_offers_the_way_back(self, client):
-        _login(client)
-        assert b'href="/admin"' in client.get('/history').data
+        html = client.get('/overview').data.decode('utf-8', 'replace')
+        assert "'/overview': 'tab-overview'" in html
+        assert "'/account': 'tab-account'" in html
 
 
 class TestFrontendWiring:
@@ -276,24 +241,6 @@ class TestFrontendWiring:
         assert b'SS_STANDALONE_PAGE' in html
         assert b'renderHistory' in html
 
-    @pytest.mark.parametrize('path,pane', [('/overview', 'overview'), ('/history', 'history'),
-                                           ('/syslog', 'syslog')])
-    def test_one_loading_indicator_at_load(self, client, path, pane):
-        """The blocking overlay stays; the pane's placeholder must not sit under it.
-
-        `#loading` is not just a spinner — it dims the page so the menus cannot be used
-        while it boots, so every page keeps it. The duplicate came from the pane's own
-        placeholder: on a standalone page that pane is `show active` from the first paint,
-        putting a second spinner right under the overlay. Decided in the HTML, not by when
-        the script removes something — both were on screen from the very first frame."""
-        _login(client)
-        html = client.get(path).data.decode('utf-8', 'replace')
-        assert 'id="loading"' in html, f'{path} lost the overlay that blocks interaction'
-        at = html.find(f'id="{pane}-container"')
-        assert at != -1, f'{path} does not render its container'
-        assert 'spinner-border' not in html[at:at + 400], \
-            f'{path} still paints a second spinner underneath the overlay'
-
     def test_the_panel_keeps_its_pane_placeholders(self, client):
         """In the panel the panes are inactive at load, so their placeholders are what the
         user sees when switching to a tab before its render lands."""
@@ -301,18 +248,6 @@ class TestFrontendWiring:
         html = client.get('/admin').data.decode('utf-8', 'replace')
         at = html.find('id="overview-container"')
         assert 'spinner-border' in html[at:at + 400]
-
-    def test_the_overlay_is_handed_over_before_the_render(self):
-        """Overlay out, section skeleton in — in that order, so they never coexist."""
-        import io
-        import os
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        wiring = io.open(os.path.join(root, 'lib', 'web_admin', 'templates', 'partials',
-                                      'init', '_wiring.html'),
-                         encoding='utf-8', errors='replace').read()
-        drop, call = wiring.find("getElementById('loading')?.remove()"), wiring.find('await _fn()')
-        assert drop != -1 and call != -1 and drop < call, \
-            'the overlay outlives the start of the section render → two spinners again'
 
     def test_admin_panel_is_not_a_standalone_page(self, client):
         _login(client)

@@ -1,0 +1,276 @@
+// ── fail2ban › Ban history (append-only audit trail) ────────────────────────
+// Standard log-table chrome (ss-card + accent + column chooser + top/bottom
+// pagination + sortable/resizable columns) — same pattern as Audit / Syslog.
+// Every column sizes to its content (resizable:false → ss-th-fit + data-fit cell)
+// EXCEPT `reason`, the free-text column that takes the remaining width and stays
+// resizable. Fit columns are still sortable + reorderable, just not hand-resizable.
+const _IPBAN_HIST_COLS = [
+    { id: 'when',     label: () => t('ipban_hist_col_when'),     sortKey: 'ts',       always: true,  resizable: false },
+    { id: 'ip',       label: () => t('ipban_col_ip'),            sortKey: 'ip',       always: true,  resizable: false },
+    { id: 'event',    label: () => t('ipban_hist_col_event'),    sortKey: 'event',    always: false, resizable: false },
+    { id: 'reason',   label: () => t('ipban_col_reason'),        sortKey: 'reason',   always: false },
+    { id: 'level',    label: () => t('ipban_col_level'),         sortKey: 'level',    always: false, resizable: false },
+    { id: 'interval', label: () => t('ipban_hist_col_interval'), sortKey: null,       always: false, resizable: false },
+    { id: 'offenses', label: () => t('ipban_col_offenses'),      sortKey: 'offenses', always: false, resizable: false },
+    { id: 'by',       label: () => t('col_updated_by'),          sortKey: 'by',       always: false, resizable: false },
+];
+const _IPBAN_HIST_DEFAULT_COLS = new Set(['event', 'reason', 'level', 'interval', 'offenses', 'by']);
+
+// Filter state for the history table (client-side, applied in _ipbanHistRender).
+let _ipbanHistFilters = { ip: '', event: '', from: '', to: '', interval: '', offenses: '', reason: '' };
+let _ipbanHistData = [];
+let _ipbanHistPage = 1;
+let _ipbanHistPageSize = null;
+let _ipbanHistSort = 'ts';
+let _ipbanHistSortDir = 'desc';
+let _ipbanHistVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_ipbanhist_cols') || 'null'); if (Array.isArray(s)) return new Set(s); } catch (_) {}
+    return new Set(_IPBAN_HIST_DEFAULT_COLS);
+})();
+let _ipbanHistColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_ipbanhist_col_order') || 'null'); if (Array.isArray(s)) return s; } catch (_) {}
+    return _IPBAN_HIST_COLS.map(c => c.id);
+})();
+
+function _ipbanHistResetCols() {
+    _ipbanHistVisibleCols = new Set(_IPBAN_HIST_DEFAULT_COLS);
+    _ipbanHistColOrder    = _IPBAN_HIST_COLS.map(c => c.id);
+    localStorage.setItem('ss_ipbanhist_cols',      JSON.stringify([..._ipbanHistVisibleCols]));
+    localStorage.setItem('ss_ipbanhist_col_order', JSON.stringify(_ipbanHistColOrder));
+    localStorage.removeItem('ss_ipbanhist_col_w');
+    _ipbanHistRender();
+}
+function _ipbanHistToggleCol(col) {
+    _ipbanHistVisibleCols.has(col) ? _ipbanHistVisibleCols.delete(col) : _ipbanHistVisibleCols.add(col);
+    localStorage.setItem('ss_ipbanhist_cols', JSON.stringify([..._ipbanHistVisibleCols]));
+    _ipbanHistRender();
+}
+function _ipbanHistSaveColOrder() {
+    localStorage.setItem('ss_ipbanhist_col_order', JSON.stringify(_ipbanHistColOrder));
+}
+function _sortIpbanHistByCol(field) {
+    if (_ipbanHistSort === field) _ipbanHistSortDir = _ipbanHistSortDir === 'asc' ? 'desc' : 'asc';
+    else { _ipbanHistSort = field; _ipbanHistSortDir = 'desc'; }
+    _ipbanHistPage = 1;
+    _ipbanHistRender();
+}
+function _goIpbanHistPage(p) { _ipbanHistPage = p; _ipbanHistRender(); }
+function _changeIpbanHistPageSize(val) { _ipbanHistPageSize = parseInt(val, 10); _ipbanHistPage = 1; _ipbanHistRender(); }
+
+// Schema-driven filter bar — declared once, built/read/cleared by the generic
+// buildFilterBar/readFilterBar/clearFilterBar helpers (partials/core/_utils.html).
+const _IPBAN_HIST_FILTER_SCHEMA = {
+    idPrefix: 'ipbanHistF',
+    onChange: '_ipbanHistFilterChanged',
+    onClear:  '_ipbanHistClearFilters',
+    values:   () => _ipbanHistFilters,
+    fields: [
+        { key: 'ip',       label: () => t('ipban_col_ip'),            type: 'search',         minWidth: '130px' },
+        { key: 'event',    label: () => t('ipban_hist_col_event'),    type: 'select',         minWidth: '120px',
+          options: () => [{ value: '', label: t('ipban_filter_all') }].concat(
+              ['banned', 'escalated', 'unbanned'].map(ev => ({ value: ev, label: t('ipban_event_' + ev) }))) },
+        { key: 'from',     label: () => t('ipban_filter_from'),       type: 'datetime-local', minWidth: '180px' },
+        { key: 'to',       label: () => t('ipban_filter_to'),         type: 'datetime-local', minWidth: '180px' },
+        { key: 'interval', label: () => t('ipban_hist_col_interval'), type: 'search',         minWidth: '110px' },
+        { key: 'offenses', label: () => t('ipban_col_offenses') + ' ≥', type: 'number',       width: '90px', min: 0 },
+        { key: 'reason',   label: () => t('ipban_col_reason'),        type: 'search',         minWidth: '120px', grow: true },
+    ],
+};
+
+// Read the (static) filter-bar inputs into state and re-render just the table body —
+// the filter bar itself is outside the re-rendered region, so focus is never lost.
+function _ipbanHistFilterChanged() {
+    _ipbanHistFilters = readFilterBar(_IPBAN_HIST_FILTER_SCHEMA);
+    _ipbanHistPage = 1;
+    _ipbanHistRender();
+}
+function _ipbanHistClearFilters() {
+    clearFilterBar(_IPBAN_HIST_FILTER_SCHEMA);
+    _ipbanHistFilters = readFilterBar(_IPBAN_HIST_FILTER_SCHEMA);
+    _ipbanHistPage = 1;
+    _ipbanHistRender();
+}
+
+/** Filtered history rows per the current filter state (used for render + pagination). */
+function _ipbanHistFiltered() {
+    const f = _ipbanHistFilters;
+    const ipq = f.ip.trim().toLowerCase(), rq = f.reason.trim().toLowerCase(), ivq = f.interval.trim().toLowerCase();
+    const fromTs = f.from ? new Date(f.from).getTime() / 1000 : null;
+    const toTs   = f.to   ? new Date(f.to).getTime()   / 1000 : null;
+    const minOff = f.offenses !== '' ? parseInt(f.offenses, 10) : null;
+    return _ipbanHistData.filter(e => {
+        if (ipq && !String(e.ip || '').toLowerCase().includes(ipq)) return false;
+        if (f.event && e.event !== f.event) return false;
+        // Reason matches the shown (translated) label OR the raw slug.
+        if (rq && !(_ipbanReason(e.reason).toLowerCase().includes(rq)
+                    || String(e.reason || '').toLowerCase().includes(rq))) return false;
+        if (fromTs != null && (e.ts || 0) < fromTs) return false;
+        if (toTs   != null && (e.ts || 0) > toTs)   return false;
+        if (minOff != null && !isNaN(minOff) && (e.offenses || 0) < minOff) return false;
+        if (ivq && !_ipbanIntervalText(e).toLowerCase().includes(ivq)) return false;
+        return true;
+    });
+}
+
+/** The interval column's plain text (ban duration / permanent / — for unbans). */
+function _ipbanIntervalText(e) {
+    if (e.event === 'unbanned') return '—';
+    if (e.banned_until == null) return t('ipban_perm_interval');
+    return _ipbanFmtDur(e.banned_until - e.banned_at);
+}
+
+// Ordered + visible columns (keeps unknown ids out, appends new ones).
+function _ipbanHistOrderedCols() {
+    const known = new Set(_IPBAN_HIST_COLS.map(c => c.id));
+    _IPBAN_HIST_COLS.forEach(c => { if (!_ipbanHistColOrder.includes(c.id)) _ipbanHistColOrder.push(c.id); });
+    _ipbanHistColOrder = _ipbanHistColOrder.filter(id => known.has(id));
+    return _ipbanHistColOrder
+        .map(id => _IPBAN_HIST_COLS.find(c => c.id === id))
+        .filter(c => c && (c.always || _ipbanHistVisibleCols.has(c.id)));
+}
+
+/** Static filter bar + a body container the render function rebuilds. Keeping the
+ *  filter bar out of the re-rendered body means typing in a filter never loses focus. */
+function _ipbanHistShell() {
+    setTimeout(() => { if (document.getElementById('ipban-hist-body')) _ipbanHistLoad(); }, 0);
+    return `<div id="ipban-hist-pane" class="ss-vfill">
+        ${buildFilterBar(_IPBAN_HIST_FILTER_SCHEMA)}
+        <div id="ipban-hist-body" class="ss-vfill">
+            <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
+        </div>
+    </div>`;
+}
+
+async function _ipbanHistLoad() {
+    const r = await apiGet('/api/v1/ipbans/banlog');
+    _ipbanHistData = (r && r.history) || [];
+    _ipbanHistPage = 1;
+    _ipbanHistRender();
+}
+
+/** Format a duration in seconds compactly (min / h / d). */
+function _ipbanFmtDur(s) {
+    s = Math.round(s || 0);
+    if (s <= 0) return '—';
+    if (s >= 86400) return Math.round(s / 86400) + ' d';
+    if (s >= 3600)  return Math.round(s / 3600) + ' h';
+    if (s >= 60)    return Math.round(s / 60) + ' min';
+    return s + ' s';
+}
+
+function _ipbanEventBadge(ev) {
+    const cls = ev === 'escalated' ? 'bg-danger' : ev === 'unbanned' ? 'bg-secondary' : 'bg-warning text-dark';
+    const lbl = t('ipban_event_' + ev);
+    return `<span class="badge ${cls}">${esc(lbl !== 'ipban_event_' + ev ? lbl : ev)}</span>`;
+}
+
+function _ipbanHistCell(e, colId) {
+    switch (colId) {
+        case 'when':     return `<td class="text-nowrap small text-muted">${esc(new Date((e.ts || 0) * 1000).toLocaleString())}</td>`;
+        case 'ip':       return `<td>${_ipbanIpLink(e.ip)}</td>`;
+        case 'event':    return `<td>${_ipbanEventBadge(e.event)}</td>`;
+        case 'reason':   return `<td>${esc(_ipbanReason(e.reason))}</td>`;
+        case 'level':    return `<td class="text-center">${e.level || ''}</td>`;
+        case 'interval': {
+            const txt = _ipbanIntervalText(e);
+            const html = (e.event !== 'unbanned' && e.banned_until == null)
+                ? `<span class="text-danger">${esc(txt)}</span>` : esc(txt);
+            return `<td class="text-nowrap">${html}</td>`;
+        }
+        case 'offenses': return `<td class="text-center">${e.offenses || ''}</td>`;
+        case 'by':       return `<td class="small">${esc(e.by || '')}</td>`;
+        default:         return '<td></td>';
+    }
+}
+
+function _ipbanHistTableHtml(rows, tableId) {
+    const cols = _ipbanHistOrderedCols();
+    const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_ipbanhist_col_w') || '{}'); } catch (_) { return {}; } })();
+    const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
+    const thRow = cols.map(col => {
+        const inner = col.sortKey
+            ? _thSortInner(col.label(), col.sortKey, _ipbanHistSort, _ipbanHistSortDir, '_sortIpbanHistByCol')
+            : `<span class="small">${esc(col.label())}</span>`;
+        // resizable:false → content-fit header (width:1% + nowrap): sized to content,
+        // not hand-resizable, but still sortable + reorderable (same as list tables).
+        if (col.resizable === false) {
+            return `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`;
+        }
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
+    }).join('');
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="${tableId}">
+        <thead class="ss-thead-sticky"><tr>${thRow}</tr></thead><tbody>`;
+    for (const e of rows) {
+        const cells = cols.map(col => {
+            const cd = _ipbanHistCell(e, col.id);
+            return col.resizable === false ? cd.replace('<td', '<td data-fit') : cd;   // content-fit cell
+        }).join('');
+        h += `<tr>${cells}</tr>`;
+    }
+    return h + `</tbody></table>`;
+}
+
+function _ipbanHistRender() {
+    const c = document.getElementById('ipban-hist-body');
+    if (!c) return;
+    if (_ipbanHistPageSize === null) _ipbanHistPageSize = _defaultPageSize;
+
+    const header = `<div class="ss-card-header">
+        <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-clock-history me-1"></i>${esc(t('ipban_hist_title'))}</span>
+        ${_buildColChooser(_IPBAN_HIST_COLS, _ipbanHistVisibleCols, '_ipbanHistToggleCol', '_ipbanHistResetCols', 150)}
+        <button class="btn btn-secondary btn-sm" onclick="_ipbanHistLoad()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('ipban_refresh'))}</button>
+    </div>`;
+
+    const filtered = _ipbanHistFiltered();
+    if (!filtered.length) {
+        const msg = _ipbanHistData.length ? t('ipban_hist_no_match') : t('ipban_hist_none');
+        c.innerHTML = `<div class="ss-card ss-vfill">
+            <div class="ss-accent ss-accent-slate"></div>
+            ${header}
+            <div class="ss-vscroll"><div class="text-center py-5 text-muted">
+                <i class="bi bi-clock-history ss-empty-icon"></i><span>${esc(msg)}</span></div></div>
+        </div>`;
+        return;
+    }
+
+    // Sort a shallow copy (never mutate the loaded array's order).
+    const sorted = filtered.slice().sort((a, b) => {
+        let av = a[_ipbanHistSort], bv = b[_ipbanHistSort];
+        av = av == null ? '' : av; bv = bv == null ? '' : bv;
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return _ipbanHistSortDir === 'asc' ? cmp : -cmp;
+    });
+
+    const total    = sorted.length;
+    const pageSize  = _ipbanHistPageSize || total;
+    _ipbanHistPage  = Math.max(1, Math.min(_ipbanHistPage, Math.ceil(total / pageSize)));
+    const pageRows  = sorted.slice((_ipbanHistPage - 1) * pageSize, _ipbanHistPage * pageSize);
+
+    const pagTop = _paginationParts(total, _ipbanHistPage, _ipbanHistPageSize, '_goIpbanHistPage', '_changeIpbanHistPageSize');
+    const pagBot = _renderPagination(total, _ipbanHistPage, _ipbanHistPageSize, '_goIpbanHistPage', '_changeIpbanHistPageSize');
+
+    c.innerHTML = `<div class="ss-card ss-vfill">
+        <div class="ss-accent ss-accent-slate"></div>
+        ${header}
+        <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
+            ${pagTop.info}${pagTop.controls}
+        </div>
+        <div class="ss-vscroll">${_ipbanHistTableHtml(pageRows, 'ipban-hist-table')}</div>
+        <div class="ss-card-band ss-card-band-bottom">${pagBot}</div>
+    </div>`;
+
+    setTimeout(_ipbanHistInitFeatures, 0);
+}
+
+function _ipbanHistInitFeatures() {
+    _attachColFeatures('ipban-hist-table',
+        () => _ipbanHistColOrder,
+        order => { _ipbanHistColOrder = order; },
+        _ipbanHistSaveColOrder,
+        _ipbanHistRender,
+        (col, w) => {
+            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_ipbanhist_col_w') || '{}'); } catch (_) { return {}; } })();
+            cw[col] = w; localStorage.setItem('ss_ipbanhist_col_w', JSON.stringify(cw));
+        }
+    );
+}

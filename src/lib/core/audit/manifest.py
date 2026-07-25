@@ -12,6 +12,17 @@ MODULE_PERMISSIONS = {
 }
 
 
+# Wiping the audit log lives in Config → General → Maintenance, not in the Audit toolbar:
+# that page stays open all day, one stray click from erasing the trail. Mirrors what the
+# history and syslog domains contribute; the fn ships with the audit UI.
+CONFIG_ACTIONS = [
+    {'section': 'maintenance', 'id': 'audit_clear_all',
+     'label_key': 'audit_clear_all', 'tooltip_key': 'audit_clear_all_tt',
+     'icon': 'bi-trash3', 'variant': 'danger', 'order': 30,
+     'perm': 'audit_delete', 'fn': 'confirmClearAudit'},
+]
+
+
 # ── Overview widgets this package contributes ────────────────────
 from .overview_widget import activity_rows, failed_login_rows  # noqa: F401
 

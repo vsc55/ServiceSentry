@@ -494,21 +494,20 @@ function _clLogsRender() {
                 <input type="search" class="form-control form-control-sm" value="${escAttr(st.q)}" placeholder="${escAttr(t('syslog_search'))}"
                     oninput="_clLogsState.q=this.value" onkeydown="if(event.key==='Enter'){_clLogsState.page=1;_clLogsFetch();}"></div>
             <div class="d-flex align-items-end gap-1">
-                <span id="cll-auto-refresh"></span>
-                <button class="btn btn-sm btn-secondary" onclick="_clLogsState.page=1;_clLogsFetch()" title="${escAttr(t('refresh'))}">
-                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button></div>
+                <!-- Unified refresh: split-button (main = reload, caret = auto-refresh interval). -->
+                <span id="cll-auto-refresh"></span></div>
         </div>
         <div id="clLogsPagerTop" class="mb-1"></div>
-        <div class="table-responsive rounded border" style="flex:1 1 auto;min-height:0;overflow:auto">
-        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-fs-3">
+        <div class="table-responsive rounded border sl-log-wrap">
+        <table class="table table-sm table-striped table-hover align-middle mb-0">
             <thead><tr>
                 <th class="text-nowrap">${esc(t('syslog_time'))}</th>
                 <th>${esc(t('syslog_severity'))}</th>
                 <th>${esc(t('cl_map_host'))}</th>
                 <th>${esc(t('syslog_app'))}</th>
                 <th style="width:50%">${esc(t('syslog_message'))}</th>
-            </tr></thead><tbody id="clLogsRows"></tbody></table></div>
-        <div id="clLogsEmpty" class="text-center text-muted py-3" style="display:none">${esc(t('host_logs_none'))}</div>
+            </tr></thead><tbody id="clLogsRows"></tbody></table>
+        <div id="clLogsState" class="sl-log-state" style="display:none"></div></div>
         <div id="clLogsPager" class="mt-2"></div>`;
     // Date range: restore + wire (reuses the syslog ts↔local-input helpers).
     const fromEl = document.getElementById('cll-from'), toEl = document.getElementById('cll-to');
@@ -552,14 +551,23 @@ function _clLogsRenderAutoRefresh() {
     const live = _clLogsState.auto === 'live';
     el.innerHTML = _autoRefreshControl({
         id: 'cllogs', interval: live ? 0 : (parseInt(_clLogsState.auto, 10) || 0),
-        setFn: 'setClLogsAutoRefresh', liveFn: 'toggleClLogsLive', liveActive: live, hideAuto: true,
+        setFn: 'setClLogsAutoRefresh', refreshFn: '_clLogsRefresh',
+        liveFn: 'toggleClLogsLive', liveActive: live, hideAuto: true,
         countId: 'cll-refresh-count', fillId: 'cll-refresh-fill',
     });
 }
+// Manual refresh from the split-button (jumps to the newest page, like the old Refresh button).
+function _clLogsRefresh() { if (_clLogsState) _clLogsState.page = 1; _clLogsFetch(); }
 async function _clLogsFetch() {
     const st = _clLogsState;
     const tbody = document.getElementById('clLogsRows');
     if (!st || !tbody) return;
+    const stateEl = document.getElementById('clLogsState');
+    // Loading spinner overlay — only when nothing is on screen to keep (no data-row flicker).
+    if (stateEl && !tbody.children.length) {
+        stateEl.innerHTML = `<div class="spinner-border spinner-border-sm"></div>`;
+        stateEl.style.display = '';
+    }
     const qs = new URLSearchParams({ limit: String(st.pageSize), offset: String((st.page - 1) * st.pageSize) });
     // One member selected → just that host; otherwise every member (effective-host filter).
     (st.sel ? [st.sel] : st.addrs).forEach(a => qs.append('hostname', a));
@@ -570,9 +578,11 @@ async function _clLogsFetch() {
     const data = await apiGet('/api/v1/syslog?' + qs.toString());
     const msgs = (data && data.messages) || [];
     const total = (data && data.total) || 0;
-    const empty = document.getElementById('clLogsEmpty');
-    if (empty) empty.style.display = msgs.length ? 'none' : '';
-    tbody.innerHTML = msgs.map(m => {
+    if (stateEl) {
+        stateEl.style.display = msgs.length ? 'none' : '';
+        if (!msgs.length) stateEl.innerHTML = `<i class="bi bi-inbox"></i><div>${esc(t('host_logs_none'))}</div>`;
+    }
+    tbody.innerHTML = !msgs.length ? '' : msgs.map(m => {
         const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
         const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
         const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');

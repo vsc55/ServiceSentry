@@ -1,0 +1,344 @@
+// ── fail2ban › Never-ban whitelist (IP/CIDR + description) ──────────────────
+// Standard log-table chrome (ss-card + accent + column chooser + top/bottom
+// pagination + sortable/resizable columns + trailing actions) — same pattern as
+// Ban history / Audit, plus an inline add form above the table.
+const _IPBAN_WL_COLS = [
+    { id: 'uid',         label: () => 'UID',                      sortKey: 'uid',         always: false, resizable: false },
+    { id: 'value',       label: () => t('ipban_col_ip'),          sortKey: 'value',       always: true,  resizable: false },
+    { id: 'description', label: () => t('ipban_col_description'), sortKey: 'description', always: false },
+    { id: 'created_at',  label: () => t('col_created_at'),        sortKey: 'created_at',  always: false, resizable: false },
+    { id: 'created_by',  label: () => t('col_created_by'),        sortKey: 'created_by',  always: false, resizable: false },
+];
+const _IPBAN_WL_DEFAULT_COLS = new Set(['description', 'created_at', 'created_by']);
+
+let _ipbanWlData = [];
+let _ipbanWlQuery = '';
+let _ipbanWlPage = 1;
+let _ipbanWlPageSize = null;
+let _ipbanWlSort = 'created_at';
+let _ipbanWlSortDir = 'desc';
+let _ipbanWlVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_ipbanwl_cols') || 'null'); if (Array.isArray(s)) return new Set(s); } catch (_) {}
+    return new Set(_IPBAN_WL_DEFAULT_COLS);
+})();
+let _ipbanWlColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_ipbanwl_col_order') || 'null'); if (Array.isArray(s)) return s; } catch (_) {}
+    return _IPBAN_WL_COLS.map(c => c.id);
+})();
+
+function _ipbanWlResetCols() {
+    _ipbanWlVisibleCols = new Set(_IPBAN_WL_DEFAULT_COLS);
+    _ipbanWlColOrder    = _IPBAN_WL_COLS.map(c => c.id);
+    localStorage.setItem('ss_ipbanwl_cols',      JSON.stringify([..._ipbanWlVisibleCols]));
+    localStorage.setItem('ss_ipbanwl_col_order', JSON.stringify(_ipbanWlColOrder));
+    localStorage.removeItem('ss_ipbanwl_col_w');
+    _ipbanWlRender();
+}
+function _ipbanWlToggleCol(col) {
+    _ipbanWlVisibleCols.has(col) ? _ipbanWlVisibleCols.delete(col) : _ipbanWlVisibleCols.add(col);
+    localStorage.setItem('ss_ipbanwl_cols', JSON.stringify([..._ipbanWlVisibleCols]));
+    _ipbanWlRender();
+}
+function _ipbanWlSaveColOrder() {
+    localStorage.setItem('ss_ipbanwl_col_order', JSON.stringify(_ipbanWlColOrder));
+}
+function _sortIpbanWlByCol(field) {
+    if (_ipbanWlSort === field) _ipbanWlSortDir = _ipbanWlSortDir === 'asc' ? 'desc' : 'asc';
+    else { _ipbanWlSort = field; _ipbanWlSortDir = 'asc'; }
+    _ipbanWlPage = 1;
+    _ipbanWlRender();
+}
+function _goIpbanWlPage(p) { _ipbanWlPage = p; _ipbanWlRender(); }
+function _changeIpbanWlPageSize(val) { _ipbanWlPageSize = parseInt(val, 10); _ipbanWlPage = 1; _ipbanWlRender(); }
+function _ipbanWlSearchChanged(v) {
+    _ipbanWlQuery = v;
+    _ipbanWlPage = 1;
+    _ipbanWlRender();
+    // The whole card is rebuilt on each keystroke, so restore focus + caret to the
+    // freshly-created search box (cursor to end — search is typed left-to-right).
+    const si = document.getElementById('ipbanWlSearch');
+    if (si) { si.focus(); const n = si.value.length; si.setSelectionRange(n, n); }
+}
+
+function _ipbanWlOrderedCols() {
+    const known = new Set(_IPBAN_WL_COLS.map(c => c.id));
+    _IPBAN_WL_COLS.forEach(c => { if (!_ipbanWlColOrder.includes(c.id)) _ipbanWlColOrder.push(c.id); });
+    _ipbanWlColOrder = _ipbanWlColOrder.filter(id => known.has(id));
+    return _ipbanWlColOrder
+        .map(id => _IPBAN_WL_COLS.find(c => c.id === id))
+        .filter(c => c && (c.always || _ipbanWlVisibleCols.has(c.id)));
+}
+
+/** Empty card container + spinner; schedules the first data load. */
+function _ipbanWhitelistCard() {
+    setTimeout(() => { if (document.getElementById('ipban-wl-pane')) _ipbanWlLoad(); }, 0);
+    return `<div id="ipban-wl-pane" class="ss-vfill">
+        <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
+    </div>`;
+}
+
+async function _ipbanWlLoad() {
+    const r = await apiGet('/api/v1/ipbans/whitelist');
+    _ipbanWlData = (r && r.whitelist) || [];
+    _ipbanWlRender();
+}
+
+function _ipbanWlCell(e, colId) {
+    switch (colId) {
+        case 'uid':         return `<td><code class="text-muted ss-fs-2">${esc(e.uid || '')}</code></td>`;
+        case 'value':       return `<td><code>${esc(e.value)}</code></td>`;
+        case 'description': return `<td>${esc(e.description || '')}</td>`;
+        case 'created_at':  return `<td class="text-nowrap small text-muted">${e.created_at ? esc(new Date(e.created_at * 1000).toLocaleString()) : '—'}</td>`;
+        case 'created_by':  return `<td class="small">${esc(e.created_by || '') || '<span class="text-muted">—</span>'}</td>`;
+        default:            return '<td></td>';
+    }
+}
+
+function _ipbanWlTableHtml(rows, tableId) {
+    const cols = _ipbanWlOrderedCols();
+    const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_ipbanwl_col_w') || '{}'); } catch (_) { return {}; } })();
+    const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';
+    const thRow = cols.map(col => {
+        const inner = col.sortKey
+            ? _thSortInner(col.label(), col.sortKey, _ipbanWlSort, _ipbanWlSortDir, '_sortIpbanWlByCol')
+            : `<span class="small">${esc(col.label())}</span>`;
+        if (col.resizable === false) {
+            return `<th class="ss-th ss-th-fit" data-col="${col.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`;
+        }
+        return `<th class="ss-th ss-th-resizable" data-col="${col.id}" draggable="true"${thW(col.id)}>${inner}</th>`;
+    }).join('');
+    let h = `<table class="table table-sm table-hover align-middle mb-0 ss-table" id="${tableId}">
+        <thead class="ss-thead-sticky"><tr>${thRow}<th class="ss-th ss-th-actions"></th></tr></thead><tbody>`;
+    for (const e of rows) {
+        const cells = cols.map(col => {
+            const cd = _ipbanWlCell(e, col.id);
+            return col.resizable === false ? cd.replace('<td', '<td data-fit') : cd;
+        }).join('');
+        h += `<tr>${cells}<td class="ss-td-actions text-end"><button class="btn btn-xs btn-secondary" onclick="_ipbanWlDelete(${jsStr(e.uid)},${jsStr(e.value)})">
+            <i class="bi bi-trash"></i></button></td></tr>`;
+    }
+    return h + `</tbody></table>`;
+}
+
+function _ipbanWlRender() {
+    const c = document.getElementById('ipban-wl-pane');
+    if (!c) return;
+    if (_ipbanWlPageSize === null) _ipbanWlPageSize = _defaultPageSize;
+
+    // Inline add form (kept above the table, same in the empty state). The pb-3 keeps
+    // it from crowding the pagination band / table header right below it.
+    const addForm = `<div class="px-3 pt-3 pb-3">
+        <div class="small text-muted mb-2">${esc(t('ipban_wl_hint'))}</div>
+        <div class="row g-2 align-items-center mb-0">
+            <div class="col-sm-4"><input id="ipbanWlValue" class="form-control form-control-sm"
+                placeholder="${escAttr(t('ipban_wl_value_ph'))}"></div>
+            <div class="col-sm-6"><input id="ipbanWlDesc" class="form-control form-control-sm"
+                placeholder="${escAttr(t('ipban_wl_desc_ph'))}"></div>
+            <div class="col-sm-2 d-grid"><button class="btn btn-sm btn-success" onclick="_ipbanWlAdd()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('ipban_wl_add'))}</button></div>
+        </div>
+    </div>`;
+    const header = `<div class="ss-card-header">
+        <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-shield-check me-1"></i>${esc(t('ipban_wl_title'))}</span>
+        <input id="ipbanWlSearch" type="search" class="form-control form-control-sm" style="max-width:210px"
+            placeholder="${escAttr(t('search'))}" value="${escAttr(_ipbanWlQuery)}" oninput="_ipbanWlSearchChanged(this.value)">
+        ${_buildColChooser(_IPBAN_WL_COLS, _ipbanWlVisibleCols, '_ipbanWlToggleCol', '_ipbanWlResetCols', 150)}
+        <button class="btn btn-secondary btn-sm" onclick="_ipbanWlLoad()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('ipban_refresh'))}</button>
+    </div>`;
+
+    // Client-side search over the visible text fields (IP/CIDR, description, author, uid).
+    const q = _ipbanWlQuery.trim().toLowerCase();
+    const filtered = q
+        ? _ipbanWlData.filter(e => [e.value, e.description, e.created_by, e.uid]
+            .some(x => String(x || '').toLowerCase().includes(q)))
+        : _ipbanWlData;
+
+    if (!filtered.length) {
+        const msg = q ? t('ipban_wl_no_match') : t('ipban_wl_none');
+        c.innerHTML = `<div class="ss-card ss-vfill">
+            <div class="ss-accent ss-accent-teal"></div>
+            ${header}${addForm}
+            <div class="ss-vscroll"><div class="text-center py-5 text-muted">
+                <i class="bi bi-shield-check ss-empty-icon"></i><span>${esc(msg)}</span></div></div>
+        </div>`;
+        return;
+    }
+
+    const sorted = filtered.slice().sort((a, b) => {
+        let av = a[_ipbanWlSort], bv = b[_ipbanWlSort];
+        av = av == null ? '' : av; bv = bv == null ? '' : bv;
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return _ipbanWlSortDir === 'asc' ? cmp : -cmp;
+    });
+
+    const total    = sorted.length;
+    const pageSize  = _ipbanWlPageSize || total;
+    _ipbanWlPage    = Math.max(1, Math.min(_ipbanWlPage, Math.ceil(total / pageSize)));
+    const pageRows  = sorted.slice((_ipbanWlPage - 1) * pageSize, _ipbanWlPage * pageSize);
+
+    const pagTop = _paginationParts(total, _ipbanWlPage, _ipbanWlPageSize, '_goIpbanWlPage', '_changeIpbanWlPageSize');
+    const pagBot = _renderPagination(total, _ipbanWlPage, _ipbanWlPageSize, '_goIpbanWlPage', '_changeIpbanWlPageSize');
+
+    c.innerHTML = `<div class="ss-card ss-vfill">
+        <div class="ss-accent ss-accent-teal"></div>
+        ${header}${addForm}
+        <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
+            ${pagTop.info}${pagTop.controls}
+        </div>
+        <div class="ss-vscroll">${_ipbanWlTableHtml(pageRows, 'ipban-wl-table')}</div>
+        <div class="ss-card-band ss-card-band-bottom">${pagBot}</div>
+    </div>`;
+
+    setTimeout(_ipbanWlInitFeatures, 0);
+}
+
+function _ipbanWlInitFeatures() {
+    _attachColFeatures('ipban-wl-table',
+        () => _ipbanWlColOrder,
+        order => { _ipbanWlColOrder = order; },
+        _ipbanWlSaveColOrder,
+        _ipbanWlRender,
+        (col, w) => {
+            const cw = (() => { try { return JSON.parse(localStorage.getItem('ss_ipbanwl_col_w') || '{}'); } catch (_) { return {}; } })();
+            cw[col] = w; localStorage.setItem('ss_ipbanwl_col_w', JSON.stringify(cw));
+        }
+    );
+}
+
+async function _ipbanWlAdd() {
+    const value = (document.getElementById('ipbanWlValue') || {}).value || '';
+    if (!value.trim()) { showToast(t('ipban_wl_invalid'), 'warning'); return; }
+    const desc = (document.getElementById('ipbanWlDesc') || {}).value || '';
+    const r = await apiPost('/api/v1/ipbans/whitelist', { value: value.trim(), description: desc.trim() });
+    if (r && r.status === 200 && r.data && r.data.ok) {
+        document.getElementById('ipbanWlValue').value = '';
+        document.getElementById('ipbanWlDesc').value = '';
+        _ipbanRefreshAll();
+    } else {
+        showToast((r && r.data && r.data.error) || t('error'), 'danger');
+    }
+}
+
+function _ipbanWlDelete(uid, value) {
+    showConfirmModal(tf('ipban_wl_confirm_del', value), async () => {
+        const r = await apiDelete('/api/v1/ipbans/whitelist/' + encodeURIComponent(uid));
+        if (r && r.data && r.data.ok) _ipbanRefreshAll();
+        else showToast((r && r.data && r.data.error) || t('error'), 'danger');
+    });
+}
+
+/** Translate a ban/offense reason slug (login_failed, csrf_failed…) to a label. */
+function _ipbanReason(r) {
+    const k = 'ipban_reason_' + (r || '');
+    const v = t(k);
+    return v !== k ? v : (r || '');
+}
+
+/** Human-readable "expires in" for a ban record. */
+function _ipbanExpiry(b) {
+    if (b.permanent) return `<span class="badge bg-danger">${esc(t('ipban_permanent'))}</span>`;
+    if (!b.active)   return `<span class="text-muted">${esc(t('ipban_expired'))}</span>`;
+    const s = b.retry_after || 0;
+    if (s >= 86400) return Math.round(s / 86400) + ' d';
+    if (s >= 3600)  return Math.round(s / 3600) + ' h';
+    if (s >= 60)    return Math.round(s / 60) + ' min';
+    return s + ' s';
+}
+
+// Per-ban "Response" override: a select defaulting to the global action ('').
+function _ipbanActionSelect(ip, current) {
+    const acts = (typeof I18N !== 'undefined' && I18N.ipban_actions) || {};
+    const opt = (val, lbl) =>
+        `<option value="${escAttr(val)}"${current === val ? ' selected' : ''}>${esc(lbl)}</option>`;
+    let opts = opt('', t('ipban_action_default'));
+    for (const a of ['page', 'minimal', 'reject', 'json']) opts += opt(a, acts[a] || a);
+    return `<select class="form-select form-select-sm" style="min-width:11rem"
+        onchange="_ipbanSetAction(${jsStr(ip)},this.value)">${opts}</select>`;
+}
+
+async function _ipbanSetAction(ip, action) {
+    const r = await apiPost('/api/v1/ipbans/action', { ip: ip, action: action });
+    if (!(r && r.status === 200 && r.data && r.data.ok)) {
+        showToast((r && r.data && r.data.error) || t('error'), 'danger');
+        _ipbanLoad();
+    }
+}
+
+/** Clickable IP that opens the attempt-history modal. */
+function _ipbanIpLink(ip) {
+    return `<a href="#" class="font-monospace text-decoration-none"
+        onclick="_ipbanHistory(${jsStr(ip)});return false" title="${escAttr(t('ipban_history_title').replace('{}', ip))}">${esc(ip)}</a>`;
+}
+
+/** Remove an IP from the watchlist (clears its offense counters + history). */
+function _ipbanClear(ip) {
+    apiPost('/api/v1/ipbans/clear', { ip: ip }).then(r => {
+        if (r && r.status === 200 && r.data && r.data.ok) _ipbanRefreshAll();
+        else showToast((r && r.data && r.data.error) || t('error'), 'danger');
+    });
+}
+
+/** Show the recorded attempt history for an IP (date/time + reason) in a modal. */
+async function _ipbanHistory(ip) {
+    const r = await apiGet('/api/v1/ipbans/history?ip=' + encodeURIComponent(ip));
+    const hist = (r && r.history) || [];
+    const rows = hist.map(h => [
+        new Date((h.ts || 0) * 1000).toLocaleString(),
+        _ipbanReason(h.category)
+    ]);
+    showInfoModal(t('ipban_history_title').replace('{}', ip), rows,
+                  rows.length ? '' : t('ipban_history_none'),
+                  rows.length ? 'danger' : 'success');
+}
+
+function _ipbanBanNow(ip) {
+    apiPost('/api/v1/ipbans', { ip: ip, reason: 'manual' }).then(r => {
+        if (r && r.status === 200 && r.data && r.data.ok) _ipbanRefreshAll();
+        else showToast((r && r.data && r.data.error) || t('error'), 'danger');
+    });
+}
+
+async function _ipbanLoad() {
+    const r = await apiGet('/api/v1/ipbans');
+    _ipbanBansData = (r && r.bans) || [];
+    _ipbanOffendersData = (r && r.offenders) || [];
+    _ipbanBansRender();
+}
+
+/** Reload every fail2ban sub-tab that is currently mounted. The three sub-tab panes
+ *  all live in the DOM at once (only one is visible), so a mutation in any one — a
+ *  ban/unban, a watchlist clear, a whitelist add/remove — refreshes the others too
+ *  (e.g. an unban adds an 'unbanned' row the History tab must reflect). */
+function _ipbanRefreshAll() {
+    if (document.getElementById('ipban-bans-pane')) _ipbanLoad();
+    if (document.getElementById('ipban-wl-pane')) _ipbanWlLoad();
+    if (document.getElementById('ipban-hist-body')) _ipbanHistLoad();
+}
+
+async function _ipbanAdd() {
+    const ip = (document.getElementById('ipbanIp') || {}).value || '';
+    if (!ip.trim()) { showToast(t('ipban_ip_required'), 'warning'); return; }
+    const reason = (document.getElementById('ipbanReason') || {}).value || '';
+    const durRaw = (document.getElementById('ipbanDur') || {}).value;
+    const body = { ip: ip.trim() };
+    if (reason.trim()) body.reason = reason.trim();
+    if (durRaw !== '' && durRaw != null) body.duration_secs = parseInt(durRaw, 10);
+    const r = await apiPost('/api/v1/ipbans', body);
+    if (r && r.status === 200 && r.data && r.data.ok) {
+        document.getElementById('ipbanIp').value = '';
+        document.getElementById('ipbanReason').value = '';
+        document.getElementById('ipbanDur').value = '';
+        _ipbanRefreshAll();
+    } else {
+        showToast((r && r.data && r.data.error) || t('error'), 'danger');
+    }
+}
+
+function _ipbanUnban(ip) {
+    showReasonModal(tf('ipban_confirm_unban', ip), async (reason) => {
+        const r = await apiDelete('/api/v1/ipbans/' + encodeURIComponent(ip)
+            + '?reason=' + encodeURIComponent(reason || ''));
+        if (r && r.data && r.data.ok) _ipbanRefreshAll();
+        else showToast((r && r.data && r.data.error) || t('error'), 'danger');
+    }, { placeholder: t('ipban_unban_reason_ph'), required: true });
+}

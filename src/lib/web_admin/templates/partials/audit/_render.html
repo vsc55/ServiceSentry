@@ -195,15 +195,31 @@ function renderAuditTable() {
     // Column chooser
     const colChooser = _buildColChooser(_AUDIT_COLS, _auditVisibleCols, '_auditToggleCol', '_resetAuditCols', 150);
 
+    // Title header between the accent strip and the pagination band — same place every other
+    // section keeps its tools, so Refresh/Export live with the table they act on (they used to
+    // sit up in the filter bar).
     c.innerHTML = filterBanner + `
     <div class="ss-card ss-vfill">
         <div class="ss-accent ss-accent-slate"></div>
+        <div class="ss-card-header">
+            <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('tab_audit'))}</h6>
+            ${colChooser}
+            <button class="btn btn-sm btn-secondary" onclick="renderAudit()" title="${escAttr(t('refresh_tt'))}">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+            <div class="btn-group">
+                <button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-download me-1"></i>${esc(t('export'))}</button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><h6 class="dropdown-header py-1">${esc(t('export'))}</h6></li>
+                    <li><hr class="dropdown-divider my-0"></li>
+                    <li><a class="dropdown-item" href="#" onclick="exportAudit('csv');return false;" title="${escAttr(t('export_csv_tt'))}"><i class="bi bi-filetype-csv me-2 text-success"></i>${esc(t('export_csv'))}</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="exportAudit('json');return false;" title="${escAttr(t('export_json_tt'))}"><i class="bi bi-filetype-json me-2 text-warning"></i>${esc(t('export_json'))}</a></li>
+                </ul>
+            </div>
+        </div>
         <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
             ${pagTop.info}
-            <div class="d-flex align-items-center gap-2">
-                ${colChooser}
-                ${pagTop.controls}
-            </div>
+            ${pagTop.controls}
         </div>
         <div class="ss-vscroll">${tableHtml}</div>
         <div class="ss-card-band ss-card-band-bottom">${paginationBot}</div>
@@ -228,6 +244,10 @@ function _initAuditTableFeatures() {
 async function renderAudit() {
     const c = document.getElementById('audit-container');
     if (!c) return;
+    // The filter strip is static markup (ships collapsed), so restore whatever the user left —
+    // including the active-filter badge, since the restored filters already apply.
+    initFilterBar('audit');
+    _auditUpdateFilterCount();
     c.innerHTML = `<div class="text-center py-5 text-muted">
         <div class="spinner-border spinner-border-sm me-2"></div>
         <span>${t('loading')}</span></div>`;

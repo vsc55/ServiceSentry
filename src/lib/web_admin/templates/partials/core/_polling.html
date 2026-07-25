@@ -80,6 +80,27 @@ function _startVersionPoll(intervalMs = 60000) {
     // (authoritative → no debounce); a restored link re-confirms with a live check.
     window.addEventListener('offline', () => _applyConnLost(true));
     window.addEventListener('online', _keepaliveCheck);
+    // Fast, self-timing connectivity heartbeat: a short-timeout GET to /api/v1/health so an
+    // unreachable OR a HANGING backend (port accepts the socket but never answers) flips the
+    // overlay within seconds. The shared fetch wrapper ignores AbortError, so this drives
+    // _setConnLost itself: our own timeout counts as "lost" too. Runs every ~6 s (plus an
+    // immediate first check), independent of the 60 s reload poll and the keepalive.
+    const _connPing = async () => {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 4000);
+        try {
+            const r = await fetch('/api/v1/health', { signal: ctrl.signal, cache: 'no-store' });
+            // Reachable unless the proxy answered a gateway error (backend down behind it).
+            _setConnLost(_connGatewayDown(r.status));
+        } catch (_) {
+            _setConnLost(true);   // network error or our own timeout → treat as unreachable
+        } finally {
+            clearTimeout(to);
+        }
+    };
+    const _connMs = Math.max(2, (configData?.web_admin?.conn_check_secs ?? 6)) * 1000;
+    setInterval(_connPing, _connMs);
+    _connPing();
     // Config field version poll — interval is read dynamically from configData each cycle.
     _scheduleConfigPoll();
 }

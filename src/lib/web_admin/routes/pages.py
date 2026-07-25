@@ -44,13 +44,17 @@ def register(app, wa):
         user = wa._users.get(session.get('username', ''), {})
         return redirect(wa._landing_url(user))
 
-    def _render_dashboard(standalone: str = ''):
-        """Render dashboard.html as the full admin panel (``/admin``, *standalone* empty)
-        or as one standalone section page (``/overview``, ``/history``, ``/syslog``): the
-        tab bar is hidden and only that section's pane is shown and rendered."""
+    def _render_dashboard():
+        """Render dashboard.html as the single SPA shell. Every URL — the panel (``/admin``)
+        and the section URLs (``/overview``, ``/history``, ``/syslog``, ``/account``) — serves
+        the SAME full shell with all panes; the client activates the pane the URL points at
+        (``_sbPaneIdFromPath``), so navigating between sections never reloads the page. The
+        section routes still exist for shareable/bookmarkable URLs and are permission-gated."""
         html = render_template(
             'dashboard.html',
-            standalone=standalone,
+            # Kept for the template's (now vestigial) guards + the SS_STANDALONE_PAGE var:
+            # always the panel, never a cut-down page. The active pane is chosen client-side.
+            standalone='',
             # Registry-driven: the navbar builds its buttons from this and the wiring
             # calls the declared render entry point for the active standalone page.
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone']}
@@ -84,9 +88,17 @@ def register(app, wa):
         """Render the main admin dashboard (all tabs)."""
         return _render_dashboard()
 
-    # Standalone section pages (Overview / History / Syslog): one generic route per
-    # entry in the HOME_PAGES registry, gated by the permission it declares. Adding a
-    # page to the registry is enough — no per-page view function here.
+    @app.route('/account')
+    @login_required
+    def account_page():
+        """Serve the SPA shell at /account so the account pane can be reached by URL. Any
+        logged-in user may open it — it edits only the caller's own account."""
+        return _render_dashboard()
+
+    # Section URLs (Overview / History / Syslog): one generic route per entry in the
+    # HOME_PAGES registry, gated by the permission it declares. Each serves the SAME SPA
+    # shell as /admin; the client opens the matching pane from the URL. Adding a page to
+    # the registry is enough — no per-page view function here.
     def _make_standalone_view(page: dict):
         spec = page['standalone']
 
@@ -95,10 +107,10 @@ def register(app, wa):
                 session.get('username', ''), session.get('role', '')) or [])
             if spec.get('perm') and spec['perm'] not in perms:
                 return redirect(url_for('dashboard'))
-            return _render_dashboard(page['id'])
+            return _render_dashboard()
 
         _view.__name__ = f"page_{page['id']}"
-        _view.__doc__ = f"Render the {page['id']} section as its own page."
+        _view.__doc__ = f"Serve the SPA shell at {page['url']} (opens the {page['id']} pane)."
         return _view
 
     for _page in standalone_pages():

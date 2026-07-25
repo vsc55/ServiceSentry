@@ -1,0 +1,254 @@
+{# ================================================================
+   Collapsible left sidebar behaviour: mini (desktop) / off-canvas (mobile),
+   persisted collapsed state, and a quick theme toggle for the user block.
+   Functions are global (called from onclick in partials/_sidebar.html).
+   ================================================================ #}
+
+const _SB_MINI_KEY = 'ss_sidebar_mini';
+const _sbIsMobile = () => window.matchMedia('(max-width: 767.98px)').matches;
+
+// Toggle: on mobile the same control opens/closes the off-canvas drawer; on desktop
+// it flips between the full and the icons-only ("mini") sidebar (state persisted).
+function _toggleSidebar() {
+    const layout = document.getElementById('ss-layout');
+    if (!layout) return;
+    if (_sbIsMobile()) { layout.classList.toggle('ss-open'); return; }
+    const mini = layout.classList.toggle('ss-mini');
+    try { localStorage.setItem(_SB_MINI_KEY, mini ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+function _openSidebar()  { document.getElementById('ss-layout')?.classList.add('ss-open'); }
+function _closeSidebar() { document.getElementById('ss-layout')?.classList.remove('ss-open'); }
+
+// Restore the persisted collapsed state at load (desktop only — mobile always starts closed).
+(function _initSidebarState() {
+    try {
+        const layout = document.getElementById('ss-layout');
+        if (layout && !_sbIsMobile() && localStorage.getItem(_SB_MINI_KEY) === '1') {
+            layout.classList.add('ss-mini');
+        }
+    } catch (e) { /* ignore */ }
+})();
+
+// Persist the Settings ("Administration panel") accordion open/closed state. It defaults to
+// expanded (the `show` class in the template); if the user collapsed it, keep it collapsed on
+// the next load instead of always re-expanding.
+const _SB_SETTINGS_KEY = 'ss_sidebar_settings_open';
+(function _initSettingsAccordion() {
+    const el = document.getElementById('ss-sb-settings');
+    if (!el) return;
+    const parent = document.querySelector('[data-bs-target="#ss-sb-settings"]');
+    if (localStorage.getItem(_SB_SETTINGS_KEY) === '0') {
+        el.classList.remove('show');                       // start collapsed (default is open)
+        parent?.setAttribute('aria-expanded', 'false');
+    }
+    el.addEventListener('shown.bs.collapse',  () => { try { localStorage.setItem(_SB_SETTINGS_KEY, '1'); } catch (e) { /* ignore */ } });
+    el.addEventListener('hidden.bs.collapse', () => { try { localStorage.setItem(_SB_SETTINGS_KEY, '0'); } catch (e) { /* ignore */ } });
+})();
+
+// The user menu opens to the RIGHT (dropend). The sidebar is overflow:hidden, so use Popper's
+// `fixed` strategy: a fixed-positioned menu escapes the ancestor's overflow clip (the sidebar
+// has no transform, so it is not a fixed containing block) — otherwise the menu would be cut off.
+(function _initUserMenu() {
+    const btn = document.querySelector('.ss-sb-userbtn');
+    if (btn && window.bootstrap?.Dropdown) {
+        bootstrap.Dropdown.getOrCreateInstance(btn, {
+            popperConfig: (defaults) => ({ ...defaults, strategy: 'fixed' }),
+        });
+    }
+})();
+
+// Close the mobile drawer after navigating to a section (the links are real navigations,
+// but the SPA tab toggles under Settings are not — close on any sidebar item click).
+document.getElementById('ss-sidebar')?.addEventListener('click', e => {
+    if (_sbIsMobile() && e.target.closest('.ss-sb-item')) _closeSidebar();
+});
+
+// Quick theme toggle for the user block — same persistence as the account modal
+// (POST just dark_mode; the endpoint merges, leaving lang/landing_page untouched).
+async function _toggleTheme() {
+    const dark = document.documentElement.getAttribute('data-bs-theme') !== 'dark';
+    const theme = dark ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-bs-theme', theme);
+    document.body.setAttribute('data-bs-theme', theme);
+    if (window.currentUser) currentUser.pref_dark_mode = dark;
+    try { await apiPut('/api/v1/users/me/preferences', { dark_mode: dark }); } catch (e) { /* ignore */ }
+}
+
+// Open the Account page from the user menu. On /admin it activates the hidden #tab-account
+// nav button, so it shows as an SPA pane (no full reload) and the shared shown.bs.tab listener
+// syncs the URL to /account — exactly like the section tabs. On a standalone page the pane
+// isn't in the DOM, so fall back to a real navigation.
+function openAccountPage() {
+    const btn = document.getElementById('btn-nav-account');
+    if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+    else window.location.href = '/account';
+}
+
+// Activate a panel tab from a sidebar item; optionally drill into one of its sub-tabs
+// (Infrastructure/Access). Used by the nested-accordion and the flyout sub-menus.
+function _navTab(paneTarget) {
+    const btn = document.querySelector(`[data-bs-target="${paneTarget}"]`);
+    if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+}
+function _navSubtab(el, paneTarget, subTarget, storageKey, storageValue) {
+    // Persist the chosen sub-tab under the SAME key that section's pane restores from, BEFORE
+    // activating — so the highlight is deterministic (no racing the pane's own shown.bs.tab).
+    // Events/ipban pass an explicit key/value (their sub-tabs are built in JS); Infra/Access
+    // store the full '#subtab-*' target under a per-section key derived from the pane.
+    if (storageKey) localStorage.setItem(storageKey, storageValue);
+    else if (paneTarget === '#tab-servers') localStorage.setItem('ss_active_subtab_infra', subTarget);
+    else if (paneTarget === '#tab-access')  localStorage.setItem('ss_active_subtab_access', subTarget);
+    _navTab(paneTarget);                          // show the parent pane first
+    // If the sub-tab button already exists (static, or the pane was already rendered),
+    // activate it directly; otherwise the pane's render restores it from the key above.
+    const sBtn = document.querySelector(`[data-bs-target="${subTarget}"]`);
+    if (sBtn) bootstrap.Tab.getOrCreateInstance(sBtn).show();
+    // Light the sidebar sub-item NOW — don't rely on shown.bs.tab, which never fires when the
+    // sub-tab was already the active one (Bootstrap no-ops) nor reliably on a hidden button.
+    _sbHighlightSub(subTarget);
+    if (_sbIsMobile()) _closeSidebar();
+}
+
+// Only ONE sub-item is ever highlighted across the whole sidebar: the one belonging to the
+// CURRENTLY active section. _sbHighlightSub clears every flyout first, then lights the given
+// target (a null/absent target just clears — e.g. sections without a flyout).
+function _sbHighlightSub(subTarget) {
+    document.querySelectorAll('#ss-sidebar .ss-sb-subsub.active').forEach(x => x.classList.remove('active'));
+    if (subTarget) document.querySelector(`#ss-sidebar .ss-sb-subsub[data-subtab="${subTarget}"]`)?.classList.add('active');
+    _sbUpdateBreadcrumb();
+}
+// Breadcrumb: reflect the active section (and its sub-tab) as a path title, e.g. "Access / Groups".
+// Read from the active sidebar item + sub-item, so it stays correct on click, restore and reload.
+function _sbUpdateBreadcrumb() {
+    const bc = document.getElementById('ss-breadcrumb');
+    if (!bc) return;
+    const _txt = el => (el?.querySelector('.ss-sb-label')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const top = document.querySelector('#ss-sidebar .ss-sb-item.active:not(.ss-sb-subsub):not(.ss-sb-userbtn)');
+    const sub = document.querySelector('#ss-sidebar .ss-sb-subsub.active');
+    const parts = [_txt(top), _txt(sub)].filter(Boolean);
+    if (!parts.length) {
+        // Panes with no labelled sidebar item (e.g. the hidden Account button) → name the pane.
+        const pane = document.querySelector('.container-fluid > .tab-content > .tab-pane.active');
+        if (pane && pane.id === 'tab-account') {
+            parts.push((typeof t === 'function' ? t('account_settings') : '') || 'Account');
+        }
+    }
+    bc.innerHTML = parts.map(p => esc(p)).join(' <span class="ss-crumb-sep">/</span> ');
+}
+// The sub-tab a section would restore, read from the SAME localStorage key that section's pane
+// uses (events stores a bare 'rules'|'log' suffix; the others the full '#subtab-*' target).
+// No-value defaults mirror each pane's own restore. Sections without a flyout return null.
+function _sbStoredSub(paneId) {
+    switch (paneId) {
+        case 'tab-servers': return localStorage.getItem('ss_active_subtab_infra')  || '#subtab-srv-hosts';
+        case 'tab-access':  return localStorage.getItem('ss_active_subtab_access') || '#subtab-users';
+        case 'tab-ipban':   return localStorage.getItem('ss_active_subtab_ipban')  || '#subtab-ipban-bans';
+        case 'tab-events':  return '#ev-pane-' + (localStorage.getItem('ss_active_subtab_events') === 'log' ? 'log' : 'rules');
+        default:            return null;
+    }
+}
+// Sync the single highlight to whatever section is active now (load / section change / Back-Fwd).
+function _sbSyncSub() {
+    const pane = document.querySelector('.container-fluid > .tab-content > .tab-pane.active');
+    _sbHighlightSub(pane ? _sbStoredSub(pane.id) : null);
+}
+// Live sub-tab changes through the (hidden) in-pane bars still bubble here (they belong to the
+// active section, so highlighting the reported sub keeps the single-highlight invariant).
+document.addEventListener('shown.bs.tab', e => {
+    const sub = e.target.dataset.bsTarget || '';
+    if (sub.startsWith('#subtab-') || sub.startsWith('#ev-pane-')) _sbHighlightSub(sub);
+});
+window.addEventListener('load', _sbSyncSub);
+_sbSyncSub();
+
+// The flyout is position:fixed (to escape the sidebar's overflow clip), so its top/left
+// are computed from the parent's box whenever it opens — on hover and on click.
+function _placeFlyout(wrap) {
+    const fly = wrap.querySelector('.ss-sb-flyout');
+    if (!fly) return;
+    const r = wrap.getBoundingClientRect();
+    fly.style.top = r.top + 'px';
+    fly.style.left = r.right + 'px';
+}
+// One mechanism only (the .ss-fly-open class), driven by JS. Hover, focus and click all go
+// through _openFlyout/_closeFlyout so at most ONE flyout is ever open — no CSS :hover racing
+// the class and leaving a menu visible with no pointer on it (which overlapped neighbours).
+function _openFlyout(wrap) {
+    document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(w => {
+        if (w !== wrap) w.classList.remove('ss-fly-open');
+    });
+    wrap.classList.add('ss-fly-open');
+    _placeFlyout(wrap);
+}
+function _closeFlyout(wrap) { wrap.classList.remove('ss-fly-open'); }
+document.querySelectorAll('.ss-sb-flywrap').forEach(wrap => {
+    // Moving onto the flyout does NOT fire mouseleave (it is a DOM child of the wrap); only
+    // leaving the whole parent+flyout does, which then closes it so it can't overlap another.
+    wrap.addEventListener('mouseenter', () => _openFlyout(wrap));
+    wrap.addEventListener('mouseleave', () => _closeFlyout(wrap));
+    wrap.addEventListener('focusin', () => _openFlyout(wrap));
+});
+
+// The parent item does nothing on click — the flyout opens purely on hover/focus (above).
+
+// ── SPA navigation on /admin: keep one active item + sync the URL without reloading ──
+// The sections (Overview/History/Syslog) and the Settings tabs are all Bootstrap Tabs on
+// /admin, but in two separate .nav groups, so Bootstrap only de-activates within a group.
+// This global listener enforces a single active item across the whole sidebar and mirrors
+// the active pane into the address bar (a section → its own /overview URL; a panel tab →
+// /admin?tab=<id>). The pages still exist for direct access / Docker; this is a same-page
+// shortcut. The first activation (initial landing) uses replaceState so it adds no history
+// entry; later ones pushState so Back/Forward walk the sections.
+let _sbNavReady = false;
+function _sbPaneUrl(btn, paneId) {
+    return btn.dataset.navUrl || ('/admin?tab=' + paneId.replace(/^tab-/, ''));
+}
+document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', e => {
+    const btn = e.target;
+    // Clear the top-level active items (leave the sub-item highlight to _sbSyncSub below).
+    document.querySelectorAll('#ss-sidebar .ss-sb-item.active').forEach(el => {
+        if (el !== btn && !el.classList.contains('ss-sb-subsub')) el.classList.remove('active');
+    });
+    btn.classList.add('active');
+    const target = btn.dataset.bsTarget || '';
+    // Bootstrap only de-activates panes WITHIN the same .nav tablist; the sections and the
+    // Settings tabs are two separate groups, so a pane from the other group would stay
+    // shown and its content would overlap the new one. Hide every top-level pane that is
+    // not the one just activated (top-level only — leave the nested infra/access sub-panes).
+    document.querySelectorAll('.container-fluid > .tab-content > .tab-pane.active')
+        .forEach(pane => { if ('#' + pane.id !== target) pane.classList.remove('show', 'active'); });
+    // Re-point the single sub-item highlight at the section just activated (clears it when the
+    // section has no flyout), so exactly one sub-item — the current section's — is ever lit.
+    _sbSyncSub();
+    const paneId = target.replace('#', '');
+    if (!paneId) return;
+    const url = _sbPaneUrl(btn, paneId);
+    const cur = window.location.pathname + window.location.search;
+    if (cur !== url) {
+        history[_sbNavReady ? 'pushState' : 'replaceState']({ pane: paneId }, '', url);
+    }
+    _sbNavReady = true;
+});
+
+// Which pane a section URL maps to (single SPA shell: every URL renders the full panel and
+// opens the pane its path points at). Returns null for /admin (handled by _resolveLandingTab)
+// and for unknown paths.
+function _sbPaneIdFromPath() {
+    const map = { '/overview': 'tab-overview', '/history': 'tab-history',
+                  '/syslog': 'tab-syslog', '/account': 'tab-account' };
+    return map[window.location.pathname] || null;
+}
+// Back/Forward: re-activate the tab the URL points to (popstate fires between this page's
+// pushState states; a full load is handled by the init landing logic instead).
+function _sbActivateFromLocation() {
+    let paneId = _sbPaneIdFromPath();
+    if (!paneId && window.location.pathname === '/admin') {
+        paneId = 'tab-' + (new URLSearchParams(window.location.search).get('tab') || 'services');
+    }
+    if (!paneId) return;
+    const btn = document.querySelector(`[data-bs-target="#${paneId}"]`);
+    if (btn && btn.closest('li')?.style.display !== 'none') {
+        bootstrap.Tab.getOrCreateInstance(btn).show();
+    }
+}
+window.addEventListener('popstate', _sbActivateFromLocation);

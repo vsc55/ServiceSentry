@@ -37,8 +37,12 @@
    fail2ban — top-level OPERATIONAL section (#tab-ipban): banned IPs,
    watchlist, whitelist and history. Its own tab, not config (the
    Exposed-services config card lives in partials/cfg/_ipban.html).
+   Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
 {% include "partials/ipban/_render.html" %}
+{% include "partials/ipban/_bans.html" %}
+{% include "partials/ipban/_history.html" %}
+{% include "partials/ipban/_whitelist.html" %}
 {# ================================================================
    Status tab — check cards and the scheduler/daemon panel.
    Thin orchestrator: includes sub-partials in order.
@@ -63,7 +67,7 @@
    Account — shared role constants, utilities and own-account actions (must load before users/roles/groups).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
-{% include "partials/account/_modal.html" %}
+{% include "partials/account/_render.html" %}
 {# ================================================================
    Users tab — user table, create/edit/delete, reset password.
    Thin orchestrator: includes sub-partials in order.
@@ -84,7 +88,7 @@
    Cluster tab — multi-bind checks (table + edit modal).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
-{% include "partials/clusters/_table.html" %}
+{% include "partials/clusters/_list.html" %}
 {% include "partials/clusters/_modal.html" %}
 {# ================================================================
    Credentials tab — reusable SSH identities (picker, list, modal).
@@ -103,7 +107,7 @@
    Sessions tab — active sessions list and revoke actions.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
-{% include "partials/sessions/_render.html" %}
+{% include "partials/sessions/_list.html" %}
 {% include "partials/sessions/_actions.html" %}
 {# ================================================================
    Roles tab — list, create, edit (incl. built-in), delete roles.
@@ -139,7 +143,7 @@
    Syslog tab — messages table, render, drops panel and polling.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
-{% include "partials/syslog/_table.html" %}
+{% include "partials/syslog/_columns.html" %}
 {% include "partials/syslog/_render.html" %}
 {% include "partials/syslog/_drops.html" %}
 {% include "partials/syslog/_poll.html" %}
@@ -152,7 +156,7 @@
    Events tab — notification rules (table helpers, render, modal + log).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
-{% include "partials/events/_table.html" %}
+{% include "partials/events/_columns.html" %}
 {% include "partials/events/_render.html" %}
 {% include "partials/events/_modal.html" %}
 {# ================================================================
@@ -162,4 +166,5 @@
 {% include "partials/init/_persistence.html" %}
 {% include "partials/init/_table_features.html" %}
 {% include "partials/init/_behaviors.html" %}
+{% include "partials/init/_sidebar.html" %}
 {% include "partials/init/_wiring.html" %}

@@ -235,10 +235,67 @@ function buildFilterBar(schema) {
     const clearBtn = schema.onClear
         ? `<button class="btn btn-secondary btn-sm" onclick="${schema.onClear}()"><i class="bi bi-funnel me-1"></i>${esc(schema.clearLabel ? schema.clearLabel() : t('clear_filters'))}</button>`
         : '';
-    return `<div class="ss-card mb-3"><div class="card-body py-2 px-3">
-        <div class="d-flex flex-wrap align-items-end gap-2">${fieldsHtml}${clearBtn}</div>
-        ${schema.footerHtml ? schema.footerHtml() : ''}
-    </div></div>`;
+    // Collapsible, and COLLAPSED BY DEFAULT: the field row costs a lot of vertical space that
+    // the table wants, and filtering is occasional. A thin always-visible header toggles it and
+    // carries a badge with how many filters are active, so a folded bar is never a silent
+    // filter. State is remembered per bar (idPrefix) across renders and reloads.
+    // NOTE: the toggled elements must NOT use Bootstrap's d-flex/d-none utilities — those carry
+    // !important and would beat the show/hide rules. Layout for them lives in web_admin.css.
+    const key = _filterBarKey(schema);
+    const collapsed = _filterBarCollapsed(schema);
+    const active = schema.fields.filter(f => {
+        const v = vals[f.key];
+        return Array.isArray(v) ? v.length : (v != null && v !== '');
+    }).length;
+    return `<div class="ss-card ss-filterbar${collapsed ? ' collapsed' : ''}" data-fb="${escAttr(key)}">
+        <div class="ss-fb-head" role="button" tabindex="0" aria-expanded="${collapsed ? 'false' : 'true'}"
+             onclick="toggleFilterBar('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleFilterBar('${key}')}"
+             title="${escAttr(t('filters_toggle'))}">
+            <i class="bi bi-funnel"></i><span>${esc(t('filters'))}</span>
+            ${active ? `<span class="badge text-bg-primary ss-fb-count">${active}</span>` : ''}
+            <i class="bi bi-chevron-down ss-collapse-caret ss-fb-caret"></i>
+        </div>
+        <div class="ss-fb-body"><div class="card-body py-2 px-3">
+            <div class="ss-fb-fields">${fieldsHtml}${clearBtn}</div>
+            ${schema.footerHtml ? schema.footerHtml() : ''}
+        </div></div>
+    </div>`;
+}
+
+const _filterBarKey = schema => schema.idPrefix || 'fb';
+// Default = collapsed: only an explicit '0' (the user opened it) keeps it expanded.
+const _filterBarCollapsed = schema => {
+    try { return localStorage.getItem('ss_fb_' + _filterBarKey(schema)) !== '0'; } catch (e) { return true; }
+};
+
+/** Sync a STATIC filter bar (one written in the template, not built by buildFilterBar) with
+ *  its remembered state — the markup ships collapsed, this opens it if the user left it open. */
+function initFilterBar(key) {
+    const el = document.querySelector(`.ss-filterbar[data-fb="${CSS.escape(key)}"]`);
+    if (!el) return;
+    let open = false;
+    try { open = localStorage.getItem('ss_fb_' + key) === '0'; } catch (e) {}
+    el.classList.toggle('collapsed', !open);
+    const head = el.querySelector('.ss-fb-head');
+    if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+/** Show how many filters are active on a folded bar, so it is never a silent filter. */
+function setFilterBarCount(key, n) {
+    const el = document.querySelector(`.ss-filterbar[data-fb="${CSS.escape(key)}"] .ss-fb-count`);
+    if (!el) return;
+    el.textContent = n;
+    el.hidden = !n;
+}
+
+/** Fold/unfold a filter bar's field row (persisted, so it survives a re-render). */
+function toggleFilterBar(key) {
+    const el = document.querySelector(`.ss-filterbar[data-fb="${CSS.escape(key)}"]`);
+    if (!el) return;
+    const collapsed = el.classList.toggle('collapsed');
+    const head = el.querySelector('.ss-fb-head');
+    if (head) head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    try { localStorage.setItem('ss_fb_' + key, collapsed ? '1' : '0'); } catch (e) {}
 }
 
 /** Read every field's current value from the DOM into a {key: value} object. */

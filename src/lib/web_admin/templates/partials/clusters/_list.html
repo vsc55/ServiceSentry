@@ -205,7 +205,7 @@ function _canWriteAnyCluster() {
 }
 createListTable({
     key: 'clusters', containerId: 'clusters-container', tableId: 'clusters-table',
-    cardClass: 'ss-card', accent: 'slate', icon: 'bi-diagram-3', title: () => esc(t('clusters_title')),
+    accent: 'slate', icon: 'bi-diagram-3', title: () => esc(t('clusters_title')),
     columns: ctx => _clCols((ctx && ctx.extraCols) || []),
     defaultVisible: ctx => {
         const s = new Set();

@@ -55,12 +55,14 @@ function _umPopulateRoles(searchVal) {
     container.innerHTML = h || '<span class="text-muted small">' + t('no_roles') + '</span>';
 }
 
-// ──────────────────────────── Account tab ─────────────────────────
-function openAccountSettingsModal() {
-    const dm = currentUser.pref_dark_mode;
-    document.getElementById('settingsDarkMode').value =
-        dm === null || dm === undefined ? 'auto' : (dm ? 'dark' : 'light');
-    document.getElementById('settingsLang').value = currentUser.pref_lang || '';
+// ──────────────────────────── Account page ────────────────────────
+// Populate the /account page fields from currentUser (called by the wiring once the
+// account page has loaded). Dark mode is NOT here — it is the quick toggle in the user
+// menu (_toggleTheme in partials/init/_sidebar.html).
+function initAccountPage() {
+    const langSel = document.getElementById('settingsLang');
+    if (!langSel) return;   // not on the account page
+    langSel.value = currentUser.pref_lang || '';
     // Landing page: "Default (…)" (inherit from group/global) + each HOME_PAGES destination.
     const _landSel = document.getElementById('settingsLanding');
     if (_landSel) {
@@ -78,14 +80,18 @@ function openAccountSettingsModal() {
     const spConf = document.getElementById('settingsPwConfirm');
     spConf.value = '';
     spConf.classList.remove('is-valid', 'is-invalid');
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('accountSettingsModal')).show();
+}
+
+// Cancel: leave the account pane without a reload. Going Back returns to the pane we opened
+// it from (opening it pushState'd /account); with no history to go back to, fall to Services.
+function _accountCancel() {
+    if (window.history.length > 1) window.history.back();
+    else _navTab('#tab-services');
 }
 
 async function saveAccountPreferences() {
-    const dmVal    = document.getElementById('settingsDarkMode').value;
     const langVal  = document.getElementById('settingsLang').value;
     const landVal  = document.getElementById('settingsLanding')?.value ?? '';
-    const darkMode = dmVal === 'auto' ? null : dmVal === 'dark';
     const prevLang = currentUser.pref_lang;
     const pwCur    = document.getElementById('settingsPwCurrent').value;
     const pwNew    = document.getElementById('settingsPwNew').value;
@@ -99,14 +105,16 @@ async function saveAccountPreferences() {
         if (!rp || !rp.ok) { showToast(rp?.error || t('password_change_error'), 'danger'); return; }
     }
 
-    const r = await apiPut('/api/v1/users/me/preferences', { lang: langVal, dark_mode: darkMode, landing_page: landVal });
+    // dark_mode is owned by the user-menu toggle; omit it here so the merging endpoint
+    // leaves it untouched. This page persists only language + landing page.
+    const r = await apiPut('/api/v1/users/me/preferences', { lang: langVal, landing_page: landVal });
     if (r && r.ok) {
-        const resolved = darkMode === null ? WA_DEFAULT_DARK_MODE : darkMode;
-        document.documentElement.setAttribute('data-bs-theme', resolved ? 'dark' : 'light');
-        currentUser.pref_dark_mode = darkMode;
         currentUser.pref_lang = langVal;
         currentUser.pref_landing_page = landVal;
-        bootstrap.Modal.getInstance(document.getElementById('accountSettingsModal'))?.hide();
+        ['settingsPwCurrent', 'settingsPwNew', 'settingsPwConfirm'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.value = ''; el.classList.remove('is-valid', 'is-invalid'); }
+        });
         showToast(t('preferences_saved'));
         if (langVal !== prevLang) setTimeout(() => location.reload(), 800);
     } else {

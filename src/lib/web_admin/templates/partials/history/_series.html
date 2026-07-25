@@ -16,6 +16,10 @@ function _historyShowPlaceholder() {
 // ── Series list ───────────────────────────────────────────────────────────────
 function _historyOnSearch(val) {
     _historyFilter = val.toLowerCase();
+    // Reflect the value in the sidebar filter input (unless it is the one being typed into),
+    // e.g. when a deep-link / compare action sets the filter programmatically.
+    const inp = document.getElementById('history-series-filter');
+    if (inp && inp !== document.activeElement && inp.value !== val) inp.value = val;
     _historyRenderSeriesList();
 }
 
@@ -151,6 +155,15 @@ function _historySelectSeries(mod, key, ev) {
 function _historyRefresh() {
     if (_historyCompare) { if (_historyCompareSel.length) _historyLoadCompare(); }
     else if (_historyMod && _historyKey) _historyLoadChart();
+    // A manual refresh restarts the auto-refresh cycle. Re-arm the timer WITHOUT re-rendering
+    // the control, so the fill bar keeps its element and its gradient transitions smoothly from
+    // its current position back to 100% (like the natural end-of-countdown reset), not a jump.
+    if (_historyTimer && _historyTimer._interval) {
+        const secs = _historyTimer._interval;
+        clearInterval(_historyTimer._id);
+        _historyTimer = { _id: setInterval(_historyAutoTick, secs * 1000), _interval: secs };
+        _startHistoryCountdown(secs);
+    }
 }
 
 function _historyShowToolbar() {
@@ -183,6 +196,9 @@ function _historyUpdateCompareBtn() {
 function _historyHideToolbar() {
     const tb = document.getElementById('history-toolbar');
     if (tb) tb.style.setProperty('display', 'none', 'important');
+    // The title lives in the header now, always visible → reset it to the section name.
+    const title = document.getElementById('history-title');
+    if (title) title.textContent = t('tab_history');
 }
 
 function _historyOnRangeChange(val) {
