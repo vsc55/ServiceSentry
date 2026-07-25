@@ -485,6 +485,42 @@ flowchart TB
 - **Dónde acaban:** el asistente los usa para registrar la app en Entra vía Graph y devolver las
   credenciales. Detalle en [caso-entra-id.md](caso-entra-id.md).
 
+### Paso opcional: asignación RBAC en Azure (`azure_rbac`)
+
+El acceso a **Azure no es un permiso de API de Entra**: leer una suscripción exige una
+**asignación de rol RBAC sobre esa suscripción**, que es una operación de **ARM** contra otro
+*audience* (`management.azure.com`). Por eso no puede viajar con el consentimiento de Graph y es
+un paso encadenado aparte, declarable por el módulo:
+
+```json
+"__entraid_provision__": {
+    "resources": [{"resource": "797f4846-…", "scopes": ["user_impersonation"]}],
+    "azure_rbac": {"role": "reader", "field": "subscription_id"}
+}
+```
+
+- `role` — rol integrado a asignar (hoy `reader`, con su id well-known en `ARM_ROLES`).
+- `field` — **qué campo de la credencial** contiene el objetivo. El id de suscripción es un dato
+  del usuario, no del schema, así que el asistente lo toma del formulario; es el único motivo por
+  el que este bloque viaja al cliente (el `role` se relee en el servidor: el cliente no elige rol).
+
+**Cómo encaja en el flujo,** sin pedir dos inicios de sesión:
+
+1. si el perfil declara `azure_rbac`, el device-code añade **`offline_access`** — sin refresh
+   token no hay forma de obtener el segundo token;
+2. tras crear la app, `auth.token_from_refresh()` canjea ese refresh por un token de **ARM**;
+3. `provisioning.assign_subscription_role()` asigna el rol al **object id del service principal**
+   (que `provision_entra_app` ahora devuelve como `sp_object_id`).
+
+El resultado viaja en `fields.azure_rbac` y se audita (`entra_azure_rbac_assigned` /
+`…_failed`). **Nunca es fatal**: si falla, la app y el secreto ya son utilizables y el rol puede
+asignarse a mano. Una asignación ya existente (409 `RoleAssignmentExists`) cuenta como éxito, así
+que repetir el asistente es seguro.
+
+> ⚠️ Quien ejecuta el asistente debe ser **Owner** o **User Access Administrator** en la
+> suscripción: ser administrador de Entra **no basta**, y ese es el origen habitual de un 403 en
+> este paso.
+
 ---
 
 ## 7b. Acciones de config y UI aportadas por un paquete (`CONFIG_ACTIONS` + `web/`)

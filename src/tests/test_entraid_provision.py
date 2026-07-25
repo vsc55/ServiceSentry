@@ -74,8 +74,11 @@ def test_provisions_app_with_requested_roles():
     with patch('lib.providers.entraid.provisioning._req', fake):
         result = _provision_module_app('admin-token', 'contoso.onmicrosoft.com',
                                        ['Sites.Read.All', 'Reports.Read.All'], app_name='Mon')
+    # The credential fields, plus the service principal's OBJECT id — what an Azure RBAC
+    # role assignment takes as its principalId (see the azure_rbac wizard step).
     assert result == {'tenant_id': 'contoso.onmicrosoft.com',
-                      'client_id': 'new-client', 'client_secret': 's3cr3t'}
+                      'client_id': 'new-client', 'client_secret': 's3cr3t',
+                      'sp_object_id': 'new-sp'}
     # The app declares only the two requested roles (not Mail.Read).
     app_body = next(b for u, b in fake.posts if u.endswith('/applications'))
     ids = {a['id'] for a in app_body['requiredResourceAccess'][0]['resourceAccess']}

@@ -5,6 +5,22 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **The provisioning wizard can now grant Azure access, not just API permissions.** Registering an
+  app was never enough for Azure: reading a subscription needs an **RBAC role assignment on that
+  subscription**, an ARM operation against a different audience (`management.azure.com`) that an
+  Entra app role does not grant — so the wizard left the one step that actually gives access to be
+  done by hand. A module declares `azure_rbac: {role, field}` inside `__entraid_provision__` and
+  the wizard chains it after the app exists, **without a second sign-in**: the flow adds
+  `offline_access`, the refresh token is redeemed for an ARM token (`auth.token_from_refresh`), and
+  the role is assigned to the app's service principal — whose object id `provision_entra_app` now
+  returns. `field` names the credential field holding the target, because the subscription is the
+  user's value, not the schema's; the role is re-read server-side, so the client cannot pick one.
+  The step is reported in `fields.azure_rbac` and audited, and is **never fatal**: the app and its
+  secret are already usable if it fails. An assignment that already exists counts as success, so
+  re-running the wizard is safe. The `azure` module declares it, and its credential gained a
+  *provision app* button plus a link to the subscription's Access control blade — because whoever
+  runs the wizard must be **Owner** or **User Access Administrator** there; being an Entra admin is
+  not enough, and that is the usual cause of a 403 on this step.
 - **A watchful module can claim a top-level section of its own (`schema.json` → `__page__`).**
   Sections were the one extensible surface with no discovery: `HOME_PAGES` was a literal tuple, the
   panes were hand-written in `dashboard.html`, the URL→pane map was a literal, and the render wiring

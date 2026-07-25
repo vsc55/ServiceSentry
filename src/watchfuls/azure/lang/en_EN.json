@@ -35,7 +35,8 @@
     },
     "action_labels": {
         "test_connection": "Test",
-        "page_refresh": "Refresh from Azure"
+        "page_refresh": "Refresh from Azure",
+        "az_link_subscription_iam": "Open the subscription (Access control)"
     },
     "new_item_key_label": "Subscription name",
     "collections": {
@@ -52,12 +53,25 @@
         "az_public_open": "{} entries in the public Azure status feed — latest: {}"
     },
     "messages_vars": {
-        "az_auth_fail": ["error"],
-        "az_health_fail": ["error"],
-        "az_health_ok": ["hours"],
-        "az_health_event": ["title"],
-        "az_public_fail": ["error"],
-        "az_public_open": ["count", "latest"]
+        "az_auth_fail": [
+            "error"
+        ],
+        "az_health_fail": [
+            "error"
+        ],
+        "az_health_ok": [
+            "hours"
+        ],
+        "az_health_event": [
+            "title"
+        ],
+        "az_public_fail": [
+            "error"
+        ],
+        "az_public_open": [
+            "count",
+            "latest"
+        ]
     },
     "widget": {
         "checks": "Checks",

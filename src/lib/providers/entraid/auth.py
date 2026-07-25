@@ -60,6 +60,32 @@ def app_token(tenant: str, client_id: str, client_secret: str,
     return access_token
 
 
+def token_from_refresh(refresh_token: str, scope: str,
+                       client_id: str = DCF_CLIENT_ID, tenant: str = 'common') -> str:
+    """Exchange a refresh token for an access token on ANOTHER audience.
+
+    A device-code sign-in yields a token for one audience only, but the same consent
+    can be redeemed for others: this is how an admin who signed in for Microsoft Graph
+    also gets a token for ``management.azure.com`` (Azure RBAC is an ARM operation, not
+    a Graph one) without signing in twice.  Requires the original flow to have asked
+    for ``offline_access``, or there is no refresh token to exchange.
+
+    Raises ``RuntimeError`` with the provider message on failure.
+    """
+    if not refresh_token:
+        raise RuntimeError('no refresh token (the sign-in did not request offline_access)')
+    tok = _req.post(
+        f'{AUTHORITY}/{tenant}/oauth2/v2.0/token',
+        data={'grant_type': 'refresh_token', 'refresh_token': refresh_token,
+              'client_id': client_id, 'scope': scope},
+        timeout=15).json()
+    access_token = tok.get('access_token')
+    if not access_token:
+        raise RuntimeError(tok.get('error_description') or tok.get('error')
+                           or 'refresh token exchange failed')
+    return access_token
+
+
 def device_code_start(scope: str = PROVISION_SCOPE, client_id: str = DCF_CLIENT_ID) -> dict:
     """Begin the Device Code Flow; returns the raw devicecode response
     (``device_code``, ``user_code``, ``verification_uri``,

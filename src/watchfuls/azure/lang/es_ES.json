@@ -35,7 +35,8 @@
     },
     "action_labels": {
         "test_connection": "Probar",
-        "page_refresh": "Actualizar desde Azure"
+        "page_refresh": "Actualizar desde Azure",
+        "az_link_subscription_iam": "Abrir la suscripción (Control de acceso)"
     },
     "new_item_key_label": "Nombre de la suscripción",
     "collections": {
@@ -52,12 +53,25 @@
         "az_public_open": "{} entradas en el feed público de estado de Azure — última: {}"
     },
     "messages_vars": {
-        "az_auth_fail": ["error"],
-        "az_health_fail": ["error"],
-        "az_health_ok": ["horas"],
-        "az_health_event": ["titulo"],
-        "az_public_fail": ["error"],
-        "az_public_open": ["cantidad", "ultima"]
+        "az_auth_fail": [
+            "error"
+        ],
+        "az_health_fail": [
+            "error"
+        ],
+        "az_health_ok": [
+            "horas"
+        ],
+        "az_health_event": [
+            "titulo"
+        ],
+        "az_public_fail": [
+            "error"
+        ],
+        "az_public_open": [
+            "cantidad",
+            "ultima"
+        ]
     },
     "widget": {
         "checks": "Comprobaciones",

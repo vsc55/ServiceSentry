@@ -172,10 +172,13 @@ def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
         raise RuntimeError((r2.json().get('error') or {}).get('message') or r2.text)
     client_secret = r2.json()['secretText']
     # 3) service principal + 4) admin consent per resource (best-effort).
+    # Kept outside the try so the caller can still learn the SP object id even if a
+    # later best-effort step failed — an Azure RBAC assignment needs exactly that id.
+    sp_object_id = None
     try:
         r3 = _req.post(f'{GRAPH_BASE}/servicePrincipals', headers=hdrs, timeout=15,
                        json={'appId': client_id, 'tags': ['WindowsAzureActiveDirectoryIntegratedApp']})
-        sp_id = r3.json().get('id') if r3.ok else None
+        sp_id = sp_object_id = r3.json().get('id') if r3.ok else None
         if sp_id:
             if require_assignment:                      # only assigned users/apps may sign in
                 try:
@@ -201,6 +204,10 @@ def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
     except Exception:  # pylint: disable=broad-except
         pass
     out = {'tenant_id': tenant_id, 'client_id': client_id, 'client_secret': client_secret}
+    if sp_object_id:
+        # The service principal's OBJECT id (not the app/client id): what an Azure RBAC
+        # role assignment takes as its principalId.
+        out['sp_object_id'] = sp_object_id
     if expose_api:
         out['sso_exposed'] = bool(sso_exposed)
         if sso_error:
@@ -644,3 +651,66 @@ def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
         pass
     return {'tenant_id': tenant_id, 'client_id': client_id, 'granted': granted,
             'already': sorted(set(already)), 'missing': sorted(set(missing))}
+
+
+# ── Azure Resource Manager: RBAC role assignment ──────────────────────────────
+# Azure access is NOT an Entra app permission. Reading a subscription's Service
+# Health needs an Azure **RBAC role assignment** on that subscription, which is an
+# ARM operation against a different audience (management.azure.com) — so it cannot
+# ride along with the Graph consent above and gets its own step.
+ARM_BASE = 'https://management.azure.com'
+# Well-known built-in role definition ids (stable across every tenant).
+ARM_ROLES = {
+    'reader': 'acdd72a7-3385-48ef-bd42-f606fba81ae7',
+}
+
+
+def assign_subscription_role(arm_token: str, subscription_id: str, principal_id: str,
+                             role: str = 'reader') -> dict:
+    """Assign a built-in Azure role to a service principal ON a subscription.
+
+    *arm_token* must be issued for ``management.azure.com`` and belong to someone who
+    may create role assignments there (**Owner** or **User Access Administrator**);
+    being an Entra admin is NOT enough, which is the usual cause of a 403 here.
+
+    Returns ``{'ok': bool, 'already': bool, 'role': str, 'message': str}`` — an
+    existing identical assignment (409 ``RoleAssignmentExists``) counts as success, so
+    re-running the wizard is safe.
+    """
+    role_id = ARM_ROLES.get(str(role or 'reader').lower())
+    if not role_id:
+        return {'ok': False, 'already': False, 'role': role, 'message': f'unknown role: {role}'}
+    if not (subscription_id and principal_id):
+        return {'ok': False, 'already': False, 'role': role,
+                'message': 'subscription id and principal id are required'}
+    sub = str(subscription_id).strip()
+    # The assignment NAME must be a GUID and is what makes the call idempotent-ish;
+    # a fresh one plus the 409 handling below covers the re-run case.
+    import uuid as _uuid  # noqa: PLC0415 (local: only this ARM path needs it)
+    name = str(_uuid.uuid4())
+    url = (f'{ARM_BASE}/subscriptions/{sub}/providers/Microsoft.Authorization/'
+           f'roleAssignments/{name}?api-version=2022-04-01')
+    body = {'properties': {
+        'roleDefinitionId': (f'/subscriptions/{sub}/providers/Microsoft.Authorization/'
+                             f'roleDefinitions/{role_id}'),
+        'principalId': principal_id,
+        # Without this ARM may reject a brand-new SP it has not replicated yet.
+        'principalType': 'ServicePrincipal',
+    }}
+    try:
+        r = _req.put(url, headers={'Authorization': f'Bearer {arm_token}',
+                                   'Content-Type': 'application/json'},
+                     json=body, timeout=20)
+    except Exception as exc:  # pylint: disable=broad-except
+        return {'ok': False, 'already': False, 'role': role, 'message': str(exc)}
+    if r.ok:
+        return {'ok': True, 'already': False, 'role': role, 'message': ''}
+    detail = ''
+    try:
+        detail = ((r.json() or {}).get('error') or {}).get('message') or ''
+    except Exception:  # pylint: disable=broad-except
+        detail = (r.text or '')[:200]
+    if r.status_code == 409 or 'RoleAssignmentExists' in (detail or ''):
+        return {'ok': True, 'already': True, 'role': role, 'message': ''}
+    return {'ok': False, 'already': False, 'role': role,
+            'message': detail or f'HTTP {r.status_code}'}

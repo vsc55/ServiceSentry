@@ -34,7 +34,11 @@ import time
 from flask import jsonify
 
 from lib.providers.entraid import auth, directory, provisioning
-from lib.providers.entraid.client import GRAPH_CLI_CLIENT_ID, SCIM_PROVISION_SCOPE
+from lib.providers.entraid.client import GRAPH_CLI_CLIENT_ID, PROVISION_SCOPE, SCIM_PROVISION_SCOPE
+
+# Azure Resource Manager audience — the RBAC step signs in for Graph and redeems the
+# same consent here (see auth.token_from_refresh).
+ARM_SCOPE = 'https://management.azure.com/.default'
 
 
 def _public_base(wa) -> str:
@@ -570,8 +574,13 @@ def register(app, wa):
         if not prof or not prof.get('resources'):
             return jsonify({'error': wa._t('cred_prov_error')}), 400
         app_name = (body.get('app_name') or prof['app_name']).strip() or prof['app_name']
+        # An Azure RBAC step needs a SECOND token (audience management.azure.com), which
+        # means a refresh token — so this flow, and only this flow, adds offline_access.
+        rbac = dict(prof.get('azure_rbac') or {})
+        rbac_target = str(body.get(rbac.get('field') or '') or '').strip() if rbac else ''
         try:
-            d = auth.device_code_start()
+            d = (auth.device_code_start(scope=PROVISION_SCOPE + ' offline_access')
+                 if rbac_target else auth.device_code_start())
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'error': str(exc) or wa._t('cred_prov_error')}), 502
         flow_token = secrets.token_urlsafe(16)
@@ -594,6 +603,8 @@ def register(app, wa):
             # the app can be admin-installed as a Teams app (used by the Teams wizard).
             'expose_api': bool(body.get('expose_api')),
             'ensure_client_id': ensure_client_id,
+            'azure_rbac': rbac if rbac_target else {},
+            'rbac_target': rbac_target,
             'kind': 'module',
         }
         return jsonify({'flow_token': flow_token, 'user_code': d['user_code'],
@@ -667,6 +678,28 @@ def register(app, wa):
             wa._entra_flows.pop(ftok, None)
             wa._audit('entra_app_provision_failed', detail={'tenant_id': tenant_id, 'error': str(exc)})
             return jsonify({'status': 'error', 'message': str(exc)})
+        # Azure RBAC step (declared by the module): the app now exists, so grant its
+        # service principal a role ON the subscription. Separate audience → exchange the
+        # refresh token for an ARM one. Reported, never fatal: the app + secret are
+        # already usable, and the admin can assign the role by hand.
+        rbac = flow.get('azure_rbac') or {}
+        target = flow.get('rbac_target') or ''
+        if rbac and target:
+            sp_oid = result.get('sp_object_id')
+            try:
+                if not sp_oid:
+                    raise RuntimeError('the service principal was not created')
+                arm_tok = auth.token_from_refresh(b.get('refresh_token', ''), ARM_SCOPE)
+                rep = provisioning.assign_subscription_role(
+                    arm_tok, target, sp_oid, role=rbac.get('role', 'reader'))
+            except Exception as exc:  # pylint: disable=broad-except
+                rep = {'ok': False, 'already': False,
+                       'role': rbac.get('role', 'reader'), 'message': str(exc)}
+            result['azure_rbac'] = rep
+            wa._audit('entra_azure_rbac_assigned' if rep.get('ok') else 'entra_azure_rbac_failed',
+                      detail={'subscription_id': target, 'role': rep.get('role'),
+                              'principal_id': sp_oid or '', 'already': rep.get('already'),
+                              'error': rep.get('message', '')})
         wa._entra_flows.pop(ftok, None)
         _det = {'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id,
                 'client_id': result.get('client_id', '')}

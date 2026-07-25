@@ -22,6 +22,11 @@ LANG = {
     'admin_panel': 'Sistema',
     'sidebar_toggle': 'Contraer / expandir menú',
     'theme_toggle': 'Cambiar claro / oscuro',
+    'prov_entraid_rbac_ask': 'Suscripción de Azure a monitorizar. El asistente concederá a la nueva app el rol Lector sobre ella — déjalo en blanco para crear solo la app y asignar el rol por tu cuenta.',
+    'prov_entraid_rbac_ask_ph': 'Id de suscripción (opcional)',
+    'prov_entraid_rbac_skipped': 'App creada, pero el rol de Azure NO se ha asignado: falta el id de suscripción. Rellénalo y vuelve a ejecutarlo, o concede a la app el rol Lector sobre la suscripción a mano.',
+    'prov_entraid_rbac_failed': 'App creada, pero no se pudo asignar el rol de Azure: {}. Asignarlo exige ser Owner o User Access Administrator en la suscripción.',
+    'prov_entraid_rbac_ok': 'Rol de Azure asignado sobre la suscripción.',
     'loading': 'Cargando…',
     # Renderizador genérico de una sección aportada por un módulo (schema.json → __page__).
     'page_refresh_live':  'Actualizar ahora',

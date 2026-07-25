@@ -86,7 +86,24 @@ def normalize_entraid_provision(decl: dict) -> dict:
         'redirect_uris': [str(u) for u in (decl.get('redirect_uris') or []) if str(u).strip()],
         'group_claims': bool(decl.get('group_claims')),
         'require_assignment': bool(decl.get('require_assignment')),
+        # Optional Azure RBAC step. Azure access is NOT an Entra app permission: reading a
+        # subscription needs a role assignment ON that subscription, an ARM operation on a
+        # different audience. A module declares it here and the wizard chains it after the
+        # app exists; the subscription id comes from the user (it is not in the schema).
+        #   "azure_rbac": {"role": "reader", "field": "subscription_id"}
+        'azure_rbac': _azure_rbac(decl.get('azure_rbac')),
     }
+
+
+def _azure_rbac(decl) -> dict:
+    """Normalise the optional ``azure_rbac`` block; ``{}`` when absent or unusable."""
+    if not isinstance(decl, dict):
+        return {}
+    role = str(decl.get('role') or 'reader').strip().lower()
+    field = str(decl.get('field') or 'subscription_id').strip()
+    if not role or not field:
+        return {}
+    return {'role': role, 'field': field}
 
 
 def entraid_provision_extras(schema: dict) -> dict:
@@ -101,9 +118,13 @@ def entraid_provision_extras(schema: dict) -> dict:
         return {}
     n = normalize_entraid_provision(ep)
     out = {'app_name': n['app_name'], 'app_roles': n['app_roles'], 'resources': n['resources']}
-    for k in ('redirect_uris', 'group_claims', 'require_assignment'):
+    for k in ('redirect_uris', 'group_claims', 'require_assignment', 'azure_rbac'):
         if n.get(k):
             out[k] = n[k]
+    # `azure_rbac` travels to the client for ONE reason: it names the credential field
+    # (e.g. subscription_id) whose value the wizard must post, since the RBAC target is
+    # the user's, not the schema's. The role itself is re-read server-side — the client
+    # cannot pick which role it gets.
     return out
 
 

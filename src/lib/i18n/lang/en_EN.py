@@ -22,6 +22,11 @@ LANG = {
     'admin_panel': 'System',
     'sidebar_toggle': 'Collapse / expand menu',
     'theme_toggle': 'Toggle light / dark',
+    'prov_entraid_rbac_ask': 'Azure subscription to monitor. The wizard will grant the new app the Reader role on it — leave it blank to create the app only and assign the role yourself.',
+    'prov_entraid_rbac_ask_ph': 'Subscription id (optional)',
+    'prov_entraid_rbac_skipped': 'App created, but the Azure role was NOT assigned: no subscription id. Fill it in and run this again, or grant the app Reader on the subscription by hand.',
+    'prov_entraid_rbac_failed': 'App created, but the Azure role could not be assigned: {}. Assigning it requires Owner or User Access Administrator on the subscription.',
+    'prov_entraid_rbac_ok': 'Azure role assigned on the subscription.',
     'loading': 'Loading…',
     # Generic renderer for a module-contributed section (schema.json → __page__).
     'page_refresh_live':  'Refresh now',

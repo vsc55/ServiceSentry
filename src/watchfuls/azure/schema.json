@@ -17,6 +17,15 @@
         "alert":   {"type": "int", "default": 3,  "min": 1, "max": 20},
         "timeout": {"type": "int", "default": 15, "min": 0, "inherit_blank": true, "max": 300}
     },
+    "__entraid_provision__": {
+        "app_name": "ServiceSentry Azure Monitor",
+        "app_roles": [],
+        "resources": [
+            {"resource": "797f4846-ba00-4fd7-ba43-dac1f8f63013",
+             "scopes": ["user_impersonation"]}
+        ],
+        "azure_rbac": {"role": "reader", "field": "subscription_id"}
+    },
     "__credential__": {
         "type": "azure_app",
         "icon": "bi-cloud-haze2",
@@ -25,6 +34,32 @@
             {"name": "client_id",       "kind": "text",     "label": "client_id"},
             {"name": "client_secret",   "kind": "password", "secret": true, "label": "client_secret"},
             {"name": "subscription_id", "kind": "text",     "label": "subscription_id"}
+        ],
+        "actions": [
+            {
+                "id": "provision_app",
+                "label": "prov_entraid_action_provision_app",
+                "url": "/api/v1/auth/entraid/provision/device-code",
+                "icon": "bi-cloud-haze2",
+                "result": "device_code",
+                "provision": {"profile": "azure"}
+            }
+        ],
+        "links": [
+            {
+                "id": "open_app",
+                "label": "prov_entraid_action_open_app",
+                "icon": "bi-box-arrow-up-right",
+                "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/{client_id}",
+                "require": ["client_id"]
+            },
+            {
+                "id": "open_subscription_iam",
+                "label": "az_link_subscription_iam",
+                "icon": "bi-person-badge",
+                "url": "https://portal.azure.com/#@/resource/subscriptions/{subscription_id}/users",
+                "require": ["subscription_id"]
+            }
         ]
     },
     "list": {
