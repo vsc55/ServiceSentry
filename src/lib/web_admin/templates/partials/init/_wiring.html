@@ -14,9 +14,11 @@ const _bootTrack = fn => function (...args) {
     _bootRenderStarted();
     return p;
 };
-for (const n of ['renderOverview', 'renderHistory', 'renderSyslog', 'renderAudit', 'renderEvents',
-                 'renderFail2ban', 'renderServices', 'initAccountPage',
-                 'reloadConfig', 'reloadModules', 'reloadHosts']) {
+// The SECTION renders (Overview/History/Syslog and any module-contributed one) are not
+// listed here: the registry loop below wraps them as it wires them, so each is wrapped
+// exactly once. These are the panel tabs, which have no registry descriptor.
+for (const n of ['renderAudit', 'renderEvents', 'renderFail2ban', 'renderServices',
+                 'initAccountPage', 'reloadConfig', 'reloadModules', 'reloadHosts']) {
     if (typeof window[n] === 'function') window[n] = _bootTrack(window[n]);
 }
 // Safety net for any landing section whose render is not on that list: the sidebar sees the
@@ -91,8 +93,22 @@ renderRoles();
 renderGroups();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
-document.getElementById('btn-nav-history')?.addEventListener('shown.bs.tab', renderHistory);
-document.getElementById('btn-nav-syslog')?.addEventListener('shown.bs.tab', renderSyslog);
+// Section render entry points come from the registry (each descriptor names its own JS
+// function), so a module-contributed section is wired without naming it here. The render
+// is resolved at CALL time: a module ships its function in web/_ui.html, and looking it
+// up lazily keeps the wiring independent of include order.
+for (const _p of (window.SS_STANDALONE_PAGES || [])) {
+    // A module page that declares no render gets the core's generic renderer, which
+    // paints whatever its page_data hook returned — contributing a section costs no
+    // front-end code at all. Core sections always name their own function.
+    const _fallback = _p.module ? () => renderModulePage(_p) : null;
+    if (!_p.render && !_fallback) continue;
+    document.getElementById('btn-nav-' + _p.id)?.addEventListener('shown.bs.tab', () => {
+        const fn = _p.render ? window[_p.render] : _fallback;
+        if (typeof fn === 'function') return _bootTrack(fn)();
+        console.error(`section "${_p.id}" declares render "${_p.render}", which is not defined`);
+    });
+}
 // Account page as an SPA pane: (re)populate its fields from currentUser each time it opens.
 document.getElementById('btn-nav-account')?.addEventListener('shown.bs.tab', initAccountPage);
 document.getElementById('btn-tab-ipban')?.addEventListener('shown.bs.tab', renderFail2ban);
@@ -133,7 +149,6 @@ document.getElementById('btnResetPasswordOk').addEventListener('click', resetUse
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
 document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
 
-document.getElementById('btn-nav-overview')?.addEventListener('shown.bs.tab', renderOverview);
 // Credentials now lives under Infrastructure: re-fetch on open (load-on-access) + persist key.
 document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', async () => {
     localStorage.setItem('ss_active_subtab_infra', '#subtab-credentials');

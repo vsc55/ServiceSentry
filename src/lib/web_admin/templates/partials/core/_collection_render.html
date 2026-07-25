@@ -383,7 +383,7 @@ function renderCollection(title, data, pathStr, target) {
     // full URL so each module only needs to declare what it supports, not the full path.
     const _discoverAction = _colSchema && _colSchema['__discovery__'] ? _colSchema['__discovery__'] : null;
     const _discoverVer    = (ITEM_SCHEMAS[`${_modNameCol}|__module__`] || {})['api_ver'] || 'v1';
-    const _discoverUrl = _discoverAction ? `/api/${_discoverVer}/watchfuls/${_modNameCol}/${_discoverAction}` : null;
+    const _discoverUrl = _discoverAction ? `/api/${_discoverVer}/modules/watchfuls/${_modNameCol}/${_discoverAction}` : null;
     const _unsupported = _colSchema && _colSchema['__unsupported__'] === true;
     const canAddItem = target !== 'modules' || hasModulePerm(_modNameCol, 'add');
     const canDelColItems = target !== 'modules' || hasModulePerm(_modNameCol, 'delete');

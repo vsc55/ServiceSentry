@@ -114,9 +114,11 @@ class Watchful(ModuleBase):
     # App provisioning is the shared Entra ID device-code wizard (core), driven by the
     # module's __entraid_provision__ roles — not a watchful action here.
     WATCHFUL_ACTIONS: frozenset[str] = frozenset(
-        {'test_connection', 'list_sites', 'list_services'})
+        {'test_connection', 'list_sites', 'list_services', 'page_refresh'})
+    # All read-only: they query Microsoft and change nothing here, so modules_view is
+    # enough (a non-read-only action would additionally demand per-module edit).
     READ_ONLY_ACTIONS: frozenset[str] = frozenset(
-        {'test_connection', 'list_sites', 'list_services'})
+        {'test_connection', 'list_sites', 'list_services', 'page_refresh'})
 
     # Per-service checks (extension point): add a (config_toggle, method) pair here
     # + the toggle/fields in schema.json + the method below, and a new M365 service
@@ -711,6 +713,108 @@ class Watchful(ModuleBase):
         }
 
     # ── Web action: test connection ───────────────────────────────────────
+
+    # ── Section page (schema __page__ → /m365) ──────────────────────────────────
+    @classmethod
+    def _page_sections(cls, status: dict, lang: str) -> list:
+        """Group the check results into one section per KIND, with the numbers each
+        check already publishes in ``other_data`` — no extra Graph call.
+
+        Shared by the cached hook (``page_data``) and the live refresh, so both render
+        identically; only where ``status`` came from differs."""
+        labels = cls._lang_section(lang, 'labels')
+        by_kind: dict = {}
+        for k, v in (status or {}).items():
+            if not isinstance(v, dict) or 'status' not in v:
+                continue                                   # bookkeeping-only key
+            parts = str(k).split('/')
+            kind = parts[1] if len(parts) >= 2 else ''
+            if kind:
+                by_kind.setdefault(kind, []).append((k, v))
+        out = []
+        for tog, sfx, _m in cls._SERVICES:                 # stable, declared order
+            rows_v = by_kind.get(sfx)
+            if not rows_v:
+                continue
+            rows, n_ok, n_warn, n_err = [], 0, 0, 0
+            for key, v in sorted(rows_v, key=lambda kv: kv[0]):
+                od = v.get('other_data') or {}
+                ok = v.get('status') is True
+                state = 'ok' if ok else ('warn' if v.get('severity') == 'warning' else 'error')
+                n_ok += ok
+                n_warn += state == 'warn'
+                n_err += state == 'error'
+                rows.append({
+                    'key': key,
+                    'name': od.get('service') or od.get('name') or key.split('/')[-1],
+                    'state': state,
+                    'message': v.get('message') or '',
+                    # Everything the check measured (used %, free bytes, days_left, score…)
+                    # travels as-is: the page renders whatever the module put there.
+                    'metrics': {mk: mv for mk, mv in od.items()
+                                if mk not in ('name', 'service') and isinstance(mv, (int, float, str))},
+                })
+            out.append({
+                'id': sfx, 'name': labels.get(tog) or sfx,
+                'state': 'ok' if not (n_warn or n_err) else ('error' if n_err else 'warn'),
+                'counts': {'ok': n_ok, 'warn': n_warn, 'error': n_err, 'total': len(rows)},
+                'rows': rows,
+            })
+        return out
+
+    @classmethod
+    def page_data(cls, items: dict, status: dict, lang: str = 'en_EN') -> dict:
+        """Data for the module's own section (``__page__`` → ``/m365``).
+
+        The CACHED half of the page: it reads the monitor's last results, so opening the
+        section is instant and costs no Graph call. Refreshing live is the ``page_refresh``
+        action below. Classmethod-safe (no monitor), like ``overview_widget``."""
+        sections = cls._page_sections(status, lang)
+        tot = {'ok': 0, 'warn': 0, 'error': 0, 'total': 0}
+        for s in sections:
+            for k in tot:
+                tot[k] += s['counts'][k]
+        return {
+            'sections': sections,
+            'counts': tot,
+            'live': False,
+            # The configured tenants, so the page can offer a per-item refresh.
+            'items': [{'key': k, 'label': (it or {}).get('label') or k}
+                      for k, it in (items or {}).items()
+                      if isinstance(it, dict) and it.get('enabled', True)],
+            'labels': cls._lang_section(lang, 'labels'),
+            'ui': cls._lang_section(lang, 'ui'),
+        }
+
+    @classmethod
+    def page_refresh(cls, config: dict) -> dict:
+        """POST /api/v1/modules/watchfuls/m365/page_refresh — the LIVE half.
+
+        Runs the item's enabled checks against Graph right now and returns the same shape
+        as ``page_data``, so the page swaps one for the other without a second renderer.
+        Read-only: it queries Microsoft, it changes nothing here."""
+        from lib.core.hosts.probe import run_module_check  # noqa: PLC0415 (web-only path)
+        item = {k: v for k, v in (config or {}).items()
+                if not (str(k).startswith('__') and str(k).endswith('__'))
+                and k not in ('_item_key', 'cred_uid', '_service', '_lang')}
+        item['enabled'] = True
+        key = str((config or {}).get('_item_key') or 'page')
+        lang = str((config or {}).get('_lang') or 'en_EN')
+        mods_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            raw = run_module_check('m365', {'watchfuls.m365': {'list': {key: item}}},
+                                   modules_dir=mods_dir)
+        except Exception as exc:  # pylint: disable=broad-except
+            return {'ok': False, 'message': str(exc)}
+        # run_module_check returns a flat list of results; rebuild the status shape the
+        # section grouping expects ({key: {status, severity, message, other_data}}).
+        status = {str(r.get('key')): r for r in (raw or []) if isinstance(r, dict)}
+        sections = cls._page_sections(status, lang)
+        tot = {'ok': 0, 'warn': 0, 'error': 0, 'total': 0}
+        for s in sections:
+            for k in tot:
+                tot[k] += s['counts'][k]
+        return {'ok': True, 'sections': sections, 'counts': tot, 'live': True}
 
     @classmethod
     def test_connection(cls, config: dict) -> dict:

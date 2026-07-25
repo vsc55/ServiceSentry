@@ -35,7 +35,7 @@ from lib.core.hosts.profiles import (
 from lib.modules.discovery.credential_schemas import credential_schemas
 from lib.modules.discovery.overview_widgets import overview_widgets_catalog
 from lib.core.overview.discovery import discover_overview_widgets_public as _discover_overview_widgets
-from ..constants import standalone_pages
+from ..constants import page_label, standalone_pages
 
 
 def register(app, wa):
@@ -57,6 +57,7 @@ def register(app, wa):
         the SAME full shell with all panes; the client activates the pane the URL points at
         (``_sbPaneIdFromPath``), so navigating between sections never reloads the page. The
         section routes still exist for shareable/bookmarkable URLs and are permission-gated."""
+        _lang = session.get('lang') or wa._default_lang
         html = render_template(
             'dashboard.html',
             # Kept for the template's (now vestigial) guards + the SS_STANDALONE_PAGE var:
@@ -64,7 +65,13 @@ def register(app, wa):
             standalone='',
             # Registry-driven: the navbar builds its buttons from this and the wiring
             # calls the declared render entry point for the active standalone page.
-            standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone']}
+            # `label` is resolved here so the template needs one key for both kinds of
+            # page: a core page translates its nav_label_key, a module page carries its
+            # own label_i18n (its translated pretty_name).
+            standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
+                               'label': (wa._t(p['standalone']['nav_label_key'])
+                                         if p['standalone'].get('nav_label_key')
+                                         else page_label(p, _lang))}
                               for p in standalone_pages()],
             username=session.get('username', ''),
             display_name=session.get('display_name', ''),

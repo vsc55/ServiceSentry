@@ -1,0 +1,67 @@
+{
+    "pretty_name": "Azure",
+    "module_description": "Azure service status: your subscription's Service Health (ARM Resource Health) plus the public Azure status feed.",
+    "labels": {
+        "enabled": "Enabled",
+        "label": "Name",
+        "tenant_id": "Tenant ID",
+        "client_id": "Application (client) ID",
+        "client_secret": "Client secret",
+        "subscription_id": "Subscription ID",
+        "timeout": "Timeout (s)",
+        "check_service_health": "Service Health (subscription)",
+        "health_window_hours": "Window (hours)",
+        "check_public_status": "Public Azure status",
+        "public_filter": "Filter (service or region)",
+        "alert": "Alert after N failures",
+        "threads": "Threads",
+        "enabled_module": "Module enabled"
+    },
+    "hints": {
+        "tenant_id": "Entra ID directory (tenant) ID of the app registration.",
+        "client_id": "Application (client) ID of the app registration.",
+        "client_secret": "Client secret of the app registration.",
+        "subscription_id": "Azure subscription to read Service Health from. The app needs an Azure RBAC role assignment (Reader is enough) ON THIS SUBSCRIPTION — an Entra app role does not grant it.",
+        "check_service_health": "Reads Microsoft.ResourceHealth events: outages, planned maintenance and advisories affecting YOUR resources and regions.",
+        "health_window_hours": "Only consider events updated within this many hours.",
+        "check_public_status": "Reads the public Azure status feed. Needs no credentials, but only reports globally announced incidents — it cannot tell whether your resources are affected.",
+        "public_filter": "Only report entries mentioning this text (e.g. 'West Europe' or 'Storage'). Blank = every entry."
+    },
+    "group_labels": {
+        "general": "General",
+        "auth": "Authentication",
+        "checks": "Checks",
+        "alerts": "Alerts"
+    },
+    "action_labels": {
+        "test_connection": "Test",
+        "page_refresh": "Refresh from Azure"
+    },
+    "new_item_key_label": "Subscription name",
+    "collections": {
+        "list": "Subscriptions"
+    },
+    "messages": {
+        "az_no_creds": "tenant_id, client_id, client_secret and subscription_id are required",
+        "az_auth_fail": "Azure authentication failed: {}",
+        "az_health_fail": "Could not read Service Health: {}",
+        "az_health_ok": "No active Service Health events in the last {} h",
+        "az_health_event": "Active event: {}",
+        "az_public_fail": "Could not read the public Azure status feed: {}",
+        "az_public_ok": "No open entries in the public Azure status feed",
+        "az_public_open": "{} entries in the public Azure status feed — latest: {}"
+    },
+    "messages_vars": {
+        "az_auth_fail": ["error"],
+        "az_health_fail": ["error"],
+        "az_health_ok": ["hours"],
+        "az_health_event": ["title"],
+        "az_public_fail": ["error"],
+        "az_public_open": ["count", "latest"]
+    },
+    "widget": {
+        "checks": "Checks",
+        "ok": "OK"
+    },
+    "ui": {}
+}

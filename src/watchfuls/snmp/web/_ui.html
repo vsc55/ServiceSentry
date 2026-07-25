@@ -127,7 +127,7 @@ function _ms(key, fallback) {
 // module's own __module__ schema entry (api_ver), defaulting to 'v1'.
 function _mibApiUrl(modName, action) {
     const ver = (ITEM_SCHEMAS[`${modName}|__module__`] || {})['api_ver'] || 'v1';
-    return `/api/${ver}/watchfuls/${modName}/${action}`;
+    return `/api/${ver}/modules/watchfuls/${modName}/${action}`;
 }
 
 // ── Module-level rendering helpers ────────────────────────────────

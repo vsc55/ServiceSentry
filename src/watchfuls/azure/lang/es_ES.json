@@ -1,0 +1,67 @@
+{
+    "pretty_name": "Azure",
+    "module_description": "Estado de servicio de Azure: el Service Health de tu suscripción (ARM Resource Health) más el feed público de estado de Azure.",
+    "labels": {
+        "enabled": "Habilitado",
+        "label": "Nombre",
+        "tenant_id": "ID de inquilino (tenant)",
+        "client_id": "ID de aplicación (cliente)",
+        "client_secret": "Secreto de cliente",
+        "subscription_id": "ID de suscripción",
+        "timeout": "Tiempo de espera (s)",
+        "check_service_health": "Service Health (suscripción)",
+        "health_window_hours": "Ventana (horas)",
+        "check_public_status": "Estado público de Azure",
+        "public_filter": "Filtro (servicio o región)",
+        "alert": "Alertar tras N fallos",
+        "threads": "Hilos",
+        "enabled_module": "Módulo habilitado"
+    },
+    "hints": {
+        "tenant_id": "ID del directorio (inquilino) de Entra ID del registro de aplicación.",
+        "client_id": "ID de aplicación (cliente) del registro de aplicación.",
+        "client_secret": "Secreto de cliente del registro de aplicación.",
+        "subscription_id": "Suscripción de Azure de la que leer el Service Health. La aplicación necesita una asignación de rol RBAC de Azure (basta Lector) SOBRE ESTA SUSCRIPCIÓN — un rol de aplicación de Entra no lo concede.",
+        "check_service_health": "Lee los eventos de Microsoft.ResourceHealth: caídas, mantenimientos planificados y avisos que afectan A TUS recursos y regiones.",
+        "health_window_hours": "Considera solo los eventos actualizados en las últimas N horas.",
+        "check_public_status": "Lee el feed público de estado de Azure. No necesita credenciales, pero solo informa de incidencias anunciadas globalmente — no puede decir si tus recursos están afectados.",
+        "public_filter": "Informa solo de entradas que mencionen este texto (p. ej. «West Europe» o «Storage»). Vacío = todas."
+    },
+    "group_labels": {
+        "general": "General",
+        "auth": "Autenticación",
+        "checks": "Comprobaciones",
+        "alerts": "Alertas"
+    },
+    "action_labels": {
+        "test_connection": "Probar",
+        "page_refresh": "Actualizar desde Azure"
+    },
+    "new_item_key_label": "Nombre de la suscripción",
+    "collections": {
+        "list": "Suscripciones"
+    },
+    "messages": {
+        "az_no_creds": "se requieren tenant_id, client_id, client_secret y subscription_id",
+        "az_auth_fail": "Falló la autenticación con Azure: {}",
+        "az_health_fail": "No se pudo leer el Service Health: {}",
+        "az_health_ok": "Sin eventos activos de Service Health en las últimas {} h",
+        "az_health_event": "Evento activo: {}",
+        "az_public_fail": "No se pudo leer el feed público de estado de Azure: {}",
+        "az_public_ok": "Sin entradas abiertas en el feed público de estado de Azure",
+        "az_public_open": "{} entradas en el feed público de estado de Azure — última: {}"
+    },
+    "messages_vars": {
+        "az_auth_fail": ["error"],
+        "az_health_fail": ["error"],
+        "az_health_ok": ["horas"],
+        "az_health_event": ["titulo"],
+        "az_public_fail": ["error"],
+        "az_public_open": ["cantidad", "ultima"]
+    },
+    "widget": {
+        "checks": "Comprobaciones",
+        "ok": "OK"
+    },
+    "ui": {}
+}

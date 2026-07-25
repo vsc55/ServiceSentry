@@ -80,16 +80,16 @@
                 <a class="ss-sb-item{% if p.id == standalone %} active{% endif %}"
                    href="{{ p.url }}" data-nav-section id="nav-page-{{ p.id }}"
                    {% if p.id == standalone %}aria-current="page"{% endif %}
-                   title="{{ i18n[p.nav_label_key] }}">
+                   title="{{ p.label }}">
                     <i class="bi {{ p.icon }} ss-sb-icon"></i>
-                    <span class="ss-sb-label">{{ i18n[p.nav_label_key] }}</span>
+                    <span class="ss-sb-label">{{ p.label }}</span>
                 </a>
                 {% else %}
                 <button class="ss-sb-item nav-link" type="button" id="btn-nav-{{ p.id }}"
                         data-bs-toggle="tab" data-bs-target="#tab-{{ p.id }}"
-                        data-nav-url="{{ p.url }}" title="{{ i18n[p.nav_label_key] }}">
+                        data-nav-url="{{ p.url }}" title="{{ p.label }}">
                     <i class="bi {{ p.icon }} ss-sb-icon"></i>
-                    <span class="ss-sb-label">{{ i18n[p.nav_label_key] }}</span>
+                    <span class="ss-sb-label">{{ p.label }}</span>
                 </button>
                 {% endif %}
             </li>

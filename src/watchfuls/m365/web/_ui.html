@@ -1,0 +1,124 @@
+{# ============================================================================
+   Microsoft 365 — the module's own top-level section (/m365).
+
+   Injected into the dashboard's shared <script> block by the generic module-web
+   discovery (lib/web_admin/app.py::_collect_web), exactly like snmp's MIB manager.
+   The core knows nothing about M365: it only renders the pane and calls the entry
+   point this module declared in schema.json (__page__.render).
+
+   All user-visible strings come from this module's own lang/*.json `ui` block via
+   _modUiStr() — no M365 string lives in web_admin.
+   ============================================================================ #}
+
+const _M365_MOD = 'm365';
+function _m3s(key, fallback) { return _modUiStr(_M365_MOD, key, fallback); }
+
+let _m365Data = null;      // last payload rendered (cached or live)
+let _m365Busy = false;
+
+/** Section entry point — named in schema.json (__page__.render), called by the
+ *  generic wiring when the pane opens. Paints the CACHED monitor results first: the
+ *  section is usable immediately and costs Microsoft nothing. */
+async function renderM365Page() {
+    const c = document.getElementById('m365-container');
+    if (!c) return;
+    if (!_m365Data) {
+        c.innerHTML = `<div class="text-center py-5 text-muted">
+            <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading') || 'Loading…')}</div>`;
+    }
+    const r = await apiGet('/api/v1/modules/page/' + _M365_MOD);
+    _m365Data = (r && r.data) || {};
+    _m365Render();
+}
+
+/** Live refresh: ask the module to query Graph right now. It returns the same shape
+ *  as the cached hook, so there is one renderer, not two. */
+async function _m365Refresh(itemKey) {
+    if (_m365Busy) return;
+    _m365Busy = true;
+    _m365Render();                               // repaint with the button disabled
+    const items = (_m365Data && _m365Data.items) || [];
+    const key = itemKey || (items[0] && items[0].key);
+    // The module config is keyed either "watchfuls.m365" or "m365" depending on how it
+    // was written — the backend accepts both, so look under both here too.
+    const modCfg = modulesData?.[`watchfuls.${_M365_MOD}`] || modulesData?.[_M365_MOD] || {};
+    const cfg = { ...((modCfg.list || {})[key] || {}), _item_key: key, _lang: CURRENT_LANG };
+    const r = await apiPost('/api/v1/modules/watchfuls/m365/page_refresh', cfg);
+    const d = r && r.data;
+    _m365Busy = false;
+    if (d && d.ok) {
+        _m365Data = { ..._m365Data, sections: d.sections, counts: d.counts, live: true };
+    } else {
+        showToast(`${_m3s('page_error', 'Could not query Microsoft')}: ${esc((d && d.message) || '')}`,
+                  'danger');
+    }
+    _m365Render();
+}
+
+const _M365_STATE_CLS = { ok: 'success', warn: 'warning', error: 'danger' };
+
+function _m365Metrics(row) {
+    const m = row.metrics || {};
+    const keep = Object.keys(m).filter(k => !['alert'].includes(k)).slice(0, 4);
+    if (!keep.length) return '';
+    return `<div class="d-flex flex-wrap gap-1 mt-1">${keep.map(k =>
+        `<span class="badge text-bg-light border fw-normal ss-fs-1">
+            ${esc(k)}: <strong>${esc(String(m[k]))}</strong></span>`).join('')}</div>`;
+}
+
+function _m365Render() {
+    const c = document.getElementById('m365-container');
+    if (!c) return;
+    const d = _m365Data || {};
+    const sections = d.sections || [];
+    const counts = d.counts || {ok: 0, warn: 0, error: 0, total: 0};
+    const live = !!d.live;
+
+    const header = `<div class="ss-card ss-vfill">
+        <div class="ss-accent ss-accent-cyan"></div>
+        <div class="ss-card-header">
+            <h6 class="mb-0 me-auto"><i class="bi bi-microsoft me-2"></i>${esc(_m3s('page_title', 'Microsoft 365'))}
+                <span class="text-muted ss-fs-2 ms-2">${esc(live ? _m3s('page_live', 'Live')
+                                                                : _m3s('page_cached', 'Last monitored result'))}</span></h6>
+            ${['ok', 'warn', 'error'].map(k => counts[k]
+                ? `<span class="badge text-bg-${_M365_STATE_CLS[k]}">${counts[k]}</span>` : '').join(' ')}
+            <button class="btn btn-sm btn-primary" onclick="_m365Refresh()" ${_m365Busy ? 'disabled' : ''}>
+                ${_m365Busy
+                    ? `<span class="spinner-border spinner-border-sm me-1"></span>${esc(_m3s('page_refreshing', 'Querying…'))}`
+                    : `<i class="bi bi-arrow-clockwise me-1"></i>${esc(_m3s('page_refresh', 'Refresh'))}`}
+            </button>
+        </div>
+        <div class="ss-vscroll p-3">`;
+
+    if (!sections.length) {
+        c.innerHTML = header + `<div class="text-center py-5 text-muted">
+            <i class="bi bi-microsoft ss-empty-icon"></i>
+            <div>${esc(_m3s('page_empty', 'No results yet.'))}</div></div></div></div>`;
+        return;
+    }
+
+    // One card per check kind (service health, licenses, secrets, secure score…) —
+    // the module decides which exist; this only lays out whatever page_data returned.
+    const cards = sections.map(s => `
+        <div class="ss-card mb-3">
+            <div class="ss-card-header">
+                <h6 class="mb-0 me-auto ss-fs-3">${esc(s.name)}</h6>
+                <span class="badge text-bg-${_M365_STATE_CLS[s.state] || 'secondary'}">
+                    ${s.counts.ok}/${s.counts.total}</span>
+            </div>
+            <div class="p-2">
+                ${s.rows.map(row => `
+                    <div class="d-flex align-items-start gap-2 py-1 border-bottom">
+                        <span class="badge text-bg-${_M365_STATE_CLS[row.state] || 'secondary'} mt-1">
+                            <i class="bi ${row.state === 'ok' ? 'bi-check-lg' : 'bi-exclamation-triangle'}"></i></span>
+                        <div class="flex-grow-1 min-w-0">
+                            <div class="fw-semibold ss-fs-3">${esc(row.name)}</div>
+                            <div class="text-muted ss-fs-2">${esc(row.message || '')}</div>
+                            ${_m365Metrics(row)}
+                        </div>
+                    </div>`).join('')}
+            </div>
+        </div>`).join('');
+
+    c.innerHTML = header + cards + `</div></div>`;
+}

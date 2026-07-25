@@ -809,7 +809,7 @@ if self.check_status(status, self.name_module, key):
     self.send_message(msg, status, item=host, severity='' if status else 'warning')
 ```
 
-Los 19 módulos incluidos ya usan este mecanismo. Detalle completo (capa de resolución,
+Los 20 módulos incluidos ya usan este mecanismo. Detalle completo (capa de resolución,
 catálogo, esquema de tags, editor) en
 [explica-notificaciones.md → Sistema de textos de notificación](explica-notificaciones.md#sistema-de-textos-de-notificación-plantillas-listados-y-tags).
 

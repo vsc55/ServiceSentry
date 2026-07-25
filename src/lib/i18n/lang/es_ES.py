@@ -23,6 +23,13 @@ LANG = {
     'sidebar_toggle': 'Contraer / expandir menú',
     'theme_toggle': 'Cambiar claro / oscuro',
     'loading': 'Cargando…',
+    # Renderizador genérico de una sección aportada por un módulo (schema.json → __page__).
+    'page_refresh_live':  'Actualizar ahora',
+    'page_refreshing':    'Consultando…',
+    'page_refresh_error': 'Falló la actualización en vivo',
+    'page_cached':        'Último resultado monitorizado',
+    'page_live':          'En directo',
+    'page_no_data':       'Aún no hay resultados — activa checks en un ítem y deja correr el monitor.',
     'cancel': 'Cancelar',
     'undo': 'Deshacer',
     'save_and_close': 'Guardar y cerrar',

@@ -1,0 +1,65 @@
+{
+    "__icon__": "bi-cloud-haze2",
+    "__page__": {
+        "id": "azure", "icon": "bi-cloud-haze2", "order": 45,
+        "refresh": "page_refresh", "perm": "modules_view"
+    },
+    "__overview_widget__": [
+        {"id": "health", "view": "stat", "icon": "bi-cloud-haze2", "perm": "modules_view",
+         "scope": "health", "link": "https://portal.azure.com/#view/Microsoft_Azure_Health/AzureHealthBrowseBlade"},
+        {"id": "table", "view": "table", "icon": "bi-cloud-haze2", "perm": "modules_view",
+         "selector": true, "cols": 4, "h": 340}
+    ],
+    "__module__": {
+        "api_ver": "v1",
+        "enabled": {"type": "bool", "default": true},
+        "threads": {"type": "int", "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
+        "alert":   {"type": "int", "default": 3,  "min": 1, "max": 20},
+        "timeout": {"type": "int", "default": 15, "min": 0, "inherit_blank": true, "max": 300}
+    },
+    "__credential__": {
+        "type": "azure_app",
+        "icon": "bi-cloud-haze2",
+        "fields": [
+            {"name": "tenant_id",       "kind": "text",     "label": "tenant_id"},
+            {"name": "client_id",       "kind": "text",     "label": "client_id"},
+            {"name": "client_secret",   "kind": "password", "secret": true, "label": "client_secret"},
+            {"name": "subscription_id", "kind": "text",     "label": "subscription_id"}
+        ]
+    },
+    "list": {
+        "__check_title_field__": "label",
+        "__title_editable__": true,
+        "__new_item_fields__": ["label"],
+        "__field_order__": ["enabled", "label", "tenant_id", "client_id", "client_secret",
+                            "subscription_id", "timeout",
+                            "check_service_health", "health_window_hours",
+                            "check_public_status", "public_filter", "alert"],
+        "__test__": "/api/v1/modules/watchfuls/azure/test_connection",
+        "__multicheck__": [
+            {"toggle": "check_service_health", "suffix": "health"},
+            {"toggle": "check_public_status",  "suffix": "public"}
+        ],
+
+        "enabled": {"type": "bool", "default": true},
+        "label":   {"type": "str",  "default": ""},
+
+        "tenant_id":       {"type": "str", "default": "", "placeholder": "contoso.onmicrosoft.com", "group": "auth"},
+        "client_id":       {"type": "str", "default": "", "placeholder": "00000000-0000-0000-0000-000000000000", "group": "auth"},
+        "client_secret":   {"type": "str", "default": "", "sensitive": true, "group": "auth"},
+        "subscription_id": {"type": "str", "default": "", "placeholder": "00000000-0000-0000-0000-000000000000", "group": "auth"},
+        "timeout":         {"type": "int", "default": 0, "min": 0, "max": 300, "zero_as_blank": true,
+                            "placeholder_module": "timeout", "group": "auth"},
+
+        "check_service_health": {"type": "bool", "default": true, "group": "checks"},
+        "health_window_hours":  {"type": "int", "default": 24, "min": 1, "max": 720, "group": "checks",
+                                 "show_when": {"check_service_health": [true]}},
+
+        "check_public_status": {"type": "bool", "default": false, "group": "checks"},
+        "public_filter":       {"type": "str", "default": "", "placeholder": "West Europe", "group": "checks",
+                                "show_when": {"check_public_status": [true]}},
+
+        "alert": {"type": "int", "default": 0, "min": 0, "max": 20, "zero_as_blank": true,
+                  "placeholder_module": "alert", "group": "alerts"}
+    }
+}

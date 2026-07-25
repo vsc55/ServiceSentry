@@ -531,6 +531,32 @@ def _merge_host_conn(wa, module, config, host_ctx):
                 config[f] = ssh[f]    # ssh_* ← host SSH profile
 
 
+def build_module_page(modules_dir: str, module: str, status_raw: dict,
+                      modules_raw: dict, lang: str) -> dict:
+    """Data for a module-contributed SECTION (``__page__``), from its
+    ``Watchful.page_data(items, status, lang)`` hook.
+
+    This is the CACHED half of the page: it reads the monitor's last check results, so it
+    answers instantly and costs no upstream API call.  A live refresh is a normal watchful
+    action the module declares and serves itself (``/api/v1/modules/watchfuls/<m>/<a>``).
+    The core stays module-agnostic — every string and number here comes from the module.
+    """
+    try:
+        status = next((status_raw[k] for k in (f'watchfuls.{module}', module)
+                       if isinstance(status_raw.get(k), dict)), {})
+        cfg = next((modules_raw[k] for k in (f'watchfuls.{module}', module)
+                    if isinstance(modules_raw.get(k), dict)), {})
+        items = cfg.get('list') if isinstance(cfg.get('list'), dict) else {}
+        parent = os.path.dirname(modules_dir or '')
+        if parent and parent not in sys.path:
+            sys.path.insert(0, parent)
+        cls = getattr(importlib.import_module(f'watchfuls.{module}'), 'Watchful', None)
+        fn = getattr(cls, 'page_data', None)
+        return (fn(items, status, lang) or {}) if callable(fn) else {}
+    except Exception:  # pylint: disable=broad-except
+        return {}
+
+
 def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, lang: str) -> dict:
     """Generic Overview-widget data: for every module declaring ``__overview_widget__``,
     call its ``Watchful.overview_widget(items, status, lang)`` hook and collect the result.

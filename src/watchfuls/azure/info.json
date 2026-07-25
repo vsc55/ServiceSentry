@@ -1,0 +1,7 @@
+{
+    "name": "azure",
+    "version": "1.0.0",
+    "description": "Azure service status: subscription Service Health (Resource Health events via ARM, app-only) and the public Azure status feed as an unauthenticated fallback.",
+    "icon": "🌩️",
+    "dependencies": []
+}

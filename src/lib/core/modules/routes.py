@@ -19,6 +19,7 @@ Routes registered by this file:
     DELETE   /api/v1/modules/status                     clear the check-state table
     POST     /api/v1/modules/checks/run                 run module checks on demand
     GET      /api/v1/modules/overview                   slim shared Overview snapshot
+    GET      /api/v1/modules/page/<module_name>          data for a module-contributed section
     GET,POST /api/v1/modules/watchfuls/<module_name>/<action>   run a watchful module's declared action
 """
 
@@ -190,6 +191,28 @@ def register(app, wa):
     # NOTE: the overview *layout* endpoints (/api/v1/overview/default-layout,
     # /reset-factory) moved to lib.core.overview.routes — this modules register keeps
     # only /api/v1/modules/overview (the slim shared snapshot, above).
+
+    @app.route('/api/v1/modules/page/<module_name>', methods=['GET'])
+    @wa._perm_required('modules_view')
+    def api_module_page(module_name):
+        """Data for a module-contributed SECTION (a module declaring ``__page__``).
+
+        The CACHED half: the monitor's last results through the module's ``page_data``
+        hook, so the section paints instantly and costs no upstream API call.  Refreshing
+        live is a normal watchful action the module declares and serves itself.
+
+        404 for a module that claims no page — that check is what stops this becoming a
+        generic "run any module hook" hole.
+        """
+        if not re.match(r'^[a-z][a-z0-9_]*$', module_name or ''):
+            return jsonify({'error': 'bad module'}), 400
+        from lib.modules.discovery.pages import module_pages_catalog  # noqa: PLC0415
+        if not any(p['module'] == module_name for p in module_pages_catalog(wa._modules_dir)):
+            return jsonify({'error': 'no such page'}), 404
+        data = modules_svc.build_module_page(
+            wa._modules_dir, module_name, wa._read_check_status(), wa._load_modules(),
+            session.get('lang', wa._default_lang))
+        return jsonify({'module': module_name, 'data': data})
 
     # --- API: per-watchful-module action dispatch ----------------
 

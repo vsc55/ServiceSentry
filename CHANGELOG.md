@@ -5,6 +5,25 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **A watchful module can claim a top-level section of its own (`schema.json` → `__page__`).**
+  Sections were the one extensible surface with no discovery: `HOME_PAGES` was a literal tuple, the
+  panes were hand-written in `dashboard.html`, the URL→pane map was a literal, and the render wiring
+  named three functions by hand. A module now declares `{id, icon, order, render, perm}` and gets
+  its URL, its sidebar entry (permission-gated), its pane and its render wiring — the registry was
+  the only piece that was not already data-driven. The label is the module's own translated
+  `pretty_name`, so no core string names a module; ids are validated and core ids (`/admin`,
+  `/overview`, …) cannot be shadowed; a malformed declaration drops that section instead of
+  breaking the panel. Data comes in two halves on purpose: `GET /api/v1/modules/page/<module>`
+  serves the module's `page_data()` hook from the monitor's **cached** results (instant, costs the
+  upstream nothing), and refreshing **live** is a normal watchful action the module serves itself —
+  returning the same shape, so the page has one renderer, not two. Documented in
+  `docs/explica-descubrimiento.md` §2c.
+- **Microsoft 365 gets its section (`/m365`), the first consumer of that mechanism.** It shows
+  service health, licences and storage, security (Secure Score, risky users) and app secret/cert
+  expiry — grouped by check kind from what the checks already publish, with a *Refresh from
+  Microsoft* button that queries Graph on the spot (`page_refresh`, read-only). The renderer ships
+  with the module (`watchfuls/m365/web/_ui.html`) and every string comes from its own lang files;
+  `lib/web_admin` contains no M365 string.
 - **Clearing the fail2ban ban history, in Config → General → Maintenance.** The append-only ban
   trail had no way to be wiped at all. It joins the other data wipes there, contributed as a
   `CONFIG_ACTION` from `lib/services/ipban/manifest.py`, behind a new **`ipban_history_delete`**

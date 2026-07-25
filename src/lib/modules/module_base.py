@@ -212,7 +212,7 @@ class ModuleBase(ObjectBase):
                 if collection in ('__i18n__', '__icon__', '__host_profile__', '__host_multiple__',
                                    '__host_multiple_bind__', '__overview_widget__',
                                    '__credential__', '__credentials__', '__status_render__',
-                                   '__entraid_provision__'):
+                                   '__entraid_provision__', '__page__'):
                     # __i18n__ handled separately; __host_profile__/__host_multiple__
                     # are host-binding metadata; __credential__ is consumed by the
                     # central credentials catalog (credential_schemas reads it from

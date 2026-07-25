@@ -47,7 +47,7 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [explica-hosts.md](explica-hosts.md) | Modelo host-céntrico: un host = dirección + perfiles de conexión por protocolo (SSH/SNMP/DB…), referencia por `host_uid`, ejecución host-aware (local/SSH), resolución y migración asistida inline→host |
 | [ref-configuracion.md](ref-configuracion.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
 | [ref-cli.md](ref-cli.md) | CLI de gestión one-shot: subcomandos `user`/`group` (alta/baja/rol/contraseña/grupos), `status` y `reload` de servicios; contexto headless, capa de servicio compartida en `lib/core` (rutas web + CLI) y auto-discovery de servicios |
-| [ref-modulos.md](ref-modulos.md) | Los 19 módulos integrados: referencia de configuración, campos y flujo de cada uno |
+| [ref-modulos.md](ref-modulos.md) | Los 20 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [explica-web-admin.md](explica-web-admin.md) | Interfaz web Flask: características, roles (64 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [explica-seguridad.md](explica-seguridad.md) | Autenticación (local/LDAP/OIDC/SAML2), semántica RBAC (escalada, IDOR), sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
 | [ref-permisos.md](ref-permisos.md) | Fuente única del RBAC: catálogo de los 64 flags de permiso, roles integrados/personalizados, grupos, permisos dinámicos (módulo/servidor/cluster) y estructuras internas |
@@ -110,7 +110,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 - Ejecuta los módulos en **paralelo** usando `ThreadPoolExecutor`.
 - Arquitectura de **plugins**: cada módulo es un package independiente en `watchfuls/`.
 - Usa `match/case` nativo de Python 3.10+.
-- 15 de los 19 módulos son **multiplataforma** 🌐 (Linux / Windows).
+- 16 de los 20 módulos son **multiplataforma** 🌐 (Linux / Windows).
 
 ---
 

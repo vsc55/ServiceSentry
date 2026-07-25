@@ -23,6 +23,13 @@ LANG = {
     'sidebar_toggle': 'Collapse / expand menu',
     'theme_toggle': 'Toggle light / dark',
     'loading': 'Loading…',
+    # Generic renderer for a module-contributed section (schema.json → __page__).
+    'page_refresh_live':  'Refresh now',
+    'page_refreshing':    'Querying…',
+    'page_refresh_error': 'Live refresh failed',
+    'page_cached':        'Last monitored result',
+    'page_live':          'Live',
+    'page_no_data':       'No results yet — enable checks on an item and let the monitor run.',
     'cancel': 'Cancel',
     'undo': 'Undo',
     'save_and_close': 'Save & close',

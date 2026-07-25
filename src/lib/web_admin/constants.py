@@ -11,8 +11,11 @@ web_admin for them.  Only genuinely web-facing constants remain here.
 """
 
 __all__ = [
-    'HOME_PAGES', 'home_page_ids', 'standalone_pages', 'standalone_page',
+    'HOME_PAGES', 'home_pages', 'page_label', 'home_page_ids',
+    'standalone_pages', 'standalone_page',
 ]
+
+from lib.modules.discovery.pages import module_pages_catalog
 
 
 # ── Landing pages (post-login URL destinations) ─────────────────────────────
@@ -48,14 +51,60 @@ HOME_PAGES = (
 )
 
 
+def _module_home_pages(watchfuls_dir: str | None = None) -> list:
+    """The same shape as a ``HOME_PAGES`` entry, for every module claiming a page.
+
+    A module page carries ``label_i18n`` (its own translated ``pretty_name``) where a
+    core page carries ``label_key`` (a key in the core catalog) — the core owns no
+    string naming a module.  Consumers resolve the label through :func:`page_label`.
+    """
+    out = []
+    for spec in module_pages_catalog(watchfuls_dir):
+        out.append({
+            'id': spec['id'], 'url': '/' + spec['id'], 'label_i18n': spec['label_i18n'],
+            'module': spec['module'],
+            'standalone': {'pane': 'tab-' + spec['id'], 'render': spec['render'],
+                           'perm': spec['perm'], 'icon': spec['icon'],
+                           'label_i18n': spec['label_i18n'], 'module': spec['module']},
+        })
+    return out
+
+
+def home_pages(watchfuls_dir: str | None = None) -> list:
+    """Every landing destination: the core pages plus the module-contributed ones.
+
+    THE accessor — prefer it over the ``HOME_PAGES`` tuple, which is only the core
+    half.  Module pages are appended after the core ones (and before ``status``, which
+    stays last as the public page) so the sidebar order reads core-first.
+    """
+    mods = _module_home_pages(watchfuls_dir)
+    if not mods:
+        return list(HOME_PAGES)
+    core = list(HOME_PAGES)
+    tail = [p for p in core if p['id'] == 'status']
+    head = [p for p in core if p['id'] != 'status']
+    return head + mods + tail
+
+
+def page_label(page: dict, lang: str, default_lang: str = 'en_EN') -> str:
+    """A page's display label: a core page translates its ``label_key``; a module page
+    carries its own ``label_i18n`` (falling back to the default language, then the id)."""
+    key = page.get('label_key')
+    if key:
+        from lib.i18n import TRANSLATIONS
+        return TRANSLATIONS.get(lang, {}).get(key) or TRANSLATIONS.get(default_lang, {}).get(key) or key
+    li = page.get('label_i18n') or {}
+    return li.get(lang) or li.get(default_lang) or page.get('id', '')
+
+
 def home_page_ids() -> list:
     """Ordered list of valid landing-page ids (for config options + validation)."""
-    return [p['id'] for p in HOME_PAGES]
+    return [p['id'] for p in home_pages()]
 
 
 def standalone_pages() -> list:
     """Pages served as their own URL outside the admin panel (id + standalone spec)."""
-    return [p for p in HOME_PAGES if p.get('standalone')]
+    return [p for p in home_pages() if p.get('standalone')]
 
 
 def standalone_page(page_id: str) -> dict | None:

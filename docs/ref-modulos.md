@@ -1086,6 +1086,46 @@ o prioridad inesperada.
 
 ---
 
+## 🌩️ azure — Estado de servicio de Azure
+
+Vigila el **estado de servicio de Azure**, que **no** es lo mismo que el de Microsoft 365: el
+check `check_health` de [m365](#️-m365--microsoft-365-microsoft-graph) lee la salud de *Microsoft
+365* (Exchange, Teams, SharePoint). Azure vive en otra API, y por dos motivos es un módulo aparte:
+
+- el token se emite para otro *audience*, **`management.azure.com`** (no Microsoft Graph); y
+- el acceso **no** se concede con un rol de aplicación de Entra, sino con una **asignación RBAC de
+  Azure** (basta **Lector**) **sobre la suscripción**. El asistente de Entra ID **no** hace esa
+  asignación: hoy se hace a mano en el portal.
+
+**Plataforma:** Multiplataforma 🌐 (HTTP)
+
+**Comprobaciones disponibles:**
+
+| Check (`list.*.check_*`) | Qué mide | Umbral / opciones | Requiere |
+| --- | --- | --- | --- |
+| `check_service_health` (def. true) | Eventos de **Service Health de tu suscripción** (`Microsoft.ResourceHealth/events`): caídas, mantenimientos y avisos que afectan a **tus** recursos y regiones. Un evento activo por resultado | `health_window_hours` (ventana, def. 24 h) | credencial + `subscription_id` + rol RBAC |
+| `check_public_status` | Feed **público** de estado de Azure (sin credenciales) | `public_filter` (texto: servicio o región; vacío = todo) | nada |
+
+Severidad: un *advisory*, *mantenimiento planificado* o *aviso de seguridad* se emite como
+**warning**; una incidencia de servicio, como **error**.
+
+> ⚠️ El check público **solo ve incidencias anunciadas globalmente**: no puede decir si *tus*
+> recursos están afectados. Sirve de señal aproximada o de respaldo cuando no hay app registrada
+> en Azure — no sustituye al check autenticado.
+
+Credencial reutilizable **`azure_app`** (`tenant_id`, `client_id`, `client_secret`,
+`subscription_id`). `list.*.timeout` / `alert` por ítem (`0` hereda el global).
+
+**Sección propia:** declara `__page__`, así que aporta la sección **`/azure`** con su entrada en la
+barra lateral. No trae código de frontend: la pinta el **renderizador genérico del core** a partir
+de su hook `page_data` (ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__)),
+con un botón de refresco que consulta Azure en el momento.
+
+**Flujo:** token *client-credentials* para `management.azure.com` → eventos de Resource Health en la
+ventana → clasifica por tipo de evento; el check público descarga el RSS y filtra.
+
+---
+
 ## ☁️ m365 — Microsoft 365 (Microsoft Graph)
 
 Monitoriza **Microsoft 365** vía la **Microsoft Graph API** (app-only). Se autentica con una
@@ -1112,6 +1152,12 @@ resultado bajo una clave propia `<ítem>/<servicio>`, así son independientes.
 
 `tenant_id` / `client_id` / `client_secret` son las credenciales de la app (o una credencial
 `m365_app` reutilizable). `list.*.timeout` / `alert` por ítem (`0` hereda el global).
+
+**Sección propia:** declara `__page__`, así que aporta la sección **`/m365`** con su entrada en la
+barra lateral: salud de servicios, licencias y almacenamiento, seguridad (Secure Score, usuarios de
+riesgo) y caducidad de secretos, agrupado por tipo de check, con un botón que consulta Graph en el
+momento. A diferencia de [azure](#-azure--estado-de-servicio-de-azure), **trae su propio
+renderizador** (`web/_ui.html`) en vez de usar el genérico del core.
 
 **Flujo:** token *client-credentials* (`.default` de Graph) → una consulta por check activo →
 compara con su umbral → emite OK / warning / down bajo `<ítem>/<servicio>`.

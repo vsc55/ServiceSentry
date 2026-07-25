@@ -234,8 +234,12 @@ document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', e => {
 // opens the pane its path points at). Returns null for /admin (handled by _resolveLandingTab)
 // and for unknown paths.
 function _sbPaneIdFromPath() {
-    const map = { '/overview': 'tab-overview', '/history': 'tab-history',
-                  '/syslog': 'tab-syslog', '/account': 'tab-account' };
+    // Built from the registry the server sends, so a module-contributed section is
+    // reachable by URL without this file knowing it exists. /account is the one
+    // hardcoded entry: it is a core pane with no registry descriptor.
+    const map = Object.fromEntries(
+        (window.SS_STANDALONE_PAGES || []).map(p => [p.url, p.pane]));
+    map['/account'] = 'tab-account';
     return map[window.location.pathname] || null;
 }
 // Back/Forward: re-activate the tab the URL points to (popstate fires between this page's

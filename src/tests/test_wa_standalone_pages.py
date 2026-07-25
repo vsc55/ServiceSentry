@@ -31,15 +31,26 @@ STANDALONE = ('overview', 'history', 'syslog')
 class TestRegistry:
 
     def test_every_standalone_page_declares_what_it_needs(self):
+        """A core page names an i18n key for its label; a module-contributed one carries its
+        own translated ``pretty_name`` (``label_i18n``) — the core owns no string naming a
+        module. Everything else is required of both."""
         from lib.web_admin.constants import standalone_pages
         ids = []
         for page in standalone_pages():
             spec = page['standalone']
-            for key in ('pane', 'render', 'perm', 'icon', 'nav_label_key'):
+            for key in ('pane', 'perm', 'icon'):
                 assert spec.get(key), f"{page['id']} standalone spec missing {key}"
+            # A core section always names its own renderer. A module section may leave it
+            # blank: it then gets the core's generic renderer, which paints whatever its
+            # page_data hook returned — contributing a section costs no front-end code.
+            if not page.get('module'):
+                assert spec.get('render'), f"{page['id']} (core) must name a render fn"
+            assert spec.get('nav_label_key') or spec.get('label_i18n'), \
+                f"{page['id']} has no label: declare nav_label_key (core) or label_i18n (module)"
             assert page['url'].startswith('/')
             ids.append(page['id'])
-        assert set(ids) == set(STANDALONE)
+        assert set(STANDALONE) <= set(ids)          # core sections are always there
+        assert len(ids) == len(set(ids)), 'two sections claim the same id'
 
     def test_they_are_valid_landing_pages(self):
         """Being a whole URL destination, each is selectable as a landing page."""
@@ -225,11 +236,19 @@ class TestSidebarSections:
 
     def test_the_client_opens_the_pane_from_the_url(self, client):
         """The wiring maps a section URL to its pane, so a reload / deep link / Back-Forward
-        lands on it without a full navigation."""
+        lands on it without a full navigation.
+
+        The map is BUILT FROM the registry the server sends, not written out section by
+        section — that is what lets a module-contributed page be reachable by URL without
+        this wiring knowing it exists. /account is the one literal: a core pane with no
+        registry descriptor."""
         _login(client)
         html = client.get('/overview').data.decode('utf-8', 'replace')
-        assert "'/overview': 'tab-overview'" in html
-        assert "'/account': 'tab-account'" in html
+        assert 'window.SS_STANDALONE_PAGES' in html
+        assert '.map(p => [p.url, p.pane])' in html
+        assert "map['/account'] = 'tab-account'" in html
+        # …and the registry it is built from really carries the section.
+        assert '"url": "/overview"' in html or "'url': '/overview'" in html
 
 
 class TestFrontendWiring:

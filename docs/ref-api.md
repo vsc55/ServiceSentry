@@ -298,6 +298,7 @@ alimenta a fail2ban:
 | DELETE | `/api/v1/modules/status` | `checks_run` | Vaciar tabla check_state |
 | POST | `/api/v1/modules/checks/run` | `checks_run` | Ejecutar checks bajo demanda |
 | GET | `/api/v1/modules/overview` | `overview_view` | Snapshot ligero del dashboard Overview |
+| GET | `/api/v1/modules/page/<module>` | `modules_view` | Datos de la **sección propia** de un módulo (`__page__`), desde su hook `page_data` (últimos resultados del monitor). 404 si el módulo no declara página |
 | GET, POST | `/api/v1/modules/watchfuls/<module>/<action>` | `modules_view` (+ inline si muta) | Despacha `Watchful.<action>` del módulo |
 
 ## Overview — [lib/core/overview/routes.py](../src/lib/core/overview/routes.py)

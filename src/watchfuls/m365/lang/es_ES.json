@@ -2,75 +2,75 @@
     "pretty_name": "Microsoft 365",
     "module_description": "Monitoriza Microsoft 365 mediante la API de Microsoft Graph (autenticación app-only): almacenamiento de SharePoint (sitio + tenant), almacenamiento de OneDrive, buzones de Exchange sobre cuota, estado de servicios/incidencias, capacidad de licencias, caducidad de secretos/certificados de la app, Secure Score y usuarios de riesgo. Cada comprobación es un interruptor opcional en el ítem. Requiere registrar una app en Azure AD/Entra ID con los permisos de aplicación correspondientes (consentimiento de admin): Sites.Read.All, Reports.Read.All, ServiceHealth.Read.All, Organization.Read.All, Application.Read.All, SecurityEvents.Read.All, IdentityRiskyUser.Read.All.",
     "labels": {
-        "enabled":            "Habilitado",
-        "label":              "Etiqueta",
-        "threads":            "Hilos",
-        "alert":              "Umbral",
-        "timeout":            "Tiempo máximo (s)",
-        "tenant_id":          "Tenant (ID o dominio)",
-        "client_id":          "ID de aplicación (client_id)",
-        "client_secret":      "Secreto de cliente",
-        "check_site":         "Almacenamiento del sitio",
-        "site":               "Sitio de SharePoint",
-        "usage_pct":          "Alerta al % usado",
-        "free_min":           "Alerta si el libre baja de",
-        "free_unit":          "Unidad (libre)",
+        "enabled": "Habilitado",
+        "label": "Etiqueta",
+        "threads": "Hilos",
+        "alert": "Umbral",
+        "timeout": "Tiempo máximo (s)",
+        "tenant_id": "Tenant (ID o dominio)",
+        "client_id": "ID de aplicación (client_id)",
+        "client_secret": "Secreto de cliente",
+        "check_site": "Almacenamiento del sitio",
+        "site": "Sitio de SharePoint",
+        "usage_pct": "Alerta al % usado",
+        "free_min": "Alerta si el libre baja de",
+        "free_unit": "Unidad (libre)",
         "check_tenant_usage": "Uso del tenant (informes)",
-        "tenant_max":         "Alerta si el uso supera",
-        "tenant_unit":        "Unidad (tenant)",
-        "check_health":       "Estado de servicios",
-        "health_services":    "Solo estos servicios",
-        "check_licenses":     "Capacidad de licencias",
-        "license_min":        "Alerta si las libres bajan de",
-        "check_secrets":      "Caducidad del secreto de la app",
-        "secret_days":        "Alerta estos días antes",
-        "check_mailbox":      "Buzones sobre cuota",
-        "mailbox_over_max":   "Alerta si los buzones sobre cuota superan",
-        "check_onedrive":     "Uso de OneDrive (tenant)",
-        "onedrive_max":       "Alerta si el uso supera",
-        "onedrive_unit":      "Unidad (OneDrive)",
+        "tenant_max": "Alerta si el uso supera",
+        "tenant_unit": "Unidad (tenant)",
+        "check_health": "Estado de servicios",
+        "health_services": "Solo estos servicios",
+        "check_licenses": "Capacidad de licencias",
+        "license_min": "Alerta si las libres bajan de",
+        "check_secrets": "Caducidad del secreto de la app",
+        "secret_days": "Alerta estos días antes",
+        "check_mailbox": "Buzones sobre cuota",
+        "mailbox_over_max": "Alerta si los buzones sobre cuota superan",
+        "check_onedrive": "Uso de OneDrive (tenant)",
+        "onedrive_max": "Alerta si el uso supera",
+        "onedrive_unit": "Unidad (OneDrive)",
         "check_secure_score": "Secure Score",
-        "secure_min":         "Alerta si el % baja de",
-        "check_risky_users":  "Usuarios de riesgo",
-        "risky_max":          "Alerta si los usuarios de riesgo superan"
+        "secure_min": "Alerta si el % baja de",
+        "check_risky_users": "Usuarios de riesgo",
+        "risky_max": "Alerta si los usuarios de riesgo superan"
     },
     "hints": {
-        "enabled":            "Habilita o deshabilita esta conexión de Microsoft 365.",
-        "threads":            "Número de conexiones de Microsoft 365 a comprobar en paralelo.",
-        "alert":              "Fallos de autenticación consecutivos antes de alertar (suaviza cortes puntuales).",
-        "timeout":            "Tiempo máximo por defecto de las peticiones a Graph, en segundos.",
-        "tenant_id":          "Identificador del tenant (GUID) o dominio, p. ej. contoso.onmicrosoft.com.",
-        "client_id":          "ID de aplicación (cliente) del registro de app en Azure AD/Entra ID.",
-        "client_secret":      "Secreto de cliente de la app. Se guarda cifrado. La app necesita los permisos de aplicación Sites.Read.All y Reports.Read.All con consentimiento de administrador. Puedes crearla automáticamente con el botón de abajo (inicias sesión como admin y das consentimiento; no hace falta secreto previo).",
-        "check_site":         "Comprueba la cuota de almacenamiento de un sitio de SharePoint (total, usado y libre).",
-        "site":               "URL del sitio de SharePoint a vigilar, p. ej. contoso.sharepoint.com/sites/Marketing. Déjalo vacío para usar el sitio raíz del tenant.",
-        "usage_pct":          "Avisa cuando el porcentaje usado del sitio alcanza este valor (1–100). En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
-        "free_min":           "Avisa cuando el espacio libre del sitio baja de esta cantidad. En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
-        "free_unit":          "Unidad de la cantidad de espacio libre (MB, GB o TB).",
+        "enabled": "Habilita o deshabilita esta conexión de Microsoft 365.",
+        "threads": "Número de conexiones de Microsoft 365 a comprobar en paralelo.",
+        "alert": "Fallos de autenticación consecutivos antes de alertar (suaviza cortes puntuales).",
+        "timeout": "Tiempo máximo por defecto de las peticiones a Graph, en segundos.",
+        "tenant_id": "Identificador del tenant (GUID) o dominio, p. ej. contoso.onmicrosoft.com.",
+        "client_id": "ID de aplicación (cliente) del registro de app en Azure AD/Entra ID.",
+        "client_secret": "Secreto de cliente de la app. Se guarda cifrado. La app necesita los permisos de aplicación Sites.Read.All y Reports.Read.All con consentimiento de administrador. Puedes crearla automáticamente con el botón de abajo (inicias sesión como admin y das consentimiento; no hace falta secreto previo).",
+        "check_site": "Comprueba la cuota de almacenamiento de un sitio de SharePoint (total, usado y libre).",
+        "site": "URL del sitio de SharePoint a vigilar, p. ej. contoso.sharepoint.com/sites/Marketing. Déjalo vacío para usar el sitio raíz del tenant.",
+        "usage_pct": "Avisa cuando el porcentaje usado del sitio alcanza este valor (1–100). En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
+        "free_min": "Avisa cuando el espacio libre del sitio baja de esta cantidad. En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
+        "free_unit": "Unidad de la cantidad de espacio libre (MB, GB o TB).",
         "check_tenant_usage": "Almacenamiento total USADO de SharePoint en el tenant, vía la API de informes. Graph no expone la cuota total agrupada, así que la alerta es por cantidad usada.",
-        "tenant_max":         "Avisa cuando el uso total de SharePoint del tenant supera esta cantidad. 0 = solo informativo.",
-        "tenant_unit":        "Unidad del límite del tenant (GB o TB).",
-        "check_health":       "Estado de los servicios de Microsoft 365: avisa cuando algún servicio no está plenamente operativo (una interrupción es error duro; una degradación es aviso). Necesita ServiceHealth.Read.All.",
-        "health_services":    "Opcional: limita a estos servicios (separados por comas, coincidencia por subcadena), p. ej. 'Exchange Online, Microsoft Teams'. Vacío = todos.",
-        "check_licenses":     "Capacidad de licencias (SKU) suscritas: unidades asignadas frente a disponibles. Necesita Organization.Read.All.",
-        "license_min":        "Avisa cuando las unidades libres de algún SKU (habilitadas − consumidas) bajan de esto. 0 = avisar solo cuando un SKU se agota del todo.",
-        "check_secrets":      "Caducidad del secreto/certificado de esta misma app, para que el monitor no muera por un secreto caducado. Necesita Application.Read.All.",
-        "secret_days":        "Avisa estos días antes de que caduque el secreto/certificado de la app (uno ya caducado avisa siempre).",
-        "check_mailbox":      "Buzones de Exchange que superan su cuota de almacenamiento (API de informes). Necesita Reports.Read.All.",
-        "mailbox_over_max":   "Avisa cuando el número de buzones con envío/recepción prohibidos (sobre cuota) supera esto. 0 = avisar si hay alguno.",
-        "check_onedrive":     "Almacenamiento total USADO de OneDrive en el tenant (API de informes). Necesita Reports.Read.All.",
-        "onedrive_max":       "Avisa cuando el uso total de OneDrive supera esta cantidad. 0 = solo informativo.",
-        "onedrive_unit":      "Unidad del límite de OneDrive (GB o TB).",
+        "tenant_max": "Avisa cuando el uso total de SharePoint del tenant supera esta cantidad. 0 = solo informativo.",
+        "tenant_unit": "Unidad del límite del tenant (GB o TB).",
+        "check_health": "Estado de los servicios de Microsoft 365: avisa cuando algún servicio no está plenamente operativo (una interrupción es error duro; una degradación es aviso). Necesita ServiceHealth.Read.All.",
+        "health_services": "Opcional: limita a estos servicios (separados por comas, coincidencia por subcadena), p. ej. 'Exchange Online, Microsoft Teams'. Vacío = todos.",
+        "check_licenses": "Capacidad de licencias (SKU) suscritas: unidades asignadas frente a disponibles. Necesita Organization.Read.All.",
+        "license_min": "Avisa cuando las unidades libres de algún SKU (habilitadas − consumidas) bajan de esto. 0 = avisar solo cuando un SKU se agota del todo.",
+        "check_secrets": "Caducidad del secreto/certificado de esta misma app, para que el monitor no muera por un secreto caducado. Necesita Application.Read.All.",
+        "secret_days": "Avisa estos días antes de que caduque el secreto/certificado de la app (uno ya caducado avisa siempre).",
+        "check_mailbox": "Buzones de Exchange que superan su cuota de almacenamiento (API de informes). Necesita Reports.Read.All.",
+        "mailbox_over_max": "Avisa cuando el número de buzones con envío/recepción prohibidos (sobre cuota) supera esto. 0 = avisar si hay alguno.",
+        "check_onedrive": "Almacenamiento total USADO de OneDrive en el tenant (API de informes). Necesita Reports.Read.All.",
+        "onedrive_max": "Avisa cuando el uso total de OneDrive supera esta cantidad. 0 = solo informativo.",
+        "onedrive_unit": "Unidad del límite de OneDrive (GB o TB).",
         "check_secure_score": "Microsoft Secure Score (actual frente a máximo, en porcentaje). Necesita SecurityEvents.Read.All.",
-        "secure_min":         "Avisa cuando el porcentaje de Secure Score actual baja de esto (1–100). 0 = solo informativo.",
-        "check_risky_users":  "Usuarios marcados actualmente en riesgo por Entra ID Identity Protection. Necesita IdentityRiskyUser.Read.All.",
-        "risky_max":          "Avisa cuando el número de usuarios en riesgo supera esto. 0 = avisar si hay alguno."
+        "secure_min": "Avisa cuando el porcentaje de Secure Score actual baja de esto (1–100). 0 = solo informativo.",
+        "check_risky_users": "Usuarios marcados actualmente en riesgo por Entra ID Identity Protection. Necesita IdentityRiskyUser.Read.All.",
+        "risky_max": "Avisa cuando el número de usuarios en riesgo supera esto. 0 = avisar si hay alguno."
     },
     "group_labels": {
         "general": "General",
-        "auth":    "Autenticación",
-        "checks":  "Comprobaciones",
-        "alerts":  "Alertas"
+        "auth": "Autenticación",
+        "checks": "Comprobaciones",
+        "alerts": "Alertas"
     },
     "action_labels": {
         "test_connection": "Probar conexión",
@@ -79,110 +79,235 @@
     "ui": {
         "discover_title": "Sitios de SharePoint",
         "discover_error": "No se pudieron obtener los sitios. Revisa las credenciales y los permisos (Sites.Read.All).",
-        "discover_none": "— Sin selección (sitio raíz del tenant) —"
+        "discover_none": "— Sin selección (sitio raíz del tenant) —",
+        "page_title": "Microsoft 365",
+        "page_subtitle": "Azure y Microsoft 365, en directo",
+        "page_refresh": "Actualizar desde Microsoft",
+        "page_refreshing": "Consultando a Microsoft…",
+        "page_cached": "Último resultado monitorizado",
+        "page_live": "En directo desde Microsoft",
+        "page_empty": "Aún no hay resultados — activa checks en un ítem M365 y deja correr el monitor.",
+        "page_error": "No se pudo consultar a Microsoft",
+        "page_all_ok": "Todos los checks OK"
     },
     "new_item_key_label": "Nombre:",
     "rename_item_prompt": "Introduce el nuevo nombre:",
-    "collections": {"list": "Conexiones de Microsoft 365"},
+    "collections": {
+        "list": "Conexiones de Microsoft 365"
+    },
     "messages": {
-        "m3_no_creds":            "M365: {} — faltan credenciales (tenant/client/secret) ⚠️",
-        "m3_auth_fail":           "M365: {} {} [auth: {}]",
-        "m3_site_fail":           "M365: {} 🔽 [SharePoint: {}]",
-        "m3_summary":             "SharePoint {}: {}% usado ({}/{}, libre {})",
-        "m3_site_ok":             "M365: {} — {} ✅",
-        "m3_why_free":            "libre < {}",
-        "m3_site_alert":          "M365: {} — {} — {} ⚠️",
-        "m3_tenant_fail":         "M365: {} 🔽 [uso del tenant: {}]",
-        "m3_tenant_base":         "M365: {} — SharePoint (tenant) usado {}",
-        "m3_tenant_over":         "{} — supera el límite {} ⚠️",
+        "m3_no_creds": "M365: {} — faltan credenciales (tenant/client/secret) ⚠️",
+        "m3_auth_fail": "M365: {} {} [auth: {}]",
+        "m3_site_fail": "M365: {} 🔽 [SharePoint: {}]",
+        "m3_summary": "SharePoint {}: {}% usado ({}/{}, libre {})",
+        "m3_site_ok": "M365: {} — {} ✅",
+        "m3_why_free": "libre < {}",
+        "m3_site_alert": "M365: {} — {} — {} ⚠️",
+        "m3_tenant_fail": "M365: {} 🔽 [uso del tenant: {}]",
+        "m3_tenant_base": "M365: {} — SharePoint (tenant) usado {}",
+        "m3_tenant_over": "{} — supera el límite {} ⚠️",
         "m3_tenant_limit_suffix": " (límite {})",
-        "m3_health_fail":         "M365: {} 🔽 [estado de servicios: {}]",
-        "m3_health_none":         "M365: {} — sin servicios que coincidan ⚠️",
-        "m3_health_ok_all":       "M365: {} — los {} servicios operativos ✅",
-        "m3_svc_ok":              "M365: {} — {}: {}",
-        "m3_svc_bad":             "M365: {} — {}: {}",
-        "m3_lic_fail":            "M365: {} 🔽 [licencias: {}]",
-        "m3_lic_ok":              "M365: {} — {} SKU de licencia, todas con unidades libres ✅",
-        "m3_lic_low":             "M365: {} — licencias bajas: {} ⚠️",
-        "m3_sec_fail":            "M365: {} 🔽 [credenciales de la app: {}]",
-        "m3_sec_none":            "M365: {} — sin credenciales de app que comprobar ✅",
-        "m3_sec_expiring":        "M365: {} — {} de la app caduca en {} días ⚠️",
-        "m3_sec_ok":              "M365: {} — credencial de la app válida {} días ✅",
-        "m3_mbx_fail":            "M365: {} 🔽 [buzones: {}]",
-        "m3_mbx_over":            "M365: {} — {} buzón(es) sobre cuota ({} avisados) ⚠️",
-        "m3_mbx_ok":              "M365: {} — ningún buzón sobre cuota ({} avisados) ✅",
-        "m3_od_fail":             "M365: {} 🔽 [OneDrive: {}]",
-        "m3_od_base":             "M365: {} — OneDrive (tenant) usado {}",
-        "m3_od_over":             "{} — supera el límite {} ⚠️",
-        "m3_od_limit_suffix":     " (límite {})",
-        "m3_score_fail":          "M365: {} 🔽 [Secure Score: {}]",
-        "m3_score_none":          "M365: {} — sin Secure Score disponible ✅",
-        "m3_score_low":           "M365: {} — Secure Score {}% por debajo de {}% ⚠️",
-        "m3_score_ok":            "M365: {} — Secure Score {}% ✅",
-        "m3_risk_fail":           "M365: {} 🔽 [usuarios de riesgo: {}]",
-        "m3_risk_over":           "M365: {} — {} usuario(s) en riesgo ⚠️",
-        "m3_risk_ok":             "M365: {} — {} usuario(s) en riesgo ✅"
+        "m3_health_fail": "M365: {} 🔽 [estado de servicios: {}]",
+        "m3_health_none": "M365: {} — sin servicios que coincidan ⚠️",
+        "m3_health_ok_all": "M365: {} — los {} servicios operativos ✅",
+        "m3_svc_ok": "M365: {} — {}: {}",
+        "m3_svc_bad": "M365: {} — {}: {}",
+        "m3_lic_fail": "M365: {} 🔽 [licencias: {}]",
+        "m3_lic_ok": "M365: {} — {} SKU de licencia, todas con unidades libres ✅",
+        "m3_lic_low": "M365: {} — licencias bajas: {} ⚠️",
+        "m3_sec_fail": "M365: {} 🔽 [credenciales de la app: {}]",
+        "m3_sec_none": "M365: {} — sin credenciales de app que comprobar ✅",
+        "m3_sec_expiring": "M365: {} — {} de la app caduca en {} días ⚠️",
+        "m3_sec_ok": "M365: {} — credencial de la app válida {} días ✅",
+        "m3_mbx_fail": "M365: {} 🔽 [buzones: {}]",
+        "m3_mbx_over": "M365: {} — {} buzón(es) sobre cuota ({} avisados) ⚠️",
+        "m3_mbx_ok": "M365: {} — ningún buzón sobre cuota ({} avisados) ✅",
+        "m3_od_fail": "M365: {} 🔽 [OneDrive: {}]",
+        "m3_od_base": "M365: {} — OneDrive (tenant) usado {}",
+        "m3_od_over": "{} — supera el límite {} ⚠️",
+        "m3_od_limit_suffix": " (límite {})",
+        "m3_score_fail": "M365: {} 🔽 [Secure Score: {}]",
+        "m3_score_none": "M365: {} — sin Secure Score disponible ✅",
+        "m3_score_low": "M365: {} — Secure Score {}% por debajo de {}% ⚠️",
+        "m3_score_ok": "M365: {} — Secure Score {}% ✅",
+        "m3_risk_fail": "M365: {} 🔽 [usuarios de riesgo: {}]",
+        "m3_risk_over": "M365: {} — {} usuario(s) en riesgo ⚠️",
+        "m3_risk_ok": "M365: {} — {} usuario(s) en riesgo ✅"
     },
     "messages_vars": {
-        "m3_no_creds": ["conexión"],
-        "m3_auth_fail": ["conexión", "icono", "error"],
-        "m3_site_fail": ["conexión", "error"],
-        "m3_summary": ["sitio", "uso %", "usado", "total", "libre"],
-        "m3_site_ok": ["conexión", "resumen"],
-        "m3_site_alert": ["conexión", "resumen", "motivos"],
-        "m3_tenant_fail": ["conexión", "error"],
-        "m3_tenant_base": ["conexión", "usado"],
-        "m3_tenant_over": ["mensaje", "límite"],
-        "m3_why_free": ["libre mín"],
-        "m3_tenant_limit_suffix": ["límite"],
-        "m3_health_fail": ["conexión", "error"],
-        "m3_health_none": ["conexión"],
-        "m3_health_ok_all": ["conexión", "servicios"],
-        "m3_svc_ok": ["conexión", "servicio", "estado"],
-        "m3_svc_bad": ["conexión", "servicio", "estado"],
-        "m3_lic_fail": ["conexión", "error"],
-        "m3_lic_ok": ["conexión", "skus"],
-        "m3_lic_low": ["conexión", "skus bajos"],
-        "m3_sec_fail": ["conexión", "error"],
-        "m3_sec_none": ["conexión"],
-        "m3_sec_expiring": ["conexión", "tipo", "días"],
-        "m3_sec_ok": ["conexión", "días"],
-        "m3_mbx_fail": ["conexión", "error"],
-        "m3_mbx_over": ["conexión", "sobre cuota", "avisados"],
-        "m3_mbx_ok": ["conexión", "avisados"],
-        "m3_od_fail": ["conexión", "error"],
-        "m3_od_base": ["conexión", "usado"],
-        "m3_od_over": ["mensaje", "límite"],
-        "m3_od_limit_suffix": ["límite"],
-        "m3_score_fail": ["conexión", "error"],
-        "m3_score_none": ["conexión"],
-        "m3_score_low": ["conexión", "score %", "mín %"],
-        "m3_score_ok": ["conexión", "score %"],
-        "m3_risk_fail": ["conexión", "error"],
-        "m3_risk_over": ["conexión", "cantidad"],
-        "m3_risk_ok": ["conexión", "cantidad"]
+        "m3_no_creds": [
+            "conexión"
+        ],
+        "m3_auth_fail": [
+            "conexión",
+            "icono",
+            "error"
+        ],
+        "m3_site_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_summary": [
+            "sitio",
+            "uso %",
+            "usado",
+            "total",
+            "libre"
+        ],
+        "m3_site_ok": [
+            "conexión",
+            "resumen"
+        ],
+        "m3_site_alert": [
+            "conexión",
+            "resumen",
+            "motivos"
+        ],
+        "m3_tenant_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_tenant_base": [
+            "conexión",
+            "usado"
+        ],
+        "m3_tenant_over": [
+            "mensaje",
+            "límite"
+        ],
+        "m3_why_free": [
+            "libre mín"
+        ],
+        "m3_tenant_limit_suffix": [
+            "límite"
+        ],
+        "m3_health_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_health_none": [
+            "conexión"
+        ],
+        "m3_health_ok_all": [
+            "conexión",
+            "servicios"
+        ],
+        "m3_svc_ok": [
+            "conexión",
+            "servicio",
+            "estado"
+        ],
+        "m3_svc_bad": [
+            "conexión",
+            "servicio",
+            "estado"
+        ],
+        "m3_lic_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_lic_ok": [
+            "conexión",
+            "skus"
+        ],
+        "m3_lic_low": [
+            "conexión",
+            "skus bajos"
+        ],
+        "m3_sec_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_sec_none": [
+            "conexión"
+        ],
+        "m3_sec_expiring": [
+            "conexión",
+            "tipo",
+            "días"
+        ],
+        "m3_sec_ok": [
+            "conexión",
+            "días"
+        ],
+        "m3_mbx_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_mbx_over": [
+            "conexión",
+            "sobre cuota",
+            "avisados"
+        ],
+        "m3_mbx_ok": [
+            "conexión",
+            "avisados"
+        ],
+        "m3_od_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_od_base": [
+            "conexión",
+            "usado"
+        ],
+        "m3_od_over": [
+            "mensaje",
+            "límite"
+        ],
+        "m3_od_limit_suffix": [
+            "límite"
+        ],
+        "m3_score_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_score_none": [
+            "conexión"
+        ],
+        "m3_score_low": [
+            "conexión",
+            "score %",
+            "mín %"
+        ],
+        "m3_score_ok": [
+            "conexión",
+            "score %"
+        ],
+        "m3_risk_fail": [
+            "conexión",
+            "error"
+        ],
+        "m3_risk_over": [
+            "conexión",
+            "cantidad"
+        ],
+        "m3_risk_ok": [
+            "conexión",
+            "cantidad"
+        ]
     },
     "widget": {
         "checks": "Comprobaciones",
         "ok": "OK"
     },
     "health_states": {
-        "serviceOperational":          "Operativo ✅",
-        "serviceRestored":             "Restaurado ✅",
-        "resolved":                    "Resuelto ✅",
-        "resolvedExternal":            "Resuelto (externo) ✅",
+        "serviceOperational": "Operativo ✅",
+        "serviceRestored": "Restaurado ✅",
+        "resolved": "Resuelto ✅",
+        "resolvedExternal": "Resuelto (externo) ✅",
         "postIncidentReviewPublished": "Revisión post-incidente ✅",
-        "falsePositive":               "Falso positivo ✅",
-        "investigationSuspended":      "Investigación suspendida ✅",
-        "serviceDegradation":          "Degradado ⚠️",
-        "investigating":               "Investigando ⚠️",
-        "restoringService":            "Restaurando ⚠️",
-        "verifyingService":            "Verificando ⚠️",
-        "extendedRecovery":            "Recuperación extendida ⚠️",
-        "mitigated":                   "Mitigado ⚠️",
-        "mitigatedExternal":           "Mitigado (externo) ⚠️",
-        "confirmed":                   "Confirmado ⚠️",
-        "reported":                    "Notificado ⚠️",
-        "serviceInterruption":         "Interrupción 🔴"
+        "falsePositive": "Falso positivo ✅",
+        "investigationSuspended": "Investigación suspendida ✅",
+        "serviceDegradation": "Degradado ⚠️",
+        "investigating": "Investigando ⚠️",
+        "restoringService": "Restaurando ⚠️",
+        "verifyingService": "Verificando ⚠️",
+        "extendedRecovery": "Recuperación extendida ⚠️",
+        "mitigated": "Mitigado ⚠️",
+        "mitigatedExternal": "Mitigado (externo) ⚠️",
+        "confirmed": "Confirmado ⚠️",
+        "reported": "Notificado ⚠️",
+        "serviceInterruption": "Interrupción 🔴"
     }
 }

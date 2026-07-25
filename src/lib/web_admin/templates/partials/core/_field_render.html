@@ -541,7 +541,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         const _discoverFieldMod = pathStr.split('|')[0];
         const _discoverFieldVer = (ITEM_SCHEMAS[`${_discoverFieldMod}|__module__`] || {})['api_ver'] || 'v1';
         const _discoverFieldUrl = _discoverFieldAction
-            ? `/api/${_discoverFieldVer}/watchfuls/${_discoverFieldMod}/${_discoverFieldAction}`
+            ? `/api/${_discoverFieldVer}/modules/watchfuls/${_discoverFieldMod}/${_discoverFieldAction}`
             : null;
         if (_discoverFieldUrl) {
             const _rdAttr = _isReadOnly

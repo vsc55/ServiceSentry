@@ -711,6 +711,31 @@ del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
 Bool. Si es `true`, el check puede vincularse a **varios hosts** (selección múltiple).
 Por defecto `false`.
 
+### `__page__`
+
+Declara que el módulo reclama una **sección de primer nivel propia**, al lado de Overview,
+Historial y Syslog: su URL, su entrada en la barra lateral y su panel.
+
+```json
+"__page__": {"id": "azure", "icon": "bi-cloud-haze2", "order": 45,
+             "render": "", "refresh": "page_refresh", "perm": "modules_view"}
+```
+
+| Clave | Por defecto | Descripción |
+| --- | --- | --- |
+| `id` | nombre del módulo | Es la URL (`/<id>`), el panel (`tab-<id>`) y el botón. Debe ser único y apto para URL; **se rechaza** si pisa un id del core (`admin`, `overview`, `history`, `syslog`, `status`, `account`, `login`) |
+| `icon` | `bi-grid-1x2` | Icono Bootstrap de la barra lateral |
+| `order` | `100` | Posición entre las secciones (las del core usan 10/20/30) |
+| `render` | `""` | Función JS que pinta la sección; el módulo la envía en su `web/_ui.html`. **Vacío = la pinta el renderizador genérico del core** a partir de `page_data`, y el módulo no necesita nada de frontend |
+| `refresh` | `""` | Acción de watchful que el botón de refresco en vivo invoca (debe estar en `WATCHFUL_ACTIONS`). Vacío = la página es solo caché |
+| `perm` | `modules_view` | Permiso que protege la ruta **y** la entrada de la barra lateral. Un watchful no posee flags propios, así que debe reutilizar uno existente |
+
+El título es el `pretty_name` traducido del módulo. Los datos salen del hook
+`Watchful.page_data(items, status, lang)` (últimos resultados del monitor, servidos por
+`GET /api/v1/modules/page/<módulo>`); el refresco en vivo es una acción normal del módulo que
+debe responder **con la misma forma**. Detalle completo en
+[explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__).
+
 ### `__credential__`
 
 Declara campos de **credencial reutilizable** del módulo (separados de los campos

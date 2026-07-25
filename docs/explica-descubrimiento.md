@@ -39,6 +39,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 | [Perfiles de host](#5-perfiles-de-host-__host_profile__) | `schema.json` · `__host_profile__` | `watchfuls/*` | `lib.core.hosts.profiles` | sección Servers (formularios por protocolo) |
 | [Tablas de módulo](#6-tablas-de-módulo-discover_db_tables) | `__init__.py` · `discover_db_tables()` | `watchfuls/*` | `reconcile_module_tables()` | BD general (crea/migra `mod_<m>_<n>`) |
 | [Provisión Entra](#7-provisión-entra-__entraid_provision__) | `schema.json`/OIDC · `__entraid_provision__` | `watchfuls/*` + config OIDC | `normalize_entraid_provision()` | asistente device-code → registro de app en Graph |
+| [Páginas de módulo](#2c-una-sección-propia-aportada-por-un-módulo-__page__) | `schema.json` · `__page__` | `watchfuls/*` | `module_pages_catalog()` | sección propia: URL + entrada de sidebar + panel |
 | [Registro de config](#8-registro-de-config-spec-y-layout) | `spec.py` (`Cfg`) + `layout.py` (`TABS`/`CARDS`) | — (registro central, no escaneo) | `config_layout()` / `cfg_meta()` | pantalla de config renderizada desde datos |
 
 > Los tres primeros escanean **dominios de núcleo y servicios** (`lib.core.*` / `lib.services.*`);
@@ -285,6 +286,50 @@ reinventarlo por widget**:
 > **Cache-busting del CSS**: `web_admin.css` se enlaza con `?v={{ asset_v }}` (mtime del archivo,
 > inyectado por el context processor). El `dev_watch` **no** reinicia con cambios `.css`; sin este
 > parámetro, los cambios de estilo no llegaban al navegador hasta un refresco forzado.
+
+---
+
+## 2c. Una sección propia aportada por un módulo (`__page__`)
+
+Un watchful puede reclamar una **sección de primer nivel** —al lado de Overview, Historial y
+Syslog—, con su URL, su entrada en la barra lateral y su propio panel. El core no sabe nada del
+módulo: lee claves genéricas, mezcla la página en el registro y pinta el hueco; el módulo pone la
+etiqueta, los datos y (si quiere) el renderizador.
+
+**Declaración** (`schema.json`):
+
+```json
+"__page__": {"id": "m365", "icon": "bi-microsoft", "order": 40,
+             "render": "renderM365Page", "perm": "modules_view"}
+```
+
+| Clave | Qué hace |
+| ----- | -------- |
+| `id` | id de la página; por defecto, el nombre del módulo. Es la URL (`/<id>`), el panel (`tab-<id>`) y el botón (`btn-nav-<id>`), así que debe ser único y apto para URL. Se **rechaza** si choca con un id del core (`admin`, `overview`, `history`, `syslog`, `status`, `account`, `login`). |
+| `icon`, `order` | icono BI de la sidebar y posición entre las secciones (las del core usan 10/20/30). |
+| `render` | nombre de la función JS que el cableado llama al abrir el panel; el módulo la envía en su `web/_ui.html`, igual que el `fn` de un `CONFIG_ACTION`. Vacío = el core pinta solo con los datos del hook. |
+| `perm` | permiso que protege **la ruta y** la entrada de la sidebar. Por defecto `modules_view`: un watchful no tiene manifiesto Python, así que **no posee flags propios** y debe reutilizar uno existente. |
+
+El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una clave del core.
+
+**Datos — dos mitades deliberadas:**
+
+- *Caché*: `GET /api/v1/modules/page/<módulo>` llama al hook
+  `Watchful.page_data(items, status, lang)`, que lee los **últimos resultados del monitor**. Pinta
+  al instante y no cuesta ni una llamada al proveedor. Devuelve 404 si el módulo no declara página
+  — esa comprobación es lo que evita que el endpoint sea un "ejecuta cualquier hook".
+- *En vivo*: una **acción de watchful normal**
+  (`POST /api/v1/modules/watchfuls/<módulo>/<acción>`) que el módulo declara en
+  `WATCHFUL_ACTIONS` y sirve él mismo. Devolviendo la misma forma que `page_data`, la página tiene
+  **un solo renderizador**, no dos.
+
+**Consumo:** `module_pages_catalog()` (`lib/modules/discovery/pages.py`) normaliza y ordena; el
+registro `lib/web_admin/constants.py::home_pages()` mezcla las páginas de módulo con las del core,
+y de ahí salen gratis la ruta, la entrada de sidebar (con su permiso), el panel generado en
+`dashboard.html` y el cableado del render — todo eso ya era data-driven salvo el propio registro.
+
+> **Ojo:** una clave `__…__` nueva debe añadirse a la lista de exclusión de
+> `ModuleBase.discover_schemas()` o se renderizará como si fuera una colección.
 
 ---
 

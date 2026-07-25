@@ -390,7 +390,7 @@ async function openHostDiscover(mod) {
     const action = sch['__discovery__'];
     if (!action) return;
     const ver = (ITEM_SCHEMAS[mod + '|__module__'] || {})['api_ver'] || 'v1';
-    const url = `/api/${ver}/watchfuls/${encodeURIComponent(mod)}/${encodeURIComponent(action)}`;
+    const url = `/api/${ver}/modules/watchfuls/${encodeURIComponent(mod)}/${encodeURIComponent(action)}`;
 
     // Put the shared modal into host mode and reset its other state.
     _discoverHostMod = mod;
