@@ -958,6 +958,50 @@ class ModuleBase(ObjectBase):
         if self.is_monitor_exist:
             return self._monitor.check_status(status, module, module_sub_key)
 
+    def _emit(self, key: str, status: bool, message: str, other: dict = None,
+              severity: str = None, name: str = None, change_msg: str = None) -> None:
+        """Record a result and notify ONLY on a status change.
+
+        The pairing of :meth:`ReturnModuleCheck.set` with :meth:`check_status` +
+        :meth:`send_message` is what makes a watchful report continuously but alert once:
+        every cycle records the current state, and a notification goes out only when that
+        state actually flipped.  Getting the pairing wrong is how a module either spams a
+        message per cycle or records a result nobody is told about — which is why it lives
+        here rather than being rewritten per module (it had been copied, byte for byte,
+        into four of them).
+
+        The ``name`` shown in the alert is the ITEM's label, so a multi-item module says
+        "web-01" rather than the internal result key.  Result keys are ``<item>/<detail>``
+        by convention, so the item is the segment before the first ``/``.
+
+        Pass ``name`` explicitly when that derivation does not fit: several modules build a
+        friendlier one — a fallback chain (``label`` → host → key), a composed string
+        (``"disk1 - /dev/sda"``), or a different field entirely (the process name).  That
+        variety is exactly why they each grew their own copy of this pairing; the override
+        lets them keep the name they want without also re-implementing the notify gate.
+
+        ``change_msg`` switches the gate to :meth:`check_status_custom`, which fires when
+        the REASON changes as well as when the status does — so a failure that mutates
+        ("connection refused" → "timeout") alerts again instead of staying quiet under an
+        unchanged "still down".  Pass the internal reason string, not the display message;
+        the comparison is against ``other_data['message']`` of the stored result, so a
+        module using this must keep putting that reason there.
+
+        ``severity='warning'`` marks a non-OK result as an aviso (amber in the UI) instead
+        of a hard error — a threshold approached rather than a thing that is down.  It is
+        passed to BOTH the recorded result and the notification: the ``send_msg=False``
+        here disables the monitor's own digest path, so this explicit ``send_message`` is
+        the only notification, and dropping the severity there made a warning arrive as a
+        hard ``down`` while the UI painted it amber.
+        """
+        if name is None:
+            name = (self.get_conf(['list', str(key).split('/')[0], 'label'], '') or '').strip()
+        self.dict_return.set(key, status, message, False, other or {}, severity, name=name)
+        changed = (self.check_status_custom(status, key, change_msg) if change_msg is not None
+                   else self.check_status(status, self.name_module, key))
+        if changed:
+            self.send_message(message, status, item=name, severity=severity or '')
+
     def check_status_custom(self, status, key, status_msg):
         """
         Comprueba cambio de estado incluyendo cambio de mensaje de error.

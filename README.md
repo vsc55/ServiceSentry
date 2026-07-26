@@ -164,6 +164,7 @@ sudo rc-update add ServiSesentry-web default && sudo rc-service ServiSesentry-we
 | [docs/caso-guia-watchful.md](docs/caso-guia-watchful.md) | Step-by-step guide to create a new watchful module |
 | [docs/ref-schema-json.md](docs/ref-schema-json.md) | Complete `schema.json` reference: all field properties, meta-keys, language files and `discover_schemas` pipeline |
 | [docs/explica-i18n.md](docs/explica-i18n.md) | Internationalisation system: two-tier architecture, `discover_schemas` pipeline, adding new languages |
+| [docs/ref-watchful-emit.md](docs/ref-watchful-emit.md) | How a watchful publishes a result: automatic vs manual notification patterns, when each applies, and the bugs that motivated the rule |
 | [docs/ref-tests.md](docs/ref-tests.md) | Full test inventory: what each test checks, pass and fail conditions, organized by group |
 
 ---

@@ -1304,8 +1304,9 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'SNMP: {labels.get(key, key)} — unhandled exception: {exc}', DebugLevel.error)
+                    _lbl = labels.get(key, key)
                     self.dict_return.set(key, False,
-                                         self._msg('snmp_error', labels.get(key, key), exc))
+                                         self._msg('snmp_error', _lbl, exc), name=_lbl)
 
         super().check()
         return self.dict_return
@@ -1351,7 +1352,7 @@ class Watchful(ModuleBase):
 
         if not host:
             self._debug(f'SNMP: {label} — no server host configured, skipping.', DebugLevel.warning)
-            self.dict_return.set(key, False, self._msg('snmp_no_host', label))
+            self.dict_return.set(key, False, self._msg('snmp_no_host', label), name=label)
             return
 
         raw_value, err = self._snmp_get(
@@ -1375,9 +1376,7 @@ class Watchful(ModuleBase):
             status = streak < max(1, t_alert)
             msg    = self._msg('snmp_up' if status else 'snmp_down', label, err)
             self._debug(f'SNMP: {label} — error: {err} (fails={streak}/{t_alert})', DebugLevel.warning)
-            self.dict_return.set(key, status, msg, False, {'oid': oid, 'error': err})
-            if self.check_status(status, self.name_module, key):
-                self.send_message(msg, status, item=label)
+            self._emit(key, status, msg, {'oid': oid, 'error': err}, name=label)
             return
 
         self.fail_streak(key, False)
@@ -1388,14 +1387,12 @@ class Watchful(ModuleBase):
             f'op={operator} expected={expected!r} → {status}',
             DebugLevel.info,
         )
-        self.dict_return.set(key, status, msg, False, {
+        self._emit(key, status, msg, {
             'oid':      oid,
             'value':    raw_value,
             'operator': operator,
             'expected': expected,
-        })
-        if self.check_status(status, self.name_module, key):
-            self.send_message(msg, status, item=label)
+        }, name=label)
 
     # ── Value evaluation ───────────────────────────────────────────────────────
 

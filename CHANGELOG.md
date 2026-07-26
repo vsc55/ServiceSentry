@@ -2,7 +2,150 @@
 
 All notable changes to **ServiceSentry** are documented in this file.
 
-## [Unreleased]
+> **Versioning.** Every commit publishes a build — `0.0.1+build.N` — and its section holds
+> **only what that commit changed**. `src/lib/__init__.py::__version__` declares the same
+> build, and `tests/test_version_changelog.py` fails when the two drift. The semantic version
+> deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
+> we will want for real releases. This changes once releases begin.
+
+## [0.0.1+build.1] - 2026-07-26
+
+### Changed
+- **One Microsoft API layer instead of two copies.** `m365` and `azure` had each grown their own
+  HTTPS transport, their own client-credentials token, their own error extractor, their own date
+  parser and their own "run this item once" — around 150 lines of near-identical code, in some
+  cases *verbatim*. They now share `lib/providers/entraid/graph_api.py` (`EntraApi`: request,
+  token, paging) and `lib/providers/entraid/client.py` (`EntraApiError` + `api_error`), with
+  `lib/providers/azure/arm.py` (`ArmApi`) extending it for Azure Resource Manager — the right
+  direction, because an ARM token is issued by Entra. It went into `lib/providers/` rather than
+  somewhere new because that package's own docstring already says it is kept low **so
+  `lib.modules` can use it**; the layer was there, it just was not being used.
+  Three things that were never Microsoft-specific went where they belong: `lang_section()` and
+  `run_item_once()` to `lib/modules/page_support.py` (any watchful with a `__page__` needs them),
+  and byte formatting to `lib/util/tools.py` as `fmt_bytes`/`to_bytes` — which now scale the full
+  binary ladder to YB in both directions instead of stopping at TB/PB, so a large figure reads
+  `2.0 EB` rather than degenerating into `2048.0 PB`, and a threshold unit a schema might add
+  later cannot be silently misread as GB.
+  Paging is now one helper for both surfaces (Graph's `@odata.nextLink`, ARM's `nextLink`), where
+  Azure used to hand-roll it twice; `api_error` covers all three answer shapes, so an ARM failure
+  that only sends a `code` (`AuthorizationFailed` — the app has no RBAC role) no longer arrives
+  empty. **The monitor side stays on `urllib`** while the web side keeps `requests`: swapping the
+  transport of two working modules would change timeouts, TLS context and proxy behaviour, which
+  is a behaviour change wearing a refactor's clothes.
+
+- **The M365 watchful is seven files instead of one** (886 lines), split the same way as azure:
+  `checks_storage` / `checks_health` / `checks_identity`, `page.py`, `actions.py`, `_parse.py` for
+  the report CSVs, and `__init__.py` as the composition. Not one m365 test needed changing.
+
+- **Azure RBAC moved out of the Entra provisioning module** into `lib/providers/azure/rbac.py`.
+  `list_subscriptions` / `assign_subscription_role` are ARM operations against a different
+  audience — the code said so in a comment while sitting in the wrong package. Re-exported from
+  `provisioning.py`, so nothing that imports them had to change.
+
+- **The Azure watchful is nine files instead of one.** It had grown to 1260 lines and 39 functions
+  in a single `__init__.py`: transport, ARM identifier parsing, eight checks, the section page and
+  the web actions, all interleaved. Split along the seams that already existed — `_http.py` (the
+  three audiences: ARM, Graph, the public feed — nothing there decides anything), `_names.py`
+  (resource ids → readable names, groups, types and stable result keys), one `checks_*.py` per
+  concern (health/inventory, compute, cost, identity), `page.py` and `actions.py` — and
+  `__init__.py` is now the composition: the item loop, the shared token and the `_SERVICES` table.
+  **No behaviour change**: same result keys, same severities, same API versions, all 78 module
+  tests green. Adding a check is now one line in `_SERVICES` plus a method in the matching file,
+  and the API versions live in one place instead of being repeated at each call site. The live
+  refresh and the credential test also stopped duplicating their "run this item once" body — they
+  differ only in how they present the answer, so they now share `_run_once`.
+
+- **`docs/ref-tests.md` is now guarded like the route index is** (`tests/test_docs_tests_inventory.py`,
+  9 tests). Nothing was watching the test inventory, so it rotted: **25 test files were missing from
+  it entirely**, 11 of the 49 declared counts were wrong (m365 claimed 26 against 53 real tests), and
+  the header was ~500 tests stale. A new test file now fails the build unless it is documented.
+  The pre-existing 25 are listed by name in a `PENDING_DOCUMENTATION` set that is **shrink-only** —
+  documenting a file without removing its line fails a test, so the list cannot quietly become a
+  permanent exemption, which is a disabled test with extra steps. Counts are checked with a
+  tolerance rather than for equality: matching exactly would mean reimplementing pytest's
+  collection (parametrize alone makes the static count differ), and a guard that must mirror a
+  collector is a liability of its own. The headline total is bounded **asymmetrically**, because
+  collected can only exceed `def test_` — a symmetric margin sat at 25% of 30% and would have
+  failed the build the first time anyone added a parametrize case. Each of the six checks was
+  verified to actually fail when its condition is violated.
+
+- **`docs/ref-tests.md` caught up, and its byte-formatting example was wrong.** It documented
+  `bytes2human(1024)` → `"1.0 KiB"`; the real answer is `"1.0K"` — wrong suffix and a space that
+  does not exist, written from the IEC convention rather than from the code. Nothing could ever
+  contradict it, because that function has no callers. The section now covers `fmt_bytes` and
+  `to_bytes` too, plus the new shared-Microsoft-layer file, and the header count went from ~3100
+  to 3678. Every example in it was executed against the real code before being written down.
+
+### Fixed
+- **An alert could be labelled with the wrong thing, and one module alerted not at all.** A
+  watchful publishes a result either by letting the monitor notify (`dict_return.set`) or by
+  pairing it by hand (`ModuleBase._emit`); nine modules used BOTH — the second for the main path,
+  the first for their error branches. Those branches did not pass `name=`, so the monitor fell
+  back to resolving the **bound host**, and the same check appeared under two different names
+  depending on how it failed ("A example.com" normally, "ns1" when it raised) — eleven call sites,
+  every one an error path, i.e. exactly when the notification matters most. Two of them looked
+  right at a glance by putting the name in `other_data`, which `get_name()` never reads.
+  Separately, `proxmox` suppressed the monitor's notification in its exception branch **and** sent
+  none itself: an unhandled error went red in the panel and told nobody. All fixed, guarded by
+  `tests/test_watchful_emit_patterns.py`, and the two patterns are now written down with diagrams
+  in `docs/ref-watchful-emit.md` — automatic as the default, manual for the two things it cannot
+  express.
+
+- **"Still missing Application.Read.All" now says WHY.** The provisioning wizard reported a
+  permission as missing for two completely different reasons and printed them identically: the
+  resource does not OFFER that role (a mis-typed or withdrawn name — nobody can grant it), or Azure
+  REFUSED the assignment (almost always the signed-in account being unable to give admin consent —
+  someone who can just repeats the wizard). Graph's own message for the second case was collected
+  and thrown away. `ensure_app_permissions` now returns a `reasons` map alongside `missing`, and
+  the wizard prints the reason under each failed permission.
+
+- **Azure gained the permission check m365 already had — and it checks the thing that actually
+  breaks.** Until now the only way to learn the app held no Reader role was for a check to 403
+  hours later. Adding the m365-style button alone would have been *worse than nothing*: that check
+  reads the token's `roles` claim, which lists Entra **application permissions**, while access to
+  a subscription comes from an ARM **RBAC role assignment** that appears nowhere in it — so it
+  would have reported "all permissions granted" while every ARM call 403s. A profile declaring
+  `azure_rbac` now also probes ARM for real (acquire an ARM-audience token, read the subscription),
+  and the report names the role assignment as its own line with the reason beside it.
+  The Fix button moved off the credential toolbar and into that modal, appearing only when
+  something is actually missing — the way m365 already worked. Offering "fix" before anything is
+  known to be broken invites blind re-runs of a wizard that needs an admin sign-in. The modal also
+  draws the role-assignment row in its checklist from the same declaration — spinning like the
+  others, which matters because that probe is the SLOWEST part of the check and leaving it out hid
+  the wait exactly where it happens. Rows are matched to the answer by a stable `id`, never by the
+  display label, and both sides render that label from one i18n key: matching on text would put the
+  same string in Python and in JavaScript and break silently the day someone reworded it.
+  Everything Azure-specific about that row — which credential field is the target, which role is
+  expected, the row id, the probe itself — lives in `lib/providers/azure/rbac.py`; the Entra route
+  folds it in through a generic `merge_row` and never learns what was checked. The first cut put
+  twenty lines of that in the route, repeating the layering slip this release had already corrected
+  once by moving the RBAC assignment out of the Entra provisioning module.
+
+- **A repaired service no longer erases its own incident.** `service_status` can restart a
+  service it finds down; when that worked, the cycle was recorded as a plain OK — so the panel and
+  the history showed nothing the moment it was fixed, and a service dying every night looked
+  perfectly healthy. The repaired cycle is now stored as a **warning** (it is running again, but
+  something happened) and a repair that FAILED stays a hard down. The notifications are unchanged:
+  the fall is announced, then the outcome, and a successful repair still routes as a recovery —
+  the alert reports the news while the record keeps the incident.
+
+- **A soft threshold breach was paging as if the thing were down.** `_emit` — the record-a-result-
+  and-notify-once pairing that four watchfuls carried as a byte-identical copy — passed
+  `severity='warning'` to the recorded result but **not** to the notification. Since it also passes
+  `send_msg=False`, disabling the monitor's own digest path, that explicit send is the *only*
+  notification: the UI painted the row amber while the alert went out as a hard `down`. Affected
+  every warning-severity result in `azure` (VM stopped, quota near the limit, budget on course to
+  blow, credential expiring, resource state Unknown), `m365` (storage thresholds, licences low,
+  app secret expiring), `keepalived` and `proxmox`. Found while hoisting the duplicate into
+  `ModuleBase`; covered now by `TestModuleBaseEmitCarriesSeverity`, verified to fail without the fix.
+
+---
+
+## [Before per-build versioning]
+
+> Everything older than `build.1`, exactly as it was: accumulated across many commits without
+> being separated per commit. Kept **unrewritten** — splitting it after the fact would be
+> reconstruction by eye, with a real risk of attributing a change to the wrong commit.
 
 ### Added
 - **Azure: cost against budgets, actual and forecast.** In Azure the thing that hurts is rarely an

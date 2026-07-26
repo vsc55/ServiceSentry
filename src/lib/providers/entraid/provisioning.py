@@ -579,8 +579,16 @@ def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
     ``appRoleAssignment`` on the app's own service principal for each granted role.
     Idempotent: roles already assigned are reported, not re-granted.
 
-    Returns ``{tenant_id, client_id, granted:[names], already:[names], missing:[names]}``
-    (``missing`` = roles the resource doesn't offer or that failed to assign)."""
+    Returns ``{tenant_id, client_id, granted:[names], already:[names], missing:[names],
+    reasons:{name: why}}``.
+
+    ``missing`` lumps together two failures that look identical to the admin and are fixed
+    in completely different ways: a role the resource does not OFFER (a mis-typed or
+    withdrawn permission name — nobody can grant it) and a role Azure REFUSED to assign
+    (almost always the signed-in account not being able to give admin consent — the right
+    person just has to repeat the wizard).  ``reasons`` carries Graph's own message per
+    role, which used to be thrown away, leaving "Still missing X" with no way to tell the
+    two apart."""
     hdrs = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
     ra = _req.get(
         f"{GRAPH_BASE}/applications?$filter=appId eq '{client_id}'"
@@ -612,7 +620,7 @@ def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
                   "?$select=appRoleId", headers=hdrs, timeout=15)
     have = {a.get('appRoleId') for a in (ex.json().get('value') or [])} if ex.ok else set()
 
-    granted, already, missing = [], [], []
+    granted, already, missing, reasons = [], [], [], {}
     for block in (resources or []):
         res_app = str((block or {}).get('resource') or GRAPH_APP_ID)
         role_names = list(dict.fromkeys((block or {}).get('roles') or []))
@@ -622,7 +630,12 @@ def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
         res_sp_id = res.get('id')
         role_ids = {ar.get('value'): ar.get('id') for ar in (res.get('appRoles') or [])
                     if ar.get('value') in role_names and ar.get('id')}
-        missing += [n for n in role_names if n not in role_ids]   # not offered by the resource
+        not_offered = [n for n in role_names if n not in role_ids]
+        missing += not_offered
+        for n in not_offered:
+            # Nobody can grant this one: the resource has no such app role. A typo, or a
+            # permission Microsoft withdrew — repeating the wizard will not help.
+            reasons[n] = 'not offered by the resource (check the permission name)'
         want_ids = set()
         for name, rid in role_ids.items():
             want_ids.add(rid)
@@ -636,6 +649,12 @@ def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
                 granted.append(name)
             else:
                 missing.append(name)
+                # Graph's own words. Discarding them is what made "Still missing
+                # Application.Read.All" unactionable: the usual cause is the signed-in
+                # account not being able to grant admin consent, and that reads nothing
+                # like a wrong permission name.
+                code = getattr(asg, 'status_code', 0)
+                reasons[name] = (graph_error(asg) or f'HTTP {code}') if code else 'request failed'
         # Mirror the grants into requiredResourceAccess so the portal reflects them.
         blk = next((b for b in rra if str(b.get('resourceAppId')) == res_app), None)
         if blk is None:
@@ -650,102 +669,15 @@ def ensure_app_permissions(access_token: str, tenant_id: str, client_id: str,
     except Exception:  # pylint: disable=broad-except
         pass
     return {'tenant_id': tenant_id, 'client_id': client_id, 'granted': granted,
-            'already': sorted(set(already)), 'missing': sorted(set(missing))}
+            'already': sorted(set(already)), 'missing': sorted(set(missing)),
+            # Only for what is missing: a reason beside a granted role is noise.
+            'reasons': {k: v for k, v in reasons.items() if k in set(missing)}}
 
 
 # ── Azure Resource Manager: RBAC role assignment ──────────────────────────────
-# Azure access is NOT an Entra app permission. Reading a subscription's Service
-# Health needs an Azure **RBAC role assignment** on that subscription, which is an
-# ARM operation against a different audience (management.azure.com) — so it cannot
-# ride along with the Graph consent above and gets its own step.
-ARM_BASE = 'https://management.azure.com'
-# Well-known built-in role definition ids (stable across every tenant).
-ARM_ROLES = {
-    'reader': 'acdd72a7-3385-48ef-bd42-f606fba81ae7',
-}
-
-
-def list_subscriptions(arm_token: str) -> list:
-    """The subscriptions the signed-in admin can see, newest API, as
-    ``[{'id', 'name', 'state'}]`` sorted by name.
-
-    Used to let the wizard OFFER a target instead of asking the admin to paste a GUID.
-    ARM only returns subscriptions the caller has access to, which is exactly the set
-    where they might also be able to create a role assignment — so an empty list is a
-    meaningful answer (this account manages none), not an error.
-
-    Returns ``[]`` on any failure: the picker is a convenience, and the caller always
-    keeps the "type the id by hand" path.
-    """
-    try:
-        r = _req.get(f'{ARM_BASE}/subscriptions?api-version=2020-01-01',
-                     headers={'Authorization': f'Bearer {arm_token}'}, timeout=20)
-        if not r.ok:
-            return []
-        rows = (r.json() or {}).get('value') or []
-    except Exception:  # pylint: disable=broad-except
-        return []
-    out = []
-    for s in rows:
-        if not isinstance(s, dict):
-            continue
-        sid = str(s.get('subscriptionId') or '').strip()
-        if not sid:
-            continue
-        # Disabled/expired subscriptions cannot take a role assignment usefully; keep
-        # them listed but let the caller show the state rather than silently hiding one.
-        out.append({'id': sid,
-                    'name': str(s.get('displayName') or sid),
-                    'state': str(s.get('state') or '')})
-    return sorted(out, key=lambda s: s['name'].lower())
-
-
-def assign_subscription_role(arm_token: str, subscription_id: str, principal_id: str,
-                             role: str = 'reader') -> dict:
-    """Assign a built-in Azure role to a service principal ON a subscription.
-
-    *arm_token* must be issued for ``management.azure.com`` and belong to someone who
-    may create role assignments there (**Owner** or **User Access Administrator**);
-    being an Entra admin is NOT enough, which is the usual cause of a 403 here.
-
-    Returns ``{'ok': bool, 'already': bool, 'role': str, 'message': str}`` — an
-    existing identical assignment (409 ``RoleAssignmentExists``) counts as success, so
-    re-running the wizard is safe.
-    """
-    role_id = ARM_ROLES.get(str(role or 'reader').lower())
-    if not role_id:
-        return {'ok': False, 'already': False, 'role': role, 'message': f'unknown role: {role}'}
-    if not (subscription_id and principal_id):
-        return {'ok': False, 'already': False, 'role': role,
-                'message': 'subscription id and principal id are required'}
-    sub = str(subscription_id).strip()
-    # The assignment NAME must be a GUID and is what makes the call idempotent-ish;
-    # a fresh one plus the 409 handling below covers the re-run case.
-    import uuid as _uuid  # noqa: PLC0415 (local: only this ARM path needs it)
-    name = str(_uuid.uuid4())
-    url = (f'{ARM_BASE}/subscriptions/{sub}/providers/Microsoft.Authorization/'
-           f'roleAssignments/{name}?api-version=2022-04-01')
-    body = {'properties': {
-        'roleDefinitionId': (f'/subscriptions/{sub}/providers/Microsoft.Authorization/'
-                             f'roleDefinitions/{role_id}'),
-        'principalId': principal_id,
-        # Without this ARM may reject a brand-new SP it has not replicated yet.
-        'principalType': 'ServicePrincipal',
-    }}
-    try:
-        r = _req.put(url, headers={'Authorization': f'Bearer {arm_token}',
-                                   'Content-Type': 'application/json'},
-                     json=body, timeout=20)
-    except Exception as exc:  # pylint: disable=broad-except
-        return {'ok': False, 'already': False, 'role': role, 'message': str(exc)}
-    if r.ok:
-        return {'ok': True, 'already': False, 'role': role, 'message': ''}
-    detail = ''
-    try:
-        detail = ((r.json() or {}).get('error') or {}).get('message') or ''
-    except Exception:  # pylint: disable=broad-except
-        detail = (r.text or '')[:200]
-    if r.status_code == 409 or 'RoleAssignmentExists' in (detail or ''):
-        return {'ok': True, 'already': True, 'role': role, 'message': ''}
-    return {'ok': False, 'already': False, 'role': role,
-            'message': detail or f'HTTP {r.status_code}'}
+# Moved to lib.providers.azure.rbac, where it belongs: ARM is a different audience with
+# a different consent model, and this module is the ENTRA provisioning path. Re-exported
+# here so the wizard's imports keep working — the code has one home, this is an alias.
+from lib.providers.azure.rbac import (  # noqa: E402,F401  (re-exported for callers)
+    ARM_ROLES, assign_subscription_role, list_subscriptions)
+from lib.providers.azure.arm import ARM_BASE  # noqa: E402,F401  (re-exported)

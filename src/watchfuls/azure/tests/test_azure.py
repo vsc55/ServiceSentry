@@ -661,7 +661,7 @@ class TestAppSecretExpiry:
         w = Watchful(create_mock_monitor({'watchfuls.azure': {'threads': 1, 'alert': 3, 'list': {
             'a1': _item(check_service_health=False, check_app_secrets=True, **item)}}}))
         with patch.object(w, '_get_token', side_effect=lambda *a, **k: 'tok'), \
-             patch.object(w, '_graph_all', side_effect=lambda tok, path, to: list(apps)):
+             patch.object(w, '_paged', side_effect=lambda tok, path, to: list(apps)):
             return w.check().list
 
     def test_nothing_expiring_soon_is_one_ok_result(self):
@@ -709,7 +709,7 @@ class TestAppSecretExpiry:
         pages = [json.dumps({'value': [{'id': 'a'}], '@odata.nextLink': 'https://next/2'}),
                  json.dumps({'value': [{'id': 'b'}]})]
         with patch.object(Watchful, '_request', side_effect=[(200, p) for p in pages]) as req:
-            out = Watchful._graph_all('tok', '/applications', 10)
+            out = Watchful._paged('tok', '/applications', 10)
         assert [o['id'] for o in out] == ['a', 'b']
         assert req.call_args_list[1][0][0] == 'https://next/2'
 
@@ -840,3 +840,49 @@ class TestDeclarations:
         from watchfuls.azure import Watchful
         assert 'page_refresh' in Watchful.WATCHFUL_ACTIONS
         assert 'page_refresh' in Watchful.READ_ONLY_ACTIONS
+
+
+class TestTokenAudience:
+    """ARM and Graph are different audiences, and a token for one is rejected by the
+    other. Since the shared helper now defaults to Graph, every ARM caller must ask for
+    ARM_SCOPE explicitly — a mistake no mocked test would otherwise notice, because a
+    stubbed _get_token happily returns a token whatever scope it was asked for."""
+
+    def test_the_monitor_asks_for_an_arm_token(self):
+        from lib.providers.azure.arm import ARM_SCOPE
+        from watchfuls.azure import Watchful
+        seen = []
+        w = Watchful(create_mock_monitor(
+            {'watchfuls.azure': {'threads': 1, 'alert': 3, 'list': {'a1': _item()}}}))
+        with patch.object(w, '_get_token',
+                          side_effect=lambda t, c, s, to, scope=None: seen.append(scope) or 'tok'), \
+             patch.object(w, '_arm_json', side_effect=lambda tok, path, to: {}):
+            w.check()
+        assert seen == [ARM_SCOPE]
+
+    def test_the_secrets_check_asks_for_a_graph_token(self):
+        """The one Graph check in the module fetches its OWN token: the shared ARM token
+        the other checks ride cannot read app registrations."""
+        from lib.providers.entraid.client import GRAPH_SCOPE
+        from watchfuls.azure import Watchful
+        seen = []
+        item = _item(check_service_health=False, check_app_secrets=True, secret_days=30)
+        w = Watchful(create_mock_monitor(
+            {'watchfuls.azure': {'threads': 1, 'alert': 3, 'list': {'a1': item}}}))
+        with patch.object(w, '_get_token',
+                          side_effect=lambda t, c, s, to, scope=None: seen.append(scope) or 'tok'), \
+             patch.object(w, '_paged', side_effect=lambda tok, path, to: []):
+            w.check()
+        assert GRAPH_SCOPE in seen
+
+    def test_the_region_picker_asks_for_an_arm_token(self):
+        from lib.providers.azure.arm import ARM_SCOPE
+        from watchfuls.azure import Watchful
+        seen = []
+        cfg = {'subscription_id': 'sub-1', 'tenant_id': 't', 'client_id': 'c',
+               'client_secret': 's'}
+        with patch.object(Watchful, '_get_token',
+                          side_effect=lambda t, c, s, to, scope=None: seen.append(scope) or 'tok'), \
+             patch.object(Watchful, '_arm_json', return_value={'value': []}):
+            Watchful.list_region_ids(cfg)
+        assert seen == [ARM_SCOPE]

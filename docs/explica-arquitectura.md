@@ -54,7 +54,7 @@ flowchart TD
         notify["lib/core/notify<br/><small>router + canales (telegram/email/webhook/msteams)</small>"]
     end
 
-    prov["lib/providers/*<br/><small>ldap · oidc · saml · scim · entraid · telegram</small>"]
+    prov["lib/providers/*<br/><small>ldap · oidc · saml · scim · entraid · azure · telegram</small>"]
 
     subgraph checks["Ejecución de checks"]
         watch["watchfuls/*"]
@@ -203,7 +203,7 @@ ServiceSentry/
 │   ├── lib/
 │   │   ├── __init__.py                  # Exports (__all__): ObjectBase, DictFilesPath, Monitor, Exec, ExecResult, Mem, MemInfo (Telegram NO se exporta; es cliente de bajo nivel en lib/providers/)
 │   │   ├── i18n/                        # Traducciones de toda la app (UI web + emails): __init__.py (loader, DEFAULT_LANG/SUPPORTED_LANGS/TRANSLATIONS/coerce_lang) + lang/ (en_EN.py, es_ES.py)
-│   │   ├── util/                        # Helpers puros sin estado: tools.py (bytes2human) + os_detect.py (SO local/remoto) + entity_audit.py (touch_entity/track_change)
+│   │   ├── util/                        # Helpers puros sin estado: tools.py (fmt_bytes/to_bytes + bytes2human) + os_detect.py (SO local/remoto) + entity_audit.py (touch_entity/track_change)
 │   │   ├── security/                    # Primitivas de seguridad: secret_manager.py (cifrado Fernet, enc: prefix, ENCRYPT_KEYS) + net_guard.py (validate_external_url, guard SSRF)
 │   │   ├── system/                      # Capa de acceso al host: ejecución (exe) + colectores de métricas (mem, linux/)
 │   │   │   ├── exe.py                   # Ejecución de comandos local/remoto (Exec, ExecResult)
@@ -289,8 +289,9 @@ ServiceSentry/
 │   │   │   ├── debug.py                 # Sistema de debug con niveles
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
 │   │   ├── modules/
-│   │   │   ├── module_base.py           # Clase base para todos los watchfuls
+│   │   │   ├── module_base.py           # Clase base para todos los watchfuls (incluye _emit: registrar + notificar)
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
+│   │   │   ├── page_support.py          # Para watchfuls con sección propia (__page__): lang_section + run_item_once
 │   │   │   └── discovery/               # Descubrimiento por escaneo de watchfuls
 │   │   │       ├── credential_schemas.py  # Catálogo de tipos de credencial (escanea watchfuls + i18n)
 │   │   │       └── overview_widgets.py    # Catálogo de widgets de Overview (reutiliza helpers de credential_schemas)
@@ -300,14 +301,20 @@ ServiceSentry/
 │   │   │   ├── oidc/                    # OIDC/OAuth2 SSO: auth.py (authlib) + routes.py (/auth/oidc/*)
 │   │   │   ├── saml/                    # SAML2 SSO: auth.py (python3-saml) + routes.py (/auth/saml2/*) [alpha]
 │   │   │   ├── scim/                    # SCIM 2.0: service.py (protocolo, sin Flask) + routes.py (/scim/v2/*)
-│   │   │   └── entraid/                 # Microsoft Entra ID / Graph (paquete)
-│   │   │       ├── client.py            # Constantes Graph/authority + graph_error()
-│   │   │       ├── auth.py              # Tenant/token app-only + device-code (start/poll)
-│   │   │       ├── directory.py         # Grupos de Entra (fetch_groups, lookup_group)
-│   │   │       ├── mail.py              # Envío de correo vía Graph (Microsoft 365)
-│   │   │       ├── provisioning.py      # Alta de apps (roles/scopes/consent/SSO)
-│   │   │       ├── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
-│   │   │       └── routes.py            # /api/v1/auth/entraid/* (registro de app + device-code de provisión SCIM)
+│   │   │   ├── entraid/                 # Microsoft Entra ID / Graph (paquete)
+│   │   │   │   ├── client.py            # Constantes Graph/authority + EntraApiError + api_error()/graph_error()
+│   │   │   │   ├── auth.py              # Tenant/token app-only + device-code (start/poll) [requests]
+│   │   │   │   ├── graph_api.py         # EntraApi: transporte del lado MONITOR (urllib, sin requests).
+│   │   │   │   │                        #   Lo heredan los watchfuls m365 y azure: request/token/paginado
+│   │   │   │   ├── permissions.py       # Inspección de permisos concedidos + merge_row() (costura genérica)
+│   │   │   │   ├── directory.py         # Grupos de Entra (fetch_groups, lookup_group)
+│   │   │   │   ├── mail.py              # Envío de correo vía Graph (Microsoft 365)
+│   │   │   │   ├── provisioning.py      # Alta de apps (roles/scopes/consent/SSO)
+│   │   │   │   ├── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
+│   │   │   │   └── routes.py            # /api/v1/auth/entraid/* (registro de app + device-code de provisión SCIM)
+│   │   │   └── azure/                   # Azure Resource Manager — audiencia y consentimiento DISTINTOS de Graph
+│   │   │       ├── arm.py               # Endpoints, versiones de API y ArmApi(EntraApi) [lado monitor]
+│   │   │       └── rbac.py              # Suscripciones, asignación de rol y sonda de acceso [lado web, requests]
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
 │   │       ├── app.py                   # Clase WebAdmin (hereda mixins de lib/web_admin/mixins + lib/core/* + lib/services/*)
 │   │       ├── constants.py             # SOLO HOME_PAGES + home_page_ids (landing pages).

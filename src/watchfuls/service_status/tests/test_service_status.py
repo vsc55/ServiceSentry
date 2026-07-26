@@ -119,20 +119,55 @@ class TestCheck:
         assert he.call_args.args[1].startswith('sc query')
         assert items['svc']['status'] is True
 
-    def test_remediation_recovers(self):
+    def _remediation_run(self, second_state):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx',
                                'remediation': True, 'host_uid': 'h1'}})
         # Remediation only runs on a state *change* → make check_status report one.
         w._monitor.check_status = MagicMock(return_value=True)
-        # First status call: stopped; remediation start; second call: active.
-        calls = [('inactive', '', 3), ('', '', 0), ('active', '', 0)]
+        # First status call: stopped; remediation start; second call: the given state.
+        calls = [('inactive', '', 3), ('', '', 0), (second_state, '', 0)]
         with patch.object(w, 'host_exec', side_effect=calls) as he:
             items = w.check().list
+        return w, he, items
+
+    def test_remediation_runs_and_restarts_the_service(self):
+        _w, he, _items = self._remediation_run('active')
         # status + start + re-check = 3 host_exec calls
         assert he.call_count == 3
         assert any('start' in c.args[1] for c in he.call_args_list)
-        assert items['web']['status'] is True
-        assert items['web']['other_data']['remediation'] is True
+
+    def test_a_repaired_service_is_recorded_as_a_warning_not_a_clean_ok(self):
+        """A cycle in which the service FELL and had to be restarted is not a clean OK.
+        Storing it as one erases the incident from the panel and from history the moment
+        it is fixed — the operator would never learn the service keeps dying."""
+        _w, _he, items = self._remediation_run('active')
+        row = items['web']
+        assert row['status'] is False, 'a repaired fall must not read as a clean OK'
+        assert row['severity'] == 'warning', 'it IS running again — a warning, not a down'
+        assert row['other_data']['remediation'] is True
+
+    def test_a_failed_repair_stays_a_hard_down(self):
+        """Could not be repaired → error, not a warning: the service is still off."""
+        _w, _he, items = self._remediation_run('inactive')
+        row = items['web']
+        assert row['status'] is False
+        assert row['severity'] == 'error'
+        assert row['other_data']['remediation'] is False
+
+    def test_both_the_fall_and_the_outcome_are_announced(self):
+        """Two notifications in one cycle: the fall, then the result of the repair. The
+        second carries the RECOVERED status so it routes as a recovery, even though the
+        stored result stays a warning — the alert reports the news, the record keeps the
+        incident."""
+        w = _watchful({'web': {'enabled': True, 'service': 'nginx',
+                               'remediation': True, 'host_uid': 'h1'}})
+        w._monitor.check_status = MagicMock(return_value=True)
+        sent = []
+        w.send_message = lambda msg, status=None, item='', severity='': sent.append(status)
+        calls = [('inactive', '', 3), ('', '', 0), ('active', '', 0)]
+        with patch.object(w, 'host_exec', side_effect=calls):
+            w.check()
+        assert sent == [False, True], 'expected the fall then the recovery'
 
     def test_unsupported_os(self):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'host_uid': 'h1'}},

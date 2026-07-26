@@ -54,17 +54,13 @@ def _run(item, *, drive=None, csv_text='', token_exc=None, site='Marketing', mod
 
 class TestHelpers:
 
-    def test_fmt_bytes(self):
-        from watchfuls.m365 import _fmt_bytes
-        assert _fmt_bytes(0) == '0 B'
-        assert _fmt_bytes(GB) == '1.0 GB'
-        assert _fmt_bytes(1536 * 1024 ** 2) == '1.5 GB'
-
-    def test_to_bytes(self):
-        from watchfuls.m365 import _to_bytes
-        assert _to_bytes(2, 'GB') == 2 * GB
-        assert _to_bytes(1, 'TB') == 1024 ** 4
-        assert _to_bytes('', 'GB') == 0
+    def test_the_byte_helpers_are_the_shared_ones(self):
+        """fmt_bytes/to_bytes were never Microsoft-specific and now live in lib.util;
+        the module keeps its old names as aliases. Their behaviour is tested in
+        tests/test_tools.py — this only pins that the module still exposes them."""
+        from lib.util import fmt_bytes, to_bytes
+        from watchfuls.m365 import _fmt_bytes, _to_bytes
+        assert _fmt_bytes is fmt_bytes and _to_bytes is to_bytes
 
     def test_csv_max(self):
         from watchfuls.m365 import _csv_max

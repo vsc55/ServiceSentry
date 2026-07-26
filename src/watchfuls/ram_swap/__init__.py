@@ -110,15 +110,22 @@ class Watchful(ModuleBase):
 
         # Blank/0/absent per-item threshold inherits the module-level value
         # (Configuration > Modules), then the module schema default.
-        self._emit(f'{key}_ram', 'RAM', label, ram_pct,
+        self._emit_usage(f'{key}_ram', 'RAM', label, ram_pct,
                    self._alert(item.get('alert_ram') or None,
                                self.module_default('alert_ram', self._MODULE_DEFAULTS['alert_ram'])))
         if swap_pct is not None:
-            self._emit(f'{key}_swap', 'SWAP', label, swap_pct,
+            self._emit_usage(f'{key}_swap', 'SWAP', label, swap_pct,
                        self._alert(item.get('alert_swap') or None,
                                    self.module_default('alert_swap', self._MODULE_DEFAULTS['alert_swap'])))
 
-    def _emit(self, result_key, caption, label, used_pct, alert):
+    def _emit_usage(self, result_key, caption, label, used_pct, alert):
+        """Record one RAM/SWAP usage reading.
+
+        NOT ModuleBase._emit (different signature, and deliberately so): this records with
+        the DEFAULT send_msg=True, letting the monitor notify from its own digest path —
+        which reads the severity off the stored result, so a usage breach routes as a warn
+        without an explicit send_message here.
+        """
         used = round(float(used_pct), 1)
         warning = used >= float(alert)
         msg = self._msg('mem_high' if warning else 'mem_ok', caption, label, f'{used:.1f}')

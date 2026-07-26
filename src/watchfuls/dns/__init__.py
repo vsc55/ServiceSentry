@@ -628,7 +628,7 @@ class Watchful(ModuleBase):
                     self._debug(f"DNS: {item['key']} - Exception: {exc}", DebugLevel.error)
                     lbl = item.get('label') or f'{item["record_type"]} {item["host"]}'
                     message = self._msg('dns_exc', lbl, exc)
-                    self.dict_return.set(item['key'], False, message)
+                    self.dict_return.set(item['key'], False, message, name=lbl)
 
         super().check()
         return self.dict_return
@@ -714,7 +714,6 @@ class Watchful(ModuleBase):
             'response_time': response_time,
             'name': label,   # display name for the status views (key is a UID)
         }
-        self.dict_return.set(key, ok, message, False, other_data)
-
-        if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=label)
+        # name= keeps the module's own fallback (label, else "<type> <host>"): the key
+        # is a UID, so the derived-from-config name would be blank for an unlabelled item.
+        self._emit(key, ok, message, other_data, name=label)

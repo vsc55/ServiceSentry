@@ -87,7 +87,8 @@ class Watchful(ModuleBase):
                 except Exception as exc:
                     message = self._msg('hdd_error', hddtemp.label, exc)
                     self.dict_return.set(hddtemp.item_key, False, message,
-                                         other_data={'name': hddtemp.label})
+                                         other_data={'name': hddtemp.label},
+                                         name=hddtemp.label)
 
     def _hddtemp_check(self, hddtemp):
         if self._hddtemp_return(hddtemp):
@@ -113,22 +114,21 @@ class Watchful(ModuleBase):
                     other_data['name'] = f'{hddtemp.label} - {hdd_dev}'
                     # An over-temperature disk is a warning (the reading succeeded); a failed
                     # hddtemp query (the else branch below) stays a down.
-                    self.dict_return.set(hdd_name, status, s_message, False, other_data,
-                                         severity='warning')
-
-                    if self.check_status(status, self.name_module, hdd_name):
-                        self.send_message(s_message, status, item=f'{hddtemp.label} - {hdd_dev}',
-                                          severity='warning')
+                    # name= is composed ("<item> - <device>"): the result key is
+                    # "<uid>_<disk>" with an UNDERSCORE, so the /-based derivation cannot
+                    # recover the item from it.
+                    self._emit(hdd_name, status, s_message, other_data,
+                               severity='warning', name=f'{hddtemp.label} - {hdd_dev}')
 
         else:
             self._debug(f"{hddtemp.label} >> Exception: {hddtemp.error}", DebugLevel.warning)
             s_message = self._msg('hdd_query_error', hddtemp.label, hddtemp.error)
 
             other_data = {'message': str(hddtemp.error), 'name': hddtemp.label}
-            self.dict_return.set(hddtemp.item_key, False, s_message, False, other_data)
-
-            if self.check_status_custom(False, hddtemp.item_key, hddtemp.error):
-                self.send_message(s_message, False, item=hddtemp.label)
+            # change_msg: a query error that CHANGES is worth re-announcing; without it a
+            # different failure would stay silent behind an unchanged down state.
+            self._emit(hddtemp.item_key, False, s_message, other_data,
+                       name=hddtemp.label, change_msg=hddtemp.error)
 
     def _hddtemp_return(self, hddtemp):
         timeout = self.module_default('timeout', self._DEFAULT_TIMEOUT)

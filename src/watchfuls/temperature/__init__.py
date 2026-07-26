@@ -70,14 +70,16 @@ class Watchful(ModuleBase):
         item = self.resolve_host(raw)
         if item.get('_host_maintenance') or not item.get('enabled', True):
             return
+        # Resolved BEFORE the OS check so the unsupported-OS result is named like every
+        # other one — it used to report the raw item UID.
+        sensor = (item.get('sensor', '') or '').strip() or key
+        label = (item.get('label', '') or '').strip() or sensor
         os_ = self.host_os(item)
         if os_ != 'linux':
             self.dict_return.set(key, False,
-                                 self._msg('temp_unsupported_os', key, os_),
-                                 severity='warning')
+                                 self._msg('temp_unsupported_os', label, os_),
+                                 severity='warning', name=label)
             return
-        sensor = (item.get('sensor', '') or '').strip() or key
-        label = (item.get('label', '') or '').strip() or sensor
         out, err, code = self.host_exec(
             item, _THERMAL_CMD, timeout=self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
         if code != 0 and not out:

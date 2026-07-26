@@ -72,3 +72,129 @@ class TestSendMessageBridgeCarriesSeverity:
         m._notifier = _Notifier()
         m.send_message('host unreachable', status=False, module='ping', item='web01')
         assert m._notifier.added == ['down']
+
+
+class TestModuleBaseEmitCarriesSeverity:
+    """`ModuleBase._emit` records a result AND notifies. It passes `send_msg=False`, which
+    disables the monitor's own digest path — so that explicit send is the ONLY notification.
+    Dropping the severity there made a soft threshold breach paint amber in the UI while
+    paging someone as if the thing were down. Four watchfuls carried that copy."""
+
+    def _module(self):
+        from lib.modules import ModuleBase
+
+        class _M(ModuleBase):
+            def __init__(self):                      # skip the real __init__
+                self.sent = []
+                self.recorded = []
+
+            name_module = 'demo'
+
+            class _DR:
+                def __init__(self, out):
+                    self._out = out
+
+                def set(self, key, status, message, send_msg=True, other_data=None,
+                        severity=None, name=''):
+                    self._out.append((key, status, severity, send_msg))
+
+            @property
+            def dict_return(self):
+                return self._DR(self.recorded)
+
+            def get_conf(self, *_a, **_k):
+                return 'web01'
+
+            def check_status(self, *_a, **_k):
+                return True                          # force the notification path
+
+            def send_message(self, message, status=None, item='', severity=''):
+                self.sent.append((message, status, item, severity))
+
+        return _M()
+
+    def test_a_warning_is_notified_as_a_warning(self):
+        m = self._module()
+        m._emit('web01/cpu', False, 'cpu high', {'used': 91}, severity='warning')
+        assert m.sent == [('cpu high', False, 'web01', 'warning')]
+
+    def test_the_severity_also_reaches_the_recorded_result(self):
+        m = self._module()
+        m._emit('web01/cpu', False, 'cpu high', severity='warning')
+        assert m.recorded == [('web01/cpu', False, 'warning', False)]
+
+    def test_a_hard_failure_still_notifies_without_severity(self):
+        """No severity must stay a plain down — the fix must not turn everything amber."""
+        m = self._module()
+        m._emit('web01/cpu', False, 'unreachable')
+        assert m.sent == [('unreachable', False, 'web01', '')]
+
+    def test_the_monitor_would_route_that_pair_as_warn_and_down(self):
+        """Ties the module side to the routing side, so the two cannot drift apart."""
+        from lib.services.monitoring.monitor import Monitor
+        assert Monitor._alert_kind(False, 'warning') == 'warn'
+        assert Monitor._alert_kind(False, '') == 'down'
+
+
+class TestEmitChangeMsgGate:
+    """`change_msg` switches the notify gate to check_status_custom, which also fires when
+    the REASON changes. Without it a failure that mutates ("connection refused" →
+    "timeout") stays silent behind an unchanged "still down" — the module knows something
+    new, nobody is told."""
+
+    def _module(self, changed=False, custom=True):
+        from lib.modules import ModuleBase
+
+        class _M(ModuleBase):
+            def __init__(self):
+                self.sent = []
+                self.gates = []
+
+            name_module = 'demo'
+
+            class _DR:
+                def set(self, *_a, **_k):
+                    return True
+
+            @property
+            def dict_return(self):
+                return self._DR()
+
+            def get_conf(self, *_a, **_k):
+                return 'db1'
+
+            def check_status(self, *_a, **_k):
+                self.gates.append('plain')
+                return changed
+
+            def check_status_custom(self, status, key, status_msg):
+                self.gates.append(('custom', status_msg))
+                return custom
+
+            def send_message(self, message, status=None, item='', severity=''):
+                self.sent.append(message)
+
+        return _M()
+
+    def test_without_change_msg_it_uses_the_plain_gate(self):
+        m = self._module(changed=False)
+        m._emit('db1', False, 'down')
+        assert m.gates == ['plain'] and m.sent == []
+
+    def test_with_change_msg_it_uses_the_custom_gate(self):
+        m = self._module(changed=False, custom=True)
+        m._emit('db1', False, 'down', change_msg='timeout')
+        assert m.gates == [('custom', 'timeout')]
+        assert m.sent == ['down'], 'a changed reason must re-alert even with an unchanged status'
+
+    def test_the_custom_gate_can_still_stay_quiet(self):
+        """Same status AND same reason → no repeat alert every cycle."""
+        m = self._module(changed=False, custom=False)
+        m._emit('db1', False, 'down', change_msg='timeout')
+        assert m.sent == []
+
+    def test_an_empty_change_msg_still_selects_the_custom_gate(self):
+        """'' is a legitimate reason (no detail); only None means "use the plain gate"."""
+        m = self._module(custom=True)
+        m._emit('db1', False, 'down', change_msg='')
+        assert m.gates == [('custom', '')]

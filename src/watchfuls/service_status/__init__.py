@@ -126,20 +126,36 @@ class Watchful(ModuleBase):
         ok = status if expected == 'running' else not status
         s_message = self._fmt(label, ok, status, error, detail)
 
+        # NOT ModuleBase._emit, deliberately: the gate is evaluated ONCE and governs TWO
+        # notifications (the fall, then the outcome of the repair). _emit couples one gate
+        # to one send, so routing this through it would silence the recovery message —
+        # check_status compares against the STORED status, which the fall has not yet
+        # updated within this cycle.
         remediation_use = None
+        severity = None
         if self.check_status(ok, self.name_module, key):
             self.send_message(s_message, ok, item=label)
             if not ok and remediation:
                 self._service_remediation(item, os_, service_name, expected)
                 status, error, detail = self._service_state(item, os_, service_name)
-                ok = status if expected == 'running' else not status
-                remediation_use = ok
+                repaired = status if expected == 'running' else not status
+                remediation_use = repaired
                 s_message = self._msg('svc_recovery_prefix') + self._fmt(
-                    label, ok, status, error, detail, unsuccessful=True)
-                self.send_message(s_message, ok, item=label)
+                    label, repaired, status, error, detail, unsuccessful=True)
+                # The ALERT reports the outcome, so a successful repair routes as a
+                # recovery — that is the news the operator wants.
+                self.send_message(s_message, repaired, item=label)
+                # The RECORDED result does not: a cycle in which the service fell and had
+                # to be restarted is not a clean OK, and storing it as one would erase the
+                # incident from the panel and from history the moment it was fixed. It is
+                # a warning — running again, but something happened. A repair that failed
+                # stays a plain down.
+                ok = False
+                severity = 'warning' if repaired else None
 
         other_data = {'error': error, 'status_detail': detail, 'remediation': remediation_use}
-        self.dict_return.set(key, ok, s_message, False, other_data)
+        self.dict_return.set(key, ok, s_message, False, other_data,
+                             severity=severity, name=label)
 
     def _fmt(self, display_name, ok, status, error, detail, unsuccessful=False):
         if ok:

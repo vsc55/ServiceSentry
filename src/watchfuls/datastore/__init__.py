@@ -287,7 +287,8 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     _lbl = self.get_conf(['list', key, 'label'], '') or key
-                    self.dict_return.set(key, False, self._msg('ds_error', _lbl, exc))
+                    self.dict_return.set(key, False, self._msg('ds_error', _lbl, exc),
+                                         name=_lbl)
         super().check()
         return self.dict_return
 
@@ -328,9 +329,9 @@ class Watchful(ModuleBase):
             s_msg = self._msg('ds_conn_error', disp, msg)
 
         severity = 'warning' if threshold_breach else ''
-        self.dict_return.set(key, ok, s_msg, False, other, severity=severity)
-        if self.check_status_custom(ok, key, msg):
-            self.send_message(s_msg, ok, item=disp, severity=severity)
+        # change_msg=msg: the INTERNAL reason, so a failure that mutates (refused →
+        # timeout) alerts again instead of hiding under an unchanged "still down".
+        self._emit(key, ok, s_msg, other, severity=severity, name=disp, change_msg=msg)
 
     def _build_cfg(self, key, db_type):
         """Collect all config fields for one item into a plain dict."""

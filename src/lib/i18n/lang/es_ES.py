@@ -1016,6 +1016,7 @@ LANG = {
     'prov_entraid_perm_granted':    'Concedidos ahora',
     'prov_entraid_perm_already':    'Ya presentes',
     'prov_entraid_perm_missing':    'Aún faltan',
+    'prov_entraid_perm_azure_rbac': 'Asignación de rol en Azure (suscripción)',
     # Etiquetas genéricas de acciones de aprovisionamiento de Entra ID. Las acciones/
     # enlaces las referencian por su campo `label`, para que tanto el ítem como el
     # editor de credencial las resuelvan aquí en vez de duplicarlas en cada módulo.

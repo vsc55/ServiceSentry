@@ -70,7 +70,8 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'Check: {name} — Exception: {exc}', DebugLevel.error)
                     _lbl = self.get_conf(['list', name, 'label'], '') or name
-                    self.dict_return.set(name, False, self._msg('web_error', _lbl, exc))
+                    self.dict_return.set(name, False, self._msg('web_error', _lbl, exc),
+                                         name=_lbl)
 
         super().check()
         return self.dict_return
@@ -156,10 +157,7 @@ class Watchful(ModuleBase):
         if not status:
             s_message += f' [{detail}]'
 
-        self.dict_return.set(name, effective, s_message, False,
-                             {'code': code, 'detail': detail})
-        if self.check_status(effective, self.name_module, name):
-            self.send_message(s_message, effective, item=label)
+        self._emit(name, effective, s_message, {'code': code, 'detail': detail}, name=label)
 
     # ── HTTP request (shared by check loop and test_connection) ───────────
 

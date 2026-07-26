@@ -1011,6 +1011,7 @@ LANG = {
     'prov_entraid_perm_granted':    'Granted now',
     'prov_entraid_perm_already':    'Already present',
     'prov_entraid_perm_missing':    'Still missing',
+    'prov_entraid_perm_azure_rbac': 'Azure role assignment (subscription)',
     # Generic Entra ID provisioning credential/module action labels. Actions/links
     # reference these keys via their `label` field, so both the item and the
     # credential editor resolve them here instead of each module duplicating them.

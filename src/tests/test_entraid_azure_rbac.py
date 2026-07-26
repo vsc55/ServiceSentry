@@ -344,3 +344,206 @@ class TestPickerFlow:
         assert d['fields']['azure_rbac']['ok'] is False
         assert 'offline_access' in d['fields']['azure_rbac']['message']
         assert 'azure_rbac_pending' not in d and not ls.called
+
+
+class TestSubscriptionAccessProbe:
+    """Azure access CANNOT be verified the way every other permission check works.
+
+    The generic check reads the token's ``roles`` claim — Entra *application*
+    permissions. Access to a subscription comes from an ARM **RBAC role assignment**,
+    which appears nowhere in that claim. A check built the usual way would report "all
+    permissions granted" while every ARM call 403s: worse than having no check at all.
+    So this probes ARM for real.
+    """
+
+    def _probe(self, token_payload, get_resp=None):
+        from lib.providers.azure import rbac
+
+        class _Req:
+            def post(self, *_a, **_k):
+                return _Resp(200, token_payload)
+
+            def get(self, *_a, **_k):
+                if get_resp is None:
+                    raise AssertionError('the ARM read must not run without a token')
+                return get_resp
+
+        with patch.object(rbac, '_req', _Req()):
+            return rbac.check_subscription_access('t', 'c', 's', 'sub-1')
+
+    def test_a_readable_subscription_passes(self):
+        out = self._probe({'access_token': 'tok'}, _Resp(200, {'subscriptionId': 'sub-1'}))
+        assert out['ok'] is True and out['detail'] == ''
+
+    def test_a_403_says_the_app_holds_no_role(self):
+        """The characteristic failure: the app authenticates fine and still cannot read.
+        The message has to point at the role assignment, not at the credentials."""
+        out = self._probe({'access_token': 'tok'}, _Resp(403, {'error': {'message': ''}}))
+        assert out['ok'] is False
+        assert 'role assignment' in out['detail']
+
+    def test_arms_own_message_wins_when_it_has_one(self):
+        out = self._probe({'access_token': 'tok'},
+                          _Resp(403, {'error': {'message': 'AuthorizationFailed'}}))
+        assert out['detail'] == 'AuthorizationFailed'
+
+    def test_a_refused_arm_token_reports_the_aadsts_reason(self):
+        """An ARM-audience token can be refused on its own, and the AADSTS text is the
+        whole diagnosis — the ARM read must not even be attempted."""
+        out = self._probe({'error': 'invalid_client',
+                           'error_description': 'AADSTS7000215: bad secret'})
+        assert out['ok'] is False and 'AADSTS7000215' in out['detail']
+
+    def test_missing_inputs_are_refused_without_calling_azure(self):
+        from lib.providers.azure import rbac
+        out = rbac.check_subscription_access('t', 'c', 's', '')
+        assert out['ok'] is False and 'required' in out['detail']
+
+    def test_a_transport_error_is_an_answer_not_an_exception(self):
+        from lib.providers.azure import rbac
+
+        class _Boom:
+            def post(self, *_a, **_k):
+                raise OSError('network down')
+
+        with patch.object(rbac, '_req', _Boom()):
+            out = rbac.check_subscription_access('t', 'c', 's', 'sub-1')
+        assert out['ok'] is False and 'network down' in out['detail']
+
+
+class TestAzureDeclaresThePermissionCheck:
+
+    def test_the_module_offers_a_test_permissions_action(self):
+        """m365 had one and azure did not, so the only way to learn azure lacked a role
+        was for a check to 403 hours later."""
+        import json as _json
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        schema = _json.load(open(_os.path.join(here, 'watchfuls', 'azure', 'schema.json'),
+                                 encoding='utf-8'))
+        actions = {a['id'] for a in schema['__credential__']['actions']}
+        assert 'test_permissions' in actions
+        assert {'provision_app', 'fix_permissions'} <= actions
+
+    def test_fix_is_reached_from_the_check_modal_not_the_toolbar(self):
+        """`toolbar: false` is what moves Fix out of the credential toolbar and into the
+        Check-permissions modal, where it only appears if something is actually missing.
+        Offering "fix" before anything is known to be broken invites blind re-runs of a
+        wizard that needs an admin sign-in; m365 already worked this way."""
+        import json as _json
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        acts = {a['id']: a for a in _json.load(open(
+            _os.path.join(here, 'watchfuls', 'azure', 'schema.json'),
+            encoding='utf-8'))['__credential__']['actions']}
+        assert acts['fix_permissions'].get('toolbar') is False
+        assert acts['fix_permissions']['provision'].get('ensure') is True,             'the modal finds the fix action by provision.ensure'
+        # The check itself must stay ON the toolbar — it is the way in.
+        assert acts['test_permissions'].get('toolbar', True) is True
+
+    def test_azure_and_m365_agree_on_the_shape(self):
+        """Two credential types offering the same three actions should not differ in how
+        they are reached."""
+        import json as _json
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+
+        def _acts(mod):
+            return {a['id']: a for a in _json.load(open(
+                _os.path.join(here, 'watchfuls', mod, 'schema.json'),
+                encoding='utf-8'))['__credential__']['actions']}
+
+        az, m3 = _acts('azure'), _acts('m365')
+        for act in ('test_permissions', 'fix_permissions'):
+            assert az[act].get('toolbar', True) == m3[act].get('toolbar', True)
+            assert az[act]['result'] == m3[act]['result']
+
+    def test_every_result_row_carries_a_stable_id(self):
+        """The client pre-draws its checklist and matches the answer by ``id``. Matching by
+        the DISPLAY label instead would put the same string in Python and in JavaScript,
+        and the row would silently stop matching the day someone reworded it — the exact
+        class of duplication that produced the severity bug elsewhere in this codebase."""
+        from lib.providers.entraid.permissions import permission_report
+        rep = permission_report(['A'], ['A', 'B'])
+        assert [r['id'] for r in rep['results']] == ['A', 'B']
+        assert all(r['id'] == r['priv'] for r in rep['results']),             'for an application permission the name IS the identifier'
+
+    def test_the_client_and_the_server_name_the_rbac_row_from_one_key(self):
+        """Both sides render the row from `prov_entraid_perm_azure_rbac`, so the checklist
+        and the "still missing …" summary cannot disagree, and it is translated."""
+        import io as _io
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        modal = _io.open(_os.path.join(here, 'lib', 'web_admin', 'templates', 'partials',
+                                       'credentials', '_modal.html'), encoding='utf-8').read()
+        routes = _io.open(_os.path.join(here, 'lib', 'providers', 'entraid', 'routes.py'),
+                          encoding='utf-8').read()
+        assert "prov_entraid_perm_azure_rbac" in modal
+        assert "prov_entraid_perm_azure_rbac" in routes
+
+    def test_the_row_id_agrees_between_the_provider_and_the_client(self):
+        from lib.providers.azure.rbac import ROW_ID
+        import io as _io
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        modal = _io.open(_os.path.join(here, 'lib', 'web_admin', 'templates', 'partials',
+                                       'credentials', '_modal.html'), encoding='utf-8').read()
+        assert f"id: '{ROW_ID}'" in modal, "the pre-drawn row must use the provider's id"
+
+    def test_the_entra_route_holds_no_azure_semantics(self):
+        """The check-permissions route folds in a row the declaration's OWNER produced; it
+        must not learn what "subscription_id" or "reader" mean, nor compose the row.
+
+        The first cut of this feature put twenty lines of exactly that in the route — the
+        same layering slip that had already been corrected once by moving the RBAC
+        assignment out of the Entra provisioning module.
+
+        Note what is NOT forbidden: the route does read the ``azure_rbac`` KEY. That key
+        belongs to the Entra declaration model (``normalize_entraid_provision`` defines and
+        normalises it), so reading it is a module reading its own vocabulary. The leak was
+        the semantics behind it, not the name."""
+        import io as _io
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        routes = _io.open(_os.path.join(here, 'lib', 'providers', 'entraid', 'routes.py'),
+                          encoding='utf-8').read()
+        body = routes.split('def api_entraid_check_permissions')[1].split('@app.route')[0]
+        for leaked in ("'subscription_id'", "'reader'", 'ROW_ID', 'check_subscription_access'):
+            assert leaked not in body, (
+                f'{leaked} is Azure knowledge and belongs in lib/providers/azure/rbac.py')
+        assert 'merge_row' in body, 'the row must arrive through the generic seam'
+
+    def test_an_extra_row_merges_into_the_report(self):
+        """merge_row is the generic seam: the report gains the row, the summary gains its
+        name, and all_ok flips — without the merger knowing what was checked."""
+        from lib.providers.entraid.permissions import merge_row, permission_report
+        rep = permission_report(['A'], ['A'])
+        assert rep['all_ok'] is True
+        merge_row(rep, {'id': 'x', 'priv': 'Extra', 'ok': False, 'detail': 'because'})
+        assert rep['all_ok'] is False
+        assert 'Extra' in rep['missing']
+        assert rep['results'][-1]['id'] == 'x'
+        assert 'because' in rep['info'][-1][1], 'the reason must ride into info'
+
+    def test_a_passing_extra_row_does_not_break_a_clean_report(self):
+        from lib.providers.entraid.permissions import merge_row, permission_report
+        rep = permission_report(['A'], ['A'])
+        merge_row(rep, {'id': 'x', 'priv': 'Extra', 'ok': True, 'detail': ''})
+        assert rep['all_ok'] is True and rep['missing'] == []
+
+    def test_the_rbac_label_exists_in_every_language(self):
+        from lib.i18n.lang import en_EN, es_ES
+        for mod in (en_EN, es_ES):
+            table = next(v for k, v in vars(mod).items()
+                         if isinstance(v, dict) and 'prov_entraid_perm_missing' in v)
+            assert table['prov_entraid_perm_azure_rbac'].strip()
+
+    def test_the_profile_still_declares_the_rbac_step(self):
+        """The probe is wired off azure_rbac: losing the declaration would silently drop
+        the ARM half of the check and leave a green tick that means nothing."""
+        import json as _json
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        schema = _json.load(open(_os.path.join(here, 'watchfuls', 'azure', 'schema.json'),
+                                 encoding='utf-8'))
+        assert schema['__entraid_provision__']['azure_rbac']['field'] == 'subscription_id'

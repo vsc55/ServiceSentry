@@ -382,6 +382,47 @@ def test_ensure_reports_role_not_offered():
     assert 'Sites.Read.All' in out['granted']
 
 
+class _RefusingEnsure(_FakeEnsure):
+    """Azure accepts the lookup but REFUSES the assignment — the usual case: the
+    signed-in admin cannot grant admin consent."""
+
+    REASON = 'Insufficient privileges to complete the operation.'
+
+    def post(self, url, **kw):
+        self.posts.append((url, kw.get('json')))
+        if url.endswith('/appRoleAssignments'):
+            return _Resp({'error': {'message': self.REASON}}, ok=False)
+        return _Resp({'id': 'client-sp-new'})
+
+
+def test_a_refused_assignment_carries_graphs_own_reason():
+    """"Still missing Application.Read.All" was unactionable while this message was
+    discarded: it reads nothing like a wrong permission name, and the fix is different
+    (someone who CAN consent repeats the wizard)."""
+    out = _ensure(_RefusingEnsure(assigned=()), ['Sites.Read.All'])
+    assert out['missing'] == ['Sites.Read.All']
+    assert out['reasons']['Sites.Read.All'] == _RefusingEnsure.REASON
+
+
+def test_a_role_the_resource_does_not_offer_says_so_instead():
+    """The other half of the point: the two causes must not read the same."""
+    out = _ensure(_FakeEnsure(assigned=()), ['Nonexistent.Role'])
+    assert 'not offered' in out['reasons']['Nonexistent.Role']
+
+
+def test_the_two_causes_are_distinguishable_in_one_report():
+    out = _ensure(_RefusingEnsure(assigned=()), ['Sites.Read.All', 'Nonexistent.Role'])
+    assert set(out['missing']) == {'Sites.Read.All', 'Nonexistent.Role'}
+    assert out['reasons']['Sites.Read.All'] != out['reasons']['Nonexistent.Role']
+
+
+def test_granted_roles_carry_no_reason():
+    """A reason beside a permission that worked is noise."""
+    out = _ensure(_FakeEnsure(assigned=()), ['Sites.Read.All'])
+    assert out['granted'] == ['Sites.Read.All']
+    assert out['reasons'] == {}
+
+
 def test_ensure_unknown_app_raises():
     class _NoApp(_FakeEnsure):
         def get(self, url, **_):

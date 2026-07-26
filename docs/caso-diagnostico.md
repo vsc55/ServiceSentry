@@ -19,6 +19,97 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un aviso de umbral llegaba como caída dura, y el panel lo pintaba ámbar
+
+**Fecha:** 2026-07-26 · **Área:** `lib/modules/module_base.py` (`_emit`), monitor
+(`_alert_kind`) · afectaba a `azure`, `m365`, `keepalived`, `proxmox`
+
+**Síntoma** — una VM apagada, una cuota rozando el límite o un secreto por caducar salían
+**ámbar** en el panel, pero la notificación llegaba como **caída** (`down`), con el tono y
+el enrutado de un servicio muerto. Nadie lo reportó como bug: cada mitad, por separado,
+parecía correcta.
+
+**Diagnóstico** — apareció comparando módulos al unificar el emparejamiento
+`registrar + notificar`. `ntp` pasaba `severity` **a las dos** llamadas; `_emit` solo a
+una. La pregunta siguiente fue si eso importaba, porque el monitor también sabe leer la
+severidad del resultado guardado (`_process_module_result` → `_alert_kind(tmp_status,
+tmp_severity)`). Y sí importaba: esa ruta está condicionada a `if tmp_send`, y `_emit`
+registra con `send_msg=False`.
+
+**Causa raíz** — `_emit` pasaba `severity` a `dict_return.set(...)` (de ahí el ámbar del
+panel) pero **no** a `send_message(...)`. Como su propio `send_msg=False` apaga la ruta
+automática del monitor, ese envío explícito era la **única** notificación, y sin severidad
+`_alert_kind(False, '')` devuelve `down`. El defecto vivía copiado **byte a byte en cuatro
+módulos**, porque cada uno tenía su propia copia de `_emit`.
+
+**Solución** — `_emit` subió a `ModuleBase` (una sola copia) pasando la severidad a las
+dos salidas. Cubierto por `TestModuleBaseEmitCarriesSeverity`, verificado fallando sin el
+arreglo.
+
+**Lección** — **un dato que viaja dos veces se desincroniza.** El patrón alternativo
+(registrar y dejar notificar al monitor, que lee la severidad del resultado) hace este
+fallo *estructuralmente imposible*, y por eso es ahora el predeterminado — ver
+[ref-watchful-emit.md](ref-watchful-emit.md). Corolario: un emparejamiento duplicado en N
+sitios se equivoca en N sitios.
+
+---
+
+## Un mock hace pasar un test aunque el token se pida para la audiencia equivocada
+
+**Fecha:** 2026-07-26 · **Área:** `watchfuls/azure`, `lib/providers/entraid/graph_api.py`
+
+**Síntoma** — ninguno todavía: se detectó **antes** de llegar a producción, y ese es el
+punto. Al unificar el transporte de `m365` y `azure`, el helper compartido `_get_token`
+quedó con `scope=GRAPH_SCOPE` por defecto. Azure necesita la audiencia **ARM**.
+
+**Diagnóstico** — la suite entera seguía en verde. El motivo es que **todos** los tests de
+azure mockean `_get_token`, y un mock devuelve un token pidas el scope que pidas. Ningún
+test de comportamiento podía distinguir un token ARM de uno de Graph.
+
+**Causa raíz** — un valor por defecto correcto para un módulo (Graph) e incorrecto para el
+otro (ARM), en un helper que ahora comparten. ARM rechaza un token de Graph: cada
+comprobación habría devuelto 403.
+
+**Solución** — `scope=ARM_SCOPE` explícito en las dos llamadas de azure (el bucle del
+monitor y el picker de regiones), y una clase `TestTokenAudience` que afirma **qué scope
+se pidió**, no qué devolvió el mock. Se verificó quitando el `scope=` : el test falla.
+
+**Lección** — cuando un mock sustituye a la frontera exacta donde vive el bug, la
+cobertura verde no significa nada. Si un parámetro decide *contra qué sistema* hablas,
+el test tiene que afirmar **ese parámetro**. Aplica igual a URLs base, versiones de API y
+audiencias de token.
+
+---
+
+## La alerta nombraba el host enlazado en vez del check que falló
+
+**Fecha:** 2026-07-26 · **Área:** 11 watchfuls (ramas de error), monitor (`_item_label`)
+
+**Síntoma** — un check DNS llamado `A example.com` aparecía en la columna *Item* del
+digest como `ns1` (el host al que está enlazado) — pero **solo** cuando fallaba por
+excepción. Fallando de forma normal salía con su nombre correcto.
+
+**Diagnóstico** — apareció auditando por AST quién usa cada patrón de publicación. Nueve
+módulos usan `_emit` en el camino normal y `dict_return.set(...)` automático en sus ramas
+de excepción. Esas ramas **calculaban** la etiqueta para el texto del mensaje pero no la
+pasaban a `set(...)`.
+
+**Causa raíz** — sin `name=`, el monitor cae a `_item_label()`, que resuelve el
+`host_uid` al nombre del host. Dos módulos parecían correctos a simple vista porque
+ponían el nombre en `other_data={'name': …}` — que `get_name()` **no lee**, porque mira el
+campo de nivel superior. Y `proxmox` tenía una variante peor: suprimía la notificación del
+monitor (`send_msg=False`) **y** no enviaba ninguna a mano, así que una excepción no
+controlada ponía el check en rojo sin avisar a nadie.
+
+**Solución** — `name=` en los 11 sitios, y `tests/test_watchful_emit_patterns.py` lo
+vigila (incluido el caso `other_data['name']`, que parece bien y no lo está).
+
+**Lección** — las **ramas de error** son las que menos se prueban y las que más importan
+en una notificación. Cuando un valor tiene dos sitios donde ponerse y solo uno funciona,
+no basta con documentarlo: hay que hacer que el equivocado falle el build.
+
+---
+
 ## Tras visitar Historial, las demás secciones aparecen al fondo de una página kilométrica
 
 **Fecha:** 2026-07-25 · **Área:** web-admin / frontend (`static/css/web_admin.css`,

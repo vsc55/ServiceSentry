@@ -184,7 +184,7 @@ class Watchful(ModuleBase):
                     _nm = item.get('label') or item.get('ups_name') or item['key']
                     message = self._msg('ups_error', _nm, exc)
                     self.dict_return.set(item['key'], False, message,
-                                         other_data={'name': _nm})
+                                         other_data={'name': _nm}, name=_nm)
 
         super().check()
         return self.dict_return
@@ -263,10 +263,7 @@ class Watchful(ModuleBase):
             'runtime': runtime_min,           # minutes
             'load': load,
         }
-        self.dict_return.set(key, ok, message, False, other_data)
-
-        if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=name)
+        self._emit(key, ok, message, other_data, name=name)
 
     # ── Web UI — test_connection ──────────────────────────────────────
     @classmethod

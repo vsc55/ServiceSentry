@@ -126,7 +126,7 @@ class Watchful(ModuleBase):
                     self._debug(f"Check: {name} - Exception: {exc}", DebugLevel.error)
                     _lbl = self.get_conf_in_list("label", name, "") or host or name
                     message = self._msg('ping_error', _lbl, exc)
-                    self.dict_return.set(name, False, message)
+                    self.dict_return.set(name, False, message, name=_lbl)
 
         super().check()
         return self.dict_return
@@ -150,10 +150,9 @@ class Watchful(ModuleBase):
         label = self.get_conf_in_list("label", name, "") or host or name
         s_message = self._msg('ping_up' if status else 'ping_down', label)
 
-        self.dict_return.set(name, status, s_message, False, other_data=other_data)
-
-        if self.check_status(status, self.name_module, name):
-            self.send_message(s_message, status, item=label)
+        # name= keeps the label → host → key fallback: an unlabelled host must still be
+        # named by its address in the alert, not by an empty string.
+        self._emit(name, status, s_message, other_data, name=label)
 
     def _ping_return(self, host, timeout, attempt) -> tuple[bool, float | None]:
         """Try to ping *host* up to *attempt* times.  Returns (success, rtt_ms)."""

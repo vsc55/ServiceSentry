@@ -161,8 +161,31 @@ específico de Entra**.
   automáticamente a la app **existente** (`provisioning.update_scim_secrets`, reusa
   `sp_object_id`, sin crear otra) — un device-code ligero (login + PUT de secrets).
 
+**Comprobar permisos** (credenciales con `__entraid_provision__`): botón *Comprobar permisos*
+→ `POST /api/v1/auth/entraid/check-permissions`. Pide un token app-only y **lee su claim
+`roles`** — los permisos de aplicación concedidos. Si algo falta, el propio modal ofrece
+*Fix permissions* (device-code); por eso esa acción lleva `"toolbar": false` y no aparece
+suelta en la barra de credenciales.
+
+> **Azure necesita una comprobación distinta.** El acceso a una suscripción viene de una
+> **asignación de rol RBAC en ARM**, que NO aparece en el claim `roles` de un token de Graph.
+> Una comprobación hecha de la forma habitual diría *"todos los permisos concedidos"* mientras
+> cada llamada ARM devuelve 403 — peor que no tener comprobación. Por eso un perfil que declare
+> `azure_rbac` añade una sonda **real** (token de audiencia ARM + lectura de la suscripción) que
+> aporta `lib/providers/azure/rbac.py::permission_row`; la ruta de Entra solo la pliega con
+> `permissions.merge_row` y no sabe qué se comprobó.
+>
+> Un permiso que falta se reporta además con **su motivo** (`reasons`): no es lo mismo que el
+> recurso no ofrezca ese rol (nombre mal escrito — nadie puede concederlo) que Azure haya
+> rechazado la asignación (quien firma no puede dar consentimiento de administrador — lo arregla
+> otra persona repitiendo el asistente).
+
 Código relevante:
-- Provider: `lib/providers/entraid/` (`auth`, `provisioning`, `directory`, `client`).
+- Provider: `lib/providers/entraid/` (`auth`, `provisioning`, `directory`, `client`,
+  `permissions`, y `graph_api` = transporte urllib del lado monitor, que heredan los watchfuls).
+- Azure (ARM: otra audiencia y otro modelo de consentimiento): `lib/providers/azure/`
+  (`arm` = endpoints, versiones de API y `ArmApi`; `rbac` = suscripciones, asignación de rol y
+  sonda de acceso).
 - Rutas: `lib/providers/entraid/routes.py`.
 - Wizard genérico (JS): `partials/credentials/_provision_wizard.html`
   (`showEntraIdProvisionWizard`).

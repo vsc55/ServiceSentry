@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~3100 tests** (≈3108 recolectados; ~3075 pasan y ~33 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~3680 tests** (3678 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -72,6 +72,7 @@
 53. [Panel Web — LDAP](#53-panel-web--ldap)
 54. [Panel Web — OIDC/SSO](#54-panel-web--oidcsso)
 55. [Panel Web — SAML2](#55-panel-web--saml2)
+55b. [Capa Microsoft compartida (Entra ID + ARM)](#55b-capa-microsoft-compartida-entra-id--arm)
 56. [Panel Web — Servidores (hosts)](#56-panel-web--servidores-hosts)
 57. [Panel Web — Historial](#57-panel-web--historial)
 58. [Panel Web — Webhooks](#58-panel-web--webhooks)
@@ -105,6 +106,18 @@
 86. [Panel Web — Protección CSRF](#86-panel-web--protección-csrf)
 87. [Panel Web — Cabeceras de seguridad y módulo CSRF](#87-panel-web--cabeceras-de-seguridad-y-módulo-csrf)
 88. [Core — Estampado de entidades (audit)](#88-core--estampado-de-entidades-audit)
+88b. [Watchfuls — Patrones de publicación de resultados](#88b-watchfuls--patrones-de-publicación-de-resultados)
+88c. [Meta — Versión y CHANGELOG](#88c-meta--versión-y-changelog)
+89. [Meta — Este documento](#89-meta--este-documento)
+90. [Core — Salud, escaneos programados y HA](#90-core--salud-escaneos-programados-y-ha)
+91. [Notificaciones — registro de eventos, idioma, destinatarios y overrides](#91-notificaciones--registro-de-eventos-idioma-destinatarios-y-overrides)
+92. [Panel Web — páginas de sección, cuenta y convenciones de partials](#92-panel-web--páginas-de-sección-cuenta-y-convenciones-de-partials)
+93. [Panel Web — Microsoft Teams](#93-panel-web--microsoft-teams)
+94. [Panel Web — orígenes de grupos, acciones de configuración y rate limit](#94-panel-web--orígenes-de-grupos-acciones-de-configuración-y-rate-limit)
+95. [Overview — recuento de checks y filtros de severidad](#95-overview--recuento-de-checks-y-filtros-de-severidad)
+96. [Guards de documentación e i18n](#96-guards-de-documentación-e-i18n)
+97. [Watchfuls — severidad de avisos y RAID mdstat](#97-watchfuls--severidad-de-avisos-y-raid-mdstat)
+98. [Entra ID — paso de RBAC de Azure del asistente](#98-entra-id--paso-de-rbac-de-azure-del-asistente)
 
 ---
 
@@ -394,9 +407,36 @@
 
 ### `TestBytes2Human`
 
+Variante **compacta** (una letra, sin espacio). No la llama nadie en el proyecto; se mantiene
+porque es API pública exportada en `lib.util.__all__`.
+
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| Conversión de bytes a unidades legibles | `bytes2human(1024)` → `"1.0 KiB"`, etc. | String con unidad correcta | Si la unidad o valor es incorrecto |
+| Conversión de bytes a unidades legibles (11 tests) | `bytes2human(1024)` → `"1.0K"`, `(0)` → `"0B"`, `(1023)` → `"1023B"`, hasta `T` | String con unidad correcta | Si la unidad o valor es incorrecto |
+
+### `TestFmtBytes`
+
+Variante **legible** (espacio + dos letras): la que de verdad se usa en mensajes de alerta y en
+la barra de Status, así que su formato es conducta, no cosmética.
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| Formato base | `fmt_bytes(0)` → `"0 B"`, `(512)` → `"512 B"` (los bytes no llevan decimales), `(1024³)` → `"1.0 GB"`, `(1.5 GB)` → `"1.5 GB"` | Unidad y decimales correctos | Si aparecen decimales en bytes o cambia el espaciado |
+| Escala la escalera completa | `PB`, `EB`, `ZB`, `YB` — no se detiene en PB | `2.0 EB` | Si degenera en `2048.0 PB`: un formateador que topa no dice "es enorme", imprime un número ilegible |
+| Más allá de YB | Renderiza en la última unidad en vez de colgarse | Termina en `" YB"` | Si lanza o entra en bucle |
+| Alcanza tan lejos como `bytes2human` | Compara ambas letra a letra de KB a YB | Misma unidad en las dos | **Impide que una consolidación futura pierda alcance** frente a la función que sustituye |
+| Un valor no numérico | `None` / `"abc"` → `"0 B"` | No lanza | Un mensaje de monitorización debe renderizar aunque la API respondiera algo raro |
+
+### `TestToBytes`
+
+Inversa de `fmt_bytes` para umbrales configurados (el admin escribe un número y elige unidad).
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| Cada unidad | `to_bytes(2, "GB")`, `(1, "TB")`, `(4, "MB")` | Bytes exactos | Si una unidad se escala mal |
+| Unidad insensible a mayúsculas | `to_bytes(1, "gb")` == `1024³` | Igual que `"GB"` | Si el desplegable y el código discrepan en el caso |
+| Valor en blanco | `""` / `None` → 0 | 0 | Si lanza |
+| Unidad desconocida se lee como GB | `to_bytes(1, "parsecs")` == `1024³` | Cae a GB | Rechazarla dejaría el umbral en 0, **desactivando en silencio la alerta que debía disparar** |
 
 ---
 
@@ -2156,7 +2196,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 35. Core — Registro central de config (spec)
 
-**Archivo:** `tests/test_config_spec.py` — 33 tests
+**Archivo:** `tests/test_config_spec.py` — 44 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2525,7 +2565,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 50. Syslog — SyslogStore
 
-**Archivo:** `tests/test_syslog_store.py` — 16 tests
+**Archivo:** `tests/test_syslog_store.py` — 18 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2548,7 +2588,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 51. Syslog — Servicio independiente
 
-**Archivo:** `tests/test_syslog_service.py` — 19 tests
+**Archivo:** `tests/test_syslog_service.py` — 26 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2613,7 +2653,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 54. Panel Web — OIDC/SSO
 
-**Archivo:** `tests/test_providers_oidc.py` — 21 tests
+**Archivo:** `tests/test_providers_oidc.py` — 22 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2640,7 +2680,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55. Panel Web — SAML2
 
-**Archivo:** `tests/test_providers_saml.py` — 23 tests
+**Archivo:** `tests/test_providers_saml.py` — 24 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2666,6 +2706,41 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_acs_not_authenticated_redirects_to_login` | ACS returning is_authenticated=False redirects to /login |
 | `test_acs_auto_create_false_blocks_unknown_user` | auto_create_users=False rejects unknown users in ACS |
 | `test_acs_disabled_account_blocked` | A disabled SAML2 user is blocked at the ACS endpoint |
+
+## 55b. Capa Microsoft compartida (Entra ID + ARM)
+
+**Archivo:** `tests/test_providers_graph_api.py` — 26 tests
+
+Esta capa transporta **a la vez** los watchfuls `m365` y `azure`, así que un fallo aquí es un fallo
+en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests no la cubriría nadie.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestApiError::test_the_graph_shape` | `{"error": {"message": …}}` → el mensaje |
+| `TestApiError::test_the_arm_shape_falls_back_to_the_code` | ARM manda a veces solo `code`, y `AuthorizationFailed` (la app no tiene rol RBAC) es la respuesta entera |
+| `TestApiError::test_the_token_endpoint_shape` | `error_description` con el `AADSTS…` real, no un "Bad Request" pelado |
+| `TestApiError::test_a_bare_error_code_is_better_than_nothing` | `{"error": "invalid_request"}` → el código |
+| `TestApiError::test_a_non_json_body_gives_nothing_rather_than_html` | Devolver el cuerpo pegaría el HTML de error de un proxy dentro de una alerta |
+| `TestApiError::test_the_message_is_bounded` | Truncado a 200 caracteres |
+| `TestEncoding::test_a_space_survives_as_an_escape` | Un espacio sin escapar hace que urllib **rechace la URL** (`URL can't contain control characters`) |
+| `TestEncoding::test_a_path_segment_is_fully_escaped` | Ids de suscripción y regiones en el path |
+| `TestParseDt::*` | ISO-8601 → datetime *aware*; un valor naive se asume UTC (restarlo de un `now` aware lanzaría `TypeError`); lo imparseable da `None`, no excepción |
+| `TestToken::test_the_scope_defaults_to_graph` | Scope y `grant_type` del client-credentials |
+| `TestToken::test_an_answer_with_no_token_is_an_error_carrying_the_reason` | El `AADSTS…` llega al `EntraApiError` |
+| `TestToken::test_the_tenant_is_escaped_into_the_path` | El tenant va escapado |
+| `TestPaging::test_graph_next_links_are_followed` | Graph pagina de 100 en 100 |
+| `TestPaging::test_arm_uses_its_own_next_key` | ARM dice `nextLink` donde Graph dice `@odata.nextLink`: usar la clave de Graph contra ARM **para en silencio tras la primera página** |
+| `TestPaging::test_a_runaway_next_link_cannot_spin_forever` | Tope de páginas |
+| `TestPaging::test_non_dict_entries_are_skipped` | Entradas basura en `value` |
+| `TestArm::test_arm_is_a_different_audience_from_graph` | El fallo clásico de Azure: todos los permisos de Graph concedidos y ARM sigue dando 403 |
+| `TestArm::test_an_arm_read_goes_to_the_arm_base` | Base correcta |
+| `TestArm::test_the_bearer_token_is_sent` | Cabecera `Authorization` |
+| `TestArm::test_an_empty_body_is_an_empty_dict_not_a_crash` | Cuerpo vacío |
+
+> **Ojo con los mocks:** un `_get_token` mockeado devuelve token *pidas el scope que pidas*, así que
+> ningún test de módulo detecta un scope equivocado. Eso lo cubre
+> `TestTokenAudience` en `watchfuls/azure/tests/test_azure.py` (§ módulo azure), que afirma que el
+> monitor y el picker de regiones piden **ARM** y que el check de secretos pide **Graph**.
 
 ## 56. Panel Web — Servidores (hosts)
 
@@ -2737,7 +2812,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 58. Panel Web — Webhooks
 
-**Archivo:** `tests/test_wa_webhook.py` — 32 tests
+**Archivo:** `tests/test_wa_webhook.py` — 35 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2973,7 +3048,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 64. Watchful: m365
 
-**Archivo:** `watchfuls/m365/tests/test_m365.py` — 26 tests
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 53 tests
 
 ### `TestHelpers`, `TestSite`, `TestTenant`, `TestModule`, `TestListSites`, `TestCredentialAndProvision`
 
@@ -3010,7 +3085,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 65. Watchful: proxmox
 
-**Archivo:** `watchfuls/proxmox/tests/test_proxmox.py` — 43 tests
+**Archivo:** `watchfuls/proxmox/tests/test_proxmox.py` — 46 tests
 
 ### `TestProxmoxInit`, `TestProxmoxCheck`, `TestProxmoxAction`, `TestProxmoxProvision`, `TestProxmoxCredentialManager`
 
@@ -3303,7 +3378,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 75. Providers — Provisioning de apps Entra ID (Graph)
 
-**Archivo:** `tests/test_entraid_provision.py` — 9 tests
+**Archivo:** `tests/test_entraid_provision.py` — 26 tests
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -3376,7 +3451,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
-**Archivo:** `tests/test_wa_scim.py` — 17 tests
+**Archivo:** `tests/test_wa_scim.py` — 18 tests
 
 > Las pruebas unitarias del servicio SCIM (autenticación Bearer, parseo de filtros, mapeo de campos de usuario) están en `tests/test_scim_service.py`, documentadas aparte en §85.
 
@@ -3696,3 +3771,454 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 | Test | Qué comprueba |
 |---|---|
 | `test_stamps_updated_fields` | `touch_entity` fija `updated_by="admin"` y un `updated_at` con formato ISO |
+
+---
+
+## 88b. Watchfuls — Patrones de publicación de resultados
+
+**Archivo:** `tests/test_watchful_emit_patterns.py` — 5 tests
+
+Un watchful publica cada resultado por una de dos vías (ver `docs/ref-watchful-emit.md`): la
+**automática** (`dict_return.set` y notifica el monitor) o la **manual** (`ModuleBase._emit`).
+Este guard nació de tres fallos reales encontrados a la vez.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (2) | Que el propio recorrido encuentra los módulos y las llamadas; si fallan, lo roto es el guard |
+| `test_automatic_results_carry_an_explicit_name` | **11 sitios** omitían `name=`, así que el monitor etiquetaba la alerta con el **host enlazado** en vez de con el check — la misma comprobación salía con dos nombres según cómo fallara |
+| `test_other_data_name_is_not_mistaken_for_the_real_one` | `other_data={'name': …}` NO alimenta la notificación (`get_name()` lee el campo de nivel superior); dos módulos llevaban esa confusión y parecían correctos |
+| `test_manual_emit_is_the_exception_not_the_rule` | Deriva silenciosa hacia el emparejamiento a mano. Cazó `proxmox`, que suprimía la notificación **y** no enviaba ninguna: una excepción ponía el check en rojo sin avisar a nadie |
+
+---
+
+## 88c. Meta — Versión y CHANGELOG
+
+**Archivo:** `tests/test_version_changelog.py` — 9 tests
+
+Cada commit publica un build (`0.0.1+build.N`) cuya sección del CHANGELOG contiene **solo** lo
+que cambió en ese commit. Ese número vive en **dos** sitios —`lib.__version__` (lo que imprime
+`main.py --version` y lo que un operador cita en un informe de fallo) y la cabecera más reciente
+de `CHANGELOG.md`— así que pueden divergir. Y una versión que miente sobre lo que está corriendo
+es peor que no tener versión.
+
+Es el mismo razonamiento que el resto de esta tanda: **un dato que viaja dos veces se
+desincroniza si nadie lo comprueba**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (2) | Que el CHANGELOG existe y que el formato `## [x.y.z+build.N] - fecha` sigue casando; si cambia, este guard pasaría sin comprobar nada |
+| `TestTheyAgree::test_the_version_matches_the_newest_build_section` | `__version__` y la sección más reciente nombran el mismo build |
+| `TestTheyAgree::test_the_version_is_a_build_of_the_semantic_version` | El contador es metadato de build, no puede convertirse en la versión |
+| `TestBuildsAreOrdered::*` (2) | Orden descendente (Keep a Changelog) y sin builds duplicados — una sección añadida al final parsearía igual, y la lectura "el más nuevo primero" elegiría el equivocado |
+| `TestTheSectionIsUsable::test_the_newest_build_carries_a_date` | Fecha presente |
+| `TestTheSectionIsUsable::test_the_newest_build_has_content` | Una sección vacía significa un commit que cambió algo y no lo contó |
+| `TestTheSectionIsUsable::test_the_historical_block_is_kept_out_of_the_build_sections` | Lo anterior al versionado por build se queda en un bloque intacto: numerarlo a posteriori sería atribuir cambios a ojo |
+
+---
+
+## 89. Meta — Este documento
+
+**Archivo:** `tests/test_docs_tests_inventory.py` — 9 tests
+
+Este documento es el mapa de la suite, y hasta ahora **no lo vigilaba nadie** — a diferencia del
+índice de rutas, que sí tiene `test_routes_documented.py` rompiendo el build. Resultado: cuando se
+escribió este guard había **25 ficheros de test ausentes**, 11 de los 49 contadores declarados
+estaban mal (uno por más del doble) y el ejemplo de `bytes2human` era falso.
+
+Las comprobaciones son mecánicas a propósito: un fichero está nombrado en el documento o no lo está.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (3) | Que el propio guard funciona: el documento existe, el recorrido encuentra ficheros y el formato `**Archivo:** …` sigue casando. Si fallan estos, lo roto es el guard, no la documentación |
+| `TestFileCoverage::test_every_test_file_is_documented` | **Un fichero de test nuevo debe entrar en el inventario.** Es la razón de ser del guard |
+| `TestFileCoverage::test_the_pending_list_only_shrinks` | Documentar un fichero obliga a borrar su línea de `PENDING_DOCUMENTATION`. Sin esto la lista se volvería permanente, y una lista de exenciones permanente es un test desactivado con pasos extra |
+| `TestFileCoverage::test_the_pending_list_has_no_ghosts` | Un fichero renombrado o borrado no puede quedarse como exención |
+| `TestDocumentAccuracy::test_every_path_the_document_names_exists` | La dirección contraria: un renombrado deja al documento apuntando a la nada, que es como un inventario se vuelve ficción |
+| `TestDocumentAccuracy::test_declared_counts_are_not_rotten` | Los "— N tests" declarados, con tolerancia del 30% |
+| `TestDocumentAccuracy::test_the_headline_total_is_in_the_right_ballpark` | La cabecera `**Total: ~N tests**`, escrita a mano, llegó a estar 500 tests desfasada |
+
+> **Por qué los contadores llevan tolerancia y no igualdad exacta:** casar el número exacto exigiría
+> reimplementar la recolección de pytest — solo `parametrize` ya hace que el conteo estático difiera
+> (`test_providers_graph_api.py` declara 26 y tiene 23 `def`). Un guard que debe replicar un
+> recolector es un problema en sí mismo. La tolerancia sigue cazando la podredumbre real: la entrada
+> de m365 declaraba 26 contra 53 tests reales.
+
+> **Deuda pendiente:** `PENDING_DOCUMENTATION` lista los ficheros que faltan por documentar. Es
+> **solo-decreciente**: nunca se añade nada, y documentar uno obliga a quitarlo de ahí.
+
+---
+
+## 90. Core — Salud, escaneos programados y HA
+
+Vigilancias que corren en el propio ServiceSentry, no sobre lo monitorizado: certificados y secretos
+que caducan, salud de los servicios internos, y quién manda cuando hay varias réplicas.
+
+**Archivo:** `tests/test_cert_scan.py` — 11 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestEnumerate::*` (4) | De dónde salen los objetivos: config inline, `host_uid` resuelto por el store, deshabilitados omitidos, y ausencia de config `ssl_cert` |
+| `TestScanner::test_disabled_never_emits` / `test_not_leader_never_emits` | Ni apagado ni desde una réplica no líder: evita avisos duplicados en HA |
+| `TestScanner::test_healthy_cert_not_alerted` | Un certificado sano no genera ruido |
+| `TestScanner::test_expiring_alerts_once` | Avisa **una vez** por severidad, no en cada ciclo |
+| `TestScanner::test_escalates_expiring_to_expired` | La escalada sí vuelve a avisar: es información nueva |
+| `TestScanner::test_recovery_rearms` | Renovar el certificado rearma el aviso para la próxima vez |
+| `TestScanner::test_unreachable_leaves_state` | Un host inalcanzable **no** borra el estado: perder visibilidad no es lo mismo que estar sano |
+
+**Archivo:** `tests/test_secret_scan.py` — 15 tests
+
+El secreto de la app Entra caduca, y cuando lo hace el SSO deja de funcionar sin avisar.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestExpiryHelpers::*` (3) | `parse_expiry` con sufijo `Z`, valor vacío/basura → `None`, y la cuenta atrás en días |
+| `TestWarning::test_no_alert_while_outside_the_window` | Silencio fuera de la ventana |
+| `TestWarning::test_warns_once_inside_the_window` | Un aviso por severidad, no uno por ciclo |
+| `TestWarning::test_escalates_from_expiring_to_expired` | *Por caducar* → *caducado* es un aviso nuevo |
+| `TestWarning::test_rearms_after_renewal` | Renovar rearma |
+| `TestWarning::test_unknown_expiry_does_nothing` | Sin fecha fiable no se inventa una alarma |
+| `TestWarning::test_disabled_oidc_or_both_toggles_off_does_nothing` | Respeta los interruptores |
+| `TestWarning::test_non_leader_never_alerts` | Solo el líder avisa |
+| `TestRotation::test_rotates_inside_the_margin_and_does_not_warn` | Rotación desatendida dentro del margen, **y sin avisar**: una rotación correcta no es un incidente |
+| `TestRotation::test_does_not_rotate_outside_the_margin` | No rota antes de tiempo |
+| `TestRotation::test_failed_rotation_still_warns` | Si la rotación falla, el aviso sigue saliendo — alguien tiene que actuar |
+| `TestRotation::test_empty_secret_from_graph_is_treated_as_failure` | Un secreto vacío devuelto por Graph es un fallo, no un éxito |
+| `TestRotation::test_rotation_works_with_notify_off` | Rotar y avisar son independientes |
+
+**Archivo:** `tests/test_service_health.py` — 9 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestClassify::test_up_down_idle` | Clasificación de vivacidad a partir de las instancias registradas |
+| `TestClassify::test_any_fresh_running_instance_makes_service_up` | Basta **una** instancia fresca: un servicio replicado no está caído porque una réplica lo esté |
+| `TestClassify::test_ignores_blank_service_key` | Filas sin clave de servicio no ensucian el cálculo |
+| `TestTransitions::test_disabled_never_emits` | Respeta el interruptor |
+| `TestTransitions::test_first_observation_seeds_without_alert` | La primera observación siembra el estado **sin** alertar: arrancar no es una caída |
+| `TestTransitions::test_up_to_down_emits_service_down` / `test_down_to_up_emits_service_up` | Las dos transiciones reales |
+| `TestTransitions::test_idle_clears_state_and_never_alerts` | *Idle* limpia estado y calla |
+| `TestTransitions::test_non_leader_updates_state_but_does_not_emit` | Una réplica no líder **sí** actualiza el estado (para que la UI esté al día) pero no notifica |
+
+**Archivo:** `tests/test_scheduler_lifecycle.py` — 6 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestAuditAutoDedup::test_background_writes_a_single_system_row` | Un arranque en segundo plano deja **una** fila de auditoría, no una por hilo |
+| `TestAuditAutoDedup::test_request_context_attributes_to_the_actor` | Si lo arranca un usuario desde el panel, la auditoría lo atribuye a él |
+| `TestAuditAutoDedup::test_request_context_without_login_falls_back_to_system` | Sin sesión, `system` |
+| `TestSchedulerNotify::test_start_stop_are_discovered_matrix_events` | Arranque/parada son eventos descubiertos, no claves cableadas |
+| `TestSchedulerNotify::test_lifecycle_dispatches_a_translated_body` | El cuerpo sale traducido |
+
+**Archivo:** `tests/test_ha_failover.py` — 5 tests
+
+Failover end-to-end con varias réplicas compartiendo el store de liderazgo.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_only_one_replica_is_leader` | Exclusión mutua real |
+| `test_failover_when_holder_stops_renewing` | Si el líder deja de renovar, otro toma el relevo |
+| `test_clean_release_is_instant_failover` | Una liberación limpia no espera al vencimiento del lease |
+| `test_active_active_service_runs_on_every_replica` | Los servicios activo-activo **no** se gatean por líder |
+| `test_gated_without_store_defaults_to_sole_owner` | Sin store (despliegue de una sola réplica) el servicio corre: la HA no debe romper el caso simple |
+
+---
+
+## 91. Notificaciones — registro de eventos, idioma, destinatarios y overrides
+
+**Archivo:** `tests/test_notify_events.py` — 9 tests
+
+El registro de eventos notificables es la **única** fuente de verdad de la matriz de enrutado.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestDiscovery::test_discovers_builtin_domain_events` | Cada dominio publica sus kinds |
+| `TestDiscovery::test_events_are_ordered_and_deduped` | Orden estable y sin duplicados |
+| `TestDiscovery::test_descriptors_carry_source_and_label` | Cada descriptor sabe de dónde viene y cómo se llama |
+| `TestDiscovery::test_matrix_subset_excludes_rule_driven_event` | Los eventos dirigidos por regla no entran en la matriz general |
+| `TestDiscovery::test_ui_matrix_hides_compat_only_kinds` | Los kinds de compatibilidad no se enseñan |
+| `TestManualRegistration::*` (2) | Registro/override manual, y descriptor inválido ignorado |
+| `TestMatrixIsFullyDynamic::test_no_static_matrix_keys_in_spec` | **Ninguna clave de matriz escrita a mano en `spec.py`** — si aparece una, hay dos fuentes de verdad |
+| `TestMatrixIsFullyDynamic::test_builtin_kinds_come_from_the_registry` | Los kinds vienen del registro |
+
+**Archivo:** `tests/test_notify_i18n.py` — 10 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestEventTitle::*` (4) | Traducción del título, idioma por defecto si va vacío, kind desconocido → clave "embellecida" (nunca la clave cruda), y `format_title` localizado |
+| `TestNotifyLang::*` (3) | Precedencia: idioma de **notificaciones** sobre el del panel; si no hay, el del panel; vacío si ninguno |
+| `TestBodyTemplates::*` (3) | Cuerpos de auth/login, scheduler/ipban y servicio/certificado, rellenados posicionalmente |
+
+**Archivo:** `tests/test_notify_recipients.py` — 10 tests
+
+Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>`).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestRecipientResolver::test_group_expands_to_member_emails_deduped` | Un grupo se expande a correos, sin repetir |
+| `TestRecipientResolver::test_user_token_resolves_to_email` | Token de usuario → su correo |
+| `TestRecipientResolver::test_user_without_email_is_skipped` | Sin correo no hay a dónde enviar |
+| `TestRecipientResolver::test_disabled_group_does_not_send` / `test_disabled_user_token_skipped_with_name` | Deshabilitados fuera, y el motivo se reporta con nombre |
+| `TestRecipientResolver::test_empty_group_reported_not_fatal` | Un grupo vacío se reporta, no revienta el envío |
+| `TestRecipientResolver::test_unknown_token_reported` | Un token desconocido se dice, no se traga |
+| `TestSuggestEndpoint::*` (2) | El endpoint de sugerencias lista usuarios y grupos, y exige permiso de edición de config |
+| `TestDispatchNoFallback::test_empty_explicit_list_does_not_fall_back_to_raw_tokens` | **Una lista resuelta vacía NO cae a los tokens crudos** — el fallback podría mandar correo a una dirección que el resolutor descartó a propósito |
+
+**Archivo:** `tests/test_notify_router.py` — 7 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_is_channel_agnostic` | El router no conoce canales concretos |
+| `test_channels_own_their_stores_via_the_router_cache` / `test_store_factory_is_called_once` | Cada canal gestiona su store por la caché del router, y la factoría se llama una sola vez |
+| `test_config_section_reads_from_context` | La config llega por `NotifyContext`, no por Flask |
+| `test_dispatch_routes_by_matrix` | Enrutado por matriz |
+| `test_dispatch_channels_override_ignores_matrix` | Una regla con canales explícitos manda sobre la matriz |
+| `test_run_dispatch_accepts_the_router_as_surface` | El router sirve de superficie: **independiente de web_admin/Flask**, que es lo que permite usarlo desde los workers standalone |
+
+**Archivo:** `tests/test_notify_text_overrides.py` — 9 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestResolution::*` (4) | El texto personalizado gana sobre el i18n; sin override, el i18n; el título del evento lo honra; vacío cuando no hay nada |
+| `TestDiscovery::*` (5) | Grupos core y módulos presentes, cada entrada lleva su valor por defecto y el personalizado, los placeholders con nombre se declaran, un mensaje sin placeholders no declara variables, y el paquete de email usa su propio store de plantillas |
+
+---
+
+## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
+
+**Archivo:** `tests/test_module_pages.py` — 35 tests
+
+Un watchful puede reclamar una sección propia de primer nivel declarando `__page__`.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestNormalize::test_defaults_are_applied` / `test_explicit_values_win` | Normalización de la declaración |
+| `TestNormalize::test_an_unusable_id_is_dropped` | El id se convierte en URL, id de elemento y destino de pestaña: si no vale, se descarta |
+| `TestNormalize::test_a_blank_id_falls_back_to_the_module_name` | En blanco = "llámalo como yo" |
+| `TestNormalize::test_core_ids_cannot_be_shadowed` | **Un módulo no puede reclamar `/admin` u `/overview`** y secuestrar una ruta del core |
+| `TestNormalize::test_a_non_dict_declaration_is_dropped` | Una declaración malformada no rompe el panel |
+| `TestDiscovery::test_a_real_module_contributes_a_page` | m365 lo hace: prueba el pipeline sobre un módulo real, no un mock |
+| `TestDiscovery::test_a_declared_refresh_reaches_the_client_spec` | `refresh` es lo que le dice al renderizador genérico que el módulo puede traer datos en vivo — se perdía por el camino |
+| `TestDiscovery::test_the_label_is_the_module_s_own_pretty_name` | **El core no contiene ninguna cadena que nombre a un módulo** |
+| `TestDiscovery::*` (resto) | Cada página lleva lo que el core necesita, orden estable y único, y un `watchfuls/` ausente no es un error |
+| `TestRegistryMerge::*` (2) | La página entra en el registro de landing sin tocar las del core |
+| `TestServed::*` (6) | Ruta enrutada, exige sesión, el shell trae su pane y su entrada de sidebar, el fragmento `web/_ui.html` se inyecta, el endpoint de datos responde, y **un módulo sin página da 404** — eso es lo que impide que sea un "ejecuta cualquier hook" |
+| `TestLiveRefreshWithoutAForm::*` (5) | El refresco en vivo conoce solo la CLAVE del ítem: basta con ella, lo que envía el llamante manda, una clave sin prefijo también se encuentra, y un fallo de lectura de config no es fatal |
+
+**Archivo:** `tests/test_wa_standalone_pages.py` — 37 tests
+
+Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el mismo shell SPA**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestRegistry::*` (2) | Cada página declara lo que necesita y es una landing válida |
+| `TestRoutes::*` (3) | Exige sesión, renderiza para admin, y History acepta deep link `?module=&key=` |
+| `TestNotTabsAnymore::*` (2) | History y Syslog ya no son pestañas del panel, pero sus panes siguen existiendo como contenedor |
+| `TestEveryUrlIsTheSameShell::*` (3) | Shell completo en toda URL — nunca una página recortada |
+| `TestNoUnguardedPanelElementAccess::test_panel_only_elements_are_accessed_defensively` | Los elementos exclusivos del panel no están en el DOM de una página standalone: leerlos sin guarda rompería el JS |
+| `TestUnsavedChangesGuard::*` (3) | Las insignias de "sin guardar" están en el shell, un elemento ausente **nunca** se lee como sucio, y salir ofrece el modal propio en vez del diálogo del navegador |
+| `TestSidebarSections::*` (3) | Secciones gateadas por permiso, botones de pestaña SPA en toda URL, y el cliente abre el pane que toca según la URL (recarga, deep link, atrás/adelante) |
+| `TestFrontendWiring::*` (3) | La página declara su punto de entrada de render, el panel conserva los placeholders, y el panel no es una standalone |
+
+**Archivo:** `tests/test_wa_account_page.py` — 9 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestRoute::*` (2) | `/account` exige sesión y renderiza |
+| `TestTheForm::*` (2) | La página standalone trae el pane y el formulario; el panel también, para que el menú de usuario lo abra como SPA sin recarga |
+| `TestItIsAPageNotAModal::*` (2) | Es una página, y el modal antiguo **no queda en ningún sitio** |
+| `TestOpensLikeTheOtherPages::test_user_menu_opens_it_spa_on_every_url` | Se abre igual desde cualquier URL |
+| `TestDarkModeMovedToUserMenu::*` (2) | El control de modo oscuro ya no está ni en la página ni en el panel |
+
+**Archivo:** `tests/test_wa_partials_convention.py` — 15 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestNaming::test_every_partial_is_underscore_prefixed` | El `_` inicial marca un fragmento que nunca se enruta solo |
+| `TestNaming::test_names_are_lowercase_words` | Nomenclatura uniforme |
+| `TestNaming::test_no_ambiguous_table_partial` | `_table` significaba dos cosas distintas (la lista entera vs el estado de columnas) |
+| `TestNaming::test_one_render_shell_per_section_folder` | Un `_render.html` por carpeta: el único punto de entrada de la sección |
+| `TestWiring::test_no_orphan_partials` | Todo partial lo incluye alguien. Un huérfano es código muerto que parece vivo |
+| `TestWiring::test_script_partials_are_included_once` | El bundle JS es **un** `<script>`: incluir dos veces redeclararía sus constantes |
+| `TestSize::test_render_shells_stay_thin` | Un `_render.html` que engorda es una sección escondiendo subsecciones dentro |
+
+---
+
+## 93. Panel Web — Microsoft Teams
+
+**Archivo:** `tests/test_wa_msteams.py` — 21 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestCards::*` (2) | Forma y color de la MessageCard, y la variante compacta de texto plano |
+| `TestChannelSender::*` (5) | Sin canales no hace nada, fan-out a los habilitados, fallo HTTP reportado, helper de prueba, y credenciales ausentes en el envío a usuario |
+| `TestBotInbound::*` (2) | Extracción de la referencia de conversación, y **degradación limpia sin PyJWT** (dependencia opcional) |
+| `TestChannelRoutes::*` (4) | Exige auth, CRUD completo, alta sin URL rechazada, endpoint de prueba |
+| `TestUserAndInboundRoutes::*` (2) | Prueba de usuario sin credenciales, y 404 del endpoint de bot cuando está deshabilitado |
+| `TestAppPackage::*` (4) | El ZIP del paquete Teams con sus iconos, la ruta de descarga, y que exige `client_id` y sesión |
+| `TestMatrixConfig::test_msteams_matrix_key_saves` | La clave de matriz se guarda |
+| `test_msteams_bot_csrf_exempt_declared` | El endpoint del bot declara su exención de CSRF **explícitamente** (lo llama Microsoft, no un navegador) |
+
+**Archivo:** `tests/test_wa_msteams_sso.py` — 13 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTabPage::*` (2) | La página de pestaña carga el SDK con la CSP de *framing* correcta, y es pública (aún no hay sesión) |
+| `TestResolveUser::*` (3) | Correspondencia por usuario, por correo, y sin correspondencia |
+| `TestSsoEndpoint::test_no_token_400` / `test_unavailable_501_when_no_pyjwt` | Sin token, 400; sin PyJWT, 501 (no un 500) |
+| `TestSsoEndpoint::test_invalid_token_401` / `test_unknown_user_403` | Token inválido y usuario desconocido |
+| `TestSsoEndpoint::test_local_account_rejected` | **Una cuenta local no se puede tomar por SSO**: sería escalada de privilegios |
+| `TestSsoEndpoint::test_disabled_user_rejected` | Un usuario deshabilitado no entra |
+| `TestSsoEndpoint::test_success_establishes_session` | El camino feliz establece sesión |
+| `test_msteams_sso_csrf_and_embed_declared` | CSRF y *embedding* declarados explícitamente |
+
+---
+
+## 94. Panel Web — orígenes de grupos, acciones de configuración y rate limit
+
+**Archivo:** `tests/test_wa_group_sources.py` — 13 tests
+
+Cada sección de autenticación que sabe leer grupos del directorio declara sus hooks; el panel **no**
+ramifica por proveedor.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestGroupSourceWiring::test_ldap_source_is_wired` / `test_entra_source_is_wired` | Ambas fuentes cableadas |
+| `TestGroupSourceWiring::test_both_lookup_endpoints_are_referenced` | Resolver un id/DN a nombre es lo que rellena las etiquetas del mapeo |
+| `TestGroupSourceWiring::test_pickers_are_declared_for_every_section` | Cada fuente declara su contenedor de picker |
+| `TestGroupSourceWiring::test_panel_has_no_provider_branching_left` | **Regresión: nada de `sec === 'ldap'`** — el widget se dirige por descriptor |
+| `TestGroupSourceDescriptors::*` (4) | Toda sección con directorio declara descriptor, lleva lo que el renderizador necesita, el layout lo entrega al panel, y una sección sin directorio no declara ninguno |
+| `TestGroupSourceEndpointsGuarded::test_requires_authentication` | Los endpoints detrás de los botones nunca son alcanzables sin sesión |
+
+**Archivo:** `tests/test_config_actions.py` — 18 tests
+
+Un paquete puede aportar acciones a una sección de configuración describiéndose a sí mismo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestNormalize::*` (3) | Entradas sin claves obligatorias fuera, claves conocidas con sus defaults, y variante/orden explícitos ganan |
+| `TestDiscovery::*` (4) | El proveedor entraid aporta acciones OIDC, salen ordenadas, cada una nombra una función JS y una clave i18n, y una sección desconocida no tiene ninguna |
+| `TestLayoutExposure::*` (2) | Las acciones se enganchan a la tarjeta que toca; una tarjeta sin aportaciones no lleva la clave |
+| `TestMaintenanceCard::test_it_is_assembled_from_contributions_only` | Los borrados destructivos viven en Config → General → Mantenimiento, y la tarjeta se ensambla **solo** con aportaciones |
+| `TestMaintenanceCard::test_every_wipe_is_permission_gated` | Sin permiso de borrado no se ve **ni el botón** |
+| `TestMaintenanceCard::test_the_panel_can_render_an_actions_only_card` | Una tarjeta sin campos se saltaba antes |
+| `TestMaintenanceCard::test_the_buttons_left_the_section_toolbars` | El objetivo del movimiento: ya no están en History, Syslog ni Audit |
+| `TestGroupLabel::*` (3) | La fila de acciones se titula por paquete cuando todas vienen del mismo, y esa clave es traducible y sobrevive a la normalización |
+| `TestI18nKeysExist::test_declared_label_keys_are_translatable` | Ninguna etiqueta declarada se queda sin traducir |
+
+**Archivo:** `tests/test_ratelimit.py` — 9 tests
+
+Limitador de ventana deslizante en proceso (`lib.security.ratelimit`), con reloj inyectado.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_under_limit_allowed` / `test_exceeding_limit_blocked_with_retry` | Por debajo pasa; por encima bloquea e informa del reintento |
+| `test_zero_max_disables_limit` | 0 = desactivado |
+| `test_window_slides` | La ventana desliza de verdad, no es un cubo fijo |
+| `test_keys_are_independent` | Una IP no consume la cuota de otra |
+| `test_peek_does_not_record` / `test_peek_reports_over_after_hits` | `peek` consulta sin contar |
+| `test_reset_forgets_history` | El reset olvida |
+| `test_gc_drops_stale_buckets` | El GC suelta cubos viejos: sin eso el limitador es una fuga de memoria |
+
+---
+
+## 95. Overview — recuento de checks y filtros de severidad
+
+**Archivo:** `tests/test_overview_checks_widget.py` — 28 tests
+
+Los avisos se cuentan **aparte** de los errores duros: mezclarlos convierte un umbral rozado en una
+caída.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestSeverityFilterParsing::*` (2) | Parseo del filtro, y que `ge` cubre niveles superiores mientras `eq` no |
+| `TestModChecksCounts::*` (3) | Separa aviso de error, todo-avisos sin errores, y módulo ausente → vacío |
+| `TestChecksStat::*` (3) | Insignias separadas para errores y avisos, solo-avisos en ámbar, y todo OK |
+| `TestSeverityFilter::*` (5) | `warning` exacto excluye error, `ge warning` lo incluye, nivel error, valores heredados siguen funcionando, y **ambos widgets declaran sus niveles** |
+| `TestServerMatcher::*` (5) | El mismo criterio aplicado a servidores, incluida la unión con mantenimiento y que lo virtual lo excluye |
+
+---
+
+## 96. Guards de documentación e i18n
+
+Tests que no comprueban conducta sino que **la documentación y las traducciones no se queden atrás**.
+Ver también §88b y §89.
+
+**Archivo:** `tests/test_routes_documented.py` — 3 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `TestPerModuleHeaders::test_every_route_is_listed_in_its_module_header` | Las rutas viven repartidas en ~30 módulos: cada una debe estar en la cabecera de la suya |
+| `TestPerModuleHeaders::test_headers_use_the_real_parameter_names` | Una cabecera con `<ip>` para una ruta declarada `<path:ip>` se lee bien pero deja de casar — así empezó la deriva |
+| `TestSurfaceIndex::test_every_route_falls_under_an_indexed_prefix` | El índice lista **prefijos**: un dominio nuevo tiene que aparecer, un endpoint dentro de uno conocido no |
+
+**Archivo:** `tests/test_i18n_keys_exist.py` — 5 tests
+
+| Test | Qué comprueba |
+|---|---|
+| `test_no_referenced_key_is_missing` | Una clave usada por el código pero ausente del idioma se renderizaría **cruda en pantalla** |
+| `test_language_files_are_in_parity` | `en_EN` y `es_ES` definen exactamente las mismas claves |
+| `test_the_regression_that_motivated_this` | `insufficient_permissions` la devuelven 6 módulos de rutas en sus 403 |
+| `test_audit_actually_finds_keys` | **Guard del guard**: si las expresiones regulares dejaran de casar, el test pasaría sin comprobar nada |
+
+---
+
+## 97. Watchfuls — severidad de avisos y RAID mdstat
+
+**Archivo:** `tests/test_warning_severity.py` — 17 tests
+
+Un sensor que roza un umbral enruta como `warn`, no como `down`. Ver `docs/ref-watchful-emit.md`.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestSeverityNormalization::*` (3) | `warning` se conserva en un resultado no-OK, un no-OK sin severidad es `error`, y un resultado OK no lleva severidad |
+| `TestAlertKindMapping::test_kind` | El mapa (estado, severidad) → kind: `warn` / `down` / `recovery` |
+| `TestSendMessageBridgeCarriesSeverity::*` (2) | El puente `send_message` enruta el aviso como `warn`, y sin severidad se queda en `down` |
+| `TestModuleBaseEmitCarriesSeverity::*` (4) | **El bug que costó cuatro módulos**: `_emit` pasaba la severidad al resultado pero no a la notificación, así que la fila salía ámbar y la alerta como caída dura. Incluye que un fallo duro siga sin severidad (el arreglo no podía volver todo ámbar) y que módulo y enrutado no puedan divergir |
+| `TestEmitChangeMsgGate::*` (4) | `change_msg` cambia el gate a `check_status_custom` para re-avisar cuando cambia la **razón**; que puede seguir callando si nada cambió; y que `''` es una razón legítima mientras solo `None` elige el gate simple |
+
+**Archivo:** `watchfuls/raid/tests/test_raid_mdstat.py` — 35 tests
+
+Lector de `/proc/mdstat`, local y por SSH.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestRaidMdstatInit::*` (6) | Construcción local/remota, ruta personalizada, y que sin host no es remoto |
+| `TestRaidMdstatValidateRemote::*` (4) | Validación de la config SSH: puerto 0, sin usuario, host vacío |
+| `TestRaidMdstatIsExistLocal/Remote::*` (6) | Existencia del fichero en ambos modos, incluidas salidas por *stderr* y config inválida → `False` en vez de excepción |
+| `TestRaidMdstatReadStatusLocal::*` (6) | Lectura OK, degradado, en recuperación, inexistente, vacío y con varios arrays |
+| `TestRaidMdstatReadStatusRemote::*` (2) | Lectura remota y que *stderr* sí levanta |
+| `TestUpdateStatusEnum::*` (2) | El enum es `IntEnum` y admite comparación directa |
+| `TestRaidMdstatReadLines::*` (5) | Las excepciones se traducen al tipo correcto: `OSError`, `RuntimeError`, `ValueError` |
+| `TestRaidMdstatRecoveryParsing::*` (2) | Detalles de recuperación, y que una línea malformada devuelve un dict vacío en vez de romper |
+
+---
+
+## 98. Entra ID — paso de RBAC de Azure del asistente
+
+**Archivo:** `tests/test_entraid_azure_rbac.py` — 47 tests
+
+Acceder a Azure **no** es un permiso de aplicación de Entra: hace falta una asignación de rol RBAC
+sobre la suscripción, contra otra audiencia. Por eso es un paso propio del asistente.
+Ver `lib/providers/azure/rbac.py`.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestDeclaration::test_the_rbac_step_is_optional` | Un perfil sin él queda intacto — todos los módulos existentes carecen de este paso |
+| `TestDeclaration::test_it_normalises_with_defaults` / `test_explicit_values_win` / `test_a_bogus_declaration_is_dropped` | Normalización |
+| `TestDeclaration::test_the_field_reaches_the_client` | El cliente debe saber **a qué campo** de credencial apuntar como destino del RBAC |
+| `TestDeclaration::test_azure_module_declares_it` | El módulo azure lo declara de verdad |
+| `TestRoleAssignment::test_a_successful_assignment` | Camino feliz |
+| `TestRoleAssignment::test_an_existing_assignment_counts_as_success` | Re-ejecutar el asistente no puede fallar por un rol ya concedido |
+| `TestRoleAssignment::test_a_denied_assignment_reports_the_reason` | El fallo habitual: un admin de Entra que **no** es Owner ni User Access Administrator |
+| `TestRoleAssignment::test_an_unknown_role_is_refused_without_calling_azure` | Se rechaza antes de gastar una llamada |
+| `TestRoleAssignment::test_missing_target_is_refused` / `test_a_transport_error_is_reported_not_raised` | Destino ausente y error de transporte reportados, no lanzados |
+| `TestSubscriptionListing::*` (5) | El picker: id/nombre/estado ordenados, una suscripción deshabilitada **se lista con su estado** en vez de ocultarse, sin nombre cae al id, entradas basura fuera, y un fallo es lista vacía — el camino de teclear el id a mano sigue disponible |
+| `TestTokenExchange::*` (3) | El consentimiento se canjea en la otra audiencia, sin refresh token se explica por qué (sin `offline_access` no hay nada que canjear), y un error del proveedor se propaga |
+| `TestServicePrincipalId::test_provision_returns_it` | La asignación necesita el **object id** del SP, que la creación ahora devuelve |
+| `TestPickerFlow::test_offline_access_is_requested_even_without_a_target` | Listar suscripciones también necesita el token ARM |
+| `TestPickerFlow::test_no_target_offers_the_subscriptions_instead_of_failing` | Sin destino, ofrece elegir en vez de fallar |
+| `TestPickerFlow::test_a_supplied_target_still_assigns_in_one_go` | El picker no estorba cuando el campo ya está relleno |
+| `TestPickerFlow::test_the_choice_completes_the_assignment` | La elección cierra el ciclo |
+| `TestPickerFlow::test_the_pending_flow_is_single_use` | Guarda un token ARM: no puede quedarse vivo una vez gastado |
+| `TestPickerFlow::test_an_unknown_flow_is_expired_not_an_error` | Un flujo desconocido está caducado, no roto |
+| `TestPickerFlow::test_no_subscription_is_refused_without_spending_the_flow` | **Un clic en falso no puede quemar el token ARM** — se puede volver a elegir |
+| `TestPickerFlow::test_a_token_exchange_failure_reports_and_skips_the_picker` | Sin token ARM no hay lista ni asignación, pero la app sí vuelve |

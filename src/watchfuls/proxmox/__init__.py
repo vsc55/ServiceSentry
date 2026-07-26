@@ -155,7 +155,11 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f'Check: {name} — Exception: {exc}', DebugLevel.error)
                     _lbl = self.get_conf(['list', name, 'label'], '') or name
-                    self.dict_return.set(name, False, self._msg('px_error', _lbl, exc), False)
+                    # send_msg left at its default: this branch used to pass False, which
+                    # suppresses the monitor's notification — and nothing sent one by hand,
+                    # so an unhandled exception went red in the panel and told nobody.
+                    self.dict_return.set(name, False, self._msg('px_error', _lbl, exc),
+                                         name=_lbl)
 
         super().check()
         return self.dict_return
@@ -169,16 +173,6 @@ class Watchful(ModuleBase):
             raw = self.get_conf(['list', key], {})
             cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
         return cache[key]
-
-    def _emit(self, key: str, status: bool, message: str, other: dict = None,
-              severity: str = None) -> None:
-        """Record a result and notify only on a status change (like the other
-        watchfuls). ``severity='warning'`` marks a non-OK result as an aviso
-        (yellow in the UI) instead of a hard error."""
-        name = (self.get_conf(['list', str(key).split('/')[0], 'label'], '') or '').strip()
-        self.dict_return.set(key, status, message, False, other or {}, severity, name=name)
-        if self.check_status(status, self.name_module, key):
-            self.send_message(message, status, item=name)
 
     def _emit_exc(self, key: str, label: str, what: str, exc: Exception,
                   extra: dict = None) -> None:

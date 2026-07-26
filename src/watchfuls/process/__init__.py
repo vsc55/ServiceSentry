@@ -97,9 +97,9 @@ class Watchful(ModuleBase):
                    else self._msg('proc_low', key, count, min_count))
 
         other_data = {'process': name, 'count': count, 'min_count': min_count}
-        self.dict_return.set(key, ok, message, False, other_data)
-        if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=name)
+        # name= is the PROCESS name, not the item label — this module identifies a
+        # check by what it watches, so the alert says "nginx", not the item's uid.
+        self._emit(key, ok, message, other_data, name=name)
 
     @staticmethod
     def _count_matches(out: str, os_: str, name: str) -> int:

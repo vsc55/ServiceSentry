@@ -60,6 +60,7 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [ref-schema-json.md](ref-schema-json.md) | Referencia completa de `schema.json`: todas las propiedades de campo, meta-claves, archivos de idioma y pipeline de `discover_schemas` |
 | [explica-i18n.md](explica-i18n.md) | Mecánica de i18n: capa global de UI + capa por módulo, resolución de etiquetas en navegador, pipeline de `discover_schemas`, cómo añadir idiomas |
 | [ref-i18n.md](ref-i18n.md) | Referencia de i18n: estructura de `lang/*.json`, los tres esquemas de tags (`notif_msg_vars`/`notif_email_vars`/`messages_vars`) y placeholders `_fill` (secuencial vs indexado) |
+| [ref-watchful-emit.md](ref-watchful-emit.md) | Cómo publica un resultado un watchful: patrón automático vs manual, cuándo aplica cada uno y los bugs que motivaron la regla |
 | [ref-tests.md](ref-tests.md) | Inventario completo de tests: qué comprueba cada test, condiciones de OK y error, organizado por grupos |
 | [caso-diagnostico.md](caso-diagnostico.md) | Bugs resueltos y trampas conocidas: causa raíz, solución y lección generalizable de fallos no evidentes que costaron aislar |
 

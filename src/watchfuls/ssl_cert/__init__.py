@@ -96,8 +96,9 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"SSL Cert: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = self._msg('ssl_error', item.get('label') or item['key'], exc)
-                    self.dict_return.set(item['key'], False, message)
+                    _lbl = item.get('label') or item['key']
+                    message = self._msg('ssl_error', _lbl, exc)
+                    self.dict_return.set(item['key'], False, message, name=_lbl)
 
         super().check()
         return self.dict_return
@@ -146,10 +147,7 @@ class Watchful(ModuleBase):
         # Approaching the expiry threshold is a warning; an already-EXPIRED cert is a hard
         # problem (down).  A connection/handshake failure raises above and is reported as down.
         severity = 'warning' if (not ok and days_left > 0) else ''
-        self.dict_return.set(key, ok, message, False, other_data, severity=severity)
-
-        if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=label, severity=severity)
+        self._emit(key, ok, message, other_data, severity=severity, name=label)
 
     @staticmethod
     def _cert_expiry(der: bytes):

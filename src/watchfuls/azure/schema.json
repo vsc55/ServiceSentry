@@ -47,11 +47,20 @@
                 "provision": {"profile": "azure"}
             },
             {
+                "id": "test_permissions",
+                "label": "prov_entraid_action_test_permissions",
+                "url": "/api/v1/auth/entraid/check-permissions",
+                "icon": "bi-shield-check",
+                "result": "modal",
+                "provision": {"profile": "azure"}
+            },
+            {
                 "id": "fix_permissions",
                 "label": "prov_entraid_action_fix_permissions",
                 "url": "/api/v1/auth/entraid/provision/device-code",
                 "icon": "bi-shield-plus",
                 "result": "device_code",
+                "toolbar": false,
                 "provision": {"profile": "azure", "ensure": true}
             }
         ],

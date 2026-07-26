@@ -529,7 +529,7 @@ def register(app, wa):
         required = _required_roles(body)
         if not required:
             return jsonify({'ok': False, 'message': wa._t('cred_prov_error')}), 400
-        vals = {}
+        vals, stored = {}, {}
         cred_uid = str(body.get('cred_uid') or '').strip()
         cstore = getattr(wa, '_credentials_store', None)
         if cred_uid and cstore is not None:
@@ -548,6 +548,22 @@ def register(app, wa):
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'ok': False, 'message': f'Auth: {exc}'})
         rep = permissions.permission_report(permissions.token_roles(token), required)
+        # A declaration may be gated by more than application permissions: an Azure one
+        # also needs an ARM role assignment, which no token claim can answer — reporting
+        # only the claim would say "all granted" while every ARM call 403s. The owner of
+        # the declaration produces that row; this route only folds it in, and stays
+        # unaware of what the extra check was.
+        rbac = (_provision_profile(body.get('profile')) or {}).get('azure_rbac') or {}
+        if rbac:
+            from lib.providers.azure import rbac as azure_rbac  # noqa: PLC0415
+            # The whole credential, not just the three auth fields: the declaration names
+            # which OTHER field is its target, and only it knows which one that is.
+            values = dict(stored)
+            values.update({k: v for k, v in body.items() if v not in (None, '')})
+            values.update({'tenant_id': tenant, 'client_id': client_id,
+                           'client_secret': secret})
+            permissions.merge_row(rep, azure_rbac.permission_row(
+                rbac, values, wa._t('prov_entraid_perm_azure_rbac')))
         msg = (wa._t('prov_entraid_perms_all_ok') if rep['all_ok']
                else wa._t('prov_entraid_perms_missing') + ': ' + ', '.join(rep['missing']))
         return jsonify({'ok': True, 'message': msg,

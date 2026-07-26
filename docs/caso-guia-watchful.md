@@ -151,7 +151,9 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     message = self._msg('mimod_error', name, exc)  # texto en lang/*.json → messages
-                    self.dict_return.set(name, False, message)
+                    # name= siempre: sin él el monitor etiqueta la alerta con el HOST enlazado,
+                    # que es otra cosa distinta del check (ver ref-watchful-emit.md).
+                    self.dict_return.set(name, False, message, name=name)
 
     def _item_check(self, name, target):
         """Ejecuta la comprobación individual para un ítem."""
@@ -163,13 +165,16 @@ class Watchful(ModuleBase):
         # Construir el mensaje con _msg (textos en lang/*.json → sección messages)
         s_message = self._msg('mimod_ok', name) if status else self._msg('mimod_fail', name, detail)
 
-        # Almacenar resultado (severity='warning' si es un aviso de umbral blando, '' si es caída)
+        # Patrón A (el que debes usar): registra y deja notificar al monitor, que lee la
+        # severidad del propio resultado — así no se puede olvidar por el camino.
+        # severity='warning' para un aviso de umbral blando; None/'' para una caída.
         other_data = {'detail': detail}
-        self.dict_return.set(name, status, s_message, False, other_data, name=name)
+        self.dict_return.set(name, status, s_message, other_data=other_data,
+                             severity=None, name=name)
 
-        # Notificar si el estado cambió
-        if self.check_status(status, self.name_module, name):
-            self.send_message(s_message, status, item=name)
+        # Patrón B, SOLO si necesitas re-avisar al cambiar la razón o mandar varios avisos
+        # en un ciclo. Registra y notifica de una vez, con el emparejamiento ya resuelto:
+        #     self._emit(name, status, s_message, other_data, severity=None, name=name)
 
     def _do_check(self, target, timeout):
         """Realiza la verificación real. Devuelve (status: bool, detail: str)."""
@@ -664,8 +669,16 @@ ping_timeout = self.get_conf('timeout', 5, select_module='watchfuls.ping')
 
 ### Resultados
 
+Hay **dos** formas de publicar un resultado, y la elección no es de estilo — ver
+[ref-watchful-emit.md](ref-watchful-emit.md):
+
+- **A (por defecto)**: `dict_return.set(...)` y **notifica el monitor**, leyendo la severidad del
+  propio resultado. Es lo que debes usar salvo que necesites lo de abajo.
+- **B**: `ModuleBase._emit(...)` — registra y notifica en una llamada. Solo para re-avisar cuando
+  cambia la *razón* (`change_msg=`) o para mandar más de un aviso por ciclo.
+
 ```python
-self.dict_return.set(key, status, message, send_msg=False, other_data=None,
+self.dict_return.set(key, status, message, send_msg=True, other_data=None,
                      severity=None, name='')
 ```
 
@@ -674,7 +687,7 @@ self.dict_return.set(key, status, message, send_msg=False, other_data=None,
 | `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state`. En módulos host-céntricos suele ser el `host_uid` (un UID, no legible) |
 | `status` | bool | `True` = OK, `False` = Error |
 | `message` | str | Texto del resultado. Se envía **en texto plano** en las notificaciones (el Markdown de Telegram se elimina, ya que se rompía al agrupar) — no incrustes `*`/`_` esperando formato |
-| `send_msg` | bool | `False` (por defecto) — no enviar el mensaje automáticamente. Usa `send_message()` después de `check_status()` para controlar cuándo se envía |
+| `send_msg` | bool | `True` **por defecto**: el monitor notifica el cambio de estado por su cuenta (patrón A). Ponlo a `False` solo si vas a notificar tú — y entonces usa `_emit()`, que hace el emparejamiento correcto. Nota: `send_msg=False` **no** afecta al registro del estado, solo silencia el aviso automático |
 | `other_data` | dict | Datos extra que se almacenan en `check_state` junto al resultado. Accesibles en la página pública `/status` bajo la clave `extra` de cada ítem |
 | `severity` | str | Severidad de un estado no-OK: `'warning'` (aviso, amarillo → kind `warn`) o `'error'` (por defecto). Los OK llevan `''` |
 | `name` | str | **Nombre amigable del ítem** para las notificaciones (p.ej. `PVE04`). Rellena la columna *Item* del digest; sin él, el monitor intenta resolver `host_uid → nombre`. Pásalo siempre que tengas el label del host/servicio |

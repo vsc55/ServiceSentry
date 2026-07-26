@@ -509,8 +509,19 @@ un paso encadenado aparte, declarable por el módulo:
 1. si el perfil declara `azure_rbac`, el device-code añade **`offline_access`** — sin refresh
    token no hay forma de obtener el segundo token;
 2. tras crear la app, `auth.token_from_refresh()` canjea ese refresh por un token de **ARM**;
-3. `provisioning.assign_subscription_role()` asigna el rol al **object id del service principal**
+3. `azure.rbac.assign_subscription_role()` asigna el rol al **object id del service principal**
    (que `provision_entra_app` ahora devuelve como `sp_object_id`).
+
+> **Dónde vive el código ARM.** `list_subscriptions`, `assign_subscription_role` y la sonda de
+> acceso están en **`lib/providers/azure/rbac.py`**, no en el provider de Entra: ARM es otra
+> audiencia con otro modelo de consentimiento, y mezclarlos es lo que hace que "concedí todos los
+> permisos y sigue dando 403" parezca un misterio. `entraid/provisioning.py` las re-exporta para
+> no romper imports.
+>
+> Esta declaración también gobierna la **comprobación de permisos** de la credencial: si está
+> presente, el informe añade una fila con una lectura **real** de la suscripción, porque una
+> asignación de rol RBAC no aparece en el claim `roles` de un token de Graph. Ver
+> [caso-entra-id.md](caso-entra-id.md) y [ref-watchful-emit.md](ref-watchful-emit.md).
 
 El resultado viaja en `fields.azure_rbac` y se audita (`entra_azure_rbac_assigned` /
 `…_failed`). **Nunca es fatal**: si falla, la app y el secreto ya son utilizables y el rol puede
@@ -519,7 +530,7 @@ que repetir el asistente es seguro.
 
 **Si el campo está vacío, el asistente no se rinde: ofrece las suscripciones.** Antes de firmar
 nadie conoce los ids, así que pedir un GUID por adelantado es pedir que el usuario se vaya al
-portal a buscarlo. Con el token de ARM ya en la mano, `provisioning.list_subscriptions()` lee las
+portal a buscarlo. Con el token de ARM ya en la mano, `azure.rbac.list_subscriptions()` lee las
 suscripciones que **ese** administrador ve (que son justo donde podría asignar un rol) y el poll
 responde `azure_rbac_pending` en lugar de darse por vencido:
 

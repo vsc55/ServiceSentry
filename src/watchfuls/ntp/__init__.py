@@ -116,8 +116,9 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"NTP: {item['key']} - Exception: {exc}", DebugLevel.error)
-                    message = self._msg('ntp_error', item.get('label') or item['key'], exc)
-                    self.dict_return.set(item['key'], False, message)
+                    _lbl = item.get('label') or item['key']
+                    message = self._msg('ntp_error', _lbl, exc)
+                    self.dict_return.set(item['key'], False, message, name=_lbl)
 
         super().check()
         return self.dict_return
@@ -143,7 +144,4 @@ class Watchful(ModuleBase):
         }
         # An offset over the limit is a warning (the server answered); a query failure
         # raises above and is reported as down.
-        self.dict_return.set(key, ok, message, False, other_data, severity='warning')
-
-        if self.check_status(ok, self.name_module, key):
-            self.send_message(message, ok, item=label, severity='warning')
+        self._emit(key, ok, message, other_data, severity='warning', name=label)
