@@ -22,7 +22,6 @@ coverage: "100% — all code features documented"
 ```
 watchfuls/<module_name>/          # module_name: lowercase, underscores only
 ├── __init__.py                   # REQUIRED — Watchful class implementation
-├── watchful.py                   # REQUIRED — always exactly: from . import Watchful
 ├── schema.json                   # REQUIRED — field definitions for UI
 ├── info.json                     # REQUIRED — module metadata
 └── lang/
@@ -160,7 +159,6 @@ class Watchful(ModuleBase):
 ### Minimum viable module
 
 - [ ] `watchfuls/<name>/__init__.py` — `Watchful(ModuleBase)` class
-- [ ] `watchfuls/<name>/watchful.py` — `from . import Watchful` (exactly this, nothing else)
 - [ ] `watchfuls/<name>/schema.json` — `__module__` + at least one named collection
 - [ ] `watchfuls/<name>/info.json` — `name`, `version`, `description`, `icon`, `dependencies: []`
 - [ ] `watchfuls/<name>/lang/en_EN.json` — `pretty_name` + `labels` for ALL visible fields

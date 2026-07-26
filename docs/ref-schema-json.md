@@ -855,7 +855,7 @@ Cuando la plataforma actual no está en la tupla, `discover_schemas()` añade `_
 
 | Mecanismo | Dónde se declara | Alcance |
 | --- | --- | --- |
-| Clase `SUPPORTED_PLATFORMS` | `watchful.py` / `__init__.py` | Módulo completo — toda la colección queda inactiva |
+| Clase `SUPPORTED_PLATFORMS` | `__init__.py` | Módulo completo — toda la colección queda inactiva |
 | Campo `supported_platforms` | `schema.json`, por campo | Solo ese campo — el resto del formulario sigue activo |
 
 Usa `SUPPORTED_PLATFORMS` en la clase cuando el módulo entero es inútil en esa plataforma (p. ej. `temperature` en Windows). Usa `supported_platforms` por campo cuando solo una opción específica no está disponible (p. ej. el campo `local` de `raid`, que usa `/proc/mdstat` y solo existe en Linux aunque el módulo soporta monitorización remota en cualquier plataforma).

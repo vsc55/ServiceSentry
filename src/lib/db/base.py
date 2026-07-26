@@ -42,6 +42,16 @@ class BaseConnector(ABC):
     ``with connector.transaction():`` — on success it commits, on any
     exception it rolls back.  Single-statement writes outside a transaction
     must still call ``commit()`` so they persist on PG/MySQL.
+
+    One implementation per driver, deliberately
+    -------------------------------------------
+    MySQL and PostgreSQL end up with an identical ``execute_ddl`` and ``execute`` (both
+    are cursor-based DB-API drivers), and a dedup pass will flag them.  They are NOT
+    folded into an intermediate base class on purpose: their ``executemany`` already
+    diverges — PostgreSQL uses ``psycopg2.extras.execute_batch``, MySQL the driver's own —
+    and an abstraction that holds two methods while a sibling must stay overridden hides
+    the very thing this layer exists to make visible, which is where the drivers differ.
+    Fourteen duplicated lines is the cheaper half of that trade.
     """
 
     # DDL type tokens — override in subclasses

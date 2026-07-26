@@ -322,7 +322,7 @@ Restricción única: `(module, key, metric)`. Sin índices secundarios.
 ## Notificaciones
 
 ### `webhooks` — webhooks salientes
-[lib/core/notify/webhook/store.py:29](../src/lib/core/notify/webhook/store.py#L29)
+[lib/core/notify/webhook/store.py:28](../src/lib/core/notify/webhook/store.py#L28)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -335,7 +335,7 @@ Restricción única: `(module, key, metric)`. Sin índices secundarios.
 Sin índices.
 
 ### `msteams_channels` — destinos de canal Teams
-[lib/core/notify/msteams/store.py:28](../src/lib/core/notify/msteams/store.py#L28)
+[lib/core/notify/msteams/store.py:27](../src/lib/core/notify/msteams/store.py#L27)
 
 Misma forma que `webhooks` (`uid` PK, `data` JSON con `webhook_url` cifrado, timestamps de
 auditoría). Sin índices.

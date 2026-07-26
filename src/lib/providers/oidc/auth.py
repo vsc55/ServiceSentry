@@ -53,20 +53,9 @@ def _config_hash(cfg: dict) -> str:
 
 # ── Role mapping ─────────────────────────────────────────────────────────────
 
-def _map_role(groups: list, group_role_map: dict) -> str:
-    priority = ['admin', 'editor', 'viewer']
-    matched: dict = {}
-    for g in groups:
-        for pattern, role in group_role_map.items():
-            if pattern.lower() == str(g).lower():
-                if role not in matched:
-                    matched[role] = g
-    for role in priority:
-        if role in matched:
-            return role
-    for role in matched:
-        return role
-    return ''
+# Shared with the other SSO provider — see lib/providers/role_map.py for why LDAP
+# keeps a variant of its own (DN parsing).
+from lib.providers.role_map import map_role as _map_role  # noqa: E402
 
 
 # ── OAuth client (lazy, re-initialized on config change) ─────────────────────

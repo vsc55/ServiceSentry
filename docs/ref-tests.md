@@ -108,6 +108,7 @@
 88. [Core — Estampado de entidades (audit)](#88-core--estampado-de-entidades-audit)
 88b. [Watchfuls — Patrones de publicación de resultados](#88b-watchfuls--patrones-de-publicación-de-resultados)
 88c. [Meta — Versión y CHANGELOG](#88c-meta--versión-y-changelog)
+88d. [Meta — Enlaces con número de línea](#88d-meta--enlaces-con-número-de-línea)
 89. [Meta — Este documento](#89-meta--este-documento)
 90. [Core — Salud, escaneos programados y HA](#90-core--salud-escaneos-programados-y-ha)
 91. [Notificaciones — registro de eventos, idioma, destinatarios y overrides](#91-notificaciones--registro-de-eventos-idioma-destinatarios-y-overrides)
@@ -3816,6 +3817,32 @@ desincroniza si nadie lo comprueba**.
 
 ---
 
+## 88d. Meta — Enlaces con número de línea
+
+**Archivo:** `tests/test_docs_line_links.py` — 6 tests
+
+Los documentos enlazan al código con ancla de línea — la forma `[fichero:N](ruta#LN)`. Son los
+enlaces más útiles de la referencia y lo más frágil que hay en ella: **cualquier edición por
+encima del destino los desplaza en silencio**, y nada lo notaba.
+
+En su primera ejecución encontró tres rotos, uno de ellos recién provocado por un arreglo de
+seguridad en `secret_manager.py` — romper una referencia de documentación arreglando un bug, sin
+enterarse, es justo el caso que motiva el guard.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (2) | Que existe `docs/` y que se encuentran >20 enlaces; si cambia el formato, falla en vez de pasar sin comprobar nada |
+| `test_the_target_file_exists` | Rutas obsoletas — cazó `lib/modules/monitor.py`, movido a `lib/services/monitoring/` (la línea seguía siendo correcta, solo la ruta había podrido) |
+| `test_the_line_is_inside_the_file` | Anclas más allá del final del fichero |
+| `test_the_line_is_not_blank` | Un ancla que cae en un hueco ha podrido con seguridad: la sentencia que nombraba se movió y el número se quedó |
+| `test_a_link_whose_text_names_a_line_names_the_same_one` | El número está escrito **dos veces a mano** (texto y ancla) y ya se había desincronizado |
+
+> **Lo que NO puede hacer:** juzgar si la línea 28 es la línea *correcta*. Solo comprueba que el
+> ancla es internamente coherente y aterriza en algo real. Y no prohíbe las anclas de línea:
+> valen lo que cuestan, solo necesitaban algo que las vigilara.
+
+---
+
 ## 89. Meta — Este documento
 
 **Archivo:** `tests/test_docs_tests_inventory.py` — 9 tests
@@ -4150,7 +4177,7 @@ Ver también §88b y §89.
 | `TestPerModuleHeaders::test_headers_use_the_real_parameter_names` | Una cabecera con `<ip>` para una ruta declarada `<path:ip>` se lee bien pero deja de casar — así empezó la deriva |
 | `TestSurfaceIndex::test_every_route_falls_under_an_indexed_prefix` | El índice lista **prefijos**: un dominio nuevo tiene que aparecer, un endpoint dentro de uno conocido no |
 
-**Archivo:** `tests/test_i18n_keys_exist.py` — 5 tests
+**Archivo:** `tests/test_i18n_keys_exist.py` — 8 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4163,7 +4190,7 @@ Ver también §88b y §89.
 
 ## 97. Watchfuls — severidad de avisos y RAID mdstat
 
-**Archivo:** `tests/test_warning_severity.py` — 17 tests
+**Archivo:** `tests/test_warning_severity.py` — 21 tests
 
 Un sensor que roza un umbral enruta como `warn`, no como `down`. Ver `docs/ref-watchful-emit.md`.
 

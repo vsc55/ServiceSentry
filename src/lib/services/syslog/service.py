@@ -43,6 +43,7 @@ from lib.services.syslog.store import SyslogStore, SyslogDropsStore
 from lib.core.notify.context import NotifyContext
 from lib.core.notify.router import NotificationRouter
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
+from lib.services.base import _StandaloneConfigMixin
 from lib.services.control_server import start_control_server
 from lib.services.syslog.manager import _SyslogMixin
 from lib.services.events.manager import _EventsMixin
@@ -51,7 +52,7 @@ from lib.security import secret_manager
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for syslog config changes (s)
 
 
-class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
+class SyslogService(_HeartbeatMixin, _StandaloneConfigMixin, _EventsMixin, _SyslogMixin):
     """Own the syslog listener as a self-contained, DB-sharing daemon.
 
     The listener lifecycle comes from :class:`_SyslogMixin`; syslog→notification
@@ -163,15 +164,6 @@ class SyslogService(_HeartbeatMixin, _EventsMixin, _SyslogMixin):
                   f'db={backend}', DebugLevel.info)
 
     # ── config surface (the router owns channel loading now) ──────────────────
-    def _read_config_file(self, _filename: str | None = None) -> dict:
-        """Effective configuration (DB ← config.json) with SS_* env overlaid.
-
-        A standalone worker has no web layer to apply env overrides and no config UI to
-        break, so env is layered on the whole config here — this is the process's single
-        consumption surface (autostart gates, notify channels, etc.)."""
-        from lib.config.manager import overlay_all_env  # noqa: PLC0415
-        return overlay_all_env(self._config_mgr.read() or {})
-
     def _config_section(self, name: str) -> dict:
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
 

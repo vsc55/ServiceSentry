@@ -3,15 +3,15 @@
 """Datastore connectivity watchful — MySQL/MariaDB, PostgreSQL, MSSQL,
 MongoDB, Redis, Valkey, Elasticsearch, OpenSearch, InfluxDB, Memcached."""
 
+import base64
 import concurrent.futures
 import json
 import os
 import os.path
 import socket
 import threading
-import urllib.request
 import urllib.error
-import base64
+import urllib.request
 from enum import IntEnum
 
 try:
@@ -57,7 +57,6 @@ try:
 except ImportError:
     _PYMEMCACHE = False
 
-from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
@@ -1019,20 +1018,6 @@ class Watchful(ModuleBase):
             return {'ok': False, 'message': str(exc), 'items': []}
 
     # ── Config helpers ─────────────────────────────────────────────────
-
-    def _resolved_item(self, key: str) -> dict:
-        """Return the item config for *key* with any referenced host merged in.
-
-        Host-centric: when the item carries a ``host_uid`` its address + db/ssh
-        credential profiles are merged over it (resolve_host is a no-op for
-        classic inline items).  Cached per key for the duration of this check
-        cycle (the monitor builds a fresh instance each cycle, so it never
-        goes stale)."""
-        cache = self.__dict__.setdefault('_resolved_items', {})
-        if key not in cache:
-            raw = self.get_conf(['list', key], {})
-            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
-        return cache[key]
 
     def _get_conf(self, opt: ConfigOptions, key: str, default=None):
         if default is None:

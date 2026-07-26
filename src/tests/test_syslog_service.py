@@ -23,8 +23,15 @@ except ImportError:
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
-def _free_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def _free_port(proto: str = 'tcp') -> int:
+    """A free port for *proto* (``'tcp'`` or ``'udp'``).
+
+    Probe with the SAME socket type the caller will bind: the two port spaces are
+    independent, so a number free for TCP can already be taken for UDP. Asking the wrong
+    one is what made these tests fail under a full parallel run and pass on their own.
+    """
+    kind = socket.SOCK_DGRAM if proto == 'udp' else socket.SOCK_STREAM
+    s = socket.socket(socket.AF_INET, kind)
     s.bind(('127.0.0.1', 0))
     p = s.getsockname()[1]
     s.close()
@@ -64,7 +71,7 @@ class TestContextSurface:
 class TestReceive:
 
     def test_udp_message_is_stored(self, admin, service):
-        port = _free_port()
+        port = _free_port('udp')
         # UDP only: pin TCP/TLS off so the listener never binds the privileged default
         # port 514 (a bind that fails as non-root — e.g. on CI). Configuring just
         # ``udp_port`` would leave ``tcp_port`` at its registry default (514), which the
@@ -219,7 +226,7 @@ class TestRun:
         # The config watcher picks up an enable made elsewhere (the web UI) and
         # binds the listener without a restart.
         import threading
-        port = _free_port()
+        port = _free_port('udp')
         admin._write_config({'syslog': {'enabled': False}})
         admin._invalidate_config_cache()
         t = threading.Thread(target=service.run, daemon=True)
@@ -262,7 +269,7 @@ class TestTraceability:
 
     def test_start_and_stop_are_logged(self, admin, service, capsys):
         self._trace_on(service)
-        port = _free_port()
+        port = _free_port('udp')
         admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
                                         'udp_port': port, 'tcp_port': 0, 'tls_port': 0}})
         admin._invalidate_config_cache()
@@ -333,7 +340,7 @@ class TestIpbanStandalone:
 
     def test_listener_is_wired_to_the_jail(self, admin, service):
         # apply_config builds the server with non-null is_banned/on_offense from _ipban
-        port = _free_port()
+        port = _free_port('udp')
         admin._write_config({'syslog': {'enabled': True, 'bind_host': '127.0.0.1',
                                         'udp_port': port, 'tcp_port': 0, 'tls_port': 0}})
         admin._invalidate_config_cache()

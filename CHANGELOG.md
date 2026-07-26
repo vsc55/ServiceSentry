@@ -8,6 +8,103 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.2] - 2026-07-26
+
+### Fixed
+- **A dangling role reference lost its warning marker.** `role_deleted` was one i18n key
+  serving two different messages: the `<option>` that flags a role a config still points at
+  ("⚠ Deleted role") and the toast shown after deleting one ("Role deleted"). Defined twice
+  in the same table, Python kept the second, so the select silently read like a
+  confirmation instead of a warning. They are now two keys — `role_deleted_ref` carries the
+  ⚠ — and `test_no_key_is_defined_twice` fails on any duplicate, including the three that
+  held the *same* value: harmless today, but the next person to edit one has even odds of
+  editing the copy that does not win.
+
+### Changed
+- **The severity rule has one home.** `norm_severity` (OK → `''`; non-OK defaults to
+  `error` unless marked `warning`) existed as two identical copies, in the result structure
+  and in the store that persists it — a rule about severity being exactly the wrong thing
+  to keep two of: add a third level and one copy goes on flattening it to `error`. The
+  store imports it now, and a test asserts both surfaces answer identically for every
+  input.
+- **`_resolved_item` moved to `ModuleBase`.** Byte-for-byte the same in `datastore`,
+  `proxmox` and `web`, and nothing in it is module-specific.
+- **Seven validation limits deleted from `web_admin/app.py`.** `_MAX_USERNAME_LEN` and
+  friends restated limits the domain services already own and enforce. Six had no reader at
+  all; the seventh passed its copy straight back into a parameter that already defaulted to
+  the domain's constant — so the web layer's value would have won silently the day the two
+  diverged.
+- **A failed ENcryption no longer writes the plaintext in silence.** `decrypt_all` and
+  `encrypt_sensitive` had the same `except Exception: pass`, but the trade-off is not the
+  same: a failed decryption keeps the ciphertext (harmless), a failed encryption keeps the
+  **plaintext** — and the caller persists it, which is the one outcome this module exists
+  to prevent. It is logged at ERROR now, naming the field so the exposed secret can be
+  rotated, and never the value. Not reachable today (every caller guards on the key being
+  present), so this is the fallback being wrong rather than a live exposure.
+  Separately, a **wrong** key — secret file regenerated, container rebuilt, a restore
+  without it — made every secret fail to decrypt with no signal at all: the operator saw
+  LDAP binds, SSH checks and API credentials failing one after another with nothing to
+  connect them. That now warns once per process (once, because `decrypt_all` runs on every
+  read of every store).
+- **A documentation link that names a line must point at that line** (`tests/test_docs_line_links.py`,
+  6 tests over 73 links). Line anchors are the most useful links in the reference docs and the most
+  fragile thing in them: any edit above the target shifts them silently, and nothing noticed. The
+  guard found three rotten ones on its first run — a path left behind when the monitor moved
+  packages (the line number was still right), an anchor landing on a blank line, and one broken
+  minutes earlier by the `secret_manager` fix in this very build. It checks that the file exists,
+  the line is inside it, the line is not blank, and that the number written in the link TEXT agrees
+  with the one in the anchor — the two are typed by hand, separately, and had already drifted.
+- **Four syslog tests could fail under a full parallel run and pass on their own.** The
+  harness asked the OS for a free **TCP** port and then bound it for **UDP**: the two port
+  spaces are independent, so the number could already be taken. `_free_port()` takes the
+  protocol now and probes with the socket type the caller will actually bind — all
+  thirteen call sites checked against the port they configure.
+- **Two notification stores became one base plus two table declarations.** The webhook and
+  Microsoft Teams stores were 135 and 136 lines whose logic was identical — the differences
+  were the table name, the prose, and whether a local was called `webhook` or `channel`;
+  even their `TableSpec` matched column for column. Both now subclass
+  `lib.core.notify.doc_store.JsonDocStore` (uid + JSON `data` + audit columns: list, get,
+  count, upsert, delete, and the at-rest encryption), and each file is 48 lines that
+  declare a table and nothing else. What the base deliberately does NOT decide is the shape
+  of `data` or which of its fields are secret — that is the part that genuinely differs per
+  destination.
+- **LDAP: ten unexplained `except Exception: pass` down to two, both documented — and one
+  of them was hiding a real failure.** Reading an optional attribute off an ldap3 entry
+  *raises* when the entry does not carry it, so every read needs a guard; that guard was
+  written out eight times. It is now `lib/providers/ldap/entry.py`, where the reasoning
+  lives once. The tenth was different in kind: if the secondary group search (the
+  `memberUid`/`member`/`uniqueMember` sweep that covers directories without `memberOf`)
+  failed, the exception was swallowed with no log at all — and silently that looks exactly
+  like "this user belongs to no extra groups", so a directory error could quietly cost
+  someone their role. It still does not block the login, but it is logged now, like every
+  other failure path in that function already was.
+- **Three more rules stopped being stated twice.** `map_role` (OIDC and SAML had it byte
+  for byte) went to `lib/providers/role_map.py`; LDAP keeps its own variant on purpose,
+  because Active Directory returns full DNs and it also matches a short pattern against the
+  first RDN — folding them together would hand OIDC and SAML that DN parsing for an edge
+  case nobody asked for, and the file says so. `_read_config_file` (the monitoring, syslog
+  and events workers, identical) became `_StandaloneConfigMixin`: *which configuration a
+  process actually obeys* is a bad thing to declare three times, since the day one stops
+  overlaying env that worker silently ignores every `SS_*` the deployment sets. And
+  `_default_text` (three copies across the health evaluators) is now one function in the
+  package that owns them.
+- **MySQL and PostgreSQL keep their duplicate `execute`/`execute_ddl` on purpose**, and
+  `BaseConnector` now says why: their `executemany` already diverges (PostgreSQL uses
+  `psycopg2.extras.execute_batch`), so an intermediate class holding two methods while a
+  sibling stays overridden would hide the one thing this layer exists to show — where the
+  drivers differ. Fourteen duplicated lines is the cheaper half of that trade.
+- **`watchfuls/<mod>/watchful.py` is gone (20 files).** A one-line alias re-exporting
+  `Watchful` from the package. Nothing imported it: discovery keys off `__init__.py`,
+  `schema.json` and `lang/` across six separate sites, and one module (`snmp`) had shipped
+  without it for some time. Its stated purpose — "so every module has the same entry-point
+  filename" — dated from when modules were single files; every module is a package now, so
+  `__init__.py` already is that name. Removed from the eight documents that listed it,
+  including two new-module checklists. Side effect: pyflakes over `watchfuls/` drops from
+  dozens of warnings to three, and those three are real (an unused import in `datastore`,
+  a dead local in `ram_swap`, an unused `pytest` in an m365 test).
+
+---
+
 ## [0.0.1+build.1] - 2026-07-26
 
 ### Changed

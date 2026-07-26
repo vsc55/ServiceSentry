@@ -109,3 +109,56 @@ def test_audit_actually_finds_keys():
     refs = _referenced_keys()
     assert len(refs) > 200, f'only {len(refs)} keys found — the scan is probably broken'
     assert 'insufficient_permissions' in refs
+
+
+def _duplicate_keys(path):
+    """Keys assigned twice inside the same dict literal → [(key, first_line, second_line,
+    same_value)]. Python keeps the LAST one silently, so the first is dead."""
+    import ast
+    tree = ast.parse(io.open(path, encoding='utf-8-sig').read())
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        seen = {}
+        for k, v in zip(node.keys, node.values):
+            if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
+                continue
+            try:
+                val = ast.literal_eval(v)
+            except Exception:                      # noqa: BLE001  (non-literal value)
+                val = object()
+            if k.value in seen:
+                prev_line, prev_val = seen[k.value]
+                out.append((k.value, prev_line, k.lineno, prev_val == val))
+            seen[k.value] = (k.lineno, val)
+    return out
+
+
+@pytest.mark.parametrize('lang', ['en_EN', 'es_ES'])
+def test_no_key_is_defined_twice(lang):
+    """A key assigned twice is resolved by Python to the LAST value, silently.
+
+    ``role_deleted`` was defined twice with different values: the select that flags a
+    dangling role reference wanted '⚠ Deleted role', the toast after deleting one wanted
+    'Role deleted' — and the toast won, so the select lost its warning marker and read like
+    a confirmation. Nothing failed; the wrong string simply shipped.
+
+    Same-value duplicates are caught too: they break nothing today, but the next person to
+    edit one has even odds of editing the copy that does not win.
+    """
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        'lib', 'i18n', 'lang', f'{lang}.py')
+    dups = _duplicate_keys(path)
+    assert not dups, '\n'.join(
+        f'{k!r} defined at line {a} and {b} '
+        f'({"same value — the first is dead" if same else "DIFFERENT values — the first is dead"})'
+        for k, a, b, same in dups)
+
+
+def test_the_two_role_deleted_strings_stayed_apart():
+    """They are different messages for different surfaces; merging them again would
+    reintroduce the bug in whichever one loses."""
+    for mod in (en_EN, es_ES):
+        keys = _known_keys(mod)
+        assert 'role_deleted' in keys and 'role_deleted_ref' in keys

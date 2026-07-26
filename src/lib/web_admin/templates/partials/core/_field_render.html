@@ -358,9 +358,12 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 opts += `<option value="${escAttr(uid)}"${sel}>${esc(ro.name || uid)}</option>`;
             }
             // A non-empty value with no matching role → it was deleted; flag it
-            // (the backend falls back to none).
+            // (the backend falls back to none). `role_deleted_ref` carries the ⚠ marker —
+            // NOT `role_deleted`, which is the toast shown after deleting one. The two used
+            // to share a key, and the toast's wording won: this option silently lost its
+            // warning marker and read like a confirmation.
             if (value && !found) {
-                opts = `<option value="${escAttr(value)}" selected>${esc(t('role_deleted'))}</option>` + opts;
+                opts = `<option value="${escAttr(value)}" selected>${esc(t('role_deleted_ref'))}</option>` + opts;
             }
             return `<div class="row mb-2 align-items-start">
             <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>

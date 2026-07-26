@@ -618,7 +618,7 @@ Los campos sensibles se cifran en reposo usando **Fernet** (AES-128-CBC + HMAC-S
 | `bot_app_password` | Contraseña de la app del bot de Teams (Bot Framework) |
 
 Estos nombres del core viven en `secret_manager.ENCRYPT_KEYS`
-([lib/security/secret_manager.py:25](../src/lib/security/secret_manager.py#L25)).
+([lib/security/secret_manager.py:34](../src/lib/security/secret_manager.py#L34)).
 
 #### Descubrimiento de secretos de módulos (schema-driven)
 

@@ -13,6 +13,7 @@ import uuid
 
 from lib.config.spec import cfg_default, cfg_get
 from lib.debug import DebugLevel
+from lib.providers.ldap.entry import attr_value, attr_values
 
 _HAS_LDAP3 = False
 try:
@@ -176,22 +177,10 @@ def authenticate(wa, username: str, password: str) -> tuple:
         return None, 'ldap_invalid_credentials'
 
     def _val(attr_name):
-        try:
-            v = getattr(entry, attr_name)
-            if v and hasattr(v, 'values') and v.values:
-                return str(v.values[0])
-        except Exception:
-            pass
-        return ''
+        return attr_value(entry, attr_name)
 
     def _vals(attr_name):
-        try:
-            v = getattr(entry, attr_name)
-            if v and hasattr(v, 'values'):
-                return [str(x) for x in v.values]
-        except Exception:
-            pass
-        return []
+        return attr_values(entry, attr_name)
 
     # Primary groups: memberOf attribute (AD / overlay)
     primary_groups = _vals(group_attr)
@@ -207,13 +196,17 @@ def authenticate(wa, username: str, password: str) -> tuple:
         conn.search(base_dn, _gf, search_scope=SUBTREE, attributes=['cn'])
         for ge in conn.entries:
             secondary_groups.append(str(ge.entry_dn))
-            try:
-                for cv in ge.cn.values:
-                    secondary_groups.append(str(cv))
-            except Exception:
-                pass
-    except Exception:
-        pass
+            # A group entry without a cn still contributes its DN — the role map can
+            # match on either. Optional attribute, so absence is not a fault.
+            secondary_groups.extend(attr_values(ge, 'cn'))
+    except Exception as exc:
+        # A failed secondary search must NOT block the login: the user may already have
+        # everything they need from memberOf. But it is logged, because silently it looks
+        # identical to "this user belongs to no extra groups" — and the difference is
+        # whether they get their role. Every other failure path here logs; this one did
+        # not, so a directory error degraded someone's permissions invisibly.
+        wa._dbg(f"> Auth/LDAP >> secondary group search failed for {username!r}: {exc}",
+                DebugLevel.warning)
 
     # Deduplicate while preserving order; primary (memberOf) takes precedence
     seen: set[str] = set()

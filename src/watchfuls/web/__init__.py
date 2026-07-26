@@ -78,16 +78,6 @@ class Watchful(ModuleBase):
 
     # ── Per-item check ────────────────────────────────────────────────────
 
-    def _resolved_item(self, key: str) -> dict:
-        """Item config for *key* with any referenced host merged in (no-op when
-        inline).  Cached per check cycle (the monitor builds a fresh instance
-        each cycle)."""
-        cache = self.__dict__.setdefault('_resolved_items', {})
-        if key not in cache:
-            raw = self.get_conf(['list', key], {})
-            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
-        return cache[key]
-
     @staticmethod
     def _compose_target(server: str, port, path: str = '') -> str:
         """Build the request target (host[:port][/path], scheme-less) from the

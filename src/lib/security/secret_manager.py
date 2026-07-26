@@ -9,7 +9,16 @@ written before encryption was introduced.
 
 import base64
 import binascii
+import logging
 from typing import Any
+
+# Stdlib logging, like lib/db/base.py: this module is deliberately dependency-light
+# (no lib.debug, no config) so anything may import it.
+_log = logging.getLogger(__name__)
+
+# Latched so the warning below is emitted ONCE per process.  decrypt_all runs on every
+# read of every store; a line per failed value would bury the signal it exists to give.
+_decrypt_failure_reported = False
 
 __all__ = ['ENCRYPT_KEYS', 'fernet_from_secret_file', 'decrypt_all', 'encrypt_sensitive',
            'mask_sensitive', 'restore_sensitive']
@@ -63,9 +72,17 @@ def decrypt_all(data: Any, fernet) -> Any:
 
     Dicts and lists are modified **in-place**; the function also returns
     *data* so it can be used in an assignment.  Non-encrypted strings and
-    non-string values are left untouched.  Decryption failures are silently
-    ignored (the original ``enc:...`` string is kept).
+    non-string values are left untouched.
+
+    A value that fails to decrypt keeps its original ``enc:...`` string.  That is the
+    right fallback — there is no plaintext to fall back to, and raising here would take
+    down every page that reads a store — but it is **logged once per process**, because
+    the usual cause is a wrong key (the secret file regenerated, a container rebuilt, a
+    restore without it), and then *every* secret fails at once.  Without that line the
+    operator sees each LDAP bind, SSH check and API credential fail to authenticate with
+    no hint that one key file explains all of them.
     """
+    global _decrypt_failure_reported  # noqa: PLW0603  (one-shot latch, see module top)
     if isinstance(data, dict):
         for k in data:
             data[k] = decrypt_all(data[k], fernet)
@@ -75,8 +92,14 @@ def decrypt_all(data: Any, fernet) -> Any:
     elif isinstance(data, str) and data.startswith(ENC_PREFIX):
         try:
             return fernet.decrypt(data[len(ENC_PREFIX):].encode()).decode('utf-8')
-        except Exception:
-            pass
+        except Exception:  # pylint: disable=broad-except  (any failure → keep the token)
+            if not _decrypt_failure_reported:
+                _decrypt_failure_reported = True
+                _log.warning(
+                    'Could not decrypt a stored secret — the encryption key does not match '
+                    'the data. Every encrypted value will stay unusable until the original '
+                    'key file is restored; expect authentication failures across LDAP, SSH '
+                    'and API credentials until then. (Reported once per process.)')
     return data
 
 
@@ -146,6 +169,17 @@ def encrypt_sensitive(data: Any, fernet,
             and data and not data.startswith(ENC_PREFIX)):
         try:
             return ENC_PREFIX + fernet.encrypt(data.encode()).decode()
-        except Exception:
-            pass
+        except Exception as exc:  # pylint: disable=broad-except
+            # NOT the same trade-off as decrypt_all. A failed DEcryption keeps the
+            # ciphertext, which is harmless; a failed ENcryption keeps the PLAINTEXT, and
+            # the caller is about to persist it — a password written to disk in the clear,
+            # which is the one outcome this module exists to prevent.
+            #
+            # Every caller guards with `if self._fernet`, so this is not reachable today.
+            # It is logged per occurrence (not latched like the decrypt warning) because
+            # each one is a distinct secret exposed, and the field name is what tells the
+            # operator which. The VALUE is never logged.
+            _log.error('Could not encrypt the value of %r (%s) — it will be stored in '
+                       'CLEAR TEXT. Rotate that secret once encryption works again.',
+                       _cur_key, type(exc).__name__)
     return data

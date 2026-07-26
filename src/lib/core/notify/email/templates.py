@@ -81,7 +81,10 @@ def get_strings(lang: str = '', overrides: 'dict | None' = None) -> dict[str, st
             overlay = TRANSLATIONS.get(lang, {}).get('email_tpl', {})
             if overlay:
                 base = {**_DEFAULT_STRINGS, **overlay}
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
+            # Deliberately silent, and safe to be: the only consequence is an email sent
+            # in the built-in English rather than the operator's language. Raising — or
+            # logging on every send — would be a worse outcome than the wrong language.
             pass
 
     # 3. Apply admin-configured overrides (highest priority)

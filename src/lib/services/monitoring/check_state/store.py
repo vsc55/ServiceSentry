@@ -70,12 +70,11 @@ _SCHEMA = TableSpec(
 _T = _SCHEMA.name  # table name — single source of truth
 
 
-def _norm_severity(severity, status) -> str:
-    """Normalise a check's severity: OK → ''; a non-OK status defaults to 'error'
-    unless the module explicitly marks it 'warning'."""
-    if status:
-        return ''
-    return 'warning' if str(severity).lower() == 'warning' else 'error'
+# The severity rule is defined ONCE, beside the structure that carries the field. This was
+# a second identical copy: two statements of the same rule, in the layer that decides how a
+# non-OK result is routed. Adding a third level to one of them would have left the other
+# flattening it to 'error'.
+from lib.modules.dict_return_check import norm_severity as _norm_severity  # noqa: E402
 
 
 def _load_json(raw):

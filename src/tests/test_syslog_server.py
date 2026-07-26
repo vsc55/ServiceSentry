@@ -31,8 +31,15 @@ class TestParseBinds:
         assert _parse_binds('127.0.0.1 127.0.0.1') == [(socket.AF_INET, '127.0.0.1')]
 
 
-def _free_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def _free_port(proto: str = 'tcp') -> int:
+    """A free port for *proto* (``'tcp'`` or ``'udp'``).
+
+    Probe with the SAME socket type the caller will bind: the two port spaces are
+    independent, so a number free for TCP can already be taken for UDP. Asking the wrong
+    one is what made these tests fail under a full parallel run and pass on their own.
+    """
+    kind = socket.SOCK_DGRAM if proto == 'udp' else socket.SOCK_STREAM
+    s = socket.socket(socket.AF_INET, kind)
     s.bind(('127.0.0.1', 0))
     p = s.getsockname()[1]
     s.close()
@@ -65,7 +72,7 @@ def sink():
 
 class TestUdp:
     def test_receive_udp(self, sink):
-        port = _free_port()
+        port = _free_port('udp')
         srv = SyslogServer(sink=sink, bind_host='127.0.0.1', udp_port=port)
         assert srv.start() == []
         try:
@@ -79,7 +86,7 @@ class TestUdp:
             srv.stop()
 
     def test_allowlist_blocks(self, sink):
-        port = _free_port()
+        port = _free_port('udp')
         srv = SyslogServer(sink=sink, bind_host='127.0.0.1', udp_port=port,
                            allowed_sources=['10.0.0.0/8'])
         assert srv.start() == []
@@ -244,7 +251,7 @@ class TestLoad:
         # buffer, so we only assert the receiver survives the burst and still
         # delivers the bulk on loopback — NOT exact delivery (that would be flaky).
         burst = 500
-        port = _free_port()
+        port = _free_port('udp')
         srv = SyslogServer(sink=sink, bind_host='127.0.0.1', udp_port=port)
         assert srv.start() == []
         try:

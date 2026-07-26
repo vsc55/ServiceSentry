@@ -33,13 +33,14 @@ from lib.services.manager.commands import ServiceCommandsStore
 from lib.services.manager.leader import ServiceLeaderStore
 from lib.security import secret_manager
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
+from lib.services.base import _StandaloneConfigMixin
 from lib.services.control_server import start_control_server
 from .manager import _MonitoringMixin
 
 _CONFIG_WATCH_EVERY = 15        # poll the shared DB for monitoring config changes (s)
 
 
-class MonitorService(_HeartbeatMixin, _MonitoringMixin):
+class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
     """Own the service-monitor scheduler as a self-contained, DB-sharing daemon."""
 
     _CONFIG_FILE = CONFIG_FILENAME
@@ -143,15 +144,6 @@ class MonitorService(_HeartbeatMixin, _MonitoringMixin):
                   f'db={backend}', DebugLevel.info)
 
     # ── context surface used by the scheduler mixin ───────────────────────────
-    def _read_config_file(self, _filename: str | None = None) -> dict:
-        """Effective configuration (DB ← config.json) with SS_* env overlaid.
-
-        A standalone worker has no web layer to apply env overrides and no config UI to
-        break, so env is layered on the whole config here — this is the process's single
-        consumption surface (autostart gates, notify channels, etc.)."""
-        from lib.config.manager import overlay_all_env  # noqa: PLC0415
-        return overlay_all_env(self._config_mgr.read() or {})
-
     def _config_section(self, name: str) -> dict:
         return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
 

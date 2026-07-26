@@ -958,6 +958,22 @@ class ModuleBase(ObjectBase):
         if self.is_monitor_exist:
             return self._monitor.check_status(status, module, module_sub_key)
 
+    def _resolved_item(self, key: str) -> dict:
+        """Item config for *key* with any referenced host merged in (no-op when inline).
+
+        Cached per check cycle — the monitor builds a fresh instance each cycle, so the
+        cache cannot go stale, and a module that reads the same item from several checks
+        resolves it once instead of once per check.
+
+        Was a byte-for-byte copy in three modules (datastore, proxmox, web); nothing in it
+        is module-specific.
+        """
+        cache = self.__dict__.setdefault('_resolved_items', {})
+        if key not in cache:
+            raw = self.get_conf(['list', key], {})
+            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
+        return cache[key]
+
     def _emit(self, key: str, status: bool, message: str, other: dict = None,
               severity: str = None, name: str = None, change_msg: str = None) -> None:
         """Record a result and notify ONLY on a status change.

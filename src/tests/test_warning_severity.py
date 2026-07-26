@@ -198,3 +198,37 @@ class TestEmitChangeMsgGate:
         m = self._module(custom=True)
         m._emit('db1', False, 'down', change_msg='')
         assert m.gates == [('custom', '')]
+
+
+class TestTheSeverityRuleHasOneHome:
+    """The rule lived as two identical copies — in the result structure and in the store
+    that persists it. A rule about severity is the wrong thing to keep two of: add a third
+    level and one copy goes on flattening it to 'error', which is how a warning ends up
+    paging someone at 3am."""
+
+    def test_the_store_uses_the_canonical_rule(self):
+        from lib.modules.dict_return_check import norm_severity
+        from lib.services.monitoring.check_state import store
+        assert store._norm_severity is norm_severity, (
+            'check_state/store.py must import the rule, not restate it')
+
+    def test_the_result_structure_uses_it_too(self):
+        from lib.modules.dict_return_check import ReturnModuleCheck, norm_severity
+        assert ReturnModuleCheck._norm_severity is norm_severity
+
+    def test_the_rule_itself(self):
+        from lib.modules.dict_return_check import norm_severity
+        assert norm_severity('warning', False) == 'warning'
+        assert norm_severity('WARNING', False) == 'warning'    # case-insensitive
+        assert norm_severity(None, False) == 'error'           # unspecified non-OK
+        assert norm_severity('anything', False) == 'error'
+        assert norm_severity('warning', True) == ''            # OK carries no severity
+
+    def test_a_third_level_would_change_both_sides_at_once(self):
+        """The point of the unification, stated as a test: whatever the rule returns, both
+        surfaces return the same thing for the same input."""
+        from lib.modules.dict_return_check import ReturnModuleCheck
+        from lib.services.monitoring.check_state import store
+        for sev, ok in (('warning', False), ('error', False), (None, False),
+                        ('warning', True), ('', True)):
+            assert store._norm_severity(sev, ok) == ReturnModuleCheck._norm_severity(sev, ok)

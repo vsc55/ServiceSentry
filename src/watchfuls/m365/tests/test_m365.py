@@ -9,8 +9,6 @@ Graph. Both the token and the Graph calls are patched so the tests stay hermetic
 
 from unittest.mock import patch
 
-import pytest
-
 from conftest import create_mock_monitor
 
 GB = 1024 ** 3

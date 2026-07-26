@@ -246,3 +246,102 @@ class TestEncPrefixInjection:
         assert encrypted["host"] == "enc:looks-like-encrypted-but-not-a-sensitive-key"
         decrypted = decrypt_all(encrypted, fernet)
         assert decrypted["host"].startswith("enc:")
+
+
+class TestAWrongKeyIsNotSilent:
+    """A value that fails to decrypt keeps its `enc:` token — the right fallback, since
+    there is no plaintext to fall back to and raising would take down every page that
+    reads a store. But the usual cause is a WRONG KEY (secret file regenerated, container
+    rebuilt, restore without it), and then every secret fails at once: without a signal the
+    operator watches LDAP binds, SSH checks and API credentials all fail with no hint that
+    one key file explains all of them."""
+
+    @staticmethod
+    def _pair():
+        from cryptography.fernet import Fernet
+        return Fernet(Fernet.generate_key()), Fernet(Fernet.generate_key())
+
+    def _reset_latch(self):
+        from lib.security import secret_manager
+        secret_manager._decrypt_failure_reported = False
+
+    def test_the_value_is_still_returned_untouched(self):
+        from lib.security import secret_manager
+        self._reset_latch()
+        good, bad = self._pair()
+        token = 'enc:' + good.encrypt(b'hunter2').decode()
+        out = secret_manager.decrypt_all({'password': token, 'user': 'admin'}, bad)
+        assert out['password'] == token, 'the token must survive — there is no plaintext'
+        assert out['user'] == 'admin', 'unencrypted values are untouched'
+
+    def test_a_wrong_key_logs_a_warning(self, caplog):
+        from lib.security import secret_manager
+        self._reset_latch()
+        good, bad = self._pair()
+        token = 'enc:' + good.encrypt(b'hunter2').decode()
+        with caplog.at_level('WARNING', logger='lib.security.secret_manager'):
+            secret_manager.decrypt_all({'password': token}, bad)
+        assert any('decrypt' in r.message.lower() for r in caplog.records), \
+            'a key mismatch must not be invisible'
+
+    def test_it_is_reported_once_per_process(self, caplog):
+        """decrypt_all runs on every read of every store — a line per failed value would
+        bury the signal it exists to give."""
+        from lib.security import secret_manager
+        self._reset_latch()
+        good, bad = self._pair()
+        payload = {f'password{i}': 'enc:' + good.encrypt(b'x').decode() for i in range(5)}
+        with caplog.at_level('WARNING', logger='lib.security.secret_manager'):
+            secret_manager.decrypt_all(dict(payload), bad)
+            secret_manager.decrypt_all(dict(payload), bad)
+        assert len(caplog.records) == 1, f'expected one warning, got {len(caplog.records)}'
+
+    def test_the_right_key_never_warns(self, caplog):
+        from lib.security import secret_manager
+        self._reset_latch()
+        good, _bad = self._pair()
+        token = 'enc:' + good.encrypt(b'hunter2').decode()
+        with caplog.at_level('WARNING', logger='lib.security.secret_manager'):
+            out = secret_manager.decrypt_all({'password': token}, good)
+        assert out['password'] == 'hunter2'
+        assert not caplog.records, 'a successful decryption must stay quiet'
+
+
+class TestAFailedEncryptionIsNotSilent:
+    """The mirror of the decrypt case, and the dangerous half: a failed DEcryption keeps
+    the ciphertext (harmless), a failed ENcryption keeps the PLAINTEXT — and the caller is
+    about to persist it. A password written to disk in the clear is the one outcome this
+    module exists to prevent, so it must not happen quietly."""
+
+    class _BrokenFernet:
+        def encrypt(self, _data):
+            raise RuntimeError('key unusable')
+
+    def test_the_field_name_is_logged_so_the_secret_can_be_rotated(self, caplog):
+        from lib.security import secret_manager
+        with caplog.at_level('ERROR', logger='lib.security.secret_manager'):
+            secret_manager.encrypt_sensitive({'password': 'hunter2'}, self._BrokenFernet())
+        assert caplog.records, 'a plaintext secret reaching disk must not be silent'
+        msg = caplog.records[0].getMessage()
+        assert 'password' in msg, 'the operator needs to know WHICH secret is exposed'
+
+    def test_the_value_is_never_logged(self, caplog):
+        from lib.security import secret_manager
+        with caplog.at_level('ERROR', logger='lib.security.secret_manager'):
+            secret_manager.encrypt_sensitive({'password': 'hunter2'}, self._BrokenFernet())
+        assert 'hunter2' not in caplog.text, 'logging the secret would defeat the point'
+
+    def test_a_working_key_stays_quiet_and_encrypts(self, caplog):
+        from cryptography.fernet import Fernet
+        from lib.security import secret_manager
+        f = Fernet(Fernet.generate_key())
+        with caplog.at_level('ERROR', logger='lib.security.secret_manager'):
+            out = secret_manager.encrypt_sensitive({'password': 'hunter2'}, f)
+        assert out['password'].startswith('enc:')
+        assert not caplog.records
+
+    def test_non_secret_fields_are_untouched_and_never_warn(self, caplog):
+        from lib.security import secret_manager
+        with caplog.at_level('ERROR', logger='lib.security.secret_manager'):
+            out = secret_manager.encrypt_sensitive({'user': 'admin'}, self._BrokenFernet())
+        assert out == {'user': 'admin'} and not caplog.records

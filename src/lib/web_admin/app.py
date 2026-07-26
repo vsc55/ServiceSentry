@@ -126,14 +126,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _PW_REQUIRE_UPPER = _cfg_default('web_admin|pw_require_upper')
     _PW_REQUIRE_DIGIT = _cfg_default('web_admin|pw_require_digit')
     _PW_REQUIRE_SYMBOL = _cfg_default('web_admin|pw_require_symbol')
-    # Validation length limits
-    _MAX_USERNAME_LEN = 64
-    _MAX_DISPLAY_NAME_LEN = 128
-    _MAX_ROLE_NAME_LEN = 64
-    _MAX_ROLE_LABEL_LEN = 128
-    _MAX_GROUP_NAME_LEN = 64
-    _MAX_GROUP_LABEL_LEN = 128
-    _MAX_GROUP_DESC_LEN = 512
+    # Validation length limits live with the domain that enforces them —
+    # lib/core/{users,roles,groups}/service.py — not here. This class used to restate
+    # seven of them; none was read (the one that was, passed its copy straight back into
+    # a parameter already defaulting to the domain's constant), so they were a second
+    # declaration waiting to disagree with the first.
     # Account lockout (0 = disabled)
     _LOCKOUT_MAX_ATTEMPTS = _cfg_default('web_admin|lockout_max_attempts')
     _LOCKOUT_DURATION_SECS = _cfg_default('web_admin|lockout_duration_secs')  # 15 min

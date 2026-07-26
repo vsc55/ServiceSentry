@@ -1183,7 +1183,6 @@ LANG = {
     'host_add_check':        'Añadir check',
     'host_check_none':       'Sin monitorizar. Pulsa "Añadir check" para monitorizar este servidor con este módulo.',
     'host_check_n':          'Check {n}',
-    'host_name_required':   'El nombre es obligatorio',
     'host_created':         'Host creado',
     'host_updated':         'Host actualizado',
     'host_deleted':         'Host eliminado',
@@ -1732,7 +1731,6 @@ LANG = {
         'gmail_client_secret': 'Client secret',
         'gmail_refresh_token': 'Refresh token',
         # Common
-        'enabled':               'Habilitado',
         # Webhook
         'webhook_name':          'Nombre',
         'webhook_url':           'URL del endpoint',
@@ -2150,7 +2148,7 @@ LANG = {
         'syslog_db': 'Base de datos Syslog',
         'events': 'Reglas de Eventos',
     },
-    'role_deleted':          '⚠ Rol eliminado',
+    'role_deleted_ref':      '⚠ Rol eliminado',
     'cfg_tab_general':       'General',
     'cfg_tab_server':        'Servidor',
     'cfg_tab_monitoring':    'Monitorización',
@@ -2329,7 +2327,6 @@ LANG = {
     'cfg_partial_conflict':   'Algunos campos guardados — resuelve los conflictos resaltados.',
     'cfg_all_conflict':       'Ningún campo guardado — todos los cambios tienen conflictos.',
     'dismiss':                'Descartar',
-    'close':                  'Cerrar',
     'cfg_update_more_info':       'Más info',
     'cfg_update_detail_title':    'Campos actualizados desde el servidor',
     'cfg_update_list_refreshed':  'Lista actualizada',

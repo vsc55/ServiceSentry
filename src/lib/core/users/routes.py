@@ -185,8 +185,12 @@ def register(app, wa):
             result = users_svc.update_user(
                 wa._users, username, data, policy=wa._pw_policy(),
                 custom_roles=wa._custom_roles, groups=wa._groups,
+                # max_display_name_len is NOT passed: the parameter defaults to the
+                # domain's own MAX_DISPLAY_NAME_LEN. Passing a copy held by the web layer
+                # meant two declarations of one limit, and the caller's would have won
+                # silently the day they diverged.
                 valid_langs=SUPPORTED_LANGS, valid_landing=home_page_ids(),
-                max_display_name_len=wa._MAX_DISPLAY_NAME_LEN, role_display=_role_display,
+                role_display=_role_display,
                 actor=session.get('username', SYSTEM_USER))
         except users_svc.AdminOpError as e:
             return jsonify({'error': wa._t(e.key, *e.args)}), 400

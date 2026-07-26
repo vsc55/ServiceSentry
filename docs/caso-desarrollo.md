@@ -188,7 +188,7 @@ Consulta [caso-guia-watchful.md](caso-guia-watchful.md) para la guía completa p
 
 Resumen rápido:
 
-1. Crear `watchfuls/mi_modulo/` con `__init__.py`, `watchful.py`, `schema.json`, `info.json` y `lang/`
+1. Crear `watchfuls/mi_modulo/` con `__init__.py`, `schema.json`, `info.json` y `lang/`
 2. Definir `class Watchful(ModuleBase)` en `__init__.py`
 3. Cargar `_SCHEMA = json.load(...)` desde `schema.json`
 4. Llamar a `super().__init__(monitor, __package__)`

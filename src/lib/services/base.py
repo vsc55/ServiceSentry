@@ -43,3 +43,23 @@ class ServiceDescriptor:
         Note this is the *capability*; whether a control action is allowed right
         now (embedded gate, enabled flag) is decided inside ``control``."""
         return self.control is not None
+
+
+class _StandaloneConfigMixin:
+    """Config as a standalone worker consumes it.
+
+    A worker process has no web layer to apply ``SS_*`` overrides and no config UI whose
+    "saved vs env-locked" distinction could break, so env is layered over the WHOLE config
+    here — this is the process's single consumption surface (autostart gates, notify
+    channels, database targets…).
+
+    One copy, not three: the monitoring, syslog and events services had this byte for byte,
+    and a rule about *which configuration a process actually obeys* is a bad thing to state
+    three times — the day one of them stops overlaying env, that worker silently ignores
+    every SS_* the deployment sets.
+    """
+
+    def _read_config_file(self, _filename: str | None = None) -> dict:
+        """Effective configuration (DB ← config.json) with ``SS_*`` env overlaid."""
+        from lib.config.manager import overlay_all_env  # noqa: PLC0415
+        return overlay_all_env(self._config_mgr.read() or {})

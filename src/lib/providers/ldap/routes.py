@@ -11,6 +11,7 @@ Routes registered by this file:
 
 from flask import jsonify, request, session
 
+from lib.providers.ldap.entry import attr_value, attr_values, first_named
 from lib.config.spec import cfg_default
 
 
@@ -100,22 +101,10 @@ def register(app, wa):
         user_dn = str(entry.entry_dn)
 
         def _val(attr_name):
-            try:
-                v = getattr(entry, attr_name)
-                if v and hasattr(v, 'values') and v.values:
-                    return str(v.values[0])
-            except Exception:
-                pass
-            return ''
+            return attr_value(entry, attr_name)
 
         def _vals(attr_name):
-            try:
-                v = getattr(entry, attr_name)
-                if v and hasattr(v, 'values'):
-                    return [str(x) for x in v.values]
-            except Exception:
-                pass
-            return []
+            return attr_values(entry, attr_name)
 
         display_name = _val(name_attr)
         email        = _val(email_attr)
@@ -183,20 +172,7 @@ def register(app, wa):
                 conn.unbind()
                 return jsonify({'ok': True, 'found': False, 'name': None})
             entry = conn.entries[0]
-            name = ''
-            try:
-                v = entry.displayName
-                if v and hasattr(v, 'values') and v.values:
-                    name = str(v.values[0])
-            except Exception:
-                pass
-            if not name:
-                try:
-                    v = entry.cn
-                    if v and hasattr(v, 'values') and v.values:
-                        name = str(v.values[0])
-                except Exception:
-                    pass
+            name = first_named(entry, 'displayName', 'cn')
             if not name:
                 m = re.match(r'CN=([^,]+)', dn, re.IGNORECASE)
                 name = m.group(1) if m else dn
@@ -245,20 +221,7 @@ def register(app, wa):
             groups = []
             for entry in conn.entries:
                 dn = str(entry.entry_dn)
-                name = ''
-                try:
-                    v = entry.displayName
-                    if v and hasattr(v, 'values') and v.values:
-                        name = str(v.values[0])
-                except Exception:
-                    pass
-                if not name:
-                    try:
-                        v = entry.cn
-                        if v and hasattr(v, 'values') and v.values:
-                            name = str(v.values[0])
-                    except Exception:
-                        pass
+                name = first_named(entry, 'displayName', 'cn')
                 if not name:
                     m = re.match(r'CN=([^,]+)', dn, re.IGNORECASE)
                     name = m.group(1) if m else dn

@@ -39,7 +39,6 @@ Para un módulo llamado `mi_modulo`, crea una carpeta package:
 watchfuls/
   +-- mi_modulo/
         +-- __init__.py       <- Implementación del módulo (obligatorio)
-        +-- watchful.py       <- Alias: `from . import Watchful` (obligatorio)
         +-- schema.json       <- Schema de campos
         +-- info.json         <- Metadatos del módulo: icono y descripción
         +-- lang/
@@ -1205,7 +1204,6 @@ Si añades un campo sensible con un nombre distinto a esos cuatro (p. ej. `api_k
 watchfuls/
   |-- ping/             <- package descubierto -> importlib.import_module('watchfuls.ping')
   |    |-- __init__.py  <- implementación
-  |    +-- watchful.py  <- alias
   |-- web/              <- package descubierto
   |-- service_status/   <- package descubierto
   +-- mi_modulo/        <- ¡descubierto automáticamente!
@@ -1545,7 +1543,6 @@ class Watchful(ModuleBase):
 
 - [ ] Crear carpeta `watchfuls/mi_modulo/`
 - [ ] Crear `__init__.py` con una clase `Watchful(ModuleBase)`
-- [ ] Crear `watchful.py` con `from . import Watchful`
 - [ ] Crear `schema.json` con las definiciones de campos `__module__` y `list`
 - [ ] Crear `info.json` con `name`, `version`, `description`, `icon` y `dependencies` (las cinco claves son obligatorias; `dependencies` puede ser `[]`)
 - [ ] Crear `lang/en_EN.json` con `pretty_name` y `labels`

@@ -344,8 +344,10 @@ directorio vivo, el efecto es inmediato sin editar la config:
 ### Webhook — HMAC + plantilla + múltiples destinos
 
 Los webhooks son una **lista** (cada uno con URL, método, headers, timeout), no un campo
-`sección|campo`; viven en su tabla (`webhooks`, `lib/core/notify/webhook/store.py`) con CRUD
-propia.
+`sección|campo`; viven en su tabla (`webhooks`, `lib/core/notify/webhook/store.py`). El CRUD
+es `JsonDocStore` (`lib/core/notify/doc_store.py`), compartido con los canales de Teams: ese
+store solo declara su tabla, porque el resto —listar, leer, upsert, borrar y el cifrado en
+reposo— era idéntico en los dos.
 
 - **Firma HMAC** (opcional): con `secret`, se firma el cuerpo y se envía en el header
   `secret_header` (por defecto `X-Signature`).

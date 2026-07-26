@@ -50,7 +50,7 @@ uso residual del `logging` estándar en tres puntos, **sin handler ni nivel conf
 De menor a mayor prioridad — cada capa sobreescribe la anterior:
 
 1. **Config** — clave `global|log_level`, por defecto `'off'`
-   ([lib/config/spec.py:256](../src/lib/config/spec.py#L256)). `set_from_config()` mapea el
+   ([lib/config/spec.py:260](../src/lib/config/spec.py#L260)). `set_from_config()` mapea el
    string a enabled+nivel; `'off'`/`''`/`'none'`/`'false'` deshabilita. Valores aceptados:
    `off, debug, info, warning, error`.
 2. **CLI** `--log-level` / **env** `SS_LOG_LEVEL` — en el arranque web sobreescribe la config

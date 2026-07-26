@@ -20,7 +20,22 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """ Class to check the return of the modules. """
 
-__all__ = ['ReturnModuleCheck']
+__all__ = ['ReturnModuleCheck', 'norm_severity']
+
+
+def norm_severity(severity, status) -> str:
+    """Canonical severity rule: OK → ``''``; a non-OK status defaults to ``'error'``
+    unless the module explicitly marks it ``'warning'``.
+
+    Lives here, at the structure that defines the ``severity`` field, and is imported by
+    the persistence layer rather than restated there.  It used to exist as two identical
+    copies — and a rule about severity is exactly the wrong thing to keep two of: add a
+    third level and one copy would go on flattening it to ``'error'``, which is how a
+    warning ends up paging someone.
+    """
+    if status:
+        return ''
+    return 'warning' if str(severity).lower() == 'warning' else 'error'
 
 
 class ReturnModuleCheck:
@@ -101,12 +116,7 @@ class ReturnModuleCheck:
             return self.is_exist(key)
         return False
 
-    @staticmethod
-    def _norm_severity(severity, status) -> str:
-        """OK → ''; a non-OK status defaults to 'error' unless marked 'warning'."""
-        if status:
-            return ''
-        return 'warning' if str(severity).lower() == 'warning' else 'error'
+    _norm_severity = staticmethod(norm_severity)     # canonical rule, see module top
 
     def update(self, key: str, option: str, value) -> bool:
         """

@@ -226,7 +226,11 @@ class Watchful(ModuleBase):
         nums = [int(x) for x in sysctl_s.split() if x.lstrip('-').isdigit()]
         ram = None
         if len(nums) >= 3:
-            _pagesize, page_count, free_count = nums[0], nums[1], nums[2]
+            # _pagesize is unpacked but unused ON PURPOSE — linters flag it, and it is
+            # kept: the percentages below need only page COUNTS, but any future reading in
+            # bytes needs this factor, and naming it documents what nums[0] is. Dropping it
+            # would leave a positional index nobody could read.
+            _pagesize, page_count, free_count = nums[0], nums[1], nums[2]  # noqa: F841
             inactive = nums[3] if len(nums) > 3 else 0
             cache = nums[4] if len(nums) > 4 else 0
             avail = free_count + inactive + cache

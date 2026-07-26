@@ -164,16 +164,6 @@ class Watchful(ModuleBase):
         super().check()
         return self.dict_return
 
-    def _resolved_item(self, key: str) -> dict:
-        """Item config for *key* with any referenced host merged in (no-op when
-        inline). Cached per check cycle (the monitor builds a fresh instance each
-        cycle)."""
-        cache = self.__dict__.setdefault('_resolved_items', {})
-        if key not in cache:
-            raw = self.get_conf(['list', key], {})
-            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
-        return cache[key]
-
     def _emit_exc(self, key: str, label: str, what: str, exc: Exception,
                   extra: dict = None) -> None:
         """Emit a check failure, classifying a Proxmox 403 as a WARNING with a clear

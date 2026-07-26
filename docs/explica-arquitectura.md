@@ -232,6 +232,7 @@ ServiceSentry/
 │   │   │   │   └── notify_events.py     # NOTIFY_EVENTS: service_down/service_up/cert_expiring (matrix)
 │   │   │   └── notify/                  # Subsistema de notificación / ENTREGA (sin Flask; lo usan web, monitor, health y daemons syslog/events) — ver explica-notificaciones.md
 │   │   │       ├── context.py          # NotifyContext: bundle de colaboradores del router (db, read_config, fernet, dbg, audit, public_url, panel_user_emails); sin Flask
+│   │   │       ├── doc_store.py        # JsonDocStore: CRUD sobre tabla uid + JSON data + auditoría; lo heredan los stores de webhook y msteams (cada uno solo declara su tabla)
 │   │   │       ├── router.py           # NotificationRouter (posee los stores de canal + ES el routing) + run_dispatch(surface, kind, …)
 │   │   │       ├── registry.py         # Registro de canales: Channel(send/flush) auto-descubierto de <canal>/channel.py (sin lista central)
 │   │   │       ├── events.py           # Registro de kinds descubiertos (NOTIFY_EVENTS en lib/**/notify_events.py; flags matrix/ui)
@@ -296,8 +297,11 @@ ServiceSentry/
 │   │   │       ├── credential_schemas.py  # Catálogo de tipos de credencial (escanea watchfuls + i18n)
 │   │   │       └── overview_widgets.py    # Catálogo de widgets de Overview (reutiliza helpers de credential_schemas)
 │   │   ├── providers/                   # Integraciones externas (identidad/cloud); capa baja, sin Flask
+│   │   │   ├── role_map.py              # grupos del IdP → rol de la app (compartido por OIDC y SAML;
+│   │   │   │                            #   LDAP mantiene su variante: AD devuelve DNs)
 │   │   │   ├── telegram.py              # Cliente de la Bot API de Telegram (Telegram + send_telegram)
 │   │   │   ├── ldap/                    # LDAP/AD: auth.py (lógica ldap3) + routes.py (/api/v1/auth/ldap/*)
+│   │   │   │                            #   + entry.py (lectura de atributos: ldap3 LANZA si no existen)
 │   │   │   ├── oidc/                    # OIDC/OAuth2 SSO: auth.py (authlib) + routes.py (/auth/oidc/*)
 │   │   │   ├── saml/                    # SAML2 SSO: auth.py (python3-saml) + routes.py (/auth/saml2/*) [alpha]
 │   │   │   ├── scim/                    # SCIM 2.0: service.py (protocolo, sin Flask) + routes.py (/scim/v2/*)
@@ -337,7 +341,6 @@ ServiceSentry/
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
 │   │   ├── filesystemusage/             # 🌐 Multiplataforma (psutil)
 │   │   │   ├── __init__.py              # Implementación del módulo
-│   │   │   ├── watchful.py              # Alias: from . import Watchful
 │   │   │   ├── schema.json              # Esquema de campos
 │   │   │   ├── info.json                # Metadatos (icono, descripción)
 │   │   │   ├── lang/en_EN.json          # Etiquetas en inglés

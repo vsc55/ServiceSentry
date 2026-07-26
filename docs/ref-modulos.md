@@ -23,7 +23,6 @@ Todos los módulos siguen esta estructura:
 watchfuls/
 └── mi_modulo/
     ├── __init__.py        # Implementación
-    ├── watchful.py        # Alias: from . import Watchful
     ├── schema.json        # Esquema de campos (tipos, defaults, rangos)
     ├── info.json          # Metadatos: nombre, icono, descripción
     ├── lang/

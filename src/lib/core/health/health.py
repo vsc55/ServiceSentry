@@ -27,10 +27,7 @@ import threading
 import time
 
 
-def _default_text(key, *args):
-    """Fallback text resolver (no host wired): the default-language i18n string."""
-    from lib.i18n import translate  # noqa: PLC0415
-    return translate('', key, *args)
+from lib.core.health import default_text as _default_text  # noqa: E402
 
 
 def classify(instances: list, *, now: float, down_after_secs: float) -> dict:
