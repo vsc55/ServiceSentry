@@ -6,7 +6,7 @@
 def users_stat(wa) -> dict:
     """Stat content for the ``users`` card: total + a by-role breakdown (role badges
     resolved client-side via the shared role metadata)."""
-    from lib.core.permissions import BUILTIN_ROLE_UIDS  # noqa: PLC0415
+    from lib.core.constants import BUILTIN_ROLE_UIDS  # noqa: PLC0415
     viewer_uid = BUILTIN_ROLE_UIDS.get('viewer', '')
     by_role: dict = {}
     for u in wa._users.values():

@@ -120,6 +120,9 @@
 96. [Guards de documentación e i18n](#96-guards-de-documentación-e-i18n)
 97. [Watchfuls — severidad de avisos y RAID mdstat](#97-watchfuls--severidad-de-avisos-y-raid-mdstat)
 98. [Entra ID — paso de RBAC de Azure del asistente](#98-entra-id--paso-de-rbac-de-azure-del-asistente)
+99. [Panel Web — sección Permisos (Acceso › Permisos)](#99-panel-web--sección-permisos-acceso--permisos)
+100. [Meta — Cada dominio del core guarda su propio código](#100-meta--cada-dominio-del-core-guarda-su-propio-código)
+101. [Permisos — poda de claves por instancia](#101-permisos--poda-de-claves-por-instancia)
 
 ---
 
@@ -3820,7 +3823,7 @@ desincroniza si nadie lo comprueba**.
 
 ## 88c-bis. Meta — Secciones publicadas del CHANGELOG
 
-**Archivo:** `tests/test_changelog_frozen.py` — 5 tests
+**Archivo:** `tests/test_changelog_frozen.py` — 6 tests
 
 Cada commit publica un build cuya sección contiene **solo lo que ese commit cambió**. Nada
 vigilaba la segunda mitad de esa regla: tras commitear `build.2` es fácil —y pasó— seguir
@@ -3839,6 +3842,7 @@ idéntica** en el árbol de trabajo. Un commit nuevo añade su sección encima y
 | `test_no_committed_section_was_edited` | El fallo para el que existe: escribir en un build ya publicado |
 | `test_no_committed_section_disappeared` | Renombrar o borrar un build publicado reescribe la historia igual que editarlo, y es más fácil de hacer sin querer con una edición por script |
 | `test_the_working_copy_only_ever_adds_sections` | El invariante entero: las secciones de `HEAD` son un subconjunto intacto de las del árbol |
+| `TestOneBuildPerCommit::test_at_most_one_section_is_unpublished` | La otra mitad de la regla, que no vigilaba nadie: un build lo publica un commit, así que **como mucho una** sección puede estar sin commitear. Pasó al revés — se abrió un build encima de otro sin commitear y la versión saltó de la 4 a la 6 con cero commits. El guard de versión no lo ve: `__version__` y la cabecera se mueven juntos, así que siguen coincidiendo; lo que falla es que el contador avanzó sin lo que cuenta |
 
 > **Dos consecuencias antes de que te falle:**
 >
@@ -4282,3 +4286,131 @@ Ver `lib/providers/azure/rbac.py`.
 | `TestPickerFlow::test_an_unknown_flow_is_expired_not_an_error` | Un flujo desconocido está caducado, no roto |
 | `TestPickerFlow::test_no_subscription_is_refused_without_spending_the_flow` | **Un clic en falso no puede quemar el token ARM** — se puede volver a elegir |
 | `TestPickerFlow::test_a_token_exchange_failure_reports_and_skips_the_picker` | Sin token ARM no hay lista ni asignación, pero la app sí vuelve |
+
+---
+
+## 99. Panel Web — sección Permisos (Acceso › Permisos)
+
+**Archivo:** `tests/test_wa_permissions_section.py` — 28 tests
+
+Asignar permisos a roles en una página entera, en vez de un rol cada vez dentro del modal. Dos
+maquetas sobre los mismos datos —matriz permisos × roles y dos paneles (lista de roles | permisos
+de ese rol)— conviviendo para poder compararlas con datos reales. Los roles integrados son
+**columnas de solo lectura**: son el patrón contra el que se lee un rol propio.
+
+Se comprueban dos cosas de naturaleza distinta.
+
+**El contrato con la API en el que se apoya la pantalla.** La sección envía
+`{"permissions": [...]}` y nada más, así que el endpoint tiene que aplicar exactamente el campo que
+recibe: si un PUT parcial empezara a rellenar por defecto lo que no recibe, guardar un permiso desde
+aquí borraría el nombre del rol o lo dejaría deshabilitado. Estos tests atacan el endpoint de verdad.
+
+**El cableado de la propia sección.** Es JS dentro de partials Jinja y aquí no hay runtime de JS, así
+que se comprueba lo que un trozo ausente rompería de verdad — y en silencio: la sub-pestaña existe en
+el shell, las dos maquetas se cargan y las etiquetas resuelven en los dos idiomas. Un partial que no
+se incluye da un panel vacío sin error en ninguna parte.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestPartialUpdateLeavesTheRestAlone::test_saving_permissions_keeps_name_and_description` | Guardar permisos no toca lo que la pantalla nunca mostró |
+| `TestPartialUpdateLeavesTheRestAlone::test_saving_permissions_does_not_disable_the_role` | `enabled` tampoco viaja: un rol no puede apagarse desde una pantalla sin interruptor |
+| `TestPartialUpdateLeavesTheRestAlone::test_granular_keys_survive_a_save` | **El fallo que más caro sale:** un rol puede tener claves granulares (`module.<name>.view`) que esta pantalla no dibuja. El borrador parte de la lista COMPLETA del rol, así que sobreviven; sembrarlo con las 64 casillas renderizadas las borraría al primer guardado sin que nada se viera en pantalla |
+| `TestPartialUpdateLeavesTheRestAlone::test_builtin_permissions_are_refused` | Por qué las columnas integradas son de solo lectura y no "desaconsejadas" |
+| `TestTheSectionReachesThePage::test_the_shell_carries_the_subtab_and_its_pane` | Entrada de nav, botón de pestaña y contenedor |
+| `TestTheSectionReachesThePage::test_both_layouts_are_loaded` | Un `include` que falta = panel vacío y ningún error |
+| `TestTheSectionReachesThePage::test_the_sidebar_offers_it_under_access` | La barra lateral la ofrece bajo Acceso |
+| `TestTheWiringItself::test_the_save_sends_permissions_and_nothing_else` | El contrato anterior desde este lado: añadir `name` o `enabled` al cuerpo convertiría la pantalla en algo que sobrescribe campos que no enseña |
+| `TestTheWiringItself::test_the_draft_is_seeded_from_the_full_permission_list` | Todo sitio que cree un borrador debe sembrarlo igual — es lo único que salva las claves granulares |
+| `TestTheWiringItself::test_the_access_poll_only_redraws_on_a_real_change` | `refreshAccessData` reemplaza `rolesData` cada 30 s. Redibujar igualmente reconstruye el DOM debajo de quien está leyendo —te devolvía arriba del todo dos veces por minuto—, así que el sondeo compara lo que pintaría; y una edición en curso se salta entera (un borrador no está obsoleto: es lo que ha escrito el usuario) |
+| `TestTheWiringItself::test_hiding_a_role_hides_it_everywhere` | El filtro actúa sobre la **lista de roles**, no sobre las columnas: así los contadores y lo que compara «Solo diferencias» le siguen. Filtrando solo columnas, la pantalla llamaría idénticos a dos roles porque el que discrepaba está oculto |
+| `TestTheWiringItself::test_hide_builtin_is_a_preset_not_a_second_state` | Salió como interruptor propio en el toolbar y el selector lo dejó de sobra; ahora escribe en el mismo conjunto de ocultos y su estado se **deriva** de él — dos controles sobre un conjunto son dos oportunidades de contradecirse |
+| `TestTheWiringItself::test_copying_stages_the_change_instead_of_sending_it` | Copiar permisos de un rol a otros aterriza en el **borrador**: las celdas copiadas quedan pendientes, Guardar las manda y Descartar las tira. Llamar a la API desde ahí sería una segunda forma de cambiar permisos, y una que se salta la pantalla que te enseña qué cambió |
+| `TestTheWiringItself::test_copying_only_targets_roles_you_may_edit` | Los integrados los rechaza la API, y un rol no editable parecería copiado hasta que fallara el guardado |
+| `TestTheWiringItself::test_a_role_with_unsaved_changes_cannot_be_hidden` | Perder de vista una edición sin guardar es como se descarta sin querer, y el selector es el único sitio donde se podría hacer de un clic |
+| `TestTheWiringItself::test_hiding_them_all_says_so` | «No hay roles» y «los que hay están ocultos» no son lo mismo; lo segundo es un filtro que puedes deshacer |
+| `TestTheWiringItself::test_a_redraw_keeps_where_you_were` | Reemplazar `innerHTML` resetea todos los contenedores con scroll de dentro — y eso pasa también en cada pulsación del filtro, no solo en el sondeo |
+| `TestTheWiringItself::test_it_uses_the_same_chrome_as_every_other_list_section` | Salió con un `.ss-toolbar`, que dentro de un panel full-bleed conserva borde, esquinas redondeadas y hueco: la sección se leía como una tarjeta flotando en un panel sin márgenes, al lado de un Users que va de borde a borde. La tarjeta compartida sí se aplana sola |
+| `TestTheWiringItself::test_the_two_panes_are_a_row` | `.ss-vfill` **es** el helper de relleno vertical, o sea una columna; `d-flex` fija `display`, no la dirección. Sin `flex-row` los dos paneles se apilan — así salió la primera vez |
+| `TestTheWiringItself::test_the_per_instance_permissions_are_shown` | **Se perdieron en el primer corte:** un rol puede acotar un flag global a un módulo, host o cluster (`module.ping.view`) y la sección solo pintaba los 64 del catálogo. Guardar sí los conservaba — eran invisibles, que es peor que perderlos: la pantalla afirma que el rol tiene menos de lo que tiene |
+| `TestTheWiringItself::test_the_resource_table_has_one_builder` | Las dos maquetas dibujan la tabla ítems × acciones desde **una** función (`_resources.html`) |
+| `TestTheWiringItself::test_the_resources_come_from_the_shared_registry` | De dónde salen módulos/servidores/clusters es `_PERM_RES_SPECS`; declararlos otra vez haría que un recurso acotado nuevo saliera en una maqueta y en la otra no |
+| `TestTheWiringItself::test_the_override_blocks_fold` | Los bloques por instancia arrancan cerrados (N módulos × 4 acciones desplegados entierran el catálogo) y una búsqueda los abre: una coincidencia escondida tras una cabecera plegada hace parecer que la búsqueda no encontró nada |
+| `TestTheWiringItself::test_the_role_modal_no_longer_edits_permissions` | **Un solo editor.** Dos pantallas sobre el mismo campo es como una deshace en silencio lo que guardó la otra — y el modal hacía PUT de todas las casillas que tenía, incluidas las no refrescadas |
+| `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
+| `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
+| `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 100. Meta — Cada dominio del core guarda su propio código
+
+**Archivo:** `tests/test_core_domain_layout.py` — 28 tests (+9 skips)
+
+`lib/core/__init__.py` enuncia la regla: un paquete de dominio agrupa su `store`, su `mixin`,
+sus `routes` y su `manifest` *«instead of spreading those across lib/stores,
+lib/web_admin/mixins and lib/web_admin/routes»*. La reorganización se había quedado a un dominio
+del final: permisos seguía con sus 210 líneas de resolución en `lib/web_admin/mixins/`, justo
+donde el docstring dice que no debe estar. Un docstring no puede darse cuenta; estos tests sí.
+
+Además fijan los dos invariantes que hacen que la distribución **funcione**, no solo que parezca
+ordenada:
+
+- El catálogo tiene que seguir importándose **sin Flask**: el descubrimiento de permisos corre al
+  importar `lib.web_admin.constants`, así que traerse el glue web desde el catálogo cerraría un
+  ciclo de imports.
+- «Qué cuenta como permiso» debe tener **una sola** definición. Tenía dos, escritas idénticas: una
+  clase nueva de clave por-instancia habría que recordarla en ambas, y la mitad que se olvidara
+  **descartaría** esas claves en silencio en vez de fallar.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_domains_are_found` | Si el escaneo mira donde no es, falla en vez de pasar sin comprobar nada |
+| `TestDomainCodeLivesWithItsDomain::test_no_domain_mixin_is_left_in_web_admin` | **El fallo para el que existe**: un mixin de dominio olvidado en `lib/web_admin/mixins/`. Solo `auth` y `services` (que no son dominios) viven ahí |
+| `TestDomainCodeLivesWithItsDomain::test_every_domain_mixin_is_in_its_package` | La misma regla al revés, para los dominios que se añadan luego |
+| `TestDomainCodeLivesWithItsDomain::test_permissions_is_a_domain_package` | Era un módulo plano cuando todos los demás eran paquetes; y el `.py` viejo no puede convivir con el paquete |
+| `TestTheImportCycleStaysOpen::test_a_domain_init_does_not_import_its_mixin` (×N) | El `__init__` ligero que pide `lib/core/__init__.py`, por el motivo concreto que da |
+| `TestTheImportCycleStaysOpen::test_the_probe_detects_flask` | Control positivo: sin él, el test siguiente pasaría para cualquier módulo |
+| `TestTheImportCycleStaysOpen::test_the_catalog_imports_without_flask` | El ciclo de imports sigue abierto (subproceso limpio; código de salida 2 = «vino Flask», distinto del 1 de un import roto) |
+| `TestTheImportCycleStaysOpen::test_the_catalog_is_still_imported_the_same_way` | El movimiento es invisible para los ~25 módulos que importan del catálogo |
+| `TestOneDefinitionOfAValidPermission::test_the_rule_is_written_once` | Nadie vuelve a deletrear la regla: barre `lib/` buscando la expresión repetida |
+| `TestOneDefinitionOfAValidPermission::test_both_directions_use_it` | Guardar un rol y resolver un rol usan **el mismo objeto** |
+| `TestOneDefinitionOfAValidPermission::test_what_the_rule_says` (×7) | Qué acepta y qué no: flags, claves por-instancia, acciones inventadas |
+| `TestBuiltInIdentitiesHaveOneHome::test_the_uuids_are_written_in_exactly_one_place` | Los UUID estables estaban pegados a mano en dos ficheros de test: una copia pasa su propio test tan contenta mientras el producto usa otro valor |
+| `TestBuiltInIdentitiesHaveOneHome::test_the_catalog_does_not_hold_them` | No vuelven al catálogo, y tampoco se re-exportan desde ahí: eso sería el segundo nombre que este movimiento quita |
+| `TestBuiltInIdentitiesHaveOneHome::test_the_role_names_are_enumerated_once` | `ROLES` y las claves de `BUILTIN_ROLE_UIDS` eran dos literales de los mismos cuatro nombres; ahora una deriva de la otra |
+| `TestBuiltInIdentitiesHaveOneHome::test_the_grants_cover_exactly_those_roles` | La tercera enumeración (qué concede cada rol) no se puede derivar, así que se comprueba: un rol con UID pero sin grants resuelve a cero permisos en silencio |
+| `TestBuiltInIdentitiesHaveOneHome::test_the_group_uid_set_is_derived` | El frozenset de grupos integrados sale del dict, no de otra lista |
+| `TestOneEscalationGuard::test_the_guard_is_defined_once` | «Un no-admin solo puede conceder permisos que él tiene» también estaba escrito dos veces: como closure en las rutas de roles y como última línea de `_role_grantable`. Ahora hay un `_perms_grantable` y ambos lo llaman |
+
+---
+
+## 101. Permisos — poda de claves por instancia
+
+**Archivo:** `tests/test_scoped_permission_pruning.py` — 12 tests
+
+`server.<uid>.edit`, `module.<name>.view` y `cluster.<uid>.delete` acotan un flag global a
+**una** cosa. Esa cosa vive en otra tabla (o en la configuración de módulos) y nada unía las dos:
+borrar un host dejaba sus claves en la lista de permisos de cada rol para siempre.
+
+No concedían nada —un UUID no se reutiliza—, pero se acumulaban sin que nadie las viera, y la
+sección Permisos **las cuenta**: un rol declaraba más permisos acotados de los que tenía.
+
+Los nombres de módulo son el caso que merece fijarse: un nombre **sí** puede volver. Un
+`module.ping.edit` obsoleto se aplicaría en silencio a lo que se llame `ping` después, así que
+quitar un módulo purga sus claves en vez de guardarlas por si vuelve. Esa dirección —una concesión
+que nadie recuerda haber dado— es la que importa.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheRuleItself::test_a_resource_owns_four_keys` | Un recurso posee sus cuatro acciones |
+| `TestTheRuleItself::test_only_the_named_resource_is_stripped` | Se va el recurso nombrado y solo ese |
+| `TestTheRuleItself::test_a_role_that_did_not_hold_them_is_not_reported_changed` | Solo se persiste y audita si algo cambió de verdad; decir «cambiado» de todos reescribiría la tabla de roles en cada borrado de host |
+| `TestTheRuleItself::test_nothing_to_strip_is_not_an_error` | Lista vacía, uid vacío o `None` no son un fallo |
+| `TestTheRuleItself::test_cluster_items_are_the_ones_bound_to_many_hosts` | Un cluster es un ítem con `host_uids`; uno de un solo host es cosa de `server.*` y no puede confundirse |
+| `TestTheRuleItself::test_a_malformed_config_yields_nothing` | Una config rota no puede provocar un borrado |
+| `TestDeletingTheResourcePrunesIt::test_deleting_a_host_drops_its_keys` | Por el endpoint real: el cableado es la mitad que se olvida |
+| `TestDeletingTheResourcePrunesIt::test_the_other_hosts_keep_theirs` | La poda no se lleva por delante lo de al lado |
+| `TestDeletingTheResourcePrunesIt::test_removing_a_module_drops_its_keys` | El caso del nombre reutilizable |
+| `TestDeletingTheResourcePrunesIt::test_a_module_that_stays_keeps_its_keys` | Guardar la config de módulos no es una poda general |
+| `TestDeletingTheResourcePrunesIt::test_it_is_audited` | Edita permisos sin que nadie lo pida en esa pantalla, así que tiene que verse en algún sitio |
+| `TestDeletingTheResourcePrunesIt::test_nothing_is_written_when_no_role_referenced_it` | El caso común —un host que no está en la lista acotada de nadie— no reescribe nada ni miente en la auditoría |

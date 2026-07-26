@@ -1,0 +1,140 @@
+{# ================================================================
+   Permissions — layout A: one grid, permissions × roles.
+
+   What it is for: reading ACROSS roles. Built-in columns sit first in descending
+   privilege, so a custom role is read against the yardstick it was cloned from and
+   "editor plus audit_delete" is a shape you can see rather than reconstruct.
+
+   State, filtering and saving all live in _state.html; this file only draws.
+   ================================================================ #}
+
+/** One column header: role name, a lock for the read-only built-ins, and how many of
+ *  the catalog's permissions it grants. */
+function _permMatrixHead(roles) {
+    let h = `<th style="min-width:15rem">${esc(t('col_permission'))}</th>`;
+    for (const { uid, rd } of roles) {
+        const ro = !_permCanEdit(uid);
+        const lock = rd.builtin
+            ? ` <i class="bi bi-lock-fill" title="${escAttr(t('role_builtin_badge'))}"></i>` : '';
+        const off = (!rd.builtin && rd.enabled === false)
+            ? ` <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : '';
+        const n = _permCounts(uid);
+        const scoped = n.scoped
+            ? ` <span class="badge bg-secondary rounded-pill fw-normal ss-fs-1"
+                      title="${escAttr(tf('perm_count_scoped', n.scoped))}"
+                ><i class="bi bi-diagram-2"></i> ${n.scoped}</span>` : '';
+        h += `<th class="text-center${ro ? ' text-muted' : ''}" style="width:1%;white-space:nowrap;padding:.35rem .6rem">
+            <div>${esc(_permRoleName(uid))}${lock}${off}</div>
+            <span class="badge bg-secondary rounded-pill fw-normal ss-fs-1"
+                  title="${escAttr(tf('perm_count_of', n.global, _PERM_CATALOG.size))}">${n.global}</span>${scoped}
+        </th>`;
+    }
+    return h;
+}
+
+/** Group separator row. Each role's cell carries how many of the group's VISIBLE
+ *  permissions it holds; for an editable role that count is the button that grants or
+ *  revokes the whole group at once. */
+function _permMatrixGroupRow(groupKey, perms, roles) {
+    let h = `<tr class="table-active">
+        <td class="fw-semibold">${esc(t(groupKey) || groupKey)}
+            ${perms.length ? `<span class="text-muted fw-normal ss-fs-1">${perms.length}</span>` : ''}</td>`;
+    for (const { uid } of roles) {
+        // The filter can leave a group with only its per-instance rows visible: no counter
+        // and no bulk button then, rather than a "0/0" that toggles nothing.
+        if (!perms.length) { h += '<td></td>'; continue; }
+        const held = perms.filter(p => _permHas(uid, p)).length;
+        const label = `${held}/${perms.length}`;
+        h += _permCanEdit(uid)
+            ? `<td class="text-center p-1"><button type="button"
+                   class="btn btn-sm btn-secondary py-0 px-1 ss-fs-1"
+                   title="${escAttr(held < perms.length ? t('perm_group_grant_all') : t('perm_group_revoke_all'))}"
+                   onclick="_permToggleGroup(${jsStr(uid)}, ${jsStr(groupKey)}, ${held < perms.length})"
+                   >${label}</button></td>`
+            : `<td class="text-center text-muted ss-fs-1">${label}</td>`;
+    }
+    return h + '</tr>';
+}
+
+function _permMatrixPermRow(perm, roles) {
+    // The second line is the permission's DESCRIPTION, as in the two-pane view. It used to
+    // be the raw flag (`audit_delete`), which reads like a missing translation sitting
+    // where the explanation should be. The flag is still there, on hover: it is what the
+    // API speaks, so it stays reachable without taking the line that explains the thing.
+    const hint = _permHint(perm);
+    let h = `<tr>
+        <td title="${escAttr(perm)}">${esc(_permLabel(perm))}
+            ${hint ? `<div class="text-muted ss-fs-1">${esc(hint)}</div>` : ''}</td>`;
+    for (const { uid } of roles) {
+        const ro = !_permCanEdit(uid);
+        h += `<td class="text-center${_permCellClass(uid, perm)}" data-perm-cell>
+            <input type="checkbox" class="form-check-input"
+                   ${_permHas(uid, perm) ? 'checked' : ''}${ro ? ' disabled' : ''}
+                   onchange="_permToggle(${jsStr(uid)}, ${jsStr(perm)}, this)"></td>`;
+    }
+    return h + '</tr>';
+}
+
+/** The per-instance overrides of a group: a caption row, then one row per (item, action) —
+ *  because in this layout a row IS a permission and the columns are already spent on roles.
+ *  The role modal can afford its items × actions table; it only ever shows one role. */
+function _permMatrixResRows(groupKey, roles) {
+    const { spec, rows } = _permVisibleResRows(groupKey);
+    if (!spec || !rows.length) return '';
+    // Collapsed by default and folded from the caption row: N modules × 4 actions unfolded
+    // would bury the catalog rows this layout exists to compare. The count stays visible so
+    // a closed block still says how much is in there.
+    const shut = _permResCollapsed(spec.prefix);
+    let h = `<tr class="table-active" style="cursor:pointer"
+                 onclick="_permResToggle(${jsStr(spec.prefix)})"
+                 title="${escAttr(shut ? t('perm_res_expand') : t('perm_res_collapse'))}">
+        <td class="ss-fs-2 text-muted fst-italic" colspan="${roles.length + 1}">
+            <i class="bi bi-chevron-${shut ? 'right' : 'down'} me-1"></i>${esc(spec.info())}
+            <span class="badge bg-secondary rounded-pill ms-1">${rows.length}</span></td></tr>`;
+    if (shut) return h;
+    for (const row of rows) {
+        const sub = row.sub?.text ? `<span class="text-muted ss-fs-1 ms-1">${esc(row.sub.text)}</span>` : '';
+        for (const action of _PERM_ACTIONS) {
+            const key = `${spec.prefix}.${row.id}.${action}`;
+            h += `<tr><td class="ps-4" title="${escAttr(key)}">${esc(row.name)}
+                <span class="text-muted">· ${esc(_permActionLabel(spec, action))}</span>${sub}</td>`;
+            for (const { uid } of roles) {
+                const ro = !_permCanEdit(uid);
+                h += `<td class="text-center${_permCellClass(uid, key)}" data-perm-cell>
+                    <input type="checkbox" class="form-check-input"
+                           ${_permHas(uid, key) ? 'checked' : ''}${ro ? ' disabled' : ''}
+                           onchange="_permToggle(${jsStr(uid)}, ${jsStr(key)}, this)"></td>`;
+            }
+            h += '</tr>';
+        }
+    }
+    return h;
+}
+
+function _permMatrixHtml() {
+    const roles = _permRoles();
+    let body = '', shown = 0;
+    for (const [groupKey] of _permGroups()) {
+        const perms = _permVisibleIn(groupKey);
+        const res = _permMatrixResRows(groupKey, roles);
+        if (!perms.length && !res) continue;  // whole group filtered out
+        shown += perms.length + (res ? 1 : 0);
+        body += _permMatrixGroupRow(groupKey, perms, roles);
+        for (const perm of perms) body += _permMatrixPermRow(perm, roles);
+        body += res;
+    }
+    if (!shown) return _permNoMatchHtml();
+    return `<div class="ss-vscroll">
+        <table class="table table-sm table-hover ss-gridtable mb-0" style="font-size:.82rem">
+            <thead class="ss-thead"><tr>${_permMatrixHead(roles)}</tr></thead>
+            <tbody>${body}</tbody>
+        </table>
+    </div>`;
+}
+
+/** Shared by both layouts: nothing survived the search / "only differences" filter. */
+function _permNoMatchHtml() {
+    return `<div class="text-center py-5 text-muted">
+        <i class="bi bi-funnel ss-empty-icon"></i>
+        <span>${esc(_permOnlyDiff() ? t('perm_no_differences') : t('perm_no_match'))}</span></div>`;
+}

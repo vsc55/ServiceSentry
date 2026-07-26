@@ -19,10 +19,14 @@ from tests.conftest import _login
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 # ── Stable UIDs ──────────────────────────────────────────────────────────────
-_ADMIN_GRP_UID  = '00000000-0000-4000-8000-000000000010'
-_UID_ADMIN  = '00000000-0000-4000-8000-000000000001'
-_UID_EDITOR = '00000000-0000-4000-8000-000000000002'
-_UID_VIEWER = '00000000-0000-4000-8000-000000000003'
+# Read from the source rather than pasted: a test carrying its own copy of a UUID passes
+# happily while the product uses a different one.
+from lib.core.constants import BUILTIN_GROUP_UIDS, BUILTIN_ROLE_UIDS   # noqa: E402
+
+_ADMIN_GRP_UID = BUILTIN_GROUP_UIDS['administrators']
+_UID_ADMIN  = BUILTIN_ROLE_UIDS['admin']
+_UID_EDITOR = BUILTIN_ROLE_UIDS['editor']
+_UID_VIEWER = BUILTIN_ROLE_UIDS['viewer']
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

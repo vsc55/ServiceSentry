@@ -16,11 +16,10 @@ Routes registered by this file:
 from flask import jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER
 from lib.core.users import service as users_svc
 from lib.i18n import SUPPORTED_LANGS
 from lib.web_admin.constants import home_page_ids
-from lib.core.constants import SYSTEM_USER
 
 
 def register(app, wa):

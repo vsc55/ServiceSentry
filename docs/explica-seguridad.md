@@ -487,7 +487,8 @@ Además de los flags globales existen **tres familias dinámicas**, cada una con
 
 La autorización por-servidor/cluster se resuelve en `lib/core/modules/routes.py` a partir del
 `host_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden acceso a
-todos. Definidas en `lib/core/permissions.py`.
+todos. Definidas en `lib/core/permissions/` (el catálogo; la resolución efectiva vive en
+`lib/core/permissions/mixin.py`).
 
 ### Escalada de privilegios bloqueada
 

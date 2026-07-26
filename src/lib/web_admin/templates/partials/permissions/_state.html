@@ -1,0 +1,475 @@
+{# ================================================================
+   Permissions section — shared state, role/permission access, filtering
+   and saving.  The two layouts (_matrix.html, _split.html) only draw; every
+   read and every write goes through here so they can never disagree.
+   ================================================================ #}
+
+// ── State ─────────────────────────────────────────────────────────
+// Which layout is on screen. Persisted so the choice survives a reload while the
+// two are being compared.
+let _permView = localStorage.getItem('ss_perm_view') === 'split' ? 'split' : 'matrix';
+// uid -> Set(permissions). Only roles the user has TOUCHED get an entry; everything
+// else reads live from rolesData, so the 30 s access poll can refresh untouched roles
+// underneath without discarding an edit in progress.
+let _permDraft = {};
+// Split view: the role being edited on the right-hand pane.
+let _permSelRole = null;
+// The section has been drawn at least once (the poll must not build it before the
+// sub-tab is ever opened).
+let _permReady = false;
+
+// ── Catalog ───────────────────────────────────────────────────────
+// The 64 global permissions, i.e. everything PERM_GROUPS declares. A role may ALSO
+// hold granular keys (module.<id>.view, server.<uid>.edit …) that this screen does not
+// show; the draft keeps a role's full permission list and only ever adds/removes
+// catalog keys, so saving from here can never drop a granular key it never rendered.
+const _PERM_CATALOG = new Set(PERM_GROUPS.flatMap(([, perms]) => perms));
+
+// Groups sorted by their translated label, same order the role modal uses.
+function _permGroups() {
+    return [...PERM_GROUPS].sort((a, b) => (t(a[0]) || a[0]).localeCompare(t(b[0]) || b[0]));
+}
+
+function _permLabel(perm) { return (I18N.permission_labels || {})[perm] || perm; }
+function _permHint(perm)  { return (I18N.permission_hints  || {})[perm] || ''; }
+
+// ── Per-instance permissions (module.<id>.<action>, server.…, cluster.…) ──────────
+// A role may narrow the global flags down to ONE module, host or cluster. Those keys are
+// not in the catalog — they come from the data — so the section reads them from the
+// registry in _resources.html: where the items come from, which global flag each action
+// falls back to, and the labels. Nothing about a resource is described twice.
+const _PERM_ACTIONS = ['view', 'add', 'edit', 'delete'];
+
+function _permResSpec(groupKey) {
+    if (typeof _PERM_RES_SPECS === 'undefined') return null;
+    return _PERM_RES_SPECS.find(s => s.group === groupKey) || null;
+}
+
+/** The resource rows of a group, or [] — a spec whose data is empty (no clusters defined)
+ *  simply contributes nothing. */
+function _permResRows(groupKey) {
+    const spec = _permResSpec(groupKey);
+    try { return spec ? spec.items() : []; } catch (_) { return []; }
+}
+
+/** The global flag a per-instance key falls back to: `module.ping.view` → `modules_view`. */
+function _permGlobalFor(perm) {
+    const [prefix, , action] = String(perm).split('.');
+    const spec = (typeof _PERM_RES_SPECS === 'undefined' ? [] : _PERM_RES_SPECS)
+        .find(s => s.prefix === prefix);
+    return (spec && spec.globalFor[action]) || '';
+}
+
+function _permActionLabel(spec, action) {
+    return (spec.actionLabel ? spec.actionLabel(action) : t('module_perm_' + action)) || action;
+}
+
+// Which override blocks are open. Stored as the EXPANDED set, so the default — and any
+// resource added later — is collapsed: every module × 4 actions unfolded by default buries
+// the 64 catalog rows the matrix is there to compare.
+let _permResExpanded = new Set((() => {
+    try { return JSON.parse(localStorage.getItem('ss_perm_res_open') || '[]'); } catch (_) { return []; }
+})());
+
+/** Collapsed unless opened — except while searching, when hiding a matching row would
+ *  make the search look like it found nothing. */
+function _permResCollapsed(prefix) {
+    return !_permQuery() && !_permResExpanded.has(prefix);
+}
+
+function _permResToggle(prefix) {
+    if (_permResExpanded.has(prefix)) _permResExpanded.delete(prefix);
+    else _permResExpanded.add(prefix);
+    try { localStorage.setItem('ss_perm_res_open', JSON.stringify([..._permResExpanded])); } catch (_) {}
+    renderPermissions();
+}
+
+// ── Roles ─────────────────────────────────────────────────────────
+// Built-ins first in descending privilege — admin, editor, viewer, none — because that
+// is how a matrix reads: each column should hold no more than the one to its left.
+// Custom roles follow, alphabetically.
+const _PERM_BUILTIN_ORDER = ['admin', 'editor', 'viewer', 'none'];
+// A built-in this list does not know about goes last rather than first — a new one must
+// not silently claim the leftmost column, which reads as "the most privileged".
+const _permBuiltinRank = key => {
+    const i = _PERM_BUILTIN_ORDER.indexOf(key);
+    return i < 0 ? _PERM_BUILTIN_ORDER.length : i;
+};
+
+// ── Which roles are on screen ─────────────────────────────────────
+// A matrix with twenty-four columns is not a comparison, it is horizontal scrolling: you
+// can no longer see the two roles you are actually contrasting. So the roles are a
+// selection, and it is ONE set of hidden UIDs — the "hide built-in" switch is a shortcut
+// that ticks the four built-ins in that same set, not a second piece of state that could
+// disagree with the picker.
+//
+// It filters the ROLE LIST, so everything derived follows: the columns, the counters and
+// what "only differences" compares. Filtering only the columns would let the screen call
+// two roles identical because the one that disagreed is hidden.
+let _permHiddenRoles = new Set((() => {
+    try { return JSON.parse(localStorage.getItem('ss_perm_roles_hidden') || '[]'); } catch (_) { return []; }
+})());
+
+function _permPersistHidden() {
+    try { localStorage.setItem('ss_perm_roles_hidden', JSON.stringify([..._permHiddenRoles])); } catch (_) {}
+}
+
+/** A role with unsaved changes is never hidden: losing sight of an edit you have not saved
+ *  is how it gets discarded by accident. */
+function _permRoleVisible(uid) {
+    return !_permHiddenRoles.has(uid) || _permIsDirty(uid);
+}
+
+function _permToggleRole(uid, on) {
+    if (on) _permHiddenRoles.delete(uid); else _permHiddenRoles.add(uid);
+    _permPersistHidden();
+    renderPermissions();
+}
+
+function _permShowAllRoles(show) {
+    if (show) _permHiddenRoles.clear();
+    else Object.keys(rolesData).forEach(uid => _permHiddenRoles.add(uid));
+    _permPersistHidden();
+    renderPermissions();
+}
+
+const _permBuiltinUids = () => Object.keys(rolesData).filter(uid => rolesData[uid]?.builtin);
+
+/** Checked when every built-in is hidden — derived, so the switch and the picker can never
+ *  tell different stories. */
+function _permBuiltinHidden() {
+    const builtin = _permBuiltinUids();
+    return builtin.length > 0 && builtin.every(uid => _permHiddenRoles.has(uid));
+}
+
+function _permSetHideBuiltin(on) {
+    for (const uid of _permBuiltinUids()) {
+        if (on) _permHiddenRoles.add(uid); else _permHiddenRoles.delete(uid);
+    }
+    _permPersistHidden();
+    renderPermissions();
+}
+
+function _permRoles() {
+    return Object.entries(rolesData)
+        .filter(([uid]) => _permRoleVisible(uid))
+        .map(([uid, rd]) => ({ uid, rd })).sort((a, b) => {
+            if (!!a.rd.builtin !== !!b.rd.builtin) return a.rd.builtin ? -1 : 1;
+            if (a.rd.builtin) return _permBuiltinRank(a.rd.key) - _permBuiltinRank(b.rd.key);
+            return (a.rd.name || a.uid).localeCompare(b.rd.name || b.uid);
+        });
+}
+
+/** The picker's contents. Rebuilt with the section (roles come and go) and kept out of
+ *  #permissions-container so opening it does not fight the re-render. */
+function _permRolesMenuHtml() {
+    const all = Object.entries(rolesData).map(([uid, rd]) => ({ uid, rd })).sort((a, b) => {
+        if (!!a.rd.builtin !== !!b.rd.builtin) return a.rd.builtin ? -1 : 1;
+        if (a.rd.builtin) return _permBuiltinRank(a.rd.key) - _permBuiltinRank(b.rd.key);
+        return (a.rd.name || a.uid).localeCompare(b.rd.name || b.uid);
+    });
+    let h = `<div class="d-flex gap-1 mb-2">
+        <input type="search" class="form-control form-control-sm" id="permRolesSearch"
+               placeholder="${escAttr(t('perm_roles_search_ph'))}"
+               oninput="_permRolesMenuFilter(this.value)" autocomplete="off">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="_permShowAllRoles(true)"
+                title="${escAttr(t('perm_roles_all'))}"><i class="bi bi-check2-all"></i></button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="_permShowAllRoles(false)"
+                title="${escAttr(t('perm_roles_none'))}"><i class="bi bi-x-lg"></i></button>
+        <button type="button" class="btn btn-sm ${_permBuiltinHidden() ? 'btn-primary' : 'btn-secondary'}"
+                onclick="_permSetHideBuiltin(${!_permBuiltinHidden()})"
+                title="${escAttr(t('perm_hide_builtin_tt'))}"><i class="bi bi-lock"></i></button>
+    </div>`;
+    for (const { uid, rd } of all) {
+        const dirty = _permIsDirty(uid);
+        const lock = rd.builtin
+            ? ` <i class="bi bi-lock-fill text-muted ss-fs-1" title="${escAttr(t('role_builtin_badge'))}"></i>` : '';
+        h += `<div class="form-check mb-0 perm-role-pick" data-role-name="${escAttr((rd.name || uid).toLowerCase())}">
+            <input class="form-check-input" type="checkbox" id="permrole_${escAttr(uid)}"
+                   ${_permRoleVisible(uid) ? 'checked' : ''}${dirty ? ' disabled' : ''}
+                   onchange="_permToggleRole(${jsStr(uid)}, this.checked)">
+            <label class="form-check-label small text-nowrap" for="permrole_${escAttr(uid)}"
+                   ${dirty ? `title="${escAttr(t('perm_role_dirty_shown'))}"` : ''}>
+                ${esc(rd.name || uid)}${lock}${dirty ? ' <span class="text-warning">●</span>' : ''}
+            </label>
+        </div>`;
+    }
+    return h;
+}
+
+function _permRolesMenuFilter(query) {
+    const q = (query || '').trim().toLowerCase();
+    document.querySelectorAll('#permRolesMenu .perm-role-pick').forEach(row => {
+        row.style.display = !q || (row.dataset.roleName || '').includes(q) ? '' : 'none';
+    });
+}
+
+function _permRoleName(uid) { return rolesData[uid]?.name || uid; }
+
+/** How much a role grants, split the way the screen shows it: `global` counts the catalog
+ *  flags (out of 64), `scoped` the per-instance overrides it holds explicitly. Reported
+ *  apart because they are not comparable — one `module.ping.edit` is not "one more
+ *  permission" beside `modules_edit`, it is a narrower version of it. */
+function _permCounts(uid) {
+    const held = [..._permSetOf(uid)];
+    return { global: held.filter(p => _PERM_CATALOG.has(p)).length,
+             scoped: held.filter(p => !_PERM_CATALOG.has(p)).length };
+}
+
+/** A role's effective permission set: its draft while it is being edited, otherwise
+ *  what the server last told us. */
+function _permSetOf(uid) {
+    return _permDraft[uid] || new Set(rolesData[uid]?.permissions || []);
+}
+
+/** What the role effectively grants for *perm*.
+ *
+ *  A built-in role's per-instance boxes are DERIVED, never stored: `admin` holds
+ *  `modules_view`, which is view on every module, and no `module.<id>.view` row exists in
+ *  its set. Showing those unticked would read as "admin cannot see this module". Custom
+ *  roles show only what they explicitly hold — the same rule as the role modal, where the
+ *  distinction is `disabled`. */
+function _permHas(uid, perm) {
+    const held = _permSetOf(uid);
+    if (held.has(perm)) return true;
+    if (!rolesData[uid]?.builtin) return false;
+    const global = perm.includes('.') ? _permGlobalFor(perm) : '';
+    return !!global && held.has(global);
+}
+
+/** Editable = a custom role and the roles_edit permission. Built-in roles are
+ *  read-only here by design: their permission sets are the product's definition of
+ *  admin/editor/viewer, and the API refuses to change them (name only). Showing them
+ *  as columns is the point — they are the yardstick a custom role is read against. */
+function _permCanEdit(uid) {
+    return !rolesData[uid]?.builtin && (currentUser.permissions || []).includes('roles_edit');
+}
+
+// ── Editing ───────────────────────────────────────────────────────
+/** Toggle one permission of one role. Takes the checkbox itself so the cell can be
+ *  marked as changed without redrawing the grid — a re-render on every tick would lose
+ *  the scroll position and the focus mid-edit. */
+function _permToggle(uid, perm, el) {
+    if (!_permCanEdit(uid)) return;
+    const on = !!el.checked;
+    if (!_permDraft[uid]) _permDraft[uid] = new Set(rolesData[uid]?.permissions || []);
+    if (on) _permDraft[uid].add(perm); else _permDraft[uid].delete(perm);
+    const saved = new Set(rolesData[uid]?.permissions || []);
+    el.closest('[data-perm-cell]')?.classList.toggle('ss-changed', saved.has(perm) !== on);
+    _permRefreshDirty();
+}
+
+/** ``ss-changed`` while a cell holds an unsaved value — so what is pending is visible
+ *  before pressing Save, in both layouts. */
+function _permCellClass(uid, perm) {
+    if (!_permDraft[uid]) return '';
+    const saved = new Set(rolesData[uid]?.permissions || []);
+    return saved.has(perm) !== _permHas(uid, perm) ? ' ss-changed' : '';
+}
+
+/** Tick/untick every VISIBLE permission of one group for one role — the bulk action a
+ *  matrix makes obvious. Visible, not all: with a filter active the button must do what
+ *  the screen shows, not what it hides. */
+function _permToggleGroup(uid, groupKey, on) {
+    if (!_permCanEdit(uid)) return;
+    if (!_permDraft[uid]) _permDraft[uid] = new Set(rolesData[uid]?.permissions || []);
+    for (const perm of _permVisibleIn(groupKey)) {
+        if (on) _permDraft[uid].add(perm); else _permDraft[uid].delete(perm);
+    }
+    renderPermissions();
+}
+
+function _permIsDirty(uid) {
+    const draft = _permDraft[uid];
+    if (!draft) return false;
+    const saved = new Set(rolesData[uid]?.permissions || []);
+    return draft.size !== saved.size || [...draft].some(p => !saved.has(p));
+}
+
+function _permDirtyUids() { return Object.keys(_permDraft).filter(_permIsDirty); }
+
+/** Enable/disable the toolbar buttons from the current draft. Called on every tick
+ *  instead of a re-render: re-drawing 64×N checkboxes to grey out one button would
+ *  lose scroll position and focus mid-edit. */
+function _permRefreshDirty() {
+    const dirty = _permDirtyUids().length;
+    document.getElementById('permSave')?.toggleAttribute('disabled', dirty === 0);
+    document.getElementById('permDirtyBadge')?.classList.toggle('d-none', dirty === 0);
+    document.getElementById('permDiscard')?.classList.toggle('d-none', dirty === 0);
+}
+
+// ── Filtering ─────────────────────────────────────────────────────
+function _permQuery() {
+    return (document.getElementById('permSearch')?.value || '').trim().toLowerCase();
+}
+function _permOnlyDiff() { return !!document.getElementById('permOnlyDiff')?.checked; }
+
+/** True when every role agrees on this permission (all grant it, or none does). Those
+ *  rows carry no information when comparing roles, which is what the "only differences"
+ *  switch hides — the same meaning in both layouts. */
+function _permIsUniform(perm) {
+    const roles = _permRoles();
+    if (roles.length < 2) return false;
+    const first = _permHas(roles[0].uid, perm);
+    return roles.every(r => _permHas(r.uid, perm) === first);
+}
+
+function _permMatches(perm) {
+    const q = _permQuery();
+    if (q && !(perm.toLowerCase().includes(q)
+               || _permLabel(perm).toLowerCase().includes(q)
+               || _permHint(perm).toLowerCase().includes(q))) return false;
+    return !(_permOnlyDiff() && _permIsUniform(perm));
+}
+
+/** The permissions of one group that survive the current filter, in catalog order. */
+function _permVisibleIn(groupKey) {
+    const group = PERM_GROUPS.find(([k]) => k === groupKey);
+    return (group ? group[1] : []).filter(_permMatches);
+}
+
+/** The per-instance rows of a group that survive the current filter, with their spec.
+ *  A resource row is matched on its own name (the module, host or cluster), not on a
+ *  permission label — searching "ping" must find the module, and "only differences" keeps
+ *  the row when ANY of its four actions is not agreed on. */
+function _permVisibleResRows(groupKey) {
+    const spec = _permResSpec(groupKey);
+    if (!spec) return { spec: null, rows: [] };
+    const q = _permQuery();
+    const rows = _permResRows(groupKey).filter(row => {
+        if (q) {
+            const hay = `${row.name} ${row.sub?.text || ''} ${spec.prefix}.${row.id}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+        }
+        if (_permOnlyDiff())
+            return _PERM_ACTIONS.some(a => !_permIsUniform(`${spec.prefix}.${row.id}.${a}`));
+        return true;
+    });
+    return { spec, rows };
+}
+
+function _permApplyFilter() { renderPermissions(); }
+
+// ── Layout switch ─────────────────────────────────────────────────
+function _permSetView(view) {
+    _permView = view === 'split' ? 'split' : 'matrix';
+    localStorage.setItem('ss_perm_view', _permView);
+    renderPermissions();
+}
+
+// ── Save / discard ────────────────────────────────────────────────
+async function _permSave() {
+    const uids = _permDirtyUids();
+    if (!uids.length) return;
+    let saved = 0, failed = 0;
+    for (const uid of uids) {
+        // ONLY `permissions` is sent. The endpoint applies the fields it is given, so a
+        // partial body leaves name/description/enabled exactly as they are — this screen
+        // cannot rename or disable a role by omitting a field it never showed.
+        const perms = [..._permDraft[uid]].sort();
+        const r = await apiPut('/api/v1/roles/' + encodeURIComponent(uid), { permissions: perms });
+        if (r && r.ok) {
+            rolesData[uid] = { ...rolesData[uid], permissions: perms,
+                               updated_at: _nowISO(), updated_by: currentUser.username || '' };
+            delete _permDraft[uid];
+            saved++;
+        } else {
+            // Keep the draft: the edit is still on screen and can be retried or discarded.
+            // A rejection here is normally the escalation guard — a non-admin may only
+            // grant permissions they hold themselves.
+            failed++;
+            showToast(`${_permRoleName(uid)}: ${r?.error || t('update_error')}`, 'danger');
+        }
+    }
+    if (saved) showToast(saved === 1 ? t('role_updated') : tf('perm_roles_updated', saved));
+    _permRefreshDirty();
+    renderPermissions();
+    if (typeof renderRoles === 'function') renderRoles();
+    return failed === 0;
+}
+
+function _permDiscard() {
+    const n = _permDirtyUids().length;
+    if (!n) return;
+    showConfirmModal(tf('perm_discard_confirm', n), () => {
+        _permDraft = {};
+        _permRefreshDirty();
+        renderPermissions();
+    });
+}
+
+// ── Render entry point ────────────────────────────────────────────
+function renderPermissions() {
+    const box = document.getElementById('permissions-container');
+    if (!box) return;
+    _permReady = true;
+    for (const view of ['matrix', 'split']) {
+        document.getElementById('permViewBtn_' + view)
+            ?.classList.toggle('btn-primary', view === _permView);
+        document.getElementById('permViewBtn_' + view)
+            ?.classList.toggle('btn-secondary', view !== _permView);
+    }
+    // The picker and its counter live in the header, outside the box being replaced.
+    const menu = document.getElementById('permRolesMenu');
+    if (menu) menu.innerHTML = _permRolesMenuHtml();
+    const shown = _permRoles().length, total = Object.keys(rolesData).length;
+    const lbl = document.getElementById('permRolesLabel');
+    if (lbl) lbl.textContent = shown === total ? t('subtab_roles') : `${shown}/${total}`;
+    // "There are no roles" and "the ones there are, you asked to hide" are different
+    // things and must not share a message: the second one is a filter you can undo.
+    const empty = !Object.keys(rolesData).length ? t('no_roles')
+                : !_permRoles().length ? t('perm_no_custom_roles') : '';
+    if (empty) {
+        box.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-shield ss-empty-icon"></i><span>${esc(empty)}</span></div>`;
+        return;
+    }
+    // Every hint on screen is a plain `title=`, never a Bootstrap tooltip: a filter
+    // re-renders this whole box on each keystroke, and instances attached to discarded
+    // nodes have to be disposed one by one or they pile up (and can outlive the element
+    // that triggered them). Native titles need no bookkeeping.
+    //
+    // Replacing innerHTML resets every scroll container inside it, which throws you back
+    // to the top of a 200-row grid — on each keystroke of the filter, and on each poll.
+    // The layout of scrollers is fixed per view (one for the matrix, two for the panes),
+    // so restoring them by position is enough.
+    const scrolls = [...box.querySelectorAll('.ss-vscroll')].map(el => [el.scrollTop, el.scrollLeft]);
+    box.innerHTML = _permView === 'split' ? _permSplitHtml() : _permMatrixHtml();
+    const after = box.querySelectorAll('.ss-vscroll');
+    scrolls.forEach(([top, left], i) => {
+        if (after[i]) { after[i].scrollTop = top; after[i].scrollLeft = left; }
+    });
+    // What is on screen now — so the poll below can tell "nothing changed" from the very
+    // first paint instead of redrawing once for free.
+    _permLastFingerprint = _permFingerprint();
+    _permRefreshDirty();
+}
+
+/** What the section actually renders from. Two polls apart that produce the same string
+ *  are the same screen, so there is nothing to redraw. */
+function _permFingerprint() {
+    return JSON.stringify(Object.keys(rolesData).sort().map(uid => {
+        const rd = rolesData[uid] || {};
+        return [uid, rd.name, rd.enabled, [...(rd.permissions || [])].sort()];
+    }));
+}
+let _permLastFingerprint = '';
+
+/** Called by the Access poll every 30 s.
+ *
+ *  It redraws only when the roles actually changed — which is almost never. Redrawing
+ *  regardless is not free: it rebuilds the DOM under you, and reading a long matrix meant
+ *  being thrown back to the top twice a minute.
+ *
+ *  A dirty draft is skipped outright: the draft is not stale, it is what the user typed,
+ *  and nothing the server sends can improve on it. */
+function _permAutoRefresh() {
+    if (!_permReady || _permDirtyUids().length) return;
+    const fp = _permFingerprint();
+    if (fp === _permLastFingerprint) return;
+    _permLastFingerprint = fp;
+    renderPermissions();
+}
+
+document.getElementById('btn-subtab-permissions')
+    ?.addEventListener('shown.bs.tab', () => renderPermissions());

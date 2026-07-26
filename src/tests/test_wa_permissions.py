@@ -13,8 +13,15 @@ four built-in roles (admin / editor / viewer / none):
 Expectations are derived from ``BUILTIN_ROLE_PERMISSIONS`` so the table only
 needs the *required* permission(s) per endpoint (any-of semantics), and the
 view/add/edit/delete distinction falls out of each role's permission set:
-viewer holds every ``*_view`` (so it may GET but not write), editor adds the
+viewer holds the ``*_view`` perms (so it may GET but not write), editor adds the
 ``*_edit`` perms (so it may PUT but not add/delete identity), none holds nothing.
+
+One ``*_view`` flag is deliberately NOT viewer's: ``config_view``, which fronts
+stored secrets unmasked. ``credentials_view`` used to be excluded as well, but the
+credential listing masks every secret and viewer already reached that endpoint
+through ``servers_view``, so withholding it only hid the tab. Recorded in each
+domain's manifest and in ``docs/ref-permisos.md``; this file used to claim viewer
+held *every* ``*_view``, which reads like a bug the first time you meet it.
 """
 import uuid
 
@@ -22,7 +29,8 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 from tests.conftest import _HAS_FLASK, _login
-from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS
+from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
+from lib.core.constants import BUILTIN_ROLE_UIDS
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 

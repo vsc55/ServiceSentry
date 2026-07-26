@@ -34,6 +34,7 @@ from lib.security import secret_manager
 
 from lib.core.modules import service as modules_svc
 from lib.core.modules.service import AdminOpError
+from lib.core.permissions import service as perms_svc
 
 
 def register(app, wa):
@@ -107,6 +108,17 @@ def register(app, wa):
                 old_data, data, sensitive=wa._sensitive_fields,
             )
             wa._audit('modules_saved', detail=changes or '')
+            # A module or a cluster item that just disappeared leaves its scoped keys
+            # behind. Module names, unlike UIDs, CAN come back — which is exactly why they
+            # are purged: a stale module.<name>.edit would silently apply to whatever is
+            # called that next, and a grant nobody remembers granting is the bad direction.
+            gone_modules = [m for m in old_data if m not in data]
+            if gone_modules:
+                wa._purge_scoped_permissions('module', gone_modules)
+            gone_clusters = (perms_svc.cluster_item_uids(old_data)
+                             - perms_svc.cluster_item_uids(data))
+            if gone_clusters:
+                wa._purge_scoped_permissions('cluster', sorted(gone_clusters))
             # Round-trip any new host links so the client persists them (a later
             # save in this session then reuses the host instead of re-creating it).
             return jsonify({'ok': True, 'provisioned': provisioned})

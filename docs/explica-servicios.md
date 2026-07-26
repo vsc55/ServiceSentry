@@ -50,7 +50,7 @@ el contexto (config, stores, debug):
 | `manager.py` | El **mixin compartido** (`_<X>Mixin`, sin Flask): toda la lógica de ciclo de vida (scheduler / listener / worker) — la usan ambos hosts |
 | `embedded.py` | `Embedded<X>`: host = **WebAdmin** (delega config/stores). Aporta `status()`, `control(action)`, `start_at_boot()` y opcional `on_config_changed(changed)` |
 | `service.py` | `<X>Service`: host = **propio** (construye su conector/config). El runner del modo standalone (`--<key>`) |
-| `store/`, `routes.py`, `permissions.py`, `overview_widget.py` | Opcionales: persistencia, endpoints (un único `routes.py`; events añade `rules_logic.py` con la lógica sin Flask), permisos self-describing y widget de Overview del servicio |
+| `store/`, `routes.py`, `manifest.py`, `overview_widget.py` | Opcionales: persistencia, endpoints (un único `routes.py`; events añade `rules_logic.py` con la lógica sin Flask), permisos self-describing y widget de Overview del servicio |
 
 ```mermaid
 flowchart LR

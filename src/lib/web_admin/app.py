@@ -23,9 +23,9 @@ from lib.core.object_base import ObjectBase
 from lib.security import csrf as _csrf, secret_manager
 from lib.security.headers import apply_security_headers
 from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
+from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
 from lib.core.permissions import (
     PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
-    BUILTIN_ROLE_UIDS, ROLES,
 )
 from .constants import HOME_PAGES
 from lib.config.spec import (
@@ -57,9 +57,7 @@ def _cfg_default(path: str):
     default means editing only ``config_spec.CONFIG_FIELDS``.
     """
     return CFG_BY_PATH[path].default
-from .mixins import (
-    _PermissionsMixin, _AuthMixin, _ServicesMixin,
-)
+from .mixins import _AuthMixin, _ServicesMixin
 # fail2ban host glue lives with its service package (lib.services.ipban), like the
 # syslog/events managers — inherited here because the request gate is host-level.
 from lib.services.ipban.manager import _IpBanMixin
@@ -68,6 +66,7 @@ from lib.services.ipban.manager import _IpBanMixin
 from lib.services.monitoring.checks_mixin import _ChecksMixin
 # Core domains packaged under lib.core carry their own WebAdmin glue (mixin),
 # inherited here just like the mixins above.
+from lib.core.permissions.mixin import _PermissionsMixin
 from lib.core.sessions.mixin import _SessionsMixin
 from lib.core.users.mixin import _UsersMixin
 from lib.core.roles.mixin import _RolesMixin

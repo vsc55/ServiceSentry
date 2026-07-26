@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Custom roles mixin for WebAdmin."""
 
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS
 
 # Legacy permission-flag renames applied to stored custom roles on load (one-off, then
 # persisted). Repairs any DB that briefly carried the singular ``cluster_*`` flags back to

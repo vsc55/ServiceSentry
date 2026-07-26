@@ -236,6 +236,9 @@ def register(app, wa):
             'uid': uid, 'name': old.get('name', ''), 'address': old.get('address', ''),
             'checks_deleted': checks_deleted,
         })
+        # The roles that scoped a permission to THIS host keep a key naming something that
+        # no longer exists — dead weight nobody can see, and counted as a grant.
+        wa._purge_scoped_permissions('server', [uid])
         return jsonify({'ok': True, 'checks_deleted': checks_deleted})
 
     # ── test / probe endpoints (run a check once without saving) ─────────────────

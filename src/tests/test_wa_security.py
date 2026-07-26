@@ -52,7 +52,7 @@ class TestSecurityInjection:
     def _make_multiuser(config_dir, var_dir):
         """Admin 'secadmin' + viewer + editor for privilege-escalation tests."""
         import uuid as _uuid
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         wa = WebAdmin(config_dir, "secadmin", "secpass", var_dir=var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True

@@ -14,8 +14,7 @@ from __future__ import annotations
 import hmac
 import uuid
 
-from lib.core.permissions import BUILTIN_ROLE_UIDS, _BUILTIN_GROUPS
-from lib.core.constants import SYSTEM_USER
+from lib.core.constants import BUILTIN_GROUP_UID_SET, BUILTIN_ROLE_UIDS, SYSTEM_USER
 
 USER_SCHEMA  = 'urn:ietf:params:scim:schemas:core:2.0:User'
 GROUP_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:Group'
@@ -113,7 +112,7 @@ class ScimService:
     def deny_group_write(self, gid, g):
         """SCIM may only mutate groups it owns. Reject built-in groups (would let a
         token add admins / delete the Administrators group) and any non-SCIM group."""
-        if gid in _BUILTIN_GROUPS:
+        if gid in BUILTIN_GROUP_UID_SET:
             return self.err(403, 'Built-in groups cannot be modified via SCIM', 'mutability')
         if (g or {}).get('source') != 'scim':
             return self.err(403, 'Only SCIM-managed groups can be modified via SCIM', 'mutability')

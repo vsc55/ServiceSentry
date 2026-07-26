@@ -8,6 +8,145 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.5] - 2026-07-26
+
+### Added
+- **Permissions is now a section of its own, under Access.** Assigning permissions to roles only
+  existed inside the role modal: one role at a time, an accordion over 17 groups and 64
+  permissions. The question that matters most when handing out access — "does support have
+  everything editor has?" — meant opening two modals and remembering the first. The new section
+  puts every role on one page, and ships **two layouts side by side** so they can be compared on
+  real data before one is kept: a **matrix** (permissions × roles, sticky header and first column,
+  built-ins first in descending privilege) for reading *across* roles, and **two panes** (role list
+  | that role's permissions, with room for each permission's description) for working *on* one.
+  The switcher remembers the choice; a text filter and an "only differences" toggle (hide the
+  permissions every role agrees on) apply to both.
+- **Copy one role's permissions onto others.** Pick a source (any role — a built-in is what a
+  custom one is usually modelled on), the targets among the roles you may edit, and whether to
+  **replace** or **add**; each target shows what the copy would change (+n / -n, or "already
+  identical") before you commit to it. The result lands in the **draft**, not on the server: the
+  copied cells go amber like any hand-made edit, Save sends them and Discard throws them away.
+  Reaching for the API here would have been a second way to change permissions — one that skips
+  the screen showing what changed.
+- **Which roles are columns is a choice.** Twenty-four of them is not a comparison, it is
+  horizontal scrolling: you can no longer see the two roles you are contrasting. A picker in the
+  header selects them (with a search, show-all / hide-all, and "hide built-in" as a preset), and
+  the selection is remembered. It filters the role LIST rather than the columns, so the counters
+  and what "only differences" compares follow it — a screen must not call two roles identical
+  because the one that disagreed is hidden. A role with unsaved changes is never hidden: losing
+  sight of an edit is how it gets discarded by accident.
+- **The per-instance permissions are there too** — `module.<id>.<action>`,
+  `server.<uid>.<action>`, `cluster.<uid>.<action>`, the ones that narrow a global flag down to
+  one module, host or cluster. The matrix gives each its own row (a row is a permission; the
+  columns are already spent on roles); the two-pane view draws the role modal's items × actions
+  table, from **that same builder**, hooked to the draft. Where the resources come from is the
+  registry both layouts share, so a new scoped resource appears in both at once. A built-in role's
+  boxes are derived from its global flag. In the matrix each override block folds — closed by
+  default, because N modules × 4 actions unfolded buries the catalog rows the layout exists to
+  compare — and a search opens them, since a match hidden behind a collapsed caption makes the
+  search look like it found nothing.
+- Built-in roles appear as **read-only columns**. Their permission sets are the product's
+  definition of admin/editor/viewer and the API refuses to change them — they are shown, not
+  hidden, because they are the yardstick a custom role is read against.
+- `.ss-gridtable` — generic cross-tabulation grid styling (sticky header + sticky first column),
+  `.ss-changed` for a value edited but not yet saved, and the full-bleed rules that stop the grid
+  fencing itself in against the window edges. Reusable classes, no per-table or per-id rules. The
+  section's own chrome is the card + accent + card-header that every list section already uses, so
+  it flattens edge-to-edge in a full-bleed pane exactly like Users or Roles beside it.
+- `tests/test_core_domain_layout.py` — the layout rule below is now enforced, not just written
+  down: no domain mixin may be left in `lib/web_admin/mixins`, a domain `__init__` may not import
+  its own mixin, the catalog must still import **without Flask** (the import cycle discovery
+  depends on stays open — with a positive control so the check cannot pass vacuously), the built-in
+  UUIDs may appear in exactly one file, and each unified rule must have exactly one definition.
+- **A build can no longer be opened without a commit** (`tests/test_changelog_frozen.py`). One
+  build per commit means at most ONE section may be unpublished at a time; this very release had
+  two, because the version was bumped again before the first was committed. The existing version
+  guard cannot see it — the number still matches the newest heading — so it is checked directly
+  against `HEAD`.
+
+### Changed
+- **Permissions is a core domain package now, like every other domain.** `lib/core/__init__.py`
+  says a domain bundles its store, its mixin, its routes and its manifest *"instead of spreading
+  those across lib/stores, lib/web_admin/mixins and lib/web_admin/routes"* — and permissions was
+  the one domain the reorganisation had stopped short of: its 210-line resolution mixin
+  (`_get_effective_permissions`, `_get_session_permissions`, `_role_grantable`, the
+  per-module/server/cluster checks) still sat in `lib/web_admin/mixins/permissions.py`. The flat
+  `lib/core/permissions.py` is now a package: `__init__.py` keeps the catalog and discovery,
+  `mixin.py` holds the resolution. `from lib.core.permissions import …` still resolves, so the move
+  is invisible to the modules that import the catalog.
+- There is **no** permissions store or routes, and that is deliberate: permissions are not
+  persisted (the catalog is static; what a role holds is a field of that role), and the catalog
+  reaches the client through the dashboard's template context and `GET /api/v1/me`. Said out loud
+  in the package docstring so the absence reads as a decision rather than an omission.
+- **The role modal's Permissions tab is gone: there is now ONE place permissions are assigned.**
+  Two editors over the same field is how one screen silently undoes what the other saved — and the
+  modal PUT every checkbox it held, including the ones it had not refreshed. It keeps what it is
+  actually about (the role's identity and who holds it) and its General tab links to the section.
+  Editing a role no longer sends `permissions` at all; the one case that still does is **clone**,
+  where a POST decides the new role's whole set.
+- The registry of scoped resources and the items × actions table moved with the editor, from
+  `partials/roles/_permissions.html` to `partials/permissions/_resources.html` — the rest of that
+  file was the modal's accordion and went with the tab, along with twelve i18n keys that only it
+  used.
+
+### Fixed
+- **A per-instance permission now dies with the resource it names.** `server.<uid>.edit`,
+  `module.<name>.view` and `cluster.<uid>.delete` scope a global flag to one thing, and nothing
+  connected the two: deleting a host left its keys in every role's permission list for good. They
+  granted nothing — a UUID is never reused — but they piled up unseen, and the new section counts
+  them, so a role reported more scoped grants than it had. Removing a host, a module or a cluster
+  item now strips its keys, once, from the roles that held them, and audits it
+  (`role_permissions_pruned`) because it edits permissions without anyone asking on that screen.
+  Module names are the case worth stating: a name CAN come back, so a stale `module.ping.edit`
+  would silently apply to whatever is called `ping` next — that is why they are purged rather than
+  kept in case it returns. Pruning happens on delete, where exactly what disappeared is known;
+  doing it on load would mean deciding what is "unknown" from a store that may simply have failed
+  to read. Keys already accumulated in an existing install stay until their resource is deleted
+  again.
+- **The built-in `viewer` role could not see credentials.** `credentials_view` was granted to
+  editor only, which is what the new section made visible. The listing masks every secret and a
+  viewer already reached that endpoint through `servers_view` for the host form's credential
+  picker, so withholding the flag only hid the tab. `config_view` stays out: configuration fronts
+  secrets in more places and does not mask them the same way.
+- **"What counts as a permission" had two definitions, written out identically** — once where a
+  role is saved (`roles/service.py`) and once where a role's permissions are resolved. A new kind
+  of per-instance key would have had to be remembered in both, and the half that was forgotten
+  would silently DROP those keys instead of failing. Now `is_valid_perm` / `filter_valid_permissions`
+  live with the catalog and both directions call them.
+- **The built-in UUIDs sat in the module that never read them.** `BUILTIN_ROLE_UIDS`,
+  `BUILTIN_GROUP_UIDS` and `ROLES` lived in the permissions catalog, which does not use a single
+  one of them — users, groups, roles, permission resolution, SCIM and the CLI do. They are
+  identity, not catalog, and no domain owns them, so they moved to `lib/core/constants.py`, the
+  module that exists precisely so everything imports downwards into `lib.core` (putting them in
+  `lib.core.roles` instead would have made the catalog import a domain that already imports the
+  catalog). Every importer was updated rather than given a re-export: an alias would be the second
+  name the move exists to remove.
+- **`ROLES` and the keys of `BUILTIN_ROLE_UIDS` were the same four names, written twice.** `ROLES`
+  is derived from the map now, so a new built-in role cannot land in one and miss the other. The
+  third enumeration — what each built-in role grants — cannot be derived and is checked by a test
+  instead: a role with a UID but no grants would resolve to no permissions at all, silently.
+- **Two test files carried pasted copies of the UUIDs**, which is the failure mode that makes them
+  worth centralising: a hardcoded copy passes its own assertions while the product uses a different
+  value. They import them now, and a guard fails on any new literal.
+- **The escalation guard had two spellings too.** "A non-admin may only grant permissions they
+  hold" existed as a closure inside the roles routes and again as the last line of
+  `_role_grantable` — the same predicate, so either could have been tightened without the other.
+  It is now `_perms_grantable` in the permissions mixin, and both callers go through it.
+- Documentation said each domain declares its permissions in a `permissions.py`; discovery has
+  read `manifest.py` for a while. Corrected across the four docs that repeated it.
+
+### Notes
+- Saving from the new section sends **only** `permissions`, so a partial PUT leaves a role's name,
+  description and `enabled` exactly as they were, and the draft is seeded from the role's full
+  permission list so the granular keys the screen never renders (`module.<name>.view` …) survive a
+  save. Both are pinned by tests, from the API end and from the screen's end.
+- The 30 s Access poll refreshes untouched roles, but only when the roles actually changed, and
+  never over an edit in progress. Redrawing regardless rebuilds the DOM under the reader: it threw
+  you back to the top of the grid twice a minute. A redraw also restores the scroll position, which
+  matters just as much on each keystroke of the filter.
+
+---
+
 ## [0.0.1+build.4] - 2026-07-26
 
 ### Added

@@ -1,0 +1,99 @@
+{# ================================================================
+   Copy one role's permissions onto others — the dialog's behaviour.
+
+   Everything it does lands in the section's draft (_permDraft), so the result is
+   reviewable before it exists: the changed cells go amber, Save sends them and Discard
+   throws them away. That is also why there is no API call here — one write path.
+   ================================================================ #}
+
+/** Open the dialog. Defaults the source to the role you are looking at (the two-pane
+ *  selection, or the first visible one), because "copy THIS one onto those" is the way
+ *  round you normally want it. */
+function _permOpenCopy() {
+    const roles = _permRoles();
+    if (!roles.length) return;
+    const sel = document.getElementById('permCopyFrom');
+    const from = (_permView === 'split' && _permSelRole) || roles[0].uid;
+    // Every role can be a SOURCE, built-ins included: "make support look like editor" is
+    // the reason most people open this.
+    sel.innerHTML = Object.entries(rolesData)
+        .map(([uid, rd]) => ({ uid, name: rd.name || uid, builtin: !!rd.builtin }))
+        .sort((a, b) => (b.builtin - a.builtin) || a.name.localeCompare(b.name))
+        .map(r => `<option value="${escAttr(r.uid)}"${r.uid === from ? ' selected' : ''}
+                   >${esc(r.name)}${r.builtin ? ' 🔒' : ''}</option>`).join('');
+    _permCopyRender();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('permCopyModal')).show();
+}
+
+function _permCopyMode() {
+    return document.getElementById('permCopyModeAdd')?.checked ? 'add' : 'replace';
+}
+
+/** The targets: every role this user may actually write. Built-ins are out — the API
+ *  refuses their permissions — and so is the source itself. */
+function _permCopyRender() {
+    const from = document.getElementById('permCopyFrom')?.value || '';
+    const box = document.getElementById('permCopyTargets');
+    if (!box) return;
+    const targets = Object.entries(rolesData)
+        .filter(([uid]) => uid !== from && _permCanEdit(uid))
+        .map(([uid, rd]) => ({ uid, name: rd.name || uid }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    if (!targets.length) {
+        box.innerHTML = `<div class="text-muted small">${esc(t('perm_copy_no_targets'))}</div>`;
+        _permCopySync();
+        return;
+    }
+    const source = new Set(rolesData[from]?.permissions || []);
+    const mode = _permCopyMode();
+    box.innerHTML = targets.map(r => {
+        // What the copy would actually change, per target — so a role that already matches
+        // says so instead of looking like work about to happen.
+        const current = _permSetOf(r.uid);
+        const after = mode === 'add' ? new Set([...current, ...source]) : source;
+        const added = [...after].filter(p => !current.has(p)).length;
+        const removed = [...current].filter(p => !after.has(p)).length;
+        const delta = (added || removed)
+            ? `<span class="ss-fs-1">${added ? `<span class="text-success">+${added}</span>` : ''}
+               ${removed ? `<span class="text-danger ms-1">-${removed}</span>` : ''}</span>`
+            : `<span class="text-muted ss-fs-1">${esc(t('perm_copy_identical'))}</span>`;
+        return `<div class="form-check d-flex align-items-center gap-2 mb-0">
+            <input class="form-check-input mt-0" type="checkbox" id="permcopy_${escAttr(r.uid)}"
+                   value="${escAttr(r.uid)}" onchange="_permCopySync()">
+            <label class="form-check-label small flex-grow-1" for="permcopy_${escAttr(r.uid)}"
+                   >${esc(r.name)}</label>
+            ${delta}
+        </div>`;
+    }).join('');
+    _permCopySync();
+}
+
+function _permCopyChecked() {
+    return [...document.querySelectorAll('#permCopyTargets input[type=checkbox]:checked')]
+        .map(cb => cb.value);
+}
+
+function _permCopySync() {
+    document.getElementById('permCopyApply')
+        ?.toggleAttribute('disabled', _permCopyChecked().length === 0);
+}
+
+/** Stage the copy in the draft. Nothing is sent: the section's Save button is the only
+ *  thing that talks to the API, so a copy is reviewed like any hand-made edit. */
+function _permCopyApply() {
+    const from = document.getElementById('permCopyFrom')?.value || '';
+    const targets = _permCopyChecked();
+    if (!from || !targets.length) return;
+    const source = rolesData[from]?.permissions || [];
+    const mode = _permCopyMode();
+    for (const uid of targets) {
+        if (!_permCanEdit(uid)) continue;
+        const current = new Set(rolesData[uid]?.permissions || []);
+        _permDraft[uid] = mode === 'add' ? new Set([...current, ...source]) : new Set(source);
+    }
+    bootstrap.Modal.getInstance(document.getElementById('permCopyModal'))?.hide();
+    // Show the result where the changes are: the matrix compares columns, which is what a
+    // copy is about, and the split view would only show one of the targets.
+    if (_permView !== 'matrix') _permSetView('matrix'); else renderPermissions();
+    showToast(tf('perm_copy_staged', targets.length));
+}

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Permissions resolution mixin for WebAdmin."""
+"""Permissions resolution mixin for WebAdmin — the domain's web glue.
+
+The catalog says what a permission *is* (:mod:`lib.core.permissions`); this says what a
+given session, role or group effectively *holds*, and whether the requester may hand it
+to someone else.
+
+It lived in ``lib/web_admin/mixins/permissions.py`` long after the other domains had
+moved into ``lib.core.<domain>`` with their own ``mixin`` — the reorganisation stopped
+one domain short.
+"""
 
 import re
 
 from flask import session
 
-from lib.core.permissions import (
-    BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS,
-    is_module_perm, is_server_perm, is_cluster_perm,
-)
+from lib.core.constants import BUILTIN_ROLE_UIDS
+from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, filter_valid_permissions
 
 _UUID_RE = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -107,7 +114,7 @@ class _PermissionsMixin:
         """Return the set of permissions for a role UID or internal key.
 
         Accepts:
-        - A built-in role UID (e.g. '00000000-0000-4000-8000-000000000001')
+        - A built-in role UID (a value of ``BUILTIN_ROLE_UIDS``)
         - A built-in role internal key (e.g. 'admin') — for backward compat
         - A custom role UID
 
@@ -123,11 +130,48 @@ class _PermissionsMixin:
         # Custom role by UID
         custom = self._custom_roles.get(role_ref)
         if custom and custom.get('enabled', True):
-            return frozenset(
-                p for p in custom.get('permissions', [])
-                if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)
-            )
+            # Filtered on the way out as well as on the way in: a stored role may carry a
+            # flag that no longer exists (a module uninstalled, a permission renamed), and
+            # a permission nobody can name must not be granted by a stale row.
+            return frozenset(filter_valid_permissions(custom.get('permissions', [])))
         return frozenset()
+
+    # ── Housekeeping ────────────────────────────────────────────────────────
+
+    def _purge_scoped_permissions(self, prefix: str, ids) -> int:
+        """Drop ``{prefix}.{id}.*`` from every custom role after those resources are gone.
+
+        Called from the delete paths of the resources themselves (a host, a module, a
+        cluster item), which is the only place that knows exactly what disappeared —
+        pruning on load would mean deciding what is "unknown" from a store that might
+        simply have failed to read.
+
+        Returns how many roles changed; audits once, naming them, because this edits
+        permissions without anyone asking on that screen.
+        """
+        from lib.core.permissions import service as perms_svc     # noqa: PLC0415
+        ids = [i for i in (ids or []) if i]
+        if not ids:
+            return 0
+        changed = perms_svc.strip_scoped(self._custom_roles, prefix, ids)
+        if not changed:
+            return 0
+        self._persist_roles()
+        self._audit('role_permissions_pruned', detail={
+            'resource': prefix, 'ids': list(ids),
+            'roles': [self._custom_roles[u].get('name', u) for u in changed]})
+        return len(changed)
+
+    def _perms_grantable(self, perms) -> bool:
+        """Requester-context guard: a non-admin may only grant permissions they hold.
+
+        The one rule behind every escalation check in the panel.  It was also written out
+        as a closure inside the roles routes — the same predicate spelled differently, so
+        the two could drift apart while both looked correct.
+        """
+        if self._is_admin_requester():
+            return True
+        return set(perms) <= self._get_session_permissions()
 
     def _role_grantable(self, role_ref: str) -> bool:
         """Requester-context guard: may the current requester assign role *role_ref*?
@@ -148,7 +192,7 @@ class _PermissionsMixin:
             return False
         if role_ref in set(BUILTIN_ROLE_UIDS.values()) or role_ref in BUILTIN_ROLE_PERMISSIONS:
             return True   # built-in editor/viewer — delegatable
-        return self._get_role_permissions(role_ref) <= self._get_session_permissions()
+        return self._perms_grantable(self._get_role_permissions(role_ref))
 
     def _groups_grantable(self, group_uids) -> bool:
         """Requester-context guard for assigning group MEMBERSHIP: a non-admin may only add a

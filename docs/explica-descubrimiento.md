@@ -32,7 +32,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 
 | Mecanismo | Declara (símbolo) | Raíz escaneada | Recolector | Consume / ensambla |
 |---|---|---|---|---|
-| [Permisos](#1-permisos-module_permissions) | `permissions.py` · `MODULE_PERMISSIONS` | `lib.core.*` + `lib.services.*` | `discover_permissions()` | `PERMISSIONS` / `PERMISSION_GROUPS` / `BUILTIN_ROLE_PERMISSIONS` |
+| [Permisos](#1-permisos-module_permissions) | `manifest.py` · `MODULE_PERMISSIONS` | `lib.core.*` + `lib.services.*` | `discover_permissions()` | `PERMISSIONS` / `PERMISSION_GROUPS` / `BUILTIN_ROLE_PERMISSIONS` |
 | [Widgets de Overview](#2-widgets-de-overview-overview_widgets) | `overview_widget.py` · `OVERVIEW_WIDGETS` | `lib.core.*` + `lib.services.*` | `discover_overview_widgets()` (+ `_stats` / `_rows` / `_public`) | grid de Overview + AJAX por widget |
 | [Servicios embebidos](#3-servicios-embebidos-embedded_service) | `__init__.py` · `EMBEDDED_SERVICE` (`embedded.py` · `make_embedded`) | `lib.services.*` | `discover_embedded_services()` | pestaña Services (estado + control) |
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
@@ -95,7 +95,7 @@ Cada dominio de núcleo y cada servicio declara los permisos que posee; el edito
 el modelo RBAC se ensamblan a partir de ellos. Solo el grupo `services` queda hardcodeado
 (es el anfitrión del mecanismo).
 
-**Descriptor** (`lib/core/<d>/permissions.py` o `lib/services/<s>/permissions.py`) — data pura,
+**Descriptor** (`lib/core/<d>/manifest.py` o `lib/services/<s>/manifest.py`) — data pura,
 etiquetas i18n por clave:
 
 ```python
@@ -113,7 +113,7 @@ MODULE_PERMISSIONS = {
 
 ```mermaid
 flowchart TB
-    decl["cada permissions.py<br/>MODULE_PERMISSIONS {group, order, permissions[{flag, roles}]}"]
+    decl["cada manifest.py<br/>MODULE_PERMISSIONS {group, order, permissions[{flag, roles}]}"]
     decl --> disc["discover_permissions()<br/>escanea lib.core.* + lib.services.*, ordena por 'order'"]
     disc --> asm["lib.core.permissions ensambla:"]
     asm --> p1["PERMISSIONS = flags core + descubiertos (tupla)"]
@@ -796,7 +796,7 @@ flowchart TB
 
 | Quiero… | Toco… |
 |---|---|
-| Un permiso nuevo en un dominio/servicio | su `permissions.py` → `MODULE_PERMISSIONS.permissions` (+ i18n del flag/grupo) |
+| Un permiso nuevo en un dominio/servicio | su `manifest.py` → `MODULE_PERMISSIONS.permissions` (+ i18n del flag/grupo) |
 | Una tarjeta en el Overview (dominio/servicio del core) | su `overview_widget.py` → `OVERVIEW_WIDGETS` (+ `stat`/`rows`) |
 | Uno o varios widgets de Overview desde un **módulo watchful** | `schema.json` → `__overview_widget__` (lista) + hook `Watchful.overview_widget()` — ver §2b |
 | Un servicio de fondo nuevo | un paquete en `lib/services/<s>/` con `EMBEDDED_SERVICE` + `make_embedded(host)` |

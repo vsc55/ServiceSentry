@@ -8,8 +8,7 @@ After the Propuesta-A refactor the ``_groups`` dict is keyed by **uid**
 
 from datetime import datetime, timezone
 
-from lib.core.permissions import BUILTIN_GROUP_UIDS, BUILTIN_ROLE_UIDS
-from lib.core.constants import SYSTEM_USER
+from lib.core.constants import BUILTIN_GROUP_UIDS, BUILTIN_ROLE_UIDS, SYSTEM_USER
 
 
 class _GroupsMixin:

@@ -6,7 +6,10 @@ MODULE_PERMISSIONS = {
     'group': 'perm_group_credentials',
     'order': 180,
     'permissions': (
-        {'flag': 'credentials_view',   'roles': ('editor',)},  # view reusable credentials
+        # viewer sees them too: the listing masks every secret (secret_manager.mask_sensitive)
+        # and a viewer already reaches that endpoint through servers_view/modules_view for the
+        # host form's credential picker — withholding the flag only hid the Credentials tab.
+        {'flag': 'credentials_view',   'roles': ('editor', 'viewer')},  # view reusable credentials
         {'flag': 'credentials_add',    'roles': ()},           # create reusable credentials (admin)
         {'flag': 'credentials_edit',   'roles': ('editor',)},  # edit reusable credentials
         {'flag': 'credentials_delete', 'roles': ()},           # delete reusable credentials (admin)

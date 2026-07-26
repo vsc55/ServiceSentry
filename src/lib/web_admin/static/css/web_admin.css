@@ -195,6 +195,11 @@
     margin-bottom: -1rem;
 }
 .ss-fullbleed-top { margin-top: -0.75rem; }
+/* A cross-tab grid in a full-bleed pane shares the header's bottom edge instead of drawing
+   a second one, and does not fence itself in against the window edges. */
+.ss-fullbleed .ss-gridtable thead tr > *      { border-top: 0; }
+.ss-fullbleed .ss-gridtable tr > :first-child { border-left: 0; }
+.ss-fullbleed .ss-gridtable tr > :last-child  { border-right: 0; }
 /* History's pane is a flex column so #history-container (flex:1 1 auto) fills it. This MUST
    stay scoped to .active: an unqualified #tab-history is an id selector, so it outranks
    Bootstrap's `.tab-content > .tab-pane { display:none }` and would keep the (tall) History
@@ -471,6 +476,39 @@
 /* Thead backgrounds */
 .ss-thead        { background: var(--bs-tertiary-bg); }
 .ss-thead-sticky { position: sticky; top: 0; z-index: 1; background: var(--bs-tertiary-bg); }
+
+/* Cross-tabulation grid — a table with more columns than fit and a first column that
+   names the row (permissions × roles today; any other matrix tomorrow). Header row AND
+   first column both stay put while the body scrolls in either direction, so a cell in
+   the far corner still says which row and which column it belongs to.
+   Generic on purpose: add the class to a table inside an .ss-vscroll and it works, with
+   no per-table rule. Borders are drawn per cell rather than with .table-bordered because
+   sticky cells need `border-collapse: separate`, and collapsed borders do not scroll
+   with the cell they belong to. */
+.ss-gridtable { border-collapse: separate; border-spacing: 0; width: 100%; }
+.ss-gridtable th,
+.ss-gridtable td { border-bottom: 1px solid var(--bs-border-color);
+                   border-right: 1px solid var(--bs-border-color); }
+.ss-gridtable tr > :first-child  { border-left: 1px solid var(--bs-border-color); }
+.ss-gridtable thead tr > *       { border-top:  1px solid var(--bs-border-color); }
+.ss-gridtable thead th           { position: sticky; top: 0; z-index: 2;
+                                   background: var(--bs-tertiary-bg); }
+.ss-gridtable tbody tr > :first-child { position: sticky; left: 0; z-index: 1;
+                                        background: var(--bs-body-bg); }
+/* The corner cell is sticky in both directions, so it must outrank both. */
+.ss-gridtable thead tr > :first-child { left: 0; z-index: 3; }
+/* Row-level backgrounds (.table-active group rows, :hover) are painted on the <tr>, which
+   a sticky cell with its own opaque background would hide — repeat them on the cell. */
+.ss-gridtable tbody tr.table-active > :first-child { background: var(--bs-tertiary-bg); }
+.ss-gridtable tbody tr:hover > :first-child        { background: var(--bs-secondary-bg); }
+
+/* A value edited but not yet saved. One class for every screen that keeps a draft, so
+   "pending" looks the same wherever it appears. Declared after the sticky/hover rules
+   above — same specificity, so being last is what makes a changed cell keep its colour
+   under the cursor. */
+.ss-changed,
+.ss-gridtable tbody tr:hover > .ss-changed,
+.ss-gridtable tbody tr > .ss-changed { background: var(--bs-warning-bg-subtle); }
 
 /* Column header cells */
 .ss-th {

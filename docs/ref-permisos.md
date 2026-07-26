@@ -20,7 +20,7 @@ código) tiene exactamente esos 64 flags.
 |-----|----------|
 | `admin` | Todos los permisos (64 flags) |
 | `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
-| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view` (sin `config_view` ni `credentials_view`) |
+| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`, `credentials_view` (sin `config_view`, que expone secretos sin enmascarar) |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos vía API. Sí permiten
 > actualizar la **etiqueta** (`label`) y gestionar qué usuarios/grupos lo tienen asignado. El
@@ -31,6 +31,11 @@ código) tiene exactamente esos 64 flags.
 
 Se crean desde **Acceso → Roles** asignando cualquier combinación de los 64 permisos. Se
 persisten en la tabla `roles`.
+
+Sus permisos se editan en **un** sitio: la sub-sección **Acceso → Permisos**, que pone todos los
+roles a la vez frente a los integrados. El modal del rol edita su identidad y a quién se le asigna,
+nunca lo que puede hacer. Ver
+[explica-web-admin.md](explica-web-admin.md#sub-sección-permisos-acceso--permisos).
 
 ## Grupos de usuarios
 
@@ -107,16 +112,32 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
 - `server.<uid>.<acción>` — permiso por host (ver [explica-hosts.md](explica-hosts.md)).
 - `cluster.<uid>.<acción>` — permiso por cluster.
 
+> **Mueren con su recurso.** Borrar un host, quitar un módulo de la configuración o eliminar un
+> cluster **poda** sus claves de todos los roles personalizados, con entrada de auditoría
+> (`role_permissions_pruned`). Se poda en el borrado, que es el único punto que sabe exactamente
+> qué desapareció; hacerlo al cargar obligaría a decidir qué es «desconocido» a partir de un store
+> que quizá solo falló al leer. Los nombres de módulo se podan igual **aunque puedan volver**: un
+> `module.ping.edit` obsoleto se aplicaría en silencio al siguiente `ping`, y una concesión que
+> nadie recuerda haber dado es peor que una que hay que volver a marcar.
+
 ---
 
 ## Estructuras internas
 
+- `BUILTIN_ROLE_UIDS` / `BUILTIN_GROUP_UIDS` / `BUILTIN_GROUP_UID_SET` — los UUID estables de
+  roles y grupos integrados, en `lib/core/constants.py`. **No** están con el catálogo de permisos:
+  son identidad, la nombran users/groups/roles/resolución/SCIM/CLI, y no las posee ningún dominio.
+- `ROLES` — las claves de rol integrado, mayor privilegio primero. **Derivada** de
+  `BUILTIN_ROLE_UIDS`, no escrita otra vez.
 - `PERMISSIONS` — tupla con los 64 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de
   roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` de los roles integrados.
 - `_perm_required(*perms)` — factoría de decoradores: acepta si el usuario tiene **alguno** de
   los permisos indicados. Ver [ref-api.md](ref-api.md#guards-de-permiso).
+- `is_valid_perm(p)` / `filter_valid_permissions(perms)` — qué cadena cuenta como permiso
+  (flag conocido o clave por-instancia bien formada). **Única fuente**: la usan tanto el guardado
+  de un rol como la resolución de sus permisos.
 - `_get_effective_permissions(username, role)` — unión del frozenset del rol del usuario más
   los permisos de todos los roles de todos sus grupos.
 - `GET /api/v1/me` — incluye `permissions: list[str]` con los permisos efectivos de la sesión.

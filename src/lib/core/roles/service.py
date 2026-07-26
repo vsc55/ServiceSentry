@@ -16,11 +16,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from lib.core.constants import SYSTEM_USER
-from lib.core.permissions import (
-    BUILTIN_ROLE_PERMISSIONS, BUILTIN_ROLE_UIDS, PERMISSIONS, ROLES,
-    is_cluster_perm, is_module_perm, is_server_perm,
-)
+from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES, SYSTEM_USER
+from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, filter_valid_permissions
 from lib.core.groups.service import MAX_GROUP_DESC_LEN
 from lib.core.users.service import AdminOpError
 from lib.util.entity_audit import touch_entity, track_change
@@ -33,10 +30,9 @@ def _now() -> str:
 
 
 # ── pure helpers ─────────────────────────────────────────────────────────────────
-def filter_valid_permissions(perms) -> list:
-    """Keep only recognised permission strings (fixed set + module/server/cluster)."""
-    return [p for p in (perms or [])
-            if p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)]
+# ``filter_valid_permissions`` is imported from the catalog and re-exported here: callers
+# reach it as ``roles_svc.filter_valid_permissions`` (the roles routes do), but the rule
+# itself belongs to the permissions catalog, not to roles.
 
 
 def role_name_taken(name: str, custom_roles: dict, builtin_role_names: dict, *,

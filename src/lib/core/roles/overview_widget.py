@@ -7,8 +7,8 @@ def role_meta(wa) -> dict:
     """Shared role metadata (``role_names`` / ``role_keys``) the users/groups/sessions
     by-role badges resolve uids to names with.  Not sensitive (ungated); served in the
     slim overview aggregate so every role badge can render regardless of ``roles_view``."""
-    from lib.core.permissions import (BUILTIN_ROLE_PERMISSIONS,  # noqa: PLC0415
-                                         BUILTIN_ROLE_UIDS)
+    from lib.core.constants import BUILTIN_ROLE_UIDS             # noqa: PLC0415
+    from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS    # noqa: PLC0415
     role_names: dict = {}
     role_keys: dict = {}
     for k in BUILTIN_ROLE_PERMISSIONS:

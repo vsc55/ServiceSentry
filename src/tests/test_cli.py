@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from lib.core.groups import service as G
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS
 from lib.core.users import service as U
 from lib.core.users.service import AdminOpError, PasswordPolicy
 

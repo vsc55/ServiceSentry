@@ -17,9 +17,8 @@ Routes registered by this file:
 from flask import jsonify, session
 
 from lib.core.groups import service as groups_svc
-from lib.core.permissions import BUILTIN_ROLE_UIDS, _BUILTIN_GROUPS
+from lib.core.constants import BUILTIN_GROUP_UID_SET, BUILTIN_ROLE_UIDS, SYSTEM_USER
 from lib.web_admin.constants import home_page_ids
-from lib.core.constants import SYSTEM_USER
 
 
 def register(app, wa):
@@ -61,7 +60,7 @@ def register(app, wa):
                 'description': gdata.get('description', ''),
                 'roles':       role_uids,
                 'members':     members_by_group.get(group_uid, []),
-                'builtin':     group_uid in _BUILTIN_GROUPS,
+                'builtin':     group_uid in BUILTIN_GROUP_UID_SET,
                 'source':      gdata.get('source', 'local'),   # 'local' | 'scim'
                 'enabled':     gdata.get('enabled', True),
                 'landing_page': gdata.get('landing_page', ''),
@@ -115,7 +114,7 @@ def register(app, wa):
         here; the data validation + mutation + audit run in :func:`groups_svc.update_group`."""
         if uid not in wa._groups:
             return jsonify({'error': wa._t('group_not_found')}), 404
-        is_builtin   = uid in _BUILTIN_GROUPS
+        is_builtin   = uid in BUILTIN_GROUP_UID_SET
         is_admin_req = wa._is_admin_requester()
         data, err = wa._require_json()
         if err:

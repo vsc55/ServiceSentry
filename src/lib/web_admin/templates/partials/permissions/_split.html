@@ -1,0 +1,152 @@
+{# ================================================================
+   Permissions — layout B: two panes, roles | permissions.
+
+   What it is for: working ON one role. The matrix answers "how do these roles differ";
+   this answers "what exactly does support get", with room for the full label and the
+   description of every permission instead of a column two characters wide.
+
+   Same draft, same save path as the matrix — switching layouts mid-edit keeps the
+   pending changes. State and filtering live in _state.html; this file only draws.
+   ================================================================ #}
+
+/** The role whose permissions the right pane is editing. Defaults to the first role the
+ *  user can actually change, so the pane opens on something editable instead of on
+ *  admin, which is read-only.
+ *
+ *  Checked against the VISIBLE roles, not against rolesData: a role that was selected and
+ *  is now filtered out (hiding the built-ins) would otherwise stay on the right pane with
+ *  nothing highlighting it on the left. */
+function _permSplitRole(roles) {
+    if (_permSelRole && roles.some(r => r.uid === _permSelRole)) return _permSelRole;
+    _permSelRole = (roles.find(r => _permCanEdit(r.uid)) || roles[0]).uid;
+    return _permSelRole;
+}
+
+function _permSelectRole(uid) {
+    _permSelRole = uid;
+    renderPermissions();
+}
+
+/** Left pane: every role, with how many catalog permissions it grants and a dot when it
+ *  holds unsaved changes — so an edit is not lost from view by switching role. */
+function _permSplitRolesHtml(roles, selected) {
+    let h = '<div class="list-group list-group-flush">';
+    for (const { uid, rd } of roles) {
+        const n = _permCounts(uid);
+        const scoped = n.scoped
+            ? `<span class="badge bg-secondary rounded-pill ss-fs-1"
+                     title="${escAttr(tf('perm_count_scoped', n.scoped))}"
+               ><i class="bi bi-diagram-2"></i> ${n.scoped}</span>` : '';
+        const lock = rd.builtin
+            ? ` <i class="bi bi-lock-fill text-muted ss-fs-1" title="${escAttr(t('role_builtin_badge'))}"></i>` : '';
+        const dirty = _permIsDirty(uid)
+            ? ` <span class="text-warning" title="${escAttr(t('unsaved_changes'))}">●</span>` : '';
+        h += `<button type="button" class="list-group-item list-group-item-action py-2
+                    ${uid === selected ? ' active' : ''}"
+                onclick="_permSelectRole(${jsStr(uid)})">
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-truncate flex-grow-1">${esc(_permRoleName(uid))}${lock}${dirty}</span>
+                ${scoped}
+                <span class="badge bg-secondary rounded-pill ss-fs-1">${n.global}</span>
+            </div>
+        </button>`;
+    }
+    return h + '</div>';
+}
+
+/** One group of the right pane: its bulk grant/revoke buttons and a switch per
+ *  permission, with the permission's own description under the label — the room the
+ *  matrix's narrow columns do not have. */
+function _permSplitGroupHtml(groupKey, perms, uid, editable) {
+    const held = perms.filter(p => _permHas(uid, p)).length;
+    let h = `<div class="mb-3">
+        <div class="d-flex align-items-center gap-2 mb-1 pb-1"
+             style="border-bottom:1px solid var(--bs-border-color)">
+            <span class="fw-semibold">${esc(t(groupKey) || groupKey)}</span>
+            ${perms.length ? `<span class="badge bg-secondary rounded-pill ss-fs-1">${held}/${perms.length}</span>` : ''}`;
+    if (editable && perms.length) {
+        h += `<div class="btn-group btn-group-sm ms-auto">
+            <button type="button" class="btn btn-secondary py-0 px-2 ss-fs-1"
+                    onclick="_permToggleGroup(${jsStr(uid)}, ${jsStr(groupKey)}, true)"
+                    >${esc(t('perm_group_grant_all'))}</button>
+            <button type="button" class="btn btn-secondary py-0 px-2 ss-fs-1"
+                    onclick="_permToggleGroup(${jsStr(uid)}, ${jsStr(groupKey)}, false)"
+                    >${esc(t('perm_group_revoke_all'))}</button>
+        </div>`;
+    }
+    h += '</div><div class="row g-2">';
+    for (const perm of perms) {
+        const hint = _permHint(perm);
+        h += `<div class="col-12 col-lg-6 col-xxl-4">
+            <div class="form-check form-switch mb-0 py-1 rounded${_permCellClass(uid, perm)}"
+                 data-perm-cell>
+                <input class="form-check-input" type="checkbox" id="permsw_${esc(perm)}"
+                       ${_permHas(uid, perm) ? 'checked' : ''}${editable ? '' : ' disabled'}
+                       onchange="_permToggle(${jsStr(uid)}, ${jsStr(perm)}, this)">
+                <label class="form-check-label small" for="permsw_${esc(perm)}">
+                    ${esc(_permLabel(perm))}
+                    ${hint ? `<div class="text-muted ss-fs-1">${esc(hint)}</div>` : ''}
+                </label>
+            </div>
+        </div>`;
+    }
+    h += '</div>';
+
+    // Per-instance overrides (this module / this host / this cluster). Only ONE role is on
+    // screen here, so this pane can afford the full items × actions table (_resources.html),
+    // hooked to the draft through onChange.
+    const { spec, rows } = _permVisibleResRows(groupKey);
+    if (spec && rows.length) {
+        h += `<div class="mt-2 pt-2" style="border-top:1px solid var(--bs-border-color)">
+            <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>${esc(spec.info())}</p>
+            ${_permResTableHtml(spec, _permSetOf(uid), !editable, {
+                rows,
+                derive: !!rolesData[uid]?.builtin,
+                // JSON.stringify, NOT jsStr: _permResTableHtml escapes this for the
+                // attribute itself, and jsStr already escapes — together they mangle it.
+                onChange: key => `_permToggle(${JSON.stringify(uid)}, ${JSON.stringify(key)}, this)`,
+            })}
+        </div>`;
+    }
+    return h + '</div>';
+}
+
+function _permSplitHtml() {
+    const roles = _permRoles();
+    const uid = _permSplitRole(roles);
+    const rd = rolesData[uid] || {};
+    const editable = _permCanEdit(uid);
+
+    let groups = '', shown = 0;
+    for (const [groupKey] of _permGroups()) {
+        const perms = _permVisibleIn(groupKey);
+        const res = _permVisibleResRows(groupKey).rows.length;
+        if (!perms.length && !res) continue;
+        shown += perms.length + res;
+        groups += _permSplitGroupHtml(groupKey, perms, uid, editable);
+    }
+
+    // Why a role cannot be edited, said once at the top instead of guessed from greyed
+    // switches: built-in sets are the product's definition of admin/editor/viewer and the
+    // API refuses to change them; otherwise it is the viewer's own roles_edit permission.
+    const notice = editable ? '' : `<div class="alert alert-secondary py-1 px-2 mb-2 ss-fs-2">
+        <i class="bi bi-lock-fill me-1"></i>${esc(rd.builtin ? t('perm_builtin_readonly')
+                                                             : t('insufficient_permissions'))}</div>`;
+
+    // .ss-vfill is a flex COLUMN (it is the vertical-fill helper); the two panes need a
+    // ROW, so flex-row has to win over it — without it they stack, list on top and the
+    // permissions underneath.
+    return `<div class="ss-vfill flex-row" style="min-height:0">
+        <div class="ss-vfill" style="flex:0 0 15rem;max-width:15rem;border-right:1px solid var(--bs-border-color)">
+            <div class="px-2 py-1 ss-fs-2 text-muted ss-thead">${esc(t('subtab_roles'))}</div>
+            <div class="ss-vscroll">${_permSplitRolesHtml(roles, uid)}</div>
+        </div>
+        <div class="ss-vfill" style="min-width:0">
+            <div class="px-3 py-2 ss-thead d-flex align-items-center gap-2">
+                <span class="fw-semibold">${esc(_permRoleName(uid))}</span>
+                ${rd.description ? `<span class="text-muted ss-fs-2 text-truncate">${esc(rd.description)}</span>` : ''}
+            </div>
+            <div class="ss-vscroll px-3 pt-2">${notice}${shown ? groups : _permNoMatchHtml()}</div>
+        </div>
+    </div>`;
+}

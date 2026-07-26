@@ -1,0 +1,62 @@
+{# Copy one role's permissions onto others (Access › Permissions).
+
+   It writes into the section's DRAFT, not to the server: the copied cells light up as
+   pending like any other edit, Save sends them and Discard throws them away. A second
+   write path straight to the API would be a way to change permissions that the screen in
+   front of you does not show. #}
+<div class="modal fade" id="permCopyModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title">
+                    <i class="bi bi-copy me-1"></i>{{ i18n.perm_copy_title }}
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="permCopyFrom">{{ i18n.perm_copy_from }}</label>
+                    <select class="form-select form-select-sm" id="permCopyFrom"
+                            onchange="_permCopyRender()"></select>
+                    <div class="form-text ss-fs-2">{{ i18n.perm_copy_from_hint }}</div>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label small mb-1">{{ i18n.perm_copy_mode }}</label>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="permCopyMode"
+                                   id="permCopyModeReplace" value="replace" checked
+                                   onchange="_permCopyRender()">
+                            <label class="form-check-label small" for="permCopyModeReplace">
+                                {{ i18n.perm_copy_replace }}
+                                <div class="text-muted ss-fs-1">{{ i18n.perm_copy_replace_hint }}</div>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="permCopyMode"
+                                   id="permCopyModeAdd" value="add" onchange="_permCopyRender()">
+                            <label class="form-check-label small" for="permCopyModeAdd">
+                                {{ i18n.perm_copy_add }}
+                                <div class="text-muted ss-fs-1">{{ i18n.perm_copy_add_hint }}</div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <label class="form-label small mb-1">{{ i18n.perm_copy_to }}</label>
+                <div id="permCopyTargets" class="border rounded p-2"
+                     style="max-height:16rem;overflow:auto"></div>
+                <div class="form-text ss-fs-2">{{ i18n.perm_copy_targets_hint }}</div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="permCopyApply" disabled
+                        onclick="_permCopyApply()">
+                    <i class="bi bi-copy me-1"></i>{{ i18n.perm_copy_stage }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

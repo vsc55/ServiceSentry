@@ -34,7 +34,7 @@ class TestApiUsers:
         assert "admin" in data
         # Must NOT expose password_hash
         assert "password_hash" not in data["admin"]
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         assert data["admin"]["role"] == BUILTIN_ROLE_UIDS['admin']
 
     def test_create_user(self, client):
@@ -49,7 +49,7 @@ class TestApiUsers:
         # Verify it appears in the list
         users = client.get("/api/v1/users").get_json()
         assert "newuser" in users
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         assert users["newuser"]["role"] == BUILTIN_ROLE_UIDS['editor']
         assert users["newuser"]["display_name"] == "New User"
 
@@ -101,7 +101,7 @@ class TestApiUsers:
         })
         assert resp.status_code == 200
         users = client.get("/api/v1/users").get_json()
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         assert users["testuser"]["role"] == BUILTIN_ROLE_UIDS['editor']
         assert users["testuser"]["display_name"] == "Test Edited"
 
@@ -257,7 +257,8 @@ class TestUserInputValidation:
 
     def test_create_user_known_group_accepted(self, admin, client):
         _login(client)
-        grp_uid = '00000000-0000-4000-8000-000000000010'  # administrators uid
+        from lib.core.constants import BUILTIN_GROUP_UIDS
+        grp_uid = BUILTIN_GROUP_UIDS['administrators']
         resp = client.post("/api/v1/users", json={
             "username": "u6", "password": "testpass", "role": "viewer",
             "groups": [grp_uid],
@@ -343,7 +344,8 @@ class TestUserInputValidation:
 
     def test_update_user_known_group_accepted(self, admin, client):
         _login(client)
-        grp_uid = '00000000-0000-4000-8000-000000000010'  # administrators uid
+        from lib.core.constants import BUILTIN_GROUP_UIDS
+        grp_uid = BUILTIN_GROUP_UIDS['administrators']
         client.post("/api/v1/users", json={
             "username": "grp3", "password": "testpass", "role": "viewer",
         })
@@ -389,7 +391,7 @@ class TestRolePermissions:
     def _make_multiuser_admin(config_dir, var_dir):
         """Create a WebAdmin with admin 'boss', editor 'dev', viewer 'guest'."""
         import uuid as _uuid
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         wa = WebAdmin(config_dir, "boss", "bosspass", var_dir=var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True
@@ -523,7 +525,7 @@ class TestPasswordResetPrivileges:
     def _make_wa(config_dir, var_dir):
         """WebAdmin with admin 'boss', editor 'dev', and viewer 'guest'."""
         import uuid as _uuid
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         wa = WebAdmin(config_dir, "boss", "bosspass", var_dir=var_dir,
                       pw_require_upper=False, pw_require_digit=False)
         wa.app.config["TESTING"] = True

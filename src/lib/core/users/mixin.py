@@ -6,7 +6,7 @@ import uuid
 
 from werkzeug.security import generate_password_hash
 
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS
 
 
 class _UsersMixin:

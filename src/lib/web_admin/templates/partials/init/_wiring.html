@@ -91,6 +91,9 @@ renderSessions();
 renderUsers();
 renderRoles();
 renderGroups();
+// Permissions edits the same rolesData this poll just replaced — _permAutoRefresh
+// redraws it, but never over an edit in progress (see partials/permissions/_state.html).
+_permAutoRefresh();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 // Section render entry points come from the registry (each descriptor names its own JS

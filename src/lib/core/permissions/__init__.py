@@ -1,15 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Unified permission discovery for self-describing modules.
+"""Permissions domain — the catalog, and what counts as a permission.
 
-Both core domains (``lib.core.*``) and service subsystems
-(``lib.services.*``) declare the permissions they own in their own ``permissions``
-submodule — a ``MODULE_PERMISSIONS`` descriptor (flags + role-editor group + builtin
-role grants).  :func:`discover_permissions` collects them from BOTH roots, and
-:mod:`lib.web_admin.constants` merges them into ``PERMISSIONS`` / ``PERMISSION_GROUPS``
-/ ``BUILTIN_ROLE_PERMISSIONS`` — so a module's permissions live WITH the module instead
-of hardcoded centrally.  Same self-describing pattern as ``embedded.py`` /
-``EMBEDDED_SERVICE``.
+Like every other core domain (see :mod:`lib.core`), this is a package that holds
+everything about permissions:
+
+* this module — the **catalog**: discovery, the flags, the built-in role grants, and the
+  rules for what a valid permission key is;
+* :mod:`lib.core.permissions.mixin` — the **resolution** (``_PermissionsMixin``): what a
+  given session, role or group effectively holds.  It lived in ``lib/web_admin/mixins``
+  while the other domains had already moved.
+
+There is no ``store``: permissions are not persisted.  The catalog is static, and what a
+role *holds* is a field of that role, in the roles table.  There are no routes either —
+the catalog reaches the client in the dashboard's template context
+(``permissions_groups``) and the session's effective set through ``GET /api/v1/me``.
+
+Both core domains (``lib.core.*``) and service subsystems (``lib.services.*``) declare
+the permissions they own in their own ``manifest.py`` — a ``MODULE_PERMISSIONS``
+descriptor (flags + role-editor group + builtin role grants).
+:func:`discover_permissions` collects them from BOTH roots and merges them into
+``PERMISSIONS`` / ``PERMISSION_GROUPS`` / ``BUILTIN_ROLE_PERMISSIONS`` below — so a
+module's permissions live WITH the module instead of hardcoded centrally.  Same
+self-describing pattern as ``embedded.py`` / ``EMBEDDED_SERVICE``.
+
+Keep this module free of Flask and of the domain stores: permission discovery imports it
+very early (at :mod:`lib.web_admin.constants` import time), so ``mixin`` is deliberately
+NOT imported here — importing the web glue from the catalog would close an import cycle.
 """
 
 from __future__ import annotations
@@ -60,13 +77,16 @@ def is_cluster_perm(p: str) -> bool:
     return bool(_CLUSTER_PERM_RE.match(p))
 
 
-# ── Roles + built-in RBAC model ─────────────────────────────────────────────────────
-# Valid user roles ordered by privilege (highest first).
-# 'none' is a built-in role with zero permissions — user gets access only through groups.
-ROLES = ('admin', 'editor', 'viewer', 'none')
+# ── Built-in RBAC model ─────────────────────────────────────────────────────────────
+# The built-in role KEYS ('admin', 'editor', …) and the stable UUIDs behind them are
+# identities, not catalog: they live in lib.core.constants (``ROLES``,
+# ``BUILTIN_ROLE_UIDS``, ``BUILTIN_GROUP_UIDS``), which everything imports downwards.
+# This module used to hold them and was the only one that never read them.
+# What belongs here is what each built-in role GRANTS — see BUILTIN_ROLE_PERMISSIONS
+# below, whose keys are exactly ``ROLES``.
 
 # Core permission flags.  Almost every domain now declares its own permissions in its
-# module's ``permissions.py`` (lib.core.* / lib.services.*), discovered and
+# module's ``manifest.py`` (lib.core.* / lib.services.*), discovered and
 # appended by the merge below.  Only ``services`` (the Services tab itself — the host of
 # the discovery mechanism, not a discoverable module) stays hardcoded here.
 _CORE_PERMISSIONS = (
@@ -79,20 +99,6 @@ _CORE_PERMISSIONS = (
 _CORE_PERMISSION_GROUPS = [
     ('perm_group_services', ['services_view', 'services_control']),
 ]
-
-# Stable UUIDs for built-in roles and groups (never change these).
-BUILTIN_ROLE_UIDS: dict[str, str] = {
-    'admin':    '00000000-0000-4000-8000-000000000001',
-    'editor':   '00000000-0000-4000-8000-000000000002',
-    'viewer':   '00000000-0000-4000-8000-000000000003',
-    'none':     '00000000-0000-4000-8000-000000000000',
-}
-BUILTIN_GROUP_UIDS: dict[str, str] = {
-    'administrators': '00000000-0000-4000-8000-000000000010',
-}
-
-# Built-in groups identified by their stable UID (cannot be deleted or modified).
-_BUILTIN_GROUPS: frozenset[str] = frozenset(BUILTIN_GROUP_UIDS.values())
 
 # Core built-in role grants.  admin gets every flag; editor/viewer's per-domain grants
 # now come from each module's descriptor (merged below).  Only the ``services`` grants
@@ -107,7 +113,7 @@ _CORE_VIEWER_PERMISSIONS = frozenset({
 # ── Merge discovered module permissions (self-describing modules) ───────────────────
 # Every self-describing module — a core domain (lib.core.*) or a service
 # (lib.services.*) — declares its own MODULE_PERMISSIONS (flags + group + role grants)
-# in its permissions.py; we append them here so the flags live WITH the module, not
+# in its manifest.py; we append them here so the flags live WITH the module, not
 # hardcoded above.
 _DISCOVERED_PERMISSIONS = discover_permissions()
 
@@ -134,3 +140,19 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
     'viewer': frozenset(_CORE_VIEWER_PERMISSIONS | _discovered_grants('viewer')),
     'none': frozenset(),
 }
+
+
+# ── What counts as a permission ─────────────────────────────────────────────────────
+# Defined here, after PERMISSIONS is assembled, because "is this string a permission?"
+# is a question about the catalog and nothing else.  It was written out twice — once
+# where a role is saved and once where a role's permissions are resolved — so a new kind
+# of per-instance key would have had to be remembered in both, and the half that was
+# forgotten would silently DROP those keys instead of failing.
+def is_valid_perm(p: str) -> bool:
+    """True if *p* is a known flag or a well-formed per-instance key."""
+    return p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)
+
+
+def filter_valid_permissions(perms) -> list:
+    """Keep only recognised permission strings (fixed set + module/server/cluster)."""
+    return [p for p in (perms or []) if is_valid_perm(p)]

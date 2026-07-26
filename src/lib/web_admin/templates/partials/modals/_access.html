@@ -95,11 +95,6 @@
                         </button>
                     </li>
                     <li class="nav-item">
-                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#rmTabPerms" type="button">
-                            <i class="bi bi-shield-check me-1"></i>{{ i18n.role_tab_permissions }}
-                        </button>
-                    </li>
-                    <li class="nav-item">
                         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#rmTabAssign" type="button">
                             <i class="bi bi-people me-1"></i>{{ i18n.role_tab_assignments }}
                         </button>
@@ -127,11 +122,17 @@
                             <textarea class="form-control form-control-sm flex-grow-1" id="rmDescription"
                                 style="resize:none" autocomplete="off"></textarea>
                         </div>
+                        {# Where permissions went, said here rather than left to be discovered. #}
+                        <div class="d-flex align-items-center gap-2 mt-2 flex-shrink-0 d-none" id="rmPermsHint">
+                            <span class="small text-muted">{{ i18n.role_perms_moved }}</span>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="_rmGoToPermissions()">
+                                <i class="bi bi-shield-check me-1"></i>{{ i18n.subtab_permissions }}
+                            </button>
+                        </div>
                     </div>
-                    {# Permissions tab — accordion built dynamically by _buildPermsAccordion() in _js_roles.html #}
-                    <div class="tab-pane fade" id="rmTabPerms">
-                        <div id="rolePermissionsGrid" class="flex-grow-1" style="overflow-y:auto;min-height:0"></div>
-                    </div>
+                    {# No Permissions tab: they are assigned in Access › Permissions, where
+                       every role is visible at once. This modal owns the role's identity and
+                       who it is given to — never what it may do. #}
                     {# Assignments tab #}
                     <div class="tab-pane fade" id="rmTabAssign">
                         <div class="row g-3 flex-grow-1" style="min-height:0">

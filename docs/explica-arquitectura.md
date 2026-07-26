@@ -126,8 +126,8 @@ ObjectBase (lib/core/object_base.py)
 │   ├── _SessionsMixin   (lib/core/sessions/mixin.py)
 │   ├── _AuditMixin      (lib/core/audit/mixin.py)   (store en el módulo; también lo importan monitoring/events)
 │   ├── _ChecksMixin     (lib/services/monitoring/checks_mixin.py) ← Checks tab = glue del motor de monitoring
-│   # Glue que sigue en lib/web_admin/mixins/ (infra sin permisos propios / host de discovery):
-│   ├── _PermissionsMixin(lib/web_admin/mixins/permissions.py)  ← calcula permisos efectivos
+│   ├── _PermissionsMixin(lib/core/permissions/mixin.py)  ← calcula permisos efectivos
+│   # Glue que sigue en lib/web_admin/mixins/ (no es un dominio: ni store ni permisos propios):
 │   ├── _AuthMixin       (lib/web_admin/mixins/auth.py)         ← login local/LDAP/OIDC/SAML
 │   └── _ServicesMixin   (lib/web_admin/mixins/services.py) ← descubre + controla los servicios embebidos
 │   # Los servicios NO se heredan: WebAdmin COMPONE un objeto embebido por servicio
@@ -217,15 +217,15 @@ ServiceSentry/
 │   │   │   └── windows/                 # Específico de Windows: ports.py (rangos TCP reservados vía netsh excludedportrange)
 │   │   ├── core/                        # Núcleo: primitivas + infra transversal + dominios self-contained
 │   │   │   ├── object_base.py           # ObjectBase (clase base con Debug compartido)
-│   │   │   ├── constants.py             # SYSTEM_USER (centinela de autor de auditoría; fuente única)
-│   │   │   ├── permissions.py           # RBAC: ROLES/PERMISSIONS/PERMISSION_GROUPS/BUILTIN_ROLE_* + is_*_perm + discover_permissions() (escanea lib.core.* + lib.services.*)
+│   │   │   ├── constants.py             # Constantes sin capa: SYSTEM_USER + identidades integradas (BUILTIN_ROLE_UIDS/BUILTIN_GROUP_UIDS/BUILTIN_GROUP_UID_SET + ROLES, derivado). Fuente única: las nombran users/groups/roles/permisos/SCIM/CLI, no las posee ningún dominio
+│   │   │   ├── permissions/             # Dominio permisos: __init__.py = catálogo (PERMISSIONS/PERMISSION_GROUPS/BUILTIN_ROLE_PERMISSIONS + is_*_perm/is_valid_perm + discover_permissions()) · mixin.py = resolución efectiva (sin store: no se persisten; las identidades → constants.py)
 │   │   │   #   Cada dominio: routes.py fino (HTTP) + service.py (lógica sin Flask, reutilizable por CLI)
-│   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + service.py + permissions.py
-│   │   │   ├── credentials/ history/ config/            # store.py + routes.py + service.py + permissions.py (sin mixin; store lo importan servicios; config/service.py incluye INT/BOOL_RULES + build_config_schema)
-│   │   │   ├── modules/                                 # store.py + facade.py + service.py + routes.py (config CRUD + /api/v1/modules/watchfuls action dispatch) + permissions.py
-│   │   │   ├── hosts/                                   # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + permissions.py (grupo perm = 'servers')
-│   │   │   ├── overview/                                # service.py (layout/widgets) + routes.py + permissions.py (grupo virtual, sin store)
-│   │   │   ├── clusters/                                # solo permissions.py (grupo virtual, sin store/routes propios)
+│   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + service.py + manifest.py
+│   │   │   ├── credentials/ history/ config/            # store.py + routes.py + service.py + manifest.py (sin mixin; store lo importan servicios; config/service.py incluye INT/BOOL_RULES + build_config_schema)
+│   │   │   ├── modules/                                 # store.py + facade.py + service.py + routes.py (config CRUD + /api/v1/modules/watchfuls action dispatch) + manifest.py
+│   │   │   ├── hosts/                                   # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + manifest.py (grupo perm = 'servers')
+│   │   │   ├── overview/                                # service.py (layout/widgets) + routes.py + manifest.py (grupo virtual, sin store)
+│   │   │   ├── clusters/                                # solo manifest.py (grupo virtual, sin store/routes propios)
 │   │   │   ├── health/                  # Auto-monitorización de la plataforma (sin Flask); emite notificaciones vía el router
 │   │   │   │   ├── health.py            # ServiceHealthMonitor: clasifica heartbeats up/down/idle → service_down/service_up (una vez por transición, leader-gated)
 │   │   │   │   ├── cert_scan.py         # CertExpiryScanner: escanea certs de los checks ssl_cert → cert_expiring (una vez por severidad expiring/expired)
@@ -322,10 +322,10 @@ ServiceSentry/
 │   │   └── web_admin/                   # Interfaz web de administración (Flask)
 │   │       ├── app.py                   # Clase WebAdmin (hereda mixins de lib/web_admin/mixins + lib/core/* + lib/services/*)
 │   │       ├── constants.py             # SOLO HOME_PAGES + home_page_ids (landing pages).
-│   │       │                            #   RBAC → lib/core/permissions.py; SYSTEM_USER → lib/core/constants.py; i18n → lib.i18n
+│   │       │                            #   RBAC → lib/core/permissions/; SYSTEM_USER e identidades integradas → lib/core/constants.py; i18n → lib.i18n
 │   │       ├── templates/               # Plantillas Jinja2 (+ partials JS por feature)
-│   │       ├── mixins/                  # Glue de infra que NO es dominio propio:
-│   │       │   └── permissions.py auth.py services.py   # permisos efectivos / login local / host de discovery de servicios
+│   │       ├── mixins/                  # Glue que NO es un dominio propio:
+│   │       │   └── auth.py services.py   # login local / host de discovery de servicios
 │   │       │   # Dominios (users/roles/groups/sessions/audit) → lib/core/<d>/mixin.py; checks → lib/services/monitoring/checks_mixin.py.
 │   │       │   # Auth externa (LDAP/OIDC/SAML) → lib/providers/{ldap,oidc,saml}/.
 │   │       └── routes/                  # Registradores de rutas Flask (ver explica-web-admin.md)

@@ -301,7 +301,7 @@ class TestCustomRoles:
         assert resp.status_code == 401
 
     def test_get_roles_returns_builtin_roles(self, client):
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         resp = client.get("/api/v1/roles")
         assert resp.status_code == 200
@@ -311,7 +311,7 @@ class TestCustomRoles:
             assert BUILTIN_ROLE_UIDS[key] in data
 
     def test_builtin_roles_are_marked(self, client):
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
         for key in ('admin', 'editor', 'viewer'):
@@ -319,7 +319,7 @@ class TestCustomRoles:
 
     def test_builtin_roles_have_permissions(self, client):
         from lib.web_admin.app import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
         assert set(roles[BUILTIN_ROLE_UIDS['admin']]['permissions']) == set(PERMISSIONS)
@@ -402,7 +402,7 @@ class TestCustomRoles:
     def test_update_builtin_role_name(self, client):
         """Built-in roles can have their display name updated, but not permissions."""
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         admin_uid = BUILTIN_ROLE_UIDS['admin']
         resp = client.put(f"/api/v1/roles/{admin_uid}", json={"name": "Super Admin"})
@@ -414,7 +414,7 @@ class TestCustomRoles:
     def test_update_builtin_role_permissions_ignored(self, client):
         """Built-in role PUT ignores permission changes (only name is accepted)."""
         from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         editor_uid = BUILTIN_ROLE_UIDS['editor']
         original_perms = set(BUILTIN_ROLE_PERMISSIONS["editor"])
@@ -436,7 +436,7 @@ class TestCustomRoles:
         assert uid not in admin._custom_roles
 
     def test_cannot_delete_builtin_role(self, client):
-        from lib.core.permissions import BUILTIN_ROLE_UIDS
+        from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         resp = client.delete(f"/api/v1/roles/{BUILTIN_ROLE_UIDS['editor']}")
         assert resp.status_code == 400

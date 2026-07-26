@@ -15,8 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from lib.core.constants import SYSTEM_USER
-from lib.core.permissions import _BUILTIN_GROUPS
+from lib.core.constants import BUILTIN_GROUP_UID_SET, SYSTEM_USER
 from lib.core.users.service import AdminOpError, resolve_role_uid
 from lib.util.entity_audit import touch_entity, track_change
 
@@ -136,7 +135,7 @@ def delete_group(groups: dict, users: dict, uid: str) -> list:
     usernames it was removed from. Raises for a missing or built-in group."""
     if uid not in groups:
         raise AdminOpError('group_not_found')
-    if uid in _BUILTIN_GROUPS:
+    if uid in BUILTIN_GROUP_UID_SET:
         raise AdminOpError('group_builtin')
     affected = []
     for uname, udata in users.items():

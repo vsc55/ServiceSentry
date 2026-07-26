@@ -19,8 +19,7 @@ from datetime import datetime, timezone
 
 from werkzeug.security import generate_password_hash
 
-from lib.core.constants import SYSTEM_USER
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER
 from lib.util.entity_audit import touch_entity, track_change
 
 MAX_USERNAME_LEN = 64

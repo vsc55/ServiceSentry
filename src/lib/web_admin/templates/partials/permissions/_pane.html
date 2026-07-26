@@ -1,0 +1,85 @@
+{#
+   Permissions section — assigning permissions to roles on a full page instead of one
+   role at a time inside the role modal.
+
+   Why it exists: the modal shows ONE role, as an accordion over 17 groups and 64
+   permissions.  "Does support have everything editor has?" means opening two modals and
+   remembering the first — the question that matters most when handing out access is the
+   one the UI could not answer.
+
+   Two layouts ship together so they can be compared on real data (matrix = permissions ×
+   roles, split = one role at a time next to the role list).  Both read the same draft and
+   write through the SAME endpoint the role modal uses (PUT /api/v1/roles/<uid>), so this
+   is a second *view*, never a second way to persist.
+
+   The role modal keeps its own Permissions tab for now — this section is additive.
+
+   The chrome is the SAME component every list section uses — the .ss-card + .ss-accent +
+   .ss-card-header that createListTable emits — and NOT a .ss-toolbar: inside a full-bleed
+   pane a card goes flush automatically, while a toolbar keeps its border, its rounded
+   corners and its gap, which made this section read as a card floating in a pane that has
+   no margins, unlike Users or Roles right beside it.
+#}
+<div class="ss-card ss-vfill">
+    <div class="ss-accent ss-accent-purple"></div>
+    <div class="ss-card-header flex-wrap">
+        <h6 class="mb-0 me-2"><i class="bi bi-shield-check me-2"></i>{{ i18n.subtab_permissions }}</h6>
+
+        {# Layout switcher: two views of the same data, not two features. #}
+        <div class="btn-group btn-group-sm me-1" role="group" aria-label="{{ i18n.perm_layout }}">
+            <button type="button" class="btn btn-secondary" id="permViewBtn_matrix"
+                    onclick="_permSetView('matrix')" title="{{ i18n.perm_view_matrix_tt }}">
+                <i class="bi bi-grid-3x3 me-1"></i>{{ i18n.perm_view_matrix }}
+            </button>
+            <button type="button" class="btn btn-secondary" id="permViewBtn_split"
+                    onclick="_permSetView('split')" title="{{ i18n.perm_view_split_tt }}">
+                <i class="bi bi-layout-sidebar me-1"></i>{{ i18n.perm_view_split }}
+            </button>
+        </div>
+
+        <input type="search" class="form-control form-control-sm" id="permSearch"
+               style="max-width:16rem" placeholder="{{ i18n.search_permissions }}"
+               oninput="_permApplyFilter()" autocomplete="off">
+
+        <div class="form-check form-switch mb-0 ms-2 me-1" title="{{ i18n.perm_only_diff_tt }}">
+            <input class="form-check-input" type="checkbox" role="switch" id="permOnlyDiff"
+                   onchange="_permApplyFilter()">
+            <label class="form-check-label small" for="permOnlyDiff">{{ i18n.perm_only_diff }}</label>
+        </div>
+
+        {# Which roles are columns. Twenty-four of them is not a comparison, it is
+           horizontal scrolling — so the matrix shows the ones you pick. "Hide built-in"
+           used to be a switch out here; it is one of this picker's presets now, because
+           two controls over one set is two chances to disagree. #}
+        <div class="dropdown">
+            <button type="button" class="btn btn-sm btn-secondary dropdown-toggle"
+                    data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                    title="{{ i18n.perm_roles_pick_tt }}">
+                <i class="bi bi-funnel me-1"></i><span id="permRolesLabel">{{ i18n.subtab_roles }}</span>
+            </button>
+            <div class="dropdown-menu p-2" id="permRolesMenu"
+                 style="min-width:15rem;max-height:60vh;overflow:auto"></div>
+        </div>
+
+        <button class="btn btn-sm btn-secondary" onclick="_permOpenCopy()"
+                title="{{ i18n.perm_copy_tt }}">
+            <i class="bi bi-copy me-1"></i>{{ i18n.perm_copy }}
+        </button>
+
+        <button class="btn btn-sm btn-secondary ms-auto" onclick="refreshAccessData()"
+                title="{{ i18n.refresh_tt }}">
+            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.refresh }}
+        </button>
+        <button class="btn btn-sm btn-secondary d-none" id="permDiscard" onclick="_permDiscard()"
+                title="{{ i18n.perm_discard_tt }}">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.perm_discard }}
+        </button>
+        <button class="btn btn-sm btn-primary" id="permSave" onclick="_permSave()" disabled>
+            <i class="bi bi-save me-1"></i>{{ i18n.save }}
+            <span class="badge text-bg-warning ms-1 d-none" id="permDirtyBadge"
+                  title="{{ i18n.unsaved_changes }}">●</span>
+        </button>
+    </div>
+
+    <div id="permissions-container" class="ss-vfill"></div>
+</div>

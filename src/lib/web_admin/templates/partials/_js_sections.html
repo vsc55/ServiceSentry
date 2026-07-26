@@ -114,9 +114,18 @@
    Roles tab — list, create, edit (incl. built-in), delete roles.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
-{% include "partials/roles/_permissions.html" %}
 {% include "partials/roles/_list.html" %}
 {% include "partials/roles/_modal.html" %}
+{# ================================================================
+   Permissions section (Access › Permissions) — the ONE place permissions are assigned
+   to roles: the scoped-resource registry, shared state/save, then the two layouts.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/permissions/_resources.html" %}
+{% include "partials/permissions/_state.html" %}
+{% include "partials/permissions/_copy.html" %}
+{% include "partials/permissions/_matrix.html" %}
+{% include "partials/permissions/_split.html" %}
 {# ================================================================
    Groups tab — list, create, edit, delete groups.
    Thin orchestrator: includes sub-partials in order.

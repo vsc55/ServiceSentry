@@ -123,6 +123,11 @@ const stGroups = document.getElementById('subtab-groups-li');
 if (stGroups) stGroups.style.display = hasAnyGroup ? '' : 'none';
 const stRoles = document.getElementById('subtab-roles-li');
 if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
+// Permissions rides on the same permission as Roles: it is the SAME data (a role's
+// permission set) on a page of its own, so anyone who may see roles may see it, and
+// only roles_edit makes a checkbox writable (enforced again server-side).
+const stPerms = document.getElementById('subtab-permissions-li');
+if (stPerms) stPerms.style.display = hasAnyRole ? '' : 'none';
 // Activate saved sub-tab (or fall back to first visible). Credentials moved to
 // Infrastructure, so it is no longer part of the Access sub-tab set.
 const _savedSubtabTarget = localStorage.getItem('ss_active_subtab_access');
@@ -131,7 +136,7 @@ const _savedSubtabBtn = _savedSubtabTarget
 const _activeSubtab = (
     _savedSubtabBtn && _savedSubtabBtn.closest('li')?.style.display !== 'none'
         ? _savedSubtabBtn
-        : ['btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-sessions']
+        : ['btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-permissions','btn-subtab-sessions']
             .map(id => document.getElementById(id))
             .find(btn => btn && btn.closest('li')?.style.display !== 'none')
 );

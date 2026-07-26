@@ -3,8 +3,8 @@
 """Custom roles management routes: /api/v1/roles, /api/v1/roles/<uid>.
 
 Validation + mutation live in the Flask-free :mod:`lib.core.roles.service`; these routes
-own request parsing, the permission-escalation guard (needs the session), persistence and
-audit.
+own request parsing, persistence, audit, and *applying* the escalation guard — the guard
+itself belongs to the permissions domain (it needs the session, not the role).
 
 Routes registered by this file:
 
@@ -16,10 +16,9 @@ Routes registered by this file:
 
 from flask import jsonify, session
 
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import SYSTEM_USER
 from lib.core.roles import service as roles_svc
 from lib.core.roles.service import AdminOpError
-from lib.core.constants import SYSTEM_USER
 
 
 def register(app, wa):
@@ -28,12 +27,9 @@ def register(app, wa):
     roles_edit_req   = wa._perm_required('roles_edit')
     roles_delete_req = wa._perm_required('roles_delete')
 
-    def _check_perms_escalation(requested_perms: list) -> bool:
-        """Requester-context guard: a non-admin may only grant permissions they hold."""
-        if wa._is_admin_requester():
-            return True
-        requester_perms = wa._get_session_permissions()
-        return all(p in requester_perms for p in requested_perms)
+    # The escalation guard — a non-admin may only grant permissions they hold — is
+    # ``wa._perms_grantable`` (lib/core/permissions/mixin.py), the same predicate the
+    # user and group routes reach through ``_role_grantable``.
 
     # ── GET /api/v1/roles ──────────────────────────────────────────────────────
 
@@ -57,7 +53,7 @@ def register(app, wa):
         if err:
             return err
         perms = roles_svc.filter_valid_permissions(data.get('permissions', []))
-        if not _check_perms_escalation(perms):
+        if not wa._perms_grantable(perms):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             role_uid = roles_svc.create_role(
@@ -90,9 +86,10 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
-        # Permission-escalation guard (needs the session) stays in the route.
+        # Escalation guard: applied here (it needs the request), defined with the
+        # permissions domain.
         if 'permissions' in data and not is_builtin:
-            if not _check_perms_escalation(roles_svc.filter_valid_permissions(data['permissions'])):
+            if not wa._perms_grantable(roles_svc.filter_valid_permissions(data['permissions'])):
                 return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             if is_builtin:

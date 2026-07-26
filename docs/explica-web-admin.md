@@ -12,11 +12,11 @@ La lógica de `WebAdmin` está dividida en **mixins** (lógica de negocio) y **r
 ```
 lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios/providers viven fuera (abajo)
 ├── app.py                    # class WebAdmin (hereda mixins de mixins/ + lib/core/* + lib/services/*)
-├── constants.py              # SOLO HOME_PAGES + home_page_ids (landing pages). RBAC → lib/core/permissions.py; SYSTEM_USER → lib/core/constants.py; i18n → lib.i18n
-├── mixins/                   # Glue de infra que NO es un dominio propio:
+├── constants.py              # SOLO HOME_PAGES + home_page_ids (landing pages). RBAC → lib/core/permissions/; SYSTEM_USER e identidades integradas → lib/core/constants.py; i18n → lib.i18n
+├── mixins/                   # Glue que NO es un dominio propio (ni store ni permisos):
 │   ├── auth.py               # _AuthMixin (login local: _authenticate)
-│   ├── permissions.py        # _PermissionsMixin (permisos efectivos)
 │   └── services.py           # _ServicesMixin (descubre + controla los servicios embebidos)
+│   # _PermissionsMixin ya NO está aquí: vive con su dominio, en lib/core/permissions/mixin.py
 │   # monitoring/syslog/events NO son mixins: el WebAdmin COMPONE un objeto por
 │   # servicio (lib/services/*/embedded.py), en self._embedded_services
 ├── routes/
@@ -34,7 +34,7 @@ lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios
 
 # El resto de mixins/routes viven con su dominio/servicio/provider (self-contained):
 #   lib/core/<d>/          routes.py (HTTP fino) + service.py (lógica sin Flask) + store.py
-#                          + permissions.py (+ mixin.py en users/roles/groups/sessions/audit)
+#                          + manifest.py (+ mixin.py en users/roles/groups/sessions/audit/permissions)
 #     users, roles, groups, sessions, audit, config, credentials, history, hosts,
 #     modules (routes.py: config CRUD + /api/v1/modules/watchfuls action dispatch),
 #     notify/{telegram,email,webhook}/routes.py (/api/v1/notify/*)
@@ -90,7 +90,7 @@ flowchart TD
 
 | Qué | Cuándo | Cómo |
 |---|---|---|
-| **Permisos** (RBAC) | al **importar** `lib.core.permissions` (antes de la instancia) | `discover_permissions()` escanea `permissions.py` de cada dominio/servicio |
+| **Permisos** (RBAC) | al **importar** `lib.core.permissions` (antes de la instancia) | `discover_permissions()` escanea el `manifest.py` de cada dominio/servicio |
 | **Campos secretos, credential schemas, perfiles de host** | al **inicio de `__init__`** | escaneo de `watchfuls/` (`discover_secret_fields`, `credential_secret_fields`, `__host_profile__`) |
 | **Tablas de módulo** | en **`_init_entity_store`** | `reconcile_module_tables()` (crea/migra `mod_<m>_<n>`) |
 | **Servicios embebidos** | al **final de `__init__`** | `discover_embedded_services()` + `make_embedded()` + `start_at_boot()` |
@@ -122,7 +122,7 @@ flowchart TD
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 64 flags granulares; activar/desactivar desde el modal |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 64 flags granulares; activar/desactivar desde el modal. Los permisos se editan por dos caminos: el modal del rol (un rol cada vez) y la sub-sección **Acceso › Permisos**, que los pone todos a la vez frente a los integrados |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -238,6 +238,55 @@ roles/grupos/usuarios, en [ref-api.md](ref-api.md).
 
 Esta sección documenta solo cómo el panel **aplica** esos permisos en la interfaz.
 
+### Sub-sección Permisos (Acceso › Permisos)
+
+Asignar permisos a roles ocurre en **un** sitio: la sub-sección **Acceso › Permisos**. El modal de
+rol tenía su propia pestaña de permisos y se eliminó — dos editores sobre el mismo campo es
+justo como una pantalla deshace en silencio lo que la otra guardó, y el modal enviaba todas las
+casillas que recordaba, incluidas las que no había refrescado. El modal se queda con lo suyo: la
+identidad del rol y a quién se le da; su pestaña *General* enlaza a la sección.
+
+Existe porque la pregunta que más importa al repartir accesos —«¿soporte tiene todo lo que tiene
+editor?»— obligaba a abrir dos modales y recordar el primero.
+
+Trae **dos maquetas conviviendo** (conmutador en la cabecera, elección recordada en
+`localStorage`) para poder compararlas con datos reales antes de quedarse con una:
+
+| Maqueta | Para qué | Cómo se lee |
+|---|---|---|
+| **Matriz** | Leer **entre** roles | Una rejilla permisos × roles. Cabecera y primera columna fijas (`.ss-gridtable`); los integrados van primero en privilegio descendente (admin → editor → viewer → none), así una columna no debería tener más que la de su izquierda |
+| **Dos paneles** | Trabajar **sobre** un rol | Lista de roles a la izquierda, permisos de ese rol a la derecha, con sitio para la etiqueta larga y la descripción de cada permiso |
+
+Los permisos **por instancia** (`module.<id>.<acción>`, `server.<uid>.<acción>`,
+`cluster.<uid>.<acción>`) están en las dos: la matriz les da una fila a cada uno —bajo un bloque
+plegable, cerrado por defecto, porque N módulos × 4 acciones desplegados entierran las filas del
+catálogo que la matriz existe para comparar—, y el panel derecho de la vista de dos paneles dibuja
+la tabla ítems × acciones. De dónde salen los recursos es el registro de
+`partials/permissions/_resources.html`, así que un recurso acotado nuevo aparece en ambas a la vez.
+
+Detalles que no son evidentes desde la pantalla:
+
+- **Los roles integrados son columnas de solo lectura.** Sus conjuntos son la definición de producto
+  de admin/editor/viewer y la API solo acepta el nombre; son el patrón contra el que se lee un rol
+  propio, por eso se muestran en vez de ocultarse.
+- **El borrador conserva las claves granulares.** Un rol puede tener `module.<name>.view` y demás,
+  que esta pantalla no dibuja: el borrador parte de la lista **completa** del rol y solo añade o
+  quita claves del catálogo, así que guardar aquí no puede borrar lo que no se enseñó.
+- **Se envía solo `permissions`.** El PUT parcial deja nombre, descripción y `enabled` intactos.
+- **El sondeo de Acceso (30 s) no redibuja sobre una edición en curso**: solo los roles que no has
+  tocado se refrescan solos.
+- Filtro por texto y conmutador **«Solo diferencias»**, que oculta los permisos en los que todos los
+  roles coinciden — las filas que no aportan nada al comparar.
+- **Qué roles son columnas se elige** (selector con buscador, mostrar/ocultar todos y «ocultar
+  integrados» como preajuste): veinticuatro columnas no son una comparación, son scroll horizontal.
+  El filtro actúa sobre la lista de roles, así que contadores y «Solo diferencias» le siguen; un rol
+  con cambios sin guardar nunca se oculta.
+- **Copiar permisos de un rol a otros** (reemplazar o añadir), con el delta por destino antes de
+  aplicar. Aterriza en el borrador, no en el servidor: se revisa y se guarda como cualquier edición.
+
+Ambas maquetas escriben por el **mismo** endpoint que el modal (`PUT /api/v1/roles/<uid>`): son una
+vista más, nunca otra forma de persistir. Ver [ref-tests.md §99](ref-tests.md#99-panel-web--sección-permisos-acceso--permisos).
+
 ### Restricción de roles en la UI
 
 La función JS `applyRoleRestrictions()` (en `partials/init/_wiring.html`) oculta o muestra
@@ -250,6 +299,7 @@ botones y pestañas según los permisos del usuario actual obtenidos de `/api/v1
 - Botones editar/borrar de cada usuario: solo si `users_edit` / `users_delete`.
 - Botón limpiar audit / borrar entrada: solo si `audit_delete`.
 - Botón "Nuevo rol" y sección de roles: solo si tiene cualquier permiso `roles_*`.
+- Sub-sección Permisos: mismo permiso que Roles (es el mismo dato en otra página); las casillas solo son editables con `roles_edit`, que el servidor vuelve a exigir.
 - Widget "Lista de módulos" del dashboard: oculto cuando falta `modules_view` (las tarjetas de resumen sí son siempre visibles).
 
 ---

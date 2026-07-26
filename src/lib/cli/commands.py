@@ -17,7 +17,7 @@ import time
 from lib.core.groups import service as groups_svc
 from lib.core.users import service as users_svc
 from lib.core.users.service import AdminOpError
-from lib.core.permissions import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS
 from lib.i18n import translate
 
 # UID → built-in role key (the inverse of BUILTIN_ROLE_UIDS), for display.

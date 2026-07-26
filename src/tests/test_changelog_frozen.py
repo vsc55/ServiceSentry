@@ -103,3 +103,24 @@ class TestCommittedSectionsAreFrozen:
         of the working copy's, unchanged."""
         head, now = _sections(head_text), _sections(io.open(CHANGELOG, encoding='utf-8').read())
         assert all(now.get(k) == v for k, v in head.items())
+
+
+class TestOneBuildPerCommit:
+    """The other half of the rule, which nothing was watching.
+
+    A build is published by a commit, so at most ONE section may be unpublished at a time.
+    It happened the other way: a second build was opened on top of the first before
+    anything was committed, and the version jumped 4 → 6 across zero commits.
+
+    The version guard next door cannot see it — ``__version__`` and the newest heading move
+    together, so they still agree. What is wrong is that the build *counter* advanced
+    without the thing it counts.
+    """
+
+    def test_at_most_one_section_is_unpublished(self, head_text):
+        head, now = _sections(head_text), _sections(io.open(CHANGELOG, encoding='utf-8').read())
+        pending = [name for name in now if name not in head]
+        assert len(pending) <= 1, (
+            'these builds are all uncommitted: ' + ', '.join(pending)
+            + ' — one build per commit, so fold them into a single section (and set '
+              '__version__ back) or commit the earlier one first')

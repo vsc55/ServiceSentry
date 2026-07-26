@@ -5,13 +5,18 @@
    ================================================================ #}
 
 let _editingRole = null;  // UID of the role being edited (null = new)
+// The permissions a CREATE carries: none for a blank role, the source role's whole set
+// (per-instance keys included) for a clone. Editing sends no permissions at all — this
+// modal no longer shows them, and a screen must not write a field it does not display.
+let _rolePermsForCreate = [];
 
 // One modal for create / edit / clone — the entry point picks the mode:
-//   'new'   → blank form, opens on General.
-//   'edit'  → load the role; opens on Permissions (built-in roles show them
-//             read-only). Editable perms only for custom roles.
-//   'clone' → load the source role's perms + description into a NEW custom role
-//             (name + copy suffix); opens on General; assignments are NOT copied.
+//   'new'   → blank form.
+//   'edit'  → load the role (name, description, enabled, assignments).
+//   'clone' → copy the source role's permissions + description into a NEW custom role
+//             (name + copy suffix); assignments are NOT copied.
+// Permissions themselves are assigned in Access › Permissions, where every role is
+// visible at once — this modal owns the role's identity and who holds it.
 function openRoleModal(uid, mode = 'edit') {
     const clone     = mode === 'clone';
     const isNew     = mode === 'new' || clone;          // both create a new role
@@ -36,9 +41,11 @@ function openRoleModal(uid, mode = 'edit') {
     const en = document.getElementById('rmEnabled');
     en.checked = isBuiltin || src.enabled !== false;
     en.disabled = isBuiltin;
-    const activePerms = new Set(src.permissions || []);
-    _buildPermsAccordion(activePerms, isBuiltin);
-    _rmBuildAllResPermGrids(activePerms, isBuiltin);   // module/server/cluster sub-grids
+    // A clone keeps what the source could do; a brand-new role starts with nothing.
+    _rolePermsForCreate = clone ? [...(src.permissions || [])] : [];
+    // The shortcut to where permissions ARE edited — pointless for a role that does not
+    // exist yet (nothing to select there) and for a built-in one (read-only anyway).
+    document.getElementById('rmPermsHint')?.classList.toggle('d-none', isNew || isBuiltin);
     ['rmUserSearch', 'rmGroupSearch'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.value = ''; delete el.dataset.bound; }
@@ -47,8 +54,9 @@ function openRoleModal(uid, mode = 'edit') {
     const assignUid = isNew ? null : uid;
     _populateRoleUsersGrid(assignUid, []);
     _populateRoleGroupsGrid(assignUid);
-    // New/clone open on General; editing always opens on Permissions.
-    const targetTab = isNew ? '#rmTabGeneral' : '#rmTabPerms';
+    // Always General now: editing used to open on Permissions, which is a section of its
+    // own since — and General is the tab this modal is actually about.
+    const targetTab = '#rmTabGeneral';
     _setActiveTab('roleModalTabs', 'roleModalTabContent', targetTab);   // pre-set: no flash
     _setModalSaveButton('btnRoleModalOk', mode);
     const modalEl = document.getElementById('roleModal');
@@ -63,6 +71,16 @@ function openRoleModal(uid, mode = 'edit') {
 }
 function openNewRoleModal()    { openRoleModal(null, 'new'); }
 function openEditRoleModal(uid) { openRoleModal(uid, 'edit'); }
+
+/** Close the modal and land on the role in Access › Permissions. Pre-selects it in the
+ *  two-pane layout so the jump arrives at the role you were editing, not at whichever one
+ *  the section happened to be showing. */
+function _rmGoToPermissions() {
+    const uid = _editingRole;
+    bootstrap.Modal.getInstance(document.getElementById('roleModal'))?.hide();
+    if (uid && typeof _permSelRole !== 'undefined') _permSelRole = uid;
+    _navSubtab(null, '#tab-access', '#subtab-permissions');
+}
 function cloneRoleModal(uid)    { openRoleModal(uid, 'clone'); }
 
 function _populateRoleUsersGrid(roleUid, searchFilterUsers) {
@@ -107,9 +125,6 @@ function _populateRoleGroupsGrid(roleUid) {
 async function saveRoleModal() {
     const name        = document.getElementById('rmLabel').value.trim();
     const description = document.getElementById('rmDescription').value.trim();
-    const permissions = Array.from(
-        document.querySelectorAll('#rolePermissionsGrid input[type=checkbox]:checked')
-    ).map(cb => cb.value);
     const selectedUsers  = new Set(Array.from(document.querySelectorAll('#rmUsersGrid input[type=checkbox]:checked')).map(cb => cb.value));
     const selectedGroups = new Set(Array.from(document.querySelectorAll('#rmGroupsGrid input[type=checkbox]:checked')).map(cb => cb.value));
     const lbl = document.getElementById('rmLabel');
@@ -130,7 +145,10 @@ async function saveRoleModal() {
 
     if (_editingRole) {
         const enabled = document.getElementById('rmEnabled').checked;
-        const payload = isBuiltin ? { name, description } : { name, description, permissions, enabled };
+        // No `permissions` key: a partial PUT leaves them exactly as they are. Sending the
+        // ones this modal happens to remember would quietly undo whatever the Permissions
+        // section saved while the modal was open.
+        const payload = isBuiltin ? { name, description } : { name, description, enabled };
         const r = await apiPut('/api/v1/roles/' + encodeURIComponent(_editingRole), payload);
         if (r && r.ok) {
             const wasEnabled = rolesData[_editingRole]?.builtin || rolesData[_editingRole]?.enabled !== false;
@@ -141,10 +159,8 @@ async function saveRoleModal() {
             const _nowIso = _nowISO();
             rolesData[_editingRole] = { ...rolesData[_editingRole], name, description,
                 updated_at: _nowIso, updated_by: currentUser.username || '' };
-            if (!isBuiltin) {
-                rolesData[_editingRole].permissions = permissions;
-                rolesData[_editingRole].enabled     = enabled;
-            }
+            // permissions are NOT touched here — the cache keeps whatever the server has.
+            if (!isBuiltin) rolesData[_editingRole].enabled = enabled;
         } else {
             showToast(r?.error || t('update_error'), 'danger'); return;
         }
@@ -174,6 +190,7 @@ async function saveRoleModal() {
         if (_reassignFailures) showToast(t('update_error'), 'danger');
     } else {
         const enabled = document.getElementById('rmEnabled').checked;
+        const permissions = _rolePermsForCreate;   // [] for a new role, the source's for a clone
         const r = await apiPost('/api/v1/roles', { name, description, permissions, enabled });
         if (r && r.status === 201) {
             showToast(t('role_created'));

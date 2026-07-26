@@ -1,0 +1,138 @@
+{# ================================================================
+   Scoped permissions — the registry of resources whose permissions can be narrowed
+   to ONE instance (module.<id>.<action>, server.<uid>.<action>, cluster.<uid>.<action>),
+   and the shared table that renders them.
+
+   It lived in partials/roles/ while the role modal owned the permission editor. The
+   editor is the Access › Permissions section now, and this is the part of that file
+   worth keeping: the registry says where each resource's rows come from and which
+   global flag each action falls back to, and _permResTableHtml draws the items ×
+   actions table both layouts of the section use.
+   ================================================================ #}
+
+// ── The registry (modules / servers / clusters) ────────────────────────────
+// ONE table driven by descriptors. The only per-resource code is each spec's items()
+// — where its rows come from; the table, the global-vs-explicit checked state and the
+// {prefix}.{id}.{action} keys are shared. To add a new scoped resource: a spec here
+// plus its catalog permissions. Both layouts of the Permissions section pick it up
+// with no code of their own.
+const _PERM_RES_SPECS = [
+    {
+        prefix: 'module', group: 'perm_group_modules',
+        info: () => t('module_perms_info'), colLabel: () => t('col_module') || 'Module',
+        globalFor: { view: 'modules_view', add: 'modules_add', edit: 'modules_edit', delete: 'modules_delete' },
+        tableStyle: 'font-size:.82rem;table-layout:fixed;width:100%', thStyle: 'width:62px',
+        items() {
+            return Object.keys(modulesData || {}).sort().map(name => {
+                const cfg = modulesData[name] || {};
+                const modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
+                const modI18n = ITEM_SCHEMAS[name + '|__i18n__'];
+                const modLd = modI18n && (modI18n[CURRENT_LANG] || modI18n[SYSTEM_DEFAULT_LANG]);
+                const desc = (modLd && modLd.module_description) || cfg.description || (modSch && modSch.description) || '';
+                return { id: name, name: modulePrettyName(name, cfg), sub: { type: 'desc', text: desc } };
+            });
+        },
+    },
+    {
+        prefix: 'server', group: 'perm_group_servers',
+        info: () => t('server_perms_info'), colLabel: () => t('col_server') || 'Server',
+        globalFor: { view: 'servers_view', add: 'servers_add', edit: 'servers_edit', delete: 'servers_delete' },
+        // 'add' on a server = "add checks to THIS host" (not creating a host).
+        actionLabel: a => a === 'add' ? (t('server_perm_add') || t('module_perm_add')) : (t('module_perm_' + a) || a),
+        actionTip: a => a === 'add' ? t('server_perm_add_tt') : '',
+        items() {
+            return Object.values(typeof hostsData !== 'undefined' ? hostsData : {})
+                .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+                .map(h => ({ id: h.uid, name: h.name || h.uid, sub: { type: 'text', text: h.address || '' } }));
+        },
+    },
+    {
+        prefix: 'cluster', group: 'perm_group_clusters',
+        info: () => t('cluster_perms_info'), colLabel: () => t('col_cluster') || t('cl_col_name') || 'Cluster',
+        globalFor: { view: 'clusters_view', add: 'clusters_add', edit: 'clusters_edit', delete: 'clusters_delete' },
+        items() {
+            const out = [];
+            for (const [mod, cfg] of Object.entries(typeof modulesData !== 'undefined' ? modulesData : {})) {
+                if (!cfg || typeof cfg !== 'object') continue;
+                for (const [coll, items] of Object.entries(cfg)) {
+                    if (coll.startsWith('__') || !items || typeof items !== 'object' || Array.isArray(items)) continue;
+                    const tf = (typeof _clColSchema === 'function' ? (_clColSchema(mod, coll)['__check_title_field__'] || 'label') : 'label');
+                    for (const [key, item] of Object.entries(items)) {
+                        if (item && typeof item === 'object' && Array.isArray(item.host_uids))
+                            out.push({ id: String(item.uid || key), name: String(item[tf] || key),
+                                       sub: { type: 'text', text: modulePrettyName(mod, cfg) } });
+                    }
+                }
+            }
+            return out.sort((a, b) => a.name.localeCompare(b.name));
+        },
+    },
+];
+
+// Secondary line under a resource's name: a plain muted line, or (modules) a
+// description with an expand toggle when it's long.
+function _permResSubHtml(spec, row) {
+    const sub = row.sub; if (!sub || !sub.text) return '';
+    if (sub.type === 'desc') {
+        const id = spec.prefix + 'Desc_' + row.id;
+        return `<div style="display:flex;align-items:baseline;gap:3px;font-size:.7rem;color:var(--bs-secondary-color,#6c757d);line-height:1.2">
+                  <span id="${id}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0">${esc(sub.text)}</span>` +
+              (sub.text.length > 70
+                  ? `<button type="button" class="btn btn-link p-0 lh-1 flex-shrink-0" style="font-size:.65rem;color:inherit;opacity:.5"
+                             onclick="_permResToggleDesc('${id}', this)">...</button>`
+                  : '') + `</div>`;
+    }
+    return `<div style="font-size:.7rem;color:var(--bs-secondary-color,#6c757d);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sub.text)}</div>`;
+}
+
+/** One resource's per-item permission table as HTML ({prefix}.{id}.{action} keys).
+ *  Built-in roles (disabled) derive each checkbox from the matching global permission;
+ *  custom roles show only explicit keys.
+ *
+ *  `opts.rows`     — the items, when the caller already has them (default: spec.items()).
+ *  `opts.onChange` — (key) => JS source for the checkbox's `onchange`. The modal reads the
+ *  boxes straight from the DOM when you press Save and needs none; the Permissions section
+ *  keeps a draft and hooks each toggle. That parameter is the whole reason this table is
+ *  ONE function instead of two that drift apart.
+ *  `opts.derive`   — whether an unticked box should follow the global flag (default:
+ *  `disabled`, which is what the modal means by it). They come apart in the Permissions
+ *  section: a custom role shown read-only to someone without `roles_edit` is disabled but
+ *  inherits nothing — only a BUILT-IN role's per-instance boxes are derived. */
+function _permResTableHtml(spec, activePerms, disabled, opts = {}) {
+    const rows = opts.rows || spec.items();
+    const derive = opts.derive === undefined ? disabled : opts.derive;
+    const actions = ['view', 'add', 'edit', 'delete'];
+    const lbl = a => spec.actionLabel ? spec.actionLabel(a) : (t('module_perm_' + a) || a);
+    const tip = a => (spec.actionTip && spec.actionTip(a)) ? ` title="${escAttr(spec.actionTip(a))}"` : '';
+    const thStyle = spec.thStyle || 'width:1%;white-space:nowrap;padding-left:.65rem;padding-right:.65rem';
+    const hdrs = actions.map(a => `<th class="text-center" style="${thStyle}"${tip(a)}>${esc(lbl(a))}</th>`).join('');
+    let h = `<table class="table table-sm table-bordered align-middle mb-0" style="${spec.tableStyle || 'font-size:.82rem;width:100%'}">
+    <thead class="ss-thead"><tr>
+        <th>${esc(spec.colLabel())}</th>${hdrs}
+    </tr></thead><tbody>`;
+    for (const row of rows) {
+        h += `<tr>
+            <td style="overflow:hidden">${esc(row.name)}${_permResSubHtml(spec, row)}</td>`;
+        for (const action of actions) {
+            const key = `${spec.prefix}.${row.id}.${action}`;
+            const checked = derive
+                ? (activePerms.has(spec.globalFor[action]) || activePerms.has(key))
+                : activePerms.has(key);
+            const onChange = opts.onChange ? ` onchange="${escAttr(opts.onChange(key))}"` : '';
+            h += `<td class="text-center"><input type="checkbox" class="form-check-input" value="${escAttr(key)}"
+                ${checked ? 'checked' : ''}${disabled ? ' disabled' : ''}${onChange}></td>`;
+        }
+        h += '</tr>';
+    }
+    return h + '</tbody></table>';
+}
+
+function _permResToggleDesc(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const collapsed = el.style.whiteSpace === 'nowrap';
+    el.style.whiteSpace   = collapsed ? 'normal'  : 'nowrap';
+    el.style.overflow     = collapsed ? 'visible' : 'hidden';
+    el.style.textOverflow = collapsed ? 'clip'    : 'ellipsis';
+    btn.textContent       = collapsed ? '↑' : '...';
+}
