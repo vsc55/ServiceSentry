@@ -27,7 +27,9 @@ import json
 import uuid
 
 from lib.db import BaseConnector
+from lib.db.freshness import bump_version
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore
 
 # Fields stored as individual columns; everything else goes into ``extra``.
 _CORE = frozenset({
@@ -79,11 +81,13 @@ _T_USERS = _USERS_SCHEMA.name
 _T_USERS_GROUPS = _USERS_GROUPS_SCHEMA.name
 
 
-class UsersStore:
+class UsersStore(BaseStore):
     """Relational store for WebAdmin user accounts (backend-agnostic)."""
 
+    _TABLE = _T_USERS
+
     def __init__(self, db: BaseConnector) -> None:
-        self._db = db
+        super().__init__(db)
         self._bootstrap()
 
     # ── Schema ────────────────────────────────────────────────────────────────
@@ -93,14 +97,9 @@ class UsersStore:
         db = self._db
         db.reconcile_table(_USERS_SCHEMA)
         db.reconcile_table(_USERS_GROUPS_SCHEMA)
-        # Backfill empty audit columns for existing rows.
-        import time as _t  # noqa: PLC0415
-        _now = _t.strftime('%Y-%m-%dT%H:%M:%SZ', _t.gmtime())
-        db.execute(
-            f"UPDATE {_T_USERS} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
-            (_now, _now, 'system'),
-        )
+        self._backfill_audit_columns()
         db.commit()
+        self._ensure_version_row()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -180,11 +179,6 @@ class UsersStore:
 
         return users
 
-    def count(self) -> int:
-        """Return the number of stored users."""
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T_USERS}')
-        return row[0] if row else 0
-
     def count_groups(self) -> int:
         """Return the total number of user-group memberships."""
         row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T_USERS_GROUPS}')
@@ -192,40 +186,32 @@ class UsersStore:
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
-    def save_all(self, users: dict) -> bool:
-        """Replace all users and their group memberships atomically."""
-        try:
-            with self._db.transaction():
-                self._db.execute(f'DELETE FROM {_T_USERS_GROUPS}')
-                self._db.execute(f'DELETE FROM {_T_USERS}')
-                for username, data in users.items():
-                    uid = self._insert_user_row(username, data)
-                    for grp_uid in dict.fromkeys(data.get('groups', [])):  # dedupe, keep order
-                        if grp_uid:
-                            self._db.execute(
-                                f'INSERT INTO {_T_USERS_GROUPS}(uid, user_uid, group_uid) '
-                                'VALUES(?,?,?)',
-                                (str(uuid.uuid4()), uid, str(grp_uid)),
-                            )
-            return True
-        except Exception:  # pylint: disable=broad-except
+    def _write_row(self, username: str, data: dict) -> None:
+        uid = data.get('uid') or username
+        self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
+        self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (uid,))
+        uid = self._insert_user_row(username, data)
+        for grp_uid in dict.fromkeys(data.get('groups', [])):   # dedupe, keep order
+            if grp_uid:
+                self._db.execute(
+                    f'INSERT INTO {_T_USERS_GROUPS}(uid, user_uid, group_uid) VALUES(?,?,?)',
+                    (str(uuid.uuid4()), uid, str(grp_uid)),
+                )
+
+    def _delete_row(self, username: str) -> bool:
+        row = self._db.fetchone(f'SELECT uid FROM {_T_USERS} WHERE username = ?', (username,))
+        if not row:
             return False
+        self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (row[0],))
+        self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
+        return True
 
     def upsert(self, username: str, data: dict) -> bool:
         """Insert or replace a single user and their group memberships."""
         try:
             with self._db.transaction():
-                uid = data.get('uid') or username
-                self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
-                self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (uid,))
-                uid = self._insert_user_row(username, data)
-                for grp_uid in dict.fromkeys(data.get('groups', [])):
-                    if grp_uid:
-                        self._db.execute(
-                            f'INSERT INTO {_T_USERS_GROUPS}(uid, user_uid, group_uid) '
-                            'VALUES(?,?,?)',
-                            (str(uuid.uuid4()), uid, str(grp_uid)),
-                        )
+                self._write_row(username, data)
+                bump_version(self._db, _T_USERS)
             return True
         except Exception:  # pylint: disable=broad-except
             return False
@@ -233,18 +219,28 @@ class UsersStore:
     def delete(self, username: str) -> bool:
         """Delete a user and their group memberships."""
         try:
-            row = self._db.fetchone(f'SELECT uid FROM {_T_USERS} WHERE username = ?', (username,))
-            if not row:
-                return False
-            uid = row[0]
             with self._db.transaction():
-                self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (uid,))
-                self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
+                deleted = self._delete_row(username)
+                bump_version(self._db, _T_USERS)
+                return deleted
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def apply(self, writes: dict, deletes=()) -> bool:
+        """Write only what changed — see :mod:`lib.core.entity_sync`.
+
+        Users a caller never knew about are left alone, which is what makes two writers
+        safe: the CLI adding an account no longer disappears because the web admin saved a
+        different one from the copy it had in memory.
+        """
+        try:
+            with self._db.transaction():
+                for username in deletes:
+                    self._delete_row(username)
+                for username, data in writes.items():
+                    self._write_row(username, data)
+                bump_version(self._db, _T_USERS)
             return True
         except Exception:  # pylint: disable=broad-except
             return False
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""

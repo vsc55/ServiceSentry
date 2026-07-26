@@ -130,7 +130,7 @@ def test_audit_user_returns_column_not_current_user(live_db):
 def test_groups_reserved_table(live_db):
     from lib.core.groups.store import GroupsStore
     s = GroupsStore(live_db)
-    s.save_all({'g1': {'name': 'LiveGrp', 'roles': ['r1'], 'enabled': True}})
+    s.apply({'g1': {'name': 'LiveGrp', 'roles': ['r1'], 'enabled': True}})
     assert s.load().get('g1', {}).get('name') == 'LiveGrp'
     assert s.count() >= 1
 

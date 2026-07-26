@@ -90,7 +90,7 @@ def test_audit_quotes_user_on_mysql():
 def test_groups_quotes_groups_table_on_mysql():
     from lib.core.groups.store import GroupsStore
     c = _RecConn(); s = GroupsStore(c)
-    s.load(); s.count(); s.save_all({'u1': {'name': 'g', 'roles': ['r1']}})
+    s.load(); s.count(); s.apply({'u1': {'name': 'g', 'roles': ['r1']}})
     sql = '\n'.join(c.sql)
     assert '`groups`' in sql and not _bare('groups', sql)   # groups_roles is fine (compound)
 

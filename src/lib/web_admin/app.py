@@ -57,7 +57,7 @@ def _cfg_default(path: str):
     default means editing only ``config_spec.CONFIG_FIELDS``.
     """
     return CFG_BY_PATH[path].default
-from .mixins import _AuthMixin, _ServicesMixin
+from .mixins import _AuthMixin, _FreshnessMixin, _ServicesMixin
 # fail2ban host glue lives with its service package (lib.services.ipban), like the
 # syslog/events managers — inherited here because the request gate is host-level.
 from lib.services.ipban.manager import _IpBanMixin
@@ -82,7 +82,7 @@ __all__ = ['WebAdmin']
 # discovers + controls them.
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
-               _IpBanMixin):
+               _IpBanMixin, _FreshnessMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -146,6 +146,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     # Internal fail2ban (_IPBAN_* defaults + all wiring live in _IpBanMixin)
     _SESSION_REVOKE_REDIRECT_SECS = _cfg_default('web_admin|session_revoke_redirect_secs')
     _ACCESS_POLL_SECS = _cfg_default('web_admin|access_poll_secs')
+    # How long roles, users and groups may be served from memory before this process asks
+    # the database whether another writer changed them (0 = every request).
+    _CACHE_RELOAD_SECS = _cfg_default('web_admin|cache_reload_secs')
     # OIDC client lazy-init state
     _oidc_config_hash: str | None = None
     # Module web UI includes (populated by _create_app)
@@ -979,6 +982,22 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         @app.before_request
         def _trace_request_start():
             g._req_start = time.perf_counter()
+
+        @app.before_request
+        def _refresh_shared_caches():
+            # Roles, users and groups live in memory for the life of the process, so
+            # another writer against the same database — the CLI, or a second web replica
+            # — would be invisible to this one.
+            # Here, and only here: the reload replaces the dict wholesale, so it has to
+            # happen before a handler starts rather than in the middle of an edit.
+            #
+            # Static files authorise nothing and arrive by the dozen per page, so they do
+            # not get a probe — with the re-check set to 0 (every request) they would
+            # otherwise turn one page load into thirty queries.
+            if request.endpoint != 'static':
+                self._reload_roles_if_stale()
+                self._reload_users_if_stale()
+                self._reload_groups_if_stale()
 
         # CSRF (double-submit): state-changing requests must echo the session token in
         # the X-CSRF-Token header (JSON APIs) or csrf_token field (form posts). Exempt

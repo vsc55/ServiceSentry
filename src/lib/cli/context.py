@@ -18,6 +18,7 @@ from lib.config import config_path
 from lib.config.manager import ConfigManager, bootstrap_database_cfg, read_config_raw
 from lib.core.config.store import ConfigStore
 from lib.core.groups.store import GroupsStore
+from lib.core.entity_sync import diff_entities, snapshot
 from lib.core.roles.store import RolesStore
 from lib.core.users.service import PasswordPolicy
 from lib.core.users.store import UsersStore
@@ -56,6 +57,11 @@ class CliContext:
         self.users = self.users_store.load()
         self.groups = self.groups_store.load()
         self.roles = self.roles_store.load_roles()   # {uid: {name, ...}} — customs + overrides
+        # What was on disk when this command started. persist_* writes the difference
+        # against it, so a CLI command touching one account cannot delete whatever the
+        # running web admin created in the meantime (see lib.core.entity_sync).
+        self._users_at_load = snapshot(self.users)
+        self._groups_at_load = snapshot(self.groups)
 
     def password_policy(self) -> PasswordPolicy:
         """Build the :class:`PasswordPolicy` from the ``web_admin`` config section.
@@ -83,9 +89,15 @@ class CliContext:
         return None
 
     def persist_users(self) -> None:
-        """Write the in-memory users working copy back to the DB store."""
-        self.users_store.save_all(self.users)
+        """Write back the users this command changed — not the whole table."""
+        writes, deletes = diff_entities(self._users_at_load, self.users)
+        if writes or deletes:
+            self.users_store.apply(writes, deletes)
+            self._users_at_load = snapshot(self.users)
 
     def persist_groups(self) -> None:
-        """Write the in-memory groups working copy back to the DB store."""
-        self.groups_store.save_all(self.groups)
+        """Write back the groups this command changed — not the whole table."""
+        writes, deletes = diff_entities(self._groups_at_load, self.groups)
+        if writes or deletes:
+            self.groups_store.apply(writes, deletes)
+            self._groups_at_load = snapshot(self.groups)

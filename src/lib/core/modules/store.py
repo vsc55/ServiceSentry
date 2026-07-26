@@ -22,7 +22,6 @@ same rule the rest of the code uses (e.g. history's label lookup); today that is
 from __future__ import annotations
 
 import json
-import time
 import uuid
 
 from lib.security import secret_manager
@@ -31,9 +30,7 @@ from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
 
 
-def _now() -> str:
-    """ISO-8601 UTC timestamp (same format the hosts store uses)."""
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+from lib.util.entity_audit import utc_now_iso as _now   # one timestamp format
 
 
 def _loads(text, default):

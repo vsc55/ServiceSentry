@@ -68,7 +68,7 @@ El monitor **standalone** usa `'info'` por defecto si no hay nivel definido.
 
 Los mensajes de bind del servidor (host:puerto) se imprimen **directamente** a stdout/stderr,
 saltándose el log, "porque el nivel por defecto es `off`"
-([app.py:1561](../src/lib/web_admin/app.py#L1561)) — así siempre se ve dónde escucha el
+([app.py:1693](../src/lib/web_admin/app.py#L1693)) — así siempre se ve dónde escucha el
 servidor aunque el logging esté desactivado.
 
 > ⚠️ **`--verbose` / `SS_VERBOSE` NO cambian el nivel de log.** Solo activan el **debugger

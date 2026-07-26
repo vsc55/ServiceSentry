@@ -621,7 +621,72 @@ El monitor paraleliza los módulos con un `ThreadPoolExecutor` de `min(len(módu
 
 ---
 
+## Más de un proceso sobre la misma BD
+
+Roles, usuarios y grupos se leen **una vez**, al arrancar el WebAdmin, y cada petición
+responde desde esos diccionarios en memoria. Eso da por hecho que hay **un solo escritor**, y
+en este producto es falso por dos vías: el **CLI** escribe usuarios y grupos contra la misma
+BD, y una **segunda réplica** del web escribe los tres. De ahí dos problemas distintos, con
+dos soluciones distintas.
+
+### Leer: el proceso que no hizo el cambio no se enteraba
+
+Seguía sirviendo lo que cargó —incluidos permisos ya revocados— hasta que alguien lo
+reiniciaba. Recargar en cada petición lo arreglaría releyendo y reparseando todo para
+descubrir que no cambió nada, que es el caso normal. En su lugar cada tabla se sonda con algo
+barato (`lib/db/freshness.py`) y solo se relee cuando la respuesta se mueve.
+
+La sonda pregunta por un **contador de versión**, no por una marca de tiempo: cada escritor
+incrementa `entity_versions` de su tabla **dentro de la misma transacción** que la escritura,
+así que la versión y las filas que describe se hacen visibles a la vez. Un contador dice «algo
+cambió» sin que intervenga el reloj de nadie, y eso importa precisamente porque los escritores
+son máquinas distintas: con timestamps, una réplica con el reloj unos segundos atrasado
+escribe una fila sellada por debajo del máximo actual y su cambio queda invisible para todos
+los demás hasta que una escritura ajena mueva el máximo. Falla en silencio, y en el escenario
+exacto para el que existe el mecanismo. La sonda arrastra además el recuento de filas y el
+`updated_at` más reciente, en la misma ida y vuelta, como red por si alguien escribe saltándose
+el contador (una fila editada a mano, un script de migración, una build antigua).
+
+La comprobación va en `before_request` y **solo ahí**: una recarga sustituye el diccionario
+entero, así que hacerla dentro de un handler tiraría la edición en curso. Intervalo en
+`web_admin|cache_reload_secs` (0 = cada petición).
+
+> **Por qué no se lee directamente de la BD en cada petición.** Medido sobre 25 roles, 500
+> usuarios y 40 grupos en SQLite local: la sonda cuesta **0,28 ms** y la recarga completa
+> **10,8 ms** (9,6 de ellos, los usuarios). Ambas dan la **misma** frescura —la del inicio de
+> la petición—, así que sería 39× el coste por el mismo resultado. La variante que sí ganaría
+> es leer **por entidad** (ese usuario, sus grupos, esos roles): unas pocas filas
+> independientemente del tamaño de la tabla. Su ventaja no es la frescura sino dejar de
+> escalar con el número de usuarios, y cuesta cambiar los ~38 sitios que hoy tratan esas
+> colecciones como diccionarios completos. Decisión por escala, no por corrección.
+
+### Escribir: el segundo en guardar borraba el trabajo del primero
+
+El guardado era `DELETE FROM <tabla>` + reinsertar todo lo que había en memoria. Dos admins en
+dos réplicas editando roles **distintos** no perdían un campo cada uno: el segundo en guardar
+**borraba el rol del otro** y dejaba la tabla como estaba en su memoria. Sin error y sin log.
+
+Ahora cada guardado escribe la **diferencia** contra el estado que ese proceso leyó
+(`lib/core/entity_sync.py`). La regla que importa es la de los borrados: solo se borra una
+fila que este proceso **tenía** y ya no tiene; una fila que apareció mientras editábamos es de
+otro y no se toca. El CLI escribe igual.
+
+---
+
 ## Capa de Persistencia y Esquema de BD
+
+Cada store es dueño de **su** tabla: columnas, joins, payloads JSON y cómo una fila se
+convierte en dict. Nada de eso se comparte. Lo que sí se comparte —y estaba copiado en cada
+uno— vive en `lib/db/store_base.py`: `BaseStore` aporta el conector, `close()` (no-op: el
+dueño del ciclo de vida es el conector), `count()`, la sonda `stamp()`, el relleno de columnas
+de auditoría y **el** formato de fecha; `EncryptedPayloadMixin` aporta cifrar/descifrar el
+payload para los dos stores que guardan secretos (credenciales y perfiles de host).
+
+Un store declara dos nombres, no uno: el **lógico** (clave del contador de versiones, y como
+lo llama la documentación) y el **identificador SQL**, que puede necesitar comillas —`groups`
+y `user` son palabras reservadas—. Separarlos no es pulcritud: la sonda de frescura salió con
+el nombre crudo de una tabla citada, y en MySQL 8 eso no lanza error, hace que la sonda
+conteste «no sé» y una sonda que no puede contestar no recarga nunca.
 
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y

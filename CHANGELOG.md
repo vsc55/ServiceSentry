@@ -8,6 +8,99 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.6] - 2026-07-26
+
+### Fixed
+- **A second writer is no longer invisible to a running web process.** Roles, users and
+  groups were read from the database once, at startup, and every request answered from those
+  dicts — a single-writer assumption that was already false twice over: the **CLI** writes
+  users and groups against the same database (`ssentry user role bob viewer` was invisible
+  until a restart), and a second **web replica** writes all three. The process that did not
+  make the change kept serving what it loaded, including permissions that had been revoked.
+- Reloading on every request would fix it by re-reading and re-parsing every row to discover
+  that nothing changed, which is the normal case. Instead each table is asked something cheap
+  and re-read only when the answer moves.
+- **The cheap question is a version counter, not a timestamp.** Every writer bumps
+  `entity_versions` for its table inside the same transaction as the write, so the version and
+  the rows it describes become visible together. A counter says "something changed" with
+  nobody's clock involved, which matters precisely because the writers this exists for are
+  different machines: with timestamps, a replica whose clock runs a few seconds behind writes
+  a row stamped below the current maximum — `MAX(updated_at)` does not move, the row count
+  does not move — and its change stays invisible to everybody else until an unrelated write.
+  Silent, and in the exact scenario the mechanism is for. The probe still carries the row
+  count and newest timestamp in the same round trip, as a backstop for a writer that bypasses
+  the counter (a hand-edited row, a migration script, an older build).
+- The check runs in `before_request` and **only** there: a reload replaces the dict wholesale,
+  so doing it inside a handler — `_get_session_permissions()` is called from several, some
+  after they have already mutated the dict — would throw away the edit in progress. Static
+  files are skipped: they authorise nothing and would turn one page load into thirty queries.
+- An unreadable table answers `None`, which means "keep what you have" — not "nothing
+  changed" and not "everything is gone". A database blip must not leave a process authorising
+  against zero roles. `_load_users` refuses an empty answer for the same reason: "no users" is
+  not a state this product can be in, and applying it would lock everyone out.
+
+- **The second writer to save no longer deletes the first one's work.** Roles, users and
+  groups were written back with `DELETE FROM <table>` + re-inserting everything held in
+  memory. Two admins on two replicas editing *different* roles did not lose a field each: the
+  one who saved second deleted the other's role and restored the table as it looked in ITS
+  memory, with nothing failing and nothing logged. A save now writes the **difference**
+  against the state that process read (`lib/core/entity_sync.py`). The rule that matters is
+  about deletions: a row may only be deleted if this process HAD it and no longer does — a row
+  that appeared while we were editing belongs to somebody else. The CLI writes the same way.
+- Upserts ask whether the row exists instead of trusting the rowcount: MySQL reports 0 rows
+  affected for an UPDATE that sets the values a row already has, so "0 means insert it" would
+  end in a duplicate key. `upsert`/`delete`/`apply` share the row-level work because the
+  connector's `transaction()` is not re-entrant — an inner commit would end the outer one
+  early, leaving half a batch written.
+
+- **The freshness probe used the raw table name for a quoted table.** `groups` is a
+  reserved word on MySQL 8, where an unquoted `FROM groups` does not raise: it makes the
+  probe return "no answer", which the caller correctly reads as "keep what you have" — so on
+  that one backend the reload would never fire, silently. The probe now takes the logical
+  name (the counter's key) and the SQL identifier separately, because they are not always
+  the same string.
+
+### Changed
+- **The part every store does the same way is written once** (`lib/db/store_base.py`). Nine
+  identical `close()`, seven identical `count()`, three identical audit-column backfills, and
+  a byte-identical pair of encrypt/decrypt helpers now live in a thin `BaseStore` plus an
+  `EncryptedPayloadMixin`. Nothing about a domain's own table moved there — columns, joins and
+  row mapping stay with their store, and forcing seventeen tables through one hierarchy would
+  have cost more than the duplication removed. What each of those really was is a *decision*
+  ("closing is a no-op because the connector owns the connection lifecycle"), and a decision
+  written nine times is one nobody can change.
+- **One timestamp format.** `…Z` in the stores and `…+00:00` from `touch_entity` were two
+  spellings of the same instant, and for the same second the second sorts *below* the first —
+  so ordering by the stored string stopped being ordering by time exactly when two writers
+  met. `utc_now_iso()` is now the single source, used by the stores and by the audit stamp.
+
+### Added
+- `web_admin|cache_reload_secs` (default 5, admin-only): how long this process may serve
+  roles, users and groups from memory before asking. 0 = every request. It only matters when
+  something else writes the same database.
+- `tests/test_cache_freshness.py` — the two-process scenario with a second store on the same
+  database, a revoked permission that must stop being served, and the constraints that are
+  easy to lose in a refactor: the hook runs before the handler and not inside the permission
+  check, our own write does not trigger a reload, and each table is tracked apart.
+- `tests/test_entity_sync.py` — the diff rule stated exhaustively, and the two-writer scenario
+  it exists for.
+- `tests/test_store_base.py` — the convention, including the two failures behind it: a probe
+  given an unquoted reserved name, and the timestamp format that made lexicographic order stop
+  matching chronological order.
+
+### Notes
+- **Reading straight from the database on every request was measured and rejected**, not
+  assumed: over 25 roles, 500 users and 40 groups on local SQLite, the probe costs **0.28 ms**
+  and a full reload **10.8 ms** (9.6 of them the users). Both give the *same* freshness — that
+  of the start of the request — so it would be 39× the cost for the same answer. The variant
+  that would genuinely win is reading **per entity** (that user, their groups, those roles): a
+  handful of rows whatever the table size. Its advantage is not freshness but no longer
+  scaling with the number of users, and it costs changing the ~38 places that treat those
+  collections as whole dicts. A decision about scale, not correctness — see
+  `docs/explica-arquitectura.md`.
+
+---
+
 ## [0.0.1+build.5] - 2026-07-26
 
 ### Added

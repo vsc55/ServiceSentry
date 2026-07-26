@@ -194,6 +194,11 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         attr='_SESSION_REVOKE_REDIRECT_SECS', min=0, max=30),
     Cfg('web_admin|access_poll_secs', int, 30, attr='_ACCESS_POLL_SECS',
         min=5, max=300),
+    # Roles, users and groups are held in memory; this is how long this process may keep
+    # serving them without asking the database whether another writer changed them.
+    # 0 = ask on every request (immediate, one tiny aggregate query per table).
+    Cfg('web_admin|cache_reload_secs', int, 5, attr='_CACHE_RELOAD_SECS',
+        min=0, max=300, admin_only=True),
     # When the backend restarts (startup_id changes), the page-reload banner is
     # shown. With force-reload on, the banner also counts down and auto-reloads.
     Cfg('web_admin|force_reload_on_update', bool, False,

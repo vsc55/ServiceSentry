@@ -11,12 +11,24 @@ the base layer that ``lib.core`` imports without inverting the dependency.
 from datetime import datetime, timezone
 
 
+def utc_now_iso() -> str:
+    """The one timestamp format this project stores: UTC, second resolution, ``…Z``.
+
+    One function because there used to be two spellings — this module produced
+    ``2026-07-26T10:00:00.123456+00:00`` and the stores ``2026-07-26T10:00:00Z`` — and for
+    the same second the first sorts BELOW the second. Any code ordering or comparing the
+    stored string (the freshness probe did) stopped being ordered by time exactly when two
+    different writers touched the same table.
+    """
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 def touch_entity(entity: dict, actor: str = 'system') -> None:
     """Stamp ``updated_at`` (UTC ISO-8601) and ``updated_by`` (*actor*) on
     *entity* in place — the audit-trail update applied on every entity edit.
     Single source for the create/update handlers (users, groups, roles).
     """
-    entity['updated_at'] = datetime.now(timezone.utc).isoformat()
+    entity['updated_at'] = utc_now_iso()
     entity['updated_by'] = actor
 
 

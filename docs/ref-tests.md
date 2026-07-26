@@ -123,6 +123,9 @@
 99. [Panel Web — sección Permisos (Acceso › Permisos)](#99-panel-web--sección-permisos-acceso--permisos)
 100. [Meta — Cada dominio del core guarda su propio código](#100-meta--cada-dominio-del-core-guarda-su-propio-código)
 101. [Permisos — poda de claves por instancia](#101-permisos--poda-de-claves-por-instancia)
+102. [Cachés compartidas — frescura entre procesos](#102-cachés-compartidas--frescura-entre-procesos)
+103. [Escrituras diferenciales — dos escritores sobre una BD](#103-escrituras-diferenciales--dos-escritores-sobre-una-bd)
+104. [Stores — la base compartida y el formato de fecha único](#104-stores--la-base-compartida-y-el-formato-de-fecha-único)
 
 ---
 
@@ -4414,3 +4417,107 @@ que nadie recuerda haber dado— es la que importa.
 | `TestDeletingTheResourcePrunesIt::test_a_module_that_stays_keeps_its_keys` | Guardar la config de módulos no es una poda general |
 | `TestDeletingTheResourcePrunesIt::test_it_is_audited` | Edita permisos sin que nadie lo pida en esa pantalla, así que tiene que verse en algún sitio |
 | `TestDeletingTheResourcePrunesIt::test_nothing_is_written_when_no_role_referenced_it` | El caso común —un host que no está en la lista acotada de nadie— no reescribe nada ni miente en la auditoría |
+
+---
+
+## 102. Cachés compartidas — frescura entre procesos
+
+**Archivo:** `tests/test_cache_freshness.py` — 18 tests
+
+Roles, usuarios y grupos se leen de la BD **una vez**, al arrancar, y cada petición responde
+desde esos diccionarios. Eso asume un único escritor, y era falso por partida doble: el **CLI**
+escribe usuarios y grupos contra la misma BD (`ssentry user role bob viewer` era invisible hasta
+reiniciar) y una **segunda réplica** del web escribe los tres. El proceso que no hizo el cambio
+seguía sirviendo lo que cargó, incluidos permisos ya revocados.
+
+Recargar en cada petición lo arreglaría releyendo y reparseando todas las filas para descubrir que
+no cambió nada, que es el caso normal. En su lugar se pregunta algo barato —un **contador de versión** que cada escritor
+incrementa dentro de su misma transacción, más recuento de filas y `updated_at` como red— y solo
+se relee cuando la respuesta se mueve.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheProbe::test_it_reports_version_count_and_newest_timestamp` | La sonda dice lo que promete |
+| `TestTheProbe::test_every_write_moves_the_version` | Altas, ediciones y borrados mueven el contador |
+| `TestTheProbe::test_a_writer_whose_clock_runs_behind_is_still_noticed` | **Por qué es un contador y no un timestamp**: una réplica con el reloj atrasado escribe una fila por debajo del máximo actual — ni `MAX(updated_at)` ni el recuento se mueven — y con una sonda basada en tiempo su cambio sería invisible para todos los demás |
+| `TestTheProbe::test_an_unreadable_table_answers_nothing_rather_than_zero` | `None` es «no hay respuesta»; devolver `(0, '')` sería idéntico a «la tabla se vació» |
+| `TestReloadingOnChange::test_a_role_written_elsewhere_is_picked_up` | El escenario de dos procesos, con un segundo store sobre la misma BD |
+| `TestReloadingOnChange::test_a_revoked_permission_stops_being_served` | **La razón de existir**: la copia obsoleta seguía concediendo lo que se había quitado |
+| `TestReloadingOnChange::test_an_unchanged_table_is_not_reloaded` | El caso normal cuesta una consulta agregada, no una relectura completa |
+| `TestReloadingOnChange::test_our_own_write_does_not_trigger_a_reload` | Persistir mueve el sello; sin registrarlo, la siguiente petición releería lo recién escrito **encima** de quien aún esté editando |
+| `TestReloadingOnChange::test_the_ttl_bounds_how_often_it_asks` | Una ráfaga de peticiones cuesta una sonda, no una por petición |
+| `TestReloadingOnChange::test_an_unreadable_database_keeps_the_cache` | Un corte no puede vaciar los roles contra los que un proceso está autorizando |
+| `TestUsersAndGroups::test_a_user_written_elsewhere_is_picked_up` | Con el CLI esto no era hipotético |
+| `TestUsersAndGroups::test_an_empty_users_table_is_refused` | «Sin usuarios» no es un estado posible del producto: aplicarlo dejaría a todos fuera |
+| `TestUsersAndGroups::test_a_group_written_elsewhere_is_picked_up` | Los roles de un grupo son parte de los permisos efectivos de sus miembros |
+| `TestUsersAndGroups::test_a_role_added_to_a_group_elsewhere_is_picked_up` | Los roles viven en una tabla de unión y solo se sondea `groups`; funciona porque ambas las escribe el mismo `save_all`, en una transacción, sellando el grupo |
+| `TestUsersAndGroups::test_each_table_is_tracked_apart` | Un mecanismo compartido, una entrada por tabla: un cambio en roles no puede leerse como «usuarios también» |
+| `TestItRunsBeforeTheHandler::test_the_request_hook_is_wired` | Un mecanismo que nadie llama es el modo de fallo aquí — todo lo demás seguiría pasando |
+| `TestItRunsBeforeTheHandler::test_static_files_do_not_pay_for_it` | Con la recomprobación a 0 convertirían una carga de página en treinta consultas |
+| `TestItRunsBeforeTheHandler::test_the_reload_is_not_wired_into_the_permission_check` | `_get_session_permissions` se llama desde dentro de handlers, algunos ya tras mutar el dict: recargar ahí tiraría la edición en curso |
+
+---
+
+## 103. Escrituras diferenciales — dos escritores sobre una BD
+
+**Archivo:** `tests/test_entity_sync.py` — 10 tests
+
+Roles, usuarios y grupos se guardaban con `DELETE FROM <tabla>` + reinsertar todo lo que había
+en memoria. Correcto mientras un proceso sea dueño de la BD, y destructivo en cuanto son dos:
+dos admins en dos réplicas editando roles **distintos** no perdían un campo cada uno — el
+segundo en guardar **borraba el rol del otro** y dejaba la tabla como estaba en su memoria. Sin
+error y sin log.
+
+La regla que lo arregla va de **borrados**, no de actualizaciones: solo puede borrarse una fila
+que este proceso **tenía** y ya no tiene. Una fila que apareció mientras editábamos es de otro.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheDiff::test_an_unchanged_row_is_not_written` | Lo que no cambió no se escribe |
+| `TestTheDiff::test_a_changed_row_is_written` / `test_a_new_row_is_written` | Cambios y altas sí |
+| `TestTheDiff::test_a_row_we_had_and_dropped_is_deleted` | Un borrado intencionado sigue ocurriendo |
+| `TestTheDiff::test_the_first_save_of_all_writes_nothing_away` | Sin snapshot (primer arranque) = «no conozco nada», así que no se borra nada |
+| `TestTheDiff::test_the_snapshot_does_not_share_its_lists` | El snapshot es **profundo**: uno superficial compartiría la lista de permisos que se edita en sitio, cambiaría con el dato vivo y todos los diffs dirían «nada cambió» — el bug que convertiría el mecanismo entero en un no-op |
+| `TestTwoWriters::test_saving_one_role_does_not_delete_another_writer_s` | **El fallo para el que existe**, con dos stores sobre una BD |
+| `TestTwoWriters::test_a_role_this_writer_deleted_is_deleted` | La otra mitad: borrar de verdad sigue funcionando |
+| `TestTwoWriters::test_an_update_that_changes_nothing_writes_nothing` | MySQL informa de 0 filas afectadas cuando el UPDATE deja los mismos valores, por eso el upsert pregunta si la fila existe en vez de fiarse del `rowcount`: «0 = insertar» acabaría en clave duplicada |
+| `TestTwoWriters::test_the_panel_saving_does_not_wipe_a_cli_user` | La misma historia con el escritor que ya existía: el CLI |
+
+---
+
+## 104. Stores — la base compartida y el formato de fecha único
+
+**Archivo:** `tests/test_store_base.py` — 32 tests
+
+Cada dominio es dueño de su store —columnas, joins, payloads JSON, cómo una fila se
+convierte en dict— y nada de eso se comparte. Lo que **sí** se compartía y aun así estaba
+copiado era lo de los bordes: nueve `close()` idénticos, siete `count()` idénticos, tres
+rellenos de columnas de auditoría iguales, siete copias de «qué hora es, en el formato que
+guarda este proyecto» y un par de helpers de cifrado byte a byte iguales.
+
+El número de líneas no es el argumento. Cada una de esas es una **decisión** —«cerrar es un
+no-op porque el dueño del ciclo de vida es el conector»— y una decisión escrita nueve veces
+es una decisión que nadie puede cambiar.
+
+Dos de estos tests existen por fallos reales, no por pulcritud:
+
+- la sonda de frescura recibía el nombre **crudo** de una tabla cuyo nombre es palabra
+  reservada (`groups` en MySQL 8): así no lanza error, devuelve «no sé», y una sonda que no
+  puede contestar no recarga nunca;
+- convivían **dos formatos de fecha** (`…Z` en los stores, `…+00:00` en `touch_entity`) y para
+  el mismo segundo el segundo ordena **por debajo** del primero, así que ordenar por la cadena
+  guardada dejaba de ser ordenar por tiempo justo cuando se cruzaban dos escritores.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestOneTimestampFormat::test_it_is_utc_second_resolution_and_sortable` | Un solo formato: UTC, segundos, `…Z` |
+| `TestOneTimestampFormat::test_touch_entity_uses_it` | El que producía la otra grafía ahora usa la única |
+| `TestOneTimestampFormat::test_lexicographic_order_is_chronological` | La propiedad de la que depende todo lo que compara esas cadenas |
+| `TestOneTimestampFormat::test_no_store_spells_it_out_again` (×8) | Ningún store vuelve a escribir el formato a mano |
+| `TestTheSharedBase::test_the_store_uses_it` (×8) | Los ocho stores del core heredan la base |
+| `TestTheSharedBase::test_it_does_not_reimplement_what_it_inherits` (×8) | Ninguno se reescribe `close()` ni un `count()` que ya hereda |
+| `TestTheSharedBase::test_encryption_is_defined_once` | Credenciales y perfiles de host compartían helpers idénticos |
+| `TestTheSharedBase::test_close_is_a_no_op_callers_can_rely_on` | Cerrar no lanza ni necesita conector |
+| `TestTheSharedBase::test_the_mixin_passes_the_payload_through_without_a_key` | Sin Fernet, «déjalo como está» y nunca «tíralo»: son credenciales y perfiles de host |
+| `TestTheProbeUsesTheRightIdentifier::test_a_reserved_table_name_is_quoted` | **El fallo silencioso**: la sonda debe pasar por el mismo identificador que el resto del SQL del store |
+| `TestTheProbeUsesTheRightIdentifier::test_the_logical_name_stays_unquoted` | La fila del contador se indexa por el nombre plano; citarlo ahí crearía una segunda fila que nadie incrementa |

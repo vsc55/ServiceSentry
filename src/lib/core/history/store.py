@@ -26,6 +26,7 @@ import time
 
 from lib.db import BaseConnector, get_connector
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore
 
 _PREFERRED_FIELDS = (
     'temp', 'used', 'count', 'code', 'response_time',
@@ -55,11 +56,11 @@ _SCHEMA = TableSpec(
 _T = _SCHEMA.name  # table name — single source of truth
 
 
-class HistoryStore:
+class HistoryStore(BaseStore):
     """Backend-agnostic time-series store."""
 
     def __init__(self, db: BaseConnector) -> None:
-        self._db = db
+        super().__init__(db)
         # ``key`` is a reserved word in MySQL — quote it (dialect-aware) in every raw query.
         self._qk = db.quote_ident('key')
         self._bootstrap()
@@ -357,8 +358,6 @@ class HistoryStore:
                 return k
         return None
 
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────

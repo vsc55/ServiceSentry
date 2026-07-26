@@ -1674,6 +1674,7 @@ LANG = {
         'conn_check_secs':             'Connection check interval (s)',
         'session_revoke_redirect_secs':'Redirect delay on revoke (s)',
         'access_poll_secs':            'Access tab refresh interval (s)',
+        'cache_reload_secs':           'Shared-cache re-check (s)',
         'force_reload_on_update':      'Force reload on update',
         'force_reload_secs':           'Reload countdown (s)',
         # LDAP
@@ -1827,6 +1828,7 @@ LANG = {
         'web_admin|scim_max_members':             'Maximum number of members processed per SCIM group write (caps CPU cost of a huge membership payload).',
         'web_admin|session_revoke_redirect_secs': 'Seconds to wait before redirecting to the login page after a session is revoked (0–30). Used for all revocation scenarios (remote revocation by admin, self-revoke, invalidate all).',
         'web_admin|access_poll_secs':             'How often the Access tab automatically refreshes its data (users, sessions, roles, groups) while it is open (5–300 seconds).',
+        'web_admin|cache_reload_secs':            'How long this process may keep serving roles, users and groups from memory before asking the database whether another writer changed them. 0 = check on every request. It matters when something else writes the same database: the CLI (users and groups) or a second web replica (0–300 seconds).',
         'web_admin|force_reload_on_update':       'When the backend is restarted/updated, the reload banner appears. Off (default): the banner only invites you to reload manually. On: the banner shows a countdown and the page reloads automatically.',
         'web_admin|force_reload_secs':            'Seconds the countdown waits before the page reloads automatically after a backend update (1–300). Only used when "Force reload on update" is on.',
         'pretty_name':                  'Optional display name shown in the interface. If empty, the module identifier is used.',

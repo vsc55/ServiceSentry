@@ -1675,6 +1675,7 @@ LANG = {
         'conn_check_secs':             'Intervalo de comprobación de conexión (s)',
         'session_revoke_redirect_secs':'Espera antes del logout por revocación (s)',
         'access_poll_secs':            'Intervalo de refresco del tab Acceso (s)',
+        'cache_reload_secs':           'Recomprobación de cachés compartidas (s)',
         'force_reload_on_update':      'Forzar recarga al actualizar',
         'force_reload_secs':           'Cuenta atrás de recarga (s)',
         # LDAP
@@ -1828,6 +1829,7 @@ LANG = {
         'web_admin|scim_max_members':             'Máximo de miembros procesados por escritura de grupo SCIM (acota el coste de CPU de un payload de membresía enorme).',
         'web_admin|session_revoke_redirect_secs': 'Segundos de espera antes de redirigir al login cuando se revoca una sesión (0–30). Se aplica a todos los escenarios de revocación (por admin, autorevocación, cerrar todas).',
         'web_admin|access_poll_secs':             'Cada cuántos segundos se refresca automáticamente el tab Acceso (usuarios, sesiones, roles, grupos) mientras está abierto (5–300 s).',
+        'web_admin|cache_reload_secs':            'Cuánto tiempo puede este proceso seguir sirviendo roles, usuarios y grupos desde memoria antes de preguntar a la BD si otro escritor los cambió. 0 = comprobar en cada petición. Importa cuando algo más escribe en la misma BD: el CLI (usuarios y grupos) o una segunda réplica del web (0–300 s).',
         'web_admin|force_reload_on_update':       'Cuando el backend se reinicia/actualiza aparece el aviso de recarga. Desactivado (por defecto): el aviso solo invita a recargar manualmente. Activado: el aviso muestra una cuenta atrás y la página se recarga automáticamente.',
         'web_admin|force_reload_secs':            'Segundos que espera la cuenta atrás antes de recargar la página automáticamente tras una actualización del backend (1–300). Solo se usa si "Forzar recarga al actualizar" está activo.',
         'pretty_name':                  'Nombre de visualización opcional. Si está vacío, se usa el identificador del módulo.',

@@ -21,6 +21,7 @@ import json
 
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore
 
 _SCHEMA = TableSpec(
     name='audit',
@@ -41,11 +42,13 @@ _SCHEMA = TableSpec(
 _T = _SCHEMA.name  # table name — single source of truth
 
 
-class AuditStore:
+class AuditStore(BaseStore):
     """Relational audit log (backend-agnostic)."""
 
+    _TABLE = _T
+
     def __init__(self, db: BaseConnector) -> None:
-        self._db = db
+        super().__init__(db)
         # ``user`` is a reserved word in PostgreSQL (it means CURRENT_USER) — quote it
         # (dialect-aware) in every raw query, else the INSERT errors and the SELECT would
         # return the DB login instead of the column.
@@ -124,10 +127,6 @@ class AuditStore:
         row = self._db.fetchone(f'SELECT MAX(id) FROM {_T}')
         return int(row[0]) if row and row[0] is not None else 0
 
-    def count(self) -> int:
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
-        return row[0] if row else 0
-
     # ── Migration ─────────────────────────────────────────────────────────────
 
     def migrate_from_list(self, entries: list[dict]) -> int:
@@ -163,8 +162,6 @@ class AuditStore:
             self._db.execute(f'DELETE FROM {_T} WHERE id = (SELECT MIN(id) FROM {_T})')
             self._db.commit()
 
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

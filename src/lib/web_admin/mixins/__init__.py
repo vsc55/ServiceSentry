@@ -7,13 +7,16 @@ groups, sessions, permissions, …) carry their own mixin inside their
 ``lib.core.<domain>`` package and are imported directly by :mod:`lib.web_admin.app`.
 
 What is left here is the glue that belongs to no domain: ``auth`` (the login/session
-lifecycle of the panel itself) and ``services`` (which discovers and controls the
-embedded services rather than owning one).
+lifecycle of the panel itself), ``services`` (which discovers and controls the embedded
+services rather than owning one) and ``freshness`` (the same three lines that keep roles,
+users and groups from going stale when this process is not the only writer).
 """
 from .auth import _AuthMixin
+from .freshness import _FreshnessMixin
 from .services import _ServicesMixin
 
 __all__ = [
     '_AuthMixin',
+    '_FreshnessMixin',
     '_ServicesMixin',
 ]

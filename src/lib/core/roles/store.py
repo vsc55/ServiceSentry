@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 
 from lib.db import BaseConnector
+from lib.db.freshness import bump_version
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore
 
 _SCHEMA = TableSpec(
     name='roles',
@@ -40,11 +42,13 @@ _SCHEMA = TableSpec(
 _T = _SCHEMA.name  # table name — single source of truth
 
 
-class RolesStore:
+class RolesStore(BaseStore):
     """Relational store for custom roles + built-in overrides (backend-agnostic)."""
 
+    _TABLE = _T
+
     def __init__(self, db: BaseConnector) -> None:
-        self._db = db
+        super().__init__(db)
         self._bootstrap()
 
     # ── Schema ────────────────────────────────────────────────────────────────
@@ -52,14 +56,9 @@ class RolesStore:
     def _bootstrap(self) -> None:
         db = self._db
         db.reconcile_table(_SCHEMA)
-        # Backfill empty audit columns for existing rows.
-        import time as _t  # noqa: PLC0415
-        _now = _t.strftime('%Y-%m-%dT%H:%M:%SZ', _t.gmtime())
-        db.execute(
-            f"UPDATE {_T} SET created_at=?, updated_at=?, updated_by=? WHERE created_at=''",
-            (_now, _now, 'system'),
-        )
+        self._backfill_audit_columns()
         db.commit()
+        self._ensure_version_row()
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
@@ -88,35 +87,41 @@ class RolesStore:
             }
         return result
 
-    def count(self) -> int:
-        """Return the number of rows in the roles table."""
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
-        return row[0] if row else 0
-
     # ── Write ─────────────────────────────────────────────────────────────────
 
-    def save_all(self, roles: dict) -> bool:
-        """Replace all role rows atomically.
+    def apply(self, writes: dict, deletes=()) -> bool:
+        """Write only what changed — see :mod:`lib.core.entity_sync`.
 
-        *roles* is ``{uid: {uid, name, description, permissions, enabled,
-        created_at, updated_at, updated_by}}``.  Includes built-in override
-        rows (UID as key, name/description only — permissions not stored).
+        Rows this caller never knew about are untouched — which is the point: two
+        processes editing different roles no longer delete each other's work, as they did
+        when a save meant "empty the table and put back what I have".
+
+        An upsert is SELECT-then-UPDATE-or-INSERT rather than a rowcount check: MySQL
+        reports 0 rows affected for an UPDATE that sets a row to the values it already
+        has, so "0 means it is not there, insert it" would try to insert a duplicate.
         """
         try:
             with self._db.transaction():
-                self._db.execute(f'DELETE FROM {_T}')
-                for uid, d in roles.items():
-                    self._db.execute(
-                        f'INSERT INTO {_T}(uid, name, description, permissions, enabled,'
-                        ' created_at, updated_at, updated_by) VALUES(?,?,?,?,?,?,?,?)',
-                        (uid, d.get('name', uid),
-                         d.get('description', ''),
-                         json.dumps(d.get('permissions', []), ensure_ascii=False),
-                         1 if d.get('enabled', True) else 0,
-                         d.get('created_at', ''),
-                         d.get('updated_at', ''),
-                         d.get('updated_by', '')),
-                    )
+                for uid in deletes:
+                    self._db.execute(f'DELETE FROM {_T} WHERE uid=?', (uid,))
+                for uid, d in writes.items():
+                    values = (d.get('name', uid), d.get('description', ''),
+                              json.dumps(d.get('permissions', []), ensure_ascii=False),
+                              1 if d.get('enabled', True) else 0,
+                              d.get('created_at', ''), d.get('updated_at', ''),
+                              d.get('updated_by', ''))
+                    exists = self._db.fetchone(f'SELECT 1 FROM {_T} WHERE uid=?', (uid,))
+                    if exists:
+                        self._db.execute(
+                            f'UPDATE {_T} SET name=?, description=?, permissions=?, enabled=?,'
+                            ' created_at=?, updated_at=?, updated_by=? WHERE uid=?',
+                            (*values, uid))
+                    else:
+                        self._db.execute(
+                            f'INSERT INTO {_T}(name, description, permissions, enabled,'
+                            ' created_at, updated_at, updated_by, uid) VALUES(?,?,?,?,?,?,?,?)',
+                            (*values, uid))
+                bump_version(self._db, _T)
             return True
         except Exception:  # pylint: disable=broad-except
             return False
@@ -126,11 +131,7 @@ class RolesStore:
         try:
             with self._db.transaction():
                 deleted = self._db.execute(f'DELETE FROM {_T} WHERE uid = ?', (uid,))
+                bump_version(self._db, _T)
             return deleted > 0
         except Exception:  # pylint: disable=broad-except
             return False
-
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""

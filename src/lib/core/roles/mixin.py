@@ -3,6 +3,7 @@
 """Custom roles mixin for WebAdmin."""
 
 from lib.core.constants import BUILTIN_ROLE_UIDS
+from lib.core.entity_sync import diff_entities, snapshot
 
 # Legacy permission-flag renames applied to stored custom roles on load (one-off, then
 # persisted). Repairs any DB that briefly carried the singular ``cluster_*`` flags back to
@@ -17,6 +18,18 @@ _LEGACY_PERM_RENAME = {
 
 class _RolesMixin:
     """Persistence and lookup for custom roles (DB table ``roles``)."""
+
+    #: The rows as last read from — or written to — the database. A save writes the
+    #: difference against this, so it touches only what this process changed.
+    _roles_snapshot: dict = None
+
+    def _reload_roles_if_stale(self) -> bool:
+        """Re-read the roles table when another writer has touched it (see
+        :class:`lib.web_admin.mixins.freshness._FreshnessMixin`).  A second web replica is
+        the writer that makes this necessary: without it, this process keeps granting the
+        permissions a role had when it started."""
+        return self._reload_if_stale('roles', getattr(self, '_roles_store', None),
+                                     self._load_roles)
 
     def _load_roles(self) -> None:
         """Load roles from the columnar roles table.
@@ -35,6 +48,9 @@ class _RolesMixin:
                                         if uid not in builtin_uids}
         self._builtin_role_overrides = {uid: d for uid, d in all_stored.items()
                                          if uid in builtin_uids}
+        # Taken here, before the migration below may persist: what is on disk right now is
+        # what the next save must diff against, so that save writes only the rows it fixed.
+        self._roles_snapshot = snapshot(all_stored)
         # One-off migration of renamed permission flags in stored custom roles, so
         # existing grants survive a flag rename (persisted once when anything changes).
         migrated = False
@@ -55,7 +71,19 @@ class _RolesMixin:
         }
 
     def _persist_roles(self) -> bool:
-        """Write all custom roles + built-in overrides to the roles table."""
+        """Write the roles this process changed — not the whole table.
+
+        Replacing every row would delete a role another replica created while this one was
+        being edited, silently and with nothing failing. :mod:`lib.core.entity_sync` spells
+        out the rule; the short version is that a row we never saw is not ours to remove.
+        """
         to_save = dict(self._custom_roles)
         to_save.update(self._builtin_role_overrides)
-        return self._roles_store.save_all(to_save)
+        writes, deletes = diff_entities(self._roles_snapshot, to_save)
+        if not writes and not deletes:
+            return True                      # nothing to say to the database
+        ok = self._roles_store.apply(writes, deletes)
+        if ok:
+            self._roles_snapshot = snapshot(to_save)
+            self._mark_fresh('roles', self._roles_store)
+        return ok

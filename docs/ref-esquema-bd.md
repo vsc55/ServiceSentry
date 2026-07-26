@@ -24,12 +24,13 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **32 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **33 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 | Grupo | Tablas |
 | ----- | ------ |
 | Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions` |
+| Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
 | Auditoría / historial / estado | `audit`, `history`, `check_state` |
@@ -70,8 +71,20 @@ erDiagram
 
 ## Identidad / control de acceso
 
+> **Cómo se escriben estas tres tablas** (`users`, `groups`, `roles`). No se reemplazan
+> enteras: cada guardado escribe la **diferencia** contra lo que ese proceso leyó, y solo borra
+> filas que tenía y ha dejado de tener. Una fila que apareció mientras editaba es de otro
+> escritor —el CLI, otra réplica— y no se toca. El modelo entero, con el fallo que lo motivó,
+> está en [explica-arquitectura.md](explica-arquitectura.md#más-de-un-proceso-sobre-la-misma-bd);
+> la mecánica, en `lib/core/entity_sync.py`.
+>
+> Los permisos de un rol viven como **lista JSON** en `roles.permissions`, no en una tabla de
+> unión: el catálogo de permisos es *código* (se descubre del `manifest.py` de cada dominio) y
+> las claves por instancia (`module.<id>.<acción>`) son ilimitadas, así que no hay tabla a la
+> que referenciar — ver [ref-permisos.md](ref-permisos.md).
+
 ### `users` — cuentas de usuario del WebAdmin
-[lib/core/users/store.py:40](../src/lib/core/users/store.py#L40)
+[lib/core/users/store.py:42](../src/lib/core/users/store.py#L42)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -93,7 +106,7 @@ erDiagram
 Índices: `idx_users_role(role)`.
 
 ### `users_groups` — pertenencia usuario↔grupo (M:N)
-[lib/core/users/store.py:61](../src/lib/core/users/store.py#L61)
+[lib/core/users/store.py:63](../src/lib/core/users/store.py#L63)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -105,7 +118,7 @@ Restricción única: `(user_uid, group_uid)`.
 Índices: `idx_users_groups_user(user_uid)`, `idx_users_groups_group(group_uid)`.
 
 ### `groups` — grupos de usuarios
-[lib/core/groups/store.py:28](../src/lib/core/groups/store.py#L28)
+[lib/core/groups/store.py:29](../src/lib/core/groups/store.py#L29)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -124,7 +137,7 @@ Restricción única: `(user_uid, group_uid)`.
 reservada en MySQL) — [store.py:77](../src/lib/core/groups/store.py#L77).
 
 ### `groups_roles` — asignación grupo↔rol (M:N)
-[lib/core/groups/store.py:45](../src/lib/core/groups/store.py#L45)
+[lib/core/groups/store.py:46](../src/lib/core/groups/store.py#L46)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -137,7 +150,7 @@ reservada en MySQL) — [store.py:77](../src/lib/core/groups/store.py#L77).
 Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_role`.
 
 ### `roles` — roles personalizados + overrides de built-in
-[lib/core/roles/store.py:25](../src/lib/core/roles/store.py#L25)
+[lib/core/roles/store.py:27](../src/lib/core/roles/store.py#L27)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -153,7 +166,7 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 Índices: `idx_roles_name(name)` UNIQUE.
 
 ### `sessions` — sesiones del WebAdmin
-[lib/core/sessions/store.py:24](../src/lib/core/sessions/store.py#L24)
+[lib/core/sessions/store.py:25](../src/lib/core/sessions/store.py#L25)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -166,6 +179,29 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 | user_agent | TEXT | no | `''` | |
 
 Índices: `idx_sessions_user_uid(user_uid)`. Rename heredado: `sid`→`uid`.
+
+---
+
+### `entity_versions` — contador de cambios por tabla
+[lib/db/freshness.py:36](../src/lib/db/freshness.py#L36)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| name | TEXT | no | — | PK — la tabla vigilada |
+| version | INTEGER | no | `0` | se incrementa en cada escritura |
+
+Una fila por tabla vigilada (`users`, `groups`, `roles`). Cada escritor la incrementa
+**dentro de su misma transacción**, así que la versión y las filas que describe se hacen
+visibles a la vez: ningún lector puede ver una sin las otras.
+
+Existe para que un proceso sepa si otro tocó la tabla sin releerla entera. Es un **contador**
+y no una marca de tiempo a propósito: los escritores son máquinas distintas, y con timestamps
+una réplica con el reloj unos segundos atrasado escribe una fila por debajo del máximo actual
+—`MAX(updated_at)` no se mueve, el recuento tampoco— y su cambio queda invisible para todos
+los demás hasta que una escritura ajena mueva el máximo. Silencioso, y justo en el escenario
+para el que existe el mecanismo.
+
+Ver [explica-arquitectura.md](explica-arquitectura.md#más-de-un-proceso-sobre-la-misma-bd).
 
 ---
 
@@ -269,7 +305,7 @@ config.json (solo lectura/arranque) → BD (editable).
 ## Auditoría / historial / estado
 
 ### `audit` — registro de auditoría
-[lib/core/audit/store.py:25](../src/lib/core/audit/store.py#L25)
+[lib/core/audit/store.py:26](../src/lib/core/audit/store.py#L26)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -283,7 +319,7 @@ config.json (solo lectura/arranque) → BD (editable).
 Índices: `idx_audit_id(id DESC)`, `idx_audit_event(event)`.
 
 ### `history` — series temporales de resultados de checks
-[lib/core/history/store.py:38](../src/lib/core/history/store.py#L38)
+[lib/core/history/store.py:39](../src/lib/core/history/store.py#L39)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -299,7 +335,7 @@ config.json (solo lectura/arranque) → BD (editable).
 El *downsampling* por buckets usa `CAST(FLOOR((ts - ?) / ?) AS <int>)` (portable multi-motor).
 
 ### `check_state` — estado vivo por check (reemplaza status.json)
-[lib/services/monitoring/check_state/store.py:49](../src/lib/services/monitoring/check_state/store.py#L49)
+[lib/services/monitoring/check_state/store.py:50](../src/lib/services/monitoring/check_state/store.py#L50)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|

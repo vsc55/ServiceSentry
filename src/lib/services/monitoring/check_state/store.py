@@ -45,6 +45,7 @@ import uuid
 from lib.config import ConfigControl
 from lib.db import BaseConnector, get_connector
 from lib.db.schema import Column, TableSpec
+from lib.db.store_base import BaseStore
 
 _SCHEMA = TableSpec(
     name='check_state',
@@ -134,11 +135,11 @@ def _join_key(key, metric):
     return f'{key}{metric}' if metric.startswith('/') else f'{key}_{metric}'
 
 
-class CheckStateStore:
+class CheckStateStore(BaseStore):
     """Backend-agnostic current-state store (one row per check)."""
 
     def __init__(self, db: BaseConnector) -> None:
-        self._db = db
+        super().__init__(db)
         # ``key`` is a reserved word in MySQL — quote it (dialect-aware) in every raw query
         # so runtime SQL works on MySQL/MariaDB, not just SQLite.
         self._qk = db.quote_ident('key')
@@ -312,8 +313,6 @@ class CheckStateStore:
         except Exception:  # pylint: disable=broad-except
             return False
 
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""
 
 
 # ── Module-level helper ────────────────────────────────────────────────────────

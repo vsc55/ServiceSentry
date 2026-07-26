@@ -78,7 +78,7 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
   `ts`/`severity`/`hostname`/`app`/`facility`). Ver el detalle en [ref-esquema-bd.md](ref-esquema-bd.md).
 - **Downsampling de historial**: las gráficas agregan por buckets con
   `CAST(FLOOR((ts - ?) / ?) AS <int>)` en SQL (portable), evitando traer todas las filas al
-  cliente ([history/store.py:38](../src/lib/core/history/store.py#L38)).
+  cliente ([history/store.py:39](../src/lib/core/history/store.py#L39)).
 
 ### Reconcile de esquema en el arranque
 

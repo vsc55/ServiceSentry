@@ -25,12 +25,12 @@ Schema::
 from __future__ import annotations
 
 import json
-import time
 import uuid
 
 from lib.security import secret_manager
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore, EncryptedPayloadMixin
 
 # Identity fields a credential owns; overlaid onto a host/check ssh dict when a
 # cred_uid is set.  Address/port/verify_host are NOT here — they belong to the
@@ -63,8 +63,7 @@ _COLS = ('uid', 'name', 'ctype', 'enabled', 'description', 'data',
 _SELECT = ', '.join(_COLS)
 
 
-def _now() -> str:
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+from lib.util.entity_audit import utc_now_iso as _now   # one timestamp format
 
 
 def apply_credential(target: dict, cred: dict | None) -> dict:
@@ -89,11 +88,13 @@ def apply_credential(target: dict, cred: dict | None) -> dict:
     return out
 
 
-class CredentialsStore:
+class CredentialsStore(EncryptedPayloadMixin, BaseStore):
     """Relational store for reusable named credentials (backend-agnostic)."""
 
+    _TABLE = _T
+
     def __init__(self, db: BaseConnector, *, fernet=None, secret_keys=None) -> None:
-        self._db = db
+        super().__init__(db)
         self._fernet = fernet
         self._secret_keys = secret_keys or secret_manager.ENCRYPT_KEYS
         self._bootstrap()
@@ -103,15 +104,6 @@ class CredentialsStore:
         self._db.reconcile_table(_CREDS_SCHEMA)
 
     # ── Secret encryption (value-level, inside data) ──────────────────────────
-    def _encrypt(self, data):
-        if self._fernet and isinstance(data, dict):
-            return secret_manager.encrypt_sensitive(data, self._fernet, keys=self._secret_keys)
-        return data
-
-    def _decrypt(self, data):
-        if self._fernet:
-            return secret_manager.decrypt_all(data, self._fernet)
-        return data
 
     # ── Row mapping ───────────────────────────────────────────────────────────
     def _row_to_cred(self, row, decrypt: bool) -> dict:
@@ -147,10 +139,6 @@ class CredentialsStore:
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
         row = self._db.fetchone(f'SELECT {_SELECT} FROM {_T} WHERE name = ?', (name,))
         return self._row_to_cred(row, decrypt) if row else None
-
-    def count(self) -> int:
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
-        return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
     def create(self, data: dict, *, actor: str = '') -> str | None:
@@ -212,6 +200,3 @@ class CredentialsStore:
             return True
         except Exception:  # pylint: disable=broad-except
             return False
-
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""

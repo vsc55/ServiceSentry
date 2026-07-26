@@ -26,12 +26,12 @@ Schema::
 from __future__ import annotations
 
 import json
-import time
 import uuid
 
 from lib.security import secret_manager
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore, EncryptedPayloadMixin
 
 _HOSTS_SCHEMA = TableSpec(
     name='hosts',
@@ -71,15 +71,16 @@ _COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'tags
 _SELECT = ', '.join(_COLS)
 
 
-def _now() -> str:
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+from lib.util.entity_audit import utc_now_iso as _now   # one timestamp format
 
 
-class HostsStore:
+class HostsStore(EncryptedPayloadMixin, BaseStore):
     """Relational store for monitored hosts (backend-agnostic)."""
 
+    _TABLE = _T
+
     def __init__(self, db: BaseConnector, *, fernet=None, secret_keys=None) -> None:
-        self._db = db
+        super().__init__(db)
         self._fernet = fernet
         self._secret_keys = secret_keys or secret_manager.ENCRYPT_KEYS
         # ``virtual`` is a reserved word in MySQL. Quote the whole column list (dialect-aware)
@@ -94,15 +95,6 @@ class HostsStore:
         self._db.reconcile_table(_HOSTS_SCHEMA)
 
     # ── Secret encryption (value-level, inside profiles) ──────────────────────
-    def _encrypt(self, profiles):
-        if self._fernet and isinstance(profiles, dict):
-            return secret_manager.encrypt_sensitive(profiles, self._fernet, keys=self._secret_keys)
-        return profiles
-
-    def _decrypt(self, profiles):
-        if self._fernet:
-            return secret_manager.decrypt_all(profiles, self._fernet)
-        return profiles
 
     # ── Row mapping ───────────────────────────────────────────────────────────
     def _row_to_host(self, row, decrypt: bool) -> dict:
@@ -162,10 +154,6 @@ class HostsStore:
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
         row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE name = ?', (name,))
         return self._row_to_host(row, decrypt) if row else None
-
-    def count(self) -> int:
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
-        return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
     def create(self, data: dict, *, actor: str = '') -> str | None:
@@ -238,6 +226,3 @@ class HostsStore:
             return True
         except Exception:  # pylint: disable=broad-except
             return False
-
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""

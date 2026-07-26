@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
+from lib.db.store_base import BaseStore
 
 _SCHEMA = TableSpec(
     name='sessions',
@@ -39,11 +40,13 @@ _SCHEMA = TableSpec(
 _T = _SCHEMA.name  # table name — single source of truth
 
 
-class SessionsStore:
+class SessionsStore(BaseStore):
     """Relational store for WebAdmin sessions (backend-agnostic)."""
 
+    _TABLE = _T
+
     def __init__(self, db: BaseConnector) -> None:
-        self._db = db
+        super().__init__(db)
         self._bootstrap()
 
     # ── Schema ────────────────────────────────────────────────────────────────
@@ -70,11 +73,6 @@ class SessionsStore:
             }
             for r in rows
         }
-
-    def count(self) -> int:
-        """Return the number of stored sessions."""
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
-        return row[0] if row else 0
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -144,8 +142,3 @@ class SessionsStore:
             return deleted
         except Exception:  # pylint: disable=broad-except
             return 0
-
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    def close(self) -> None:
-        """No-op: the connector owns the connection lifecycle."""
