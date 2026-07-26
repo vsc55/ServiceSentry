@@ -99,107 +99,27 @@
     <div class="tab-content pt-1">
         <!-- ==================== Overview Tab =================== -->
         {% if not standalone or standalone == 'overview' %}
-        <div class="tab-pane fade{% if standalone == 'overview' %} show active{% endif %}" id="tab-overview">
-            <div id="overview-container">
-                {# Placeholder for the PANEL's pane, which is inactive at load. On a
-                   standalone page the pane is active from the first paint, so this would
-                   sit under the loading overlay as a second spinner — there the overlay is
-                   the indicator, and the render fills this in. #}
-                {% if not standalone %}
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-                {% endif %}
-            </div>
-        </div>
+        {% include "partials/overview/_pane.html" %}
 
         <!-- ==================== Modules Tab ==================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-modules">
-            <div class="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border"
-                 style="background:var(--bs-secondary-bg);position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
-                <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
-                <button class="btn btn-sm btn-secondary ms-auto" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
-                    <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
-                </button>
-                <button class="btn btn-sm btn-success" id="btnNewModule" onclick="openNewModuleModal()" title="{{ i18n.add_module_tt }}">
-                    <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
-                </button>
-                <button class="btn btn-sm btn-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
-                    <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
-                </button>
-                <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()" title="{{ i18n.save_modules_tt }}" disabled>
-                    <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
-                    <span class="badge text-bg-warning ms-1 d-none" id="badgeModulesDirty"
-                        title="{{ i18n.unsaved_changes }}">●</span>
-                </button>
-            </div>
-            <div id="modules-container"></div>
-        </div>
+        {% include "partials/modules/_pane.html" %}
 
         <!-- =============== Infrastructure Tab (Servers + Cluster) =============== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-servers">
-            <!-- Sub-tab nav -->
-            <ul class="nav nav-tabs mb-3" id="infraSubTabs" role="tablist">
-                <li class="nav-item" role="presentation" id="subtab-srv-hosts-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-hosts" type="button" id="btn-subtab-srv-hosts">
-                        <i class="bi bi-hdd-network me-1"></i>{{ i18n.subtab_servers }}
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation" id="subtab-srv-clusters-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-clusters" type="button" id="btn-subtab-srv-clusters">
-                        <i class="bi bi-diagram-3 me-1"></i>{{ i18n.subtab_clusters }}
-                    </button>
-                </li>
-                <!-- Credentials: reusable SSH identities referenced by hosts/checks — an
-                     infrastructure concern, so it lives here (not under Access/RBAC). -->
-                <li class="nav-item" role="presentation" id="subtab-credentials-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-credentials" type="button" id="btn-subtab-credentials">
-                        <i class="bi bi-key me-1"></i>{{ i18n.tab_credentials }}
-                    </button>
-                </li>
-            </ul>
-            <div class="tab-content">
-                {# The Infrastructure sub-panes run full-bleed with a flush card (see each
-                   createListTable's cardClass), like History: no card chrome, filling the whole
-                   area. #infraSubTabs is hidden (the sidebar drives these), so they also eat the
-                   shell's top padding — the accent strip sits flush against the breadcrumb. #}
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-hosts">
-                    <div id="servers-container"></div>
-                </div>
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-clusters">
-                    <div id="clusters-container"></div>
-                </div>
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-credentials">
-                    <div id="credentials-container"></div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/servers/_pane.html" %}
 
         <!-- ==================== Status Tab ===================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-status">
-            <div id="status-container">
-                <p class="text-muted">{{ i18n.status_placeholder }}</p>
-            </div>
-        </div>
+        {% include "partials/status/_pane.html" %}
 
         <!-- ==================== History Tab ==================== -->
         {% endif %}
         {% if not standalone or standalone == 'history' %}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'history' %} show active{% endif %}" id="tab-history">
-            <div id="history-container">
-                {% if not standalone %}   {# see #overview-container #}
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-                {% endif %}
-            </div>
-        </div>
+        {% include "partials/history/_pane.html" %}
 
         <!-- ==================== Events Tab ===================== -->
         {% endif %}
@@ -207,28 +127,14 @@
         {# Full-bleed like the other sections: renderEvents() builds its own sub-tabs inside
            #events-container, and that nav is hidden (the sidebar drives it), so the flush cards
            run edge-to-edge straight under the breadcrumb. #}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-events">
-            <div id="events-container" class="ss-vfill">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/events/_pane.html" %}
 
         <!-- ==================== Syslog Tab ===================== -->
         {% endif %}
         {% if not standalone or standalone == 'syslog' %}
         {# Full-bleed: filter bar, statistics and the message list stack as one edge-to-edge
            surface (separated by hairlines) instead of three floating cards. #}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'syslog' %} show active{% endif %}" id="tab-syslog">
-            <div id="syslog-container" class="ss-vfill">
-                {% if not standalone %}   {# see #overview-container #}
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-                {% endif %}
-            </div>
-        </div>
+        {% include "partials/syslog/_pane.html" %}
 
         <!-- ==================== fail2ban Tab ===================== -->
         {% endif %}
@@ -236,123 +142,27 @@
         {# Full-bleed: renderFail2ban() builds the Banned IPs / Ban history / Whitelist sub-tabs
            inside #ipban-container and #ipbanSubTabs is hidden (the sidebar drives them), so all
            three run edge-to-edge — including Ban history's filter strip, which goes flush too. #}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-ipban">
-            <div id="ipban-container" class="ss-vfill ss-subtabs-fill">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/ipban/_pane.html" %}
 
         <!-- ==================== Services Tab ===================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-services">
-            <div id="services-container">
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm"></div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/services/_pane.html" %}
 
         <!-- ==================== Config Tab ===================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-config">
-            <div style="position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
-                <div class="d-flex align-items-center gap-2 px-3 py-2 rounded-top-3 border"
-                     style="background:var(--bs-secondary-bg)">
-                    <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
-                    <button class="btn btn-sm btn-secondary ms-auto" id="btnReloadConfig" onclick="reloadConfig()"
-                        title="{{ i18n.reload_config_title }}">
-                        <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_config }}
-                    </button>
-                    <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}" disabled>
-                        <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
-                        <span class="badge text-bg-warning ms-1 d-none" id="badgeConfigDirty"
-                            title="{{ i18n.unsaved_changes }}">●</span>
-                    </button>
-                </div>
-                <div class="px-3 py-2 border border-top-0 rounded-bottom-3 mb-3"
-                     style="background:var(--bs-tertiary-bg)">
-                    <div class="input-group input-group-sm">
-                        <label class="input-group-text" for="cfgSearch">{{ i18n.config_search_label }}</label>
-                        <input type="search" id="cfgSearch" class="form-control"
-                               placeholder="{{ i18n.config_search }}"
-                               oninput="_filterConfig(this.value)">
-                        <button type="button" id="cfgSearchHintsToggle"
-                                class="btn btn-secondary active"
-                                onclick="_toggleCfgSearchHints()"
-                                title="{{ i18n.config_search_hints_tt }}">
-                            <i class="bi bi-info-circle me-1"></i>{{ i18n.config_search_hints_label }}
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div id="config-container"></div>
-        </div>
+        {% include "partials/cfg/_pane.html" %}
 
         <!-- ==================== Access Tab ===================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade" id="tab-access">
-            <!-- Sub-tab nav -->
-            <ul class="nav nav-tabs mb-3" id="accessSubTabs" role="tablist">
-                <li class="nav-item" role="presentation" id="subtab-users-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-users" type="button" id="btn-subtab-users">
-                        <i class="bi bi-person me-1"></i>{{ i18n.subtab_users }}
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation" id="subtab-groups-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-groups" type="button" id="btn-subtab-groups">
-                        <i class="bi bi-people me-1"></i>{{ i18n.subtab_groups }}
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation" id="subtab-roles-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-roles" type="button" id="btn-subtab-roles">
-                        <i class="bi bi-shield-lock me-1"></i>{{ i18n.subtab_roles }}
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation" id="subtab-sessions-li" style="display:none">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-sessions" type="button" id="btn-subtab-sessions">
-                        <i class="bi bi-plug me-1"></i>{{ i18n.subtab_sessions }}
-                    </button>
-                </li>
-            </ul>
-            {# Full-bleed flush cards, like Infrastructure and History: #accessSubTabs is hidden
-               (the sidebar drives these sub-tabs), so each pane also eats the shell's top
-               padding and its table runs edge-to-edge under the breadcrumb. #}
-            <div class="tab-content">
-                <!-- Users sub-tab -->
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-users">
-                    <div id="users-container"></div>
-                </div>
-                <!-- Groups sub-tab -->
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-groups">
-                    <div id="groups-container"></div>
-                </div>
-                <!-- Roles sub-tab -->
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-roles">
-                    <div id="roles-container"></div>
-                </div>
-                <!-- Sessions sub-tab (card built by the createListTable factory) -->
-                <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-sessions">
-                    <div id="sessions-container"></div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/access/_pane.html" %}
 
         <!-- ==================== Audit Tab ====================== -->
         {% endif %}
         {% if not standalone %}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-audit">
-            {# Filter strip — built by the shared buildFilterBar from _AUDIT_FILTER_SCHEMA
-               (partials/audit/_filters.html), like every other section. Only the mount point
-               lives here; renderAudit() fills it. #}
-            <div id="audit-filterbar"></div>
-
-            <div id="audit-container" class="ss-vfill"></div>
-        </div>
+        {% include "partials/audit/_pane.html" %}
         {% endif %}
 
         <!-- ======= Account (SPA pane on /admin + own page at /account) ====== -->
@@ -360,9 +170,7 @@
            pane without a full reload, exactly like the section tabs; active from first
            paint when served as its own standalone page (/account). #}
         {% if not standalone or standalone == 'account' %}
-        <div class="tab-pane fade{% if standalone == 'account' %} show active{% endif %}" id="tab-account">
-            {% include "partials/account/_page.html" %}
-        </div>
+        {% include "partials/account/_pane.html" %}
         {% endif %}
 
         <!-- ======= Module-contributed sections (schema.json → __page__) ====== -->

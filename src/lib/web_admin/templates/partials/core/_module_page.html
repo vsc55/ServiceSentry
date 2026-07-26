@@ -107,19 +107,67 @@ function _mpRender(pageId) {
         <div class="ss-card mb-3">
             <div class="ss-card-header">
                 <h6 class="mb-0 me-auto ss-fs-3">${esc(s.name)}</h6>
+                ${_mpGroupSelect(pageId, s)}
                 <span class="badge text-bg-${_MP_STATE_CLS[s.state] || 'secondary'}">${s.counts.ok}/${s.counts.total}</span>
             </div>
-            <div class="p-2">
-                ${(s.rows || []).map(row => `
-                    <div class="d-flex align-items-start gap-2 py-1 border-bottom">
-                        <span class="badge text-bg-${_MP_STATE_CLS[row.state] || 'secondary'} mt-1">
-                            <i class="bi ${row.state === 'ok' ? 'bi-check-lg' : 'bi-exclamation-triangle'}"></i></span>
-                        <div class="flex-grow-1 min-w-0">
-                            <div class="fw-semibold ss-fs-3">${esc(row.name)}</div>
-                            <div class="text-muted ss-fs-2">${esc(row.message || '')}</div>
-                            ${_mpMetrics(row)}
-                        </div>
-                    </div>`).join('')}
-            </div>
+            <div class="p-2">${_mpRows(pageId, s)}</div>
         </div>`).join('') + `</div></div>`;
+}
+
+/** One row. */
+function _mpRow(row) {
+    return `<div class="d-flex align-items-start gap-2 py-1 border-bottom">
+        <span class="badge text-bg-${_MP_STATE_CLS[row.state] || 'secondary'} mt-1">
+            <i class="bi ${row.state === 'ok' ? 'bi-check-lg' : 'bi-exclamation-triangle'}"></i></span>
+        <div class="flex-grow-1 min-w-0">
+            <div class="fw-semibold ss-fs-3">${esc(row.name)}</div>
+            <div class="text-muted ss-fs-2">${esc(row.message || '')}</div>
+            ${_mpMetrics(row)}
+        </div>
+    </div>`;
+}
+
+/** The "group by" selector, offered only for the keys the MODULE declared groupable
+ *  (`section.group_by`). The core never guesses which measurements make sense to group
+ *  on — it does not know what they mean. */
+function _mpGroupSelect(pageId, s) {
+    const keys = Array.isArray(s.group_by) ? s.group_by : [];
+    if (!keys.length || (s.rows || []).length < 2) return '';
+    const cur = (_mpState[pageId]?.groupBy || {})[s.id] || '';
+    return `<select class="form-select form-select-sm w-auto ss-fs-2 me-2"
+                    onchange="_mpSetGroup('${escAttr(pageId)}','${escAttr(s.id)}',this.value)">
+        <option value=""${cur ? '' : ' selected'}>${esc(t('page_group_none'))}</option>
+        ${keys.map(k => `<option value="${escAttr(k)}"${cur === k ? ' selected' : ''}>${esc(k)}</option>`).join('')}
+    </select>`;
+}
+
+function _mpSetGroup(pageId, sectionId, key) {
+    const st = _mpState[pageId];
+    if (!st) return;
+    (st.groupBy || (st.groupBy = {}))[sectionId] = key;
+    _mpRender(pageId);
+}
+
+/** Rows, flat or grouped by the chosen measurement. Grouping is a VIEW: no row is
+ *  dropped, so a resource with no value for the key lands in its own bucket rather than
+ *  disappearing — an inventory that hides things is worse than an unsorted one. */
+function _mpRows(pageId, s) {
+    const rows = s.rows || [];
+    const key = (_mpState[pageId]?.groupBy || {})[s.id] || '';
+    if (!key) return rows.map(_mpRow).join('');
+    const buckets = new Map();
+    for (const r of rows) {
+        const v = String((r.metrics || {})[key] ?? '') || t('page_group_other');
+        (buckets.get(v) || buckets.set(v, []).get(v)).push(r);
+    }
+    return [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, rs]) => {
+        const bad = rs.filter(r => r.state !== 'ok').length;
+        return `<div class="mb-2">
+            <div class="d-flex align-items-center gap-2 px-1 py-1 bg-body-secondary rounded">
+                <span class="fw-semibold ss-fs-2">${esc(name)}</span>
+                <span class="badge text-bg-${bad ? 'warning' : 'secondary'} ss-fs-1">${rs.length}</span>
+            </div>
+            ${rs.map(_mpRow).join('')}
+        </div>`;
+    }).join('');
 }

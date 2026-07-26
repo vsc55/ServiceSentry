@@ -15,7 +15,24 @@
         "public_filter": "Filter (service or region)",
         "alert": "Alert after N failures",
         "threads": "Threads",
-        "enabled_module": "Module enabled"
+        "enabled_module": "Module enabled",
+        "check_resource_health": "Check resource health",
+        "resource_filter": "Resource filter",
+        "resource_list": "List every resource",
+        "check_vm_power": "Check VM power state",
+        "vm_filter": "VM filter",
+        "check_quotas": "Check subscription quotas",
+        "quota_region": "Quota region",
+        "quota_pct": "Warn at % of quota",
+        "check_app_secrets": "Check app secret expiry",
+        "secret_days": "Warn N days ahead",
+        "vm_list": "List every VM",
+        "check_vm_metrics": "Check VM CPU and disk",
+        "cpu_pct": "Warn at CPU %",
+        "disk_pct": "Warn at disk IOPS %",
+        "metric_window": "Average over (minutes)",
+        "check_budgets": "Check cost against budgets",
+        "budget_pct": "Warn at % of budget"
     },
     "hints": {
         "tenant_id": "Entra ID directory (tenant) ID of the app registration.",
@@ -25,7 +42,24 @@
         "check_service_health": "Reads Microsoft.ResourceHealth events: outages, planned maintenance and advisories affecting YOUR resources and regions.",
         "health_window_hours": "Only consider events updated within this many hours.",
         "check_public_status": "Reads the public Azure status feed. Needs no credentials, but only reports globally announced incidents — it cannot tell whether your resources are affected.",
-        "public_filter": "Only report entries mentioning this text (e.g. 'West Europe' or 'Storage'). Blank = every entry."
+        "public_filter": "Only report entries mentioning this text (e.g. 'West Europe' or 'Storage'). Blank = every entry.",
+        "check_resource_health": "Azure's own health view of every resource in the subscription — VMs, VPN gateways, networks, databases and anything else. One result per unhealthy resource. Needs the app to have Reader on the subscription.",
+        "resource_filter": "Only watch resources whose id contains this text — a type ('virtualMachines'), a resource group ('/rg-prod/') or a name. Blank = every resource in the subscription.",
+        "resource_list": "Report one result per resource, healthy ones included, so the section lists the whole subscription instead of only what is broken. A large subscription turns this into hundreds of stored results and history rows.",
+        "check_vm_power": "Whether the VMs are actually running. Resource Health cannot answer this: a deallocated VM reports Unknown, the same as a resource Azure has no opinion about.",
+        "vm_filter": "Which VMs both VM checks look at: a resource group ('/rg-prod/') or a name. Blank = every VM in the subscription.",
+        "check_quotas": "Subscription quota headroom (vCPUs, public IPs, disks), so running out shows up here instead of failing a deployment.",
+        "quota_region": "Quotas are per region. ARM wants the resource-id form (westeurope), not the display name - use the picker.",
+        "quota_pct": "Report a quota once it reaches this share of its limit. At 100% it is an error, not a warning: the next deployment will fail.",
+        "check_app_secrets": "App-registration secrets and certificates about to expire - including ServiceSentry's own, which nothing else would notice. Needs the Graph permission Application.Read.All (re-run the wizard's 'fix permissions' on an app created before this check existed).",
+        "secret_days": "Report a credential this many days before it expires.",
+        "vm_list": "Report one result per VM, running ones included, so the section lists the machines instead of one total. On by default: the power state of each machine is the point of this check.",
+        "check_vm_metrics": "CPU and disk saturation per running VM, from Azure Monitor. Only what Azure reports WITHOUT an agent - disk SPACE and guest memory are not available here at all; use the filesystem and RAM modules over SSH for those.",
+        "cpu_pct": "Report a VM whose average CPU over the window reaches this. Blank = do not check CPU.",
+        "disk_pct": "Report a VM whose OS or data disk reaches this share of its provisioned IOPS - the throttling that makes a machine feel broken while every health check stays green. Blank = do not check disks.",
+        "metric_window": "Average the metrics over this many minutes. Longer ignores brief spikes; shorter reacts sooner.",
+        "check_budgets": "Spend against the subscription's Azure budgets. In Azure the thing that hurts is rarely an outage - it is the invoice, and it is the one number the person paying asks about. Needs a budget to exist in Azure; the Reader role already covers reading it.",
+        "budget_pct": "Report a budget once the spend reaches this share of it. Over 100% is an error, not a warning: that money is already spent. A budget FORECAST to be exceeded is always reported, whatever this is set to."
     },
     "group_labels": {
         "general": "General",
@@ -36,7 +70,9 @@
     "action_labels": {
         "test_connection": "Test",
         "page_refresh": "Refresh from Azure",
-        "az_link_subscription_iam": "Open the subscription (Access control)"
+        "az_link_subscription_iam": "Open the subscription (Access control)",
+        "list_regions": "Pick a region",
+        "list_region_ids": "Pick a region"
     },
     "new_item_key_label": "Subscription name",
     "collections": {
@@ -50,7 +86,39 @@
         "az_health_event": "Active event: {}",
         "az_public_fail": "Could not read the public Azure status feed: {}",
         "az_public_ok": "No open entries in the public Azure status feed",
-        "az_public_open": "{} entries in the public Azure status feed — latest: {}"
+        "az_public_open": "{} entries in the public Azure status feed — latest: {}",
+        "az_res_fail": "Could not read resource health: {}",
+        "az_res_ok": "All {} resources available",
+        "az_res_empty": "The subscription reports no resources",
+        "az_res_none": "No resource matches the filter: {}",
+        "az_res_bad": "{} is {}: {}",
+        "az_res_up": "{} is available",
+        "az_vm_fail": "Could not read the VMs: {}",
+        "az_vm_ok": "All {} VMs running",
+        "az_vm_off": "{} is {}",
+        "az_vm_empty": "The subscription has no VMs",
+        "az_vm_none": "No VM matches the filter: {}",
+        "az_quota_fail": "Could not read the quotas: {}",
+        "az_quota_no_region": "Pick the region whose quotas to check",
+        "az_quota_empty": "No quota reported for the region: {}",
+        "az_quota_ok": "All {} quotas below {}%",
+        "az_quota_over": "{} at {}% of its limit ({})",
+        "az_sec_fail": "Could not read the app registrations: {}",
+        "az_sec_ok": "None of the {} credentials expires within {} days",
+        "az_sec_soon": "{}: its {} expires in {} days",
+        "az_sec_gone": "{}: its {} expired {} days ago",
+        "az_vm_up": "{} is {}",
+        "az_met_fail": "Could not read the metrics: {}",
+        "az_met_no_threshold": "Set a CPU or disk threshold for this check to do anything",
+        "az_met_no_vms": "No running VM to measure",
+        "az_met_ok": "The {} running VMs are below their thresholds ({} min average)",
+        "az_met_over": "{} is at {} ({} min average)",
+        "az_res_nohealth": "{} exists (Azure reports no health for this type)",
+        "az_bud_fail": "Could not read the budgets: {}",
+        "az_bud_none": "This subscription has no budget - nothing is watching the spend",
+        "az_bud_ok": "The {} budgets are below {}%",
+        "az_bud_over": "{} at {}% of its budget ({})",
+        "az_bud_forecast": "{} is forecast to reach {}% of its budget ({} so far)"
     },
     "messages_vars": {
         "az_auth_fail": [
@@ -71,6 +139,104 @@
         "az_public_open": [
             "count",
             "latest"
+        ],
+        "az_res_fail": [
+            "error"
+        ],
+        "az_res_ok": [
+            "count"
+        ],
+        "az_res_none": [
+            "filter"
+        ],
+        "az_res_bad": [
+            "name",
+            "state",
+            "summary"
+        ],
+        "az_res_up": [
+            "name"
+        ],
+        "az_vm_fail": [
+            "error"
+        ],
+        "az_vm_ok": [
+            "count"
+        ],
+        "az_vm_off": [
+            "name",
+            "power"
+        ],
+        "az_vm_none": [
+            "filter"
+        ],
+        "az_quota_fail": [
+            "error"
+        ],
+        "az_quota_empty": [
+            "region"
+        ],
+        "az_quota_ok": [
+            "count",
+            "pct"
+        ],
+        "az_quota_over": [
+            "name",
+            "pct",
+            "usage"
+        ],
+        "az_sec_fail": [
+            "error"
+        ],
+        "az_sec_ok": [
+            "count",
+            "days"
+        ],
+        "az_sec_soon": [
+            "app",
+            "kind",
+            "days"
+        ],
+        "az_sec_gone": [
+            "app",
+            "kind",
+            "days"
+        ],
+        "az_vm_up": [
+            "name",
+            "power"
+        ],
+        "az_met_fail": [
+            "error"
+        ],
+        "az_met_ok": [
+            "count",
+            "window"
+        ],
+        "az_met_over": [
+            "name",
+            "what",
+            "window"
+        ],
+        "az_res_nohealth": [
+            "name"
+        ],
+        "az_bud_fail": [
+            "error"
+        ],
+        "az_bud_ok": [
+            "count",
+            "pct"
+        ],
+        "az_bud_over": [
+            "name",
+            "pct",
+            "money"
+        ],
+        "az_bud_forecast": [
+            "name",
+            "pct",
+            "money"
         ]
     },
     "widget": {

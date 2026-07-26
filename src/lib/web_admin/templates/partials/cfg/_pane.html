@@ -1,0 +1,39 @@
+{#
+   Config section: the markup of its tab pane.
+
+   Lives with the rest of the section rather than inline in dashboard.html, which is
+   the shell: the panes it used to hold belonged to twelve different sections, so a
+   change to any one of them meant editing the file that renders the whole panel.
+#}
+<div class="tab-pane fade" id="tab-config">
+    <div style="position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
+        <div class="ss-toolbar ss-toolbar-attached ss-toolbar-plain">
+            <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
+            <button class="btn btn-sm btn-secondary" id="btnReloadConfig" onclick="reloadConfig()"
+                title="{{ i18n.reload_config_title }}">
+                <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_config }}
+            </button>
+            <button class="btn btn-sm btn-primary" id="btnSaveConfig" onclick="saveConfig()" title="{{ i18n.save_config_tt }}" disabled>
+                <i class="bi bi-save me-1"></i>{{ i18n.save_config }}
+                <span class="badge text-bg-warning ms-1 d-none" id="badgeConfigDirty"
+                    title="{{ i18n.unsaved_changes }}">●</span>
+            </button>
+        </div>
+        <div class="px-3 py-2 border border-top-0 rounded-bottom-3 mb-3"
+             style="background:var(--bs-tertiary-bg)">
+            <div class="input-group input-group-sm">
+                <label class="input-group-text" for="cfgSearch">{{ i18n.config_search_label }}</label>
+                <input type="search" id="cfgSearch" class="form-control"
+                       placeholder="{{ i18n.config_search }}"
+                       oninput="_filterConfig(this.value)">
+                <button type="button" id="cfgSearchHintsToggle"
+                        class="btn btn-secondary active"
+                        onclick="_toggleCfgSearchHints()"
+                        title="{{ i18n.config_search_hints_tt }}">
+                    <i class="bi bi-info-circle me-1"></i>{{ i18n.config_search_hints_label }}
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="config-container"></div>
+</div>

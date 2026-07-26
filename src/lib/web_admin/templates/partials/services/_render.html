@@ -206,8 +206,8 @@ async function renderServices() {
     const refreshBtn = `<button class="btn btn-secondary btn-sm" onclick="renderServices()">
         <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('svc_refresh'))}</button>`;
 
-    c.innerHTML = `<div class="d-flex align-items-center mb-3">
-            <h5 class="mb-0 flex-grow-1"><i class="bi bi-hdd-rack me-2"></i>${esc(t('tab_services'))}</h5>
+    c.innerHTML = `<div class="ss-toolbar">
+            <h6 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>${esc(t('tab_services'))}</h6>
             ${refreshBtn}
         </div>
         <div class="row">${cards.join('') || `<p class="text-muted">${esc(t('svc_none'))}</p>`}</div>`;

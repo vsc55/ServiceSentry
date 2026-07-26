@@ -665,6 +665,41 @@ ARM_ROLES = {
 }
 
 
+def list_subscriptions(arm_token: str) -> list:
+    """The subscriptions the signed-in admin can see, newest API, as
+    ``[{'id', 'name', 'state'}]`` sorted by name.
+
+    Used to let the wizard OFFER a target instead of asking the admin to paste a GUID.
+    ARM only returns subscriptions the caller has access to, which is exactly the set
+    where they might also be able to create a role assignment — so an empty list is a
+    meaningful answer (this account manages none), not an error.
+
+    Returns ``[]`` on any failure: the picker is a convenience, and the caller always
+    keeps the "type the id by hand" path.
+    """
+    try:
+        r = _req.get(f'{ARM_BASE}/subscriptions?api-version=2020-01-01',
+                     headers={'Authorization': f'Bearer {arm_token}'}, timeout=20)
+        if not r.ok:
+            return []
+        rows = (r.json() or {}).get('value') or []
+    except Exception:  # pylint: disable=broad-except
+        return []
+    out = []
+    for s in rows:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get('subscriptionId') or '').strip()
+        if not sid:
+            continue
+        # Disabled/expired subscriptions cannot take a role assignment usefully; keep
+        # them listed but let the caller show the state rather than silently hiding one.
+        out.append({'id': sid,
+                    'name': str(s.get('displayName') or sid),
+                    'state': str(s.get('state') or '')})
+    return sorted(out, key=lambda s: s['name'].lower())
+
+
 def assign_subscription_role(arm_token: str, subscription_id: str, principal_id: str,
                              role: str = 'reader') -> dict:
     """Assign a built-in Azure role to a service principal ON a subscription.

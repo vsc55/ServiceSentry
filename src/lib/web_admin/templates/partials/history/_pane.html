@@ -1,0 +1,16 @@
+{#
+   History section: the markup of its tab pane.
+
+   Lives with the rest of the section rather than inline in dashboard.html, which is
+   the shell: the panes it used to hold belonged to twelve different sections, so a
+   change to any one of them meant editing the file that renders the whole panel.
+#}
+<div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'history' %} show active{% endif %}" id="tab-history">
+    <div id="history-container">
+        {% if not standalone %}   {# see #overview-container #}
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm"></div>
+        </div>
+        {% endif %}
+    </div>
+</div>

@@ -517,6 +517,27 @@ El resultado viaja en `fields.azure_rbac` y se audita (`entra_azure_rbac_assigne
 asignarse a mano. Una asignación ya existente (409 `RoleAssignmentExists`) cuenta como éxito, así
 que repetir el asistente es seguro.
 
+**Si el campo está vacío, el asistente no se rinde: ofrece las suscripciones.** Antes de firmar
+nadie conoce los ids, así que pedir un GUID por adelantado es pedir que el usuario se vaya al
+portal a buscarlo. Con el token de ARM ya en la mano, `provisioning.list_subscriptions()` lee las
+suscripciones que **ese** administrador ve (que son justo donde podría asignar un rol) y el poll
+responde `azure_rbac_pending` en lugar de darse por vencido:
+
+```jsonc
+"azure_rbac_pending": {
+    "flow_token": "…",          // flujo aparte que CUSTODIA el token de ARM
+    "role": "reader", "field": "subscription_id",
+    "subscriptions": [{"id": "…", "name": "Producción", "state": "Enabled"}]
+}
+```
+
+El asistente pinta un desplegable y `POST /api/v1/auth/entraid/provision/assign-role`
+(`{flow_token, subscription_id}`) cierra la asignación reutilizando ese token — **sin volver a
+firmar**. El id elegido se guarda además en el campo que el módulo nombró (`field`), o la app
+tendría el rol y el módulo ningún id que leer. Ese flujo es de **un solo uso** y caduca a los 15
+min: custodia un token de ARM, no debe sobrevivir a un asistente abandonado. Si la cuenta no ve
+ninguna suscripción se ofrece el id a mano — una respuesta legítima, no un error.
+
 > ⚠️ Quien ejecuta el asistente debe ser **Owner** o **User Access Administrator** en la
 > suscripción: ser administrador de Entra **no basta**, y ese es el origen habitual de un 403 en
 > este paso.

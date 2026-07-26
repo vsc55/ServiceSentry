@@ -63,7 +63,12 @@ def _module_home_pages(watchfuls_dir: str | None = None) -> list:
         out.append({
             'id': spec['id'], 'url': '/' + spec['id'], 'label_i18n': spec['label_i18n'],
             'module': spec['module'],
+            # `refresh` travels too: it is what tells the core's generic renderer the
+            # module can fetch live data, and therefore whether to offer the button. A
+            # module shipping its own renderer draws its own; one relying on the generic
+            # renderer has no other way to say so.
             'standalone': {'pane': 'tab-' + spec['id'], 'render': spec['render'],
+                           'refresh': spec['refresh'],
                            'perm': spec['perm'], 'icon': spec['icon'],
                            'label_i18n': spec['label_i18n'], 'module': spec['module']},
         })

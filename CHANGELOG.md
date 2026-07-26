@@ -5,6 +5,105 @@ All notable changes to **ServiceSentry** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Azure: cost against budgets, actual and forecast.** In Azure the thing that hurts is rarely an
+  outage — it is the invoice, and it is the one number the person paying asks about. Azure already
+  knew the budget and the spend against it; nothing was reading them. Past the configured share is
+  a warning; **over** budget is an error, because that money is already spent. A budget merely
+  **forecast** to be exceeded is reported too, whatever the threshold: one that will be blown on
+  the 24th is worth knowing on the 10th, which is the entire point of a forecast — and a budget
+  with no forecast is absent, not a comfortable zero. A subscription with **no budget at all** is
+  reported rather than painted green: nothing is watching the spend, and that is worth saying out
+  loud. Reader already covers reading budgets.
+- **A module section can group its rows** — by resource group, type, owner, whatever the module
+  says is groupable (`section.group_by`). The core offers the selector but never guesses the keys:
+  it does not know what a module's measurements mean. Grouping is a **view**, not a filter — a row
+  with no value for the key gets its own bucket instead of disappearing, because an inventory that
+  hides things is worse than an unsorted one.
+- **The Azure inventory now says which VM owns a disk, a NIC or a public IP.** "What exists" is
+  half an inventory; the question asked when a machine misbehaves is "what belongs to what". A VM
+  names its disks and NICs in its own properties and each NIC names its public IP, so **two list
+  calls** map the whole chain — no per-resource lookups, and nothing inferred from naming
+  conventions, which lie. Group by owner and a VM appears with everything it consumes. Resources
+  that belong to nothing stay unowned, and a failure of that lookup costs the column, not the
+  inventory.
+- **Azure: CPU and disk saturation per VM, from Azure Monitor.** The failure mode where every
+  health check stays green and the machine is unusable anyway. Averaged over a window on purpose —
+  one bad minute is not a problem, and a module that pages for it gets muted — and reported as a
+  **warning**, because a saturated VM is still serving, slowly. Only **running** VMs are queried: a
+  deallocated machine publishes nothing, and asking would turn "switched off" into a spurious "no
+  data". A metric the VM does not publish (a machine on unmanaged disks has no IOPS metric) is
+  absent rather than a comfortable 0%. One call per VM, so the number is capped — and what the cap
+  left out, like what could not be read, is reported on the row instead of passing for coverage.
+  **Disk *space* and guest memory are deliberately not here**: Azure does not report them without
+  the Monitor Agent, and ServiceSentry already reads those over SSH with its filesystem/RAM modules
+  — what it offers instead is IOPS throttling, which is the thing that silently degrades a VM.
+- **The VM check now lists the machines instead of one total**, on by default: the power state *of
+  each machine* is the point of that check, and VMs are counted in tens where resources run to
+  hundreds. It can still be reduced to a single aggregate row.
+- **Azure: expiring app credentials, quota headroom and VM power state.** Three checks for the
+  things that break an Azure tenant without anything going "down":
+  - **App-registration secrets and certificates about to expire** — the most avoidable Azure
+    outage there is: everything works until a secret expires, silently, months after whoever
+    created it left. That includes **ServiceSentry's own credential**: the wizard registers an app
+    whose secret expires too, and nothing else in the product would notice. Reports each
+    credential a configurable number of days ahead (warning), or after it has expired (error, not
+    a heads-up — whatever used it is already broken). This one is **Graph**, not ARM: its own
+    audience and its own permission, `Application.Read.All`, now requested by the wizard — an app
+    created before this check exists needs one pass of the wizard's *fix permissions*. Graph's
+    paging is followed, because a tenant with more than one page of apps would otherwise get a
+    silent slice of the answer.
+  - **Subscription quotas** per region (vCPUs, public IPs, disks). Running out breaks nothing that
+    is already running — it breaks the next deployment, which is the worst moment to find out.
+    Over the configured share of the limit is a warning; **at** the limit it is an error, because
+    the next deployment will fail. ARM wants the region's resource-id form in the path, so the
+    field has its own picker (`list_region_ids`) and a display name typed by hand is normalised
+    rather than 404-ing.
+  - **VM power state**, which Resource Health cannot answer: a deallocated VM reports `Unknown`,
+    exactly like a resource Azure has no opinion about. One `statusOnly=true` call covers the
+    whole subscription. A stopped VM is always a **warning**, never an outage — shutting one down
+    is a deliberate act, and paging someone for saving money at night is how a module teaches
+    people to ignore it.
+- **The Azure module now watches the resources themselves, not just the platform.** Service Health
+  answers "is Azure having a bad day"; it says nothing about whether *your* VM, VPN gateway or
+  network is up. A new **resource health** check reads Azure's own per-resource view
+  (`availabilityStatuses`) — and because that one API answers for **every** resource type, the
+  module needs no per-type code and already covers resource types added after it was written. One
+  result per unhealthy resource, so each alerts and is silenced on its own, keyed by resource id so
+  that state survives a resource joining or leaving the answer. `Unknown` (Azure cannot tell —
+  typically a stopped VM) is a **warning**, not an outage; `Unavailable`/`Degraded` are real. A
+  filter narrows it by type (`virtualMachines`), resource group (`/rg-prod/`) or name, and a filter
+  matching **nothing warns instead of going green** — a green check watching nothing looks like
+  cover it is not. It needs no new permission: the Reader role the wizard assigns already covers it.
+  Opting into **list every resource** reports one result per resource, healthy ones included, so
+  the section becomes the subscription's inventory with each resource's state rather than only
+  what is broken — opt-in because on a large subscription that is hundreds of stored results and
+  history rows, which is the admin's call to make, not a default. Rows read as facts about a
+  resource, not as ARM paths: the **resource group** and a **readable type** ("VPN gateway", not
+  `microsoft.network/virtualnetworkgateways` — ARM lower-cases its ids, so the original casing
+  cannot be recovered from them), and no resource-id badge, which was a line of path that pushed
+  everything worth reading off the row. Types that Resource Health does not report on — alert
+  **rules** and the like, which Azure answers `Unknown` for — are left out instead of appearing as
+  amber rows about nothing that drag the whole section amber with them; how many were left out is
+  reported rather than swallowed.
+- **The public-status filter can now pick a region instead of you knowing its name.** It takes a
+  service *or* a region, so it stays free text — but it gained the shared field picker
+  (`input_action`, the same mechanism `datastore` uses to choose a database), which reads the
+  subscription's own regions from `/locations`. Display names ("West Europe"), because that is how
+  Azure writes them in the announcements this filter matches against. The public feed needs no
+  credentials at all, so an item without them — or with a rejected one — still gets suggestions
+  from a shipped list rather than an empty picker.
+- **The provisioning wizard now offers the Azure subscriptions instead of asking for a GUID.**
+  The role assignment needs a target subscription, but before signing in nobody knows the ids —
+  so asking for one up front meant sending the admin to the portal to go and find it, and leaving
+  it blank meant the app was created without the access it exists for. The ARM token is already in
+  hand at that point, so the wizard uses it: `provisioning.list_subscriptions()` reads the ones
+  **that** admin can see (exactly where they might be able to assign a role), the poll answers
+  `azure_rbac_pending` instead of giving up, and the wizard shows a **picker** — by name, not by
+  id. `POST /api/v1/auth/entraid/provision/assign-role` closes the assignment reusing that token,
+  so choosing costs **no second sign-in**, and the chosen id is written into the credential field
+  the module named. That pending flow is single-use and expires in 15 min because it holds an ARM
+  token. An account that can see no subscription still gets the manual id — a legitimate answer,
+  not an error — and the whole step remains skippable, since the app and secret are already usable.
 - **The provisioning wizard can now grant Azure access, not just API permissions.** Registering an
   app was never enough for Azure: reading a subscription needs an **RBAC role assignment on that
   subscription**, an ARM operation against a different audience (`management.azure.com`) that an
@@ -451,6 +550,37 @@ All notable changes to **ServiceSentry** are documented in this file.
   event row under the cursor is tinted so the active line stands out. Implemented with Bootstrap
   `table-hover` + a reusable `.ss-hover-rows` utility class (section sub-headers keep their own
   background).
+
+### Fixed
+- **The Azure resource inventory silently omitted whole categories.** It was built from
+  `availabilityStatuses`, which only answers for the resource types Resource Health has an
+  opinion about — so virtual networks, IPSec connections and NSGs could be missing from the
+  listing entirely, and the section looked like it held only VMs and storage. The inventory now
+  comes from the **resources** API, which lists what actually exists, with health merged on top
+  where Azure reports it. A resource Azure reports no health for is listed as such (an em dash,
+  not `Unknown` — that is Azure saying it looked and could not tell) and counts as fine, because
+  not being covered by Resource Health is not a fault.
+- **A module section that declared a live refresh never got its button.** The declaration was
+  read from `schema.json` and normalised into the page catalog, but `refresh` was dropped when
+  the spec was handed to the browser — and the core's generic renderer offers the button only
+  when the spec says the module can fetch live data. So the same declaration produced two
+  behaviours: a module shipping its own renderer drew its own button (m365), while one relying
+  on the generic renderer silently had none (azure). It travels now, with a test pinning it.
+- **A module section's live refresh failed unless the Modules screen had been opened first.**
+  Watchful actions were built for the module-config form, which posts the whole (possibly
+  unsaved) item — so the browser sent the item it had. A section has no form: it knew only the
+  item key and sent whatever the modules config happened to be cached in the page, which is
+  nothing until that screen has been visited. The action then ran against an empty item — no
+  `cred_uid`, so no credentials, so an authentication failure on a check that works everywhere
+  else. The server now fills in whatever the caller did not send from the stored item, with the
+  caller's values still winning (a form action is testing exactly what it posted, including a
+  field the user cleared).
+- **Azure Service Health could never have worked: its query was wrong twice over.** The time
+  window was expressed as an OData `$filter=lastUpdateTime ge …`, which ARM rejects with a 400 —
+  this API defines `queryStartTime` for exactly that — and its spaces were never percent-encoded,
+  so the HTTP client refused the URL outright (*URL can't contain control characters*) before a
+  request was ever made. The query is now built with `urlencode` from `queryStartTime`, and a test
+  asserts the path carries no whitespace, no `$filter`, and an ISO-8601 start time.
 
 ### Changed
 - **The docs caught up with the new UI, and the route index is now enforced.** Auditing it turned

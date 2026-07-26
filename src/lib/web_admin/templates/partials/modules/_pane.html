@@ -1,0 +1,30 @@
+{#
+   Modules section: its toolbar and the container the list renders into.
+
+   Lives here rather than inline in dashboard.html so the section owns its own markup,
+   the way services/ and overview/ already do — dashboard.html is the shell, not the
+   place every section's HTML piles up.
+
+   The toolbar is the shared .ss-toolbar: title first, then the actions, which the class
+   pushes right on its own (no ms-auto to remember when a button is added).
+#}
+<div class="tab-pane fade" id="tab-modules">
+    <div class="ss-toolbar">
+        <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
+        <button class="btn btn-sm btn-secondary" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
+            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
+        </button>
+        <button class="btn btn-sm btn-success" id="btnNewModule" onclick="openNewModuleModal()" title="{{ i18n.add_module_tt }}">
+            <i class="bi bi-plus-lg me-1"></i>{{ i18n.add_module }}
+        </button>
+        <button class="btn btn-sm btn-secondary d-none" id="btnUndoModules" onclick="revertModules()" title="{{ i18n.undo_modules }}">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo_modules }}
+        </button>
+        <button class="btn btn-sm btn-primary" id="btnSaveModules" onclick="saveModules()" title="{{ i18n.save_modules_tt }}" disabled>
+            <i class="bi bi-save me-1"></i>{{ i18n.save_modules }}
+            <span class="badge text-bg-warning ms-1 d-none" id="badgeModulesDirty"
+                title="{{ i18n.unsaved_changes }}">●</span>
+        </button>
+    </div>
+    <div id="modules-container"></div>
+</div>

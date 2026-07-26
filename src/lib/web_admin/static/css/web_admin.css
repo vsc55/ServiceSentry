@@ -218,6 +218,47 @@
 .ss-accent-purple   { background: linear-gradient(90deg, #8b5cf6, #ec4899); }
 .ss-accent-slate    { background: linear-gradient(90deg, #64748b, #475569); }
 .ss-accent-blue     { background: linear-gradient(90deg, #3b82f6, #6366f1); }
+.ss-accent-cyan     { background: linear-gradient(90deg, #06b6d4, #0ea5e9); }
+/* An accent with no colour would be an invisible strip, which reads as a broken card
+   rather than as a missing rule — so an unknown variant still shows something. */
+.ss-accent:not([class*=" ss-accent-"]):not([class^="ss-accent-"]) {
+    background: linear-gradient(90deg, var(--bs-secondary), var(--bs-secondary-bg));
+}
+
+/* Section toolbar — the title + actions bar that heads a section (Modules, Services…).
+   Sticks below the top offset so the actions stay reachable while the list scrolls.
+   A class, not inline styles: it is the same bar in every section, so it is edited in
+   ONE place. */
+.ss-toolbar {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    background: var(--bs-secondary-bg);
+    position: sticky;
+    top: calc(var(--ss-top-offset, 0px) + 8px);
+    z-index: 10;
+}
+.ss-toolbar { flex-wrap: wrap; }
+.ss-toolbar > :first-child { margin-bottom: 0; }
+/* When the bar opens with a TITLE, everything after it is pushed right — so a section
+   declares its buttons in reading order without repeating an `ms-auto` on the first one.
+   Scoped to a heading on purpose: a bar that is only controls (the refresh bars) must
+   keep them together on the left instead of blowing one of them to the far edge. */
+.ss-toolbar > h5:first-child ~ :nth-child(2),
+.ss-toolbar > h6:first-child ~ :nth-child(2) { margin-left: auto; }
+/* Variant for a toolbar that something else is attached to (Config's tab strip): keeps
+   the two joined instead of leaving a seam and a gap between them. */
+.ss-toolbar.ss-toolbar-attached {
+    margin-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+/* Already inside a sticky wrapper — sticking twice buys nothing. */
+.ss-toolbar.ss-toolbar-plain { position: static; }
 
 /* Card header zone — title + action buttons */
 .ss-card-header {

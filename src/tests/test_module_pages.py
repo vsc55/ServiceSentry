@@ -73,6 +73,17 @@ class TestDiscovery:
                 assert p.get(key) not in (None, ''), f"{p.get('module')} page missing {key}"
             assert isinstance(p['label_i18n'], dict) and p['label_i18n']
 
+    def test_a_declared_refresh_reaches_the_client_spec(self):
+        """`refresh` is what tells the core's generic renderer the module can fetch live
+        data — and therefore whether to offer the button at all. Dropped on the way to the
+        client, a module that declares one silently gets no refresh button, while a module
+        shipping its own renderer still has one: the same declaration, two behaviours."""
+        from lib.web_admin.constants import _module_home_pages
+        declared = {p['module']: p['refresh'] for p in module_pages_catalog()}
+        assert any(declared.values()), 'no module declares a refresh — test is vacuous'
+        for page in _module_home_pages():
+            assert page['standalone']['refresh'] == declared[page['module']]
+
     def test_pages_are_ordered_and_unique(self):
         pages = module_pages_catalog()
         assert [p['order'] for p in pages] == sorted(p['order'] for p in pages)
@@ -141,3 +152,59 @@ class TestServed:
         _login(client)
         assert client.get('/api/v1/modules/page/ping').status_code == 404
         assert client.get('/api/v1/modules/page/Bad-Name').status_code == 400
+
+
+class TestLiveRefreshWithoutAForm:
+    """A module section asking for a live refresh knows only the item KEY.
+
+    Actions were built for the module-config form, which posts the whole (possibly
+    unsaved) item. A page has no form: without the server filling in the rest, the action
+    would run against an empty item — no ``cred_uid``, so no credentials, so an
+    authentication failure on a check that works everywhere else.
+    """
+
+    def _stored(self):
+        return {'watchfuls.demo': {'list': {'k1': {
+            'label': 'Prod', 'cred_uid': 'cred-1', 'enabled': True, 'timeout': 30}}}}
+
+    def _fill(self, config, stored=None):
+        from lib.core.modules import service as svc
+
+        class _WA:
+            _secret_keys = frozenset()
+
+            def _load_modules(self):
+                return stored if stored is not None else {}
+
+        svc._fill_from_stored_item(_WA(), 'demo', config)
+        return config
+
+    def test_the_key_alone_is_enough(self):
+        out = self._fill({'_item_key': 'k1'}, self._stored())
+        assert out['cred_uid'] == 'cred-1' and out['label'] == 'Prod'
+
+    def test_what_the_caller_sent_wins(self):
+        """A form action posts the item being edited — those values are the point."""
+        out = self._fill({'_item_key': 'k1', 'timeout': 5, 'label': ''}, self._stored())
+        assert out['timeout'] == 5 and out['label'] == ''      # even a cleared field
+        assert out['cred_uid'] == 'cred-1'                     # …and the rest still fills
+
+    def test_an_unprefixed_module_key_is_found_too(self):
+        stored = {'demo': {'list': {'k1': {'cred_uid': 'cred-1'}}}}
+        assert self._fill({'_item_key': 'k1'}, stored)['cred_uid'] == 'cred-1'
+
+    def test_no_key_and_unknown_key_change_nothing(self):
+        assert self._fill({'a': 1}, self._stored()) == {'a': 1}
+        assert self._fill({'_item_key': 'nope'}, self._stored()) == {'_item_key': 'nope'}
+
+    def test_a_config_read_failure_is_not_fatal(self):
+        """The action should still run on what the caller sent."""
+        from lib.core.modules import service as svc
+
+        class _Boom:
+            def _load_modules(self):
+                raise RuntimeError('db down')
+
+        cfg = {'_item_key': 'k1'}
+        svc._fill_from_stored_item(_Boom(), 'demo', cfg)
+        assert cfg == {'_item_key': 'k1'}

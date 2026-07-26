@@ -190,7 +190,9 @@ function _applyAutoCustom(id, setFn) {
 }
 
 function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '', arOpts = {}) {
-    let h = `<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 mb-3 rounded-3 border" style="background:var(--bs-secondary-bg)">`;
+    // Same bar as the section toolbars (.ss-toolbar), minus the sticking: these sit at
+    // the top of a scrolling list that owns its own header.
+    let h = `<div class="ss-toolbar ss-toolbar-plain">`;
     // Unified refresh: the split-button's main side runs the manual refresh (renderFn), its
     // caret opens the auto-refresh interval menu — no separate Refresh button.
     h += _autoRefreshControl({ interval: timerGet()?._interval || 0, setFn: timerSet, refreshFn: renderFn, ...arOpts });

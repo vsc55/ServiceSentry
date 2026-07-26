@@ -266,8 +266,11 @@ def register(app, wa):
                 # control fields and must never be client-controllable.
                 for _k in [k for k in config if k.startswith('__') and k.endswith('__')]:
                     del config[_k]
-                # Restore the check's own masked secrets from the stored config, so an action
-                # run after a reload (UI only holds the masked placeholder) authenticates.
+                # Fill anything the caller did not send from the stored item (a caller with
+                # no form knows only the key), then restore the check's own masked secrets
+                # from the stored config, so an action run after a reload (the UI only holds
+                # the masked placeholder) authenticates. Client values win in both.
+                modules_svc._fill_from_stored_item(wa, module_name, config)
                 modules_svc._restore_action_secrets(wa, module_name, config)
                 # Inject server-side context after stripping client values so the server value
                 # always wins regardless of what the client sent.

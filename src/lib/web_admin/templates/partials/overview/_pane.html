@@ -1,0 +1,20 @@
+{#
+   Overview section: the markup of its tab pane.
+
+   Lives with the rest of the section rather than inline in dashboard.html, which is
+   the shell: the panes it used to hold belonged to twelve different sections, so a
+   change to any one of them meant editing the file that renders the whole panel.
+#}
+<div class="tab-pane fade{% if standalone == 'overview' %} show active{% endif %}" id="tab-overview">
+    <div id="overview-container">
+        {# Placeholder for the PANEL's pane, which is inactive at load. On a
+           standalone page the pane is active from the first paint, so this would
+           sit under the loading overlay as a second spinner — there the overlay is
+           the indicator, and the render fills this in. #}
+        {% if not standalone %}
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm"></div>
+        </div>
+        {% endif %}
+    </div>
+</div>

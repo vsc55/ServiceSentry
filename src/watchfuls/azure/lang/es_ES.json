@@ -15,7 +15,24 @@
         "public_filter": "Filtro (servicio o región)",
         "alert": "Alertar tras N fallos",
         "threads": "Hilos",
-        "enabled_module": "Módulo habilitado"
+        "enabled_module": "Módulo habilitado",
+        "check_resource_health": "Comprobar salud de recursos",
+        "resource_filter": "Filtro de recursos",
+        "resource_list": "Listar todos los recursos",
+        "check_vm_power": "Comprobar estado de las VMs",
+        "vm_filter": "Filtro de VMs",
+        "check_quotas": "Comprobar cuotas de la suscripción",
+        "quota_region": "Región de las cuotas",
+        "quota_pct": "Avisar al % de la cuota",
+        "check_app_secrets": "Comprobar caducidad de secretos",
+        "secret_days": "Avisar N días antes",
+        "vm_list": "Listar todas las VMs",
+        "check_vm_metrics": "Comprobar CPU y disco de las VMs",
+        "cpu_pct": "Avisar al % de CPU",
+        "disk_pct": "Avisar al % de IOPS de disco",
+        "metric_window": "Promediar sobre (minutos)",
+        "check_budgets": "Comprobar coste contra presupuestos",
+        "budget_pct": "Avisar al % del presupuesto"
     },
     "hints": {
         "tenant_id": "ID del directorio (inquilino) de Entra ID del registro de aplicación.",
@@ -25,7 +42,24 @@
         "check_service_health": "Lee los eventos de Microsoft.ResourceHealth: caídas, mantenimientos planificados y avisos que afectan A TUS recursos y regiones.",
         "health_window_hours": "Considera solo los eventos actualizados en las últimas N horas.",
         "check_public_status": "Lee el feed público de estado de Azure. No necesita credenciales, pero solo informa de incidencias anunciadas globalmente — no puede decir si tus recursos están afectados.",
-        "public_filter": "Informa solo de entradas que mencionen este texto (p. ej. «West Europe» o «Storage»). Vacío = todas."
+        "public_filter": "Informa solo de entradas que mencionen este texto (p. ej. «West Europe» o «Storage»). Vacío = todas.",
+        "check_resource_health": "La visión que Azure tiene de la salud de cada recurso de la suscripción: VMs, gateways de VPN, redes, bases de datos y lo que haya. Un resultado por recurso con problemas. Exige que la app tenga Lector sobre la suscripción.",
+        "resource_filter": "Vigilar solo los recursos cuyo id contenga este texto: un tipo ('virtualMachines'), un grupo de recursos ('/rg-prod/') o un nombre. En blanco = todos los recursos de la suscripción.",
+        "resource_list": "Emitir un resultado por recurso, incluidos los sanos, para que la sección liste toda la suscripción en lugar de solo lo que falla. En una suscripción grande esto se convierte en cientos de resultados almacenados y filas de histórico.",
+        "check_vm_power": "Si las VMs están realmente encendidas. Resource Health no puede responder a esto: una VM desasignada informa «Unknown», igual que un recurso sobre el que Azure no tiene opinión.",
+        "vm_filter": "Qué VMs miran las dos comprobaciones de VM: un grupo de recursos ('/rg-prod/') o un nombre. En blanco = todas las VMs de la suscripción.",
+        "check_quotas": "Margen de las cuotas de la suscripción (vCPUs, IPs públicas, discos), para que agotarlas aparezca aquí en vez de reventar un despliegue.",
+        "quota_region": "Las cuotas son por región. ARM exige la forma de id de recurso (westeurope), no el nombre visible — usa el selector.",
+        "quota_pct": "Informar de una cuota cuando alcance esta parte de su límite. Al 100 % es un error, no un aviso: el siguiente despliegue va a fallar.",
+        "check_app_secrets": "Secretos y certificados de registros de aplicación a punto de caducar, incluido el del propio ServiceSentry, del que nada más se daría cuenta. Exige el permiso de Graph Application.Read.All (en una app creada antes de esta comprobación, vuelve a pasar el «arreglar permisos» del asistente).",
+        "secret_days": "Informar de una credencial estos días antes de que caduque.",
+        "vm_list": "Emitir un resultado por VM, incluidas las encendidas, para que la sección liste las máquinas en vez de un total. Activado por defecto: el estado de cada máquina es justo el sentido de esta comprobación.",
+        "check_vm_metrics": "Saturación de CPU y disco de cada VM encendida, vía Azure Monitor. Solo lo que Azure informa SIN agente: el ESPACIO en disco y la memoria del sistema operativo no están disponibles aquí — para eso usa los módulos de sistema de ficheros y RAM por SSH.",
+        "cpu_pct": "Informar de una VM cuya CPU media en la ventana llegue a este valor. En blanco = no comprobar la CPU.",
+        "disk_pct": "Informar de una VM cuyo disco de sistema o de datos llegue a esta parte de sus IOPS aprovisionadas: el estrangulamiento que hace que una máquina parezca rota mientras todas las comprobaciones de salud siguen en verde. En blanco = no comprobar los discos.",
+        "metric_window": "Promediar las métricas sobre estos minutos. Más ventana ignora picos breves; menos reacciona antes.",
+        "check_budgets": "Gasto contra los presupuestos de Azure de la suscripción. En Azure lo que duele rara vez es una caída: es la factura, y es el número por el que pregunta quien paga. Exige que exista un presupuesto en Azure; leerlo ya entra con el rol Lector.",
+        "budget_pct": "Informar de un presupuesto cuando el gasto alcance esta parte de él. Pasar del 100 % es un error, no un aviso: ese dinero ya está gastado. Un presupuesto que se PREVÉ superar se informa siempre, sea cual sea este valor."
     },
     "group_labels": {
         "general": "General",
@@ -36,7 +70,9 @@
     "action_labels": {
         "test_connection": "Probar",
         "page_refresh": "Actualizar desde Azure",
-        "az_link_subscription_iam": "Abrir la suscripción (Control de acceso)"
+        "az_link_subscription_iam": "Abrir la suscripción (Control de acceso)",
+        "list_regions": "Elegir región",
+        "list_region_ids": "Elegir región"
     },
     "new_item_key_label": "Nombre de la suscripción",
     "collections": {
@@ -50,7 +86,39 @@
         "az_health_event": "Evento activo: {}",
         "az_public_fail": "No se pudo leer el feed público de estado de Azure: {}",
         "az_public_ok": "Sin entradas abiertas en el feed público de estado de Azure",
-        "az_public_open": "{} entradas en el feed público de estado de Azure — última: {}"
+        "az_public_open": "{} entradas en el feed público de estado de Azure — última: {}",
+        "az_res_fail": "No se pudo leer la salud de los recursos: {}",
+        "az_res_ok": "Los {} recursos están disponibles",
+        "az_res_empty": "La suscripción no informa de ningún recurso",
+        "az_res_none": "Ningún recurso coincide con el filtro: {}",
+        "az_res_bad": "{} está en estado {}: {}",
+        "az_res_up": "{} está disponible",
+        "az_vm_fail": "No se pudieron leer las VMs: {}",
+        "az_vm_ok": "Las {} VMs están encendidas",
+        "az_vm_off": "{} está en estado {}",
+        "az_vm_empty": "La suscripción no tiene VMs",
+        "az_vm_none": "Ninguna VM coincide con el filtro: {}",
+        "az_quota_fail": "No se pudieron leer las cuotas: {}",
+        "az_quota_no_region": "Elige la región cuyas cuotas comprobar",
+        "az_quota_empty": "La región no informa de ninguna cuota: {}",
+        "az_quota_ok": "Las {} cuotas están por debajo del {} %",
+        "az_quota_over": "{} al {} % de su límite ({})",
+        "az_sec_fail": "No se pudieron leer los registros de aplicación: {}",
+        "az_sec_ok": "Ninguna de las {} credenciales caduca en {} días",
+        "az_sec_soon": "{}: su {} caduca en {} días",
+        "az_sec_gone": "{}: su {} caducó hace {} días",
+        "az_vm_up": "{} está {}",
+        "az_met_fail": "No se pudieron leer las métricas: {}",
+        "az_met_no_threshold": "Pon un umbral de CPU o de disco para que esta comprobación haga algo",
+        "az_met_no_vms": "No hay ninguna VM encendida que medir",
+        "az_met_ok": "Las {} VMs encendidas están por debajo de sus umbrales (media de {} min)",
+        "az_met_over": "{} está al {} (media de {} min)",
+        "az_res_nohealth": "{} existe (Azure no informa de salud para este tipo)",
+        "az_bud_fail": "No se pudieron leer los presupuestos: {}",
+        "az_bud_none": "Esta suscripción no tiene presupuesto: nadie vigila el gasto",
+        "az_bud_ok": "Los {} presupuestos están por debajo del {} %",
+        "az_bud_over": "{} al {} % de su presupuesto ({})",
+        "az_bud_forecast": "{} se prevé que llegue al {} % de su presupuesto ({} hasta ahora)"
     },
     "messages_vars": {
         "az_auth_fail": [
@@ -71,6 +139,104 @@
         "az_public_open": [
             "cantidad",
             "ultima"
+        ],
+        "az_res_fail": [
+            "error"
+        ],
+        "az_res_ok": [
+            "count"
+        ],
+        "az_res_none": [
+            "filter"
+        ],
+        "az_res_bad": [
+            "name",
+            "state",
+            "summary"
+        ],
+        "az_res_up": [
+            "name"
+        ],
+        "az_vm_fail": [
+            "error"
+        ],
+        "az_vm_ok": [
+            "count"
+        ],
+        "az_vm_off": [
+            "name",
+            "power"
+        ],
+        "az_vm_none": [
+            "filter"
+        ],
+        "az_quota_fail": [
+            "error"
+        ],
+        "az_quota_empty": [
+            "region"
+        ],
+        "az_quota_ok": [
+            "count",
+            "pct"
+        ],
+        "az_quota_over": [
+            "name",
+            "pct",
+            "usage"
+        ],
+        "az_sec_fail": [
+            "error"
+        ],
+        "az_sec_ok": [
+            "count",
+            "days"
+        ],
+        "az_sec_soon": [
+            "app",
+            "kind",
+            "days"
+        ],
+        "az_sec_gone": [
+            "app",
+            "kind",
+            "days"
+        ],
+        "az_vm_up": [
+            "name",
+            "power"
+        ],
+        "az_met_fail": [
+            "error"
+        ],
+        "az_met_ok": [
+            "count",
+            "window"
+        ],
+        "az_met_over": [
+            "name",
+            "what",
+            "window"
+        ],
+        "az_res_nohealth": [
+            "name"
+        ],
+        "az_bud_fail": [
+            "error"
+        ],
+        "az_bud_ok": [
+            "count",
+            "pct"
+        ],
+        "az_bud_over": [
+            "name",
+            "pct",
+            "money"
+        ],
+        "az_bud_forecast": [
+            "name",
+            "pct",
+            "money"
         ]
     },
     "widget": {

@@ -23,6 +23,7 @@ Routes registered by this file:
     POST   /api/v1/auth/entraid/scim/device-poll          poll SCIM app provisioning result
     POST   /api/v1/auth/entraid/provision/device-code   device-code: generic module app
     POST   /api/v1/auth/entraid/provision/device-poll   poll generic module app provisioning
+    POST   /api/v1/auth/entraid/provision/assign-role   assign the Azure role on a picked subscription
     POST   /api/v1/auth/entraid/oidc/secret/device-code   device-code: rotate the OIDC app secret
     POST   /api/v1/auth/entraid/oidc/secret/device-poll   poll the OIDC secret rotation
     POST   /api/v1/auth/entraid/check-permissions         verify the app's granted Graph permissions
@@ -576,11 +577,14 @@ def register(app, wa):
         app_name = (body.get('app_name') or prof['app_name']).strip() or prof['app_name']
         # An Azure RBAC step needs a SECOND token (audience management.azure.com), which
         # means a refresh token — so this flow, and only this flow, adds offline_access.
+        # Asked for whenever the step is DECLARED, not only when a target was supplied:
+        # without a target the poll uses that same token to list the admin's
+        # subscriptions so they can pick one instead of pasting a GUID.
         rbac = dict(prof.get('azure_rbac') or {})
         rbac_target = str(body.get(rbac.get('field') or '') or '').strip() if rbac else ''
         try:
             d = (auth.device_code_start(scope=PROVISION_SCOPE + ' offline_access')
-                 if rbac_target else auth.device_code_start())
+                 if rbac else auth.device_code_start())
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'error': str(exc) or wa._t('cred_prov_error')}), 502
         flow_token = secrets.token_urlsafe(16)
@@ -603,7 +607,7 @@ def register(app, wa):
             # the app can be admin-installed as a Teams app (used by the Teams wizard).
             'expose_api': bool(body.get('expose_api')),
             'ensure_client_id': ensure_client_id,
-            'azure_rbac': rbac if rbac_target else {},
+            'azure_rbac': rbac,
             'rbac_target': rbac_target,
             'kind': 'module',
         }
@@ -684,22 +688,45 @@ def register(app, wa):
         # already usable, and the admin can assign the role by hand.
         rbac = flow.get('azure_rbac') or {}
         target = flow.get('rbac_target') or ''
-        if rbac and target:
+        pending = None
+        if rbac:
             sp_oid = result.get('sp_object_id')
+            role = rbac.get('role', 'reader')
             try:
                 if not sp_oid:
                     raise RuntimeError('the service principal was not created')
                 arm_tok = auth.token_from_refresh(b.get('refresh_token', ''), ARM_SCOPE)
-                rep = provisioning.assign_subscription_role(
-                    arm_tok, target, sp_oid, role=rbac.get('role', 'reader'))
             except Exception as exc:  # pylint: disable=broad-except
-                rep = {'ok': False, 'already': False,
-                       'role': rbac.get('role', 'reader'), 'message': str(exc)}
-            result['azure_rbac'] = rep
-            wa._audit('entra_azure_rbac_assigned' if rep.get('ok') else 'entra_azure_rbac_failed',
-                      detail={'subscription_id': target, 'role': rep.get('role'),
-                              'principal_id': sp_oid or '', 'already': rep.get('already'),
-                              'error': rep.get('message', '')})
+                arm_tok = ''
+                result['azure_rbac'] = {'ok': False, 'already': False,
+                                        'role': role, 'message': str(exc)}
+                wa._audit('entra_azure_rbac_failed',
+                          detail={'subscription_id': target, 'role': role,
+                                  'principal_id': sp_oid or '', 'error': str(exc)})
+            if arm_tok and target:
+                rep = provisioning.assign_subscription_role(arm_tok, target, sp_oid, role=role)
+                result['azure_rbac'] = rep
+                wa._audit('entra_azure_rbac_assigned' if rep.get('ok') else 'entra_azure_rbac_failed',
+                          detail={'subscription_id': target, 'role': rep.get('role'),
+                                  'principal_id': sp_oid or '', 'already': rep.get('already'),
+                                  'error': rep.get('message', '')})
+            elif arm_tok:
+                # No target was supplied: offer the subscriptions this admin can see
+                # instead of making them find and paste a GUID. The ARM token is held in
+                # a SEPARATE short-lived flow so the choice can be completed without a
+                # second sign-in — see …/provision/assign-role.
+                subs = provisioning.list_subscriptions(arm_tok)
+                rtok = secrets.token_urlsafe(16)
+                wa._entra_flows[rtok] = {
+                    'kind': 'azure_rbac', 'arm_token': arm_tok, 'principal_id': sp_oid,
+                    'role': role, 'field': rbac.get('field', ''),
+                    'client_id': result.get('client_id', ''),
+                    # The ARM token's own lifetime (~1 h) bounds this; keep it shorter so
+                    # an abandoned picker does not hold a token around for the full hour.
+                    'expires_at': time.time() + 900,
+                }
+                pending = {'flow_token': rtok, 'role': role,
+                           'field': rbac.get('field', ''), 'subscriptions': subs}
         wa._entra_flows.pop(ftok, None)
         _det = {'app_name': flow.get('app_name', ''), 'tenant_id': tenant_id,
                 'client_id': result.get('client_id', '')}
@@ -712,4 +739,37 @@ def register(app, wa):
             wa._audit('entra_expose_api_failed', detail={
                 'client_id': result.get('client_id', ''),
                 'error': result.get('sso_error', '')})
-        return jsonify({'status': 'complete', 'fields': result})
+        out = {'status': 'complete', 'fields': result}
+        if pending:
+            out['azure_rbac_pending'] = pending
+        return jsonify(out)
+
+    @app.route('/api/v1/auth/entraid/provision/assign-role', methods=['POST'])
+    @cred_edit_req
+    def api_entraid_provision_assign_role():
+        """Finish the Azure RBAC step on the subscription the admin PICKED, reusing the
+        ARM token the provisioning poll already holds — so choosing a target costs no
+        second sign-in. Audited; the flow is consumed either way."""
+        data, err = wa._require_json()
+        if err:
+            return err
+        ftok = data.get('flow_token')
+        flow = wa._entra_flows.get(ftok)
+        if not flow or flow.get('kind') != 'azure_rbac':
+            return jsonify({'status': 'expired'})
+        if time.time() > flow['expires_at']:
+            wa._entra_flows.pop(ftok, None)
+            return jsonify({'status': 'expired'})
+        sub = str(data.get('subscription_id') or '').strip()
+        if not sub:
+            return jsonify({'error': wa._t('cred_prov_rbac_no_sub')}), 400
+        wa._entra_flows.pop(ftok, None)
+        rep = provisioning.assign_subscription_role(
+            flow['arm_token'], sub, flow['principal_id'], role=flow.get('role', 'reader'))
+        wa._audit('entra_azure_rbac_assigned' if rep.get('ok') else 'entra_azure_rbac_failed',
+                  detail={'subscription_id': sub, 'role': rep.get('role'),
+                          'principal_id': flow.get('principal_id', ''),
+                          'client_id': flow.get('client_id', ''),
+                          'already': rep.get('already'), 'error': rep.get('message', '')})
+        return jsonify({'status': 'complete', 'azure_rbac': rep,
+                        'field': flow.get('field', ''), 'subscription_id': sub})

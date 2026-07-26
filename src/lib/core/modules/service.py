@@ -441,6 +441,37 @@ def _resolve_host_ctx(wa, config):
     return None
 
 
+def _fill_from_stored_item(wa, module, config):
+    """Fill an action's *config* from the STORED item named by ``_item_key``, for keys the
+    client did not send.
+
+    An action invoked from a form posts the whole (possibly unsaved) item, and those values
+    must win — they are what the user is testing.  But an action invoked from somewhere with
+    no form (a module's own section asking for a live refresh) knows only the item key, and
+    without this it would run against an empty item: no ``cred_uid``, so no credentials, so
+    a puzzling authentication failure on a check that works everywhere else.
+    """
+    key = str(config.get('_item_key') or '').strip()
+    if not key:
+        return
+    try:
+        modules = wa._load_modules()
+    except Exception:  # pylint: disable=broad-except
+        return
+    for mk in (module, f'watchfuls.{module}'):
+        mod = modules.get(mk)
+        if not isinstance(mod, dict):
+            continue
+        for coll, items in mod.items():
+            if coll.startswith('__') or not isinstance(items, dict):
+                continue
+            stored = items.get(key)
+            if isinstance(stored, dict):
+                for k, v in stored.items():
+                    config.setdefault(k, v)     # client values always win
+                return
+
+
 def _restore_action_secrets(wa, module, config):
     """Restore masked (null/'') secret fields in an action's *config* from the stored
     module-config item (matched by the injected ``_item_key``), so a web action (e.g. datastore
