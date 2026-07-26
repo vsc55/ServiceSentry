@@ -8,6 +8,25 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.3] - 2026-07-26
+
+### Fixed
+- **Losing the secret key was silent — and it is how you get the "wrong key" above.** The file
+  that signs Flask sessions AND derives the Fernet key for every stored secret was written inside
+  an `except OSError: pass`. A failure to persist it leaves the process on an in-memory key: the
+  next restart generates a different one, every session dies and everything encrypted in the
+  meantime becomes undecryptable. It still does not raise — refusing to start is a worse outcome
+  than a short-lived key — but it logs the path at ERROR now, and never the key.
+- **The other seventeen swallowed exceptions were all legitimate, and now say why.** Reading an
+  optional lang file, closing an already-broken socket, a chmod on a filesystem that has none,
+  `int()` on a query string: each catches a specific type in a place where the failure IS the
+  expected outcome. They keep the behaviour and gain the one line of reasoning they lacked —
+  because an unexplained swallow reads like an oversight, and an audit in this very session
+  proposed deleting something for exactly that reason. Across `lib/` there is now no
+  `except …: pass` without a stated reason.
+
+---
+
 ## [0.0.1+build.2] - 2026-07-26
 
 ### Fixed

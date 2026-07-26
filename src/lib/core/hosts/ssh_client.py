@@ -84,6 +84,8 @@ def connect(*, address, port=22, user='', password='', key_path='',
             import os
             client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
         except (OSError, IOError):
+            # A user-level known_hosts is optional — often absent for a service account.
+            # The system host keys loaded above still apply, so verification is not weakened.
             pass
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:

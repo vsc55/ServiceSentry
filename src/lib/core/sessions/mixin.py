@@ -2,12 +2,16 @@
 # -*- coding: utf-8 -*-
 """Session registry mixin for WebAdmin."""
 
+import logging
 import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from flask import request, session
+
+# Stdlib logging, as in lib/db/base.py and lib/security/secret_manager.py.
+_log = logging.getLogger(__name__)
 
 
 class _SessionsMixin:
@@ -36,6 +40,8 @@ class _SessionsMixin:
                 if key:
                     return key
             except OSError:
+                # Unreadable key file → fall through and mint a new one below. Failing here
+                # would leave the panel unable to start over a permissions problem.
                 pass
         key = secrets.token_hex(32)
         self._save_secret_key(key)
@@ -59,9 +65,24 @@ class _SessionsMixin:
             try:
                 os.chmod(path, 0o600)      # tighten an existing file too (no-op on Windows)
             except OSError:
+                # Best effort: a filesystem that cannot chmod (Windows, some mounts) is not
+                # a reason to refuse to run. The key itself was written successfully.
                 pass
-        except OSError:
-            pass
+        except OSError as exc:
+            # NOT best-effort like the chmod above. This file signs Flask sessions AND
+            # derives the Fernet key for every stored secret (see the docstring), so a
+            # failure to persist it means the process runs on an in-memory key: on the next
+            # restart a DIFFERENT key is generated, every session is invalidated and — far
+            # worse — everything encrypted in the meantime becomes undecryptable.
+            #
+            # Not raised, because refusing to start would be a worse outcome than running
+            # with a key that survives only this process. But it must never be silent: this
+            # is one of the ways an installation ends up with the "wrong key" that
+            # secret_manager.decrypt_all then reports on every read.
+            _log.error('Could not persist the secret key at %s (%s) — running on an '
+                       'in-memory key. Sessions and every secret encrypted from now on '
+                       'will be unreadable after a restart. Fix the permissions on that '
+                       'directory and restart.', self._secret_key_path, exc)
 
     # ------------------------------------------------------------------ #
     # Session registry                                                     #

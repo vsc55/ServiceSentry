@@ -265,6 +265,9 @@ class _EventsMixin:
                     if int(ctx.get('severity', 5)) > int(sev_max):
                         return False
                 except (TypeError, ValueError):
+                    # A non-numeric severity_max cannot filter anything, so it does not:
+                    # the rule goes on to be judged by its other conditions rather than
+                    # silently matching nothing.
                     pass
             host = str(rule.get('host') or '').strip()
             if host and host not in (ctx.get('hostname'), ctx.get('source')):

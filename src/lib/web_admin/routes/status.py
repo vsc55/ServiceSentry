@@ -36,6 +36,8 @@ def _module_pretty_name(modules_dir: str | None, mod_name: str, lang: str) -> st
             if name:
                 return str(name)
         except (OSError, ValueError, KeyError):
+            # The public status page names a module by its folder when it has no readable
+            # lang file. A translation problem must not take that page down.
             pass
     return None
 

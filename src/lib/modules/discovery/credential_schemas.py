@@ -82,6 +82,8 @@ def _module_i18n(module_dir: str) -> dict:
             with open(os.path.join(ldir, fn), encoding='utf-8') as fh:
                 out[fn[:-5]] = json.load(fh)
         except (OSError, ValueError):
+            # One malformed lang file must not hide the credential types of every OTHER
+            # module — discovery is per-file precisely so a bad module stays contained.
             pass
     return out
 

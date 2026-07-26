@@ -153,6 +153,8 @@ class SyslogServer:
             try:
                 s.close()
             except OSError:
+                # Closing an already-closed or broken socket is not a failure, and stop()
+                # must keep going: the remaining sockets still need closing.
                 pass
         for t in self._threads:
             t.join(timeout=2.0)
@@ -178,6 +180,9 @@ class SyslogServer:
             try:
                 s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
             except (OSError, AttributeError):
+                # Not every platform exposes IPV6_V6ONLY (AttributeError) or allows setting
+                # it (OSError); where it is missing the OS default applies and the bind
+                # still succeeds. Refusing to listen over a hint would be worse.
                 pass
         s.bind((addr, port))
         s.settimeout(_SOCK_TIMEOUT)
@@ -311,6 +316,7 @@ class SyslogServer:
                 try:
                     conn.close()
                 except OSError:
+                    # The peer was rejected; a close that fails changes nothing about that.
                     pass
                 continue
             self._spawn(self._tcp_conn_loop, name='syslog-conn', args=(conn, tls_ctx, ip))
@@ -338,11 +344,15 @@ class SyslogServer:
             if buf.strip():
                 self._enqueue(buf, ip)
         except (ssl.SSLError, OSError):
+            # A client vanishing mid-stream (or a TLS teardown) is ordinary for a syslog
+            # listener, not an error worth reporting: whatever arrived was already enqueued
+            # above, and the connection is closed in the finally below.
             pass
         finally:
             try:
                 conn.close()
             except OSError:
+                # The connection is being discarded either way.
                 pass
 
     def _consume_stream(self, buf: bytes, ip: str) -> bytes:

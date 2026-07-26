@@ -27,6 +27,8 @@ def _pretty_name(modules_dir: str | None, module: str, lang: str) -> str:
             if name:
                 return str(name)
         except (OSError, ValueError):
+            # No lang file, or a malformed one: the caller falls back to the folder name.
+            # A module shipping a broken translation must not empty the History view.
             pass
     return module
 
@@ -64,6 +66,7 @@ def _history_labels(modules_dir: str | None, module: str, lang: str) -> dict:
             if isinstance(hist, dict) and hist:
                 return {k: str(v) for k, v in hist.items()}
         except (OSError, ValueError):
+            # Same as above: labels are optional, the next language (or the raw keys) wins.
             pass
     return {}
 

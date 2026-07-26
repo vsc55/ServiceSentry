@@ -131,6 +131,8 @@ def _module_packages(lang: str, overrides: dict, modules_dir: str) -> list:
             with open(os.path.join(lang_dir, f'{lang or DEFAULT_LANG}.json'), encoding='utf-8') as fh:
                 name = json.load(fh).get('pretty_name') or ''
         except (OSError, ValueError):
+            # Falls back to the folder name (see the line above) — a module with no lang
+            # file still has to appear in the editable-texts catalogue.
             pass
         out.append({'id': f'mod.{mod}', 'group': 'modules', 'name': name or mod, 'entries': entries})
     return out

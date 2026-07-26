@@ -375,6 +375,8 @@ class Monitor(ObjectBase):
                 try:
                     os.unlink(tmp_path)
                 except OSError:
+                    # Cleanup after a write that already failed and was logged above.
+                    # A second error here would only bury the first.
                     pass
 
     @staticmethod

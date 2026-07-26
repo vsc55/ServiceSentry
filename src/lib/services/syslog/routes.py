@@ -47,6 +47,7 @@ def _multi_int_arg(name):
         try:
             out.append(int(s))
         except (TypeError, ValueError):
+            # Query strings are user input: a non-numeric value is not a filter, not a 500.
             pass
     return out
 
