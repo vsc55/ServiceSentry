@@ -8,6 +8,21 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.4] - 2026-07-26
+
+### Added
+- **A published CHANGELOG section can no longer be edited** (`tests/test_changelog_frozen.py`).
+  Each commit's section is supposed to hold only what that commit changed, and nothing enforced
+  the second half of it: after committing `build.2` entries kept being appended to it, so the
+  section described work the commit does not contain. The version guard cannot see that — the
+  number still matches, the order is right, the section is non-empty; only the content lies. The
+  rule is now exact: every section present in HEAD's CHANGELOG must be byte-identical in the
+  working copy, so a new commit adds its section above and leaves the rest alone. It also catches
+  a published section being renamed or deleted, and **skips** rather than guesses when there is no
+  git history to compare against.
+
+---
+
 ## [0.0.1+build.3] - 2026-07-26
 
 ### Fixed

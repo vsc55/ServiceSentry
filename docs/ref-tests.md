@@ -108,6 +108,7 @@
 88. [Core — Estampado de entidades (audit)](#88-core--estampado-de-entidades-audit)
 88b. [Watchfuls — Patrones de publicación de resultados](#88b-watchfuls--patrones-de-publicación-de-resultados)
 88c. [Meta — Versión y CHANGELOG](#88c-meta--versión-y-changelog)
+88c-bis. [Meta — Secciones publicadas del CHANGELOG](#88c-bis-meta--secciones-publicadas-del-changelog)
 88d. [Meta — Enlaces con número de línea](#88d-meta--enlaces-con-número-de-línea)
 89. [Meta — Este documento](#89-meta--este-documento)
 90. [Core — Salud, escaneos programados y HA](#90-core--salud-escaneos-programados-y-ha)
@@ -3814,6 +3815,38 @@ desincroniza si nadie lo comprueba**.
 | `TestTheSectionIsUsable::test_the_newest_build_carries_a_date` | Fecha presente |
 | `TestTheSectionIsUsable::test_the_newest_build_has_content` | Una sección vacía significa un commit que cambió algo y no lo contó |
 | `TestTheSectionIsUsable::test_the_historical_block_is_kept_out_of_the_build_sections` | Lo anterior al versionado por build se queda en un bloque intacto: numerarlo a posteriori sería atribuir cambios a ojo |
+
+---
+
+## 88c-bis. Meta — Secciones publicadas del CHANGELOG
+
+**Archivo:** `tests/test_changelog_frozen.py` — 5 tests
+
+Cada commit publica un build cuya sección contiene **solo lo que ese commit cambió**. Nada
+vigilaba la segunda mitad de esa regla: tras commitear `build.2` es fácil —y pasó— seguir
+añadiendo entradas ahí, con lo que la sección acaba describiendo trabajo que no está en el commit
+que nombra.
+
+El guard de versión de al lado **no lo caza**: el número sigue coincidiendo, el orden sigue bien y
+la sección sigue sin estar vacía. Lo único que miente es el contenido.
+
+La regla es exacta: toda sección presente en el CHANGELOG de `HEAD` debe ser **byte a byte
+idéntica** en el árbol de trabajo. Un commit nuevo añade su sección encima y no toca las demás.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (2) | Que el fichero existe y que se parsean ≥2 secciones de `HEAD`; si cambia el formato de cabecera, falla en vez de pasar sin comprobar nada |
+| `test_no_committed_section_was_edited` | El fallo para el que existe: escribir en un build ya publicado |
+| `test_no_committed_section_disappeared` | Renombrar o borrar un build publicado reescribe la historia igual que editarlo, y es más fácil de hacer sin querer con una edición por script |
+| `test_the_working_copy_only_ever_adds_sections` | El invariante entero: las secciones de `HEAD` son un subconjunto intacto de las del árbol |
+
+> **Dos consecuencias antes de que te falle:**
+>
+> - **Rechaza el `--amend`** que edite las entradas de ese build. Es deliberado y encaja con la
+>   preferencia ya existente del proyecto por un commit nuevo antes que enmendar; si de verdad hay
+>   que reescribir historia, se enmienda también el CHANGELOG, no se afloja el test.
+> - **Se salta (skip) en vez de fallar cuando no puede ejecutarse** — sin git, o en una exportación
+>   del fuente sin historia. Un guard que no ve la referencia no debe inventarse un veredicto.
 
 ---
 
