@@ -8,6 +8,29 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.10] - 2026-07-27
+
+### Added
+- **Modules can be laid out four ways, and you pick.** The section had one — a grid of cards,
+  each expanding its configuration inside a 420px cell — and that layout already admitted the
+  cell was too small: it carried a "full screen" button that reopened the same body in a modal,
+  which is a workaround for the container, not a feature. Three more sit beside it behind a
+  switcher in the toolbar, so the choice can be made by using them rather than by arguing:
+  **list and detail** (a narrow scrolling list, the selected module gets the rest of the width —
+  nothing grows, so nothing reflows), **table** (one row per module: state, items, warnings —
+  for "which of these is not how I left it"), and **compact cards** (status tiles that never
+  grow, editing opens full width with a back button).
+- The chosen view is remembered, and so is the module you were on. A filter box came with them,
+  matching the module id AND its display name, because half the time you remember one and half
+  the time the other.
+- **A view is chrome and navigation, nothing else.** What a module's configuration looks like is
+  one renderer used verbatim by all four; none of them counts items, decides whether a module is
+  available, or applies the view-only permission on its own. Those were the parts that would
+  have become four copies, and the tests hold the line.
+- Writing that up found a duplication that predates it: the "add module" picker read the three
+  dependency/platform discovery flags itself, one drift away from offering a module the list
+  would then refuse to configure. Both ask the same function now.
+
 ## [0.0.1+build.9] - 2026-07-27
 
 ### Fixed

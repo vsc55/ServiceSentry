@@ -1,0 +1,207 @@
+{# ================================================================
+   Modules — the part every view shares.
+
+   A "view" here is chrome and navigation, nothing else: WHAT a module's configuration looks
+   like is `renderModuleBody()` and stays in _list.html, used verbatim by all of them. If a
+   view ever renders a field itself, the views have stopped being views.
+
+   Three things live here because four copies of them is how they drift:
+     * `_modFacts()` — everything a view needs to draw a module in its list/row/card. The
+       counting used to be written twice (renderModules + _refreshModuleCount) and the
+       dependency flags three times.
+     * the view registry + the switcher, so adding a view is one entry.
+     * the filter, shared: typing in the search box must mean the same thing in every view.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time rather than held as a reference: the view
+// files are separate partials concatenated after this one, so the functions do not exist
+// yet when this array is evaluated.
+const MOD_VIEWS = [
+    { id: 'split',   label_key: 'mod_view_split',   icon: 'bi-layout-sidebar-inset', render: '_modViewSplit' },
+    { id: 'table',   label_key: 'mod_view_table',   icon: 'bi-list-ul',              render: '_modViewTable' },
+    { id: 'compact', label_key: 'mod_view_compact', icon: 'bi-grid',                 render: '_modViewCompact' },
+    { id: 'cards',   label_key: 'mod_view_cards',   icon: 'bi-grid-3x2-gap',         render: '_modViewCards' },
+];
+const _MOD_VIEW_KEY = 'ss_modules_view';
+
+function _modViewId() {
+    const stored = localStorage.getItem(_MOD_VIEW_KEY);
+    return MOD_VIEWS.some(v => v.id === stored) ? stored : MOD_VIEWS[0].id;
+}
+
+function setModulesView(id) {
+    if (!MOD_VIEWS.some(v => v.id === id)) return;
+    localStorage.setItem(_MOD_VIEW_KEY, id);
+    renderModules();
+}
+
+/** The switcher, rendered into the toolbar. Radio-style buttons rather than a dropdown:
+ *  with four options the cost of showing them is one row and the gain is that you can see
+ *  which one you are in without opening anything. */
+function _modViewSwitcher() {
+    const cur = _modViewId();
+    return `<div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('mod_view'))}">
+        ${MOD_VIEWS.map(v => `
+            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
+                onclick="setModulesView('${escAttr(v.id)}')"
+                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
+                <i class="bi ${escAttr(v.icon)}"></i>
+            </button>`).join('')}
+    </div>`;
+}
+
+// ── The filter ───────────────────────────────────────────────────────────────
+// One term for every view. It matches the module id AND its display name, because half the
+// time you remember one and half the time the other.
+let _modFilterTerm = '';
+
+function _modFilter(term) {
+    _modFilterTerm = String(term || '');
+    renderModules();
+    // Re-focus after the re-render, or typing a second character would land nowhere.
+    const el = document.getElementById('modSearch');
+    if (el) { el.focus(); el.value = _modFilterTerm; el.setSelectionRange(el.value.length, el.value.length); }
+}
+
+function _modMatches(f) {
+    const q = _modFilterTerm.trim().toLowerCase();
+    if (!q) return true;
+    return f.name.toLowerCase().includes(q) || String(f.pretty || '').toLowerCase().includes(q);
+}
+
+/** Module names to show, sorted, after the filter. */
+function _modVisibleNames() {
+    return Object.keys(modulesData).sort().filter(n => _modMatches(_modFacts(n)));
+}
+
+// ── The facts a view draws from ──────────────────────────────────────────────
+/** Everything a view needs about one module, computed once.
+ *
+ * `unavailable` is the distinction that matters: a module whose dependencies are missing or
+ * whose platform does not support it cannot be configured at all, so every view has to stop
+ * short of offering an editor for it — showing one that saves nothing is worse than saying
+ * plainly that it is unavailable.
+ */
+function _modFacts(name) {
+    const cfg = modulesData[name] || {};
+    const av = _modAvailability(name);
+    const { missingDeps, partialDeps, unsupported, unavailable } = av;
+    const { total, active } = _modItemCounts(cfg);
+    return {
+        name, cfg, unavailable, unsupported, missingDeps, partialDeps, total, active,
+        on: !unavailable && cfg.enabled !== false,
+        hue: _moduleHue(name),
+        icon: moduleIcon(name, cfg),
+        pretty: modulePrettyName(name, cfg),
+        canEdit: hasModulePerm(name, 'edit'),
+        canDelete: new Set(currentUser.permissions || []).has('modules_delete'),
+    };
+}
+
+/** Can this module be used here at all? Reads the discovery flags a module's schema carries.
+ *
+ *  Separate from `_modFacts` because it answers for a module that is NOT configured yet —
+ *  the "add module" picker asks the same question about candidates that have no entry in
+ *  `modulesData`. It had its own copy of these three flags, which is one drift away from the
+ *  picker offering a module the list then refuses to configure.
+ *
+ *  `unsupported` is deliberately only reported when nothing is missing: a package you can
+ *  install is actionable, "your OS cannot do this" is not, and showing both says the first
+ *  would fix it.
+ */
+function _modAvailability(name) {
+    const sch = ITEM_SCHEMAS[name + '|__module__'] || null;
+    const missingDeps = (sch && sch['__missing_deps__']) || null;
+    const partialDeps = (sch && sch['__partial_deps__']) || null;
+    const unsupported = !missingDeps && !!(sch && sch['__unsupported__'] === true);
+    return { missingDeps, partialDeps, unsupported,
+             unavailable: unsupported || !!missingDeps };
+}
+
+/** Items across every collection of a module: how many exist, how many are enabled.
+ *  A collection is a plain object under a non-`__` key; a value that is not an object (or is
+ *  an array) is a module-level setting, not an item, and must not be counted as one. */
+function _modItemCounts(cfg) {
+    if (!cfg || typeof cfg !== 'object') return { total: 0, active: 0 };
+    const cols = Object.keys(cfg).filter(
+        k => !k.startsWith('__') && typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
+    const total = cols.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
+    const active = cols.reduce((s, k) => s + Object.values(cfg[k]).filter(
+        v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
+    return { total, active };
+}
+
+// ── Small pieces the views share ─────────────────────────────────────────────
+/** The module's coloured tile. `size` in px so a list row can use a smaller one. */
+function _modAvatar(f, size = 34) {
+    return `<span class="ss-mod-av${f.on ? '' : ' off'} rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+        style="--mh:${f.hue};width:${size}px;height:${size}px;font-size:${(size / 34).toFixed(2)}rem">${f.icon}</span>`;
+}
+
+/** The active/total items pill, or '' for a module with no items.
+ *  Keeps the `modcount-<name>` id wherever it is drawn, because `_refreshModuleCount()`
+ *  updates it in place after an item's switch is toggled — without a full re-render. */
+function _modCountBadge(f) {
+    if (!f.total) return '';
+    const warn = f.active < f.total;
+    return `<span class="badge rounded-pill flex-shrink-0" id="modcount-${escAttr(f.name)}"
+        style="font-size:.7rem;background:var(--bs-secondary-bg);color:${warn ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)'};border:1px solid var(--bs-border-color)">
+        <i class="bi bi-list-ul me-1" style="opacity:.6"></i>${f.active}/${f.total}</span>`;
+}
+
+/** The reason a module cannot be used, as a badge — clickable when it is a missing package,
+ *  because "install this" is the answer and the modal already knows how to say it. */
+function _modWarnBadge(f) {
+    const deps = f.missingDeps || f.partialDeps;
+    if (deps) {
+        return `<button type="button" class="badge bg-warning bg-opacity-75 text-dark flex-shrink-0 border-0"
+            style="font-size:.68rem;cursor:pointer"
+            onclick="event.stopPropagation();openDepInstallModal(${escAttr(JSON.stringify(deps))})">
+            <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}</button>`;
+    }
+    if (f.unsupported) {
+        return `<span class="badge bg-secondary bg-opacity-50 flex-shrink-0 ss-fs-2"
+            title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
+            <i class="bi bi-slash-circle me-1"></i>${esc(t('not_supported') || 'Not supported')}</span>`;
+    }
+    return '';
+}
+
+/** The enable switch. Disabled — not hidden — without the edit permission: the state is
+ *  information, and hiding it would read as "this module has no switch". */
+function _modSwitch(f) {
+    return `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1"
+                 onclick="event.stopPropagation()">
+        <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
+               ${f.on ? 'checked' : ''} ${f.canEdit ? '' : 'disabled'}
+               onclick="event.stopPropagation()"
+               onchange="event.stopPropagation();toggleModule(${jsStr(f.name)},this.checked)">
+    </div>`;
+}
+
+function _modDeleteBtn(f) {
+    if (!f.canDelete) return '';
+    return `<button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+        onclick="event.stopPropagation();deleteModule(${jsStr(f.name)})"
+        title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>`;
+}
+
+/** Render a module's configuration into *el*, honouring the view-only case.
+ *  Every view that shows an editor goes through this, so "you may look but not touch" is
+ *  applied in one place instead of being remembered four times. */
+function _modRenderBodyInto(el, name) {
+    if (!el) return;
+    el.innerHTML = renderModuleBody(name, modulesData[name] || {});
+    if (!hasModulePerm(name, 'edit')) _applyReadonly(el);
+}
+
+/** The empty state, shared: nothing configured at all, or nothing matching the filter. */
+function _modEmptyState() {
+    const filtering = !!_modFilterTerm.trim();
+    return `<div class="text-center py-5 text-muted">
+        <i class="bi ${filtering ? 'bi-search' : 'bi-puzzle'} ss-empty-icon"></i>
+        <span>${esc(filtering ? (t('no_matches') || 'No matches')
+                              : (t('no_modules') || 'No modules configured'))}</span>
+    </div>`;
+}

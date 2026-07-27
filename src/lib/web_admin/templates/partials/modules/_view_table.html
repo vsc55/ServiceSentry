@@ -1,0 +1,65 @@
+{# ================================================================
+   Modules — view: dense table + side panel.
+
+   For the question the other views answer badly: "which of my modules is not in the state I
+   expect?". A card grid makes you read twelve boxes; a table makes you read one column. The
+   columns are the four things that go wrong — off when it should be on, items disabled,
+   dependencies missing, platform unsupported.
+
+   Editing happens in a panel over the table rather than in a row: a configuration form
+   inside a table row either squashes the form or wrecks the columns, and the columns are the
+   reason to be in this view at all.
+   ================================================================ #}
+
+function _modViewTable(c, names) {
+    const rows = names.map(n => _modRow(_modFacts(n))).join('');
+    c.innerHTML = `<div class="ss-vfill" style="min-height:0">
+        <div class="ss-vscroll">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                    <tr>
+                        <th class="small py-2">${esc(t('module') || 'Module')}</th>
+                        <th class="small py-2" style="width:6rem">${esc(t('mod_state') || 'State')}</th>
+                        <th class="small py-2" style="width:6rem">${esc(t('mod_items') || 'Items')}</th>
+                        <th class="small py-2" style="width:12rem">${esc(t('mod_warnings') || 'Warnings')}</th>
+                        <th class="small py-2" style="width:8rem"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function _modRow(f) {
+    const state = f.unavailable
+        ? `<span class="badge text-bg-warning">${esc(t('mod_state_unavailable') || 'Unavailable')}</span>`
+        : (f.on ? `<span class="badge text-bg-success">${esc(t('svc_state_running') || 'On')}</span>`
+                : `<span class="badge text-bg-secondary">${esc(t('svc_state_stopped') || 'Off')}</span>`);
+    // The count is worth colouring only when it is telling you something: "3/4" with one item
+    // switched off is a state somebody chose and then forgot about.
+    const items = !f.total ? '<span class="text-muted">—</span>'
+        : `<span class="${f.active < f.total ? 'text-warning-emphasis fw-medium' : 'text-muted'}">${f.active}/${f.total}</span>`;
+    const warn = _modWarnBadge(f) || '<span class="text-muted">—</span>';
+    return `<tr>
+        <td class="d-flex align-items-center gap-2">
+            ${_modAvatar(f, 26)}
+            <span class="min-w-0">
+                <span class="d-block text-truncate" style="font-size:.85rem">${esc(f.pretty)}</span>
+                <code class="text-muted ss-fs-2">${esc(f.name)}</code>
+            </span>
+        </td>
+        <td>${state}</td>
+        <td>${items}</td>
+        <td>${warn}</td>
+        <td class="text-end">
+            <span class="d-inline-flex align-items-center gap-1">
+                ${f.unavailable ? '' : _modSwitch(f)}
+                ${f.unavailable ? '' : `<button class="btn btn-sm btn-secondary py-0 px-1" type="button"
+                    onclick="openModuleExpandModal(${jsStr(f.name)})"
+                    title="${escAttr(t('module_details'))}"><i class="bi bi-gear"></i></button>`}
+                ${_modDeleteBtn(f)}
+            </span>
+        </td>
+    </tr>`;
+}

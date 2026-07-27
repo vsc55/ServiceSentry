@@ -1,5 +1,5 @@
 {#
-   Modules section: its toolbar and the container the list renders into.
+   Modules section: its toolbar and the container the views render into.
 
    Lives here rather than inline in dashboard.html so the section owns its own markup,
    the way services/ and overview/ already do — dashboard.html is the shell, not the
@@ -7,10 +7,23 @@
 
    The toolbar is the shared .ss-toolbar: title first, then the actions, which the class
    pushes right on its own (no ms-auto to remember when a button is added).
+
+   The view switcher and the search box are FILLED BY JS (_modSyncToolbar), not written out
+   here: the list of views is a registry in _views.html, so adding one must not mean editing
+   this file too — and the search input has to survive a re-render with its value intact.
+
+   The pane fills the viewport (.ss-vfill) because two of the four views put a scrolling
+   list beside a scrolling detail pane; a section that grows with its content cannot do that.
 #}
-<div class="tab-pane fade" id="tab-modules">
+<div class="tab-pane fade ss-vfill" id="tab-modules">
     <div class="ss-toolbar">
         <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
+        <div class="input-group input-group-sm" style="max-width:16rem">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="search" id="modSearch" class="form-control"
+                   placeholder="{{ i18n.mod_search }}" oninput="_modFilter(this.value)">
+        </div>
+        <span id="modViewSwitcher"></span>
         <button class="btn btn-sm btn-secondary" id="btnReloadModules" onclick="reloadModules()" title="{{ i18n.reload_modules_title }}">
             <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_modules }}
         </button>
@@ -26,5 +39,5 @@
                 title="{{ i18n.unsaved_changes }}">●</span>
         </button>
     </div>
-    <div id="modules-container"></div>
+    <div id="modules-container" class="ss-vfill"></div>
 </div>

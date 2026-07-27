@@ -1,0 +1,83 @@
+{# ================================================================
+   Modules — view: compact cards + full-width editor.
+
+   The smallest change from the layout this section had, and it fixes the thing that made
+   that one awkward: cards no longer grow. A card is a status tile — state, items, warnings —
+   and editing leaves the grid entirely for a full-width view of one module.
+
+   Which means the grid never reflows. In the original, opening the third card pushed the
+   fourth to the next row and you lost your place in a list you were reading.
+
+   The editor is a pane, not a modal: a modal over a grid you cannot use is a page with extra
+   steps, and this one has a back button that says where it goes back to.
+   ================================================================ #}
+
+const _MOD_EDIT_KEY = 'ss_modules_editing';
+
+function editModuleFull(name) {
+    localStorage.setItem(_MOD_EDIT_KEY, name || '');
+    renderModules();
+}
+
+function _modViewCompact(c, names) {
+    const editing = localStorage.getItem(_MOD_EDIT_KEY) || '';
+    // Only stay in the editor while the module is still there AND still shown: deleting it,
+    // or filtering it away, would otherwise strand you on a pane for something you cannot see.
+    if (editing && names.includes(editing)) { _modCompactEditor(c, editing); return; }
+    c.innerHTML = `<div class="ss-vscroll ss-scroll-pad">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.75rem;align-items:start">
+            ${names.map(n => _modTile(_modFacts(n))).join('')}
+        </div>
+    </div>`;
+}
+
+function _modTile(f) {
+    const accent = f.on
+        ? `linear-gradient(90deg,hsl(${f.hue},65%,50%),hsl(${(f.hue + 45) % 360},65%,55%))`
+        : 'linear-gradient(90deg,#94a3b8,#cbd5e1)';
+    return `<div class="rounded-3 overflow-hidden border module-card${f.on ? ' enabled' : ''}"
+        id="card-${escAttr(f.name)}"
+        style="background:var(--ss-surface-bg,var(--bs-body-bg))${f.on ? '' : ';opacity:.65'}">
+        <div style="height:3px;background:${accent}"></div>
+        <div class="d-flex align-items-center gap-2 px-2 py-2">
+            ${_modAvatar(f, 32)}
+            <span class="flex-grow-1 min-w-0">
+                <span class="fw-semibold d-block text-truncate" style="font-size:.88rem">${esc(f.pretty)}</span>
+                <code class="text-muted ss-fs-2 d-block text-truncate">${esc(f.name)}</code>
+            </span>
+            ${f.unavailable ? '' : _modSwitch(f)}
+        </div>
+        <div class="d-flex align-items-center gap-2 px-2 pb-2">
+            ${_modCountBadge(f) || '<span class="small text-muted">—</span>'}
+            ${_modWarnBadge(f)}
+            <span class="ms-auto d-inline-flex gap-1">
+                ${f.unavailable ? '' : `<button class="btn btn-sm btn-secondary py-0 px-2" type="button"
+                    onclick="editModuleFull(${jsStr(f.name)})">
+                    <i class="bi bi-pencil me-1"></i>${esc(t('edit') || 'Edit')}</button>`}
+                ${_modDeleteBtn(f)}
+            </span>
+        </div>
+    </div>`;
+}
+
+function _modCompactEditor(c, name) {
+    const f = _modFacts(name);
+    c.innerHTML = `<div class="ss-vfill" style="min-height:0">
+        <div class="px-3 py-2 ss-thead d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-secondary" type="button" onclick="editModuleFull('')">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('tab_modules'))}
+            </button>
+            ${_modAvatar(f, 30)}
+            <span class="flex-grow-1 min-w-0">
+                <span class="fw-semibold d-block text-truncate" style="font-size:.95rem">${esc(f.pretty)}</span>
+                <code class="text-muted ss-fs-2">${esc(f.name)}</code>
+            </span>
+            ${_modCountBadge(f)}
+            ${_modWarnBadge(f)}
+            ${f.unavailable ? '' : _modSwitch(f)}
+            ${_modDeleteBtn(f)}
+        </div>
+        <div class="ss-vscroll ss-scroll-pad px-3" data-module="${escAttr(name)}" id="modFullBody"></div>
+    </div>`;
+    _modRenderBodyInto(c.querySelector('#modFullBody'), name);
+}

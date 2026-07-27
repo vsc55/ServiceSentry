@@ -45,28 +45,29 @@ function _refreshModuleCount(name) {
     const cfg = modulesData[name];
     const el = document.getElementById('modcount-' + name);
     if (!cfg || typeof cfg !== 'object' || !el) return;
-    const colKeys = Object.keys(cfg).filter(
-        k => !k.startsWith('__') && typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
-    const total = colKeys.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
-    const active = colKeys.reduce((s, k) => s + Object.values(cfg[k]).filter(
-        v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
+    // Counting lives in _views.html: it was written here and there, and "what counts as an
+    // item" is exactly the kind of rule that ends up meaning two things.
+    const { total, active } = _modItemCounts(cfg);
     el.style.color = active < total ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)';
     el.innerHTML = `<i class="bi bi-list-ul me-1" style="opacity:.6"></i>${active}/${total}`;
 }
 
 function renderModules() {
     const c = document.getElementById('modules-container');
-    const moduleKeys = Object.keys(modulesData).sort();
+    if (!c) return;
     const _savedAutoExpand = _autoExpandItemPath; // capture before HTML generation consumes it
-    if (!moduleKeys.length) {
-        c.innerHTML = `<div class="text-center py-5 text-muted">
-            <i class="bi bi-puzzle ss-empty-icon"></i>
-            <span>${t('no_modules') || 'No modules configured'}</span>
-        </div>`;
+    _modSyncToolbar();
+    const names = _modVisibleNames();
+    if (!names.length) {
+        disposeTooltips(c);
+        c.innerHTML = _modEmptyState();
+        _modSyncExpandModal(_savedAutoExpand);
         return;
     }
 
-    // Save expanded state before re-render
+    // Save expanded state before re-render. View-independent on purpose: whatever draws a
+    // module's body marks its items with data-item-path and its panel with data-module, so
+    // switching view or re-rendering after a save does not silently close what was open.
     const expandedMods  = new Set();
     const expandedItems = new Set();
     c.querySelectorAll('[data-module].show').forEach(el => expandedMods.add(el.dataset.module));
@@ -77,108 +78,11 @@ function renderModules() {
     for (const m of _pendingExpandMods) expandedMods.add(m);
     _pendingExpandMods.clear();
 
-    let h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:.75rem;align-items:start">';
-    for (const name of moduleKeys) {
-        const cfg = modulesData[name];
-        const _modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
-        const missingDeps         = (_modSch && _modSch['__missing_deps__']) || null;
-        const partialDeps         = (_modSch && _modSch['__partial_deps__'])  || null;
-        const platformUnsupported = !missingDeps && _modSch && _modSch['__unsupported__'] === true;
-        const moduleUnavailable   = platformUnsupported || !!missingDeps;
-        const on = !moduleUnavailable && cfg.enabled !== false;
-        const icon = moduleIcon(name, cfg);
-        const id = uid();
-        const pname = modulePrettyName(name, cfg);
-
-        // Count items across all collections
-        const colKeys = Object.keys(cfg).filter(k => !k.startsWith('__') && typeof cfg[k] === 'object' && cfg[k] !== null && !Array.isArray(cfg[k]));
-        const totalItems  = colKeys.reduce((s, k) => s + Object.keys(cfg[k]).length, 0);
-        const activeItems = colKeys.reduce((s, k) =>
-            s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
-
-        // Per-module accent derived from name hash
-        const hue = _moduleHue(name);
-        const accentGrad = on
-            ? `linear-gradient(90deg,hsl(${hue},65%,50%),hsl(${(hue + 45) % 360},65%,55%))`
-            : 'linear-gradient(90deg,#94a3b8,#cbd5e1)';
-        h += `<div class="rounded-3 overflow-hidden border module-card${on ? ' enabled' : ''}"
-               id="card-${esc(name)}"
-               style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 8px rgba(0,0,0,.06)${on ? '' : ';opacity:.65'}">
-
-            <div style="height:3px;background:${accentGrad}"></div>
-
-            <div class="module-header d-flex align-items-center gap-2 px-3 py-2"
-                 ${!moduleUnavailable ? `role="button" onclick="toggleCollapseFromHeader(event,'${id}')"` : ''}
-                 style="cursor:${moduleUnavailable ? 'default' : 'pointer'}">
-                <span class="ss-mod-av${on ? '' : ' off'} rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                      style="--mh:${hue};width:40px;height:40px;font-size:1.15rem">${icon}</span>
-                <div class="flex-grow-1 min-w-0">
-                    <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(pname)}</div>
-                    <code class="text-muted ss-fs-2">${esc(name)}</code>
-                </div>
-                ${totalItems > 0 ? `
-                <span class="badge rounded-pill flex-shrink-0" id="modcount-${esc(name)}"
-                      style="font-size:.7rem;background:var(--bs-secondary-bg);color:${activeItems < totalItems ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)'};border:1px solid var(--bs-border-color)">
-                    <i class="bi bi-list-ul me-1" style="opacity:.6"></i>${activeItems}/${totalItems}
-                </span>` : ''}
-                ${partialDeps && !moduleUnavailable
-                    ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark flex-shrink-0 border-0"
-                           style="font-size:.68rem;cursor:pointer"
-                           onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(partialDeps).replace(/"/g, '&quot;')})">
-                           <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
-                       </button>`
-                    : ''}
-                ${moduleUnavailable
-                    ? (missingDeps
-                        ? `<button type="button" class="badge bg-warning bg-opacity-75 text-dark flex-shrink-0 border-0"
-                               style="font-size:.68rem;cursor:pointer"
-                               onclick="event.stopPropagation();openDepInstallModal(${JSON.stringify(missingDeps).replace(/"/g, '&quot;')})">
-                               <i class="bi bi-box-seam me-1"></i>${esc(t('missing_dep'))}
-                           </button>`
-                        : `<span class="badge bg-secondary bg-opacity-50 flex-shrink-0 ss-fs-2"
-                               title="${escAttr(t('platform_not_supported') || 'Not supported on this platform')}">
-                               <i class="bi bi-slash-circle me-1"></i>${t('not_supported') || 'Not supported'}
-                           </span>`)
-                    : (hasModulePerm(name, 'edit')
-                        ? `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1" onclick="event.stopPropagation()">
-                               <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
-                                      ${on ? 'checked' : ''}
-                                      onclick="event.stopPropagation()"
-                                      onchange="event.stopPropagation();toggleModule(${jsStr(name)},this.checked)">
-                           </div>`
-                        : `<div class="form-check form-switch mb-0 flex-shrink-0" data-no-collapse="1">
-                               <input class="form-check-input" type="checkbox" role="switch" data-no-collapse="1"
-                                      ${on ? 'checked' : ''} disabled>
-                           </div>`)
-                }
-                ${new Set(currentUser.permissions||[]).has('modules_delete') ? `<button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
-                    onclick="event.stopPropagation();deleteModule(${jsStr(name)})" title="${escAttr(t('delete_tt'))}">
-                    <i class="bi bi-trash3"></i>
-                </button>` : ''}
-                ${!moduleUnavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
-                    style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
-                    onclick="event.stopPropagation();openModuleExpandModal(${jsStr(name)})"
-                    title="${escAttr(t('module_expand') || 'Expand')}">
-                    <i class="bi bi-fullscreen ss-fs-3"></i>
-                </button>` : ''}
-                ${!moduleUnavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
-                    style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
-                    data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
-                    aria-label="${escAttr(t('module_details'))}" title="${escAttr(t('module_details'))}" onclick="event.stopPropagation()">
-                    <i class="bi bi-chevron-down small"></i>
-                </button>` : ''}
-            </div>
-
-            ${!moduleUnavailable ? `<div class="collapse" id="${id}" data-module="${esc(name)}">
-                <div class="px-3 py-3" style="border-top:1px solid var(--bs-border-color)">
-                    ${renderModuleBody(name, cfg)}
-                </div>
-            </div>` : ''}
-        </div>`;
-    }
-    h += '</div>';
+    // The view owns the chrome and nothing else — see partials/modules/_views.html.
+    const view = MOD_VIEWS.find(v => v.id === _modViewId()) || MOD_VIEWS[0];
+    const draw = window[view.render];
     disposeTooltips(c);   // avoid stuck tooltips when the DOM is replaced
-    c.innerHTML = h;
+    (typeof draw === 'function' ? draw : _modViewCards)(c, names);
 
     // Restore expanded state after re-render
     c.querySelectorAll('[data-module]').forEach(el => {
@@ -191,43 +95,111 @@ function renderModules() {
         }
     });
     // Disable inputs in modules the user may only view (not edit)
-    for (const name of moduleKeys) {
+    for (const name of names) {
         if (!hasModulePerm(name, 'edit')) {
             const panel = c.querySelector(`[data-module="${CSS.escape(name)}"]`);
             if (panel) _applyReadonly(panel);
         }
     }
-    // Sync the expand modal body if it is currently open
-    if (_moduleExpandName && document.getElementById('moduleExpandModal')?.classList.contains('show')) {
-        const _expandBody = document.getElementById('moduleExpandBody');
-        if (_expandBody) {
-            // Save which item collapse panels are currently open so we can restore them
-            const _expandedItems = new Set();
-            _expandBody.querySelectorAll('[data-item-path]').forEach(el => {
-                const col = el.querySelector(':scope > .collapse');
-                if (col && col.classList.contains('show')) _expandedItems.add(el.dataset.itemPath);
-            });
-            // Restore _autoExpandItemPath so renderModuleBody can apply the auto-expand
-            _autoExpandItemPath = _savedAutoExpand;
-            _expandBody.innerHTML = renderModuleBody(_moduleExpandName, modulesData[_moduleExpandName] || {});
-            _autoExpandItemPath = null;
-            if (!hasModulePerm(_moduleExpandName, 'edit')) _applyReadonly(_expandBody);
-            // Re-open previously expanded items
-            _expandBody.querySelectorAll('[data-item-path]').forEach(el => {
-                if (_expandedItems.has(el.dataset.itemPath)) {
-                    const col = el.querySelector(':scope > .collapse');
-                    if (col) col.classList.add('show');
-                }
-            });
-            // Scroll to newly added item if applicable
-            if (_savedAutoExpand?.startsWith(_moduleExpandName + '|')) {
-                setTimeout(() => {
-                    const el = _expandBody.querySelector(`[data-item-path="${CSS.escape(_savedAutoExpand)}"]`);
-                    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 50);
-            }
+    _modSyncExpandModal(_savedAutoExpand);
+}
+
+/** Keep the toolbar's view switcher and search box in sync with the state they reflect.
+ *  Rendered from here rather than baked into the pane markup so a new view needs no edit
+ *  to the HTML — and so the search keeps its value across a re-render. */
+function _modSyncToolbar() {
+    const sw = document.getElementById('modViewSwitcher');
+    if (sw) sw.innerHTML = _modViewSwitcher();
+    const box = document.getElementById('modSearch');
+    if (box && box.value !== _modFilterTerm) box.value = _modFilterTerm;
+}
+
+/** The expand modal shows a module's body too, so a re-render has to refresh it — otherwise
+ *  an item added while it is open appears in the list behind and not in the modal in front.
+ *  View-independent: the modal belongs to the section, not to whichever view opened it. */
+function _modSyncExpandModal(savedAutoExpand) {
+    if (!_moduleExpandName || !document.getElementById('moduleExpandModal')?.classList.contains('show')) return;
+    const body = document.getElementById('moduleExpandBody');
+    if (!body) return;
+    // Save which item collapse panels are currently open so we can restore them
+    const expandedItems = new Set();
+    body.querySelectorAll('[data-item-path]').forEach(el => {
+        const col = el.querySelector(':scope > .collapse');
+        if (col && col.classList.contains('show')) expandedItems.add(el.dataset.itemPath);
+    });
+    // Restore _autoExpandItemPath so renderModuleBody can apply the auto-expand
+    _autoExpandItemPath = savedAutoExpand;
+    _modRenderBodyInto(body, _moduleExpandName);
+    _autoExpandItemPath = null;
+    body.querySelectorAll('[data-item-path]').forEach(el => {
+        if (expandedItems.has(el.dataset.itemPath)) {
+            const col = el.querySelector(':scope > .collapse');
+            if (col) col.classList.add('show');
         }
+    });
+    // Scroll to newly added item if applicable
+    if (savedAutoExpand?.startsWith(_moduleExpandName + '|')) {
+        setTimeout(() => {
+            const el = body.querySelector(`[data-item-path="${CSS.escape(savedAutoExpand)}"]`);
+            el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 50);
     }
+}
+
+// ── View: cards ───────────────────────────────────────────────────────────────
+// The original layout: a grid of cards, each expanding its own configuration in place.
+function _modViewCards(c, moduleKeys) {
+    // The pane is a flex column now (the split view needs it), so this view brings its
+    // own scroller instead of growing the section.
+    let h = '<div class="ss-vscroll ss-scroll-pad"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:.75rem;align-items:start">';
+    for (const name of moduleKeys) {
+        const f = _modFacts(name);
+        const cfg = f.cfg;
+        const id = uid();
+        const accentGrad = f.on
+            ? `linear-gradient(90deg,hsl(${f.hue},65%,50%),hsl(${(f.hue + 45) % 360},65%,55%))`
+            : 'linear-gradient(90deg,#94a3b8,#cbd5e1)';
+        h += `<div class="rounded-3 overflow-hidden border module-card${f.on ? ' enabled' : ''}"
+               id="card-${esc(name)}"
+               style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 2px 8px rgba(0,0,0,.06)${f.on ? '' : ';opacity:.65'}">
+
+            <div style="height:3px;background:${accentGrad}"></div>
+
+            <div class="module-header d-flex align-items-center gap-2 px-3 py-2"
+                 ${!f.unavailable ? `role="button" onclick="toggleCollapseFromHeader(event,'${id}')"` : ''}
+                 style="cursor:${f.unavailable ? 'default' : 'pointer'}">
+                ${_modAvatar(f, 40)}
+                <div class="flex-grow-1 min-w-0">
+                    <div class="fw-semibold" style="font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.pretty)}</div>
+                    <code class="text-muted ss-fs-2">${esc(name)}</code>
+                </div>
+                ${_modCountBadge(f)}
+                ${_modWarnBadge(f)}
+                ${f.unavailable ? '' : _modSwitch(f)}
+                ${_modDeleteBtn(f)}
+                ${!f.unavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
+                    onclick="event.stopPropagation();openModuleExpandModal(${jsStr(name)})"
+                    title="${escAttr(t('module_expand') || 'Expand')}">
+                    <i class="bi bi-fullscreen ss-fs-3"></i>
+                </button>` : ''}
+                ${!f.unavailable ? `<button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
+                    style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
+                    data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="false"
+                    aria-label="${escAttr(t('module_details'))}" title="${escAttr(t('module_details'))}" onclick="event.stopPropagation()">
+                    <i class="bi bi-chevron-down small"></i>
+                </button>` : ''}
+            </div>
+
+            ${!f.unavailable ? `<div class="collapse" id="${id}" data-module="${esc(name)}">
+                <div class="px-3 py-3" style="border-top:1px solid var(--bs-border-color)">
+                    ${renderModuleBody(name, cfg)}
+                </div>
+            </div>` : ''}
+        </div>`;
+    }
+    h += '</div></div>';
+    c.innerHTML = h;
 }
 
 function _discoveredModuleNames() {
@@ -270,11 +242,13 @@ function openNewModuleModal() {
             const pname = modulePrettyName(name, {});
             const hue   = _moduleHue(name);
             const accentColor = `hsl(${hue},65%,55%)`;
-            const _modSch = ITEM_SCHEMAS[name + '|__module__'] || null;
-            const _pickerMissingDeps    = (_modSch && _modSch['__missing_deps__']) || null;
-            const _pickerPartialDeps    = (_modSch && _modSch['__partial_deps__'])  || null;
-            const _pickerUnsupported    = !_pickerMissingDeps && _modSch && _modSch['__unsupported__'] === true;
-            const _pickerUnavailable    = _pickerUnsupported || !!_pickerMissingDeps;
+            // Same question the list asks about a configured module, so the same answer:
+            // the picker used to read the three discovery flags itself, one drift away from
+            // offering a module the list would then refuse to configure.
+            const { missingDeps:  _pickerMissingDeps,
+                    partialDeps:  _pickerPartialDeps,
+                    unsupported:  _pickerUnsupported,
+                    unavailable:  _pickerUnavailable } = _modAvailability(name);
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
                        style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
                        onclick="addModuleFromPicker(${jsStr(name)})"

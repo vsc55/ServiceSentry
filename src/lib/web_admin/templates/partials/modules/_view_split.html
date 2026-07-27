@@ -1,0 +1,104 @@
+{# ================================================================
+   Modules — view: list | detail.
+
+   The one that answers what the card grid could not: a module's configuration is wide, and a
+   420px grid cell is not. That layout already admitted it, with a "full screen" button that
+   reopened the same body in a modal — a workaround for the container, not a feature.
+
+   Here the list stays narrow and scrolls on its own, and the selected module gets the whole
+   remaining width. Nothing grows, so nothing reflows: expanding an item moves the detail
+   pane's scrollbar and leaves everything else where it was.
+
+   Same shell as the two-pane Permissions layout on purpose — aside at a fixed 15rem, the
+   detail pane taking the rest — so the panel has one way of doing this, not two.
+   ================================================================ #}
+
+const _MOD_SEL_KEY = 'ss_modules_selected';
+
+/** The module the right pane is editing.
+ *
+ *  Checked against the VISIBLE names, not against modulesData: one that was selected and is
+ *  now filtered away (or deleted) would otherwise leave the pane showing something with
+ *  nothing highlighted beside it. Remembered across visits, because coming back to carry on
+ *  with the same module is the common case and landing on the first one alphabetically every
+ *  time is a small daily annoyance. */
+function _modSelected(names) {
+    const stored = localStorage.getItem(_MOD_SEL_KEY);
+    return names.includes(stored) ? stored : names[0];
+}
+
+function selectModule(name) {
+    localStorage.setItem(_MOD_SEL_KEY, name);
+    renderModules();
+}
+
+function _modViewSplit(c, names) {
+    const sel = _modSelected(names);
+    // .ss-vfill is a flex COLUMN (it is the vertical-fill helper); the two panes need a ROW,
+    // so flex-row has to win over it — without it they stack, list on top.
+    c.innerHTML = `<div class="ss-vfill flex-row" style="min-height:0">
+        <div class="ss-vfill" style="flex:0 0 15rem;max-width:15rem;border-right:1px solid var(--bs-border-color)">
+            <div class="px-2 py-1 ss-fs-2 text-muted ss-thead">${esc(t('tab_modules'))}</div>
+            <div class="ss-vscroll">
+                <div class="list-group list-group-flush">
+                    ${names.map(n => _modSplitRow(_modFacts(n), n === sel)).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="ss-vfill" style="min-width:0" id="modSplitDetail"></div>
+    </div>`;
+    _modSplitDetail(c.querySelector('#modSplitDetail'), sel);
+}
+
+/** One row of the left list: a state dot, the module, and how many of its items are on.
+ *  The dot carries three states, not two — unavailable is not "off", and colouring it the
+ *  same would hide the one case you cannot fix from this pane. */
+function _modSplitRow(f, active) {
+    const dot = f.unavailable ? 'text-warning' : (f.on ? 'text-success' : 'text-secondary');
+    return `<button type="button"
+        class="list-group-item list-group-item-action py-2 d-flex align-items-center gap-2${active ? ' active' : ''}"
+        onclick="selectModule(${jsStr(f.name)})" title="${escAttr(f.pretty)}">
+        <i class="bi bi-circle-fill ${active ? '' : dot}" style="font-size:.5rem"></i>
+        <span class="flex-grow-1 min-w-0">
+            <span class="d-block text-truncate" style="font-size:.85rem">${esc(f.pretty)}</span>
+            <code class="${active ? '' : 'text-muted'} ss-fs-2 d-block text-truncate">${esc(f.name)}</code>
+        </span>
+        ${f.total ? `<span class="ss-fs-2 ${active ? '' : (f.active < f.total ? 'text-warning-emphasis' : 'text-muted')}"
+            >${f.active}/${f.total}</span>` : ''}
+    </button>`;
+}
+
+/** The right pane: a header that stays put while the body scrolls, then the body.
+ *  The header does NOT scroll away — the enable switch and delete are the two things you
+ *  come here to press, and hunting for them at the top of a long form is exactly the
+ *  annoyance this view exists to remove. */
+function _modSplitDetail(el, name) {
+    if (!el) return;
+    if (!name) { el.innerHTML = _modEmptyState(); return; }
+    const f = _modFacts(name);
+    el.innerHTML = `
+        <div class="px-3 py-2 ss-thead d-flex align-items-center gap-2">
+            ${_modAvatar(f, 30)}
+            <span class="flex-grow-1 min-w-0">
+                <span class="fw-semibold d-block text-truncate" style="font-size:.95rem">${esc(f.pretty)}</span>
+                <code class="text-muted ss-fs-2">${esc(f.name)}</code>
+            </span>
+            ${_modCountBadge(f)}
+            ${_modWarnBadge(f)}
+            ${f.unavailable ? '' : _modSwitch(f)}
+            ${_modDeleteBtn(f)}
+        </div>
+        <div class="ss-vscroll ss-scroll-pad px-3 pt-2" data-module="${escAttr(name)}" id="modSplitBody"></div>`;
+    const body = el.querySelector('#modSplitBody');
+    // An unavailable module has no configuration to offer. An editor whose fields cannot
+    // take effect is worse than saying why there is none.
+    if (f.unavailable) {
+        body.innerHTML = `<div class="text-center py-5 text-muted">
+            <i class="bi bi-slash-circle ss-empty-icon"></i>
+            <span>${esc(f.missingDeps ? t('missing_dep')
+                                      : (t('platform_not_supported') || 'Not supported on this platform'))}</span>
+        </div>`;
+        return;
+    }
+    _modRenderBodyInto(body, name);
+}

@@ -136,6 +136,7 @@
 112. [El breadcrumb nombra el camino completo hasta la sección](#112-el-breadcrumb-nombra-el-camino-completo-hasta-la-sección)
 113. [«Conexión perdida» tiene que significar que se perdió la conexión](#113-conexión-perdida-tiene-que-significar-que-se-perdió-la-conexión)
 114. [El menú de órdenes por servicio](#114-el-menú-de-órdenes-por-servicio-qué-ofrece-qué-destruye-y-que-se-parezca-al-resto)
+115. [Modules — cuatro layouts, no cuatro renderizadores](#115-modules--cuatro-layouts-no-cuatro-renderizadores)
 
 ---
 
@@ -4984,3 +4985,56 @@ es el mismo cambio que quitaría el mapa hardcodeado.
 | `TestTheDestructiveOnesAskFirst::test_the_message_names_what_is_being_emptied` | |
 | `TestTheDestructiveOnesAskFirst::test_every_destructive_command_has_its_wording` | En los dos idiomas, y con hueco para el nombre del servicio |
 | `TestTheLabelsExist::test_every_command_is_translated` | Sin etiqueta el menú saldría con la clave cruda |
+
+---
+
+## 115. Modules — cuatro layouts, no cuatro renderizadores
+
+**Archivo:** `tests/test_wa_modules_views.py` — 19 tests
+
+La sección tenía uno: una rejilla de tarjetas, cada una desplegando su configuración dentro de
+una celda de 420 px. Ese layout **ya admitía** que la celda se quedaba corta: llevaba un botón
+de «pantalla completa» que reabría el mismo cuerpo en un modal, que es un apaño para el
+contenedor, no una funcionalidad. Se escribieron tres más para compararlos: lista-y-detalle,
+tabla densa, y tarjetas compactas con editor a ancho completo.
+
+**Una vista es chrome y navegación. Nada más.** Cómo se ve la configuración de un módulo es
+`renderModuleBody()`, que las cuatro usan tal cual. En cuanto una vista pinte un campo por su
+cuenta, un fallo de campo tiene cuatro sitios donde arreglarse y tres se olvidan. Esa es la
+regla que sostiene el fichero, y casi todo lo demás es una forma de ella:
+
+- ninguna vista construye el cuerpo de un módulo: llaman al renderizador compartido;
+- ninguna decide por su cuenta qué es un «ítem», si un módulo está disponible o quién puede
+  editarlo — `_modFacts()` lo contesta una vez;
+- el conmutador, el filtro y la selección son estado de la **sección**, no de cada vista, así
+  que cambiar de vista conserva lo que tenías escrito y seleccionado.
+
+La otra mitad son las cosas que un cambio de layout rompe en silencio: el permiso de solo
+lectura, el deep-link que auto-expande un ítem recién añadido, y un módulo con dependencias
+que faltan — al que no se le puede ofrecer un editor cuyos campos no surten efecto.
+
+Escribiendo el guard salió una duplicación que ya existía: el selector de «nuevo módulo» leía
+las tres banderas de descubrimiento por su cuenta, a una divergencia de ofrecer un módulo que
+la lista luego se negaría a configurar. Ahora ambos preguntan a `_modAvailability()`.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_registry_is_found` | |
+| `TestTheScanItself::test_every_view_file_exists` | |
+| `TestAViewIsChromeOnly::test_no_view_builds_a_module_body_itself` | **La regla**: una cuarta copia del formulario es un fallo con tres escondites |
+| `TestAViewIsChromeOnly::test_the_view_only_case_is_applied_in_one_place` | Olvidar `_applyReadonly` es ofrecer un editor que tira lo que escribes |
+| `TestAViewIsChromeOnly::test_no_view_counts_items_itself` | «Qué cuenta como ítem» ya estaba escrito dos veces antes de esto |
+| `TestAViewIsChromeOnly::test_no_view_decides_availability_itself` | Dos lecturas de las banderas pueden discrepar sobre si un módulo funciona |
+| `TestTheSectionOwnsTheState::test_the_switcher_is_driven_by_the_registry` | Añadir una vista es una entrada, no una entrada más un botón más una rama |
+| `TestTheSectionOwnsTheState::test_the_chosen_view_survives_a_reload` | |
+| `TestTheSectionOwnsTheState::test_the_filter_is_shared_by_every_view` | Si cada vista filtra, el mismo texto significa dos cosas |
+| `TestTheSectionOwnsTheState::test_the_filter_matches_id_and_display_name` | La mitad de las veces recuerdas uno y la mitad el otro |
+| `TestWhatALayoutChangeBreaksQuietly::test_the_render_entry_point_is_still_one_function` | Una docena de sitios llaman a `renderModules()`; las vistas cuelgan de ella, no la sustituyen |
+| `TestWhatALayoutChangeBreaksQuietly::test_an_unknown_stored_view_falls_back` | Un valor rancio en localStorage dejaría la sección en blanco |
+| `TestWhatALayoutChangeBreaksQuietly::test_the_expand_modal_is_still_refreshed` | Un ítem añadido con el modal abierto aparecería en la lista de detrás y no en el modal de delante |
+| `TestWhatALayoutChangeBreaksQuietly::test_the_auto_expand_deep_link_is_preserved` | La captura tiene que ir antes de generar HTML: generarlo es lo que consume la bandera |
+| `TestWhatALayoutChangeBreaksQuietly::test_the_count_badge_keeps_its_id_in_every_view` | `_refreshModuleCount` lo actualiza en sitio; sin el id se congelaría |
+| `TestWhatALayoutChangeBreaksQuietly::test_an_unavailable_module_is_not_offered_an_editor` | Un formulario que parece editable es peor que decir por qué no lo hay |
+| `TestTheSelectionIsHonest::test_a_selection_that_is_no_longer_shown_falls_back` | Un módulo borrado o filtrado dejaría el detalle sin nada que lo resalte al lado |
+| `TestTheSelectionIsHonest::test_the_compact_editor_closes_when_its_module_goes` | |
+| `TestTheLabelsExist::test_every_view_is_named_in_both_languages` | |
