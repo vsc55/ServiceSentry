@@ -134,6 +134,7 @@
 110. [Un ajuste no puede dejarte fuera del panel](#110-un-ajuste-no-puede-dejarte-fuera-del-panel)
 111. [El icono del sitio existe y pedirlo no da 404](#111-el-icono-del-sitio-existe-y-pedirlo-no-da-404)
 112. [El breadcrumb nombra el camino completo hasta la sección](#112-el-breadcrumb-nombra-el-camino-completo-hasta-la-sección)
+113. [«Conexión perdida» tiene que significar que se perdió la conexión](#113-conexión-perdida-tiene-que-significar-que-se-perdió-la-conexión)
 
 ---
 
@@ -4882,3 +4883,42 @@ La regla tiene dos mitades y la segunda importa igual:
 | `TestAFirstLevelSectionIsJustItself::test_missing_parts_are_dropped_not_rendered_empty` | Sin `filter(Boolean)` una sección sin grupo empezaría por un separador |
 | `TestTheGroupHeaderIsNeverTheSection::test_the_parent_link_is_excluded_from_the_item_lookup` | La cabecera del grupo también lleva `.ss-sb-item`; sin excluirla el crumb la repetiría |
 | `TestTheGroupHeaderIsNeverTheSection::test_the_separator_is_still_escaped_markup` | Las etiquetas se escapan; solo el separador es marcado |
+
+---
+
+## 113. «Conexión perdida» tiene que significar que se perdió la conexión
+
+**Archivo:** `tests/test_wa_conn_overlay.py` — 11 tests
+
+El overlay tapa el panel entero, así que uno falso no es un fallo cosmético: interrumpe lo que
+estuvieras haciendo para decirte algo que no es cierto, y se queda hasta que la siguiente
+sonda acierte. Y saltaba con **un solo** fallo.
+
+El mecanismo se leía como si fuera cuidadoso —el comentario decía «con antirrebote (~1,2 s de
+fallo continuado) para que un parpadeo no lo enseñe»— pero durante esa espera **no se
+recomprobaba nada**: el temporizador solo retrasaba el anuncio, nunca lo cuestionaba. Bastaba
+una respuesta lenta: una petición que se pasa de los 4 s del latido porque un worker está
+ocupado, un parpadeo mientras un portátil cambia de red.
+
+Dos cambios, y el primero es el que importa:
+
+- **un primer fallo vuelve a preguntar en vez de anunciar.** Dispara una re-sonda inmediata y
+  solo un segundo fallo consecutivo levanta el overlay. Una caída real tarda apenas más en
+  verse, porque la confirmación no espera al siguiente latido;
+- **la confirmación espera más.** El timeout corto de la primera sonda está pensado para
+  detectar un backend **colgado**; uno simplemente ocupado también se lo pasa, y «lento una vez»
+  no es «no está».
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_pieces_are_found` | |
+| `TestOneFailureIsNotAnAnswer::test_a_failure_is_counted_not_announced` | **La regresión**: sin contador, lo único entre un parpadeo y un cartel a pantalla completa es un temporizador que no comprueba nada |
+| `TestOneFailureIsNotAnAnswer::test_the_first_failure_triggers_a_re_probe` | Preguntar otra vez es lo que hace que el segundo fallo signifique algo |
+| `TestOneFailureIsNotAnAnswer::test_the_probe_is_reachable_from_there` | Era una const dentro del closure de arranque, así que nada de fuera podía relanzarla — de ahí que la confirmación se inventara como temporizador a secas |
+| `TestOneFailureIsNotAnAnswer::test_the_confirmation_is_given_more_time` | Un servidor ocupado también se pasa del presupuesto de la primera sonda |
+| `TestSuccessClearsEverything::test_a_success_resets_the_counter` | Si no, dos fallos sin relación con minutos de diferencia sumarían una caída |
+| `TestSuccessClearsEverything::test_it_cancels_both_pending_timers` | Una confirmación o un pintado en cola dispararían después de que el servidor ya hubiera contestado |
+| `TestSuccessClearsEverything::test_hiding_is_immediate` | Solo se protege el mostrar: un panel que funciona nunca debe parecer roto |
+| `TestTheAuthoritativeSignalsStillBypassIt::test_the_browser_going_offline_shows_it_at_once` | El navegador sabe que no hay enlace; no hay nada que confirmar |
+| `TestTheAuthoritativeSignalsStillBypassIt::test_a_gateway_error_still_counts_as_unreachable` | Un proxy vivo delante de un backend muerto contesta 502/503/504 |
+| `TestTheAuthoritativeSignalsStillBypassIt::test_an_abort_is_still_not_a_network_error` | Una petición cancelada al navegar no es el servidor yéndose |

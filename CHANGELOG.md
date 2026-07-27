@@ -8,6 +8,29 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.8] - 2026-07-27
+
+### Fixed
+- **"Connection lost" stopped firing when the connection was fine.** The overlay covers the
+  whole panel, so a false one is not a cosmetic slip: it interrupts whatever the user was
+  doing to tell them something untrue, and it stays until the next probe happens to succeed.
+  It was raised by a **single** failure. The mechanism read as if it were careful — the
+  comment said "debounced (~1.2 s of continuous failure) so a single blip doesn't flash it" —
+  but nothing re-checked during that wait: the timer only delayed the announcement, it never
+  questioned it. One slow answer was enough (a request that overran the 4 s heartbeat timeout
+  because a worker was busy, a blip while a laptop changes network).
+- A first failure now asks again instead of announcing: it triggers an immediate re-probe, and
+  only a second consecutive failure raises the overlay. A real outage is barely slower to
+  show, because the confirmation does not wait for the next heartbeat — and any success
+  resets the count and cancels both pending timers, so two unrelated failures minutes apart
+  never add up to an outage.
+- The confirmation also waits twice as long. The first probe's short timeout is tuned to
+  notice a *hanging* backend quickly, but a merely busy one overruns it too, and "slow once"
+  is not "gone". A dead socket still fails immediately, so a real outage shows just as fast.
+- The authoritative signals still bypass all of it: the browser reporting itself offline shows
+  the overlay at once (there is nothing to confirm), a gateway error from a proxy in front of a
+  dead backend still counts as unreachable, and a request cancelled by navigation still does not.
+
 ## [0.0.1+build.7] - 2026-07-27
 
 ### Added

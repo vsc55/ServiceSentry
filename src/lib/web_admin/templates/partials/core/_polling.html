@@ -85,19 +85,6 @@ function _startVersionPoll(intervalMs = 60000) {
     // overlay within seconds. The shared fetch wrapper ignores AbortError, so this drives
     // _setConnLost itself: our own timeout counts as "lost" too. Runs every ~6 s (plus an
     // immediate first check), independent of the 60 s reload poll and the keepalive.
-    const _connPing = async () => {
-        const ctrl = new AbortController();
-        const to = setTimeout(() => ctrl.abort(), 4000);
-        try {
-            const r = await fetch('/api/v1/health', { signal: ctrl.signal, cache: 'no-store' });
-            // Reachable unless the proxy answered a gateway error (backend down behind it).
-            _setConnLost(_connGatewayDown(r.status));
-        } catch (_) {
-            _setConnLost(true);   // network error or our own timeout → treat as unreachable
-        } finally {
-            clearTimeout(to);
-        }
-    };
     const _connMs = Math.max(2, (configData?.web_admin?.conn_check_secs ?? 6)) * 1000;
     setInterval(_connPing, _connMs);
     _connPing();
@@ -107,11 +94,45 @@ function _startVersionPoll(intervalMs = 60000) {
 
 // ── Connection-lost overlay ────────────────────────────────────────────────
 // State driven by the shared fetch wrapper (real traffic) + the browser's online/offline
-// events: shown when the server is unreachable, hidden when it answers. Showing is
-// debounced (~1.2s of continuous failure) so a single blip or a concurrent partial failure
-// doesn't flash it; hiding — on any successful response — is immediate.
+// events: shown when the server is unreachable, hidden when it answers. Hiding — on any
+// successful response — is immediate.
+//
+// Showing needs TWO failures, and that is the whole point. It used to arm on the first one
+// and wait 1.2 s before painting, which is not the same thing at all: nothing re-checked
+// during that wait, so a single slow answer — a busy worker, one request that overran the
+// 4 s heartbeat timeout, a blip while a laptop changes network — put "connection lost"
+// across the screen for the seconds until the next probe happened to succeed. The overlay
+// covers the panel, so a false one is not a cosmetic error: it interrupts whatever the user
+// was doing to tell them something untrue.
+//
+// So a first failure is treated as a question, not an answer: it triggers an immediate
+// re-probe and only a second consecutive failure raises the overlay. A real outage still
+// shows in about a second, because the confirmation does not wait for the next heartbeat.
 let _connLost = false;
 let _connShowTimer = null;
+let _connFails = 0;          // consecutive failures; any success resets it
+let _connConfirmTimer = null;
+
+// The heartbeat, at module scope so the confirmation path can re-run it without waiting for
+// the interval. `confirming` marks the re-probe, whose failure is the one that counts.
+async function _connPing(confirming) {
+    const ctrl = new AbortController();
+    // The confirmation waits longer on purpose. The first probe's 4 s is tuned to notice a
+    // HANGING backend quickly, but a server that is merely busy also overruns it — and "slow
+    // once" is not "gone". Giving the second attempt twice the budget means a deployment
+    // under load stops being told it is offline, while a socket that is genuinely dead still
+    // fails immediately and shows the overlay just as fast.
+    const to = setTimeout(() => ctrl.abort(), confirming ? 8000 : 4000);
+    try {
+        const r = await fetch('/api/v1/health', { signal: ctrl.signal, cache: 'no-store' });
+        // Reachable unless the proxy answered a gateway error (backend down behind it).
+        _setConnLost(_connGatewayDown(r.status), confirming);
+    } catch (_) {
+        _setConnLost(true, confirming);   // network error or our own timeout
+    } finally {
+        clearTimeout(to);
+    }
+}
 
 function _applyConnLost(lost) {
     if (lost === _connLost) return;
@@ -127,14 +148,25 @@ function _applyConnLost(lost) {
     ov.classList.toggle('d-none', !lost);
 }
 
-function _setConnLost(lost) {
-    if (lost) {
-        if (_connLost || _connShowTimer) return;     // already shown / show already pending
-        _connShowTimer = setTimeout(() => { _connShowTimer = null; _applyConnLost(true); }, 1200);
-    } else {
+function _setConnLost(lost, confirmed) {
+    if (!lost) {
+        _connFails = 0;
+        if (_connConfirmTimer) { clearTimeout(_connConfirmTimer); _connConfirmTimer = null; }
         if (_connShowTimer) { clearTimeout(_connShowTimer); _connShowTimer = null; }
         _applyConnLost(false);
+        return;
     }
+    _connFails++;
+    // First failure: ask again rather than announce. A confirmation probe answers within a
+    // second, so a real outage is barely slower to show — and a blip never shows at all.
+    if (_connFails < 2 && !confirmed) {
+        if (!_connConfirmTimer) {
+            _connConfirmTimer = setTimeout(() => { _connConfirmTimer = null; _connPing(true); }, 700);
+        }
+        return;
+    }
+    if (_connLost || _connShowTimer) return;         // already shown / show already pending
+    _connShowTimer = setTimeout(() => { _connShowTimer = null; _applyConnLost(true); }, 600);
 }
 
 function _scheduleConfigPoll() {
