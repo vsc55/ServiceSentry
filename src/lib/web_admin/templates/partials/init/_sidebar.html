@@ -117,15 +117,23 @@ function _sbHighlightSub(subTarget) {
     if (subTarget) document.querySelector(`#ss-sidebar .ss-sb-subsub[data-subtab="${subTarget}"]`)?.classList.add('active');
     _sbUpdateBreadcrumb();
 }
-// Breadcrumb: reflect the active section (and its sub-tab) as a path title, e.g. "Access / Groups".
-// Read from the active sidebar item + sub-item, so it stays correct on click, restore and reload.
+// Breadcrumb: reflect the active section as the path you would follow in the sidebar to reach
+// it — "System / Infrastructure / Servers", not "Infrastructure / Servers". Read from the
+// sidebar itself (group + item + sub-item), so it stays correct on click, restore and reload.
 function _sbUpdateBreadcrumb() {
     const bc = document.getElementById('ss-breadcrumb');
     if (!bc) return;
     const _txt = el => (el?.querySelector('.ss-sb-label')?.textContent || '').replace(/\s+/g, ' ').trim();
-    const top = document.querySelector('#ss-sidebar .ss-sb-item.active:not(.ss-sb-subsub):not(.ss-sb-userbtn)');
+    // `.ss-sb-parent` is excluded: a group header is the first crumb, never the section — it
+    // is picked up below, from whichever group actually contains the active item.
+    const top = document.querySelector(
+        '#ss-sidebar .ss-sb-item.active:not(.ss-sb-subsub):not(.ss-sb-parent):not(.ss-sb-userbtn)');
     const sub = document.querySelector('#ss-sidebar .ss-sb-subsub.active');
-    const parts = [_txt(top), _txt(sub)].filter(Boolean);
+    // A section nested under a group is named by its whole path, because the group is where
+    // you go looking for it. A first-level section (Overview, History…) sits in no group and
+    // is just itself — prefixing it with one would name a place it does not live in.
+    const group = top?.closest('.ss-sb-group')?.querySelector(':scope > .ss-sb-parent');
+    const parts = [_txt(group), _txt(top), _txt(sub)].filter(Boolean);
     if (!parts.length) {
         // Panes with no labelled sidebar item (e.g. the hidden Account button) → name the pane.
         const pane = document.querySelector('.container-fluid > .tab-content > .tab-pane.active');

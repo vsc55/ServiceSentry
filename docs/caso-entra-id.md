@@ -186,7 +186,12 @@ Código relevante:
 - Azure (ARM: otra audiencia y otro modelo de consentimiento): `lib/providers/azure/`
   (`arm` = endpoints, versiones de API y `ArmApi`; `rbac` = suscripciones, asignación de rol y
   sonda de acceso).
-- Rutas: `lib/providers/entraid/routes.py`.
+- Rutas: `lib/providers/entraid/routes.py` — **solo enrutado**. Lo que cada botón *hace* vive
+  al lado de su tema: `device_flow.py` (la conversación device-code —aparcar un flujo,
+  sondearlo, caducarlo— compartida por los seis botones de registro/rotación),
+  `sections.py` (qué app usa cada sección de auth; URLs SP/SCIM que publica este servidor),
+  `cred_link.py` (leer y escribir la credencial que guarda una app de Entra) y
+  `declarations.py` (resolver qué permisos debe tener una app).
 - Wizard genérico (JS): `partials/credentials/_provision_wizard.html`
   (`showEntraIdProvisionWizard`).
 - Glue por protocolo: `partials/cfg/auth/_renderers.html` (OIDC),

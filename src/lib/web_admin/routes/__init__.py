@@ -45,7 +45,8 @@ registered; every listed file's own header lists its exact per-endpoint routes.
                                                 /syslog. They all serve the SAME single-page
                                                 shell: the URL only selects the active pane.)
     overview2        /overview2                 (experimental Alpine.js Overview — real widgets + data)
-    ui               /lang/<code> (navigation), /api/v1/me, /api/v1/health
+    ui               /lang/<code> (navigation), /favicon.ico (site-root icon, public),
+                     /api/v1/me, /api/v1/health
     status           /status                    (public status page, no auth)
     util             /api/v1/util/*
     errors           (Flask error handlers — no URL routes)

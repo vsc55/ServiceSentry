@@ -326,6 +326,11 @@ try {
             _landingShown = true;
         }
     }
+    // Opening the config search box puts the cursor in it: you press the magnifier because
+    // you are about to type, and a box that opens without focus asks for a second click.
+    document.getElementById('cfgSearchBox')?.addEventListener('shown.bs.collapse', () => {
+        document.getElementById('cfgSearch')?.focus();
+    });
     // Keep --ss-top-offset in sync with the sticky header height (navbar + visible banners)
     const _stickyTop = document.getElementById('ss-sticky-top');
     if (_stickyTop) {

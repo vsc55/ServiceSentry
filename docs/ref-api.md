@@ -439,9 +439,13 @@ alimenta a fail2ban:
 | POST | `/api/v1/auth/entraid/scim/device-poll` | `config_edit` | Poll del flujo device-code SCIM |
 | POST | `/api/v1/auth/entraid/oidc/secret/device-code` | `config_edit` | Device-code: iniciar rotación del secreto de la app OIDC existente |
 | POST | `/api/v1/auth/entraid/oidc/secret/device-poll` | `config_edit` | Poll; al completar emite un secreto nuevo (Graph `addPassword`) y lo persiste con su caducidad |
+| POST | `/api/v1/auth/entraid/sso/check-permissions` | `config_edit` | Verificar que los permisos Graph de la app de una sección SSO (`oidc`/`saml2`) están concedidos **y consentidos** |
 | POST | `/api/v1/auth/entraid/check-permissions` | `credentials_add`\|`credentials_edit` | Verificar permisos Graph de una credencial app-only |
+| POST | `/api/v1/auth/entraid/cred/secret/device-code` | `credentials_add`\|`credentials_edit` | Device-code: iniciar rotación del secreto de la app **existente** de una credencial |
+| POST | `/api/v1/auth/entraid/cred/secret/device-poll` | `credentials_add`\|`credentials_edit` | Poll; al completar emite un secreto nuevo, lo guarda en la credencial y lo devuelve al editor |
 | POST | `/api/v1/auth/entraid/provision/device-code` | `credentials_add`\|`credentials_edit` | Device-code: provisionar app Entra genérica |
 | POST | `/api/v1/auth/entraid/provision/device-poll` | `credentials_add`\|`credentials_edit` | Poll del flujo de provisión genérica |
+| POST | `/api/v1/auth/entraid/provision/assign-role` | `credentials_add`\|`credentials_edit` | Asignar el rol Azure en la suscripción elegida, reutilizando el token ARM del poll |
 
 ## Provider — Teams SSO — [lib/providers/entraid/sso_routes.py](../src/lib/providers/entraid/sso_routes.py)
 

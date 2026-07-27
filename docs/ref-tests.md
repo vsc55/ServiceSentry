@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~3680 tests** (3678 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4040 tests** (4038 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -126,6 +126,14 @@
 102. [Cachés compartidas — frescura entre procesos](#102-cachés-compartidas--frescura-entre-procesos)
 103. [Escrituras diferenciales — dos escritores sobre una BD](#103-escrituras-diferenciales--dos-escritores-sobre-una-bd)
 104. [Stores — la base compartida y el formato de fecha único](#104-stores--la-base-compartida-y-el-formato-de-fecha-único)
+105. [Config — un mapeo Grupo→Rol nuevo tiene que sobrevivir al Guardar](#105-config--un-mapeo-gruporol-nuevo-tiene-que-sobrevivir-al-guardar)
+106. [Entra ID — comprobar permisos de las secciones SSO](#106-entra-id--comprobar-permisos-de-las-secciones-sso)
+107. [Entra ID — rotar el secreto de la app de una credencial](#107-entra-id--rotar-el-secreto-de-la-app-de-una-credencial)
+108. [Entra ID — la conversación device-code, escrita una vez](#108-entra-id--la-conversación-device-code-escrita-una-vez)
+109. [Config — la cabecera tiene que quedarse arriba toda la sección](#109-config--la-cabecera-tiene-que-quedarse-arriba-toda-la-sección)
+110. [Un ajuste no puede dejarte fuera del panel](#110-un-ajuste-no-puede-dejarte-fuera-del-panel)
+111. [El icono del sitio existe y pedirlo no da 404](#111-el-icono-del-sitio-existe-y-pedirlo-no-da-404)
+112. [El breadcrumb nombra el camino completo hasta la sección](#112-el-breadcrumb-nombra-el-camino-completo-hasta-la-sección)
 
 ---
 
@@ -4521,3 +4529,356 @@ Dos de estos tests existen por fallos reales, no por pulcritud:
 | `TestTheSharedBase::test_the_mixin_passes_the_payload_through_without_a_key` | Sin Fernet, «déjalo como está» y nunca «tíralo»: son credenciales y perfiles de host |
 | `TestTheProbeUsesTheRightIdentifier::test_a_reserved_table_name_is_quoted` | **El fallo silencioso**: la sonda debe pasar por el mismo identificador que el resto del SQL del store |
 | `TestTheProbeUsesTheRightIdentifier::test_the_logical_name_stays_unquoted` | La fila del contador se indexa por el nombre plano; citarlo ahí crearía una segunda fila que nadie incrementa |
+
+---
+
+## 105. Config — un mapeo Grupo→Rol nuevo tiene que sobrevivir al Guardar
+
+**Archivo:** `tests/test_cfg_group_role_map.py` — 20 tests
+
+El síntoma reportado era un guardado que **mentía**: añadir una fila en Configuration ›
+Authentication › SSO (OIDC), pulsar Guardar y recargar dejaba el mapeo nuevo sin rastro,
+mientras el toast decía que se había guardado. Cambiar el Role de un mapeo **ya existente**
+funcionaba siempre.
+
+Esa asimetría es todo el diagnóstico. Las dos mitades pasan por handlers distintos: el
+`<select>` de Role llama a `_grmUpdate` directamente —síncrono, el valor queda en
+`_dirtyFields` antes de que el clic llegue a Guardar—, mientras que el `<input>` del id de
+grupo llamaba a `_grmRowIdChanged`, que en una sección con fuente de grupos (oidc, saml2 y
+ldap declaran una) **esperaba antes una búsqueda de nombre**. El handler corre en `change`,
+que dispara cuando el botón Guardar toma el foco: el clic caía con la búsqueda en vuelo,
+`saveConfig` enviaba todos los campos sucios menos ése, informaba de éxito con toda la razón,
+y el mapeo se apuntaba un instante después sin nadie que lo guardara.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheValueIsStagedBeforeAnythingIsAwaited::test_the_mapping_is_staged_unconditionally_before_any_branch` | **La invariante**, y el primer error de este propio guard: «antes del primer await» no basta —la versión con el bug también apuntaba pronto, pero dentro de un `if` que retorna—, así que se exige antes de **cualquier** bifurcación |
+| `TestTheValueIsStagedBeforeAnythingIsAwaited::test_the_lookup_only_decorates_the_name` | Por qué apuntar pronto es correcto y no un parche a la carrera: lo que se espera rellena la columna de nombre, que es otro campo |
+| `TestWhatIsPendingMatchesWhatIsOnScreen::test_typing_stages_the_value_not_just_the_dirty_flag` | `markDirty` encendía el botón dejando el campo fuera del payload: el botón decía «hay cambios» y el guardado no estaba de acuerdo |
+| `TestWhatIsPendingMatchesWhatIsOnScreen::test_every_row_source_agrees` | Las filas se construyen en dos sitios (render inicial y «Add»); arreglar uno solo es cómo vuelve esto |
+| `TestTheOtherHalfStillWorks::test_the_role_select_stages_synchronously` | La mitad que siempre funcionó, fijada para que un refactor no vuelva asíncronas las dos |
+| `TestTheOtherHalfStillWorks::test_removing_a_row_stages_too` | Quitar una fila también tiene que llegar al payload |
+| `test_the_sections_this_affects_declare_a_group_source` (×3) | El bug solo muerde donde hay búsqueda de nombre: si un proveedor deja de declararla el camino async es código muerto, y si uno nuevo la declara hereda el arreglo |
+
+**La segunda mitad de la misma historia.** Con el mapeo ya guardándose, el botón *Save
+Configuration* volvía a ponerse en «cambios pendientes» justo después de anunciar el éxito;
+F5 demostraba que el valor estaba guardado y pulsar Guardar otra vez era lo que lo callaba.
+Mismo widget, dirección opuesta: `markDirty` decide el botón comparando `configData` con
+`_serverConfigData` —la foto de lo que tiene el servidor— y este widget guarda un campo
+**por su cuenta** (`group_display_names`: nombres que resuelve él solo y que el usuario nunca
+tecleó, así que no debería tener que guardarlos). Esa escritura fuera de banda quitaba la
+ruta de `_dirtyFields` pero no movía la foto, así que las dos discrepaban para siempre.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestASaveThatSucceedsLeavesTheButtonAtRest::test_the_reconciliation_is_defined_once` | Token de versión, conjunto sucio y foto describen el mismo hecho y se mueven juntos (`applySavedField`) |
+| `TestASaveThatSucceedsLeavesTheButtonAtRest::test_the_main_save_uses_it` | Estaba embebido en `saveConfig`, que es justo por qué el guardado del widget pudo hacerlo mal: no había definición que reutilizar |
+| `TestASaveThatSucceedsLeavesTheButtonAtRest::test_the_widgets_own_save_uses_it_too` | **El fallo reportado**: guardar sin mover la foto deja el botón mintiendo |
+| `TestASaveThatSucceedsLeavesTheButtonAtRest::test_the_dirty_set_is_not_edited_behind_the_helpers_back` | |
+| `TestResolvingANameDoesNotDirtyTheMapping::test_the_mapping_is_staged_exactly_once` | Una vez, arriba y sin condiciones; los caminos de después solo rellenan la columna de nombre |
+| `TestResolvingANameDoesNotDirtyTheMapping::test_the_later_paths_stage_names_only` | Volver a apuntar el mapeo tras la búsqueda lo devolvía a `_dirtyFields` después de que un guardado ya se lo hubiera llevado |
+| `TestResolvingANameDoesNotDirtyTheMapping::test_the_bulk_resolver_agrees` | `_grmAutoResolveNames` sigue la misma regla tras un fetch del directorio |
+
+---
+
+## 106. Entra ID — comprobar permisos de las secciones SSO
+
+**Archivo:** `tests/test_entraid_sso_check_perms.py` — 17 tests
+
+El editor de credenciales ya sabía preguntar si la app de un módulo tiene los permisos de
+Graph que necesita. Las apps de SSO no, y son donde más duele: **el consentimiento es la
+mitad que falla en silencio.** Registrar la app va bien, el admin nunca pulsa «Grant admin
+consent», y nada se queja hasta que alguien llama de verdad a Graph — el selector de grupos
+vuelve vacío, o un login no mapea ningún grupo, sin nada que apunte a la causa.
+
+La comprobación lee el claim `roles` de un token app-only: un permiso pedido pero no
+consentido nunca llega a ese claim, que es justo la distinción que se quiere hacer.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatTheAppIsRegisteredWith::test_the_name_and_the_id_live_together` | El id es con lo que se concede, el nombre lo único que lleva el claim; separarlos es cómo se acaba verificando un permiso que el registro nunca pidió |
+| `TestWhatTheAppIsRegisteredWith::test_the_saml2_registration_grants_exactly_that` | El asistente de SAML2 escribe el id directamente |
+| `TestTheRoute::test_it_needs_config_edit` | Lee un secreto guardado y habla con el tenant |
+| `TestTheRoute::test_a_section_with_no_provider_url_says_so` | Sin tenant no hay dónde iniciar sesión: contesta en vez de reventar |
+| `TestTheRoute::test_it_reports_missing_credentials_instead_of_failing` | El estado justo después de teclear la URL a mano |
+| `TestTheRoute::test_a_granted_permission_reports_all_ok` | El camino feliz, con la lista construida desde la respuesta |
+| `TestTheRoute::test_a_requested_but_unconsented_permission_reports_missing` | **El caso por el que existe**: pedido pero sin consentir |
+| `TestTheRoute::test_a_failed_sign_in_is_reported_not_raised` | Un fallo de autenticación se cuenta, no se lanza |
+| `TestTheRoute::test_saml2_uses_its_own_app_never_oidc_s` | Tomar prestadas las credenciales de OIDC comprobaría una app que nadie usa para SAML |
+| `TestTheButtons::test_the_section_offers_the_button` (×2) | Ambas secciones declaran la acción |
+| `TestTheButtons::test_it_only_shows_once_there_is_an_app` (×2) | Y se apoya en el campo que rellena **su propio** registro |
+| `TestTheButtons::test_one_handler_serves_both_sections` | El panel pasa el id de sección a la acción, así que un paquete escribe una función y no un wrapper por sección |
+| `TestTheModalIsShared::test_there_is_one_renderer` | Un solo `showPermissionCheck` |
+| `TestTheModalIsShared::test_the_credentials_editor_uses_it` | El editor de credenciales dejó de tener su copia |
+| `TestTheModalIsShared::test_a_caller_without_the_list_still_gets_a_checklist` | Las secciones de auth no tienen la lista (es del servidor), así que las filas se construyen desde la respuesta |
+
+---
+
+## 107. Entra ID — rotar el secreto de la app de una credencial
+
+**Archivo:** `tests/test_entraid_cred_secret_rotate.py` — 23 tests
+
+La sección SSO OIDC ya sabía hacerlo; una credencial de módulo no, y la única forma de
+sustituir un secreto a punto de caducar era **volver a registrar la app** — lo que acuña un
+id nuevo y deja permisos y consentimiento a cero, rompiendo a todo el que ya confiaba en la
+anterior. Rotar toca el secreto y nada más.
+
+Dos propiedades cargan con el peso: el secreto nuevo se **guarda en la credencial** (una
+rotación que solo rellenara el formulario dejaría la app con un secreto que nadie conservó
+si se cierra el editor sin guardar) y la respuesta dice `rotated`, para que el asistente no
+anuncie «app creada y credencial rellenada» en la única operación cuyo sentido es que la app
+**no** cambió.
+
+`AADSTS7000215` merece su propio bloque: Entra devuelve ese mismo código para un secreto
+equivocado y para uno recién creado que aún no ha replicado. Reintentar distingue los casos
+que se pueden distinguir; el mensaje explica el que no.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheModulesOfferIt::test_the_credential_type_has_the_action` (×2) | m365 y azure declaran la acción en su `schema.json` |
+| `TestTheModulesOfferIt::test_it_names_its_own_poll_endpoint` (×2) | La acción trae su endpoint de sondeo |
+| `TestTheModulesOfferIt::test_it_does_not_ask_for_an_application_name` (×2) | **El fallo reportado**: salía el modal de «Create Application» pidiendo nombre, cuando no se crea nada |
+| `TestTheModulesOfferIt::test_the_editor_passes_those_through` | El asistente reenvía `client_id`/`cred_uid`: sin eso el servidor no sabe qué app rotar |
+| `TestTheModulesOfferIt::test_the_app_id_reaches_the_server` | El otro fallo reportado: «Fill in the client_id first» con el id delante |
+| `TestTheModulesOfferIt::test_it_is_labelled_in_both_languages` (×2) | Sin traducción el botón sale con la clave cruda |
+| `TestTheFlow::test_it_needs_the_credential_permissions` | Acuña un secreto en el tenant: no es una ruta abierta |
+| `TestTheFlow::test_it_refuses_without_an_app` | |
+| `TestTheFlow::test_it_finds_the_app_on_the_stored_credential` | El id puede no estar en el formulario |
+| `TestTheFlow::test_the_new_secret_is_stored_on_the_credential` | **La propiedad principal**, y la que destapó que `update()` reemplaza la credencial entera |
+| `TestTheFlow::test_it_reports_a_rotation_not_a_creation` | |
+| `TestTheFlow::test_an_unsaved_credential_still_gets_its_field` | Rotar desde un editor sin guardar sigue devolviendo el secreto |
+| `TestTheFlow::test_a_failed_sign_in_is_reported_and_audited` | |
+| `TestTheFlow::test_a_flow_of_another_kind_is_not_accepted` | Un token de otro asistente no avanza por aquí |
+| `TestAFreshSecretIsNotUsableYet::test_a_secret_that_needs_a_moment_is_retried` | |
+| `TestAFreshSecretIsNotUsableYet::test_any_other_error_fails_at_once` | Reintentar cualquier fallo de autenticación sería esconder el caso común |
+| `TestAFreshSecretIsNotUsableYet::test_it_gives_up_after_its_attempts` | |
+| `TestTheMessageSaysWhichItIs::test_a_stubborn_fresh_secret_is_explained` | Los dos significados del mismo código, dichos |
+| `TestTheMessageSaysWhichItIs::test_another_failure_is_not_dressed_up_as_that_one` | |
+
+---
+
+## 108. Entra ID — la conversación device-code, escrita una vez
+
+**Archivo:** `tests/test_entraid_device_flow.py` — 43 tests
+
+Seis botones registran o reparan una app de Entra —SAML2, SCIM, el secreto de OIDC, el de
+una credencial, el asistente genérico de módulos— y todos mantienen **el mismo intercambio**:
+pedir un código a Entra, aparcar lo que la operación va a necesitar, y sondear hasta que el
+admin haya iniciado sesión en otro sitio. Ese intercambio estaba escrito seis veces dentro de
+`routes.py`, y con él seis copias de sus reglas: cuánto vive un flujo aparcado, que
+`slow_down` sube el intervalo, que una respuesta terminal lo consume.
+
+Seis copias de una regla es una regla que nadie puede cambiar. Y además dejó que **divergiera**:
+el sondeo de SAML2 comprobaba que hubiera *un* flujo aparcado bajo el token, pero no que
+estuviera aparcado *para él*, así que un flujo de cualquier otro tipo podía avanzar por ahí y
+leerse luego con el stash equivocado.
+
+Las dos últimas clases cubren lo que el mismo movimiento hizo alcanzable: la regla de **qué
+app usa cada sección de auth** y la escritura del secreto rotado eran closures dentro de una
+ruta Flask, solo comprobables por HTTP. Como funciones planas, sus trampas se pueden enunciar
+directamente.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestItIsWrittenOnce::test_no_route_spells_the_ceremony_out_again` (×4) | Ni `authorization_pending`, ni `slow_down`, ni acuñar tokens, ni sondear: una copia de vuelta es una regla que deja de serlo |
+| `TestItIsWrittenOnce::test_the_flow_registry_is_still_the_hosts` | El registro sigue siendo del host (un código que solo puede terminar quien lo emitió), no un global del módulo |
+| `TestStarting::test_it_parks_the_flow_under_its_kind` | |
+| `TestStarting::test_the_token_is_not_guessable` | Es lo único entre un sondeo y la sesión de otro |
+| `TestStarting::test_the_payload_carries_the_code_and_the_direct_link` | `verification_uri_complete` lleva el código dentro; uno de los seis no lo devolvía |
+| `TestStarting::test_the_deadline_comes_from_entra` | |
+| `TestStarting::test_a_response_without_a_deadline_still_gets_one` | |
+| `TestStarting::test_a_non_default_client_is_remembered` | SCIM usa otro cliente, y el sondeo **debe** canjear con el mismo que emitió el código |
+| `TestStarting::test_the_default_client_is_not_stashed` | Copiar el defecto lo congelaría en cada flujo aparcado |
+| `TestStarting::test_a_failure_to_start_is_the_callers_to_report` | «El asistente no pudo arrancar» se dice distinto en cada sección |
+| `TestPolling::test_pending_keeps_the_flow_parked` | |
+| `TestPolling::test_slow_down_raises_the_interval_and_keeps_the_flow` | |
+| `TestPolling::test_the_interval_is_capped` | Sin tope, un tenant que insista estira el sondeo más allá de la vida del código: parece un cuelgue, no una caducidad |
+| `TestPolling::test_an_error_consumes_the_flow_and_is_audited` | Un fallo que solo es un toast es un fallo que nadie puede consultar después |
+| `TestPolling::test_an_expired_flow_is_consumed_and_audited` | Y no se manda a Entra un código ya caducado |
+| `TestPolling::test_a_flow_of_another_kind_is_refused` | **La divergencia que cierra este movimiento** |
+| `TestPolling::test_an_unknown_token_is_expired_not_described` | Caducado o falsificado: ninguno merece explicación |
+| `TestPolling::test_completion_hands_back_the_stash_and_the_token` | |
+| `TestPolling::test_a_completed_flow_cannot_be_polled_twice` | Se suelta **antes** de la parte lenta: si no, un segundo sondeo canjea el mismo código y ejecuta la operación dos veces |
+| `TestPolling::test_it_redeems_with_the_client_that_issued_the_code` | |
+| `TestPolling::test_the_default_client_is_left_to_auth` | |
+| `TestTheFollowUpFlow::test_park_and_take_round_trip` | El paso de RBAC de Azure: elegir suscripción no puede costar un segundo inicio de sesión |
+| `TestTheFollowUpFlow::test_take_does_not_consume` | Una petición mal formada se puede reintentar sin quemar el token |
+| `TestTheFollowUpFlow::test_it_refuses_a_flow_of_another_kind` | |
+| `TestTheFollowUpFlow::test_an_abandoned_picker_does_not_hold_the_token` | |
+| `TestTheFollowUpFlow::test_the_default_ttl_is_shorter_than_an_arm_token` | |
+| `TestWhichAppASectionUses::test_oidc_uses_its_own` | |
+| `TestWhichAppASectionUses::test_saml2_never_borrows_oidcs` | La respuesta parecería correcta y no significaría nada |
+| `TestWhichAppASectionUses::test_an_unknown_section_is_not_a_third_set_of_rules` | |
+| `TestWhichAppASectionUses::test_a_full_pair_from_the_request_wins` | El estado justo después del asistente |
+| `TestWhichAppASectionUses::test_a_lone_client_id_must_not_override` | Se emparejaría con el secreto **guardado** de otra app, y el fallo se leería como un problema de permisos |
+| `TestWhichAppASectionUses::test_a_lone_secret_must_not_override_either` | |
+| `TestWhichAppASectionUses::test_the_provider_url_may_travel_alone` | Nombra al tenant, no a una identidad |
+| `TestWritingARotatedSecretBack::test_the_id_on_screen_wins` | |
+| `TestWritingARotatedSecretBack::test_the_stored_credential_fills_in_for_a_field_the_editor_never_got` | |
+| `TestWritingARotatedSecretBack::test_no_store_is_not_a_crash` | |
+| `TestWritingARotatedSecretBack::test_the_rotation_changes_the_secret_and_nothing_else` | **La trampa**: `update()` reemplaza la credencial entera, así que mandar solo `data` borraba el nombre y reseteaba el tipo |
+| `TestWritingARotatedSecretBack::test_nothing_to_write_is_not_an_error` | |
+| `TestWritingARotatedSecretBack::test_an_unknown_credential_is_not_created` | |
+| `TestWritingARotatedSecretBack::test_the_identity_to_check_prefers_what_was_typed` | Los campos enmascarados siguen viniendo del store |
+
+---
+
+## 109. Config — la cabecera tiene que quedarse arriba toda la sección
+
+**Archivo:** `tests/test_wa_config_pane_layout.py` — 21 tests
+
+La barra (título, Reload, Save con su chincheta de cambios sin guardar) y el buscador son los
+controles que buscas **porque** has hecho scroll: encuentras un campo, lo cambias y le das a
+Guardar. Estaban fijados con `position: sticky`, y eso los fijaba durante **una pantalla**;
+después la cabecera se iba hacia arriba y desaparecía, justo donde la lista de configuración
+se hace larga y hace falta.
+
+`sticky` no podía funcionar ahí, y el motivo es una regla que el panel impone a propósito en
+otro sitio: **una tab-pane activa es una columna flex acotada por el viewport**
+(`.container-fluid > .tab-content > .tab-pane.active` con `flex: 1 1 auto; min-height: 0`
+dentro de una `.ss-main` que es `height: 100vh`). Un elemento sticky solo viaja hasta donde
+llega su bloque contenedor, y ese bloque mide una pantalla por muy largo que sea el contenido:
+el contenido se desborda y la cabecera se va con el bloque.
+
+El mecanismo que sí funciona es el que ya usa el resto del panel: la cabecera conserva su
+altura natural y el cuerpo de debajo pasa a ser el scroller (`.ss-vscroll`). Así la cabecera no
+puede irse — no hay scroll debajo de ella que se la lleve.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_pane_is_found` | |
+| `TestTheScanItself::test_the_fill_helpers_exist` | |
+| `TestTheBodyScrolls::test_the_config_body_is_the_scroller` | Si no scrollea él, scrollea la página y se lleva la cabecera |
+| `TestTheBodyScrolls::test_the_scroller_has_a_gutter` | Cards en flujo, no una tabla: sin canal la barra de scroll se come el borde derecho |
+| `TestTheBodyScrolls::test_the_gutter_is_not_baked_into_the_scroll_helper` | `.ss-vscroll` lo usan cuerpos de tabla que no quieren ese padding; un helper genérico con el gusto de una sección deja de ser genérico |
+| `TestTheSeamBetweenHeaderAndBody::test_the_header_card_has_no_bottom_margin` | La franja de 1rem de fondo de página entre el card y el cuerpo: las filas que pasaban por debajo **asomaban ahí**, un trozo de input flotando que parecía un fallo de pintado |
+| `TestTheSeamBetweenHeaderAndBody::test_the_header_sits_on_the_edge_not_inside_the_padding` | Es el borde superior de la sección, no un card flotando dentro: ancho completo, a ras del marco y cuadrado arriba |
+| `TestTheSeamBetweenHeaderAndBody::test_the_bottom_stays_rounded` | La curva de abajo es lo que dice «el cuerpo se mete por aquí» |
+| `TestTheSeamBetweenHeaderAndBody::test_the_bleed_cancels_exactly_the_padding_above_it` | El margen negativo es aritmética contra dos paddings del shell; si cambia alguno, la barra deja de estar a ras y nada más lo diría |
+| `TestTheSeamBetweenHeaderAndBody::test_the_cut_is_faded_not_sliced` | `overflow` corta a cuchillo; un input partido por la mitad se lee como error, no como «hay más arriba» |
+| `TestTheSeamBetweenHeaderAndBody::test_the_fade_is_not_baked_into_the_scroll_helper` | `.ss-vscroll` lo comparten cuerpos de tabla con su propia fila de cabecera, que no deben enmascararse |
+| `TestTheSeamBetweenHeaderAndBody::test_the_fade_is_short` | Suficiente para suavizar el borde, nunca tanto como para tapar una fila que estás leyendo |
+| `TestTheHeaderDoesNotGoBackToSticky::test_the_header_is_not_positioned` | **La regresión**: volver a `position:sticky` dentro de una pane acotada |
+| `TestTheHeaderDoesNotGoBackToSticky::test_the_pane_is_still_a_flex_column` | Todo el montaje se apoya en ella: sin columna, el cuerpo no tiene altura donde scrollear |
+| `TestTheHeaderDoesNotGoBackToSticky::test_the_shell_is_the_bounded_one` | `.ss-main` a `100vh` es justo la razón por la que sticky no podía funcionar |
+| `TestTheSearchBoxIsCollapsed::test_it_starts_closed` | El filtro sirve para encontrar un ajuste entre muchos, no para estar a la vista el resto del tiempo |
+| `TestTheSearchBoxIsCollapsed::test_the_toggle_targets_it` | Incluido el estado cerrado anunciado a accesibilidad |
+| `TestTheSearchBoxIsCollapsed::test_an_active_filter_is_visible_with_the_box_closed` | **La trampa** de esconder el buscador: un filtro activo con la caja cerrada deja media configuración oculta y parece pérdida de datos |
+| `TestTheSearchBoxIsCollapsed::test_the_toolbar_closes_the_card_when_the_box_is_hidden` | Sin nada debajo, la barra **es** el fondo del card y tiene que tener su forma; un borde inferior recto sin nada después parece un panel que no llegó a pintarse |
+| `TestTheSearchBoxIsCollapsed::test_opening_it_puts_the_cursor_in_it` | Pulsas la lupa porque vas a escribir; abrir sin foco pide un segundo clic |
+| `TestTheControlsAreStillThere::test_the_header_holds_them_all` | Un cambio de layout no puede dejarse un control por el camino |
+
+---
+
+## 110. Un ajuste no puede dejarte fuera del panel
+
+**Archivo:** `tests/test_wa_cookie_lockout.py` — 13 tests
+
+Dos ajustes podían hacerlo, y los dos fallaban igual: un rebote infinito entre `/login` y `/`.
+El login **funcionaba** —credenciales correctas, sesión creada— y el navegador llegaba a la
+página siguiente sin sesión ninguna, porque la cookie que la llevaba se tiraba al llegar. Nada
+en pantalla lo decía; el panel simplemente dejaba de ser alcanzable, incluida la página donde
+se apaga el ajuste que lo causó.
+
+**Cookies Secure sobre HTTP plano.** Un navegador descarta una cookie `Secure` en `http://`.
+La configuración de sesión es cuidadosa con esto para `public_url` —una URL externa canónica
+no afirma que todo el tráfico sea HTTPS—, pero la política de *embed* marcaba `Secure` sin
+condiciones en cuanto se permitía cualquier origen en frame-ancestors (activar el embed de
+Teams bastaba). Ese trato nunca compensó: un iframe cross-site necesita `SameSite=None`, los
+navegadores rechazan `SameSite=None` sin `Secure`, y rechazan `Secure` sobre HTTP — así que en
+un despliegue http:// la política tampoco habilitaba el embed. Solo rompía el login.
+
+**Una redirección a sí misma.** `force_fqdn` comparaba `request.host` (que lleva el puerto)
+contra una URL pública que puede no llevarlo, así que `192.168.0.1:8080` se leía como host
+distinto de `192.168.0.1` y mandaba al navegador al puerto 80. El ajuste va del *hostname* por
+el que entras, y una redirección que aterriza donde empezó gira para siempre.
+
+La forma de las dos reglas es la misma, y es el sentido del fichero: **un ajuste de seguridad
+que no puede aplicarse no debe aplicarse a medias.** No redirigir, o dejar la cookie usable, es
+siempre mejor que un bloqueo — el peor caso es que el endurecimiento no se aplique, que es
+justo donde ya estabas.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSessionCookieStaysUsableOverPlainHttp::test_no_embed_no_https_keeps_the_cookie_usable` | |
+| `TestTheSessionCookieStaysUsableOverPlainHttp::test_allowing_an_iframe_origin_does_not_break_plain_http_login` | **El bloqueo**: activar el embed de Teams marcaba la cookie Secure y el login rebotaba en bucle |
+| `TestTheSessionCookieStaysUsableOverPlainHttp::test_with_https_the_embed_policy_applies` | No se desactiva: se condiciona a lo único que la hace funcionar |
+| `TestTheSessionCookieStaysUsableOverPlainHttp::test_an_https_intent_alone_still_marks_it_secure` | |
+| `TestTheSessionCookieStaysUsableOverPlainHttp::test_the_impossible_combination_is_reported` | Un embed que no puede funcionar no puede fallar en silencio |
+| `TestForcingTheDomainCannotLoop::test_a_different_hostname_is_redirected` | Lo que el ajuste sí debe hacer |
+| `TestForcingTheDomainCannotLoop::test_the_query_string_survives` | |
+| `TestForcingTheDomainCannotLoop::test_a_public_url_without_a_port_accepts_any_port` | **El bucle**: `request.host` lleva puerto y la URL pública puede no llevarlo |
+| `TestForcingTheDomainCannotLoop::test_a_named_port_is_still_honoured` | Nombrar un puerto significa que importa |
+| `TestForcingTheDomainCannotLoop::test_the_comparison_ignores_case` | |
+| `TestForcingTheDomainCannotLoop::test_it_never_redirects_to_the_request_it_is_answering` | Cinturón y tirantes: un destino idéntico a la petición actual es un bucle que el navegador seguirá siempre |
+| `TestForcingTheDomainCannotLoop::test_it_does_nothing_while_switched_off` | |
+| `TestForcingTheDomainCannotLoop::test_it_does_nothing_without_a_public_url` | Activarlo a solas es un no-op |
+
+---
+
+## 111. El icono del sitio existe y pedirlo no da 404
+
+**Archivo:** `tests/test_wa_favicon.py` — 10 tests
+
+No había favicon, así que cada visita dejaba un `GET /favicon.ico 404` — inofensivo en sí, y
+ruido en el log de acceso de todos los despliegues para siempre. Los navegadores piden ese
+fichero **por su cuenta y desde la raíz**, haya o no etiquetas `<link rel="icon">` en la
+página: en una página de error, en un endpoint JSON abierto en una pestaña, antes de parsear
+ningún HTML. Por eso las etiquetas no bastan y la ruta tiene que contestar.
+
+Dos propiedades merecen fijarse más allá de «el fichero está»:
+
+- **es público.** Exigir sesión redirigiría al login y le daría al navegador un documento HTML
+  donde va un icono — un 200 que no es una imagen es peor que un 404;
+- **el binario tiene fuente.** `tools/make_favicon.py` lo dibuja a partir de la geometría (sin
+  dependencias: un PNG son unas cuantas scanlines comprimidas con zlib y un `.ico` es un
+  directorio de PNGs), así que el `.ico` commiteado es reproducible en vez de un artefacto que
+  nadie puede regenerar. El test vuelve a ejecutar el generador y compara bytes.
+
+Cada tamaño se renderiza desde la forma en lugar de reescalar un bitmap: a 16px —el tamaño que
+enseña de verdad una pestaña— un check reescalado se convierte en una mancha.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheFilesExist::test_the_ico_is_there` | |
+| `TestTheFilesExist::test_the_svg_is_there` | Lo que prefiere un navegador moderno: un fichero, nítido a cualquier densidad |
+| `TestTheFilesExist::test_the_ico_is_a_real_ico` | Cabecera válida y payloads PNG |
+| `TestTheFilesExist::test_it_carries_the_sizes_a_browser_asks_for` | 16 y 32; el de 16 es el de la pestaña |
+| `TestTheBinaryIsReproducible::test_the_committed_ico_matches_its_generator` | Un binario sin fuente es un callejón sin salida: nadie puede cambiarle el color ni la forma |
+| `TestThePageDeclaresIt::test_both_forms_are_offered` | SVG + bitmap alternativo |
+| `TestThePageDeclaresIt::test_they_are_cache_busted_like_the_stylesheet` | Un icono que el navegador fijó para siempre es lo único que nadie piensa en recargar a la fuerza |
+| `TestTheRootPathAnswers::test_it_is_served_without_a_session` | **El sentido de la ruta**: se pide antes de haber sesión y en páginas que no son nuestras |
+| `TestTheRootPathAnswers::test_it_returns_the_committed_file` | |
+| `TestTheRootPathAnswers::test_it_is_cacheable` | Refrescarlo en cada carga es justo el ruido que esta ruta viene a quitar |
+
+---
+
+## 112. El breadcrumb nombra el camino completo hasta la sección
+
+**Archivo:** `tests/test_wa_breadcrumb.py` — 10 tests
+
+Leía el ítem activo del sidebar y su sub-ítem y ahí paraba, así que una sección anidada dos
+niveles se anunciaba como «Infrastructure / Servers» y una anidada un nivel como «Services» a
+secas — el mismo título que recibe una sección de primer nivel. Las dos perdían el grupo en el
+que viven, que es justo la parte que dice *dónde estás*: a Servers se llega abriendo System y
+luego Infrastructure. Un camino al que le falta el primer paso no es un camino.
+
+La regla tiene dos mitades y la segunda importa igual:
+
+- una sección dentro de un grupo se nombra con su cadena entera — «System / Services»,
+  «System / Infrastructure / Servers»;
+- una sección de primer nivel (Overview, History, Syslog…) no pertenece a ningún grupo y es
+  solo ella misma. Prefijarla nombraría un sitio en el que no vive.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_builder_is_found` | |
+| `TestTheScanItself::test_the_sidebar_has_groups` | Todo el arreglo se apoya en que el grupo sea un elemento real con etiqueta |
+| `TestThePathStartsAtTheGroup::test_the_group_is_part_of_the_crumb` | **La regresión** |
+| `TestThePathStartsAtTheGroup::test_it_is_the_group_containing_the_active_item` | Se resuelve hacia arriba desde el ítem activo, no «el primer grupo del sidebar» — que acertaría por suerte mientras solo haya uno |
+| `TestThePathStartsAtTheGroup::test_it_takes_that_groups_own_header` | `:scope >`: un grupo anidado aportaría la cabecera de su hijo |
+| `TestThePathStartsAtTheGroup::test_the_group_comes_first` | El orden **es** el camino |
+| `TestAFirstLevelSectionIsJustItself::test_the_standalone_sections_are_outside_every_group` | Si alguna se moviera dentro de un grupo heredaría prefijo en silencio |
+| `TestAFirstLevelSectionIsJustItself::test_missing_parts_are_dropped_not_rendered_empty` | Sin `filter(Boolean)` una sección sin grupo empezaría por un separador |
+| `TestTheGroupHeaderIsNeverTheSection::test_the_parent_link_is_excluded_from_the_item_lookup` | La cabecera del grupo también lleva `.ss-sb-item`; sin excluirla el crumb la repetiría |
+| `TestTheGroupHeaderIsNeverTheSection::test_the_separator_is_still_escaped_markup` | Las etiquetas se escapan; solo el separador es marcado |

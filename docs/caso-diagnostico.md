@@ -19,6 +19,118 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Permitir el iframe de Teams dejaba a todo el mundo fuera del panel
+
+**Fecha:** 2026-07-27 · **Área:** `lib/web_admin/app.py` (`_apply_embed_cookie_policy`,
+`_enforce_fqdn`)
+
+**Síntoma** — entrando por `http://192.168.0.1:8080`, el navegador mostraba «La página no está
+redirigiendo adecuadamente» (`ERR_TOO_MANY_REDIRECTS`) en `/login`. El login **funcionaba**:
+credenciales correctas, sin mensaje de error, sesión creada.
+
+**Diagnóstico** — la primera hipótesis fue el ajuste que redirige al dominio
+(`force_fqdn`), pero el usuario confirmó que estaba **apagado**, y ese guardián sale en su
+primera línea. Descartado eso, el bucle solo puede venir de una sesión que no persiste: si la
+cookie no llega de vuelta, la página siguiente ve un anónimo y devuelve a `/login`, que vuelve
+a autenticar correctamente, y así indefinidamente. Un bucle de login **con credenciales
+válidas** es siempre la cookie, no la autenticación.
+
+**Causa raíz** — tres ajustes marcan la cookie de sesión como `Secure`, y un navegador
+descarta una cookie `Secure` sobre `http://`. Dos son explícitos y legítimos (`secure_cookies`,
+`force_https`); el tercero no: `_apply_embed_cookie_policy` la marcaba **sin condiciones** en
+cuanto había cualquier origen permitido en frame-ancestors, y activar «embed in Teams» basta
+para eso. Lo llamativo es que el mismo fichero razona correctamente el caso análogo treinta
+líneas más arriba, para `public_url`, y anota que forzar `Secure` desde ahí «rompería el login
+en silencio sobre HTTP plano». Y el trato nunca compensaba: un iframe cross-site necesita
+`SameSite=None`, los navegadores rechazan `SameSite=None` sin `Secure` y rechazan `Secure`
+sobre HTTP — así que en un despliegue http:// la política tampoco habilitaba el embed.
+
+**Solución** — la política del embed se condiciona a una intención explícita de HTTPS
+(`secure_cookies` o `force_https`) y avisa por log cuando se permite un origen sin ella, en vez
+de no hacer nada. De paso se arregló `force_fqdn`, que comparaba `request.host` —que lleva el
+puerto— contra una URL pública que puede no llevarlo: `192.168.0.1:8080` se leía como host
+distinto de `192.168.0.1` y redirigía al puerto 80. Ahora una URL pública sin puerto acepta
+cualquier puerto, con puerto lo exige, la comparación ignora mayúsculas y nunca se redirige a
+la propia petición que se está contestando. Cubierto por `tests/test_wa_cookie_lockout.py`,
+verificado fallando contra el código original.
+
+**Lección** — **un ajuste de seguridad que no puede aplicarse no debe aplicarse a medias.** Los
+dos defectos tienen la misma forma: el endurecimiento era imposible en ese despliegue (cookie
+Secure sin HTTPS, redirección a sí misma) y aun así se aplicó la mitad que rompe. No redirigir,
+o dejar la cookie usable, es siempre preferible: el peor caso es que el endurecimiento no se
+aplique, que es exactamente donde ya estabas — mientras que el bloqueo se lleva por delante la
+página desde la que se desactiva.
+
+Corolario operativo: cuando un ajuste puede dejar el panel inalcanzable, conviene que tenga
+salida por variable de entorno. `secure_cookies` y `force_https` la tienen
+(`SS_SECURE_COOKIES`, `SS_FORCE_HTTPS`); `embed_in_teams` y `frame_ancestors` no, y por eso
+este bug solo se podía deshacer tocando la BD.
+
+---
+
+## Guardar decía que sí y el mapeo Grupo→Rol nuevo no aparecía
+
+**Fecha:** 2026-07-27 · **Área:** web-admin / Configuration › Authentication
+(`partials/cfg/auth/_group_role_map.html`)
+
+**Síntoma** — añadir una fila «Group → Role mapping» en SSO (OIDC), pulsar Guardar y
+recargar dejaba el mapeo nuevo sin rastro. El toast decía que se había guardado
+correctamente. Cambiar el *Role* de un mapeo **ya existente** se guardaba siempre.
+
+**Diagnóstico** — esa asimetría era todo. Las dos mitades de la misma fila pasan por
+handlers distintos: el `<select>` de Role llama a `_grmUpdate` directamente —síncrono— y el
+`<input>` del id de grupo llamaba a `_grmRowIdChanged`, que en una sección con fuente de
+grupos (oidc, saml2 y ldap declaran una) **esperaba antes una búsqueda de nombre en el
+directorio**. Lo que confirma el diagnóstico es *cuándo* corre ese handler: en `change`, que
+dispara cuando el botón Guardar toma el foco. El clic caía con la búsqueda en vuelo.
+
+**Causa raíz** — `saveConfig` envía únicamente `_dirtyFields`. Con el mapeo aún sin apuntar,
+mandaba todos los campos sucios **menos ése**, y el servidor contestaba éxito con toda la
+razón: el payload que recibió se guardó entero. El mapeo se apuntaba un instante después, ya
+sin nadie que lo guardara. Ningún error en ningún lado, en ninguna de las dos partes.
+
+**Solución** — apuntar el mapeo antes de que el handler pueda bifurcarse, y apuntar en
+`oninput` (cada pulsación) en vez de solo en `change`. La búsqueda de nombre sigue esperando,
+pero solo decora la columna de nombre, que es otro campo. Cubierto por
+`tests/test_cfg_group_role_map.py`.
+
+**Segunda mitad — el botón se quedaba encendido después de guardar bien.** Con el mapeo ya
+persistiendo, *Save Configuration* volvía a marcarse como «cambios pendientes» justo tras el
+mensaje de éxito. F5 mostraba el valor guardado, y volver a pulsar Guardar era lo que lo
+callaba. Mismo widget, dirección contraria: `markDirty` decide el estado del botón comparando
+`configData` con `_serverConfigData` —la foto de lo que tiene el servidor—, y este widget
+guarda un campo **por su cuenta** (`group_display_names`, nombres que resuelve él y que el
+usuario nunca tecleó). Ese guardado fuera de banda borraba la ruta de `_dirtyFields` pero no
+movía la foto: las dos discrepaban ya para siempre y el botón se lo creía. La secuencia
+completa es que la búsqueda de nombre termina **después** del guardado, apunta el nombre
+recién resuelto, lo persiste ella sola y deja la foto atrasada. Arreglado con un único
+`applySavedField` —token de versión, conjunto sucio y foto se mueven juntos, porque describen
+el mismo hecho— y, sobre todo, sacando los nombres de la maquinaria de «cambios sin guardar»:
+se escriben directamente en `configData` y se persisten al momento, así que la vía automática
+ya no puede encender el botón pase lo que pase con el orden. Solo reconciliar la cola no
+bastaba: mientras el guardado automático llegara a completarse funcionaba, pero cualquier
+camino que apuntase algo después del guardado volvía a encenderlo.
+
+**Lección** — tres, y las dos últimas son sobre el propio guard. La primera: **un handler `change`
+que espera algo compite con el clic que lo disparó**; si además el guardado manda solo lo
+sucio, la carrera se convierte en un éxito que miente. Lo que se persiste tiene que quedar
+apuntado antes del primer `await`, y lo que hay en pantalla tiene que estar siempre en la
+cola (`oninput`, no `change`).
+
+La segunda: **un dato que describe un solo hecho no se puede escribir a trozos.** «El
+servidor ya tiene esto» son tres cosas —token de versión, campo fuera de la cola, foto del
+estado guardado— y cualquier camino que actualice dos de las tres deja la interfaz
+contradiciendo al servidor. Estaban embebidas dentro de `saveConfig`, así que el segundo sitio
+que necesitó guardar un campo no tenía nada que reutilizar y se dejó una.
+
+La tercera: el primer test que escribí para esto **pasaba con el código roto**. Comprobaba
+que el apuntado apareciera antes del primer `await` — y así era, dentro de un `if` que
+retorna, en un camino que el usuario no recorre. La invariante real no es «antes del primer
+await» sino «antes de cualquier bifurcación». Un guard de regresión hay que verlo fallar
+contra el código original (`git show HEAD:...`) antes de creérselo.
+
+---
+
 ## Un aviso de umbral llegaba como caída dura, y el panel lo pintaba ámbar
 
 **Fecha:** 2026-07-26 · **Área:** `lib/modules/module_base.py` (`_emit`), monitor

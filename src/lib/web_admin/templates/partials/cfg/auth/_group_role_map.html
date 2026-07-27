@@ -62,7 +62,7 @@ function _renderGroupRoleMap(sec, rawValue) {
                 <input type="text" class="form-control form-control-sm grm-group font-monospace"
                     value="${escAttr(grp)}" placeholder="${escAttr(t('grm_group'))}"
                     style="font-size:.8em"
-                    oninput="markDirty('config')"
+                    oninput="_grmUpdate('${escAttr(sec)}')"
                     onchange="${_rowOnChange}">
             </td>
             ${hasNames ? `<td class="pe-2 grm-name-cell">
@@ -255,15 +255,26 @@ async function _grmRowIdChanged(input, sec) {
     const tr = input.closest('tr');
     const grp = input.value.trim();
     delete tr.dataset.grmName;
+    // Stage the mapping NOW, before anything is awaited. It does not depend on the name
+    // lookup below — that only fills the display-name column — and the await is long
+    // enough to lose a save to it: this handler runs on `change`, which fires when the
+    // Save button takes focus, so the click landed while the lookup was still in flight
+    // and saveConfig sent the fields WITHOUT this one. It reported success, truthfully,
+    // and the new row was gone on reload. Editing an existing row's Role went through the
+    // select's synchronous handler, which is why that half always worked.
+    _grmUpdate(sec);
     const span = tr.querySelector('.grm-name-cell span');
-    if (!span) { _grmUpdate(sec); return; }
+    if (!span) return;
 
     if (!grp) {
         span.textContent = '—';
         span.title = '';
         span.className = 'd-block text-truncate small text-muted py-1';
         delete span.dataset.grmState;
-        _grmUpdate(sec);
+        // Names only from here on: the mapping was staged above and nothing below touches
+        // it. Re-staging it would put it back in `_dirtyFields` after a save has already
+        // taken it — which is how a finished save ends up looking pending.
+        _grmUpdateNamesOnly(sec);
         return;
     }
 
@@ -276,7 +287,7 @@ async function _grmRowIdChanged(input, sec) {
         span.title = cachedName;
         span.className = 'd-block text-truncate small text-muted py-1';
         delete span.dataset.grmState;
-        _grmUpdate(sec);
+        _grmUpdateNamesOnly(sec);
         await _saveDisplayNames(sec);
         return;
     }
@@ -301,7 +312,7 @@ async function _grmRowIdChanged(input, sec) {
         span.className = 'd-block text-truncate small text-warning-emphasis fw-medium py-1';
         span.dataset.grmState = 'not_found';
     }
-    _grmUpdate(sec);
+    _grmUpdateNamesOnly(sec);
     await _saveDisplayNames(sec);
 }
 
@@ -329,7 +340,7 @@ function _grmAddRow(sec, prefill, label) {
                 value="${escAttr(prefill)}"
                 placeholder="${escAttr(t('grm_group'))}"
                 ${hasNames ? 'style="font-size:.8em"' : ''}
-                oninput="markDirty('config')"
+                oninput="_grmUpdate('${escAttr(sec)}')"
                 onchange="${_inputOnChange}">
         </td>
         ${hasNames ? `<td class="pe-2 grm-name-cell">
@@ -395,23 +406,62 @@ function _grmUpdate(sec) {
     }
 }
 
+/** Record the resolved display names WITHOUT staging them as a user edit.
+ *
+ * These names are decoration the widget looks up by itself; the user never typed them and
+ * must not be asked to save them — every caller of this follows it with
+ * `_saveDisplayNames`, which persists them immediately.
+ *
+ * So it writes straight into `configData` instead of going through `updateField`. Staging
+ * them was what lit the Save button behind a save that had already succeeded: the lookup
+ * finishes AFTER the save (it is what the user was waiting for when they pressed Save), and
+ * whatever it stages then lands in an empty dirty set with the button freshly cleared. The
+ * button would go back to "unsaved changes" seconds after announcing success, F5 would show
+ * everything stored, and only pressing Save again would settle it.
+ *
+ * The mapping itself is never touched here — resolving a name cannot change it.
+ */
 function _grmUpdateNamesOnly(sec) {
     if (!configData[sec] || !('group_display_names' in configData[sec])) return;
-    updateField('config', `${sec}|group_display_names`, JSON.stringify(_grmBuildNames(sec)));
+    setPath(configData, [sec, 'group_display_names'], JSON.stringify(_grmBuildNames(sec)));
 }
 
+/** Persist the display-name column on its own, without the user pressing Save.
+ *
+ * The names are decoration the widget resolves by itself, so asking the user to save them
+ * would be asking them to save something they never typed. That is why it is a save of its
+ * own — and why it has to finish the job a save does: `applySavedField` moves the version
+ * token, the dirty set AND the saved-state snapshot together, and `markDirty` then re-judges
+ * the button. Dropping the path from `_dirtyFields` alone left `configData` and
+ * `_serverConfigData` disagreeing for good, so the button announced unsaved changes
+ * immediately after a successful save — the value was stored (F5 proved it), only the
+ * button disagreed, and pressing Save again was what quietened it.
+ *
+ * It is all-or-nothing on purpose. Either the value is stored and both `configData` and the
+ * snapshot carry it, or neither does — a half-applied write is precisely a diff the user
+ * cannot see, cannot have caused and cannot clear except by saving something they never
+ * edited.
+ */
 async function _saveDisplayNames(sec) {
     const pathStr = `${sec}|group_display_names`;
     if (!configData[sec] || !('group_display_names' in configData[sec])) return false;
     const value = configData[sec]['group_display_names'];
-    const fields = { [pathStr]: { value, version: _fieldVersions[pathStr] ?? null } };
-    const data = await apiPut('/api/v1/config', { fields });
-    if (!data) return false;
-    if (data.saved?.includes(pathStr)) {
-        if (data.versions?.[pathStr]) _fieldVersions[pathStr] = data.versions[pathStr];
-        _dirtyFields.delete(pathStr);
+    const data = await apiPut('/api/v1/config',
+                              { fields: { [pathStr]: { value, version: _fieldVersions[pathStr] ?? null } } });
+    if (data?.saved?.includes(pathStr)) {
+        // Snapshot + version token only. It deliberately does NOT call `markDirty`: this
+        // path never staged anything, so it has nothing to re-judge — and `markDirty` can
+        // only ever LIGHT the button, never leave it alone. Calling it here after a save
+        // had just cleared the badge is what put the badge straight back.
+        applySavedField(pathStr, data.versions?.[pathStr]);
         return true;
     }
+    // Not stored (network, conflict, rejection): put the field back to what the server is
+    // known to hold, so a decoration nobody asked to save cannot leave the panel looking
+    // edited. The name on screen stays until the next render, which is honest — it WAS
+    // resolved; it just is not persisted.
+    const known = _serverConfigData?.[sec]?.['group_display_names'];
+    if (known !== undefined) setPath(configData, [sec, 'group_display_names'], known);
     return false;
 }
 
@@ -440,7 +490,8 @@ function _grmAutoResolveNames(sec, idNameMap) {
             updated = true;
         }
     });
-    if (updated) _grmUpdate(sec);
+    // Resolving names never changes the mapping — see _grmRowIdChanged.
+    if (updated) _grmUpdateNamesOnly(sec);
 }
 
 function _grmBindFilter(sec) {

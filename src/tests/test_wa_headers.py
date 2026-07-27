@@ -99,12 +99,17 @@ class TestDiscoveryMechanism:
 
     def test_embed_cookie_policy_is_generic(self, admin):
         # SameSite=None; Secure iff the app is embeddable cross-site — driven by the effective
-        # frame-ancestors allowlist, NOT any integration-specific flag.
+        # frame-ancestors allowlist, NOT any integration-specific flag. The policy also needs
+        # an HTTPS intent (a Secure cookie is dropped over http://, which locked people out of
+        # the panel entirely — see test_wa_cookie_lockout.py); here that is simply satisfied,
+        # so this stays a test about genericity.
         class _App:
             def __init__(self):
                 self.config = {}
         app, saved = _App(), admin._frame_ancestors_list
+        saved_https = admin._force_https
         try:
+            admin._force_https = True
             admin._frame_ancestors_list = ['https://embed.example.com']
             admin._apply_embed_cookie_policy(app)
             assert app.config['SESSION_COOKIE_SAMESITE'] == 'None'
@@ -113,7 +118,7 @@ class TestDiscoveryMechanism:
             admin._apply_embed_cookie_policy(app)
             assert app.config['SESSION_COOKIE_SAMESITE'] == 'Lax'
         finally:
-            admin._frame_ancestors_list = saved
+            admin._frame_ancestors_list, admin._force_https = saved, saved_https
 
 
 class TestCsrfModule:

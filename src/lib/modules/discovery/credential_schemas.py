@@ -271,6 +271,24 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                     # shown as a button in the credential-editor actions toolbar.
                     'toolbar':    bool(a.get('toolbar', True)),
                 }
+                # A device-code action may name the endpoint that polls it. Without this
+                # every such action would have to be served by the one generic poll route,
+                # which is fine for provisioning an app and wrong for anything else (a
+                # secret rotation ends somewhere different and writes somewhere different).
+                if a.get('poll_url'):
+                    entry_action['pollUrl'] = str(a['poll_url'])
+                # `existing_app` marks a device-code action that operates on the app the
+                # credential ALREADY holds (rotating its secret) instead of creating one.
+                # It carries two consequences, which is why it is one flag and not two
+                # that could be set apart: there is no application name to ask for, and
+                # the editor must send WHICH app — the id and the credential uid — or the
+                # server has nothing to act on. `intro_key` says what the sign-in is for,
+                # since the creation wizard's explanation would be wrong.
+                if a.get('existing_app'):
+                    entry_action['existing_app'] = True
+                    entry_action['simple'] = True
+                if a.get('intro_key'):
+                    entry_action['intro_key'] = str(a['intro_key'])
                 # A device-code provisioning action carries a `provision` object
                 # (opaque pass-through). Whatever extras the module's provisioning
                 # declaration contributes (app name, permissions, …) are merged in

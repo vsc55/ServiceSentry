@@ -93,6 +93,10 @@ function _toggleCfgSearchHints() {
 function _filterConfig(term) {
     _cfgSearchTerm = term;
     const q = term.trim().toLowerCase();
+    // The search box is collapsed by default, so an active filter can be hiding most of the
+    // configuration with nothing on screen to explain it. The badge on the toggle is what
+    // says "you are looking at a subset" once the box itself is out of sight.
+    document.getElementById('badgeCfgFilter')?.classList.toggle('d-none', !q);
     const container = document.getElementById('config-container');
     if (!container) return;
     const nav  = container.querySelector('#cfg-tab-nav');
@@ -782,8 +786,11 @@ function _cfgSectionActions(sec, data) {
     const btns = acts.map(a => {
         const tip = a.tooltip_key ? ` title="${escAttr(t(a.tooltip_key))}"` : '';
         const ico = a.icon ? `<i class="bi ${escAttr(a.icon)} me-1"></i>` : '';
+        // The section is passed to the handler so one function can serve several sections
+        // instead of a wrapper per section. Every handler that predates this takes no
+        // parameters and simply ignores it.
         return `<button class="btn btn-${escAttr(a.variant || 'secondary')} btn-sm" type="button"
-                        onclick="${escAttr(a.fn)}()"${tip}>${ico}${esc(t(a.label_key))}</button>`;
+                        onclick="${escAttr(a.fn)}(${jsStr(sec)})"${tip}>${ico}${esc(t(a.label_key))}</button>`;
     }).join('');
     // Row caption: when every visible action comes from the same package group, use its
     // label (e.g. "Entra ID") so the row says WHOSE actions these are; if a section mixes

@@ -21,7 +21,10 @@ Convention — a package declares ``CONFIG_ACTIONS`` in its ``manifest.py`` (see
 
 ``fn`` names a JavaScript function the SAME package ships in its ``web/*_ui.html``
 (injected by the package web-assets discovery), so the behaviour travels with the
-package while the panel only knows "render a button that calls this name".
+package while the panel only knows "render a button that calls this name".  It is called
+with the **section id** as its only argument, so one function can serve several sections
+(the Entra "check permissions" button is the same code for ``oidc`` and ``saml2``); a
+handler that only ever serves one section simply declares no parameter and ignores it.
 
 ``show_when`` is a tiny declarative gate evaluated by the frontend against the section's
 current values: ``{'field': <name>, 'not_empty': True}`` renders the button only when

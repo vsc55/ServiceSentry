@@ -6,11 +6,14 @@ live in :mod:`lib.web_admin.routes.pages`.
 Routes registered by this file:
 
     GET /lang/<code>       switch UI language (persisted to profile on same-origin)
+    GET /favicon.ico       the site-root icon browsers request on their own
     GET /api/v1/me         current logged-in user info
     GET /api/v1/health     unauthenticated startup_id (client-side version check)
 """
 
-from flask import jsonify, redirect, request, session
+import os
+
+from flask import jsonify, redirect, request, send_from_directory, session
 
 from lib.debug import DebugLevel
 from lib.i18n import SUPPORTED_LANGS
@@ -38,6 +41,26 @@ def register(app, wa):
                 if old_lang != code:
                     wa._audit('language_changed', detail={'old': old_lang, 'new': code})
         return redirect(wa._safe_referrer('login'))
+
+    @app.route('/favicon.ico')
+    def favicon():
+        """The icon a browser fetches from the site ROOT, on its own.
+
+        The ``<link rel="icon">`` tags in ``base.html`` cover a rendered page, but the
+        request for ``/favicon.ico`` is made regardless — and on responses that are not a
+        page of ours at all (an error page, a JSON endpoint opened in a tab). Without this it
+        404s on every visit: harmless, and noise in the access log of every deployment.
+
+        Public and cacheable: it is a static image, it identifies nothing, and requiring a
+        session for it would 302 the browser to the login page and hand it an HTML document
+        where an icon belongs.
+        """
+        resp = send_from_directory(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'static', 'img'),
+            'favicon.ico', mimetype='image/x-icon')
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
 
     @app.route('/api/v1/me', methods=['GET'])
     @login_required

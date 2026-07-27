@@ -5,6 +5,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}ServiceSentry{% endblock %}</title>
+    {# Both, deliberately: the SVG is what a modern browser picks and stays crisp at any
+       density, the .ico covers the ones that only take a bitmap — and it is the file the
+       browser requests from the site root on its own, whether or not these tags exist
+       (which is why /favicon.ico is served as a route too). #}
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg?v={{ asset_v }}">
+    <link rel="alternate icon" href="/static/img/favicon.ico?v={{ asset_v }}" sizes="16x16 32x32 48x48">
+    <link rel="apple-touch-icon" href="/static/img/favicon.svg?v={{ asset_v }}">
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/bootstrap-icons.min.css" rel="stylesheet">
     <link href="/static/css/web_admin.css?v={{ asset_v }}" rel="stylesheet">

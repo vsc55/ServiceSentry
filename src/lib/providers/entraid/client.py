@@ -33,6 +33,11 @@ SCIM_PROVISION_SCOPE = ('https://graph.microsoft.com/Application.ReadWrite.All '
 # creates an app + service principal that supports a SCIM synchronization job.
 CUSTOM_APP_TEMPLATE = '8adf8e6e-67b2-4cf2-a259-e3dc5476c621'
 GROUP_READ_ALL = '5b567255-7703-4780-807c-7be8301ae99b'   # Graph app role id
+#: The application permissions every SSO app (OIDC and SAML2) is registered with, by NAME.
+#: The id above is what a grant is written with; the name is what a token's ``roles`` claim
+#: carries, which is what a permission check can actually read. Both spellings of the same
+#: permission live here so the register button and the check button cannot drift apart.
+SSO_APP_ROLES = ('Group.Read.All',)
 
 
 class EntraApiError(Exception):

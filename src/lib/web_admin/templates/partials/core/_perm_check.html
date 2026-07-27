@@ -1,0 +1,145 @@
+{# ================================================================
+   "Check permissions" modal — shared by every surface that asks whether an app's
+   permissions are actually granted.
+
+   Two surfaces ask it today: a credential in the Credentials editor (a module's Entra
+   app) and an auth section in Configuration (the OIDC / SAML2 sign-in app). The question,
+   the checklist and the way an answer is read are identical; only where the required list
+   comes from and which endpoint answers differ, so those are the parameters.
+
+   The modal opens IMMEDIATELY with one spinning row per required permission, then ticks
+   them in sequence: the required list is known up-front from the declaration, so nothing
+   waits on the network to render, and the wait is visible exactly where it happens.
+   ================================================================ #}
+
+/** The modal element, created once and reused. */
+function _permCheckModal() {
+    let el = document.getElementById('permCheckModal');
+    if (el) return el;
+    el = document.createElement('div');
+    el.className = 'modal fade'; el.id = 'permCheckModal'; el.tabIndex = -1;
+    el.innerHTML = `<div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title mb-0"><i class="bi bi-shield-check me-2"></i><span id="permCheckTitle"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="permCheckLead" class="small mb-2"></div>
+                <div id="permCheckBody"></div>
+            </div>
+            <div class="modal-footer py-2" id="permCheckFooter" style="display:none"></div>
+        </div></div>`;
+    document.body.appendChild(el);
+    return el;
+}
+
+const _permCheckDomId = id => 'cpk-' + String(id).replace(/[^A-Za-z0-9_-]/g, '_');
+
+/** Run a permission check and render it live.
+ *
+ *  spec = {
+ *    title,            // modal heading
+ *    rows,             // OPTIONAL [{id, label}] — the declaration, when the caller has it
+ *    url, body,        // where to ask, and with what
+ *    fix,              // optional {label, run} → offered when something is missing
+ *  }
+ *
+ *  `rows` is what lets the checklist render before the network answers, so the wait is
+ *  visible where it happens. A caller that does NOT hold the list — the auth sections,
+ *  where the permissions are declared server-side next to the code that grants them —
+ *  omits it and gets one spinner until the answer arrives. Better a plain spinner than a
+ *  copy of the list in the panel, drifting from the one that is actually provisioned.
+ *
+ *  Rows are matched to answers by `id`, never by display text: a declaration may include
+ *  checks that are not application permissions (Azure RBAC is one — a subscription role
+ *  assignment, invisible in a token's roles claim), and those carry an id of their own.
+ */
+async function showPermissionCheck(spec) {
+    let rows = spec.rows || [];
+    const el = _permCheckModal();
+    document.getElementById('permCheckTitle').textContent = spec.title || '';
+    const ft = document.getElementById('permCheckFooter');   // reset any stale Fix button
+    if (ft) { ft.innerHTML = ''; ft.style.display = 'none'; }
+    document.getElementById('permCheckLead').innerHTML =
+        `<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>${esc(t('cred_prov_waiting') || 'Checking…')}</span>`;
+    document.getElementById('permCheckBody').innerHTML = rows.length
+        ? rows.map(row => `<div class="d-flex align-items-start gap-2 py-1">
+            <span class="cpk-ic" id="${escAttr(_permCheckDomId(row.id))}"><span class="spinner-border spinner-border-sm text-secondary"></span></span>
+            <div><code class="ss-fs-2">${esc(row.label)}</code><div class="text-muted ss-fs-2" id="${escAttr(_permCheckDomId(row.id))}-why"></div></div></div>`).join('')
+        : `<div class="text-muted small">${esc(t('host_test_none') || '—')}</div>`;
+    bootstrap.Modal.getOrCreateInstance(el).show();
+
+    const r = await apiPost(spec.url, spec.body || {});
+    const d = r && r.data;
+    const lead = document.getElementById('permCheckLead');
+    if (!lead) return d;   // the modal was closed while we waited
+    if (!d || !d.ok) {
+        lead.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc((d && d.message) || t('error') || 'Error')}</span>`;
+        document.querySelectorAll('#permCheckBody .cpk-ic').forEach(s => {
+            s.innerHTML = '<i class="bi bi-dash text-muted"></i>';
+        });
+        return d;
+    }
+    // No declaration up-front (the caller does not hold the list): build the checklist
+    // from what the server says it checked, then tick it in the same pass below.
+    if (!rows.length && (d.results || []).length) {
+        rows = d.results.map(x => ({ id: String(x.id || x.priv), label: String(x.priv || x.id) }));
+        const bodyEl = document.getElementById('permCheckBody');
+        if (bodyEl) bodyEl.innerHTML = rows.map(row =>
+            `<div class="d-flex align-items-start gap-2 py-1">
+                <span class="cpk-ic" id="${escAttr(_permCheckDomId(row.id))}"><span class="spinner-border spinner-border-sm text-secondary"></span></span>
+                <div><code class="ss-fs-2">${esc(row.label)}</code><div class="text-muted ss-fs-2" id="${escAttr(_permCheckDomId(row.id))}-why"></div></div></div>`).join('');
+    }
+    // Answers indexed by id. A row without one (an older or third-party producer) falls
+    // back to the missing list, where an application permission is named by itself.
+    const byId = new Map((d.results || []).map(x => [String(x.id || x.priv), x]));
+    const missing = new Set(d.missing || []);
+    rows.forEach((row, i) => setTimeout(() => {
+        const ic = document.getElementById(_permCheckDomId(row.id));
+        if (!ic) return;
+        const res = byId.get(String(row.id));
+        const ok = res ? !!res.ok : !missing.has(row.id);
+        ic.innerHTML = ok
+            ? '<i class="bi bi-check-circle-fill text-success"></i>'
+            : '<i class="bi bi-x-circle-fill text-danger"></i>';
+        // The reason goes under the row it belongs to: a bare ❌ is the "missing, but
+        // why?" this check exists to answer.
+        const why = document.getElementById(_permCheckDomId(row.id) + '-why');
+        if (why) why.textContent = (!ok && res && res.detail) ? res.detail : '';
+    }, i * 90));
+
+    // Anything the server checked that no declaration announced. It should not happen,
+    // but dropping it would hide a real answer.
+    const known = new Set(rows.map(x => String(x.id)));
+    const extra = (d.results || []).filter(x => !known.has(String(x.id || x.priv)));
+    if (extra.length) {
+        const bodyEl = document.getElementById('permCheckBody');
+        if (bodyEl) bodyEl.insertAdjacentHTML('beforeend', extra.map(x =>
+            `<div class="d-flex align-items-start gap-2 py-1">
+                <span class="cpk-ic">${x.ok
+                    ? '<i class="bi bi-check-circle-fill text-success"></i>'
+                    : '<i class="bi bi-x-circle-fill text-danger"></i>'}</span>
+                <div><code class="ss-fs-2">${esc(x.priv)}</code>${
+                    (!x.ok && x.detail) ? `<div class="text-muted ss-fs-2">${esc(x.detail)}</div>` : ''
+                }</div></div>`).join(''));
+    }
+
+    // The verdict lands after the ticks, so the checklist reads in order.
+    setTimeout(() => {
+        const l = document.getElementById('permCheckLead');
+        if (l) l.innerHTML = `<span class="text-${d.variant === 'success' ? 'success' : 'warning'}">`
+            + `<i class="bi ${d.variant === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'} me-1"></i>${esc(d.message || '')}</span>`;
+        const foot = document.getElementById('permCheckFooter');
+        if (foot && !d.all_ok && spec.fix) {
+            foot.innerHTML = `<button class="btn btn-sm btn-warning" id="permCheckFixBtn">
+                <i class="bi bi-shield-plus me-1"></i>${esc(spec.fix.label || '')}</button>`;
+            foot.style.display = '';
+            document.getElementById('permCheckFixBtn').onclick = () => {
+                bootstrap.Modal.getInstance(document.getElementById('permCheckModal'))?.hide();
+                spec.fix.run();
+            };
+        }
+    }, rows.length * 90 + 60);
+    return d;
+}

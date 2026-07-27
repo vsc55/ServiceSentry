@@ -262,6 +262,13 @@
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
 }
+/* …unless what is attached is COLLAPSED, in which case the toolbar is the bottom of the card
+   again and has to be shaped like it. Without this, closing the search box leaves a bar with
+   a square bottom edge and nothing under it — it reads as a panel that failed to render. */
+.ss-toolbar.ss-toolbar-attached:has(+ .collapse:not(.show)) {
+    border-bottom-left-radius: var(--bs-border-radius-lg);
+    border-bottom-right-radius: var(--bs-border-radius-lg);
+}
 /* Already inside a sticky wrapper — sticking twice buys nothing. */
 .ss-toolbar.ss-toolbar-plain { position: static; }
 
@@ -375,6 +382,35 @@
    top/bottom while the .ss-vscroll body between them scrolls. */
 .ss-vfill   { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .ss-vscroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* .ss-scroll-pad : for an .ss-vscroll holding plain flowing content (cards, not a table).
+   The scrollbar sits INSIDE the box, so without a gutter it lands on top of the content's
+   right edge; the top and bottom padding keep the first and last card off the frame. A
+   table body wants none of it, which is why this is a separate class and not part of
+   .ss-vscroll. */
+.ss-scroll-pad { padding: .75rem .5rem 1rem 0; }
+/* .ss-bleed-top : a pinned header that belongs to the top EDGE of its section instead of
+   floating inside the content padding. It cancels the content container's gutters and its
+   top padding (.container-fluid pt-2 + .tab-content pt-1 = .75rem, guarded by
+   test_wa_config_pane_layout.py) so the bar spans the full width and starts flush.
+   The top corners and the top/side borders go with it: a bar that touches the frame has no
+   outer edge of its own to draw. The BOTTOM corners keep their curve — that is the line the
+   scrolling body disappears under, and rounding it is what says so. */
+.ss-bleed-top { margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) 0; }
+.ss-bleed-top > * { border-left: 0; border-right: 0; }
+.ss-bleed-top > :first-child {
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+/* .ss-scroll-fade : soften the top edge of a scroll box that sits under a pinned header.
+   `overflow` cuts with a razor edge, so a row sliding under the header is sliced through
+   the middle of an input — it reads as a rendering fault rather than as "there is more
+   above". Fading the last few pixels instead makes the same clip look deliberate. Kept
+   small (10px) so it never hides a row you are trying to read. */
+.ss-scroll-fade {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+}
 /* Log tables (host/cluster) loading/empty state: an OVERLAY over the body area (below the
    header) instead of stretching the table — so the header keeps its natural height and nothing
    overflows. Centered vertically + horizontally; transparent so the header shows through. */

@@ -1101,13 +1101,34 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
         @app.before_request
         def _enforce_fqdn():
+            """Send a request that arrived on the wrong host to the public URL.
+
+            Opt-in (``web_admin|force_fqdn``) and only with a public URL configured.  Two
+            things it must never do, because both make the panel unreachable — including the
+            page that would let you turn it off:
+
+            * **redirect over a port difference.**  ``request.host`` carries the port,
+              ``public_url`` need not.  Comparing the raw strings made ``192.168.0.1:8080``
+              a "different host" from ``192.168.0.1`` and sent the browser to port 80, where
+              nothing is listening.  The setting is about the *hostname* you arrived on, so
+              a public URL that names no port accepts any port;
+            * **redirect to itself.**  If the target is the request we are answering, the
+              browser follows it forever (``ERR_TOO_MANY_REDIRECTS``).  Refusing is always
+              better than looping: the worst case is that the redirect does not happen.
+            """
             if not self._force_fqdn or not self._public_url:
                 return
-            if request.host == self._public_url:
+            want = self._public_url.strip().lower()      # host[:port], never a scheme
+            have = (request.host or '').strip().lower()
+            if ':' not in want:
+                have = have.split(':', 1)[0]
+            if have == want:
                 return
             scheme = 'https' if self._force_https else 'http'
-            qs = request.query_string.decode('utf-8')
             target = f"{scheme}://{self._public_url}{request.path}"
+            if target == request.base_url:
+                return
+            qs = request.query_string.decode('utf-8')
             if qs:
                 target += '?' + qs
             return redirect(target, code=302)
@@ -1606,15 +1627,34 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             self._apply_embed_cookie_policy(_app)
 
     def _apply_embed_cookie_policy(self, app) -> None:
-        """SameSite=None; Secure when the app is embeddable cross-site (any allowed
-        frame-ancestors) so the session cookie survives in a cross-site iframe; else keep the
-        stricter Lax. Provider-agnostic — driven by the effective frame-ancestors allowlist."""
-        if self._frame_ancestors_list:
+        """SameSite=None + Secure when the app is embeddable cross-site (any allowed
+        frame-ancestors), so the session cookie survives inside the iframe; otherwise the
+        stricter Lax. Provider-agnostic — driven by the effective frame-ancestors allowlist.
+
+        **Only on an explicit HTTPS intent**, and that condition is the whole point. Browsers
+        refuse a ``SameSite=None`` cookie that is not ``Secure``, and they refuse a ``Secure``
+        cookie over plain HTTP — so on an http:// deployment this policy does not enable the
+        embed, it just throws the session cookie away. Every login then succeeds and lands
+        back on the login page, because the session it created was never stored: an infinite
+        redirect, with nothing saying that allowing an iframe origin was what caused it.
+
+        The same reasoning is already applied to ``public_url`` above. A cross-site iframe
+        over plain HTTP cannot work in any case, so there is nothing to trade away: the embed
+        is impossible either way, and this keeps ordinary login working.
+        """
+        _https = bool(self._secure_cookies or self._force_https)
+        if self._frame_ancestors_list and _https:
             app.config['SESSION_COOKIE_SAMESITE'] = 'None'
             app.config['SESSION_COOKIE_SECURE'] = True
-        else:
-            app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-            app.config['SESSION_COOKIE_SECURE'] = bool(self._secure_cookies or self._force_https)
+            return
+        if self._frame_ancestors_list:
+            self._dbg('> Security >> frame-ancestors are allowed but neither secure_cookies '
+                      'nor force_https is on: the cross-site iframe cannot work over plain '
+                      'HTTP (a SameSite=None cookie must be Secure, and a Secure cookie is '
+                      'dropped on http://). Keeping SameSite=Lax so normal login still works.',
+                      DebugLevel.warning)
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+        app.config['SESSION_COOKIE_SECURE'] = _https
 
     def _register_routes(self, app: Flask):
         """Register all routes — delegates to routes sub-package."""

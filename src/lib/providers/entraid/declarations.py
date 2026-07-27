@@ -156,3 +156,39 @@ def module_entraid_provision(watchfuls_dir: str | None = None) -> dict:
         if norm['resources']:
             out[entry] = norm
     return out
+
+
+def provision_profile(watchfuls_dir: str | None, profile) -> dict | None:
+    """The normalised profile a caller names by module id, or ``None``.
+
+    Never raises: a malformed or missing schema means "this caller declared nothing",
+    which every caller already has to handle — an exception here would turn a bad schema
+    in one module into a broken wizard for all of them.
+    """
+    try:
+        return module_entraid_provision(watchfuls_dir).get(str(profile or ''))
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def declared_profile(watchfuls_dir: str | None, body: dict) -> dict | None:
+    """The profile a request refers to: named by ``profile``, else declared inline.
+
+    Inline is how a non-module caller (the SSO "Register in Azure" button) reuses the same
+    wizard without inventing a module — same declaration vocabulary, no schema file.
+    """
+    prof = provision_profile(watchfuls_dir, body.get('profile'))
+    if not prof or not prof.get('resources'):
+        inline = normalize_entraid_provision(body)
+        if inline['resources']:
+            return inline
+    return prof
+
+
+def declared_roles(watchfuls_dir: str | None, body: dict) -> list[str]:
+    """The application permissions a check or a fix needs — every resource's roles,
+    de-duplicated in declaration order. Empty means nothing was declared, which callers
+    treat as "there is no question to ask"."""
+    prof = declared_profile(watchfuls_dir, body)
+    roles = [r for res in ((prof or {}).get('resources') or []) for r in (res.get('roles') or [])]
+    return list(dict.fromkeys(roles))

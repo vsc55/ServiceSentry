@@ -6,9 +6,29 @@
    change to any one of them meant editing the file that renders the whole panel.
 #}
 <div class="tab-pane fade" id="tab-config">
-    <div style="position:sticky;top:calc(var(--ss-top-offset,0px) + 8px);z-index:10">
+    {# The header (toolbar + search) keeps its natural height and the body below scrolls,
+       which is what actually keeps it on screen. It used to be `position:sticky` instead,
+       and that could not work here: an active tab-pane is a flex column bounded by the
+       viewport (see .container-fluid > .tab-content > .tab-pane.active), so the sticky
+       element's containing block is ONE SCREEN TALL — it pinned for about a screenful of
+       scrolling and then scrolled away with the block that held it, exactly where the
+       config list gets long. The .ss-vfill/.ss-vscroll chain is the mechanism the rest of
+       the panel already uses for this. #}
+    <div class="ss-bleed-top">
         <div class="ss-toolbar ss-toolbar-attached ss-toolbar-plain">
             <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
+            {# Collapsed by default: the filter is for finding one setting among many, not
+               something you need in view the rest of the time. The badge is not decoration —
+               a filter left on while the box is hidden would silently show a fraction of the
+               configuration with nothing on screen saying why. #}
+            <button class="btn btn-sm btn-secondary" id="btnCfgSearchToggle"
+                data-bs-toggle="collapse" data-bs-target="#cfgSearchBox"
+                aria-expanded="false" aria-controls="cfgSearchBox"
+                title="{{ i18n.config_search_label }}">
+                <i class="bi bi-search"></i>
+                <span class="badge text-bg-warning ms-1 d-none" id="badgeCfgFilter"
+                    title="{{ i18n.config_search_label }}">●</span>
+            </button>
             <button class="btn btn-sm btn-secondary" id="btnReloadConfig" onclick="reloadConfig()"
                 title="{{ i18n.reload_config_title }}">
                 <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload_config }}
@@ -19,7 +39,12 @@
                     title="{{ i18n.unsaved_changes }}">●</span>
             </button>
         </div>
-        <div class="px-3 py-2 border border-top-0 rounded-bottom-3 mb-3"
+        {# No bottom margin: that 1rem strip of page background sat between the card and the
+           scrolling body, and rows sliding underneath surfaced in it — a seam that looked
+           like a rendering fault. The card's own border is the boundary now.
+           The collapse lives on THIS element, not on a wrapper, so the toolbar's `+` sibling
+           selector can see whether it is open and round its own bottom accordingly. #}
+        <div class="collapse px-3 py-2 border border-top-0 rounded-bottom-3" id="cfgSearchBox"
              style="background:var(--bs-tertiary-bg)">
             <div class="input-group input-group-sm">
                 <label class="input-group-text" for="cfgSearch">{{ i18n.config_search_label }}</label>
@@ -35,5 +60,5 @@
             </div>
         </div>
     </div>
-    <div id="config-container"></div>
+    <div id="config-container" class="ss-vscroll ss-scroll-pad ss-scroll-fade"></div>
 </div>

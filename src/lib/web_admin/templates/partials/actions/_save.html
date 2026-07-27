@@ -2,6 +2,31 @@
    Save, revert, and reload operations.
    ================================================================ #}
 
+/** Reconcile ONE config field the server has just accepted.
+ *
+ * Three things move together and must not be separated: the version token (the next save
+ * needs it), the dirty set, and `_serverConfigData` — the snapshot `markDirty` compares
+ * against to decide whether the Save button should be lit at all.
+ *
+ * Forgetting the snapshot is not a cosmetic slip. A widget that saves a field behind the
+ * user's back (`_saveDisplayNames`) dropped the path from `_dirtyFields` and left the
+ * snapshot stale, so `configData` and `_serverConfigData` disagreed forever: the button
+ * went on claiming unsaved changes right after a save that HAD stored the value. F5 showed
+ * it saved, and only saving a second time put the button back to rest.
+ *
+ * So this is the single definition. Any code path that persists a field outside
+ * `saveConfig` calls it, and then `markDirty('config')` to re-judge the button.
+ */
+function applySavedField(path, version) {
+    if (version) _fieldVersions[path] = version;
+    _dirtyFields.delete(path);
+    const [sec, field] = path.split('|');
+    if (!_serverConfigData) _serverConfigData = {};
+    if (!_serverConfigData[sec]) _serverConfigData[sec] = {};
+    if (configData[sec] && field in configData[sec])
+        _serverConfigData[sec][field] = configData[sec][field];
+}
+
 // --- Save ---
 async function saveModules() {
     const r = await apiPut('/api/v1/modules', modulesData);
@@ -63,13 +88,7 @@ async function saveConfig() {
     if (_saveResp.error) { showToast(_saveResp.error, 'danger'); return; }
     // Apply results: update version tokens and serverConfigData for saved fields.
     for (const path of (_saveResp.saved || [])) {
-        if (_saveResp.versions?.[path]) _fieldVersions[path] = _saveResp.versions[path];
-        _dirtyFields.delete(path);
-        const [sec, field] = path.split('|');
-        if (!_serverConfigData) _serverConfigData = {};
-        if (!_serverConfigData[sec]) _serverConfigData[sec] = {};
-        if (configData[sec] && field in configData[sec])
-            _serverConfigData[sec][field] = configData[sec][field];
+        applySavedField(path, _saveResp.versions?.[path]);
     }
     // Store conflict info for any fields that were rejected.
     _configConflicts = _saveResp.conflicts || {};
@@ -82,6 +101,13 @@ async function saveConfig() {
         else                            showToast(t('config_saved'));
     }
     if (!_dirtyFields.size && !hasConflicts) {
+        // Everything the user staged was accepted, so "nothing pending" has to be TRUE, not
+        // merely displayed: `markDirty` decides the button by comparing these two objects,
+        // and any field that differs without being staged — written by a widget outside the
+        // dirty set, normalised locally, whatever — makes the very next `markDirty` light
+        // the button again for a change nobody made and nobody can clear. Field-by-field
+        // mirroring only covers what was sent; this makes the snapshot mean what it says.
+        _serverConfigData = deepClone(configData);
         clearDirty('config');
     } else {
         if (!hasSaved && hasConflicts) showToast(t('cfg_all_conflict'), 'danger');

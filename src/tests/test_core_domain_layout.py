@@ -32,9 +32,12 @@ CORE = os.path.join(SRC, 'lib', 'core')
 WA_MIXINS = os.path.join(SRC, 'lib', 'web_admin', 'mixins')
 
 # The glue that belongs to no domain and therefore legitimately lives in web_admin:
-# the panel's own login/session lifecycle, and the mixin that discovers and controls the
-# embedded services rather than owning one.
-NON_DOMAIN_MIXINS = {'auth', 'services'}
+# the panel's own login/session lifecycle, the mixin that discovers and controls the
+# embedded services rather than owning one, and the staleness check that re-reads a cache
+# when another process has written — it serves users, roles AND groups, so putting it in any
+# one of their packages would make the other two import from a domain they have nothing to
+# do with. That is exactly the coupling this file exists to prevent.
+NON_DOMAIN_MIXINS = {'auth', 'services', 'freshness'}
 
 
 def _domains():

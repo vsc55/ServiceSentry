@@ -1,0 +1,42 @@
+{# ================================================================
+   Config — Auth tab: "Check permissions" for the SSO sections.
+
+   Its own file because it is its own subject: the group→role widget next door is about
+   reading the directory, this is about whether the app is allowed to. Both OIDC and SAML2
+   use the same function — the panel passes the section id to a config action, so one
+   handler serves both instead of a wrapper per section.
+   ================================================================ #}
+
+// ── "Check permissions" for an SSO section (OIDC / SAML2) ────────────────────
+// Asks whether the app behind this section holds its Graph permissions AND that an admin
+// consented to them. Consent is the half that fails quietly: the registration succeeds,
+// nobody presses "Grant admin consent", and nothing complains until Graph is actually
+// called — the group picker comes back empty, or a login maps no groups.
+//
+// The required list is NOT passed from here: it is declared server-side, beside the code
+// that grants it (entraid/client.py :: SSO_APP_ROLES), so the check cannot end up asking
+// for something different from what "Register in Azure" provisioned. The checklist is
+// therefore built from the answer — see core/_perm_check.html.
+function checkEntraSsoPermissions(sec) {
+    // The same body the group fetch sends: whatever is on screen but not yet saved wins,
+    // so a check right after the wizard tests the credentials you are looking at.
+    const cfg = (typeof configData !== 'undefined' && configData[sec]) || {};
+    const body = { sec };
+    const [idField, secretField, urlField] = sec === 'saml2'
+        ? ['sp_app_id', 'graph_secret', 'idp_sso_url']
+        : ['client_id', 'client_secret', 'provider_url'];
+    if (cfg[idField])  body.client_id = cfg[idField];
+    if (cfg[urlField]) body.provider_url = cfg[urlField];
+    // A stored secret arrives as `null` — set, never transmitted. Only a string is a
+    // replacement the user typed; sending anything else would test a value that is not
+    // the real one. Without it the id goes too, because the server only honours an
+    // override when it has the full pair — otherwise a typed id would be paired with the
+    // stored secret of a different app.
+    if (typeof cfg[secretField] === 'string' && cfg[secretField]) body.client_secret = cfg[secretField];
+    else delete body.client_id;
+    showPermissionCheck({
+        title: t('entra_check_perms'),
+        url: '/api/v1/auth/entraid/sso/check-permissions',
+        body,
+    });
+}

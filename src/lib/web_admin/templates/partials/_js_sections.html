@@ -14,6 +14,9 @@
 {% include "partials/core/_field_render.html" %}
 {% include "partials/core/_collection_render.html" %}
 {% include "partials/core/_list_table.html" %}
+{# Shared "are these permissions actually granted?" checklist — used by the credentials
+   editor and by the OIDC/SAML2 sections of Configuration. #}
+{% include "partials/core/_perm_check.html" %}
 {% include "partials/core/_module_page.html" %}
 {# ================================================================
    Modules tab — rendering logic.

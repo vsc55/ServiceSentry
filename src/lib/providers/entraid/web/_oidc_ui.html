@@ -17,12 +17,17 @@ function _entraRedirectUri() {
     return publicBaseUrl() + '/auth/oidc/callback';   // shared helper (core/_utils.html)
 }
 
+// What the OIDC sign-in app is registered WITH — declared once, so the "Check
+// permissions" button below verifies exactly what "Register in Azure" provisions. Two
+// lists would drift, and the check would then reassure you about the wrong app.
+const ENTRA_OIDC_APP_ROLES = ['Group.Read.All'];
+
 function showEntraWizard() {
     showEntraIdProvisionWizard({
         url: '/api/v1/auth/entraid/provision/device-code',
         provision: {
             app_name: ENTRA_APP_NAME_OIDC,
-            app_roles: ['Group.Read.All'],
+            app_roles: ENTRA_OIDC_APP_ROLES.slice(),
             scopes: ['openid', 'email', 'profile', 'User.Read'],
             redirect_uris: [_entraRedirectUri()],
             group_claims: true,

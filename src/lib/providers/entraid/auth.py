@@ -60,6 +60,38 @@ def app_token(tenant: str, client_id: str, client_secret: str,
     return access_token
 
 
+#: Entra's "invalid client secret" code. It is also what a secret minted seconds ago
+#: answers, before it has replicated across the tenant's authentication endpoints.
+FRESH_SECRET_ERROR = 'AADSTS7000215'
+
+
+def app_token_retrying(tenant: str, client_id: str, client_secret: str,
+                       scope: str = 'https://graph.microsoft.com/.default',
+                       *, attempts: int = 3, delay: float = 3.0) -> str:
+    """:func:`app_token`, retrying while Entra says the secret is invalid.
+
+    A client secret is usable only once it has propagated, which takes a few seconds:
+    rotate a secret and immediately check the app with it and Entra answers
+    ``AADSTS7000215`` — the same code it uses for a genuinely wrong secret. Reporting
+    that verbatim sends the reader hunting for a mistake that is not there.
+
+    Only that one code is retried, and only a couple of times: a secret that is actually
+    wrong costs the caller the extra seconds before the same error comes back, which is
+    the right trade for a check the user pressed and is watching.
+    """
+    import time as _time                                        # noqa: PLC0415
+    last = None
+    for i in range(max(1, attempts)):
+        try:
+            return app_token(tenant, client_id, client_secret, scope)
+        except Exception as exc:                                # pylint: disable=broad-except
+            last = exc
+            if FRESH_SECRET_ERROR not in str(exc) or i == attempts - 1:
+                raise
+            _time.sleep(delay)
+    raise last                                                   # pragma: no cover
+
+
 def token_from_refresh(refresh_token: str, scope: str,
                        client_id: str = DCF_CLIENT_ID, tenant: str = 'common') -> str:
     """Exchange a refresh token for an access token on ANOTHER audience.

@@ -1,181 +1,494 @@
 {
-    "__icon__": "bi-cloud-haze2",
-    "__page__": {
-        "id": "azure", "icon": "bi-cloud-haze2", "order": 45,
-        "refresh": "page_refresh", "perm": "modules_view"
+  "__icon__": "bi-cloud-haze2",
+  "__page__": {
+    "id": "azure",
+    "icon": "bi-cloud-haze2",
+    "order": 45,
+    "refresh": "page_refresh",
+    "perm": "modules_view"
+  },
+  "__overview_widget__": [
+    {
+      "id": "health",
+      "view": "stat",
+      "icon": "bi-cloud-haze2",
+      "perm": "modules_view",
+      "scope": "health",
+      "link": "https://portal.azure.com/#view/Microsoft_Azure_Health/AzureHealthBrowseBlade"
     },
-    "__overview_widget__": [
-        {"id": "health", "view": "stat", "icon": "bi-cloud-haze2", "perm": "modules_view",
-         "scope": "health", "link": "https://portal.azure.com/#view/Microsoft_Azure_Health/AzureHealthBrowseBlade"},
-        {"id": "table", "view": "table", "icon": "bi-cloud-haze2", "perm": "modules_view",
-         "selector": true, "cols": 4, "h": 340}
-    ],
-    "__module__": {
-        "api_ver": "v1",
-        "enabled": {"type": "bool", "default": true},
-        "threads": {"type": "int", "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
-        "alert":   {"type": "int", "default": 3,  "min": 1, "max": 20},
-        "timeout": {"type": "int", "default": 15, "min": 0, "inherit_blank": true, "max": 300}
-    },
-    "__entraid_provision__": {
-        "app_name": "ServiceSentry Azure Monitor",
-        "app_roles": [],
-        "resources": [
-            {"resource": "797f4846-ba00-4fd7-ba43-dac1f8f63013",
-             "scopes": ["user_impersonation"]},
-            {"resource": "00000003-0000-0000-c000-000000000000",
-             "roles": ["Application.Read.All"], "scopes": []}
-        ],
-        "azure_rbac": {"role": "reader", "field": "subscription_id"}
-    },
-    "__credential__": {
-        "type": "azure_app",
-        "icon": "bi-cloud-haze2",
-        "fields": [
-            {"name": "tenant_id",       "kind": "text",     "label": "tenant_id"},
-            {"name": "client_id",       "kind": "text",     "label": "client_id"},
-            {"name": "client_secret",   "kind": "password", "secret": true, "label": "client_secret"},
-            {"name": "subscription_id", "kind": "text",     "label": "subscription_id"}
-        ],
-        "actions": [
-            {
-                "id": "provision_app",
-                "label": "prov_entraid_action_provision_app",
-                "url": "/api/v1/auth/entraid/provision/device-code",
-                "icon": "bi-cloud-haze2",
-                "result": "device_code",
-                "provision": {"profile": "azure"}
-            },
-            {
-                "id": "test_permissions",
-                "label": "prov_entraid_action_test_permissions",
-                "url": "/api/v1/auth/entraid/check-permissions",
-                "icon": "bi-shield-check",
-                "result": "modal",
-                "provision": {"profile": "azure"}
-            },
-            {
-                "id": "fix_permissions",
-                "label": "prov_entraid_action_fix_permissions",
-                "url": "/api/v1/auth/entraid/provision/device-code",
-                "icon": "bi-shield-plus",
-                "result": "device_code",
-                "toolbar": false,
-                "provision": {"profile": "azure", "ensure": true}
-            }
-        ],
-        "links": [
-            {
-                "id": "open_app",
-                "label": "prov_entraid_action_open_app",
-                "icon": "bi-box-arrow-up-right",
-                "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/{client_id}",
-                "require": ["client_id"]
-            },
-            {
-                "id": "open_subscription_iam",
-                "label": "az_link_subscription_iam",
-                "icon": "bi-person-badge",
-                "url": "https://portal.azure.com/#@/resource/subscriptions/{subscription_id}/users",
-                "require": ["subscription_id"]
-            }
-        ]
-    },
-    "list": {
-        "__check_title_field__": "label",
-        "__title_editable__": true,
-        "__new_item_fields__": ["label"],
-        "__field_order__": ["enabled", "label", "tenant_id", "client_id", "client_secret",
-                            "subscription_id", "timeout",
-                            "check_service_health", "health_window_hours",
-                            "check_resource_health", "resource_filter", "resource_list",
-                            "check_vm_power", "vm_list",
-                            "check_vm_metrics", "cpu_pct", "disk_pct", "metric_window",
-                            "vm_filter",
-                            "check_quotas", "quota_region", "quota_pct",
-                            "check_budgets", "budget_pct",
-                            "check_app_secrets", "secret_days",
-                            "check_public_status", "public_filter", "alert"],
-        "__test__": "/api/v1/modules/watchfuls/azure/test_connection",
-        "__multicheck__": [
-            {"toggle": "check_service_health",  "suffix": "health"},
-            {"toggle": "check_resource_health", "suffix": "resources"},
-            {"toggle": "check_vm_power",        "suffix": "vms"},
-            {"toggle": "check_vm_metrics",      "suffix": "metrics"},
-            {"toggle": "check_quotas",          "suffix": "quotas"},
-            {"toggle": "check_budgets",         "suffix": "budgets"},
-            {"toggle": "check_app_secrets",     "suffix": "secrets"},
-            {"toggle": "check_public_status",   "suffix": "public"}
-        ],
-
-        "enabled": {"type": "bool", "default": true},
-        "label":   {"type": "str",  "default": ""},
-
-        "tenant_id":       {"type": "str", "default": "", "placeholder": "contoso.onmicrosoft.com", "group": "auth"},
-        "client_id":       {"type": "str", "default": "", "placeholder": "00000000-0000-0000-0000-000000000000", "group": "auth"},
-        "client_secret":   {"type": "str", "default": "", "sensitive": true, "group": "auth"},
-        "subscription_id": {"type": "str", "default": "", "placeholder": "00000000-0000-0000-0000-000000000000", "group": "auth"},
-        "timeout":         {"type": "int", "default": 0, "min": 0, "max": 300, "zero_as_blank": true,
-                            "placeholder_module": "timeout", "group": "auth"},
-
-        "check_service_health": {"type": "bool", "default": true, "group": "checks"},
-        "health_window_hours":  {"type": "int", "default": 24, "min": 1, "max": 720, "group": "checks",
-                                 "show_when": {"check_service_health": [true]}},
-
-        "check_resource_health": {"type": "bool", "default": false, "group": "checks"},
-        "resource_filter":       {"type": "str", "default": "", "placeholder": "virtualMachines", "group": "checks",
-                                  "show_when": {"check_resource_health": [true]}},
-        "resource_list":         {"type": "bool", "default": false, "group": "checks",
-                                  "show_when": {"check_resource_health": [true]}},
-
-        "check_vm_power": {"type": "bool", "default": false, "group": "checks"},
-        "vm_filter":      {"type": "str", "default": "", "placeholder": "/rg-prod/", "group": "checks"},
-        "vm_list":        {"type": "bool", "default": true, "group": "checks",
-                           "show_when": {"check_vm_power": [true]}},
-
-        "check_vm_metrics": {"type": "bool", "default": false, "group": "checks"},
-        "cpu_pct":          {"type": "int", "default": 90, "min": 0, "max": 100, "zero_as_blank": true,
-                             "group": "checks", "show_when": {"check_vm_metrics": [true]}},
-        "disk_pct":         {"type": "int", "default": 90, "min": 0, "max": 100, "zero_as_blank": true,
-                             "group": "checks", "show_when": {"check_vm_metrics": [true]}},
-        "metric_window":    {"type": "int", "default": 15, "min": 5, "max": 1440, "group": "checks",
-                             "show_when": {"check_vm_metrics": [true]}},
-
-        "check_quotas": {"type": "bool", "default": false, "group": "checks"},
-        "quota_region": {"type": "str", "default": "", "placeholder": "westeurope", "group": "checks",
-                         "show_when": {"check_quotas": [true]},
-                         "input_action": {
-                             "id":           "list_region_ids",
-                             "url":          "/api/v1/modules/watchfuls/azure/list_region_ids",
-                             "extra":        {},
-                             "icon":         "bi-globe-americas",
-                             "result":       "field_picker",
-                             "result_field": "quota_region"
-                         }},
-        "quota_pct":    {"type": "int", "default": 80, "min": 1, "max": 100, "group": "checks",
-                         "show_when": {"check_quotas": [true]}},
-
-        "check_budgets": {"type": "bool", "default": false, "group": "checks"},
-        "budget_pct":    {"type": "int", "default": 90, "min": 1, "max": 200, "group": "checks",
-                          "show_when": {"check_budgets": [true]}},
-
-        "check_app_secrets": {"type": "bool", "default": false, "group": "checks"},
-        "secret_days":       {"type": "int", "default": 30, "min": 1, "max": 365, "group": "checks",
-                              "show_when": {"check_app_secrets": [true]}},
-
-        "check_public_status": {"type": "bool", "default": false, "group": "checks"},
-        "public_filter":       {"type": "str", "default": "", "placeholder": "West Europe", "group": "checks",
-                                "show_when": {"check_public_status": [true]},
-                                "input_action": {
-                                    "id":           "list_regions",
-                                    "url":          "/api/v1/modules/watchfuls/azure/list_regions",
-                                    "extra":        {},
-                                    "icon":         "bi-globe-americas",
-                                    "result":       "field_picker",
-                                    "result_field": "public_filter"
-                                }},
-
-        "alert": {"type": "int", "default": 0, "min": 0, "max": 20, "zero_as_blank": true,
-                  "placeholder_module": "alert", "group": "alerts"}
+    {
+      "id": "table",
+      "view": "table",
+      "icon": "bi-cloud-haze2",
+      "perm": "modules_view",
+      "selector": true,
+      "cols": 4,
+      "h": 340
     }
+  ],
+  "__module__": {
+    "api_ver": "v1",
+    "enabled": {
+      "type": "bool",
+      "default": true
+    },
+    "threads": {
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "inherit_blank": true,
+      "max": 100
+    },
+    "alert": {
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 20
+    },
+    "timeout": {
+      "type": "int",
+      "default": 15,
+      "min": 0,
+      "inherit_blank": true,
+      "max": 300
+    }
+  },
+  "__entraid_provision__": {
+    "app_name": "ServiceSentry Azure Monitor",
+    "app_roles": [],
+    "resources": [
+      {
+        "resource": "797f4846-ba00-4fd7-ba43-dac1f8f63013",
+        "scopes": [
+          "user_impersonation"
+        ]
+      },
+      {
+        "resource": "00000003-0000-0000-c000-000000000000",
+        "roles": [
+          "Application.Read.All"
+        ],
+        "scopes": []
+      }
+    ],
+    "azure_rbac": {
+      "role": "reader",
+      "field": "subscription_id"
+    }
+  },
+  "__credential__": {
+    "type": "azure_app",
+    "icon": "bi-cloud-haze2",
+    "fields": [
+      {
+        "name": "tenant_id",
+        "kind": "text",
+        "label": "tenant_id"
+      },
+      {
+        "name": "client_id",
+        "kind": "text",
+        "label": "client_id"
+      },
+      {
+        "name": "client_secret",
+        "kind": "password",
+        "secret": true,
+        "label": "client_secret"
+      },
+      {
+        "name": "subscription_id",
+        "kind": "text",
+        "label": "subscription_id"
+      }
+    ],
+    "actions": [
+      {
+        "id": "provision_app",
+        "label": "prov_entraid_action_provision_app",
+        "url": "/api/v1/auth/entraid/provision/device-code",
+        "icon": "bi-cloud-haze2",
+        "result": "device_code",
+        "provision": {
+          "profile": "azure"
+        }
+      },
+      {
+        "id": "rotate_secret",
+        "label": "prov_entraid_action_rotate_secret",
+        "url": "/api/v1/auth/entraid/cred/secret/device-code",
+        "poll_url": "/api/v1/auth/entraid/cred/secret/device-poll",
+        "icon": "bi-arrow-repeat",
+        "result": "device_code",
+        "intro_key": "prov_entraid_rotate_secret_intro",
+        "existing_app": true
+      },
+      {
+        "id": "test_permissions",
+        "label": "prov_entraid_action_test_permissions",
+        "url": "/api/v1/auth/entraid/check-permissions",
+        "icon": "bi-shield-check",
+        "result": "modal",
+        "provision": {
+          "profile": "azure"
+        }
+      },
+      {
+        "id": "fix_permissions",
+        "label": "prov_entraid_action_fix_permissions",
+        "url": "/api/v1/auth/entraid/provision/device-code",
+        "icon": "bi-shield-plus",
+        "result": "device_code",
+        "toolbar": false,
+        "provision": {
+          "profile": "azure",
+          "ensure": true
+        }
+      }
+    ],
+    "links": [
+      {
+        "id": "open_app",
+        "label": "prov_entraid_action_open_app",
+        "icon": "bi-box-arrow-up-right",
+        "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/{client_id}",
+        "require": [
+          "client_id"
+        ]
+      },
+      {
+        "id": "open_subscription_iam",
+        "label": "az_link_subscription_iam",
+        "icon": "bi-person-badge",
+        "url": "https://portal.azure.com/#@/resource/subscriptions/{subscription_id}/users",
+        "require": [
+          "subscription_id"
+        ]
+      }
+    ]
+  },
+  "list": {
+    "__check_title_field__": "label",
+    "__title_editable__": true,
+    "__new_item_fields__": [
+      "label"
+    ],
+    "__field_order__": [
+      "enabled",
+      "label",
+      "tenant_id",
+      "client_id",
+      "client_secret",
+      "subscription_id",
+      "timeout",
+      "check_service_health",
+      "health_window_hours",
+      "check_resource_health",
+      "resource_filter",
+      "resource_list",
+      "check_vm_power",
+      "vm_list",
+      "check_vm_metrics",
+      "cpu_pct",
+      "disk_pct",
+      "metric_window",
+      "vm_filter",
+      "check_quotas",
+      "quota_region",
+      "quota_pct",
+      "check_budgets",
+      "budget_pct",
+      "check_app_secrets",
+      "secret_days",
+      "check_public_status",
+      "public_filter",
+      "alert"
+    ],
+    "__test__": "/api/v1/modules/watchfuls/azure/test_connection",
+    "__multicheck__": [
+      {
+        "toggle": "check_service_health",
+        "suffix": "health"
+      },
+      {
+        "toggle": "check_resource_health",
+        "suffix": "resources"
+      },
+      {
+        "toggle": "check_vm_power",
+        "suffix": "vms"
+      },
+      {
+        "toggle": "check_vm_metrics",
+        "suffix": "metrics"
+      },
+      {
+        "toggle": "check_quotas",
+        "suffix": "quotas"
+      },
+      {
+        "toggle": "check_budgets",
+        "suffix": "budgets"
+      },
+      {
+        "toggle": "check_app_secrets",
+        "suffix": "secrets"
+      },
+      {
+        "toggle": "check_public_status",
+        "suffix": "public"
+      }
+    ],
+    "enabled": {
+      "type": "bool",
+      "default": true
+    },
+    "label": {
+      "type": "str",
+      "default": ""
+    },
+    "tenant_id": {
+      "type": "str",
+      "default": "",
+      "placeholder": "contoso.onmicrosoft.com",
+      "group": "auth"
+    },
+    "client_id": {
+      "type": "str",
+      "default": "",
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "group": "auth"
+    },
+    "client_secret": {
+      "type": "str",
+      "default": "",
+      "sensitive": true,
+      "group": "auth"
+    },
+    "subscription_id": {
+      "type": "str",
+      "default": "",
+      "placeholder": "00000000-0000-0000-0000-000000000000",
+      "group": "auth"
+    },
+    "timeout": {
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 300,
+      "zero_as_blank": true,
+      "placeholder_module": "timeout",
+      "group": "auth"
+    },
+    "check_service_health": {
+      "type": "bool",
+      "default": true,
+      "group": "checks"
+    },
+    "health_window_hours": {
+      "type": "int",
+      "default": 24,
+      "min": 1,
+      "max": 720,
+      "group": "checks",
+      "show_when": {
+        "check_service_health": [
+          true
+        ]
+      }
+    },
+    "check_resource_health": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "resource_filter": {
+      "type": "str",
+      "default": "",
+      "placeholder": "virtualMachines",
+      "group": "checks",
+      "show_when": {
+        "check_resource_health": [
+          true
+        ]
+      }
+    },
+    "resource_list": {
+      "type": "bool",
+      "default": false,
+      "group": "checks",
+      "show_when": {
+        "check_resource_health": [
+          true
+        ]
+      }
+    },
+    "check_vm_power": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "vm_filter": {
+      "type": "str",
+      "default": "",
+      "placeholder": "/rg-prod/",
+      "group": "checks"
+    },
+    "vm_list": {
+      "type": "bool",
+      "default": true,
+      "group": "checks",
+      "show_when": {
+        "check_vm_power": [
+          true
+        ]
+      }
+    },
+    "check_vm_metrics": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "cpu_pct": {
+      "type": "int",
+      "default": 90,
+      "min": 0,
+      "max": 100,
+      "zero_as_blank": true,
+      "group": "checks",
+      "show_when": {
+        "check_vm_metrics": [
+          true
+        ]
+      }
+    },
+    "disk_pct": {
+      "type": "int",
+      "default": 90,
+      "min": 0,
+      "max": 100,
+      "zero_as_blank": true,
+      "group": "checks",
+      "show_when": {
+        "check_vm_metrics": [
+          true
+        ]
+      }
+    },
+    "metric_window": {
+      "type": "int",
+      "default": 15,
+      "min": 5,
+      "max": 1440,
+      "group": "checks",
+      "show_when": {
+        "check_vm_metrics": [
+          true
+        ]
+      }
+    },
+    "check_quotas": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "quota_region": {
+      "type": "str",
+      "default": "",
+      "placeholder": "westeurope",
+      "group": "checks",
+      "show_when": {
+        "check_quotas": [
+          true
+        ]
+      },
+      "input_action": {
+        "id": "list_region_ids",
+        "url": "/api/v1/modules/watchfuls/azure/list_region_ids",
+        "extra": {},
+        "icon": "bi-globe-americas",
+        "result": "field_picker",
+        "result_field": "quota_region"
+      }
+    },
+    "quota_pct": {
+      "type": "int",
+      "default": 80,
+      "min": 1,
+      "max": 100,
+      "group": "checks",
+      "show_when": {
+        "check_quotas": [
+          true
+        ]
+      }
+    },
+    "check_budgets": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "budget_pct": {
+      "type": "int",
+      "default": 90,
+      "min": 1,
+      "max": 200,
+      "group": "checks",
+      "show_when": {
+        "check_budgets": [
+          true
+        ]
+      }
+    },
+    "check_app_secrets": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "secret_days": {
+      "type": "int",
+      "default": 30,
+      "min": 1,
+      "max": 365,
+      "group": "checks",
+      "show_when": {
+        "check_app_secrets": [
+          true
+        ]
+      }
+    },
+    "check_public_status": {
+      "type": "bool",
+      "default": false,
+      "group": "checks"
+    },
+    "public_filter": {
+      "type": "str",
+      "default": "",
+      "placeholder": "West Europe",
+      "group": "checks",
+      "show_when": {
+        "check_public_status": [
+          true
+        ]
+      },
+      "input_action": {
+        "id": "list_regions",
+        "url": "/api/v1/modules/watchfuls/azure/list_regions",
+        "extra": {},
+        "icon": "bi-globe-americas",
+        "result": "field_picker",
+        "result_field": "public_filter"
+      }
+    },
+    "alert": {
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 20,
+      "zero_as_blank": true,
+      "placeholder_module": "alert",
+      "group": "alerts"
+    }
+  }
 }

@@ -13,6 +13,13 @@ Layout:
   :mod:`~lib.providers.entraid.mail` (``sendMail``),
   :mod:`~lib.providers.entraid.teams` (activity feed + Bot Framework),
   :mod:`~lib.providers.entraid.provisioning` (app-registration).
+* What the web layer needs but is not routing:
+  :mod:`~lib.providers.entraid.device_flow` (the device-code conversation — park a
+  flow, poll it, expire it — shared by every register/rotate button),
+  :mod:`~lib.providers.entraid.sections` (which app an auth section uses; the SP/SCIM
+  URLs this server publishes),
+  :mod:`~lib.providers.entraid.cred_link` (the credential that holds an Entra app).
+  :mod:`~lib.providers.entraid.routes` is left with routing.
 
 The declaration helpers are re-exported here for convenience; import the specific
 Graph submodule explicitly (e.g. ``from lib.providers.entraid import auth``).
