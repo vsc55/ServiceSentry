@@ -8,6 +8,43 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.9] - 2026-07-27
+
+### Fixed
+- **The per-service command menu had no icons.** Start and Stop sit a centimetre away with
+  one each, so a text-only dropdown beside them read as unfinished. The glyph is chosen per
+  COMMAND rather than per service, because "Reload" means the same thing wherever it appears
+  and must not be one icon under Monitor and another under Syslog. Run Now deliberately avoids
+  the play glyph Start uses: it runs one cycle now, it does not start the service, and two
+  controls that close together must not claim the same action.
+- **fail2ban had Start/Stop and nothing else.** Not by design: it was the only controllable
+  service with no `_apply_command`. It now offers **Reload** — push the stored config into the
+  live jail (thresholds, windows, ban durations and the **whitelist**; an address added to the
+  whitelist did nothing until a config save happened to reconfigure the jail) — and **Prune**,
+  a retention sweep over stale offence counters, the ban log and the history. The hook lives on
+  the embedded twin rather than in a manager mixin because this service has no worker loop: the
+  gate runs inline on every request. The manual prune deliberately does not call the jail's own
+  `_gc`, which is throttled to once every five minutes and would have reported success while
+  sweeping nothing.
+- **The destructive commands ask first.** Prune and Clear status delete things that do not come
+  back, and they sit in the same dropdown as Reload — one row apart, same colour, no gap. The
+  confirmation **names the service**, because the same command destroys different things
+  depending on where it is pressed: Prune under Syslog drops stored messages, under fail2ban
+  offence counters and the ban log. A dialog that does not say what you are about to lose is a
+  speed bump, not a safeguard. Reload and Run now are not gated — asking every time teaches
+  people to click through the dialog without reading it.
+- A guard now checks that the menu never offers a command the service's own `_apply_command`
+  rejects — an entry the backend does not implement is a button that fails every time it is
+  pressed. The reverse is left alone on purpose: syslog accepts `clear_status` as an alias of
+  `prune` and the panel does not offer it, which is a decision about the UI, not a broken
+  control.
+- Noted but not fixed, with the reason written into the tests: the route validates an action
+  name against ONE GLOBAL set, so `run_now` against fail2ban — which has no work cycle — is
+  accepted, queued and only refused by the service itself, leaving `unknown_action` in a table
+  row while the HTTP answer already said `ok`. `ok` means "queued", not "ran". Making it honest
+  needs each service to DECLARE its commands, which is the same change that would stop the
+  panel hardcoding the menu.
+
 ## [0.0.1+build.8] - 2026-07-27
 
 ### Fixed

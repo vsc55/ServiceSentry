@@ -775,6 +775,8 @@ LANG = {
     'svc_cmd_reload':      'Recargar',
     'svc_cmd_clear_status': 'Limpiar estado',
     'svc_cmd_prune':       'Purgar',
+    'svc_cmd_confirm_clear_status': '¿Borrar el estado guardado de «{}»? Se pierde el resultado de cada check hasta la próxima ejecución. No se puede deshacer.',
+    'svc_cmd_confirm_prune': '¿Aplicar ahora la retención de «{}»? Borra de forma permanente los datos que ya están fuera de política (por antigüedad o por tope de filas). No se puede deshacer.',
     'svc_command_ok':      'Comando encolado',
     'svc_command_error':   'No se pudo encolar el comando',
     'svc_leader':          'Líder',

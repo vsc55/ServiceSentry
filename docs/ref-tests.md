@@ -135,6 +135,7 @@
 111. [El icono del sitio existe y pedirlo no da 404](#111-el-icono-del-sitio-existe-y-pedirlo-no-da-404)
 112. [El breadcrumb nombra el camino completo hasta la sección](#112-el-breadcrumb-nombra-el-camino-completo-hasta-la-sección)
 113. [«Conexión perdida» tiene que significar que se perdió la conexión](#113-conexión-perdida-tiene-que-significar-que-se-perdió-la-conexión)
+114. [El menú de órdenes por servicio](#114-el-menú-de-órdenes-por-servicio-qué-ofrece-qué-destruye-y-que-se-parezca-al-resto)
 
 ---
 
@@ -4922,3 +4923,64 @@ Dos cambios, y el primero es el que importa:
 | `TestTheAuthoritativeSignalsStillBypassIt::test_the_browser_going_offline_shows_it_at_once` | El navegador sabe que no hay enlace; no hay nada que confirmar |
 | `TestTheAuthoritativeSignalsStillBypassIt::test_a_gateway_error_still_counts_as_unreachable` | Un proxy vivo delante de un backend muerto contesta 502/503/504 |
 | `TestTheAuthoritativeSignalsStillBypassIt::test_an_abort_is_still_not_a_network_error` | Una petición cancelada al navegar no es el servidor yéndose |
+
+---
+
+## 114. El menú de órdenes por servicio: qué ofrece, qué destruye y que se parezca al resto
+
+**Archivo:** `tests/test_wa_services_commands.py` — 18 tests
+
+Tres cosas, y la tercera es la que importa de verdad.
+
+**Los ítems llevan icono.** Start y Stop están a un centímetro con el suyo, así que un
+desplegable solo-texto al lado se lee como algo sin terminar. El icono se elige **por orden**,
+no por servicio: «Reload» significa lo mismo dondequiera que aparezca y no puede ser un glifo
+bajo Monitor y otro bajo Syslog. `run_now` evita a propósito el icono de play que usa Start —
+ejecuta un ciclo ya, no arranca el servicio, y dos controles tan juntos no deben reclamar la
+misma acción.
+
+**fail2ban tenía Start/Stop y nada más.** No por diseño: era el único servicio controlable sin
+`_apply_command`. Ahora ofrece `reload` (empujar la config a la jaula viva — umbrales,
+ventanas, duraciones y **whitelist**; una IP añadida a la whitelist no surtía efecto hasta
+guardar config) y `prune` (barrer contadores rancios y recortar log e histórico). El hook vive
+en `embedded.py`, no en `manager.py`, porque este servicio **no tiene bucle de trabajo**: la
+jaula se aplica en línea en cada petición. El `prune` manual no llama al `_gc` interno de la
+jaula a propósito: ese está limitado a una vez cada 5 minutos, así que pulsar el botón dentro
+de esa ventana habría dicho «hecho» sin barrer nada.
+
+**Lo destructivo pregunta antes.** `prune` y `clear_status` borran cosas que no vuelven y
+están en el mismo desplegable que Reload — una fila más abajo, mismo color, sin separación. Lo
+único entre un clic mal puesto y datos perdidos es que te pregunten. El mensaje **nombra el
+servicio**, porque la misma orden destruye cosas distintas según dónde se pulse: Prune bajo
+Syslog tira mensajes guardados, bajo fail2ban contadores de ofensa y el log de baneos. Un
+diálogo que no dice qué vas a perder es un badén, no una salvaguarda.
+
+**Y una deuda que quedó anotada, no arreglada.** El mapa de órdenes del frontend y los
+`_apply_command` del backend son dos declaraciones del mismo hecho, y ya han divergido (syslog
+acepta `clear_status` como alias de `prune` y el panel nunca lo ofrece). Peor: la ruta valida
+el nombre de la acción contra **un conjunto global**, así que `run_now` sobre ipban se acepta,
+se encola y solo lo rechaza el servicio — el `unknown_action` acaba en la fila de la tabla,
+fuera de la vista, mientras el HTTP contestó `ok`. Los tests fijan eso **como está**, con el
+motivo escrito: hacer honesta la respuesta requiere que cada servicio DECLARE sus órdenes, que
+es el mismo cambio que quitaría el mapa hardcodeado.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestEveryEntryHasAnIcon::test_the_menu_renders_one` | **La regresión** de los iconos |
+| `TestEveryEntryHasAnIcon::test_every_offered_command_has_one` | Una orden nueva sin icono no pasa desapercibida |
+| `TestEveryEntryHasAnIcon::test_the_icon_belongs_to_the_command_not_the_service` | Un mapa por servicio dejaría que la misma orden tuviera dos caras |
+| `TestEveryEntryHasAnIcon::test_run_now_does_not_borrow_the_start_glyph` | Pulsar uno queriendo el otro es justo el riesgo |
+| `TestTheMenuOnlyOffersWhatTheServiceAccepts::test_no_menu_entry_is_rejected_by_its_service` | Un ítem que el backend no implementa falla siempre que se pulsa |
+| `TestTheMenuOnlyOffersWhatTheServiceAccepts::test_the_services_that_offer_commands_implement_the_hook` | Un menú sin nada detrás |
+| `TestTheMenuOnlyOffersWhatTheServiceAccepts::test_the_command_is_reachable_from_the_queue` | El drenaje busca el hook en el objeto **embebido**; definirlo donde el gemelo no lo hereda encolaría órdenes que nadie ejecuta |
+| `TestFail2banActuallyRunsThem::test_prune_sweeps_the_store` | Prueba funcional por la ruta real, no solo acuerdo estático |
+| `TestFail2banActuallyRunsThem::test_reload_pushes_config_into_the_live_jail` | |
+| `TestFail2banActuallyRunsThem::test_an_action_it_does_not_know_is_recorded_as_failed` | **La deuda**, fijada tal cual: `ok` significa «encolada», no «ejecutada» |
+| `TestFail2banActuallyRunsThem::test_it_needs_the_control_permission` | Reconfigura la jaula que mantiene fuera a los atacantes |
+| `TestTheDestructiveOnesAskFirst::test_they_are_marked_as_destructive` | Declarado como dato: una orden destructiva nueva está a una entrada de quedar protegida |
+| `TestTheDestructiveOnesAskFirst::test_the_handler_confirms_before_sending` | Y **no** manda la petición de camino al modal: se confirmaría con el borrado ya en vuelo |
+| `TestTheDestructiveOnesAskFirst::test_it_is_the_in_app_modal_not_the_browser_one` | Un `confirm()` del navegador bloquea la página y no se puede traducir |
+| `TestTheDestructiveOnesAskFirst::test_a_harmless_command_is_not_gated` | Preguntar siempre enseña a pulsar sin leer |
+| `TestTheDestructiveOnesAskFirst::test_the_message_names_what_is_being_emptied` | |
+| `TestTheDestructiveOnesAskFirst::test_every_destructive_command_has_its_wording` | En los dos idiomas, y con hueco para el nombre del servicio |
+| `TestTheLabelsExist::test_every_command_is_translated` | Sin etiqueta el menú saldría con la clave cruda |

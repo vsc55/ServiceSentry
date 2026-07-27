@@ -12,6 +12,8 @@ it to the live jail, so every replica converges on the shared desired state.
 """
 from __future__ import annotations
 
+import time
+
 from lib.services.embedded import _EmbeddedBase
 
 
@@ -98,6 +100,44 @@ class EmbeddedIpban(_EmbeddedBase):
                            {'service': 'ipban', 'web_admin|ipban_enabled': enable})
         self._notify_service_control(action)
         return True, ''
+
+    # ── Imperative commands (reload / prune) ─────────────────────────────────────
+    def _apply_command(self, action: str, args: dict | None = None) -> tuple[bool, str]:
+        """Execute a one-shot command on the instance enforcing the jail.
+
+        This service has no worker loop to nudge — the gate runs inline on every request —
+        so both commands are maintenance the jail otherwise only does on its own schedule,
+        made available on demand. Same queue as the other services, so the button works
+        against a jail enforced in another container just as well as this one.
+        """
+        host = self._host
+        if action == 'reload':
+            # Re-read the stored config and push it into the live jail: thresholds,
+            # windows, ban durations and the whitelist. The whitelist is the reason this
+            # is worth a button — an address added to it does nothing until the jail is
+            # reconfigured, and until now that only happened on a config save.
+            try:
+                host._invalidate_config_cache()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            try:
+                host._configure_ipban()
+            except Exception as exc:  # pylint: disable=broad-except
+                return False, str(exc)
+            return True, 'jail reconfigured'
+        if action in ('prune', 'clear_status'):
+            store = getattr(host, '_ipban_store', None)
+            if store is None:
+                return False, 'no store'
+            # Deliberately NOT the jail's own _gc: that one is throttled to once every
+            # five minutes, so pressing the button inside that window would report
+            # success and sweep nothing.
+            try:
+                store.prune(time.time())
+            except Exception as exc:  # pylint: disable=broad-except
+                return False, str(exc)
+            return True, 'retention sweep run'
+        return False, 'unknown_action'
 
     def on_config_changed(self, changed) -> None:
         # A Config-tab edit to ipban_enabled already re-applies via routes/config; this

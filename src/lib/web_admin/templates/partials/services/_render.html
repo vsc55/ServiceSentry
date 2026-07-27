@@ -17,7 +17,26 @@ const _SVC_COMMANDS = {
     monitoring: ['run_now', 'reload', 'clear_status'],
     events:     ['run_now', 'reload'],
     syslog:     ['reload', 'prune'],
+    ipban:      ['reload', 'prune'],
 };
+
+// Icon per COMMAND, not per service: the same command means the same thing wherever it is
+// offered, so "Reload" must not be one glyph under Monitor and another under Syslog. The
+// buttons beside this menu (Start/Stop) carry icons, so text-only entries read as unfinished.
+// run_now deliberately avoids the play glyph Start uses — it runs one cycle now, it does not
+// start the service, and two buttons a centimetre apart should not claim the same action.
+const _SVC_CMD_ICON = {
+    run_now:      'bi-lightning-charge',
+    reload:       'bi-arrow-clockwise',
+    clear_status: 'bi-eraser',
+    prune:        'bi-trash3',
+};
+
+// Commands that DELETE something and cannot be undone. They sit in the same dropdown as
+// Reload — one keystroke apart, no gap, no different colour — so the only thing between a
+// misplaced click and gone data is being asked first. Declared as data next to the icons so
+// a new destructive command is one entry away from being guarded, not one review away.
+const _SVC_CMD_DESTRUCTIVE = new Set(['clear_status', 'prune']);
 
 let _svcPollTimer = null;
 
@@ -132,7 +151,10 @@ function _svcFooter(meta) {
     const cmds = _SVC_COMMANDS[meta.key];
     if (cmds && canCtl) {
         const items = cmds.map(a =>
-            `<li><button class="dropdown-item" onclick="servicesCommand('${meta.key}','${a}')">${esc(t('svc_cmd_' + a))}</button></li>`).join('');
+            `<li><button class="dropdown-item d-flex align-items-center gap-2"
+                onclick="servicesCommand('${escAttr(meta.key)}','${escAttr(a)}')">
+                <i class="bi ${escAttr(_SVC_CMD_ICON[a] || 'bi-play')}"></i>${esc(t('svc_cmd_' + a))}
+            </button></li>`).join('');
         cmdMenu = `<div class="dropdown">
             <button class="btn btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="${esc(t('svc_commands'))}"><i class="bi bi-three-dots"></i></button>
             <ul class="dropdown-menu dropdown-menu-end">${items}</ul></div>`;
@@ -235,6 +257,21 @@ async function servicesControl(name, action) {
 }
 
 async function servicesCommand(name, action) {
+    // Ask before anything irreversible. The message names the SERVICE, because the same
+    // command destroys different things depending on where it is pressed — Prune under
+    // Syslog drops stored messages, under fail2ban it drops offence counters and the ban
+    // log — and a confirmation that does not say what you are about to lose is a speed bump,
+    // not a safeguard.
+    if (_SVC_CMD_DESTRUCTIVE.has(action)) {
+        const svc = t('svc_' + name) || name;
+        showConfirmModal(tf('svc_cmd_confirm_' + action, svc),
+                         () => _servicesCommandRun(name, action));
+        return;
+    }
+    return _servicesCommandRun(name, action);
+}
+
+async function _servicesCommandRun(name, action) {
     const r = await apiPost(`/api/v1/services/${name}/command/${action}`, {});
     if (r && (r.status === 200) && r.data?.ok) {
         showToast(t('svc_command_ok'), 'success');

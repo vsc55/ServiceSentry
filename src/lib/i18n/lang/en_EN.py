@@ -770,6 +770,8 @@ LANG = {
     'svc_cmd_reload':      'Reload',
     'svc_cmd_clear_status': 'Clear status',
     'svc_cmd_prune':       'Prune',
+    'svc_cmd_confirm_clear_status': 'Clear the stored status of "{}"? Every check result is lost until the next run. This cannot be undone.',
+    'svc_cmd_confirm_prune': 'Apply the retention policy of "{}" now? It permanently deletes whatever already falls outside it (too old, or over the row cap). This cannot be undone.',
     'svc_command_ok':      'Command queued',
     'svc_command_error':   'Could not queue the command',
     'svc_leader':          'Leader',
