@@ -55,7 +55,11 @@
    Status tab — check cards and the scheduler/daemon panel.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/status/_views.html" %}
 {% include "partials/status/_checks.html" %}
+{% include "partials/status/_view_summary.html" %}
+{% include "partials/status/_view_table.html" %}
+{% include "partials/status/_view_heatmap.html" %}
 {% include "partials/status/_daemon.html" %}
 {# ================================================================
    Actions — field updates, item add/remove, save operations.

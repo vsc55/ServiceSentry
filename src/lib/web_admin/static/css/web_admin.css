@@ -509,9 +509,18 @@
 
 .ss-table { --bs-table-cell-padding-x: 0.7rem; }
 
-/* Thead backgrounds */
-.ss-thead        { background: var(--bs-tertiary-bg); }
-.ss-thead-sticky { position: sticky; top: 0; z-index: 1; background: var(--bs-tertiary-bg); }
+/* Thead backgrounds.
+   `--bs-secondary-bg`, not tertiary: in the dark theme tertiary sits a couple of points from
+   the body background, which is enough for a panel edge and not enough for a header ROW —
+   the column titles ended up floating over the data with nothing separating them. The rule
+   under it is what actually reads as "titles end here"; a background alone is too subtle at
+   this size in either theme. */
+.ss-thead        { background: var(--bs-secondary-bg); border-bottom: 2px solid var(--bs-border-color); }
+.ss-thead-sticky { position: sticky; top: 0; z-index: 1;
+                   background: var(--bs-secondary-bg); border-bottom: 2px solid var(--bs-border-color); }
+/* A sticky header sits ON the rows as they pass under it, so its own cells have to carry the
+   background — a <thead> one does not paint over a scrolled <td>. */
+.ss-thead-sticky th { background: var(--bs-secondary-bg); }
 
 /* Cross-tabulation grid — a table with more columns than fit and a first column that
    names the row (permissions × roles today; any other matrix tomorrow). Header row AND

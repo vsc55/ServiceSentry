@@ -8,6 +8,64 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.11] - 2026-07-27
+
+### Added
+- **Status can be read four ways.** It is a monitoring surface, so the layouts differ in how
+  fast they answer "what is broken right now" — and the card grid answers it slowly: you
+  scroll past everything green to find the two that are not. Three more sit beside it behind
+  a switcher: **summary** (the totals first, then modules ordered worst-first, with an "only
+  problems" switch), **check table** (one row per CHECK rather than per module — module,
+  check, reason, value against threshold, all comparable on one line, and the view that
+  survives three hundred checks), and **heatmap** (one tile per check, a wall you take in at
+  once; hover names it, clicking opens its reason). The card grid stays as the fourth,
+  unsorted, because it is the baseline the others are compared against.
+- The summary spends page on a module in proportion to what it has to say: a failing module
+  gets a full card with its problems in view, everything else collapses to one line — a dot,
+  a name, a count — so twelve modules that are fine cost twelve lines instead of twelve cards.
+  The line is still a way in: clicking one opens its card, because wanting to look at a module
+  that is passing should not require changing view. What you opened is deliberately forgotten
+  on the next visit; a summary that filled up with everything ever opened would be the grid
+  again with extra steps. A module with no items at all is not called passing — it ran
+  nothing, and saying OK about it would be the page's own small lie.
+- A filter came with them, matching a module name **or** a check name — half the time you are
+  looking for one host, not for the module it happens to live under.
+- **All four agree about what a check means.** Whether a result is ok / warning / error, its
+  display name, and the value-vs-threshold decoration its module declares in
+  `__status_render__` are decided once and drawn from by every view. On a page whose whole job
+  is to say what is wrong, two panels contradicting each other about the same check is worse
+  than either being wrong alone — and the distinction that costs most to lose is warning vs
+  error: a soft threshold breach is amber, not red.
+- Switching view, filtering and "only problems" all redraw the data already on screen instead
+  of re-fetching. Looking at a result is not asking for a new one, and on a page that
+  auto-refreshes a redraw that fetched would also race its own timer.
+- "Only problems" now hides the passing **checks**, not just the modules that have none:
+  keeping a module with one error and eight OK checks still listed all nine, so on the table
+  view — the one where it matters most — the switch looked broken. The counts beside it still
+  report the whole set, because hiding the passing checks must not also hide that they exist.
+  It is remembered across reloads, and what makes that safe is where it sits: next to totals
+  that always state everything, so a filtered page cannot understate how much there is. The
+  search term is not remembered — the totals say nothing about a text filter, so a page
+  opening with one silently applied could not admit to it.
+- **A table header no longer wears light colours in dark mode.** Bootstrap's `.table-light`
+  pins a light background AND dark text whatever the theme is, so the check table carried a
+  white strip across the top of a dark page. It was in three templates by the time it was
+  seen — two written the same week from the same habit, one old enough that nobody looked at
+  it any more — so a guard replaced the three fixes. It bans `table-light` and deliberately
+  does not ban `bg-light`: a badge inside a primary button is light against the button, not
+  the page, and flagging five correct templates is how a test gets switched off. The header
+  also needed a rule under it, not just a shade: at that size a background alone reads as
+  nothing, and the column titles floated over the data.
+- **A row separator that broke at one column.** `d-flex` on a `<td>` takes it out of
+  `display: table-cell`, so the cell stops taking part in the row's height and its bottom
+  border draws at the height of its own content. Both new tables did it; the flex now goes on
+  a wrapper inside the cell, and a guard scans for it — it is invisible in review and obvious
+  on screen, which is the worst combination to leave to attention.
+- The filter, the view switcher and the "only problems" switch sit on one line with the
+  totals rather than in a strip of their own. Not in the Scheduler toolbar, where there is
+  visibly room: that toolbar exists only for a user with `checks_run`, and filtering is
+  reading, not running.
+
 ## [0.0.1+build.10] - 2026-07-27
 
 ### Added

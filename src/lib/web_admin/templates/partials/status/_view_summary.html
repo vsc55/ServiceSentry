@@ -1,0 +1,84 @@
+{# ================================================================
+   Status — view: summary.
+
+   The card grid gives every module the same amount of page whether or not anything is wrong
+   with it, which is exactly backwards: twelve modules that are fine cost twelve cards of
+   scrolling to reach the one that is not.
+
+   Here a module earns its space. Something failing gets a full card, opened, with its
+   problem checks in view. Everything else collapses to a single line — a dot, a name, a
+   count — so "all twelve of these are fine" takes twelve lines instead of twelve cards, and
+   the failures are the only thing above the fold.
+
+   That line is still a way in, not a dead end: clicking one opens its card, because "let me
+   look at a module that is passing" is a normal thing to want and should not require
+   changing view. The expansion is transient on purpose — a summary that quietly remembered
+   six modules you opened last week would stop being a summary.
+   ================================================================ #}
+
+// Modules the reader has opened by hand. Not persisted: this is a summary, and one that
+// slowly filled up with everything ever opened would be the grid again with extra steps.
+const _stSummaryOpen = new Set();
+
+function _stSummaryToggle(mod) {
+    if (_stSummaryOpen.has(mod)) _stSummaryOpen.delete(mod); else _stSummaryOpen.add(mod);
+    _stDrawResults();
+}
+
+function _stViewSummary(c, data) {
+    const tt = _stTotals(data);
+    const shown = _stVisible(data);
+    // A module gets a card when it has something to say — or when you asked to see it.
+    const open = shown.filter(([mod, , st]) => st.err || st.warn || _stSummaryOpen.has(mod));
+    const clean = shown.filter(([mod, , st]) => !st.err && !st.warn && !_stSummaryOpen.has(mod));
+
+    c.innerHTML = `
+        ${_stResultsHeader(tt)}
+        ${open.length
+            ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">
+                   ${open.map(([mod, checks]) => _renderOneStatusCard(mod, checks)).join('')}
+               </div>`
+            : ''}
+        ${clean.length ? _stCleanList(clean, open.length > 0) : ''}
+        ${!open.length && !clean.length ? _stEmptyState() : ''}`;
+}
+
+/** The modules with nothing to report, one line each.
+ *
+ *  Headed only when there are failures above it: with everything passing the heading would
+ *  be labelling the entire page, which the totals bar already does. */
+function _stCleanList(clean, headed) {
+    return `<div class="${headed ? 'mt-3' : ''}">
+        ${headed ? `<div class="text-muted ss-fs-2 mb-1 px-1">
+            <i class="bi bi-check2-circle me-1"></i>${esc(t('st_all_clear'))}</div>` : ''}
+        <div class="list-group list-group-flush rounded-3 border">
+            ${clean.map(([mod, , st]) => _stCleanRow(mod, st)).join('')}
+        </div>
+    </div>`;
+}
+
+function _stCleanRow(mod, st) {
+    const pretty = modulePrettyName(mod, modulesData[mod] || {});
+    // A module with no items at all is not "passing" — it is unconfigured, and saying OK
+    // about a module that ran nothing would be the page's own small lie.
+    const none = st.total === 0;
+    return `<button type="button"
+        class="list-group-item list-group-item-action py-2 d-flex align-items-center gap-2"
+        onclick="_stSummaryToggle(${jsStr(mod)})" title="${escAttr(t('module_details'))}">
+        <i class="bi bi-circle-fill ${none ? 'text-secondary' : 'text-success'}" style="font-size:.5rem"></i>
+        <span class="flex-grow-1 text-truncate" style="font-size:.88rem">${esc(pretty)}</span>
+        <span class="text-muted ss-fs-2">${none ? esc(t('status_no_items') || '—')
+                                                : `${st.ok}/${st.total}`}</span>
+        <i class="bi bi-chevron-down text-muted ss-fs-2"></i>
+    </button>`;
+}
+
+/** The "only problems" switch, shared with the other views. */
+function _stProblemsToggle() {
+    return `<span class="form-check form-switch mb-0 d-inline-flex align-items-center gap-2">
+        <input class="form-check-input mt-0" type="checkbox" role="switch" id="stOnlyProblems"
+               ${_stOnlyProblems ? 'checked' : ''}
+               onchange="_stToggleProblems(this.checked)">
+        <label class="form-check-label ss-fs-3" for="stOnlyProblems">${esc(t('st_only_problems'))}</label>
+    </span>`;
+}

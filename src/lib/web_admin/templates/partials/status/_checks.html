@@ -1,4 +1,4 @@
-﻿{# ================================================================
+{# ================================================================
    Status tab — rendering logic + run checks.
    ================================================================ #}
 
@@ -61,6 +61,7 @@ async function renderStatus() {
         <span>${t('loading')}</span>
     </div>`;
     const data = await apiGet('/api/v1/modules/status');
+    _stLastData = data || null;
     if (!data) {
         c.innerHTML = `<div class="alert alert-warning d-flex align-items-center gap-2">
             <i class="bi bi-exclamation-triangle-fill"></i>${t('status_load_error')}
@@ -144,21 +145,43 @@ async function renderStatus() {
     }
 
     // ── Results area ──────────────────────────────────────────
-    h += `<div id="checksResultArea">`;
-    if (!Object.keys(data).length) {
-        h += `<div class="text-center py-5 text-muted">
-            <i class="bi bi-inbox ss-empty-icon"></i>
-            <span>${t('status_empty')}</span>
-        </div>`;
-    } else {
-        h += _renderStatusCards(data);
-    }
-    h += `</div>`;
+    // The filter and the view switcher are NOT here: they belong to the results, so they are
+    // drawn with the totals inside the results area (_stResultsHeader) — one row instead of
+    // two, and present for a read-only user, who has no Scheduler toolbar to hang them from.
+    h += `<div id="checksResultArea"></div>`;
 
     c.innerHTML = h;
+    _stDrawResults();
 
     // (Re)start the countdown ticker for the freshly-rendered refresh bar.
     _startStatusCountdown(_statusTimer?._interval || 0);
+}
+
+/** Draw the last payload with whichever view is selected. Separate from renderStatus()
+ *  because filtering, toggling "only problems" and switching view all redraw the SAME data —
+ *  re-fetching for any of them would make a look-at operation cost a round trip, and on a
+ *  page that auto-refreshes it would also race with its own timer. */
+function _stDrawResults() {
+    const area = document.getElementById('checksResultArea');
+    if (!area) return;
+    const data = _stLastData || {};
+    if (!Object.keys(data).length) { area.innerHTML = _stEmptyState(); return; }
+    const view = STATUS_VIEWS.find(v => v.id === _stViewId()) || STATUS_VIEWS[0];
+    const draw = window[view.render];
+    (typeof draw === 'function' ? draw : _stViewCards)(area, data);
+}
+
+// ── View: cards ───────────────────────────────────────────────────────────────
+// What the section had. Kept unsorted on purpose — it is the baseline the other three are
+// compared against, and reordering it would change the thing being compared. The shared
+// filter still applies: that is section state, not a property of a layout.
+function _stViewCards(c, data) {
+    const shown = _stVisible(data, false);
+    c.innerHTML = _stResultsHeader(_stTotals(data)) + (shown.length
+        ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">
+               ${shown.map(([mod, checks]) => _renderOneStatusCard(mod, checks)).join('')}
+           </div>`
+        : _stEmptyState());
 }
 
 function _renderWaitingCard(mod) {
@@ -226,20 +249,12 @@ function _statusCheckLabel(mod, ck) {
 function _renderOneStatusCard(mod, checks) {
         const pname = modulePrettyName(mod, modulesData[mod] || {});
         const icon  = moduleIcon(mod, modulesData[mod] || {});
-        // Only entries with a recorded status are checks; a bookkeeping-only entry
-        // (e.g. a bare item key holding just fail_count, when the real results live
-        // under sub-keys like <item>/site) must not show as a phantom row.
-        const rows  = Object.entries(checks).filter(([, v]) => v && typeof v === 'object' && 'status' in v);
-        const _sev    = v => (v && typeof v === 'object' && v.severity) || '';
-        const okCnt   = rows.filter(([, v]) => v?.status === true).length;
-        const total   = rows.length;
+        // What each check means, and the tally, are decided in _views.html — the card is one
+        // of four things drawing them, and the four must agree about which check is failing.
+        const st = _stModStats(mod, checks);
+        const { rows, total, ok: okCnt, warn: warnCnt, err: hardErr, pct } = st;
         const allOk   = okCnt === total && total > 0;
         const noItems = total === 0;
-        // A non-OK check is a soft warning (severity 'warning') or a hard error; count them
-        // apart so a card whose only problems are warnings reads amber, not red.
-        const warnCnt = rows.filter(([, v]) => v?.status === false && _sev(v) === 'warning').length;
-        const hardErr = (total - okCnt) - warnCnt;
-        const pct     = noItems ? 0 : Math.round(100 * okCnt / total);
         // The check list starts collapsed when everything is OK and expanded as
         // soon as something failed, so problem checks are visible without a click.
         // (Re-applied on every render, incl. after a run.)  Only cards with rows
@@ -247,16 +262,7 @@ function _renderOneStatusCard(mod, checks) {
         const hasRows   = total > 0;
         const collapsed = allOk;
 
-        // Card colour state: green (all OK) / red (any hard error) / amber (only warnings).
-        const cardState = noItems ? 'none' : allOk ? 'ok'
-                        : hardErr === 0 && warnCnt > 0 ? 'warn' : 'error';
-        const _PAL = {
-            none:  {grad:'linear-gradient(90deg,#94a3b8,#cbd5e1)',        bg:'var(--bs-secondary-bg)', color:'var(--bs-secondary-color)', bar:'var(--bs-secondary-bg)'},
-            ok:    {grad:'linear-gradient(90deg,#22c55e,#4ade80,#0ea5e9)', bg:'#dcfce7', color:'#15803d', bar:'linear-gradient(90deg,#22c55e,#4ade80)'},
-            warn:  {grad:'linear-gradient(90deg,#f59e0b,#fbbf24)',         bg:'#fef3c7', color:'#b45309', bar:'linear-gradient(90deg,#f59e0b,#fbbf24)'},
-            error: {grad:'linear-gradient(90deg,#ef4444,#f97316)',         bg:'#fee2e2', color:'#b91c1c', bar:'linear-gradient(90deg,#ef4444,#f97316)'},
-        };
-        const _pal = _PAL[cardState];
+        const _pal = ST_PAL[st.state];
         const accentGrad = _pal.grad;
         const avBg    = _pal.bg, avColor = _pal.color;
         const badgeBg = _pal.bg, badgeColor = _pal.color;
@@ -301,72 +307,19 @@ function _renderOneStatusCard(mod, checks) {
             <div style="height:100%;width:${pct}%;background:${pbarBg};transition:width .5s ease"></div>
         </div>`;
 
-        // Check rows (collapsible body)
-        // Per-module Status decorations (usage bar / badge), declared in the module
-        // schema (__status_render__) and rendered generically — no other_data key
-        // names are hardcoded in the core.
-        const _srDir = MODULE_STATUS_RENDER[mod.split('.').pop()] || MODULE_STATUS_RENDER[mod] || [];
+        // Check rows (collapsible body). The name, the reason line and the schema-declared
+        // decoration all come from the shared facts, so this card cannot describe a check
+        // differently from the table or the heatmap showing the same one.
         h += `<div class="ss-card-checks"${collapsed ? ' style="display:none"' : ''}>`;
-        for (const [ck, info] of rows) {
-            const st = info?.status;
-            const ok = st === true;
-            const unknown = st !== true && st !== false;
-            const warn = st === false && _sev(info) === 'warning';   // soft threshold breach
-            const extra = (typeof info === 'object' && info?.other_data) || {};
-
-            const rowIcon = ok
-                ? '<i class="bi bi-check-circle-fill text-success" style="font-size:.9rem;flex-shrink:0"></i>'
-                : unknown
-                    ? '<i class="bi bi-question-circle text-secondary" style="font-size:.9rem;flex-shrink:0"></i>'
-                    : warn
-                        ? '<i class="bi bi-exclamation-triangle-fill text-warning" style="font-size:.9rem;flex-shrink:0"></i>'
-                        : '<i class="bi bi-x-circle-fill text-danger" style="font-size:.9rem;flex-shrink:0"></i>';
-
-            const cbBg    = ok ? '#dcfce7' : unknown ? 'var(--bs-secondary-bg)'    : warn ? '#fef3c7' : '#fee2e2';
-            const cbColor = ok ? '#15803d' : unknown ? 'var(--bs-secondary-color)' : warn ? '#b45309' : '#b91c1c';
-            const cbTxt   = ok ? t('status_ok') : unknown ? '—' : warn ? t('status_warning') : t('status_error');
-
-            // Extra info: schema-declared decorations (__status_render__) applied
-            // to other_data — first matching directive wins. Generic: a "bar"
-            // (percentage + threshold) or a "badge" (prefixed field value).
-            let extraHtml = '';
-            for (const d of _srDir) {
-                if (d.type === 'bar' && extra[d.value] !== undefined && extra[d.value] !== null) {
-                    const usedPct = Math.min(parseFloat(extra[d.value]) || 0, 100);
-                    const thr = parseFloat(extra[d.threshold]) || d.default_threshold || 80;
-                    const unit = d.unit || '%';
-                    const barColor = usedPct >= thr ? '#ef4444' : usedPct >= thr * 0.75 ? '#f59e0b' : '#22c55e';
-                    const thrShown = (d.threshold && extra[d.threshold] !== undefined && extra[d.threshold] !== null)
-                        ? `<span style="opacity:.55">/ ${esc(String(extra[d.threshold]))}${unit}</span>` : '';
-                    extraHtml = `<span class="d-flex align-items-center gap-1 text-muted" style="font-size:.74rem;flex-shrink:0">
-                        <span style="width:48px;height:5px;background:var(--bs-border-color);border-radius:3px;display:inline-block;overflow:hidden;vertical-align:middle">
-                            <span style="display:block;height:100%;width:${usedPct}%;background:${barColor}"></span>
-                        </span>
-                        ${(parseFloat(extra[d.value]) || 0).toFixed(1)}${unit}
-                        ${thrShown}
-                    </span>`;
-                    break;
-                }
-                if (d.type === 'badge' && extra[d.field] !== undefined && extra[d.field] !== null && extra[d.field] !== '') {
-                    extraHtml = `<code style="font-size:.72rem;flex-shrink:0;opacity:.75">${esc((d.prefix || '') + String(extra[d.field]))}</code>`;
-                    break;
-                }
-            }
-
-            // Reason line: the check's message, shown under the name for any non-OK
-            // result so the operator sees WHY it failed/warned (e.g. a Graph error or
-            // the threshold breached) without leaving the card.
-            const _rowName = extra.name || _statusCheckLabel(mod, ck);
-            const _rowMsg  = (!ok && info && typeof info === 'object' && info.message) ? String(info.message) : '';
+        for (const f of _stShownRows(st)) {
             h += `<div class="d-flex align-items-start gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">
-                <span class="mt-1">${rowIcon}</span>
+                <span class="mt-1">${_stStateIcon(f)}</span>
                 <div class="flex-grow-1" style="min-width:0">
-                    <div class="text-truncate" title="${escAttr(_rowName)}">${esc(_rowName)}</div>
-                    ${_rowMsg ? `<div class="text-muted mt-1" style="font-size:.76rem;word-break:break-word">${esc(_rowMsg)}</div>` : ''}
+                    <div class="text-truncate" title="${escAttr(f.name)}">${esc(f.name)}</div>
+                    ${f.msg ? `<div class="text-muted mt-1" style="font-size:.76rem;word-break:break-word">${esc(f.msg)}</div>` : ''}
                 </div>
-                ${extraHtml}
-                <span class="rounded-pill px-2 py-0 fw-bold flex-shrink-0 mt-1"
-                      style="font-size:.68rem;background:${cbBg};color:${cbColor}">${cbTxt}</span>
+                ${f.extraHtml}
+                <span class="mt-1">${_stStatePill(f)}</span>
             </div>`;
         }
         h += `</div>`; // .ss-card-checks (collapsible body)

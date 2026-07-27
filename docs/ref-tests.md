@@ -137,6 +137,8 @@
 113. [«Conexión perdida» tiene que significar que se perdió la conexión](#113-conexión-perdida-tiene-que-significar-que-se-perdió-la-conexión)
 114. [El menú de órdenes por servicio](#114-el-menú-de-órdenes-por-servicio-qué-ofrece-qué-destruye-y-que-se-parezca-al-resto)
 115. [Modules — cuatro layouts, no cuatro renderizadores](#115-modules--cuatro-layouts-no-cuatro-renderizadores)
+116. [Status — cuatro layouts que tienen que coincidir](#116-status--cuatro-layouts-que-tienen-que-coincidir-en-qué-está-fallando)
+117. [Marcado que no hace lo que sugiere el nombre de la clase](#117-marcado-que-no-hace-lo-que-sugiere-el-nombre-de-la-clase)
 
 ---
 
@@ -5038,3 +5040,121 @@ la lista luego se negaría a configurar. Ahora ambos preguntan a `_modAvailabili
 | `TestTheSelectionIsHonest::test_a_selection_that_is_no_longer_shown_falls_back` | Un módulo borrado o filtrado dejaría el detalle sin nada que lo resalte al lado |
 | `TestTheSelectionIsHonest::test_the_compact_editor_closes_when_its_module_goes` | |
 | `TestTheLabelsExist::test_every_view_is_named_in_both_languages` | |
+
+---
+
+## 116. Status — cuatro layouts que tienen que coincidir en qué está fallando
+
+**Archivo:** `tests/test_wa_status_views.py` — 32 tests
+
+El **Resumen** estuvo a punto de no tener nombre propio: al mover la barra de totales a una
+cabecera que dibujan las cuatro vistas, se quedó siendo la rejilla de tarjetas en otro orden —
+dos vistas de cuatro diferenciándose por un `sort`. Ahora gasta página en un módulo en
+proporción a lo que ese módulo tiene que decir: el que falla se abre en tarjeta, el que está
+bien se colapsa a una línea, y esa línea sigue siendo una entrada (un clic la abre).
+
+Status es una superficie de **monitorización**, así que sus layouts se diferencian en una
+cosa: cuánto tardan en contestar «¿qué está roto ahora mismo?». La rejilla de tarjetas tarda
+mucho — hay que pasar por delante de todo lo verde para encontrar los dos que no lo están —,
+así que se le suman tres: un resumen con los totales y los problemas ordenados primero, una
+tabla plana de checks, y un mosaico.
+
+**Lo que no puede diferir es qué SIGNIFICA un check.** Si un resultado es ok / aviso / error,
+cuál es su nombre visible y la decoración valor-contra-umbral que su módulo declara en
+`__status_render__` se deciden una vez y todas las vistas beben de ahí. Una vista que leyera
+`status` y `severity` por su cuenta sería libre de discrepar de la tarjeta de al lado sobre el
+mismo check — y en una página cuyo trabajo entero es decir qué va mal, dos paneles
+contradiciéndose es peor que cualquiera de los dos equivocado por separado.
+
+La distinción que más caro sale perder es **aviso frente a error**. Un rebase blando de umbral
+es ámbar, no rojo; pintar los dos de rojo es cómo una página llena de «todo está ardiendo»
+deja de leerse, y es justo lo que se re-deriva ligeramente distinto en un cuarto sitio.
+
+Los tres controles (filtro, vista, «solo problemas») viven **con los totales**, no en una
+fila propia ni en la barra del Scheduler, que es donde visiblemente sobra sitio: esa barra
+solo se dibuja con permiso `checks_run`, y filtrar o cambiar de vista es **leer**, no
+ejecutar. Ponerlos ahí se los quitaría justo a quien solo puede mirar.
+
+«Solo problemas» **se recuerda** entre visitas, y lo que lo hace seguro es dónde acabó el
+interruptor: junto a los totales, que siempre declaran el conjunto entero. La página puede
+estar filtrada, pero no puede mentir sobre cuánto hay. El texto del buscador **no** se
+recuerda, y la diferencia es real: los totales no dicen nada de un filtro de texto, así que
+una página que abriera con uno aplicado en silencio no tendría cómo admitirlo.
+
+El resto va de lo que un redibujado **no** puede hacer: cambiar de vista, filtrar o marcar
+«solo problemas» miran los **mismos** datos, así que ninguno puede volver a pedirlos — en una
+página que se auto-refresca, un redibujado que pide datos además compite con su propio timer.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_registry_is_found` | |
+| `TestTheScanItself::test_every_view_file_exists` | |
+| `TestEveryViewAgreesOnWhatACheckIs::test_a_check_state_is_decided_in_one_place` | |
+| `TestEveryViewAgreesOnWhatACheckIs::test_no_view_reads_the_raw_result_itself` | `status === true` en una vista es una segunda opinión sobre el mismo check |
+| `TestEveryViewAgreesOnWhatACheckIs::test_no_view_re_derives_the_warning_rule` | **La distinción cara**: ámbar no es rojo |
+| `TestEveryViewAgreesOnWhatACheckIs::test_the_schema_decoration_is_rendered_once` | Cuatro lectores de `__status_render__` son cuatro números distintos para el mismo valor |
+| `TestEveryViewAgreesOnWhatACheckIs::test_the_palette_is_shared` | Dos colores separándose es cómo una página deja de poder ojearse |
+| `TestEveryViewAgreesOnWhatACheckIs::test_a_phantom_row_is_excluded_once` | Una entrada sin `status` es contabilidad, no un check |
+| `TestTheControlsSitWithWhatTheyControl::test_there_is_one_header_and_every_view_uses_it` | Filtro, vista y «solo problemas» viven **con los totales**, en una sola barra |
+| `TestTheControlsSitWithWhatTheyControl::test_no_view_builds_the_totals_bar_itself` | |
+| `TestTheControlsSitWithWhatTheyControl::test_the_controls_do_not_depend_on_the_run_permission` | **El sitio donde no pueden ir**: la barra del Scheduler solo existe con `checks_run`, y filtrar es leer, no ejecutar |
+| `TestTheControlsSitWithWhatTheyControl::test_a_view_may_add_one_thing_of_its_own` | La leyenda del mosaico es de esa vista, no de la barra: se pasa, no se reconstruye |
+| `TestTheSummaryEarnsItsName::test_a_failing_module_gets_a_card` | |
+| `TestTheSummaryEarnsItsName::test_a_passing_module_collapses_to_a_line` | Doce módulos que están bien deben costar doce líneas, no doce tarjetas |
+| `TestTheSummaryEarnsItsName::test_that_line_is_still_a_way_in` | Querer mirar un módulo que pasa es normal y no debe obligar a cambiar de vista |
+| `TestTheSummaryEarnsItsName::test_what_you_opened_is_not_remembered` | Un resumen que se fuera llenando de todo lo abierto alguna vez sería la rejilla con pasos de más |
+| `TestTheSummaryEarnsItsName::test_a_module_with_no_items_is_not_called_passing` | No ejecutó nada; decir OK sería la mentira pequeña de la propia página |
+| `TestTheSummaryEarnsItsName::test_it_no_longer_merely_reorders_the_grid` | **La regresión**: dos vistas que solo se diferencian en el orden |
+| `TestLookingIsNotFetching::test_switching_view_redraws_the_data_it_has` | Es una forma de **mirar** el último resultado, no de pedir otro |
+| `TestLookingIsNotFetching::test_filtering_redraws_too` | |
+| `TestLookingIsNotFetching::test_the_payload_is_kept_for_that` | |
+| `TestLookingIsNotFetching::test_the_draw_step_is_separate_from_the_load` | |
+| `TestTheOrderIsPartOfTheAnswer::test_problems_come_first` | Una página con la primera pantalla verde y el fallo tres filas más abajo te ha hecho scrollear para saber algo que ya sabía |
+| `TestTheOrderIsPartOfTheAnswer::test_the_baseline_view_is_not_reordered` | Las tarjetas son la referencia contra la que se comparan las otras tres; reordenarlas cambiaría lo comparado |
+| `TestTheOrderIsPartOfTheAnswer::test_the_filter_still_applies_to_it` | Filtrar es estado de la sección, no propiedad de un layout |
+| `TestOnlyProblemsIsHonest::test_it_hides_the_passing_CHECKS_too` | **El bug**: quedarse solo con los módulos que tienen un problema no basta — un módulo con un error y ocho checks OK seguía listando los nueve |
+| `TestOnlyProblemsIsHonest::test_the_counts_still_include_them` | La cabecera sigue diciendo «6/9 OK»: esconder los que pasan no puede esconder que existen |
+| `TestOnlyProblemsIsHonest::test_it_survives_a_reload` | Si así es como trabajas, no deberías tener que decirlo en cada visita |
+| `TestOnlyProblemsIsHonest::test_the_totals_beside_it_still_report_everything` | Lo que hace **seguro** recordarlo: la línea junto al interruptor sigue declarando el conjunto entero |
+| `TestOnlyProblemsIsHonest::test_the_search_term_is_not_remembered` | Los totales no dicen nada de un filtro de texto, así que una página que abriera con uno puesto no podría admitirlo |
+| `TestOnlyProblemsIsHonest::test_the_empty_state_says_which_emptiness_it_is` | «No hay checks» y «nada coincide con tu filtro» son noticias distintas |
+| `TestTheLabelsExist::test_every_view_is_named_in_both_languages` | |
+
+---
+
+## 117. Marcado que no hace lo que sugiere el nombre de la clase
+
+**Archivo:** `tests/test_wa_css_traps.py` — 5 tests
+
+Dos trampas, las dos encontradas la misma tarde mirando la tabla de Status, las dos invisibles en revisión y evidentes en pantalla.
+
+**Una clase que ignora el tema.** El panel se sirve en claro y oscuro y recuerda cuál elegiste, así que un componente que
+decide sus propios colores acierta la mitad de las veces. El que cayó fue una cabecera de
+tabla: `.table-light` de Bootstrap pone fondo claro **y** texto oscuro sin mirar
+`data-bs-theme`, así que en modo oscuro la tabla de checks llevaba una franja blanca con
+letras negras — lo único claro de la página.
+
+Para cuando se vio, estaba en **tres sitios**, y ese es el argumento para un guard y no para
+tres arreglos: dos se escribieron la misma semana desde la misma costumbre, y el tercero
+llevaba ahí lo bastante como para que ya nadie lo viera.
+
+**Una celda que deja de serlo.** `d-flex` sobre un `<td>` lo saca de `display:table-cell`,
+así que ya no participa en la altura de la fila y su borde inferior se dibuja a la altura
+de su propio contenido. El separador de filas se parte en esa columna mientras el resto de
+tablas del panel mantienen la línea recta.
+
+La regla del tema es que un componente pida una **variable** de Bootstrap (`--bs-tertiary-bg` y
+compañía) o una de las clases propias del panel construidas sobre ellas, y decida el tema.
+
+Lo que el guard **no** prohíbe importa tanto como lo que prohíbe: `bg-light` se dejó fuera a
+propósito. Un `badge bg-light text-dark` dentro de un botón primario es claro contra **el
+botón**, no contra la página, y es correcto en ambos temas. Prohibirlo habría señalado cinco
+plantillas que están bien y habría enseñado al siguiente a desactivar el test.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_templates_are_found` | |
+| `TestNoTemplatePinsALightSurface::test_none_of_the_theme_blind_classes_is_used` | **La regresión**: `class="… table-light …"`, solo en marcado, no en un comentario |
+| `TestNoTemplatePinsALightSurface::test_the_replacement_exists_and_is_theme_driven` | Si la clase sustituta fijara un color, el guard solo habría movido el problema detrás de un nombre mejor |
+| `TestNoTemplatePinsALightSurface::test_the_tables_that_had_it_use_the_replacement` | Las tres donde apareció, nombradas: volver atrás en cualquiera es la regresión que este fichero vigila |
+| `TestATableCellStaysATableCell::test_no_cell_is_turned_into_a_flex_container` | **La segunda trampa**: `d-flex` en un `<td>` lo saca de `display:table-cell`, deja de contar para la altura de la fila y su borde se dibuja a la altura del contenido — el separador se parte justo en esa columna |

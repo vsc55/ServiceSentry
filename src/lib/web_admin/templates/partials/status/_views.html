@@ -1,0 +1,290 @@
+{# ================================================================
+   Status — the part every view shares.
+
+   Status is a MONITORING surface, so the views differ in one thing: how quickly they answer
+   "what is broken right now". The card grid answers it slowly — you scroll past everything
+   green to find the two that are not.
+
+   What must not differ is what a check MEANS. Whether a result is ok / warning / error, what
+   its display name is, and the value-vs-threshold decoration a module declares in its schema
+   (__status_render__) are decided once, here, and every view draws from that. A view that
+   read `status` and `severity` itself would be free to disagree with the card next to it
+   about whether the same check is failing.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time: the view files are separate partials
+// concatenated after this one, so their functions do not exist yet when this is evaluated.
+const STATUS_VIEWS = [
+    { id: 'summary', label_key: 'st_view_summary', icon: 'bi-clipboard-check',  render: '_stViewSummary' },
+    { id: 'table',   label_key: 'st_view_table',   icon: 'bi-list-ul',          render: '_stViewTable' },
+    { id: 'heatmap', label_key: 'st_view_heatmap', icon: 'bi-grid-3x3-gap-fill', render: '_stViewHeatmap' },
+    { id: 'cards',   label_key: 'st_view_cards',   icon: 'bi-grid-3x2-gap',     render: '_stViewCards' },
+];
+const _ST_VIEW_KEY = 'ss_status_view';
+
+function _stViewId() {
+    const stored = localStorage.getItem(_ST_VIEW_KEY);
+    return STATUS_VIEWS.some(v => v.id === stored) ? stored : STATUS_VIEWS[0].id;
+}
+
+/** Switching view must not re-run the checks — it is a way of LOOKING at the last result,
+ *  not a way of getting a new one. So it redraws from the data already on screen when there
+ *  is some, and only fetches when there is nothing to redraw. */
+function setStatusView(id) {
+    if (!STATUS_VIEWS.some(v => v.id === id)) return;
+    localStorage.setItem(_ST_VIEW_KEY, id);
+    if (_stLastData) _stDrawResults(); else renderStatus();
+}
+
+function _stViewSwitcher() {
+    const cur = _stViewId();
+    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('st_view'))}">
+        ${STATUS_VIEWS.map(v => `
+            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
+                onclick="setStatusView('${escAttr(v.id)}')"
+                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
+                <i class="bi ${escAttr(v.icon)}"></i>
+            </button>`).join('')}
+    </div>`;
+}
+
+// ── Filters, shared by every view ────────────────────────────────────────────
+// "Only problems" is the one that matters on this page: a hundred green checks are not what
+// you came to read, and if that is how you work you should not have to say so on every
+// visit — so it is remembered.
+//
+// The risk in remembering it is a page hiding most of itself without saying why. What makes
+// it safe here is WHERE the switch ended up: beside the totals, which always report the
+// whole set ("190 checks · 181 OK · 8 warning · 1 error"). A filtered page cannot understate
+// how much there is while that line sits next to the switch that filtered it.
+//
+// The search term is NOT remembered, and the difference is real: the totals say nothing
+// about a text filter, so a page opening with one silently applied would have no way of
+// admitting it.
+const _ST_PROBLEMS_KEY = 'ss_status_only_problems';
+let _stFilterTerm = '';
+let _stOnlyProblems = localStorage.getItem(_ST_PROBLEMS_KEY) === '1';
+let _stLastData = null;      // the last status payload, so a view switch needs no round trip
+
+function _stFilter(term) {
+    _stFilterTerm = String(term || '');
+    _stDrawResults();
+    const el = document.getElementById('stSearch');
+    if (el) { el.focus(); el.value = _stFilterTerm; el.setSelectionRange(el.value.length, el.value.length); }
+}
+
+function _stToggleProblems(on) {
+    _stOnlyProblems = !!on;
+    localStorage.setItem(_ST_PROBLEMS_KEY, _stOnlyProblems ? '1' : '0');
+    _stDrawResults();
+}
+
+/** `[[module, checks], …]` after the filters, sorted worst first.
+ *
+ *  The order is part of the answer, not decoration: a page whose first screen is green while
+ *  the failure is three rows below has made you scroll to learn something it already knew. */
+function _stVisible(data, sort = true) {
+    const q = _stFilterTerm.trim().toLowerCase();
+    const out = [];
+    for (const [mod, checks] of Object.entries(data || {})) {
+        if (!checks || typeof checks !== 'object') continue;
+        const st = _stModStats(mod, checks);
+        if (_stOnlyProblems && st.err === 0 && st.warn === 0) continue;
+        if (q) {
+            const pretty = String(modulePrettyName(mod, modulesData[mod] || {}) || '').toLowerCase();
+            const hitMod = mod.toLowerCase().includes(q) || pretty.includes(q);
+            // Matching a CHECK name too: half the time you are looking for one host, not for
+            // the module it happens to live under.
+            const hitCheck = st.rows.some(r => r.name.toLowerCase().includes(q));
+            if (!hitMod && !hitCheck) continue;
+        }
+        out.push([mod, checks, st]);
+    }
+    // The cards view opts out: it is the baseline the others are compared against, and
+    // reordering it would change the very thing being compared.
+    if (!sort) return out;
+    const rank = s => (s.err ? 0 : s.warn ? 1 : s.total === 0 ? 3 : 2);
+    return out.sort((a, b) => rank(a[2]) - rank(b[2])
+        || String(a[0]).localeCompare(String(b[0])));
+}
+
+// ── What a check is ──────────────────────────────────────────────────────────
+/** The entries of a module's status payload that are really checks.
+ *
+ *  A bookkeeping-only entry (a bare item key holding just fail_count, when the real results
+ *  live under sub-keys) has no `status` and must not show as a phantom row — in any view. */
+function _stCheckEntries(checks) {
+    return Object.entries(checks || {})
+        .filter(([, v]) => v && typeof v === 'object' && 'status' in v);
+}
+
+/** One check, decided once: its state, its name, why it failed, and the decoration its
+ *  module declared. Every view renders from this and none of them reads `status` itself. */
+function _stCheckFacts(mod, ck, info) {
+    const st = info?.status;
+    const ok = st === true;
+    const unknown = st !== true && st !== false;
+    // A soft threshold breach is a warning, not a failure: colouring both red is how a page
+    // full of "everything is on fire" stops being read at all.
+    const warn = st === false && ((info && info.severity) || '') === 'warning';
+    const extra = (typeof info === 'object' && info?.other_data) || {};
+    return {
+        mod, key: ck, ok, unknown, warn,
+        err: !ok && !unknown && !warn,
+        state: ok ? 'ok' : unknown ? 'none' : warn ? 'warn' : 'error',
+        name: extra.name || _statusCheckLabel(mod, ck),
+        msg: (!ok && info && typeof info === 'object' && info.message) ? String(info.message) : '',
+        extra,
+        extraHtml: _stExtraHtml(mod, extra),
+    };
+}
+
+/** The value/threshold decoration a module declares in its schema (`__status_render__`),
+ *  rendered generically — the core knows no module's `other_data` key names. First matching
+ *  directive wins. */
+function _stExtraHtml(mod, extra) {
+    const dirs = MODULE_STATUS_RENDER[mod.split('.').pop()] || MODULE_STATUS_RENDER[mod] || [];
+    for (const d of dirs) {
+        if (d.type === 'bar' && extra[d.value] !== undefined && extra[d.value] !== null) {
+            const usedPct = Math.min(parseFloat(extra[d.value]) || 0, 100);
+            const thr = parseFloat(extra[d.threshold]) || d.default_threshold || 80;
+            const unit = d.unit || '%';
+            const barColor = usedPct >= thr ? '#ef4444' : usedPct >= thr * 0.75 ? '#f59e0b' : '#22c55e';
+            const thrShown = (d.threshold && extra[d.threshold] !== undefined && extra[d.threshold] !== null)
+                ? `<span style="opacity:.55">/ ${esc(String(extra[d.threshold]))}${unit}</span>` : '';
+            return `<span class="d-flex align-items-center gap-1 text-muted" style="font-size:.74rem;flex-shrink:0">
+                <span style="width:48px;height:5px;background:var(--bs-border-color);border-radius:3px;display:inline-block;overflow:hidden;vertical-align:middle">
+                    <span style="display:block;height:100%;width:${usedPct}%;background:${barColor}"></span>
+                </span>
+                ${(parseFloat(extra[d.value]) || 0).toFixed(1)}${unit}
+                ${thrShown}
+            </span>`;
+        }
+        if (d.type === 'badge' && extra[d.field] !== undefined && extra[d.field] !== null && extra[d.field] !== '') {
+            return `<code style="font-size:.72rem;flex-shrink:0;opacity:.75">${esc((d.prefix || '') + String(extra[d.field]))}</code>`;
+        }
+    }
+    return '';
+}
+
+/** The checks a view should LIST for a module, as opposed to the ones it counts.
+ *
+ *  "Only problems" has to bite twice. Keeping just the modules that have a problem is not
+ *  enough — a module with one error and eight passing checks still showed all nine, so the
+ *  filter appeared not to work at all on the view where it matters most.
+ *
+ *  The stats are deliberately NOT filtered: the header still says "6/9 OK", because hiding
+ *  the passing checks must not also hide that they exist. A page that says a module has one
+ *  check, and that it failed, is a different claim from the true one.
+ */
+function _stShownRows(st) {
+    return _stOnlyProblems ? st.rows.filter(r => !r.ok) : st.rows;
+}
+
+/** A module's tally, with its rows already decided. */
+function _stModStats(mod, checks) {
+    const rows = _stCheckEntries(checks).map(([ck, info]) => _stCheckFacts(mod, ck, info));
+    const ok = rows.filter(r => r.ok).length;
+    const warn = rows.filter(r => r.warn).length;
+    const err = rows.filter(r => r.err).length;
+    const total = rows.length;
+    return {
+        rows, total, ok, warn, err,
+        unknown: total - ok - warn - err,
+        pct: total ? Math.round(100 * ok / total) : 0,
+        state: !total ? 'none' : err ? 'error' : warn ? 'warn' : ok === total ? 'ok' : 'none',
+    };
+}
+
+/** Everything, across every module — the number the page opens with. */
+function _stTotals(data) {
+    let total = 0, ok = 0, warn = 0, err = 0, mods = 0;
+    for (const [mod, checks] of Object.entries(data || {})) {
+        if (!checks || typeof checks !== 'object') continue;
+        const s = _stModStats(mod, checks);
+        mods++; total += s.total; ok += s.ok; warn += s.warn; err += s.err;
+    }
+    return { mods, total, ok, warn, err };
+}
+
+// ── Shared pieces ────────────────────────────────────────────────────────────
+// One palette for the four states, so "amber" means the same thing in a card, a table row
+// and a heatmap tile. Two colours drifting apart is how a page stops being scannable.
+const ST_PAL = {
+    none:  { grad: 'linear-gradient(90deg,#94a3b8,#cbd5e1)',         bg: 'var(--bs-secondary-bg)', color: 'var(--bs-secondary-color)', bar: 'var(--bs-secondary-bg)',                solid: '#94a3b8' },
+    ok:    { grad: 'linear-gradient(90deg,#22c55e,#4ade80,#0ea5e9)', bg: '#dcfce7',                color: '#15803d',                   bar: 'linear-gradient(90deg,#22c55e,#4ade80)', solid: '#22c55e' },
+    warn:  { grad: 'linear-gradient(90deg,#f59e0b,#fbbf24)',         bg: '#fef3c7',                color: '#b45309',                   bar: 'linear-gradient(90deg,#f59e0b,#fbbf24)', solid: '#f59e0b' },
+    error: { grad: 'linear-gradient(90deg,#ef4444,#f97316)',         bg: '#fee2e2',                color: '#b91c1c',                   bar: 'linear-gradient(90deg,#ef4444,#f97316)', solid: '#ef4444' },
+};
+
+function _stStateIcon(f, size = '.9rem') {
+    const ico = f.ok ? 'bi-check-circle-fill text-success'
+              : f.unknown ? 'bi-question-circle text-secondary'
+              : f.warn ? 'bi-exclamation-triangle-fill text-warning'
+              : 'bi-x-circle-fill text-danger';
+    return `<i class="bi ${ico}" style="font-size:${size};flex-shrink:0"></i>`;
+}
+
+function _stStateLabel(f) {
+    return f.ok ? t('status_ok') : f.unknown ? '—' : f.warn ? t('status_warning') : t('status_error');
+}
+
+function _stStatePill(f) {
+    const p = ST_PAL[f.state];
+    return `<span class="rounded-pill px-2 py-0 fw-bold flex-shrink-0"
+        style="font-size:.68rem;background:${p.bg};color:${p.color}">${esc(_stStateLabel(f))}</span>`;
+}
+
+/** The counts, as one line. Used by the summary header and by each view's own header, so a
+ *  view never has to decide how to phrase "119 OK, 6 warning, 3 error". */
+function _stTotalsHtml(tt) {
+    const bit = (n, cls, ico, label) => n
+        ? `<span class="d-inline-flex align-items-center gap-1 ${cls}">
+               <i class="bi ${ico}"></i>${n} ${esc(label)}</span>` : '';
+    return `<span class="d-flex align-items-center gap-3 flex-wrap ss-fs-3">
+        <span class="fw-semibold">${tt.total} ${esc(t('st_checks'))}</span>
+        ${bit(tt.ok,   'text-success',          'bi-check-circle-fill',        t('status_ok'))}
+        ${bit(tt.warn, 'text-warning-emphasis', 'bi-exclamation-triangle-fill', t('status_warning'))}
+        ${bit(tt.err,  'text-danger',           'bi-x-circle-fill',            t('status_error'))}
+    </span>`;
+}
+
+/** The one bar above the results: what there is, and the three controls that change what
+ *  you see of it — filter, view, "only problems".
+ *
+ *  They live WITH the totals rather than in a row of their own, and rather than in the
+ *  Scheduler toolbar where there is visibly room: that toolbar only exists for a user with
+ *  `checks_run`, and filtering or switching view is reading, not running. Putting them there
+ *  would take both controls away from exactly the people who can only look.
+ */
+function _stResultsHeader(tt, extra = '') {
+    // The controls are one nowrap group: they belong together, and letting them wrap
+    // individually is how the switcher ended up alone on a second line with the bar half
+    // empty. Bootstrap's .input-group is `width:100%`, so inside a flex row it demands the
+    // whole line unless given a definite size — hence the explicit width + `flex:0 0 auto`
+    // rather than a max-width, which caps it without telling flex how much it actually wants.
+    return `<div class="d-flex align-items-center gap-3 flex-wrap mb-3 px-3 py-2 rounded-3 border"
+                 style="background:var(--bs-tertiary-bg)">
+        ${_stTotalsHtml(tt)}
+        <span class="ms-auto d-flex align-items-center gap-2 flex-nowrap">
+            ${extra}
+            ${_stProblemsToggle()}
+            <div class="input-group input-group-sm flex-nowrap" style="width:14rem;flex:0 0 auto">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="search" id="stSearch" class="form-control" value="${escAttr(_stFilterTerm)}"
+                       placeholder="${escAttr(t('st_search'))}" oninput="_stFilter(this.value)">
+            </div>
+            ${_stViewSwitcher()}
+        </span>
+    </div>`;
+}
+
+function _stEmptyState() {
+    const filtering = _stOnlyProblems || !!_stFilterTerm.trim();
+    return `<div class="text-center py-5 text-muted">
+        <i class="bi ${filtering ? 'bi-check2-circle' : 'bi-inbox'} ss-empty-icon"></i>
+        <span>${esc(filtering ? (t('st_no_problems') || 'Nothing to report')
+                              : t('status_empty'))}</span>
+    </div>`;
+}

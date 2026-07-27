@@ -1,0 +1,63 @@
+{# ================================================================
+   Status — view: one row per CHECK.
+
+   The card grid groups by module, which is the right grouping for configuring and the wrong
+   one for triage: "what is broken right now" is a question about checks, and the answer is
+   currently spread across however many cards happen to contain a failure.
+
+   Flattened, the failures are the first rows and everything about them — module, check,
+   reason, value against threshold — is on one line, comparable at a glance. It is also the
+   view that survives scale: three hundred checks is three hundred rows, where it would be
+   forty cards to open.
+
+   Sorted worst first by default, for the same reason the summary view is: the page should
+   not make you look for what it already knows.
+   ================================================================ #}
+
+function _stViewTable(c, data) {
+    const tt = _stTotals(data);
+    // Flatten to checks, keeping the module order _stVisible decided (worst first) and
+    // ordering within a module the same way, so the very first row is the worst thing there is.
+    const rank = { error: 0, warn: 1, none: 2, ok: 3 };
+    const rows = [];
+    for (const [, , st] of _stVisible(data)) {
+        rows.push(..._stShownRows(st).sort((a, b) => rank[a.state] - rank[b.state]
+            || a.name.localeCompare(b.name)));
+    }
+    const q = _stFilterTerm.trim().toLowerCase();
+    // The module filter already ran; narrowing to matching CHECKS only makes sense once the
+    // term actually matches some, or searching a module name would empty its own rows.
+    const shown = (q && rows.some(r => r.name.toLowerCase().includes(q)))
+        ? rows.filter(r => r.name.toLowerCase().includes(q)) : rows;
+
+    c.innerHTML = `
+        ${_stResultsHeader(tt)}
+        ${shown.length ? `<div class="ss-vscroll">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="ss-thead-sticky">
+                    <tr>
+                        <th class="small py-2" style="width:6rem">${esc(t('mod_state'))}</th>
+                        <th class="small py-2" style="width:12rem">${esc(t('module'))}</th>
+                        <th class="small py-2">${esc(t('st_check'))}</th>
+                        <th class="small py-2" style="width:12rem"></th>
+                    </tr>
+                </thead>
+                <tbody>${shown.map(_stTableRow).join('')}</tbody>
+            </table>
+        </div>` : _stEmptyState()}`;
+}
+
+function _stTableRow(f) {
+    const pretty = modulePrettyName(f.mod, modulesData[f.mod] || {});
+    return `<tr>
+        <td><span class="d-flex align-items-center gap-2">${_stStateIcon(f, '.85rem')}${_stStatePill(f)}</span></td>
+        <td class="text-truncate" title="${escAttr(pretty)}">
+            <span style="font-size:.85rem">${esc(pretty)}</span>
+        </td>
+        <td class="min-w-0">
+            <div class="text-truncate" style="font-size:.85rem" title="${escAttr(f.name)}">${esc(f.name)}</div>
+            ${f.msg ? `<div class="text-muted" style="font-size:.76rem;word-break:break-word">${esc(f.msg)}</div>` : ''}
+        </td>
+        <td class="text-end">${f.extraHtml}</td>
+    </tr>`;
+}
