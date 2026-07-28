@@ -136,8 +136,6 @@ document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', () 
     // (Bootstrap does not re-fire a sub-tab's shown event on a parent tab change).
     if (document.getElementById('subtab-srv-clusters')?.classList.contains('active')
         && typeof renderClusters === 'function') renderClusters();
-    if (document.getElementById('subtab-credentials')?.classList.contains('active')
-        && typeof renderCredentials === 'function') renderCredentials();
 });
 // Infrastructure sub-tabs: render on demand; persist the active sub-tab.
 document.getElementById('btn-subtab-srv-clusters')?.addEventListener('shown.bs.tab', () => {
@@ -152,9 +150,9 @@ document.getElementById('btnResetPasswordOk').addEventListener('click', resetUse
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
 document.getElementById('btnGroupModalOk').addEventListener('click', saveGroupModal);
 
-// Credentials now lives under Infrastructure: re-fetch on open (load-on-access) + persist key.
-document.getElementById('btn-subtab-credentials')?.addEventListener('shown.bs.tab', async () => {
-    localStorage.setItem('ss_active_subtab_infra', '#subtab-credentials');
+// Credentials is a section of its own: re-fetch on open (load-on-access). No sub-tab key to
+// persist any more — the sidebar's own ss_active_tab remembers it like every other section.
+document.getElementById('btn-tab-credentials')?.addEventListener('shown.bs.tab', async () => {
     await loadCredentials();
     renderCredentials();
 });

@@ -141,6 +141,7 @@
 117. [Marcado que no hace lo que sugiere el nombre de la clase](#117-marcado-que-no-hace-lo-que-sugiere-el-nombre-de-la-clase)
 118. [Páginas de módulo — cuatro layouts que son del núcleo](#118-páginas-de-módulo--cuatro-layouts-que-son-del-núcleo-no-de-un-módulo)
 119. [Ejecutar un check una vez — la proyección es el contrato](#119-ejecutar-un-check-una-vez--la-proyección-es-el-contrato)
+120. [Credentials es una sección, no una sub-pestaña](#120-credentials-es-una-sección-no-una-sub-pestaña-de-infrastructure)
 
 ---
 
@@ -5267,3 +5268,42 @@ la respuesta). Verificado quitando `severity`: falla nombrándolo.
 | `TestASeveritySurvivesTheRun::test_a_field_the_module_never_set_reads_as_empty_not_missing` | Quien tenga que preguntar si la clave existe acabará olvidándolo, y la rama que olvide es la ámbar |
 | `TestItRunsTheRealCheck::*` (×2) | Un módulo sin `Watchful` no corre en silencio; un resultado no-dict no es fatal |
 | `TestTheStandInIsAMonitor::test_is_a_monitor` | La firma tiene que reflejar `Monitor.send_message` o cualquier módulo que avise revienta |
+
+---
+
+## 120. Credentials es una sección, no una sub-pestaña de Infrastructure
+
+**Archivo:** `tests/test_wa_credentials_section.py` — 11 tests
+
+Credentials llegó a Infrastructure cuando el catálogo eran **identidades SSH reutilizables**, y
+el comentario que justificaba la mudanza decía exactamente eso. Dejó de ser verdad: la mitad
+del catálogo son hoy registros de aplicación de Entra ID —se alcanzan por *tenant*, sin ningún
+host detrás— y los flujos construidos alrededor (rotar un secreto, conceder y consentir los
+roles que le faltan a una app) no tocan ninguna máquina.
+
+Dos razones estructurales, más allá de la población. Sus vecinas bajo Infrastructure —Servers
+y Clusters— son **cosas que monitorizas**; una credencial no se monitoriza, es el secreto con
+el que alcanzas otras cosas. Y sus consumidores están repartidos entre hosts, módulos y
+proveedores, así que colgarla de cualquiera de los tres afirma una pertenencia que no existe.
+Tampoco a Access: ahí viven usuarios, grupos, roles y sesiones —*quién entra al panel*—, y
+estas son identidades de máquina que el panel usa hacia fuera.
+
+De paso se cazó un puntero podrido: el widget de Overview declaraba `nav: {tab: '#tab-access',
+sub: '#subtab-credentials'}` mucho después de que la pestaña se hubiera ido de Access, así que
+al pulsarlo abría el panel equivocado y luego buscaba una sub-pestaña que vivía dentro de un
+tercero. **Un destino muerto es peor que uno ausente**: Bootstrap no activa nada y no dice
+nada, así que la sección simplemente no se abre y no hay error que seguir.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_every_file_is_found` | Las siete superficies que participan |
+| `TestItIsATopLevelSection::test_the_sidebar_lists_it_among_the_panel_tabs` | **La regla** |
+| `TestItIsATopLevelSection::test_it_declares_no_sub_tabs` | Una sección con sub-pestañas es un contenedor; esta tiene una sola lista |
+| `TestItIsATopLevelSection::test_the_pane_exists_and_the_shell_includes_it` | |
+| `TestItIsATopLevelSection::test_infrastructure_no_longer_carries_it` | Marcado huérfano es el que edita el siguiente |
+| `TestNothingStillPointsAtTheOldSubTab::test_no_file_targets_the_retired_sub_pane` | Un destino muerto no da error, solo no hace nada |
+| `TestNothingStillPointsAtTheOldSubTab::test_the_overview_widget_points_at_the_section` | **El puntero podrido** que cazó |
+| `TestNothingStillPointsAtTheOldSubTab::test_a_stored_sub_tab_from_before_does_not_strand_infrastructure` | Quien tuviera guardada la sub-pestaña vieja aterriza en una visible, no en ninguna |
+| `TestTheGateTravelledWithIt::test_the_section_is_shown_by_its_own_permissions` | |
+| `TestTheGateTravelledWithIt::test_infrastructure_is_no_longer_revealed_by_a_credential_permission` | Antes `credentials_view` abría Infrastructure por ella; ahora sería una pestaña vacía |
+| `TestTheGateTravelledWithIt::test_it_still_loads_on_access` | Cargar al abrir, no al arrancar: un panel que precargara todo pagaría por todas para enseñar una |

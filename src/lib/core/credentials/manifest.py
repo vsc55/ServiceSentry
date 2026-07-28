@@ -24,7 +24,9 @@ OVERVIEW_WIDGETS = [
     {'id': 'credentials', 'icon': 'bi-key', 'label_key': 'overview_credentials',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 90,
      'perms': {'any': ['credentials_view', 'servers_view', 'modules_view']},
-     'nav': {'tab': '#tab-access', 'sub': '#subtab-credentials'},
+     # Its own section. This said #tab-access long after the tab had left Access, so the
+     # widget opened the wrong pane and then looked for a sub-tab living inside a third one.
+     'nav': {'tab': '#tab-credentials'},
      'stat': credentials_stat,
      'view': {'kind': 'stat', 'icon': 'bi-key-fill', 'label_key': 'overview_credentials',
               'accent': 'teal', 'data_url': '/api/v1/overview/widget/credentials'}},

@@ -8,6 +8,29 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.13] - 2026-07-28
+
+### Changed
+- **Credentials is a section of its own, not a sub-tab of Infrastructure.** It went there when
+  the catalogue was reusable SSH identities — genuinely a host concern, and the comment
+  justifying the move said so. That stopped being true: half of it is now Entra ID app
+  registrations, reached by tenant with no host behind them, and the flows built around them
+  (rotate a secret, grant and consent the roles an app is missing) never touch a machine. Two
+  structural reasons on top of the population: its neighbours there, Servers and Clusters, are
+  things you MONITOR, while a credential is the secret you reach other things WITH; and its
+  consumers are spread across hosts, modules and providers alike, so hanging it off any one of
+  them asserted a belonging that was not real. Not moved back to Access either — that is users,
+  groups, roles and sessions, meaning who may enter the panel, and these are machine identities
+  the panel uses on its way out.
+- It keeps its own permissions, so nothing changes about who sees it. What did change: holding
+  only `credentials_view` no longer reveals Infrastructure, which would now be an empty tab.
+
+### Fixed
+- The Credentials overview widget navigated to the wrong place. It declared `#tab-access` long
+  after the tab had left Access, then looked for a sub-tab that lived inside a third pane — and
+  a dead target is worse than a missing one, because Bootstrap activates nothing and reports
+  nothing, so the click just did not work and left no error to follow.
+
 ## [0.0.1+build.12] - 2026-07-28
 
 ### Added

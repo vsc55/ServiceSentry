@@ -112,6 +112,11 @@
         {% if not standalone %}
         {% include "partials/servers/_pane.html" %}
 
+        <!-- ==================== Credentials Tab ==================== -->
+        {% endif %}
+        {% if not standalone %}
+        {% include "partials/credentials/_pane.html" %}
+
         <!-- ==================== Status Tab ===================== -->
         {% endif %}
         {% if not standalone %}

@@ -128,8 +128,8 @@ if (stRoles) stRoles.style.display = hasAnyRole ? '' : 'none';
 // only roles_edit makes a checkbox writable (enforced again server-side).
 const stPerms = document.getElementById('subtab-permissions-li');
 if (stPerms) stPerms.style.display = hasAnyRole ? '' : 'none';
-// Activate saved sub-tab (or fall back to first visible). Credentials moved to
-// Infrastructure, so it is no longer part of the Access sub-tab set.
+// Activate saved sub-tab (or fall back to first visible). Credentials is its own section
+// now, so it is part of neither the Access nor the Infrastructure sub-tab set.
 const _savedSubtabTarget = localStorage.getItem('ss_active_subtab_access');
 const _savedSubtabBtn = _savedSubtabTarget
     ? document.querySelector(`[data-bs-target="${_savedSubtabTarget}"]`) : null;
@@ -147,9 +147,13 @@ if (overviewLi) overviewLi.style.display = perms.has('overview_view') ? '' : 'no
 // Modules tab
 const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
-// Infrastructure tab (Servers + Cluster + Credentials sub-tabs). Shows when the
-// user can see hosts OR manage modules (cluster are multi-bind module checks) OR
-// manage credentials (reusable SSH identities — an infrastructure concern).
+// Credentials is a section of its own, gated only by its own permissions: it stopped being
+// an Infrastructure sub-tab when half the catalogue became tenant-level app registrations
+// with no host behind them.
+const credentialsLi = document.getElementById('tab-credentials-li');
+if (credentialsLi) credentialsLi.style.display = hasAnyCredential ? '' : 'none';
+// Infrastructure tab (Servers + Cluster sub-tabs). Shows when the user can see hosts
+// OR manage modules (cluster are multi-bind module checks).
 const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
 // Cluster are their OWN resource: gated strictly by cluster_* (global) or any
@@ -157,21 +161,20 @@ const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => 
 const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('cluster.'));
 const serversLi = document.getElementById('tab-servers-li');
-if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster || hasAnyCredential) ? '' : 'none';
-// Sub-tabs: Servers gated by host perms, Cluster by cluster perms, Credentials by
-// credential perms.
+if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster) ? '' : 'none';
+// Sub-tabs: Servers gated by host perms, Cluster by cluster perms.
 const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
 if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
 const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
 if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
-const stCredentials = document.getElementById('subtab-credentials-li');
-if (stCredentials) stCredentials.style.display = hasAnyCredential ? '' : 'none';
-// Activate the saved infra sub-tab, or the first visible one.
+// Activate the saved infra sub-tab, or the first visible one. A stored #subtab-credentials
+// from before the promotion resolves to no element, so it falls through to the first
+// visible one rather than leaving Infrastructure with nothing selected.
 const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
 const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
 const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
     ? _savedInfraBtn
-    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters','btn-subtab-credentials']
+    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters']
         .map(id => document.getElementById(id))
         .find(btn => btn && btn.closest('li')?.style.display !== 'none');
 if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();

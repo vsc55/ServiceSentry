@@ -76,7 +76,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `modules_delete` | Eliminar entradas de módulo |
 | **Servers** | `servers_view` `servers_add` `servers_edit` `servers_delete` | CRUD del registro de hosts |
 | **Clusters** | `clusters_view` `clusters_add` `clusters_edit` `clusters_delete` | CRUD de clusters (checks multi-bind) |
-| **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de identidades SSH reutilizables |
+| **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de credenciales reutilizables: identidades SSH y registros de aplicación de Entra ID (`azure_app`, `m365_app`), tokens de API (Proxmox, NUT, HTTP, datastore). Sección propia dentro de System |
 | **Config** | `config_view` | Leer configuración sin poder editarla |
 | | `config_edit` | Guardar cambios en configuración |
 | **Overview** | `overview_view` | Ver el dashboard de resumen |
