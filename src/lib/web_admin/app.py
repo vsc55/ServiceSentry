@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from urllib.parse import urlparse
 
 from flask import (Flask, flash, g, has_request_context, jsonify,
@@ -24,12 +24,9 @@ from lib.security import csrf as _csrf, secret_manager
 from lib.security.headers import apply_security_headers
 from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
 from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
-from lib.core.permissions import (
-    PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
-)
+from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
 from .constants import HOME_PAGES
-from lib.config.spec import (
-    CFG_BY_PATH, cfg_validate, env_field_specs, normalize_url, registry_defaults)
+from lib.config.spec import CFG_BY_PATH, normalize_url, registry_defaults
 from lib.config.layout import config_layout
 from lib.providers.entraid.declarations import (
     DEFAULT_APP_NAME as _ENTRA_APP_DEFAULT,
@@ -42,13 +39,6 @@ from lib.providers.ldap import auth as _ldap_auth
 from lib.providers.oidc import auth as _oidc_auth
 from lib.providers.saml import auth as _saml_auth
 
-# Maps environment variable names to (config_path, expected_type), derived from
-# the central registry (lib.config.spec).  Env vars are runtime-only
-# overrides — never written to config.json; fields with a valid env var appear
-# locked in the UI.
-_ENV_FIELD_SPECS: dict[str, tuple[str, type]] = env_field_specs()
-
-
 def _cfg_default(path: str):
     """Default value of a config field, from the central registry.
 
@@ -57,7 +47,8 @@ def _cfg_default(path: str):
     default means editing only ``config_spec.CONFIG_FIELDS``.
     """
     return CFG_BY_PATH[path].default
-from .mixins import _AuthMixin, _FreshnessMixin, _ServicesMixin
+from .mixins import (_AuthMixin, _EmbedMixin, _FreshnessMixin, _ScannersMixin,
+                     _ServicesMixin, _StoresMixin)
 # fail2ban host glue lives with its service package (lib.services.ipban), like the
 # syslog/events managers — inherited here because the request gate is host-level.
 from lib.services.ipban.manager import _IpBanMixin
@@ -72,6 +63,7 @@ from lib.core.users.mixin import _UsersMixin
 from lib.core.roles.mixin import _RolesMixin
 from lib.core.groups.mixin import _GroupsMixin
 from lib.core.audit.mixin import _AuditMixin
+from lib.core.config.mixin import _ConfigMixin
 
 __all__ = ['WebAdmin']
 
@@ -82,7 +74,8 @@ __all__ = ['WebAdmin']
 # discovers + controls them.
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
-               _IpBanMixin, _FreshnessMixin):
+               _IpBanMixin, _FreshnessMixin, _StoresMixin, _ConfigMixin,
+               _ScannersMixin, _EmbedMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -449,172 +442,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _init_entity_store(self) -> None:
-        """Create the shared DB connector and the entity stores on top of it.
-
-        A single :class:`lib.db.BaseConnector` (SQLite by default; PostgreSQL/
-        MySQL via the ``database`` config section) is shared by the users,
-        groups, sessions and roles stores so they never open the database
-        directly nor fight over separate connections.
-        """
-        from lib.db             import get_connector, reconcile_module_tables  # noqa: PLC0415
-        from lib.core.users.store  import UsersStore   # noqa: PLC0415
-        from lib.core.groups.store import GroupsStore  # noqa: PLC0415
-        from lib.core.sessions.store import SessionsStore   # noqa: PLC0415
-        from lib.core.roles.store  import RolesStore   # noqa: PLC0415
-        from lib.config.manager import bootstrap_database_cfg  # noqa: PLC0415
-        db_path = os.path.join(self._var_dir or self._config_dir, 'data.db')
-        db_cfg  = bootstrap_database_cfg(self._read_config_file(self._CONFIG_FILE))
-        self._db_connector   = get_connector(db_cfg or None, default_sqlite_path=db_path)
-        self._users_store    = UsersStore(self._db_connector)
-        self._groups_store   = GroupsStore(self._db_connector)
-        self._sessions_store = SessionsStore(self._db_connector)
-        self._roles_store    = RolesStore(self._db_connector)
-        # Internal fail2ban — the jail + its persistent store live on the shared
-        # connector so every in-process service (web + syslog) enforces one ban list.
-        # Internal fail2ban: shared, store-backed jail manager (persistent + consistent
-        # across processes). Wiring lives in _IpBanMixin.
-        self._init_ipban()
-        # Host registry — connection profiles defined once, reused by modules.
-        from lib.core.hosts.store import HostsStore  # noqa: PLC0415
-        self._hosts_store = HostsStore(
-            self._db_connector,
-            fernet=self._get_fernet(),
-            secret_keys=getattr(self, '_secret_keys', None),
-        )
-        # Reusable named credentials (SSH identities referenced by hosts/checks).
-        from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
-        self._credentials_store = CredentialsStore(
-            self._db_connector,
-            fernet=self._get_fernet(),
-            secret_keys=getattr(self, '_secret_keys', None),
-        )
-        # Notification routing lives in the core-owned, web_admin-independent
-        # NotificationRouter: it *owns* the channel stores (webhooks + Teams channels +
-        # the Teams bot conversation-reference store) and does the fan-out.  The web admin
-        # builds one from an explicit NotifyContext and reaches its stores via ``_notify``
-        # (CRUD routes, config bundle) — no per-host channel wiring.
-        from lib.core.notify.context import NotifyContext  # noqa: PLC0415
-        from lib.core.notify.router import NotificationRouter  # noqa: PLC0415
-        self._notify = NotificationRouter(NotifyContext(
-            db=self._db_connector,
-            read_config=lambda: self._read_config_file(self._CONFIG_FILE),
-            fernet=self._get_fernet(),
-            secret_keys=getattr(self, '_secret_keys', None),
-            dbg=self._dbg,
-            audit=getattr(self, '_audit', None) or (lambda *a, **k: None),
-            public_url=getattr(self, 'public_base_url', None),
-            panel_user_emails=self._panel_user_emails,
-            config_file=self._CONFIG_FILE,
-        ))
-        # Event→notification subsystem stores (rules, sent-log, worker state).
-        from lib.services.events.store import (  # noqa: PLC0415
-            EventRulesStore, EventStateStore, NotificationLogStore)
-        self._event_rules_store = EventRulesStore(self._db_connector)
-        self._notification_log_store = NotificationLogStore(self._db_connector)
-        # Persisted cooldown + per-source cursor for the decoupled event worker.
-        self._event_state_store = EventStateStore(self._db_connector)
-        # Observed-state registry for background services (the heartbeat): every
-        # instance — embedded here or in another pod — upserts its liveness row;
-        # the Services tab reads them. Shared connector, so a --monitor worker and
-        # this process see the same rows.
-        from lib.services.manager.instances import ServiceInstancesStore  # noqa: PLC0415
-        self._service_instances_store = ServiceInstancesStore(self._db_connector)
-        # Imperative one-shot command queue (run-now/reload/clear): the UI enqueues,
-        # the hosting instance (embedded here or a remote pod) claims + runs it.
-        from lib.services.manager.commands import ServiceCommandsStore  # noqa: PLC0415
-        self._service_commands_store = ServiceCommandsStore(self._db_connector)
-        # Leader lease for single-owner services (monitor/events): only the holder
-        # does the work, extra replicas are hot standby with TTL failover.
-        from lib.services.manager.leader import ServiceLeaderStore  # noqa: PLC0415
-        self._service_leader_store = ServiceLeaderStore(self._db_connector)
-        # Watchful module/item configuration (DB-backed, shared with the monitor
-        # through the same database).
-        from lib.core.modules.store import ModulesStore    # noqa: PLC0415
-        from lib.core.modules.facade import DbBackedModules  # noqa: PLC0415
-        self._modules_store = ModulesStore(self._db_connector)
-        self._modules_facade = DbBackedModules(
-            self._modules_store,
-            fernet=self._get_fernet(),
-            secret_keys=getattr(self, '_secret_keys', None),
-        )
-        self._modules_facade.read()
-        # Editable configuration: a row per ``section|field`` in the DB, owned by
-        # the single ConfigManager (the one place that reads/writes config).
-        from lib.core.config.store import ConfigStore     # noqa: PLC0415
-        from lib.config.manager import ConfigManager  # noqa: PLC0415
-        self._config_store = ConfigStore(self._db_connector)
-        self._config_mgr = ConfigManager(
-            self._config_store,
-            os.path.join(self._config_dir, self._CONFIG_FILE),
-            fernet=self._get_fernet(),
-            secret_keys=getattr(self, '_secret_keys', None),
-        )
-        # Let watchful modules create their own tables on the shared connector.
-        try:
-            reconcile_module_tables(self._db_connector)
-        except Exception:  # pylint: disable=broad-except
-            pass
-
-    def _init_history(self):
-        """Create a HistoryStore on the shared connector (or its own if absent)."""
-        if not self._var_dir:
-            return None
-        try:
-            from lib.core.history.store import HistoryStore, create as _create_history  # noqa: PLC0415
-            connector = getattr(self, '_db_connector', None)
-            if connector is not None:
-                return HistoryStore(connector)
-            db_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
-            return _create_history(
-                db_cfg or None,
-                sqlite_path=os.path.join(self._var_dir, 'data.db'),
-            )
-        except Exception:  # pylint: disable=broad-except
-            return None
-
-    def _init_check_state(self):
-        """Create the CheckStateStore (the DB-backed replacement for status.json)."""
-        if not self._var_dir:
-            return None
-        try:
-            from lib.services.monitoring.check_state import CheckStateStore, create as _create_cs  # noqa: PLC0415
-            connector = getattr(self, '_db_connector', None)
-            if connector is not None:
-                return CheckStateStore(connector)
-            db_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('database')
-            return _create_cs(
-                db_cfg or None,
-                sqlite_path=os.path.join(self._var_dir, 'data.db'),
-            )
-        except Exception:  # pylint: disable=broad-except
-            return None
-
-    def _init_syslog_stores(self) -> None:
-        """Create the shared syslog DB connector + stores.
-
-        They are host infrastructure shared by the embedded listener, the decoupled
-        event worker and the Syslog tab; the listener *server* lifecycle lives in
-        the embedded syslog service object (``lib.services.syslog.embedded``)."""
-        self._syslog_store = None
-        self._syslog_drops_store = None
-        self._syslog_db_connector = None
-        connector = getattr(self, '_db_connector', None)
-        if connector is None:
-            return
-        try:
-            from lib.db import build_syslog_connector  # noqa: PLC0415
-            from lib.services.syslog.store import SyslogStore, SyslogDropsStore  # noqa: PLC0415
-            from lib.config.manager import overlay_section_env  # noqa: PLC0415
-            var = self._var_dir or self._config_dir or ''
-            sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
-            self._syslog_db_connector = build_syslog_connector(
-                sdb, main_connector=connector,
-                default_sqlite_path=os.path.join(var, 'syslog.db'))
-            self._syslog_store = SyslogStore(self._syslog_db_connector)
-            self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
-        except Exception:  # pylint: disable=broad-except
-            pass
 
     def _notify_lang(self) -> str:
         """Effective system notification language (global ``notifications|lang``, then the
@@ -641,240 +468,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         except Exception:  # pylint: disable=broad-except
             return {}
 
-    def _apply_saved_config(self) -> None:
-        """Read config.json and apply persisted settings to runtime attributes.
-
-        Called once at startup so that policy/preference changes saved from
-        a previous session take effect without requiring a manual re-save.
-        ``_create_app`` is intentionally called *after* this method so that
-        Flask-level settings (session lifetime, secure cookies, proxy count)
-        are already correct when the app is built.
-        """
-        data = self._read_config_file(self._CONFIG_FILE)
-        if not data:
-            return
-        # Boot: the Flask app isn't built yet (``_create_app`` runs after), so live=False —
-        # only runtime attributes are set, not Flask-level config.
-        self._apply_config_attrs(data)
-
-    def _apply_config_attrs(self, data: dict, *, live: bool = False) -> None:
-        """Apply persisted config values to runtime attributes — the shared core of both boot
-        (:meth:`_apply_saved_config`) and save (:meth:`_apply_config_on_save`).
-
-        Covers the INT/BOOL registry rules, the password-length clamp, lang/status-lang/
-        dark-mode/secure-cookies, public_url, the landing page and the fail2ban settings.
-        When *live* is True the Flask app already exists, so Flask-level settings (the
-        ``flask_cfg`` mirrors + ``SESSION_COOKIE_SECURE``) are pushed onto ``self._app`` too.
-        """
-        from lib.core.config.service import INT_RULES, BOOL_RULES  # local import avoids circular
-        wa_cfg = data.get('web_admin') or {}
-        # Integer rules (values in a saved config are already in valid range).
-        for path, rule in INT_RULES.items():
-            if rule['attr'] is None:
-                continue
-            section, field = path.split('|')
-            v = (data.get(section) or {}).get(field)
-            if not (isinstance(v, int) and not isinstance(v, bool)):
-                continue   # absent/null = leave the runtime value unchanged (save contract)
-            setattr(self, rule['attr'], v)
-            if live and 'flask_cfg' in rule:
-                cfg_key, transform = rule['flask_cfg']
-                self._app.config[cfg_key] = transform(v)
-        # Boolean rules
-        for path, attr in BOOL_RULES.items():
-            if attr is None:
-                continue
-            section, field = path.split('|')
-            v = (data.get(section) or {}).get(field)
-            if isinstance(v, bool):
-                setattr(self, attr, v)
-        # Ensure pw_max_len >= pw_min_len after both are applied
-        if self._PW_MAX_LEN < self._PW_MIN_LEN:
-            self._PW_MAX_LEN = self._PW_MIN_LEN
-        # Language (keep current value if the saved one is missing/invalid)
-        self._default_lang = coerce_lang(wa_cfg.get('lang', ''), self._default_lang)
-        # Status-page language (empty string = use default)
-        if 'status_lang' in wa_cfg and isinstance(wa_cfg['status_lang'], str):
-            self._STATUS_LANG = coerce_lang(wa_cfg['status_lang'], '')
-        # Dark mode default
-        new_dm = wa_cfg.get('dark_mode')
-        if isinstance(new_dm, bool):
-            self._default_dark_mode = new_dm
-        # Secure cookies (at boot _create_app reads self._secure_cookies directly; on a live
-        # save the app already exists, so push it onto the running app's config too).
-        new_sec = wa_cfg.get('secure_cookies')
-        if isinstance(new_sec, bool):
-            self._secure_cookies = new_sec
-            if live:
-                self._app.config['SESSION_COOKIE_SECURE'] = new_sec
-        # Public URL for external links and notifications (stored without scheme)
-        if 'public_url' in wa_cfg and isinstance(wa_cfg['public_url'], str):
-            self._public_url = normalize_url(wa_cfg['public_url'])
-        # Default landing page (string attr not covered by INT/BOOL rules) — resolves the
-        # post-login destination for users/groups that don't override it.
-        self._landing_page = str(wa_cfg.get('landing_page') or 'admin')
-        # Framing allowlist (who may iframe the panel): admin-defined origins + any registered
-        # embed profile whose flag is on (e.g. Teams). Precomputed (boot + save) so the
-        # per-response header hook stays cheap. At boot the embed profiles aren't registered
-        # yet (they are declared during register_all), so _create_app recomputes once more
-        # after routes are registered.
-        self._recompute_frame_ancestors()
-        # fail2ban master switch: a no_rule bool, so it is NOT in BOOL_RULES — apply it
-        # explicitly (like dark_mode/secure_cookies) so a persisted disable survives a
-        # restart instead of reverting to the class default at boot.
-        new_ipban = wa_cfg.get('ipban_enabled')
-        if isinstance(new_ipban, bool):
-            self._IPBAN_ENABLED = new_ipban
-        # fail2ban string fields + push into the live manager (it sets _IPBAN_DURATIONS /
-        # _IPBAN_WHITELIST from wa_cfg itself, wiring in _IpBanMixin).
-        self._apply_ipban_config(wa_cfg)
-
-    def _apply_config_on_save(self, old_data: dict, new_data: dict, to_apply: dict) -> None:
-        """Apply a just-saved config to the running instance: the shared runtime attributes
-        (:meth:`_apply_config_attrs` with ``live=True``) plus the save-only side-effects —
-        re-apply the log level, invalidate the config cache, let every embedded service react,
-        poke dedicated-container instances, flag a restart when port/proxy/syslog_db change,
-        and rebuild ProxyFix for the (possibly new) proxy depth."""
-        from lib.core.config.service import syslog_db_changed  # local import avoids circular
-        # Re-apply the log level immediately so a verbosity change takes effect for request
-        # tracing without waiting for a restart.
-        self._apply_log_level()
-        # Let every background service react to the config change — each owns its own rule
-        # (syslog re-applies ports/allowlist or stops; a disabled monitor stops; …). Iterating
-        # the registry keeps this generic, so a new service reacts without touching this code.
-        self._invalidate_config_cache()
-        for svc in getattr(self, '_embedded_services', {}).values():
-            svc.on_config_changed(to_apply)
-        # Accelerate convergence on services owned by a dedicated container: poke their
-        # instances so a desired-state edit applies now (the periodic reconcile would catch up).
-        poke = getattr(self, '_poke_services_for_config', None)
-        if poke is not None:
-            poke(to_apply)
-        _pre_port, _pre_proxy = self._WEB_PORT, self._proxy_count
-        self._apply_config_attrs(new_data, live=True)
-        if self._WEB_PORT != _pre_port or self._proxy_count != _pre_proxy:
-            self._restart_pending = True
-        # The syslog database connector is built at startup; any change needs a restart to
-        # take effect (like the system database section).
-        if syslog_db_changed(old_data, new_data):
-            self._restart_pending = True
-        # The system database connector and the bind host are also read once at startup —
-        # a change to either needs a restart (mirrors syslog_db / the web port above).
-        if (old_data.get('database') or {}) != (new_data.get('database') or {}):
-            self._restart_pending = True
-        if (old_data.get('web_admin') or {}).get('host') != \
-                (new_data.get('web_admin') or {}).get('host'):
-            self._restart_pending = True
-        # Rebuild ProxyFix for the (possibly new) trusted-proxy depth.
-        if isinstance(self._app.wsgi_app, ProxyFix):
-            self._app.wsgi_app = self._app.wsgi_app.app
-        if self._proxy_count > 0:
-            self._app.wsgi_app = ProxyFix(
-                self._app.wsgi_app,
-                x_for=self._proxy_count, x_proto=self._proxy_count,
-                x_host=self._proxy_count, x_prefix=self._proxy_count,
-            )
-
-    @staticmethod
-    def _parse_env_var(raw: str, cast: type) -> tuple:
-        """Parse and validate a raw env var string. Returns (value, error_str|None)."""
-        if cast is bool:
-            if raw.lower() in ('1', 'true', 'yes'):
-                return True, None
-            if raw.lower() in ('0', 'false', 'no'):
-                return False, None
-            return None, f"expected true/false/yes/no/1/0, got {raw!r}"
-        if cast is int:
-            try:
-                return int(raw), None
-            except ValueError:
-                return None, f"expected integer, got {raw!r}"
-        return raw, None  # str: always valid
-
-    def _apply_env_overrides(self) -> None:
-        """Apply env var overrides to runtime attrs. Never modifies config files.
-
-        Valid env vars override the saved config at runtime and lock the field in
-        the UI.  Invalid values (wrong type, out of range, unsupported language)
-        are printed as warnings; those fields are NOT locked and the saved config
-        value remains in effect.
-        """
-        from lib.core.config.service import INT_RULES, BOOL_RULES  # local import avoids circular
-
-        locked: set[str] = set()
-        overrides: dict[str, object] = {}
-
-        for env_key, (path, cast) in _ENV_FIELD_SPECS.items():
-            raw = os.environ.get(env_key)
-            if not raw:
-                continue
-
-            value, err = self._parse_env_var(raw, cast)
-            if err:
-                print(
-                    f'[ServiceSentry] WARNING: env var {env_key}={raw!r} is invalid'
-                    f' ({err}) — saved config value will be used, field will not be locked',
-                    flush=True,
-                )
-                continue
-
-            section, field = path.split('|')
-
-            # Range check for integer fields defined in INT_RULES
-            if cast is int and path in INT_RULES:
-                rule = INT_RULES[path]
-                ok, _err = cfg_validate(path, value)
-                if not ok:
-                    print(
-                        f'[ServiceSentry] WARNING: env var {env_key}={raw!r} value {value}'
-                        f' is out of range [{rule["min"]}, {rule["max"]}]'
-                        f' — saved config value will be used, field will not be locked',
-                        flush=True,
-                    )
-                    continue
-
-            # Language validation
-            if section == 'web_admin' and field == 'lang' and value not in SUPPORTED_LANGS:
-                print(
-                    f'[ServiceSentry] WARNING: env var {env_key}={raw!r} is not a'
-                    f' supported language ({", ".join(SUPPORTED_LANGS)})'
-                    f' — saved config value will be used, field will not be locked',
-                    flush=True,
-                )
-                continue
-
-            locked.add(path)
-            overrides[path] = value
-
-            # Apply to runtime attrs (web_admin section only)
-            if section != 'web_admin':
-                continue
-
-            if path in INT_RULES:
-                setattr(self, INT_RULES[path]['attr'], value)
-            elif path in BOOL_RULES:
-                setattr(self, BOOL_RULES[path], value)
-            elif field == 'lang':
-                self._default_lang = value
-            elif field == 'status_lang':
-                self._STATUS_LANG = coerce_lang(value, '')
-            elif field == 'dark_mode':
-                self._default_dark_mode = bool(value)
-            elif field == 'secure_cookies':
-                self._secure_cookies = bool(value)
-            elif field == 'public_url':
-                self._public_url = normalize_url(value)
-            else:
-                # Generic fallback: any other web_admin env field with a registry attr
-                # (e.g. ipban_whitelist → _IPBAN_WHITELIST, ipban_enabled) is applied
-                # straight to that attr, so new env-overridable options need no case here.
-                from lib.config.spec import CFG_BY_PATH  # noqa: PLC0415
-                _cfg = CFG_BY_PATH.get(path)
-                if _cfg is not None and _cfg.attr:
-                    setattr(self, _cfg.attr, value)
-
-        self._env_locked = frozenset(locked)
-        self._env_override_values = overrides
 
     def _create_app(self) -> Flask:
         """Create and configure the Flask application."""
@@ -1270,52 +863,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         data = request.get_json(silent=True)
         return data if isinstance(data, dict) else {}
 
-    def _get_fernet(self):
-        """Return a cached Fernet instance derived from the Flask secret key."""
-        if not hasattr(self, '_fernet'):
-            self._fernet = secret_manager.fernet_from_secret_file(self._secret_key_path)
-        return self._fernet
-
-    @property
-    def _file_locked(self) -> frozenset:
-        """Paths pinned read-only in ``config.json`` — owned by the ConfigManager."""
-        mgr = getattr(self, '_config_mgr', None)
-        return mgr.file_locked if mgr is not None else frozenset()
-
-    def _read_config_file(self, filename: str) -> dict:
-        """Effective configuration (the single read), via the ConfigManager.
-
-        Before the manager exists (the bootstrap ``database`` read that builds the
-        connector) this falls back to a direct, un-merged disk read.
-        """
-        mgr = getattr(self, '_config_mgr', None)
-        if mgr is not None:
-            return mgr.read()
-        from lib.config.manager import read_config_raw  # noqa: PLC0415
-        return read_config_raw(os.path.join(self._config_dir, filename), self._get_fernet())
-
-    def _read_config_file_raw(self, filename: str) -> dict:
-        """The raw (un-merged) ``config.json`` — the manager's ``read_raw`` once it
-        exists, or a direct disk read during bootstrap."""
-        mgr = getattr(self, '_config_mgr', None)
-        if mgr is not None:
-            return mgr.read_raw()
-        from lib.config.manager import read_config_raw  # noqa: PLC0415
-        return read_config_raw(os.path.join(self._config_dir, filename), self._get_fernet())
-
-    def _invalidate_config_cache(self) -> None:
-        """Drop the cached effective config so the next read re-resolves it."""
-        mgr = getattr(self, '_config_mgr', None)
-        if mgr is not None:
-            mgr.invalidate()
-
-    def _config_section(self, name: str) -> dict:
-        """Return the *name* section of config.json as a dict (``{}`` if absent).
-
-        Single home for the ``(wa._read_config_file(...) or {}).get(name) or {}``
-        pattern repeated across auth/email/webhook/notify modules.
-        """
-        return (self._read_config_file(self._CONFIG_FILE) or {}).get(name) or {}
 
     def _csrf_token(self) -> str:
         """The per-session CSRF token (double-submit), injected into pages. Policy in
@@ -1368,21 +915,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         debug printer (gated by ``global|log_level``).  Never pass secrets."""
         ObjectBase.debug.print(msg, level)
 
-    def _write_config(self, data: dict, actor: str = '') -> bool:
-        """The single config writer — delegated to the ConfigManager.
-
-        Callers hand over the full (effective-shaped) config dict; the manager
-        routes editable ``section|field`` leaves to the DB (the single source) and
-        keeps the bootstrap ``database`` section, credentials and env/file-locked
-        overrides in ``config.json``.
-        """
-        mgr = getattr(self, '_config_mgr', None)
-        if mgr is None:                       # never in practice — routes run post-init
-            return False
-        mgr.env_locked = self._env_locked
-        ok = mgr.write(data, actor=actor)
-        self._dbg(f"> Config >> wrote via ConfigManager (ok={ok})", DebugLevel.debug)
-        return ok
 
     def _load_modules(self) -> dict:
         """Current watchful module/item configuration (DB-backed), decrypted and
@@ -1426,235 +958,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         from lib.core.notify import registry as _channels  # noqa: PLC0415
         return [{'key': name, 'label_key': f'notif_channel_{name}'} for name in _channels.channels()]
 
-    def _start_service_health_monitor(self) -> None:
-        """Launch the background service-health notifier (emits service_down / service_up
-        on heartbeat transitions).  Leader-gated so replicas don't double-alert; a no-op
-        when the instances store is absent.  Enable is read live (services|notify_down)."""
-        if getattr(self, '_service_health', None) is not None:
-            return
-        store = getattr(self, '_service_instances_store', None)
-        if store is None:
-            return
-        import os as _os  # noqa: PLC0415
-        import time as _time  # noqa: PLC0415
-        from lib.core.health.health import ServiceHealthMonitor  # noqa: PLC0415
-        from lib.services.heartbeat import hostname  # noqa: PLC0415
-        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
-        _inst_id = f'health-{hostname()}-{_os.getpid()}'
 
-        def _is_leader():
-            ls = getattr(self, '_service_leader_store', None)
-            if ls is None:
-                return True   # sole owner
-            try:
-                poll = int(self._config_section('services').get('health_poll_secs') or 30)
-            except (TypeError, ValueError):
-                poll = 30
-            try:
-                return bool(ls.try_acquire('svc_health', _inst_id, host=hostname(),
-                                           ttl=max(30, poll * 3)))
-            except Exception:  # pylint: disable=broad-except
-                return True
-
-        def _emit(kind, **fields):
-            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
-
-        self._service_health = ServiceHealthMonitor(
-            instances_provider=lambda: store.list_instances(),
-            dispatch=_emit,
-            config_getter=lambda: self._config_section('services'),
-            is_leader=_is_leader,
-            dbg=self._dbg,
-            text_fn=self._notify_text,
-        )
-        self._service_health.start(
-            poll_getter=lambda: self._config_section('services').get('health_poll_secs', 30))
-
-    def _start_cert_scanner(self) -> None:
-        """Launch the background certificate-expiry scanner (emits cert_expiring for
-        ssl_cert checks nearing expiry).  Leader-gated; enable read live (certs|notify_expiry)."""
-        if getattr(self, '_cert_scanner', None) is not None:
-            return
-        import os as _os  # noqa: PLC0415
-        import time as _time  # noqa: PLC0415
-        from lib.core.health.cert_scan import CertExpiryScanner, enumerate_targets  # noqa: PLC0415,E501
-        from lib.services.heartbeat import hostname  # noqa: PLC0415
-        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
-        _inst_id = f'certscan-{hostname()}-{_os.getpid()}'
-
-        def _host_address(uid):
-            store = getattr(self, '_hosts_store', None)
-            try:
-                return (store.get(uid) or {}).get('address') if store else None
-            except Exception:  # pylint: disable=broad-except
-                return None
-
-        def _targets():
-            try:
-                mods = self._modules_facade.read()
-            except Exception:  # pylint: disable=broad-except
-                return []
-            warn = self._config_section('certs').get('warn_days', 21)
-            return enumerate_targets(mods, host_address=_host_address, default_warn=warn)
-
-        def _is_leader():
-            ls = getattr(self, '_service_leader_store', None)
-            if ls is None:
-                return True
-            try:
-                return bool(ls.try_acquire('cert_scan', _inst_id, host=hostname(), ttl=3600))
-            except Exception:  # pylint: disable=broad-except
-                return True
-
-        def _emit(kind, **fields):
-            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
-
-        self._cert_scanner = CertExpiryScanner(
-            targets_provider=_targets,
-            dispatch=_emit,
-            config_getter=lambda: self._config_section('certs'),
-            is_leader=_is_leader,
-            dbg=self._dbg,
-            text_fn=self._notify_text,
-        )
-        self._cert_scanner.start(
-            poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
-
-    def _save_oidc_secret(self, secret: str, expires_at: str = '') -> bool:
-        """Persist a freshly minted OIDC client secret (and the expiry Entra granted).
-
-        Used by both the assisted rotation (device-code route) and the unattended one
-        (:class:`SecretExpiryScanner`).  ``expires_at`` is stored verbatim so the scanner
-        can compute the remaining life; an empty value simply means "unknown"."""
-        if not secret:
-            return False
-        cfg = self._read_config_file(self._CONFIG_FILE) or {}
-        cfg.setdefault('oidc', {})
-        cfg['oidc']['client_secret'] = secret
-        cfg['oidc']['secret_expires_at'] = expires_at or ''
-        return bool(self._write_config(cfg))
-
-    def _start_secret_scanner(self) -> None:
-        """Launch the background Entra client-secret scanner: warns before the OIDC secret
-        expires (``secret_expiring``) and, when ``oidc|secret_auto_rotate`` is on, mints a
-        replacement once inside ``oidc|secret_rotate_days`` (``secret_rotated``).
-
-        Unattended rotation authenticates the app **as itself** (client-credentials) and
-        therefore only works if the app may modify its own registration in Entra; when it
-        can't, rotation fails and the scanner degrades to warning only."""
-        if getattr(self, '_secret_scanner', None) is not None:
-            return
-        import os as _os  # noqa: PLC0415
-        import time as _time  # noqa: PLC0415
-        from lib.core.health.secret_scan import SecretExpiryScanner  # noqa: PLC0415
-        from lib.providers.entraid import auth as _ent_auth, provisioning as _ent_prov  # noqa: PLC0415,E501
-        from lib.services.heartbeat import hostname  # noqa: PLC0415
-        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
-        _inst_id = f'secretscan-{hostname()}-{_os.getpid()}'
-
-        def _is_leader():
-            ls = getattr(self, '_service_leader_store', None)
-            if ls is None:
-                return True
-            try:
-                return bool(ls.try_acquire('secret_scan', _inst_id, host=hostname(), ttl=3600))
-            except Exception:  # pylint: disable=broad-except
-                return True
-
-        def _emit(kind, **fields):
-            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
-
-        def _rotate():
-            """App-only token with the app's CURRENT secret → mint the next one."""
-            oidc = self._config_section('oidc')
-            tenant = _ent_auth.tenant_from_provider_url(oidc.get('provider_url', '') or '')
-            if not tenant:
-                raise RuntimeError('cannot derive tenant from oidc|provider_url')
-            token = _ent_auth.app_token(tenant, oidc.get('client_id', ''),
-                                        oidc.get('client_secret', ''))
-            return _ent_prov.add_app_secret(token, oidc.get('client_id', ''),
-                                            display_name='ServiceSentry OIDC (auto)')
-
-        def _save(secret, expires_at):
-            self._save_oidc_secret(secret, expires_at)
-            self._audit('entra_oidc_secret_rotated',
-                        detail={'auto': True, 'expires_at': expires_at})
-
-        self._secret_scanner = SecretExpiryScanner(
-            config_getter=lambda: self._config_section('oidc'),
-            dispatch=_emit,
-            rotate_fn=_rotate,
-            save_fn=_save,
-            is_leader=_is_leader,
-            dbg=self._dbg,
-            text_fn=self._notify_text,
-        )
-        self._secret_scanner.start(
-            poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
-
-    # ------------------------------------------------------------------
-    # Route registration
-    # ------------------------------------------------------------------
-
-    def _register_csrf_exempt(self, *prefixes: str) -> None:
-        """Declare CSRF-exempt path prefixes — called by a route module's register() so the
-        exempt set is discovered from the modules, not hardcoded. Deduped, order preserved."""
-        clean = [p for p in prefixes if p]
-        self._csrf_exempt_prefixes = tuple(dict.fromkeys((*self._csrf_exempt_prefixes, *clean)))
-
-    def _register_embed_origins(self, config_attr: str, *origins: str) -> None:
-        """Declare iframe-embed origins gated by a bool config attr (e.g. ``_embed_in_teams``),
-        so integration-specific frame-ancestors are discovered from the provider rather than
-        hardcoded in the core security layer. Recomputes the effective allowlist."""
-        prof = (config_attr, tuple(o for o in origins if o))
-        self._embed_profiles = (*self._embed_profiles, prof)
-        self._recompute_frame_ancestors()
-
-    def _recompute_frame_ancestors(self) -> None:
-        """Rebuild the iframe allowlist: admin-configured origins + every registered embed
-        profile whose flag attr is currently on. Cheap, called on config change / at startup."""
-        try:
-            wa_cfg = (self._read_config_file(self._CONFIG_FILE) or {}).get('web_admin') or {}
-        except Exception:  # pylint: disable=broad-except
-            wa_cfg = {}
-        fa = [o for o in str(wa_cfg.get('frame_ancestors') or '').replace(',', ' ').split() if o]
-        for attr, origins in self._embed_profiles:
-            if getattr(self, attr, False):
-                fa = list(dict.fromkeys(fa + list(origins)))
-        self._frame_ancestors_list = fa
-        _app = getattr(self, '_app', None)   # None at boot (set after _create_app); set on live saves
-        if _app is not None:
-            self._apply_embed_cookie_policy(_app)
-
-    def _apply_embed_cookie_policy(self, app) -> None:
-        """SameSite=None + Secure when the app is embeddable cross-site (any allowed
-        frame-ancestors), so the session cookie survives inside the iframe; otherwise the
-        stricter Lax. Provider-agnostic — driven by the effective frame-ancestors allowlist.
-
-        **Only on an explicit HTTPS intent**, and that condition is the whole point. Browsers
-        refuse a ``SameSite=None`` cookie that is not ``Secure``, and they refuse a ``Secure``
-        cookie over plain HTTP — so on an http:// deployment this policy does not enable the
-        embed, it just throws the session cookie away. Every login then succeeds and lands
-        back on the login page, because the session it created was never stored: an infinite
-        redirect, with nothing saying that allowing an iframe origin was what caused it.
-
-        The same reasoning is already applied to ``public_url`` above. A cross-site iframe
-        over plain HTTP cannot work in any case, so there is nothing to trade away: the embed
-        is impossible either way, and this keeps ordinary login working.
-        """
-        _https = bool(self._secure_cookies or self._force_https)
-        if self._frame_ancestors_list and _https:
-            app.config['SESSION_COOKIE_SAMESITE'] = 'None'
-            app.config['SESSION_COOKIE_SECURE'] = True
-            return
-        if self._frame_ancestors_list:
-            self._dbg('> Security >> frame-ancestors are allowed but neither secure_cookies '
-                      'nor force_https is on: the cross-site iframe cannot work over plain '
-                      'HTTP (a SameSite=None cookie must be Secure, and a Secure cookie is '
-                      'dropped on http://). Keeping SameSite=Lax so normal login still works.',
-                      DebugLevel.warning)
-        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-        app.config['SESSION_COOKIE_SECURE'] = _https
 
     def _register_routes(self, app: Flask):
         """Register all routes — delegates to routes sub-package."""

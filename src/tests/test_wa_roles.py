@@ -27,15 +27,15 @@ class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
     def test_permissions_tuple_has_64_flags(self):
-        from lib.web_admin.app import PERMISSIONS
+        from lib.core.permissions import PERMISSIONS
         assert len(PERMISSIONS) == 64
 
     def test_permissions_are_unique(self):
-        from lib.web_admin.app import PERMISSIONS
+        from lib.core.permissions import PERMISSIONS
         assert len(PERMISSIONS) == len(set(PERMISSIONS))
 
     def test_permissions_expected_flags(self):
-        from lib.web_admin.app import PERMISSIONS
+        from lib.core.permissions import PERMISSIONS
         expected = {
             'users_view', 'users_add', 'users_edit', 'users_delete',
             'roles_view', 'roles_add', 'roles_edit', 'roles_delete',
@@ -69,7 +69,7 @@ class TestPermissionsConstants:
         # This test locks in that a module owns its own permissions (flags + group +
         # role grants) — for both services and core domains.
         from lib.core.permissions import discover_permissions
-        from lib.web_admin.app import (PERMISSIONS, PERMISSION_GROUPS,
+        from lib.core.permissions import (PERMISSIONS, PERMISSION_GROUPS,
                                         BUILTIN_ROLE_PERMISSIONS)
         ipban = next(m for m in discover_permissions()
                      if m['group'] == 'perm_group_ipban')
@@ -86,7 +86,7 @@ class TestPermissionsConstants:
         assert {p for p in BUILTIN_ROLE_PERMISSIONS['viewer'] if p.startswith('ipban_')} == exp_viewer
 
     def test_permission_groups_structure(self):
-        from lib.web_admin.app import PERMISSION_GROUPS
+        from lib.core.permissions import PERMISSION_GROUPS
         # Must be a list of 2-tuples (key, [perms])
         assert isinstance(PERMISSION_GROUPS, list)
         for item in PERMISSION_GROUPS:
@@ -95,17 +95,17 @@ class TestPermissionsConstants:
             assert isinstance(item[1], list)
 
     def test_permission_groups_cover_all_permissions(self):
-        from lib.web_admin.app import PERMISSIONS, PERMISSION_GROUPS
+        from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
         grouped = {p for _, perms in PERMISSION_GROUPS for p in perms}
         assert grouped == set(PERMISSIONS)
 
     def test_permission_groups_no_duplicates(self):
-        from lib.web_admin.app import PERMISSION_GROUPS
+        from lib.core.permissions import PERMISSION_GROUPS
         all_perms = [p for _, perms in PERMISSION_GROUPS for p in perms]
         assert len(all_perms) == len(set(all_perms))
 
     def test_permission_groups_keys(self):
-        from lib.web_admin.app import PERMISSION_GROUPS
+        from lib.core.permissions import PERMISSION_GROUPS
         keys = [k for k, _ in PERMISSION_GROUPS]
         assert 'perm_group_users' in keys
         assert 'perm_group_roles' in keys
@@ -118,11 +118,11 @@ class TestPermissionsConstants:
         assert 'perm_group_checks' in keys
 
     def test_admin_has_all_permissions(self):
-        from lib.web_admin.app import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
         assert BUILTIN_ROLE_PERMISSIONS['admin'] == frozenset(PERMISSIONS)
 
     def test_editor_permissions(self):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         ep = BUILTIN_ROLE_PERMISSIONS['editor']
         assert 'modules_view' in ep
         assert 'modules_edit' in ep
@@ -161,7 +161,7 @@ class TestPermissionsConstants:
         assert 'sessions_view' in ep
 
     def test_viewer_has_view_permissions(self):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         vp = BUILTIN_ROLE_PERMISSIONS['viewer']
         assert 'users_view' in vp
         assert 'roles_view' in vp
@@ -182,17 +182,17 @@ class TestPermissionsConstants:
             f"viewer holds non-view permissions: {sorted(p for p in vp if not p.endswith('_view'))}"
 
     def test_builtin_roles_are_frozensets(self):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         for role, perms in BUILTIN_ROLE_PERMISSIONS.items():
             assert isinstance(perms, frozenset), f"Role {role} permissions not a frozenset"
 
     def test_get_role_permissions_admin(self, admin):
-        from lib.web_admin.app import PERMISSIONS
+        from lib.core.permissions import PERMISSIONS
         perms = admin._get_role_permissions('admin')
         assert perms == frozenset(PERMISSIONS)
 
     def test_get_role_permissions_viewer(self, admin):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         perms = admin._get_role_permissions('viewer')
         assert perms == BUILTIN_ROLE_PERMISSIONS['viewer']
         assert 'users_view' in perms
@@ -233,13 +233,13 @@ class TestPermissionsConstants:
         assert isinstance(data['permissions'], list)
 
     def test_api_me_admin_has_all_permissions(self, client):
-        from lib.web_admin.app import PERMISSIONS
+        from lib.core.permissions import PERMISSIONS
         _login(client)
         data = client.get("/api/v1/me").get_json()
         assert set(data['permissions']) == set(PERMISSIONS)
 
     def test_api_me_viewer_has_view_permissions(self, admin, client):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         admin._users['viewer_test'] = {
             "password_hash": generate_password_hash("v"),
             "role": "viewer", "display_name": "V",
@@ -249,7 +249,7 @@ class TestPermissionsConstants:
         assert set(data['permissions']) == set(BUILTIN_ROLE_PERMISSIONS['viewer'])
 
     def test_api_me_editor_permissions(self, admin, client):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         admin._users['editor_test'] = {
             "password_hash": generate_password_hash("e"),
             "role": "editor", "display_name": "E",
@@ -318,7 +318,7 @@ class TestCustomRoles:
             assert roles[BUILTIN_ROLE_UIDS[key]]['builtin'] is True
 
     def test_builtin_roles_have_permissions(self, client):
-        from lib.web_admin.app import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import PERMISSIONS, BUILTIN_ROLE_PERMISSIONS
         from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         roles = client.get("/api/v1/roles").get_json()
@@ -401,7 +401,7 @@ class TestCustomRoles:
 
     def test_update_builtin_role_name(self, client):
         """Built-in roles can have their display name updated, but not permissions."""
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         admin_uid = BUILTIN_ROLE_UIDS['admin']
@@ -413,7 +413,7 @@ class TestCustomRoles:
 
     def test_update_builtin_role_permissions_ignored(self, client):
         """Built-in role PUT ignores permission changes (only name is accepted)."""
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         from lib.core.constants import BUILTIN_ROLE_UIDS
         _login(client)
         editor_uid = BUILTIN_ROLE_UIDS['editor']

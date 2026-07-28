@@ -127,9 +127,13 @@ ObjectBase (lib/core/object_base.py)
 │   ├── _AuditMixin      (lib/core/audit/mixin.py)   (store en el módulo; también lo importan monitoring/events)
 │   ├── _ChecksMixin     (lib/services/monitoring/checks_mixin.py) ← Checks tab = glue del motor de monitoring
 │   ├── _PermissionsMixin(lib/core/permissions/mixin.py)  ← calcula permisos efectivos
+│   ├── _ConfigMixin     (lib/core/config/mixin.py)       ← leer/aplicar/escribir config + overlay SS_*
 │   # Glue que sigue en lib/web_admin/mixins/ (no es un dominio: ni store ni permisos propios):
 │   ├── _AuthMixin       (lib/web_admin/mixins/auth.py)         ← login local/LDAP/OIDC/SAML
-│   └── _ServicesMixin   (lib/web_admin/mixins/services.py) ← descubre + controla los servicios embebidos
+│   ├── _ServicesMixin   (lib/web_admin/mixins/services.py) ← descubre + controla los servicios embebidos
+│   ├── _StoresMixin     (lib/web_admin/mixins/stores.py)   ← construir los stores al arrancar
+│   ├── _ScannersMixin   (lib/web_admin/mixins/scanners.py) ← salud de servicios, certificados, secretos
+│   └── _EmbedMixin      (lib/web_admin/mixins/embed.py)    ← frame-ancestors + SameSite de la cookie
 │   # Los servicios NO se heredan: WebAdmin COMPONE un objeto embebido por servicio
 │   # (self._embedded_services), construido en __init__:
 │   ├─ EmbeddedMonitor  (lib/services/monitoring/embedded.py)  ← _MonitoringMixin + contexto del host
@@ -328,7 +332,7 @@ ServiceSentry/
 │   │       │                            #   RBAC → lib/core/permissions/; SYSTEM_USER e identidades integradas → lib/core/constants.py; i18n → lib.i18n
 │   │       ├── templates/               # Plantillas Jinja2 (+ partials JS por feature)
 │   │       ├── mixins/                  # Glue que NO es un dominio propio:
-│   │       │   └── auth.py services.py   # login local / host de discovery de servicios
+│   │       │   └── auth.py services.py stores.py scanners.py embed.py
 │   │       │   # Dominios (users/roles/groups/sessions/audit) → lib/core/<d>/mixin.py; checks → lib/services/monitoring/checks_mixin.py.
 │   │       │   # Auth externa (LDAP/OIDC/SAML) → lib/providers/{ldap,oidc,saml}/.
 │   │       └── routes/                  # Registradores de rutas Flask (ver explica-web-admin.md)

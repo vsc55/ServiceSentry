@@ -366,7 +366,7 @@ class TestGroupPermissions:
         assert "modules_edit" not in effective
 
     def test_get_effective_permissions_no_groups(self, admin):
-        from lib.web_admin.app import BUILTIN_ROLE_PERMISSIONS
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
         perms = admin._get_effective_permissions("nobody", "viewer")
         assert perms == BUILTIN_ROLE_PERMISSIONS['viewer']
 

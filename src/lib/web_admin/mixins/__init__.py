@@ -12,11 +12,17 @@ services rather than owning one) and ``freshness`` (the same three lines that ke
 users and groups from going stale when this process is not the only writer).
 """
 from .auth import _AuthMixin
+from .embed import _EmbedMixin
 from .freshness import _FreshnessMixin
+from .scanners import _ScannersMixin
 from .services import _ServicesMixin
+from .stores import _StoresMixin
 
 __all__ = [
     '_AuthMixin',
+    '_EmbedMixin',
     '_FreshnessMixin',
+    '_ScannersMixin',
     '_ServicesMixin',
+    '_StoresMixin',
 ]

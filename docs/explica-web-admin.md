@@ -15,7 +15,12 @@ lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios
 ├── constants.py              # SOLO HOME_PAGES + home_page_ids (landing pages). RBAC → lib/core/permissions/; SYSTEM_USER e identidades integradas → lib/core/constants.py; i18n → lib.i18n
 ├── mixins/                   # Glue que NO es un dominio propio (ni store ni permisos):
 │   ├── auth.py               # _AuthMixin (login local: _authenticate)
-│   └── services.py           # _ServicesMixin (descubre + controla los servicios embebidos)
+│   ├── services.py           # _ServicesMixin (descubre + controla los servicios embebidos)
+│   ├── stores.py             # _StoresMixin — construir los stores al arrancar (backend, conector, orden)
+│   ├── scanners.py           # _ScannersMixin — salud de servicios, caducidad de certificados y de secretos
+│   └── embed.py              # _EmbedMixin — frame-ancestors + SameSite de la cookie: dos decisiones que van juntas
+│   # _ConfigMixin NO está aquí: es pegamento del dominio config (core/config/routes.py llama a
+│   #   _read_config_file/_write_config/_apply_config_on_save) → lib/core/config/mixin.py
 │   # _PermissionsMixin ya NO está aquí: vive con su dominio, en lib/core/permissions/mixin.py
 │   # monitoring/syslog/events NO son mixins: el WebAdmin COMPONE un objeto por
 │   # servicio (lib/services/*/embedded.py), en self._embedded_services

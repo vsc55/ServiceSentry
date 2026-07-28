@@ -37,7 +37,20 @@ WA_MIXINS = os.path.join(SRC, 'lib', 'web_admin', 'mixins')
 # when another process has written — it serves users, roles AND groups, so putting it in any
 # one of their packages would make the other two import from a domain they have nothing to
 # do with. That is exactly the coupling this file exists to prevent.
-NON_DOMAIN_MIXINS = {'auth', 'services', 'freshness'}
+# Three more joined them when the boot code came out of app.py, and each is here for the
+# same reason: it serves EVERY domain, so filing it under one would make the rest import from
+# a package they have nothing to do with.
+#   stores   — constructs each domain's store at startup. It is about boot order and backends,
+#              not about any one of the things it builds.
+#   scanners — service health, certificate expiry and secret expiry. Nobody configured these
+#              and no domain owns them; they exist because the panel is the only thing in a
+#              position to notice.
+#   embed    — frame-ancestors and the session cookie's SameSite, which are one decision in
+#              two places and belong to the app's security posture, not to a domain.
+# `config` deliberately did NOT stay: lib/core/config/routes.py calls _read_config_file,
+# _write_config and _apply_config_on_save, so that mixin is the config domain's glue and lives
+# in lib/core/config/mixin.py like every other domain's. This guard is what caught it.
+NON_DOMAIN_MIXINS = {'auth', 'services', 'freshness', 'stores', 'scanners', 'embed'}
 
 
 def _domains():

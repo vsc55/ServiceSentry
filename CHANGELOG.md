@@ -8,6 +8,43 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.21] - 2026-07-28
+
+### Changed
+- **`WebAdmin` handed four concerns to mixins**, 1809 lines down to 1119. The class already
+  composed eleven domain mixins, so what was left in the file was everything that is *not* a
+  domain — and four groups of it came out cleanly:
+  - `mixins/stores.py` — building each domain's store at startup: which backend, which
+    connector, what to do when the database is not up yet, and the order they have to come up
+    in. A boot concern sitting in the middle of a class whose job is serving requests.
+  - `lib/core/config/mixin.py` — reading the configuration, turning it into attributes,
+    re-applying it on save, and overlaying the environment. It went to the config **domain**,
+    not to `web_admin/mixins`, and the domain-layout guard is what said so: `core/config/
+    routes.py` already calls `_read_config_file`, `_write_config` and `_apply_config_on_save`,
+    so this is that domain's glue, and its package was missing exactly the `mixin.py` every
+    other domain has. The `SS_*` overlay stays in it rather than moving into
+    `ConfigManager.read()` on purpose: a value fixed by env must reach the editor marked
+    **locked**, and a read that had already blended saved with env could not tell the two apart.
+  - `mixins/scanners.py` — the three things the panel watches on its own: service health,
+    certificate expiry, provider secret expiry. Nobody configured them and they have no
+    schedule; they exist because the panel is the only thing in a position to notice.
+  - `mixins/embed.py` — `frame-ancestors` and the session cookie's `SameSite`, which are two
+    decisions that have to be made together. Allow the embed without the cookie and the iframe
+    shows an eternally logged-out page; change the cookie without meaning to and the session
+    travels cross-site everywhere.
+- The other three joined the guard's list of glue that belongs to no domain, each with its
+  reason written down: they serve EVERY domain, so filing one under a single package would make
+  the rest import from something they have nothing to do with — which is the coupling that
+  guard exists to prevent.
+- Nothing outside changed: `WebAdmin`'s attribute surface is identical, 195 attributes, none
+  added and none lost. The eleven domain mixins were already the precedent — these four simply
+  stopped being the exception.
+- One name did leave `app.py`, on purpose. `BUILTIN_ROLE_PERMISSIONS` was imported there and
+  never used — it read as dead until the tests importing it *through* `app.py` failed. It lives
+  in `lib.core.permissions`, which is where those tests now name it: an import that exists only
+  so somebody else can reach it through you is a re-export, and this codebase asks for the real
+  address instead.
+
 ## [0.0.1+build.20] - 2026-07-28
 
 ### Changed
