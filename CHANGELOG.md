@@ -8,6 +8,18 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.18] - 2026-07-28
+
+### Changed
+- **The service-status watchful split**, 389 lines down to 215: discovery and its five
+  per-init parsers — systemd, OpenRC, SysV, launchd and Windows SC, each answering
+  differently, with the dispatch picking by platform — moved to `actions.py`. What remains is
+  the check and the service commands behind it.
+- With it, **`_INIT_SPLIT_PENDING` is empty.** It began as snmp 1596, proxmox 1087,
+  datastore 1052, dns 719 and service_status 389, and every one came off it as it was split —
+  the only direction that list is allowed to move. The largest `__init__.py` in the repo is now
+  `ping`, at 332: under the line, and left alone.
+
 ## [0.0.1+build.17] - 2026-07-28
 
 ### Changed

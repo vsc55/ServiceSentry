@@ -476,10 +476,11 @@ class TestRealModuleRuntimeContract:
 # be three subsystems sharing a namespace.
 _INIT_MAX_LINES = 350
 
-# Modules not yet split. This list may only ever SHRINK: adding to it would turn the guard
-# into a record of what we gave up on. It started as {snmp 1596, proxmox 1087, datastore 1052,
-# dns 719, service_status 389}; each comes off as it is split.
-_INIT_SPLIT_PENDING = frozenset({'service_status'})
+# Modules not yet split. EMPTY, and it may only ever SHRINK: adding to it would turn the
+# guard into a record of what we gave up on. It started as {snmp 1596, proxmox 1087,
+# datastore 1052, dns 719, service_status 389} and every one of them came off it as it was
+# split — which is the only direction this list is allowed to move.
+_INIT_SPLIT_PENDING: frozenset = frozenset()
 
 
 class TestModuleFileLayout:
