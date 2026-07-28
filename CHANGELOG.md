@@ -8,6 +8,28 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.16] - 2026-07-28
+
+### Changed
+- **The Datastore watchful split seven ways.** Its `__init__.py` was 1052 lines and is now 97.
+  `engines.py` holds the ten conversations — MySQL/MariaDB, PostgreSQL, MSSQL, MongoDB,
+  Redis/Valkey, Elasticsearch/OpenSearch, InfluxDB, Memcached — each answering "are you alive"
+  and "what databases do you have" its own way; both halves stay together because both are the
+  same kind of knowledge, and splitting ping from list would put two halves of one driver in
+  two files. `checks.py` decides which backend to ask and what the answer means, and knows
+  nothing about any of them. `tunnel.py` is the local listener that forwards over SSH, so the
+  ten drivers never learn they are not talking to localhost. `actions.py` is what the panel
+  invokes, `deps.py` is which client library is actually installed, and `tables.py` the default
+  ports, display names and config vocabulary that all three read and none of them owns.
+- **A patch that could not take.** The optional-dependency flags were reached with
+  `from .deps import _PSYCOPG2`, which copies the value: setting it on one module left every
+  other consumer looking at the old one, so a test disabling a backend disabled it only where
+  it happened to look. They are read as attributes now — one place to patch, and the tests
+  stopped needing a different target per module.
+- `_pkey_from_string` went with the tunnel that uses it, and `_DEFAULT_PORTS` with the table it
+  belongs to; the tests name both at their real address rather than through a re-export.
+- The pending-split list is down to `dns` (719) and `service_status` (389).
+
 ## [0.0.1+build.15] - 2026-07-28
 
 ### Changed

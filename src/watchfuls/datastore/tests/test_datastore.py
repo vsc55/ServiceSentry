@@ -87,7 +87,7 @@ class TestBackendDispatch:
 
     def test_ssh_unavailable_returns_error(self):
         from watchfuls.datastore import Watchful
-        import watchfuls.datastore as mod
+        from watchfuls.datastore import deps as mod
         orig = mod._PARAMIKO
         mod._PARAMIKO = False
         try:
@@ -142,7 +142,7 @@ class TestPostgresBackend:
 
     def test_driver_missing(self):
         from watchfuls.datastore import Watchful
-        import watchfuls.datastore as mod
+        from watchfuls.datastore import deps as mod
         orig = mod._PSYCOPG2
         mod._PSYCOPG2 = False
         try:
@@ -178,7 +178,7 @@ class TestMssqlBackend:
 
     def test_driver_missing(self):
         from watchfuls.datastore import Watchful
-        import watchfuls.datastore as mod
+        from watchfuls.datastore import deps as mod
         orig = mod._PYMSSQL
         mod._PYMSSQL = False
         try:
@@ -197,7 +197,7 @@ class TestMongoBackend:
 
     def test_driver_missing(self):
         from watchfuls.datastore import Watchful
-        import watchfuls.datastore as mod
+        from watchfuls.datastore import deps as mod
         orig = mod._PYMONGO
         mod._PYMONGO = False
         try:
@@ -216,7 +216,7 @@ class TestRedisBackend:
 
     def test_driver_missing(self):
         from watchfuls.datastore import Watchful
-        import watchfuls.datastore as mod
+        from watchfuls.datastore import deps as mod
         orig = mod._REDIS
         mod._REDIS = False
         try:
@@ -235,7 +235,7 @@ class TestMemcachedBackend:
 
     def test_driver_missing(self):
         from watchfuls.datastore import Watchful
-        import watchfuls.datastore as mod
+        from watchfuls.datastore import deps as mod
         orig = mod._PYMEMCACHE
         mod._PYMEMCACHE = False
         try:
@@ -328,7 +328,8 @@ class TestTestConnection:
             m.assert_called_once()
 
     def test_default_port_applied(self):
-        from watchfuls.datastore import Watchful, _DEFAULT_PORTS
+        from watchfuls.datastore import Watchful
+        from watchfuls.datastore.tables import _DEFAULT_PORTS
         captured = {}
         def fake_test_redis(cfg):
             captured['port'] = cfg['port']
@@ -378,15 +379,15 @@ class TestSshKeyString:
     """Inline private key (PEM/OpenSSH text) support for the SSH tunnel."""
 
     def test_pkey_from_string_invalid_raises(self):
-        import watchfuls.datastore as mod
-        if not mod._PARAMIKO:
+        from watchfuls.datastore import deps, tunnel as mod
+        if not deps._PARAMIKO:
             pytest.skip('paramiko not installed')
         with pytest.raises(ValueError):
             mod._pkey_from_string('not a key')
 
     def test_pkey_from_string_parses_generated_key(self):
-        import watchfuls.datastore as mod
-        if not mod._PARAMIKO:
+        from watchfuls.datastore import deps, tunnel as mod
+        if not deps._PARAMIKO:
             pytest.skip('paramiko not installed')
         import io
         import paramiko
