@@ -36,9 +36,11 @@ CSS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 # `bg-light` is deliberately NOT here, and the reason is worth stating: a `badge bg-light
 # text-dark` sitting inside a primary button is light against the BUTTON, not against the
 # page, so it is correct in both themes. Banning it outright would have flagged five
-# templates that are right and taught the next person to disable the test. `table-light`
-# has no such defence — a table header is always page furniture.
-_THEME_BLIND = ('table-light',)
+# templates that are right and taught the next person to disable the test.
+#
+# `table-light` and `text-bg-light` have no such defence: a table header and a badge sitting
+# on a card are both page furniture, and both were found wearing daylight on a dark page.
+_THEME_BLIND = ('table-light', 'text-bg-light')
 
 
 def _templates():

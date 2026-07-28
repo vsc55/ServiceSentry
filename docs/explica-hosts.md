@@ -25,7 +25,7 @@ conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 | Resolución | `lib/core/hosts/resolve.py` | Primitivas sin store: `host_profile_specs()` (normaliza `__host_profile__`), `resolve_os()` |
 | SSH | `lib/core/hosts/ssh_client.py` | Helpers SSH (paramiko, opcional): `connect_host`, `run_command`, `test_connection` |
 | Ejecución | `lib/core/hosts/runner.py` | Ejecuta un comando en el host, **local o remoto por SSH** |
-| Sonda | `lib/core/hosts/probe.py` | Ejecuta un check de un módulo una sola vez (asistente) |
+| Sonda | `lib/core/hosts/probe.py` | Resuelve un host **sin guardar** (el borrador del modal) para que el asistente pruebe lo que el admin acaba de teclear. Ejecutar el check en sí **no** es asunto de hosts: eso es `lib/modules/check_runner.py` |
 | Migración | `lib/core/hosts/migrate.py` | Asistente inline→host (agrupar conexiones repetidas) |
 
 Un host declarado como **`remote`** lleva una conexión SSH (usuario + contraseña / fichero de

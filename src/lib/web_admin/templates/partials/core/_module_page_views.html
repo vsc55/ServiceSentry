@@ -1,0 +1,292 @@
+{# ================================================================
+   Module pages — the layouts, and what they share.
+
+   A module page is always the same shape (sections of rows, each row with a state, a
+   message and the measurements the check published), so the layouts belong to the CORE
+   renderer rather than to any one module. M365 and Azure get them from the same code, and
+   a module contributing a page tomorrow gets them without writing front-end at all.
+
+   What a view may decide is chrome and navigation. What a row MEANS — its state, its
+   measurements, how it is drawn — stays in `_mpRow`, used verbatim by all four. A view that
+   drew a row itself would be free to disagree with the view next to it about the same check.
+
+   State is per PAGE, not global: wanting the table for Azure and the board for M365 at the
+   same time is normal, and one shared setting would make each visit undo the other.
+   ================================================================ #}
+
+const MP_VIEWS = [
+    { id: 'board', label_key: 'page_view_board', icon: 'bi-columns-gap',    render: '_mpViewBoard' },
+    { id: 'split', label_key: 'page_view_split', icon: 'bi-layout-sidebar-inset', render: '_mpViewSplit' },
+    { id: 'table', label_key: 'page_view_table', icon: 'bi-list-ul',        render: '_mpViewTable' },
+    { id: 'cards', label_key: 'page_view_cards', icon: 'bi-grid-3x2-gap',   render: '_mpViewCards' },
+];
+
+function _mpViewId(pageId) {
+    const stored = localStorage.getItem('ss_page_view_' + pageId);
+    return MP_VIEWS.some(v => v.id === stored) ? stored : MP_VIEWS[0].id;
+}
+
+/** Switching view redraws what is already on screen. A module page's data costs a Graph
+ *  call to refresh; making a way of LOOKING at it spend one would be charging the reader
+ *  for a decision about layout. */
+function setModulePageView(pageId, id) {
+    if (!MP_VIEWS.some(v => v.id === id)) return;
+    localStorage.setItem('ss_page_view_' + pageId, id);
+    _mpRender(pageId);
+}
+
+function _mpViewSwitcher(pageId) {
+    const cur = _mpViewId(pageId);
+    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('page_view'))}">
+        ${MP_VIEWS.map(v => `
+            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
+                onclick="setModulePageView('${escAttr(pageId)}','${escAttr(v.id)}')"
+                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
+                <i class="bi ${escAttr(v.icon)}"></i>
+            </button>`).join('')}
+    </div>`;
+}
+
+// ── Filters, per page and shared by its views ────────────────────────────────
+function _mpFilterTerm(pageId) { return _mpState[pageId]?.term || ''; }
+function _mpOnlyProblems(pageId) { return !!_mpState[pageId]?.onlyBad; }
+
+function _mpSetFilter(pageId, term) {
+    const st = _mpState[pageId];
+    if (!st) return;
+    st.term = String(term || '');
+    _mpRender(pageId);
+    const el = document.getElementById('mpSearch_' + pageId);
+    if (el) { el.focus(); el.value = st.term; el.setSelectionRange(el.value.length, el.value.length); }
+}
+
+function _mpToggleProblems(pageId, on) {
+    const st = _mpState[pageId];
+    if (!st) return;
+    st.onlyBad = !!on;
+    _mpRender(pageId);
+}
+
+/** The rows of a section after the filters. Kept separate from the section's own counts:
+ *  the badge still says 4/8 while the list shows the four that are not OK, because hiding
+ *  the passing rows must not also hide that they exist. */
+function _mpShownRows(pageId, s) {
+    const q = _mpFilterTerm(pageId).trim().toLowerCase();
+    let rows = s.rows || [];
+    if (_mpOnlyProblems(pageId)) rows = rows.filter(r => r.state !== 'ok');
+    if (q) rows = rows.filter(r => String(r.name || '').toLowerCase().includes(q)
+                                || String(r.message || '').toLowerCase().includes(q));
+    return rows;
+}
+
+/** Sections worth drawing, worst first.
+ *
+ *  A section whose rows are all filtered away is dropped: an empty card headed "Licenses"
+ *  tells you nothing except that you filtered. The order is part of the answer — the reader
+ *  came to find what is wrong, not to scroll past what is not. */
+function _mpVisibleSections(pageId, sections, sort = true) {
+    const out = (sections || [])
+        .map(s => [s, _mpShownRows(pageId, s)])
+        .filter(([s, rows]) => rows.length || (!_mpOnlyProblems(pageId) && !_mpFilterTerm(pageId).trim() && !(s.rows || []).length));
+    if (!sort) return out;
+    const rank = s => (s.state === 'error' ? 0 : s.state === 'warn' ? 1 : 2);
+    return out.sort((a, b) => rank(a[0]) - rank(b[0]));
+}
+
+// ── The one bar above the results ────────────────────────────────────────────
+/** Totals on the left, the controls that change what you see of them on the right — the
+ *  same arrangement Status settled on, for the same reason: a filter that hides most of the
+ *  page is only honest while the count of everything sits beside the switch that hid it. */
+function _mpResultsHeader(pageId, counts) {
+    const bit = (n, cls, ico, label) => n
+        ? `<span class="d-inline-flex align-items-center gap-1 ${cls}"><i class="bi ${ico}"></i>${n} ${esc(label)}</span>`
+        : '';
+    return `<div class="d-flex align-items-center gap-3 flex-wrap mb-3 px-3 py-2 rounded-3 border"
+                 style="background:var(--bs-tertiary-bg)">
+        <span class="d-flex align-items-center gap-3 flex-wrap ss-fs-3">
+            <span class="fw-semibold">${counts.total || 0} ${esc(t('page_checks'))}</span>
+            ${bit(counts.ok,    'text-success',          'bi-check-circle-fill',         t('status_ok'))}
+            ${bit(counts.warn,  'text-warning-emphasis', 'bi-exclamation-triangle-fill', t('status_warning'))}
+            ${bit(counts.error, 'text-danger',           'bi-x-circle-fill',             t('status_error'))}
+        </span>
+        <span class="ms-auto d-flex align-items-center gap-2 flex-nowrap">
+            <span class="form-check form-switch mb-0 d-inline-flex align-items-center gap-2">
+                <input class="form-check-input mt-0" type="checkbox" role="switch"
+                       id="mpOnlyBad_${escAttr(pageId)}" ${_mpOnlyProblems(pageId) ? 'checked' : ''}
+                       onchange="_mpToggleProblems('${escAttr(pageId)}',this.checked)">
+                <label class="form-check-label ss-fs-3" for="mpOnlyBad_${escAttr(pageId)}">${esc(t('st_only_problems'))}</label>
+            </span>
+            <div class="input-group input-group-sm flex-nowrap" style="width:14rem;flex:0 0 auto">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="search" id="mpSearch_${escAttr(pageId)}" class="form-control"
+                       value="${escAttr(_mpFilterTerm(pageId))}" placeholder="${escAttr(t('page_search'))}"
+                       oninput="_mpSetFilter('${escAttr(pageId)}',this.value)">
+            </div>
+            ${_mpViewSwitcher(pageId)}
+        </span>
+    </div>`;
+}
+
+function _mpEmptyState(pageId, icon) {
+    const filtering = _mpOnlyProblems(pageId) || !!_mpFilterTerm(pageId).trim();
+    return `<div class="text-center py-5 text-muted">
+        <i class="bi ${filtering ? 'bi-check2-circle' : escAttr(icon)} ss-empty-icon"></i>
+        <div>${esc(filtering ? t('st_no_problems') : t('page_no_data'))}</div>
+    </div>`;
+}
+
+// ── View: board ──────────────────────────────────────────────────────────────
+// One tile per section with its number, then only the rows that need attention, from every
+// section at once. Answers "how is this tenant" without scrolling, and keeps the detail one
+// click away rather than one screen down.
+function _mpViewBoard(pageId, st, c) {
+    // The tiles are filtered like everything else. They used to be drawn from the raw list,
+    // so "only problems" left every section on screen and looked as though it did nothing
+    // in this view — the one place the switch has the least to hide.
+    const shown = _mpVisibleSections(pageId, st.data.sections || []);
+    const bad = [];
+    for (const [s, rows] of shown) {
+        for (const r of rows) if (r.state !== 'ok') bad.push([s, r]);
+    }
+    c.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.75rem">
+            ${shown.map(([s]) => _mpTile(pageId, s)).join('')}
+        </div>
+        ${bad.length ? `<div class="mt-3">
+            <div class="text-muted ss-fs-2 mb-1 px-1">
+                <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('page_needs_attention'))}</div>
+            <div class="ss-card">${bad.map(([s, r]) => `
+                <div class="d-flex align-items-start gap-2 px-2 py-1 border-bottom">
+                    <span class="badge text-bg-${_MP_STATE_CLS[r.state] || 'secondary'} mt-1">
+                        <i class="bi bi-exclamation-triangle"></i></span>
+                    <span class="text-muted ss-fs-2 mt-1" style="min-width:8rem">${esc(s.name)}</span>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fw-semibold ss-fs-3">${esc(r.name)}</div>
+                        <div class="text-muted ss-fs-2">${esc(r.message || '')}</div>
+                        ${_mpMetrics(r)}
+                    </div>
+                    ${_mpRowChart(s.chart, r)}
+                </div>`).join('')}</div>
+        </div>` : `<div class="mt-3 text-center text-muted py-4">
+            <i class="bi bi-check2-circle me-1"></i>${esc(t('st_no_problems'))}</div>`}`;
+}
+
+/** A section as a single figure. Clicking it goes to that section in the split view, which
+ *  is where the rows live — a tile that did nothing would be a number you cannot follow. */
+function _mpTile(pageId, s) {
+    const cls = _MP_STATE_CLS[s.state] || 'secondary';
+    // The tile keeps .ss-card's border. It used to add border-0, which left a grid of
+    // unbounded figures: with nothing marking where one tile ended, the state badge — pushed
+    // to the far right by ms-auto, i.e. as far from its own number as the tile allows and as
+    // close as possible to the NEXT tile's label — read as belonging to its neighbour.
+    // The badge sits beside the figure it qualifies now, sharing the label's left edge, so
+    // label, state and number line up in one column and the reading is forced.
+    return `<button type="button" class="ss-card text-start w-100 p-0"
+        onclick="_mpOpenSection('${escAttr(pageId)}',${jsStr(s.id)})" title="${escAttr(s.name)}">
+        <div class="p-3">
+            <div class="text-muted ss-fs-2 text-truncate">${esc(s.name)}</div>
+            <div class="d-flex align-items-center gap-2 mt-1">
+                <span class="badge text-bg-${cls} flex-shrink-0"><i class="bi ${
+                    s.state === 'ok' ? 'bi-check-lg' : 'bi-exclamation-triangle'}"></i></span>
+                <span class="fw-semibold text-truncate" style="font-size:1.35rem">${
+                    s.counts.ok}/${s.counts.total}</span>
+            </div>
+        </div>
+    </button>`;
+}
+
+function _mpOpenSection(pageId, sectionId) {
+    const st = _mpState[pageId];
+    if (st) st.section = sectionId;
+    localStorage.setItem('ss_page_view_' + pageId, 'split');
+    _mpRender(pageId);
+}
+
+// ── View: split ──────────────────────────────────────────────────────────────
+// Sections on the left, the chosen one at full width on the right. For a section with many
+// rows — licences, several tenants — where the stacked cards make you scroll past the ones
+// you are not reading.
+function _mpViewSplit(pageId, st, c) {
+    const shown = _mpVisibleSections(pageId, st.data.sections || []);
+    if (!shown.length) { c.innerHTML = _mpEmptyState(pageId, st.spec.icon); return; }
+    const ids = shown.map(([s]) => s.id);
+    const sel = ids.includes(st.section) ? st.section : ids[0];
+    const [cur, rows] = shown.find(([s]) => s.id === sel);
+    c.innerHTML = `<div class="ss-vfill flex-row" style="min-height:0">
+        <div class="ss-vfill" style="flex:0 0 15rem;max-width:15rem;border-right:1px solid var(--bs-border-color)">
+            <!-- The list gets a header of its own so its first entry lines up with the
+                 detail title beside it. Without one the two panes start at different
+                 heights and read as two unrelated things that happen to be adjacent. -->
+            <!-- Same type as the detail title beside it, not a small muted label: the two
+                 are peers — each names its pane — and sizing one down makes the pair read as
+                 a caption over a heading rather than as two columns of one thing. -->
+            <div class="ss-pane-head fw-semibold">${esc(t('page_sections'))}</div>
+            <div class="ss-vscroll">
+                <div class="list-group list-group-flush">
+                    ${shown.map(([s]) => `
+                        <button type="button"
+                            class="list-group-item list-group-item-action py-2 d-flex align-items-center gap-2${s.id === sel ? ' active' : ''}"
+                            onclick="_mpSelectSection('${escAttr(pageId)}',${jsStr(s.id)})">
+                            <i class="bi bi-circle-fill text-${s.id === sel ? 'light' : (_MP_STATE_CLS[s.state] || 'secondary')}"
+                               style="font-size:.5rem"></i>
+                            <span class="flex-grow-1 text-truncate ss-fs-3">${esc(s.name)}</span>
+                            <span class="ss-fs-2">${s.counts.ok}/${s.counts.total}</span>
+                        </button>`).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="ss-vfill" style="min-width:0">
+            <div class="ss-pane-head">
+                <span class="fw-semibold flex-grow-1 text-truncate">${esc(cur.name)}</span>
+                ${_mpGroupSelect(pageId, cur)}
+                <span class="badge text-bg-${_MP_STATE_CLS[cur.state] || 'secondary'}">${cur.counts.ok}/${cur.counts.total}</span>
+            </div>
+            <div class="ss-vscroll ss-scroll-pad px-2 pt-1">${rows.map(r => _mpRow(r, cur.chart)).join('')}</div>
+        </div>
+    </div>`;
+}
+
+function _mpSelectSection(pageId, sectionId) {
+    const st = _mpState[pageId];
+    if (!st) return;
+    st.section = sectionId;
+    _mpRender(pageId);
+}
+
+// ── View: table ──────────────────────────────────────────────────────────────
+// One row per CHECK across every section. The stacked cards group by section, which is right
+// for reading a subject and wrong for triage: "what needs attention" is a question about
+// checks, and the answer was spread across however many cards happened to contain one.
+function _mpViewTable(pageId, st, c) {
+    const shown = _mpVisibleSections(pageId, st.data.sections || []);
+    const rank = { error: 0, warn: 1, ok: 2 };
+    const flat = [];
+    for (const [s, rows] of shown) for (const r of rows) flat.push([s, r]);
+    flat.sort((a, b) => (rank[a[1].state] ?? 3) - (rank[b[1].state] ?? 3)
+        || String(a[1].name).localeCompare(String(b[1].name)));
+    if (!flat.length) { c.innerHTML = _mpEmptyState(pageId, st.spec.icon); return; }
+    c.innerHTML = `<div class="ss-vscroll">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead-sticky">
+                <tr>
+                    <th class="small py-2" style="width:6rem">${esc(t('mod_state'))}</th>
+                    <th class="small py-2" style="width:12rem">${esc(t('page_section'))}</th>
+                    <th class="small py-2">${esc(t('st_check'))}</th>
+                    <th class="small py-2" style="width:16rem"></th>
+                </tr>
+            </thead>
+            <tbody>${flat.map(([s, r]) => `
+                <tr>
+                    <td><span class="badge text-bg-${_MP_STATE_CLS[r.state] || 'secondary'}">
+                        <i class="bi ${r.state === 'ok' ? 'bi-check-lg' : 'bi-exclamation-triangle'}"></i>
+                    </span></td>
+                    <td class="text-truncate ss-fs-3" title="${escAttr(s.name)}">${esc(s.name)}</td>
+                    <td class="min-w-0">
+                        <div class="text-truncate ss-fs-3" title="${escAttr(r.name)}">${esc(r.name)}</div>
+                        ${r.message ? `<div class="text-muted ss-fs-2">${esc(r.message)}</div>` : ''}
+                    </td>
+                    <td><span class="d-flex align-items-center gap-2">${_mpMetrics(r)}${_mpRowChart(s.chart, r)}</span></td>
+                </tr>`).join('')}</tbody>
+        </table>
+    </div>`;
+}

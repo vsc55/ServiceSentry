@@ -180,18 +180,18 @@ createListTable({
             case 'address': return `<td class="text-nowrap"><code${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.address || '')}</code></td>`;
             case 'kind':    return `<td class="text-center">${host.kind === 'remote'
                 ? `<span class="badge text-bg-secondary"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_kind_remote'))}</span>`
-                : `<span class="badge text-bg-light border">${esc(t('host_kind_local'))}</span>`}</td>`;
+                : `<span class="badge bg-body-secondary text-body border">${esc(t('host_kind_local'))}</span>`}</td>`;
             case 'os': {
                 const o = host.os || 'auto';
                 return `<td class="text-nowrap">${o === 'auto'
                     ? `<span class="text-muted small">${esc(_osLabel('auto'))}</span>`
-                    : `<span class="badge text-bg-light border">${esc(_osLabel(o))}</span>`}</td>`;
+                    : `<span class="badge bg-body-secondary text-body border">${esc(_osLabel(o))}</span>`}</td>`;
             }
             case 'status': return `<td class="text-center">${_srvStatusBadge(host)}</td>`;
             case 'modules': {
                 const tot = host.modules_total || 0, act = host.modules_active || 0;
                 if (!tot) return `<td class="text-center"><span class="text-muted small">—</span></td>`;
-                return `<td class="text-center"><span class="badge text-bg-light border"
+                return `<td class="text-center"><span class="badge bg-body-secondary text-body border"
                     title="${escAttr((t('host_modules_count')||'{active} active / {total} added').replace('{active}',act).replace('{total}',tot))}">
                     <i class="bi bi-puzzle me-1" style="opacity:.6"></i>${act}/${tot}</span></td>`;
             }

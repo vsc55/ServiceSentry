@@ -76,7 +76,7 @@ def run_item_once(module: str, config: dict, *, modules_dir: str,
     Never raises: a failure comes back as the second element, because these callers all
     answer an HTTP request and a traceback helps nobody there.
     """
-    from lib.core.hosts.probe import run_module_check  # noqa: PLC0415 (web-only path)
+    from lib.modules.check_runner import run_module_check  # noqa: PLC0415 (web-only path)
     item = strip_control_keys(config)
     item['enabled'] = True
     if service:

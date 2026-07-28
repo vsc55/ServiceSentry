@@ -19,6 +19,58 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## La misma comprobación salía ámbar o roja según quién la ejecutara
+
+**Fecha:** 2026-07-28 · **Área:** `lib/core/hosts/probe.py` (`run_module_check`) · afectaba
+a toda ejecución bajo demanda: refresco en vivo de páginas de módulo (`run_item_once`) y
+"probar" una credencial/host desde Servers
+
+**Síntoma** — en la página de Microsoft 365, *Unused licences* aparecía **entera en rojo**:
+insignia de sección, icono de la fila y anillo de uso, los tres. La comprobación emite
+`severity='warning'` y el resultado guardado por el monitor sí se pintaba ámbar. Reportado
+como «esta todo rojo, si es warning deberia ser amarillo».
+
+**Diagnóstico** — una traza del camino cacheado (`page_data` → `_page_sections`) daba
+`section: unused -> warn` y `row -> warn`, o sea el dato de origen era correcto. Eso dejaba
+una sola ruta sin verificar: la **mitad en vivo**. `page_refresh` no lee el estado guardado,
+llama a `run_item_once` → `run_module_check`, y ahí la lista de resultados no es la del
+módulo: se **reconstruye campo a campo**.
+
+**Causa raíz** — esa proyección era una lista blanca de cuatro claves (`key`, `status`,
+`message`, `other_data`) y `severity` no estaba en ella. Como `_page_sections` solo asigna
+`warn` cuando ve `severity == 'warning'`, cualquier fila no-OK llegada por refresco en vivo
+caía en la rama `error`. No era un fallo de M365: afectaba a cualquier módulo con umbrales
+blandos, y el comentario de `page_refresh` ya *prometía* `{status, severity, message,
+other_data}` — describía la forma que hacía falta, no la que llegaba.
+
+**Solución** — `severity` entra en la proyección, vacío cuando no lo hay: la ausencia tiene
+que seguir siendo una ausencia porque es lo que significa «esto sí es un error». Y como la
+decisión no era de hosts, el runner (`ProbeMonitor` + `run_module_check`) se mudó a
+[`lib/modules/check_runner.py`](../src/lib/modules/check_runner.py), junto a su consumidor
+natural; en `probe.py` se queda `ProbeHostsStore`, que sí es de hosts, **sin re-exportar** el
+runner: un import de conveniencia lo dejaría pareciendo código de hosts y el siguiente lo
+volvería a buscar ahí. La lista blanca dejó de ser una lista a mano: `RESULT_FIELDS` se
+compara contra lo que escribe `ReturnModuleCheck.set()` y un campo nuevo del contrato tiene
+que estar proyectado o excluido a propósito. Fijado por `tests/test_module_check_runner.py`
+(11 tests), verificado fallando sin el arreglo.
+
+**Lección** — **una proyección con lista blanca de campos caduca en silencio.** Copiar un
+resultado clave a clave congela el esquema del día en que se escribió: cuando el emisor gana
+un campo, el consumidor no falla, *pierde información* — y pierde justo la que distingue dos
+estados, no la que salta a la vista. Se defiende derivando la lista del contrato en vez de
+mantenerla a mano. Segunda lección, la que explica por qué nadie miró ahí: **el código
+genérico que vive dentro de un dominio no se busca donde está.** Esta decisión era sobre el
+contrato de resultado de un módulo y estaba en un fichero de hosts, así que quien añadió
+`severity` a `_emit` revisó `module_base` y el monitor, que es exactamente donde uno mira. La
+entrada [Un aviso de umbral llegaba como caída
+dura](#un-aviso-de-umbral-llegaba-como-caída-dura-y-el-panel-lo-pintaba-ámbar) es el mismo
+defecto por el otro extremo: allí el dato viajaba dos veces y una copia se olvidó de él;
+aquí viaja por dos caminos y uno lo filtra. Corolario práctico: cuando dos vistas del mismo
+hecho se contradicen, el sospechoso no es el hecho sino el camino menos recorrido — y la
+prueba que lo cierra es la que afirma que el campo **existe** incluso cuando está vacío.
+
+---
+
 ## Permitir el iframe de Teams dejaba a todo el mundo fuera del panel
 
 **Fecha:** 2026-07-27 · **Área:** `lib/web_admin/app.py` (`_apply_embed_cookie_policy`,

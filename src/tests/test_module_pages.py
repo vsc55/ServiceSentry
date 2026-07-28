@@ -65,7 +65,16 @@ class TestDiscovery:
         pages = module_pages_catalog()
         m365 = next((p for p in pages if p['module'] == 'm365'), None)
         assert m365, 'm365 declares __page__ but no page was discovered'
-        assert m365['id'] == 'm365' and m365['render'] == 'renderM365Page'
+        assert m365['id'] == 'm365'
+
+    def test_a_page_can_decline_to_ship_a_renderer(self):
+        """The interesting half of the mechanism, and the one m365 now exercises: with no
+        `render`, the core paints whatever page_data returned. m365 used to ship its own
+        renderer, which had drifted into a stale copy of the core's — it had lost the
+        group-by the core gained — so it was dropped rather than kept in step by hand."""
+        m365 = next(p for p in module_pages_catalog() if p['module'] == 'm365')
+        assert m365['render'] == '', 'm365 ships a renderer again; the core already has one'
+        assert m365['refresh'] == 'page_refresh',             'without a refresh action the page can only ever show the cached result'
 
     def test_every_page_carries_what_the_core_needs(self):
         for p in module_pages_catalog():
@@ -134,11 +143,20 @@ class TestServed:
         assert 'id="btn-nav-m365"' in html and 'data-nav-url="/m365"' in html
         assert 'Microsoft 365' in html                      # the module's own label
 
-    def test_its_ui_fragment_is_injected(self, client):
-        """The renderer ships with the module (web/_ui.html), like snmp's."""
+    def test_a_module_shipped_ui_fragment_is_injected(self, client):
+        """A module may still ship front-end of its own (web/_ui.html) and have it injected
+        into the shell. Pinned on snmp, which genuinely does: m365 used to be the example
+        here and no longer ships one, so keeping it as the example would have left this
+        testing nothing."""
         _login(client)
         html = client.get('/admin').data.decode('utf-8', 'replace')
-        assert 'function renderM365Page' in html
+        assert 'function _mibStatusBadge' in html
+
+    def test_the_core_renderer_is_what_paints_m365(self, client):
+        _login(client)
+        html = client.get('/admin').data.decode('utf-8', 'replace')
+        assert 'async function renderModulePage' in html
+        assert 'renderM365Page' not in html, 'the retired renderer is back'
 
     def test_the_data_endpoint_answers(self, client):
         _login(client)

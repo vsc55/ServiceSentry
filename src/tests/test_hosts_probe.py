@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/core/hosts/probe — running a single module check once for the
-Servers "test" feature (reuses the module's real check() with a minimal
-Monitor stand-in)."""
+"""Tests for lib/core/hosts/probe — the HOST half of the Servers "test" feature.
+
+Resolving an unsaved host is what is specific to hosts here; running the check is not, and
+lives in lib/modules/check_runner (see tests/test_module_check_runner.py).  The runs below
+stay in this file because what they exercise is the host resolution: a check reaching a
+remote machine through the draft the admin has typed but not yet saved.
+"""
 
 from contextlib import contextmanager
 from unittest.mock import patch
 
 from lib.core.hosts import ssh_client
 from lib.core.hosts import probe as host_probe
+from lib.modules.check_runner import run_module_check
 
 
 @contextmanager
@@ -33,24 +38,15 @@ _HOST = {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
 _PS_OUT = "nginx\nnginx\nsshd\n"
 
 
-class TestProbeMonitor:
-
-    def test_is_a_monitor(self):
-        # Must satisfy ModuleBase's isinstance(obj, Monitor) check.
-        import lib
-        mon = host_probe._ProbeMonitor({}, None, None)
-        assert isinstance(mon, lib.Monitor)
-        assert mon.send_message('x', True) is None      # no-op, no Telegram
-        # Signature must mirror Monitor.send_message: ModuleBase forwards module=/item=,
-        # so a probe of any module that emits an alert must not TypeError.
-        assert mon.send_message('x', True, module='process', item='web') is None
+class TestTheDraftHostIsWhatGetsChecked:
+    """The modal tests what the admin typed, so the check must reach the draft's address."""
 
     def test_runs_process_check_remote(self):
         cfg = {'watchfuls.process': {'list': {
             'web': {'process': 'nginx', 'min_count': 2, 'enabled': True, 'host_uid': 'h1'}}}}
         store = host_probe.ProbeHostsStore(_HOST, _FakeStore({'h1': _HOST}))
         with _mock_ssh(_PS_OUT):
-            results = host_probe.run_module_check('process', cfg, hosts_store=store)
+            results = run_module_check('process', cfg, hosts_store=store)
         assert len(results) == 1
         assert results[0]['key'] == 'web' and results[0]['status'] is True
         assert results[0]['other_data']['count'] == 2
@@ -60,7 +56,7 @@ class TestProbeMonitor:
             'web': {'process': 'nginx', 'min_count': 5, 'enabled': True, 'host_uid': 'h1'}}}}
         store = host_probe.ProbeHostsStore(_HOST, _FakeStore({'h1': _HOST}))
         with _mock_ssh(_PS_OUT):
-            results = host_probe.run_module_check('process', cfg, hosts_store=store)
+            results = run_module_check('process', cfg, hosts_store=store)
         assert results[0]['status'] is False
 
 

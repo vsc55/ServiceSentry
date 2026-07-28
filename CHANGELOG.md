@@ -8,6 +8,107 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.12] - 2026-07-28
+
+### Added
+- **A module page can be read four ways, and the layouts belong to the core.** A module
+  contributes a top-level section by declaring `__page__` and answering with a fixed shape —
+  sections of rows, each with a state, a message and whatever the check measured. Because the
+  shape is fixed, the layouts are core furniture: **board** (one tile per section, then only
+  the rows needing attention), **sections and detail** (a narrow list beside the chosen
+  section at full width), **table** (one row per check across every section, for triage) and
+  the **stacked cards** it had. Microsoft 365 and Azure get all four from the same code, and a
+  module contributing a page tomorrow gets them without writing any front-end at all.
+- A filter and an "only problems" switch came with them, both **per page**: wanting the table
+  for Azure and the board for M365 at the same time is normal, and one shared setting would
+  make each visit undo the other. Switching view redraws what is on screen — refreshing a
+  module page queries Microsoft, so a layout switch that re-fetched would charge the reader
+  for a decision about presentation.
+- **A usage ring per row**, where the module declares one. `section.chart = {used, total}`
+  names two measurements; the core divides and draws. No metric name lives in the core — the
+  same arrangement as `group_by`, which says which measurement is worth grouping on without
+  saying what any of them mean. Declared today for site storage, tenant and OneDrive storage,
+  Secure Score, licence capacity and MFA coverage.
+- Where a row has no total, an **empty ring** is drawn rather than nothing, with a tooltip
+  naming the measurement that is missing. A silent absence sends the reader off the page to
+  find out why — which is exactly what happened with OneDrive, whose "whole" is a limit
+  nobody had configured.
+
+- **Five new Microsoft 365 checks**, each answering a question the panel can and an admin
+  usually cannot, because each lives in a report nobody opens twice a year:
+  **MFA coverage** (how much of the directory has *registered* it — a policy that requires it
+  and a directory that has registered it are different facts), **unused licences** (accounts
+  holding a licence and not signing in: not a fault, a bill — and it names WHICH licences,
+  because "10 of 11 idle" is a number without an answer; an account holding two idle licences
+  wastes two, since the total that costs money counts licences, not people), **privileged
+  roles** (how many
+  Global Administrators exist), **domains** (one left unverified stops receiving mail) and
+  **service messages** (Microsoft's own deadlines for retirements and breaking changes — a
+  different question from whether a service is down).
+- All five are **off by default**, like every other optional check in the module. Turning them
+  on for existing installs would have started calling Graph with permissions not yet consented,
+  and in some cases alerting: a tenant with six Global Administrators and a threshold of five
+  would begin warning without anyone asking it to.
+- The Graph roles they need are declared, so the credential editor's **Check permissions**
+  reports them as missing and **Fix permissions** grants and consents them on the app that
+  already exists — same client id, same prior grants, no re-registration.
+- **Licence capacity now reports one row per SKU**, the way service health already reported one
+  per service. The numbers behind the verdict — units owned, units taken — were computed and
+  thrown away, leaving a single row that said "4 SKUs" and could not answer the only question
+  worth asking: which one is filling up. Note the consequence: alerts are now per SKU, so two
+  exhausted SKUs are two warnings rather than one.
+
+### Changed
+- **Running one check on demand moved out of the hosts domain.** The runner behind the Servers
+  "test" button and every module page's live refresh had lived in `lib/core/hosts/probe.py`,
+  because that is where it was needed first — so the generic module layer depended on one
+  domain to run a module. It is `lib/modules/check_runner.py` now, beside its main caller;
+  `probe.py` keeps resolving an unsaved host, which is the part that really is about hosts, and
+  deliberately does not re-export the runner: a convenience import would keep it looking like
+  host code and the next caller would reach for it there again. That address is not a detail —
+  the severity bug below survived precisely because a decision about the module result contract
+  was sitting in a file nobody opens when they change what a check emits.
+- **Microsoft 365 stopped shipping its own page renderer.** It had begun as a copy of the
+  core's and then stopped tracking it — by the time anyone looked, the core had grown grouping
+  by measurement and the copy had not. It was not a different design, it was an older one, so
+  the copy was deleted rather than a fourth renderer written beside it. The mechanism for a
+  module to ship one remains; a guard now notices when a module uses it, because a second
+  implementation deserves a conversation rather than appearing quietly.
+
+### Fixed
+- The board's tiles had no edges, so it was not clear which item an icon belonged to. They
+  dropped the card border and pushed the state badge to the far right — the furthest point
+  from the number it qualifies and the nearest to the next tile's label, which is what the
+  eye then paired it with. The border is back and the badge leads its figure, aligned under
+  the label, so each tile reads as one column of label, state and count.
+- The "only problems" switch did nothing to the board's tiles: they were drawn from the
+  unfiltered list, so in the view where the switch has the least left to hide it also appeared
+  to do nothing at all.
+- A metrics badge, and five others across clusters and servers, used `text-bg-light` — light
+  background and dark text whatever the theme is. The CSS-trap guard now bans it alongside
+  `table-light`.
+- **The same check reported amber or red depending on who ran it.** A module page has two
+  halves — the monitor's last stored result and a live refresh — and the live one rebuilds each
+  result field by field from a list that never included `severity`. So a soft threshold breach
+  (unused licences, a quota near its limit) arrived indistinguishable from a hard failure and
+  the page painted the row, its section badge and its ring red, while the stored half of the
+  very same check painted them amber. Not a Microsoft 365 fault: it hit every module with a
+  warning state, and the "test this credential" button in Servers too. The projection stopped
+  being a hand-kept list: it is checked against what the result contract writes, so the next
+  field added has to be carried or excluded on purpose rather than falling out by omission —
+  `name` was already going the same way.
+- The usage ring coloured itself from a fixed "fuller is worse" scale, so a row the check had
+  called a warning could carry a red ring — two signals disagreeing about one record. It takes
+  the row's own state now: the check decides, the ring draws.
+- The MFA check asked Graph for `userRegistrationFeatureSummary` as a plain segment. It is an
+  OData function with required parameters, so the answer was `400 Resource not found for the
+  segment` — a check that could never have worked. It counts from `userRegistrationDetails`,
+  the GA report, instead: more calls, and impossible to be wrong about.
+- The two panes of the sections-and-detail layout started at different heights, so the list's
+  first entry sat level with the detail's title and the halves read as unrelated. Both headers
+  come from one class with a fixed height now: with different content on each side, matching
+  padding would only align them by luck.
+
 ## [0.0.1+build.11] - 2026-07-27
 
 ### Added

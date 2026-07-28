@@ -7,6 +7,7 @@ Graph. Both the token and the Graph calls are patched so the tests stay hermetic
 (no network) and exercise only the threshold/aggregation logic.
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from conftest import create_mock_monitor
@@ -334,12 +335,23 @@ class TestCredentialAndProvision:
     def test_declares_entraid_provision_roles(self):
         from watchfuls.m365 import Watchful
         prov = Watchful.ITEM_SCHEMA['__entraid_provision__']
-        # Storage checks (Sites/Reports) plus the added service-health, licence,
-        # app-secret, security-posture and risky-user checks.
+        # Every role the module's checks need, and nothing else — this list is what the
+        # credential editor's "Check permissions" asks about and what "Fix permissions"
+        # grants and consents on the app that already exists. A check added without its
+        # role here fails against a tenant with a silence nobody can trace.
         assert set(prov['app_roles']) == {
-            'Sites.Read.All', 'Reports.Read.All', 'ServiceHealth.Read.All',
-            'Organization.Read.All', 'Application.Read.All',
-            'SecurityEvents.Read.All', 'IdentityRiskyUser.Read.All'}
+            'Sites.Read.All',                 # SharePoint site + tenant storage
+            'Reports.Read.All',               # OneDrive / mailbox usage reports
+            'ServiceHealth.Read.All',         # service health
+            'ServiceMessage.Read.All',        # service messages with an action deadline
+            'Organization.Read.All',          # subscribed SKUs (licence capacity)
+            'Application.Read.All',           # this app's own secret expiry
+            'SecurityEvents.Read.All',        # Secure Score
+            'IdentityRiskyUser.Read.All',     # risky users
+            'AuditLog.Read.All',              # MFA registration + sign-in activity
+            'User.Read.All',                  # the licensed accounts behind that activity
+            'RoleManagement.Read.Directory',  # who holds Global Administrator
+            'Domain.Read.All'}                # domain verification state
 
 
 class TestExtendedChecks:
@@ -348,11 +360,11 @@ class TestExtendedChecks:
     Secure Score and risky users. Each is opt-in and emits under <item>/<suffix>."""
 
     @staticmethod
-    def _run(item, *, jbp=None, tbp=None):
+    def _run(item, *, jbp=None, tbp=None, pbp=None):
         from watchfuls.m365 import Watchful
         cfg = {'watchfuls.m365': {'threads': 1, 'alert': 1, 'list': {'m1': item}}}
         w = Watchful(create_mock_monitor(cfg))
-        jbp, tbp = jbp or {}, tbp or {}
+        jbp, tbp, pbp = jbp or {}, tbp or {}, pbp or {}
 
         def fake_json(tok, path, to):
             return next((r for frag, r in jbp.items() if frag in path), {})
@@ -360,8 +372,12 @@ class TestExtendedChecks:
         def fake_text(tok, path, to):
             return next((r for frag, r in tbp.items() if frag in path), '')
 
+        def fake_paged(tok, path, to, **_kw):
+            return next((r for frag, r in pbp.items() if frag in path), [])
+
         with patch.object(w, '_get_token', side_effect=lambda *a: 'tok'), \
              patch.object(w, '_graph_json', side_effect=fake_json), \
+             patch.object(w, '_paged', side_effect=fake_paged), \
              patch.object(w, '_graph_text', side_effect=fake_text):
             return w.check().list
 
@@ -408,24 +424,185 @@ class TestExtendedChecks:
         assert 'm1/health/exchange-online' not in res          # not in the filter
 
     # ── licences ─────────────────────────────────────────────────────
+    # One result PER SKU, like the health check reports per service. The aggregate row said
+    # "4 SKUs" and could not answer which one was filling up — the numbers behind that
+    # judgement were computed and discarded.
     def test_licenses_free_units_ok(self):
         res = self._run(_item(check_site=False, check_licenses=True),
                         jbp={'subscribedSkus': {'value': [
                             {'skuPartNumber': 'E3', 'prepaidUnits': {'enabled': 10}, 'consumedUnits': 5}]}})
-        assert res['m1/licenses']['status'] is True
+        assert res['m1/licenses/e3']['status'] is True
 
-    def test_licenses_exhausted_warns(self):
+    def test_each_sku_reports_its_own_numbers(self):
+        """What the page draws a ring from, and what the old aggregate threw away."""
         res = self._run(_item(check_site=False, check_licenses=True),
                         jbp={'subscribedSkus': {'value': [
-                            {'skuPartNumber': 'E3', 'prepaidUnits': {'enabled': 5}, 'consumedUnits': 5}]}})
-        assert res['m1/licenses']['status'] is False
-        assert res['m1/licenses']['severity'] == 'warning'
+                            {'skuPartNumber': 'E3', 'prepaidUnits': {'enabled': 10}, 'consumedUnits': 5},
+                            {'skuPartNumber': 'E5', 'prepaidUnits': {'enabled': 4}, 'consumedUnits': 4}]}})
+        od = res['m1/licenses/e3']['other_data']
+        assert od['assigned'] == 5 and od['total'] == 10 and od['free'] == 5
+        assert od['sku'] == 'E3'
+        assert res['m1/licenses/e5']['other_data']['assigned'] == 4
+
+    def test_only_the_exhausted_sku_warns(self):
+        """The point of splitting them: one SKU running out no longer marks the others."""
+        res = self._run(_item(check_site=False, check_licenses=True),
+                        jbp={'subscribedSkus': {'value': [
+                            {'skuPartNumber': 'E3', 'prepaidUnits': {'enabled': 10}, 'consumedUnits': 5},
+                            {'skuPartNumber': 'E5', 'prepaidUnits': {'enabled': 5}, 'consumedUnits': 5}]}})
+        assert res['m1/licenses/e3']['status'] is True
+        assert res['m1/licenses/e5']['status'] is False
+        assert res['m1/licenses/e5']['severity'] == 'warning'
 
     def test_licenses_below_threshold_warns(self):
         res = self._run(_item(check_site=False, check_licenses=True, license_min=3),
                         jbp={'subscribedSkus': {'value': [
                             {'skuPartNumber': 'E3', 'prepaidUnits': {'enabled': 10}, 'consumedUnits': 8}]}})
-        assert res['m1/licenses']['status'] is False
+        assert res['m1/licenses/e3']['status'] is False
+
+    def test_a_tenant_with_no_skus_still_reports(self):
+        res = self._run(_item(check_site=False, check_licenses=True),
+                        jbp={'subscribedSkus': {'value': []}})
+        assert res['m1/licenses']['status'] is True
+
+    # ── tenant posture ───────────────────────────────────────────────
+    # Five checks that answer questions a panel can and an admin usually cannot, because
+    # each needs a report nobody opens twice a year. Each reports its own NUMBERS, not just
+    # a verdict, so the section page can draw them.
+
+    # Counted from userRegistrationDetails, the GA report. The aggregate summary beside it is
+    # an OData FUNCTION with required parameters, so asking for it as a plain segment answers
+    # 400 "Resource not found for the segment" — which is how the first attempt failed.
+    def test_mfa_coverage_reports_the_fraction(self):
+        res = self._run(_item(check_site=False, check_mfa=True, mfa_min=0),
+                        pbp={'userRegistrationDetails': [{'isMfaRegistered': True},
+                                                         {'isMfaRegistered': True},
+                                                         {'isMfaRegistered': True},
+                                                         {'isMfaRegistered': False}]})
+        od = res['m1/mfa']['other_data']
+        assert res['m1/mfa']['status'] is True
+        assert od['registered'] == 3 and od['total'] == 4 and od['used'] == 75.0
+
+    def test_mfa_below_the_floor_warns(self):
+        res = self._run(_item(check_site=False, check_mfa=True, mfa_min=90),
+                        pbp={'userRegistrationDetails': [{'isMfaRegistered': True},
+                                                         {'isMfaRegistered': False}]})
+        assert res['m1/mfa']['status'] is False
+        assert res['m1/mfa']['severity'] == 'warning'
+
+    def test_an_empty_directory_is_not_a_breach(self):
+        """0% of nobody is a number with no subject; reporting it as a failure would be a
+        verdict about an empty set."""
+        res = self._run(_item(check_site=False, check_mfa=True, mfa_min=90),
+                        pbp={'userRegistrationDetails': []})
+        assert res['m1/mfa']['status'] is True
+
+    def test_unused_licences_counts_the_idle_ones(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat().replace('+00:00', 'Z')
+        recent = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=60),
+                        pbp={'/users': [
+                            {'userPrincipalName': 'a@x', 'assignedLicenses': [{'skuId': '1'}],
+                             'signInActivity': {'lastSignInDateTime': recent}},
+                            {'userPrincipalName': 'b@x', 'assignedLicenses': [{'skuId': '1'}],
+                             'signInActivity': {'lastSignInDateTime': old}},
+                            {'userPrincipalName': 'c@x', 'assignedLicenses': []},
+                        ]})
+        od = res['m1/unused']['other_data']
+        assert res['m1/unused']['status'] is False          # one licence is being wasted
+        # A bill, not a fault: amber. Nothing is broken and nothing is down.
+        assert res['m1/unused']['severity'] == 'warning'
+        assert od['licensed'] == 2 and od['idle'] == 1      # the unlicensed one is not counted
+        assert 'b@x' in od['worst']
+
+    def test_unused_licences_names_the_wasted_skus(self):
+        """"10 of 11 idle" is a number without an answer: which licences are being paid for?
+        The SKU names live in the subscription list, so the check joins the two."""
+        old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat().replace('+00:00', 'Z')
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=60),
+                        pbp={'/users': [
+                            {'userPrincipalName': 'a@x',
+                             'assignedLicenses': [{'skuId': 'g-e3'}, {'skuId': 'g-e5'}],
+                             'signInActivity': {'lastSignInDateTime': old}},
+                            {'userPrincipalName': 'b@x', 'assignedLicenses': [{'skuId': 'g-e3'}],
+                             'signInActivity': {'lastSignInDateTime': old}}],
+                             '/subscribedSkus': [{'skuId': 'g-e3', 'skuPartNumber': 'E3'},
+                                                 {'skuId': 'g-e5', 'skuPartNumber': 'E5'}]})
+        skus = res['m1/unused']['other_data']['skus']
+        # Licences, not people: an account holding two idle licences wastes two.
+        assert 'E3 ×2' in skus and 'E5 ×1' in skus
+
+    def test_the_count_survives_when_the_names_do_not(self):
+        """Without the subscription list the answer is still "1 of 1 idle", which is worth
+        having — failing the whole check over a cosmetic second call would trade a real
+        finding for a label."""
+        old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat().replace('+00:00', 'Z')
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=60),
+                        pbp={'/users': [
+                            {'userPrincipalName': 'a@x', 'assignedLicenses': [{'skuId': 'g-e3'}],
+                             'signInActivity': {'lastSignInDateTime': old}}]})
+        assert res['m1/unused']['status'] is False
+        assert res['m1/unused']['other_data']['idle'] == 1
+
+    def test_never_signed_in_counts_as_unused(self):
+        """The strongest case of the thing being looked for — skipping it would report the
+        cleanest waste as no waste at all."""
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=30),
+                        pbp={'/users': [{'userPrincipalName': 'new@x',
+                                         'assignedLicenses': [{'skuId': '1'}]}]})
+        assert res['m1/unused']['status'] is False
+        assert res['m1/unused']['other_data']['idle'] == 1
+
+    def test_privileged_roles_counts_global_admins(self):
+        res = self._run(_item(check_site=False, check_privileged=True, privileged_max=2),
+                        pbp={'/directoryRoles': [
+                            {'displayName': 'Global Administrator',
+                             'members': [{'id': '1'}, {'id': '2'}, {'id': '3'}]},
+                            {'displayName': 'Helpdesk Administrator', 'members': [{'id': '9'}]}]})
+        assert res['m1/privileged']['status'] is False
+        assert res['m1/privileged']['other_data']['global_admins'] == 3
+
+    def test_the_legacy_role_name_counts_too(self):
+        """Graph still calls it "Company Administrator" in places; missing that spelling
+        would report a tenant full of admins as having none."""
+        res = self._run(_item(check_site=False, check_privileged=True, privileged_max=0),
+                        pbp={'/directoryRoles': [
+                            {'displayName': 'Company Administrator', 'members': [{'id': '1'}]}]})
+        assert res['m1/privileged']['other_data']['global_admins'] == 1
+
+    def test_an_unverified_domain_warns(self):
+        res = self._run(_item(check_site=False, check_domains=True),
+                        pbp={'/domains': [{'id': 'x.com', 'isVerified': True},
+                                          {'id': 'new.com', 'isVerified': False}]})
+        assert res['m1/domains']['status'] is False
+        assert 'new.com' in res['m1/domains']['other_data']['names']
+
+    def test_all_domains_verified_is_ok(self):
+        res = self._run(_item(check_site=False, check_domains=True),
+                        pbp={'/domains': [{'id': 'x.com', 'isVerified': True}]})
+        assert res['m1/domains']['status'] is True
+
+    def test_a_deadline_inside_the_window_warns(self):
+        soon = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat().replace('+00:00', 'Z')
+        res = self._run(_item(check_site=False, check_announcements=True, announce_days=14),
+                        pbp={'serviceAnnouncement': [
+                            {'title': 'Retiring basic auth', 'actionRequiredByDateTime': soon}]})
+        assert res['m1/announcements']['status'] is False
+        assert res['m1/announcements']['other_data']['due'] == 1
+
+    def test_a_deadline_already_past_is_not_upcoming(self):
+        """Missed or done — either way not the deadline this check exists to warn about."""
+        past = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat().replace('+00:00', 'Z')
+        res = self._run(_item(check_site=False, check_announcements=True, announce_days=14),
+                        pbp={'serviceAnnouncement': [
+                            {'title': 'Old thing', 'actionRequiredByDateTime': past}]})
+        assert res['m1/announcements']['status'] is True
+
+    def test_a_message_with_no_deadline_is_not_counted(self):
+        res = self._run(_item(check_site=False, check_announcements=True),
+                        pbp={'serviceAnnouncement': [{'title': 'FYI'}]})
+        assert res['m1/announcements']['status'] is True
+        assert res['m1/announcements']['other_data']['due'] == 0
 
     # ── app secret expiry ────────────────────────────────────────────
     def test_secret_valid_is_ok(self):

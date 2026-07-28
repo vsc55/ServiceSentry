@@ -40,6 +40,7 @@ from ._parse import _csv_max  # noqa: F401  (re-exported)
 from .actions import M365Actions
 from .checks_health import HealthChecks
 from .checks_identity import IdentityChecks
+from .checks_posture import PostureChecks
 from .checks_storage import StorageChecks
 from .page import M365Page
 
@@ -59,7 +60,7 @@ _SCHEMA = json.load(
 )
 
 
-class Watchful(StorageChecks, HealthChecks, IdentityChecks,
+class Watchful(StorageChecks, HealthChecks, IdentityChecks, PostureChecks,
                M365Page, M365Actions, EntraApi, ModuleBase):
     """Monitors Microsoft 365 through the Graph API.
 
@@ -99,6 +100,11 @@ class Watchful(StorageChecks, HealthChecks, IdentityChecks,
         ('check_onedrive',     'onedrive',    '_check_onedrive'),
         ('check_secure_score', 'securescore', '_check_secure_score'),
         ('check_risky_users',  'risky',       '_check_risky_users'),
+        ('check_mfa',            'mfa',           '_check_mfa'),
+        ('check_unused_licenses','unused',        '_check_unused_licenses'),
+        ('check_privileged',     'privileged',    '_check_privileged'),
+        ('check_domains',        'domains',       '_check_domains'),
+        ('check_announcements',  'announcements', '_check_announcements'),
     )
 
     def __init__(self, monitor):

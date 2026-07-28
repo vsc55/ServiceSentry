@@ -139,6 +139,8 @@
 115. [Modules — cuatro layouts, no cuatro renderizadores](#115-modules--cuatro-layouts-no-cuatro-renderizadores)
 116. [Status — cuatro layouts que tienen que coincidir](#116-status--cuatro-layouts-que-tienen-que-coincidir-en-qué-está-fallando)
 117. [Marcado que no hace lo que sugiere el nombre de la clase](#117-marcado-que-no-hace-lo-que-sugiere-el-nombre-de-la-clase)
+118. [Páginas de módulo — cuatro layouts que son del núcleo](#118-páginas-de-módulo--cuatro-layouts-que-son-del-núcleo-no-de-un-módulo)
+119. [Ejecutar un check una vez — la proyección es el contrato](#119-ejecutar-un-check-una-vez--la-proyección-es-el-contrato)
 
 ---
 
@@ -3069,7 +3071,24 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 64. Watchful: m365
 
-**Archivo:** `watchfuls/m365/tests/test_m365.py` — 53 tests
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 69 tests
+
+**Postura del tenant** (14 tests, `TestExtendedChecks`): cinco comprobaciones que contestan
+preguntas que el panel puede y un administrador normalmente no, porque cada una vive en un
+informe que nadie abre dos veces al año — cobertura de MFA registrada, licencias asignadas a
+cuentas que no entran —**nombrando qué SKU** se están desperdiciando, porque «10 de 11
+inactivas» es una cifra sin respuesta—, cuántos administradores globales hay, dominios sin
+verificar y avisos
+de Microsoft con fecha límite de acción. Tres decisiones que los tests fijan porque son
+fáciles de equivocar: **no haber entrado nunca cuenta** como licencia sin usar (es el caso más
+claro de desperdicio), **una fecha ya pasada no es próxima** (está hecha o perdida), y un
+**directorio vacío no incumple** el mínimo de MFA (0% de nadie es un número sin sujeto). Graph
+aún llama *Company Administrator* al rol en algunos sitios, así que ambas grafías cuentan: sin
+eso, un tenant lleno de admins se reportaría con cero.
+
+Las licencias pasan a **una fila por SKU**, como salud de servicio ya hacía por servicio. Los
+números detrás del veredicto —cuántas unidades hay y cuántas están tomadas— se calculaban y se
+tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se está llenando.
 
 ### `TestHelpers`, `TestSite`, `TestTenant`, `TestModule`, `TestListSites`, `TestCredentialAndProvision`
 
@@ -5158,3 +5177,93 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 | `TestNoTemplatePinsALightSurface::test_the_replacement_exists_and_is_theme_driven` | Si la clase sustituta fijara un color, el guard solo habría movido el problema detrás de un nombre mejor |
 | `TestNoTemplatePinsALightSurface::test_the_tables_that_had_it_use_the_replacement` | Las tres donde apareció, nombradas: volver atrás en cualquiera es la regresión que este fichero vigila |
 | `TestATableCellStaysATableCell::test_no_cell_is_turned_into_a_flex_container` | **La segunda trampa**: `d-flex` en un `<td>` lo saca de `display:table-cell`, deja de contar para la altura de la fila y su borde se dibuja a la altura del contenido — el separador se parte justo en esa columna |
+
+---
+
+## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
+
+**Archivo:** `tests/test_wa_module_page_views.py` — 36 tests
+
+Un módulo aporta una sección de primer nivel declarando `__page__` y contestando con una
+forma fija: secciones de filas, cada fila con estado, mensaje y lo que la comprobación haya
+medido. Como la forma es fija, **los layouts son mobiliario del núcleo**: Microsoft 365 y
+Azure los reciben del mismo código, y un módulo que aporte una página mañana los hereda sin
+escribir nada de front-end.
+
+Eso estuvo a punto de perderse. M365 traía **su propio** renderizador —declarado en su
+schema, viviendo en `web/_ui.html`— que empezó siendo una copia del del núcleo y dejó de
+seguirle: cuando se miró, el núcleo había ganado la agrupación por métrica y la copia no. No
+era un diseño distinto, era uno más viejo. Así que las vistas fueron al renderizador genérico
+y la copia se retiró, en lugar de escribir un cuarto renderizador a su lado.
+
+**El anillo de uso** es el mismo trato que `group_by`: el módulo declara **qué dos medidas**
+son el par usado/total y el núcleo divide. Ninguna clave de métrica aparece en el núcleo — hay
+un guard que lo comprueba, porque es justo el conocimiento que no le toca tener. Dos detalles
+que costaron un ida y vuelta cada uno: se dibuja **por fila**, no por sección (sumar los
+sitios contesta «cuán lleno está SharePoint entero», que nadie pregunta, y esconde qué sitio
+se está llenando); y cuando falta el total **se dibuja un anillo vacío** en vez de nada,
+porque una ausencia muda obliga a salir de la página para averiguar por qué.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×2) | El registro y el cableado de los dos ficheros |
+| `TestTheLayoutsBelongToTheCore::test_no_shipped_module_declares_its_own_page_renderer` | **La regla**: un segundo renderizador merece una conversación, no aparecer en silencio |
+| `TestTheLayoutsBelongToTheCore::test_the_retired_renderer_is_really_gone` | Una copia muerta en el árbol es la que edita el siguiente |
+| `TestAViewIsChromeOnly::test_no_view_draws_a_row_itself` | Una vista que montara una fila podría discrepar de la de al lado sobre el mismo check |
+| `TestAViewIsChromeOnly::test_the_measurements_are_rendered_once` | |
+| `TestAViewIsChromeOnly::test_the_filter_is_applied_in_one_place` | |
+| `TestTheRingIsDeclaredNotGuessed::test_the_core_only_draws_what_it_was_told` | Ningún nombre de métrica en el núcleo |
+| `TestTheRingIsDeclaredNotGuessed::test_a_missing_total_never_becomes_a_number` | Un 0,0% que se lee como medida y no lo es |
+| `TestTheRingIsDeclaredNotGuessed::test_a_missing_total_says_so_instead_of_vanishing` | La ausencia muda costó un ida y vuelta real |
+| `TestTheRingIsDeclaredNotGuessed::test_the_placeholder_shows_no_percentage` | Cualquier cifra dentro se leería como dato |
+| `TestTheRingIsDeclaredNotGuessed::test_it_is_drawn_per_row_not_per_section` | |
+| `TestTheRingIsDeclaredNotGuessed::test_every_view_shows_it` | Una cifra en un layout y no en el siguiente hace que se contradigan |
+| `TestTheRingIsDeclaredNotGuessed::test_the_label_is_centred_by_declaration` | El ajuste a ojo solo acierta a un tamaño |
+| `TestTheRingIsDeclaredNotGuessed::test_each_declared_pair_is_what_that_check_publishes` | **El error que cazó**: `total_bytes` frente a `limit_bytes`; la declaración equivocada no pintaba nada, en silencio |
+| `TestTheRingIsDeclaredNotGuessed::test_it_is_only_offered_when_the_rows_carry_both` | |
+| `TestTheRingIsDeclaredNotGuessed::test_the_ring_takes_its_colour_from_the_row` | Una escala «más lleno es peor» vale para un disco y no para lo demás: un anillo rojo junto a una fila ámbar son dos señales discrepando sobre el mismo registro |
+| `TestTheRingIsDeclaredNotGuessed::test_it_needs_no_charting_library` | Un anillo no justifica una dependencia, y la CSP prohíbe traerla |
+| `TestTheStateBelongsToThePage::*` (×3) | Vista y filtro son **por página**: querer la tabla para Azure y el cuadro para M365 a la vez es normal |
+| `TestTheBoardIsASummaryNotAFilteredList::*` (×3) | Las casillas **son** el conjunto; la lista de abajo es lo que necesita atención — y el interruptor tenía que morder también las casillas |
+| `TestATileIsBoundedAndReadsAsOne::*` (×3) | Una rejilla de cifras sin bordes es una rejilla de cifras ambiguas: el badge estaba a la derecha del todo, o sea lo más lejos posible de su número y lo más cerca de la etiqueta de al lado |
+| `TestTheTwoPanesLineUp::*` (×4) | Una sola clase con altura fija: con contenidos distintos a cada lado, igualar el padding alinea por casualidad |
+| `TestOnlyProblemsIsHonest::*` (×3) | Esconde filas, nunca los recuentos |
+| `TestTheLabelsExist::test_every_view_is_named_in_both_languages` | |
+
+---
+
+## 119. Ejecutar un check una vez — la proyección es el contrato
+
+**Archivo:** `tests/test_module_check_runner.py` — 11 tests
+
+Dos funciones necesitan exactamente lo mismo: el botón **probar** de Servers y el **refresco
+en vivo** de una página de módulo. Las dos quieren el `check()` **real** del módulo —una sonda
+que pasara por otro código no probaría nada de lo que corre a las 3 de la mañana—, así que el
+módulo recibe un Monitor mínimo y se le llama. Eso es `lib/modules/check_runner.py`, y estuvo
+viviendo en `lib/core/hosts/probe.py` porque allí se necesitó primero: la capa genérica
+dependiendo de **un** dominio.
+
+La factura llegó como bug. El runner no devuelve el resultado del módulo tal cual: lo
+**reconstruye campo a campo**, y esa lista blanca es el único sitio que decide qué sobrevive a
+una ejecución bajo demanda. `severity` no estaba en ella, así que un aviso de umbral llegaba
+indistinguible de una caída y la página lo pintaba rojo mientras el resultado guardado del
+**mismo** check salía ámbar. Nada falló: se perdió información, que es la forma más cara de
+romperse. `name` iba detrás, por la misma puerta.
+
+De ahí el guard: `RESULT_FIELDS` se compara con lo que `ReturnModuleCheck.set()` escribe, y un
+campo nuevo del contrato tiene que estar proyectado **o** excluido a propósito
+(`RESULT_FIELDS_EXCLUDED`, hoy solo `send`, que es la compuerta de notificación y no parte de
+la respuesta). Verificado quitando `severity`: falla nombrándolo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheProjectionMatchesTheContract::test_no_field_of_the_contract_is_lost_by_omission` | **La regla**: ningún campo se cae por olvido |
+| `TestTheProjectionMatchesTheContract::test_nothing_is_projected_that_the_contract_does_not_write` | Y al revés: nada inventado |
+| `TestTheProjectionMatchesTheContract::test_the_exclusion_is_only_the_notify_gate` | La lista de exclusiones no puede volverse un escondite |
+| `TestTheProjectionMatchesTheContract::test_every_projected_field_reaches_the_caller` | |
+| `TestTheProjectionMatchesTheContract::test_the_notify_gate_does_not_reach_the_caller` | Una ejecución puntual no notifica a nadie |
+| `TestASeveritySurvivesTheRun::test_a_warning_is_not_reported_as_a_failure` | **El bug**: ámbar o rojo según quién lo ejecutara |
+| `TestASeveritySurvivesTheRun::test_a_plain_failure_carries_no_severity` | El vacío **es** el dato: significa «esto sí es un error» |
+| `TestASeveritySurvivesTheRun::test_a_field_the_module_never_set_reads_as_empty_not_missing` | Quien tenga que preguntar si la clave existe acabará olvidándolo, y la rama que olvide es la ámbar |
+| `TestItRunsTheRealCheck::*` (×2) | Un módulo sin `Watchful` no corre en silencio; un resultado no-dict no es fatal |
+| `TestTheStandInIsAMonitor::test_is_a_monitor` | La firma tiene que reflejar `Monitor.send_message` o cualquier módulo que avise revienta |

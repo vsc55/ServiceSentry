@@ -64,8 +64,81 @@ function _mpMetrics(row) {
     const keys = Object.keys(m).filter(k => k !== 'alert').slice(0, 4);
     if (!keys.length) return '';
     return `<div class="d-flex flex-wrap gap-1 mt-1">${keys.map(k =>
-        `<span class="badge text-bg-light border fw-normal ss-fs-1">${esc(k)}: <strong>${esc(String(m[k]))}</strong></span>`
+        `<span class="badge bg-body-secondary text-body border fw-normal ss-fs-1">${esc(k)}: <strong>${esc(String(m[k]))}</strong></span>`
     ).join('')}</div>`;
+}
+
+/** One row's figure as a ring, when its section declared which measurements make one.
+ *
+ *  `section.chart = {used: <metric>, total: <metric>}` — two measurement NAMES. The core
+ *  still knows nothing about what they mean: it is told which two numbers to divide, exactly
+ *  like `group_by` tells it which measurement is worth grouping on. Without a declaration
+ *  there is no ring, because guessing which of "used / used_bytes / free_bytes / total_bytes"
+ *  is the interesting pair is precisely the module knowledge the core does not have.
+ *
+ *  Per row, not per section: adding the sites up answers "how full is all of SharePoint",
+ *  which nobody asked, and hides the one that matters — which site is filling up.
+ *
+ *  Drawn as an SVG arc rather than with a chart library: one ring does not justify a
+ *  dependency, and the page's CSP forbids fetching one anyway.
+ */
+/** The placeholder ring: same footprint, no claim. Used when a section declares a ring but
+ *  a row has no total to divide by — typically because the "whole" is a limit the operator
+ *  has not configured, which the core cannot know and so does not assert. */
+function _mpRingEmpty(spec) {
+    const R = 15.9155;
+    return `<span class="d-inline-flex align-items-center flex-shrink-0 ps-2 text-muted"
+                  title="${escAttr(tf('page_chart_no_total', spec.total))}">
+        <svg width="58" height="58" viewBox="0 0 36 36" role="img"
+             aria-label="${escAttr(tf('page_chart_no_total', spec.total))}">
+            <circle cx="18" cy="18" r="${R}" fill="none" stroke="var(--bs-border-color)"
+                    stroke-width="3.5" stroke-dasharray="2 3"/>
+            <text x="18" y="18" text-anchor="middle" dominant-baseline="central"
+                  fill="currentColor" style="font-size:11px;font-weight:600">—</text>
+        </svg>
+    </span>`;
+}
+
+function _mpRowChart(spec, row) {
+    if (!spec || !spec.used || !spec.total) return '';
+    const m = row.metrics || {};
+    const used = parseFloat(m[spec.used]);
+    const total = parseFloat(m[spec.total]);
+    // A ring computed from a missing total is a confident-looking zero, which is worse than
+    // no ring at all — so it is not drawn. But drawing NOTHING is its own small failure: the
+    // reader sees a ring on the row above and none here and has to go and find out why. An
+    // empty ring says "there is no whole to be a fraction of" in the same space, and its
+    // tooltip names the measurement that is missing, which is what points at the setting.
+    if (!Number.isFinite(used) || !(total > 0)) return _mpRingEmpty(spec);
+    const pct = Math.min(100, Math.max(0, (used / total) * 100));
+    // Coloured by the ROW's state, not by a threshold of its own. A fixed "fuller is worse"
+    // scale is right for a disk and wrong for anything else — 91% of licences idle is a
+    // warning the check already made, and a red ring beside an amber row is two signals
+    // disagreeing about one record. The check decides; the ring draws.
+    const col = row.state === 'error' ? 'var(--bs-danger)'
+              : row.state === 'warn' ? 'var(--bs-warning)'
+              : row.state === 'ok' ? 'var(--bs-success)' : 'var(--bs-secondary)';
+    const R = 15.9155;                            // circumference 100 → dasharray IS the %
+    const label = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
+    // Sized to the row, not to a corner of it: a row is three lines tall (name, reason,
+    // measurements) and a 34px ring left most of that height empty while being too small to
+    // read the number inside. Everything else is in viewBox units, so the stroke and the
+    // label scale with it and nothing needs re-tuning if this changes again.
+    return `<span class="d-inline-flex align-items-center flex-shrink-0 ps-2"
+                  title="${escAttr(`${spec.used} / ${spec.total}`)}">
+        <svg width="58" height="58" viewBox="0 0 36 36" role="img" aria-label="${escAttr(label + '%')}">
+            <circle cx="18" cy="18" r="${R}" fill="none" stroke="var(--bs-border-color)" stroke-width="3.5"/>
+            <circle cx="18" cy="18" r="${R}" fill="none" stroke="${col}" stroke-width="3.5"
+                    stroke-dasharray="${pct.toFixed(2)} ${(100 - pct).toFixed(2)}"
+                    stroke-dashoffset="25" stroke-linecap="round"/>
+            <!-- Centred by declaring it centred: text-anchor for the horizontal,
+                 dominant-baseline for the vertical. The y was a hand-tuned nudge before,
+                 which is only right at one font size — and it stopped being right the
+                 moment the ring grew. -->
+            <text x="18" y="18" text-anchor="middle" dominant-baseline="central"
+                  fill="currentColor" style="font-size:9px;font-weight:600">${esc(label)}%</text>
+        </svg>
+    </span>`;
 }
 
 function _mpRender(pageId) {
@@ -73,7 +146,6 @@ function _mpRender(pageId) {
     const c = document.getElementById(pageId + '-container');
     if (!st || !c) return;
     const d = st.data || {};
-    const sections = d.sections || [];
     const counts = d.counts || { ok: 0, warn: 0, error: 0, total: 0 };
 
     const refreshBtn = st.spec.refresh ? `
@@ -83,39 +155,54 @@ function _mpRender(pageId) {
                 : `<i class="bi bi-arrow-clockwise me-1"></i>${esc(t('page_refresh_live'))}`}
         </button>` : '';
 
-    const head = `<div class="ss-card ss-vfill">
+    c.innerHTML = `<div class="ss-card ss-vfill">
         <div class="ss-accent ss-accent-cyan"></div>
         <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi ${escAttr(st.spec.icon)} me-2"></i>${esc(st.spec.label || pageId)}
                 <span class="text-muted ss-fs-2 ms-2">${esc(d.live ? t('page_live') : t('page_cached'))}</span></h6>
-            ${['ok', 'warn', 'error'].map(k => counts[k]
-                ? `<span class="badge text-bg-${_MP_STATE_CLS[k]}">${counts[k]}</span>` : '').join(' ')}
             ${refreshBtn}
         </div>
-        <div class="ss-vscroll p-3">`;
+        <div class="ss-vscroll p-3" id="mpBody_${escAttr(pageId)}"></div>
+    </div>`;
 
-    if (!sections.length) {
-        c.innerHTML = head + `<div class="text-center py-5 text-muted">
-            <i class="bi ${escAttr(st.spec.icon)} ss-empty-icon"></i>
-            <div>${esc(t('page_no_data'))}</div></div></div></div>`;
+    // The counts moved out of the card header and into the results header, where they sit
+    // beside the filter that can hide things — a total is only honest next to the switch
+    // that narrowed what is under it.
+    const body = c.querySelector('#mpBody_' + CSS.escape(pageId));
+    if (!body) return;
+    if (!(d.sections || []).length) {
+        body.innerHTML = _mpEmptyState(pageId, st.spec.icon);
         return;
     }
+    body.innerHTML = _mpResultsHeader(pageId, counts) + '<div id="mpViewBody_' + escAttr(pageId) + '"></div>';
+    const view = MP_VIEWS.find(v => v.id === _mpViewId(pageId)) || MP_VIEWS[0];
+    const draw = window[view.render];
+    (typeof draw === 'function' ? draw : _mpViewCards)(
+        pageId, st, body.querySelector('#mpViewBody_' + CSS.escape(pageId)));
+}
 
+// ── View: cards ───────────────────────────────────────────────────────────────
+// What a module page looked like before there was a choice: every section stacked, all of it
+// open. Kept as the baseline the other three are compared against, and unsorted for the same
+// reason — reordering it would change the thing being compared.
+function _mpViewCards(pageId, st, c) {
+    const shown = _mpVisibleSections(pageId, st.data.sections || [], false);
+    if (!shown.length) { c.innerHTML = _mpEmptyState(pageId, st.spec.icon); return; }
     // One card per section the module returned — the core lays out, the module decides
     // what the sections are and what they are called.
-    c.innerHTML = head + sections.map(s => `
+    c.innerHTML = shown.map(([s, rows]) => `
         <div class="ss-card mb-3">
             <div class="ss-card-header">
                 <h6 class="mb-0 me-auto ss-fs-3">${esc(s.name)}</h6>
                 ${_mpGroupSelect(pageId, s)}
                 <span class="badge text-bg-${_MP_STATE_CLS[s.state] || 'secondary'}">${s.counts.ok}/${s.counts.total}</span>
             </div>
-            <div class="p-2">${_mpRows(pageId, s)}</div>
-        </div>`).join('') + `</div></div>`;
+            <div class="p-2">${_mpRows(pageId, s, rows)}</div>
+        </div>`).join('');
 }
 
 /** One row. */
-function _mpRow(row) {
+function _mpRow(row, chart) {
     return `<div class="d-flex align-items-start gap-2 py-1 border-bottom">
         <span class="badge text-bg-${_MP_STATE_CLS[row.state] || 'secondary'} mt-1">
             <i class="bi ${row.state === 'ok' ? 'bi-check-lg' : 'bi-exclamation-triangle'}"></i></span>
@@ -124,6 +211,7 @@ function _mpRow(row) {
             <div class="text-muted ss-fs-2">${esc(row.message || '')}</div>
             ${_mpMetrics(row)}
         </div>
+        ${_mpRowChart(chart, row)}
     </div>`;
 }
 
@@ -151,10 +239,10 @@ function _mpSetGroup(pageId, sectionId, key) {
 /** Rows, flat or grouped by the chosen measurement. Grouping is a VIEW: no row is
  *  dropped, so a resource with no value for the key lands in its own bucket rather than
  *  disappearing — an inventory that hides things is worse than an unsorted one. */
-function _mpRows(pageId, s) {
-    const rows = s.rows || [];
+function _mpRows(pageId, s, rows) {
+    rows = rows || _mpShownRows(pageId, s);
     const key = (_mpState[pageId]?.groupBy || {})[s.id] || '';
-    if (!key) return rows.map(_mpRow).join('');
+    if (!key) return rows.map(r => _mpRow(r, s.chart)).join('');
     const buckets = new Map();
     for (const r of rows) {
         const v = String((r.metrics || {})[key] ?? '') || t('page_group_other');
@@ -167,7 +255,7 @@ function _mpRows(pageId, s) {
                 <span class="fw-semibold ss-fs-2">${esc(name)}</span>
                 <span class="badge text-bg-${bad ? 'warning' : 'secondary'} ss-fs-1">${rs.length}</span>
             </div>
-            ${rs.map(_mpRow).join('')}
+            ${rs.map(r => _mpRow(r, s.chart)).join('')}
         </div>`;
     }).join('');
 }

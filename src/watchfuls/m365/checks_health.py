@@ -12,6 +12,8 @@ and its own silence — not a line buried in an aggregate.
 
 import re
 
+from lib.providers.entraid.graph_api import parse_dt
+
 
 class HealthChecks:
     """Microsoft 365 service health, one result per service."""
@@ -69,3 +71,46 @@ class HealthChecks:
                 # serviceInterruption = hard down; any other non-OK state = warning.
                 self._emit(f'{key}/health/{slug}', False, self._msg('m3_svc_bad', label, svc, state_txt),
                            extra, severity='' if state == 'serviceInterruption' else 'warning')
+
+    def _check_announcements(self, it: dict, key: str, label: str, token: str,
+                             timeout: int) -> None:
+        """Service messages that require action, within ``announce_days`` days.
+
+        Different question from service health: health says what is broken NOW, this says
+        what Microsoft has told you to do before a date — a retirement, a breaking change.
+        Those arrive months ahead and are read by nobody, which is exactly why the deadline
+        is worth watching.
+        """
+        try:
+            msgs = self._paged(token, '/admin/serviceAnnouncement/messages', timeout)
+        except Exception as exc:  # pylint: disable=broad-except
+            self._emit(f'{key}/announcements', False, self._msg('m3_ann_fail', label, exc),
+                       {'name': f'{label} · Service messages'})
+            return
+        from datetime import datetime, timezone                      # noqa: PLC0415
+        days = int(it.get('announce_days') or 0) or 14
+        now = datetime.now(timezone.utc)
+        due = []
+        for m in msgs:
+            when = str(m.get('actionRequiredByDateTime') or '')
+            if not when:
+                continue                       # nothing to be late for
+            dt = parse_dt(when)
+            if not dt:
+                continue
+            left = (dt - now).days
+            # Already past is not "due soon" — it is done or missed, and either way it is
+            # not the deadline this check exists to warn about.
+            if 0 <= left <= days:
+                due.append((left, str(m.get('title') or m.get('id') or '?')))
+        due.sort()
+        extra = {'name': f'{label} · Service messages', 'messages': len(msgs),
+                 'due': len(due), 'days': days,
+                 'soonest': due[0][1] if due else '', 'in_days': due[0][0] if due else ''}
+        if due:
+            self._emit(f'{key}/announcements', False,
+                       self._msg('m3_ann_due', label, len(due), days, due[0][1], due[0][0]),
+                       extra, severity='warning')
+        else:
+            self._emit(f'{key}/announcements', True,
+                       self._msg('m3_ann_ok', label, len(msgs)), extra)

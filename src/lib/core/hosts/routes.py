@@ -34,6 +34,7 @@ from lib.core.constants import SYSTEM_USER
 from lib.core.hosts import service as hosts_svc
 from lib.core.hosts import ssh_client
 from lib.core.hosts import probe as host_probe
+from lib.modules import check_runner
 from lib.core.hosts.migrate import apply_to_modules, build_migration_plan
 from lib.core.hosts.service import (
     _MOD_RE, _bare, _probe_host_record, _restore_check_secrets,
@@ -341,7 +342,7 @@ def register(app, wa):
                             if not k.startswith('__') and not isinstance(v, dict)}
             cfg = {f'watchfuls.{bare}': {**_mod_scalars, coll: items}}
             try:
-                results = host_probe.run_module_check(
+                results = check_runner.run_module_check(
                     bare, cfg, hosts_store=store, db=db, modules_dir=wa._modules_dir,
                     notify_cfg=notify_cfg)
             except Exception as exc:  # pylint: disable=broad-except

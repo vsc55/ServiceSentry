@@ -21,6 +21,31 @@ from lib.modules.page_support import lang_section, modules_dir_for, run_item_onc
 class M365Page:
     """Section page (schema ``__page__`` → /m365) and Overview widget."""
 
+    # Sections whose numbers add up to a fraction the page can draw as a ring. The core
+    # renders it; only this module knows WHICH of the measurements a check publishes are the
+    # used-vs-total pair (``used`` is a percentage, ``used_bytes`` an absolute — summing the
+    # first across sites would be meaningless).
+    # Read from what each check actually publishes (checks_storage / checks_identity), not
+    # from what the names suggest: check_site reports `total_bytes` while the tenant and
+    # OneDrive ones report `limit_bytes`, so one spelling for all three would have silently
+    # drawn nothing on two of them.
+    #
+    # The sections NOT here are the interesting part. Mailboxes over quota publishes
+    # `prohibited` / `warned` — two independent counts, not a part and a whole. Licenses
+    # publishes only how many SKUs exist; free-vs-enabled is computed per SKU and never
+    # reaches the row, so there is nothing here to divide. Secrets publishes days remaining,
+    # which has no maximum. A ring over any of those would be a picture of a fraction that
+    # does not exist.
+    _CHARTS = {
+        'site':        {'used': 'used_bytes', 'total': 'total_bytes'},
+        'tenant':      {'used': 'used_bytes', 'total': 'limit_bytes'},
+        'onedrive':    {'used': 'used_bytes', 'total': 'limit_bytes'},
+        'securescore': {'used': 'score',      'total': 'max'},
+        'licenses':    {'used': 'assigned',   'total': 'total'},
+        'mfa':         {'used': 'registered', 'total': 'total'},
+        'unused':      {'used': 'idle',       'total': 'licensed'},
+    }
+
     @classmethod
     def _lang_section(cls, lang: str, section: str) -> dict:
         """A section of the module's lang/ file (fallback en_EN) — classmethod-safe
@@ -66,12 +91,20 @@ class M365Page:
                     'metrics': {mk: mv for mk, mv in od.items()
                                 if mk not in ('name', 'service') and isinstance(mv, (int, float, str))},
                 })
-            out.append({
+            sec = {
                 'id': sfx, 'name': labels.get(tog) or sfx,
                 'state': 'ok' if not (n_warn or n_err) else ('error' if n_err else 'warn'),
                 'counts': {'ok': n_ok, 'warn': n_warn, 'error': n_err, 'total': len(rows)},
                 'rows': rows,
-            })
+            }
+            # Which two measurements are a fraction worth drawing as a ring. Only offered
+            # when the rows actually carry both — a ring computed from a missing total is a
+            # confident-looking zero, which is worse than no ring at all.
+            chart = cls._CHARTS.get(sfx)
+            if chart and all(any(k in (r.get('metrics') or {}) for r in rows)
+                             for k in (chart['used'], chart['total'])):
+                sec['chart'] = dict(chart)
+            out.append(sec)
         return out
 
     @staticmethod

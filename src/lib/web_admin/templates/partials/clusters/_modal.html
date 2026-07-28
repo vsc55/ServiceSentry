@@ -155,7 +155,7 @@ function _clMembersInner() {
         const ro = _canEditHost(uid) ? '' : 'disabled';
         const maintBadge = maint
             ? `<span class="badge" style="background:#fd7e14;color:#fff"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance') || 'Maintenance')}</span>`
-            : `<span class="badge text-bg-light border">${esc(t('cl_status_normal') || 'Normal')}</span>`;
+            : `<span class="badge bg-body-secondary text-body border">${esc(t('cl_status_normal') || 'Normal')}</span>`;
         return `<tr>
             <td class="text-nowrap fw-semibold">${esc(h.name || uid)}</td>
             <td class="text-nowrap"><code class="small">${esc(h.address || '')}</code></td>

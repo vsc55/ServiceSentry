@@ -32,7 +32,16 @@
         "check_secure_score": "Secure Score",
         "secure_min": "Alerta si el % baja de",
         "check_risky_users": "Usuarios de riesgo",
-        "risky_max": "Alerta si los usuarios de riesgo superan"
+        "risky_max": "Alerta si los usuarios de riesgo superan",
+        "check_mfa": "Cobertura de MFA",
+        "mfa_min": "Avisar por debajo de esta cobertura MFA (%)",
+        "check_unused_licenses": "Licencias sin usar",
+        "unused_days": "Contar como sin usar tras (días)",
+        "check_privileged": "Roles privilegiados",
+        "privileged_max": "Avisar si los administradores globales superan",
+        "check_domains": "Dominios",
+        "check_announcements": "Avisos de servicio",
+        "announce_days": "Avisar estos días antes de la fecha límite"
     },
     "hints": {
         "enabled": "Habilita o deshabilita esta conexión de Microsoft 365.",
@@ -64,7 +73,16 @@
         "check_secure_score": "Microsoft Secure Score (actual frente a máximo, en porcentaje). Necesita SecurityEvents.Read.All.",
         "secure_min": "Avisa cuando el porcentaje de Secure Score actual baja de esto (1–100). 0 = solo informativo.",
         "check_risky_users": "Usuarios marcados actualmente en riesgo por Entra ID Identity Protection. Necesita IdentityRiskyUser.Read.All.",
-        "risky_max": "Avisa cuando el número de usuarios en riesgo supera esto. 0 = avisar si hay alguno."
+        "risky_max": "Avisa cuando el número de usuarios en riesgo supera esto. 0 = avisar si hay alguno.",
+        "check_mfa": "Cuánto del directorio tiene MFA REGISTRADO. Que la política lo exija y que el directorio lo tenga registrado son dos hechos distintos, y en esa diferencia es donde ocurre el incidente. Necesita AuditLog.Read.All.",
+        "mfa_min": "Avisar cuando la cobertura registrada baje de aquí. 0 informa del porcentaje sin juzgarlo.",
+        "check_unused_licenses": "Licencias asignadas a cuentas que no inician sesión. No es una avería: es una factura. Necesita User.Read.All y AuditLog.Read.All.",
+        "unused_days": "Una cuenta sin iniciar sesión durante este tiempo cuenta como licencia sin usar. No haber entrado nunca también cuenta.",
+        "check_privileged": "Cuántas cuentas tienen administrador global. El hallazgo de toda auditoría, y el que nadie ve crecer. Necesita RoleManagement.Read.Directory.",
+        "privileged_max": "Avisar por encima de este número. 0 desactiva el umbral y solo informa del recuento.",
+        "check_domains": "Un dominio sin verificar no recibe correo, y la página que lo dice es una que nadie abre. Necesita Domain.Read.All.",
+        "check_announcements": "Mensajes de Microsoft con fecha límite de acción (una retirada, un cambio incompatible) — pregunta distinta de si un servicio está caído. Necesita ServiceMessage.Read.All.",
+        "announce_days": "Avisar cuando una fecha límite esté a esta distancia. Las ya pasadas no se reportan: están hechas o perdidas, no próximas."
     },
     "group_labels": {
         "general": "General",
@@ -132,7 +150,25 @@
         "m3_score_ok": "M365: {} — Secure Score {}% ✅",
         "m3_risk_fail": "M365: {} 🔽 [usuarios de riesgo: {}]",
         "m3_risk_over": "M365: {} — {} usuario(s) en riesgo ⚠️",
-        "m3_risk_ok": "M365: {} — {} usuario(s) en riesgo ✅"
+        "m3_risk_ok": "M365: {} — {} usuario(s) en riesgo ✅",
+        "m3_lic_none": "M365: {} — sin SKU de licencia ✅",
+        "m3_lic_sku_ok": "M365: {} — {}: {}/{} asignadas ✅",
+        "m3_lic_sku_low": "M365: {} — {}: solo {} libres de {} ⚠️",
+        "m3_mfa_fail": "M365: {} 🔽 [cobertura MFA: {}]",
+        "m3_mfa_ok": "M365: {} — MFA registrado por el {}% ({}/{} usuarios) ✅",
+        "m3_mfa_low": "M365: {} — MFA registrado solo por el {}% ({}/{} usuarios), mínimo {}% ⚠️",
+        "m3_unused_fail": "M365: {} 🔽 [licencias sin usar: {}]",
+        "m3_unused_none": "M365: {} — las {} cuentas con licencia han entrado en los últimos {} días ✅",
+        "m3_unused_some": "M365: {} — {} de {} cuentas con licencia llevan {}+ días sin entrar: {} ⚠️",
+        "m3_priv_fail": "M365: {} 🔽 [roles privilegiados: {}]",
+        "m3_priv_ok": "M365: {} — {} administrador(es) global(es) ✅",
+        "m3_priv_many": "M365: {} — {} administradores globales, por encima de los {} permitidos ⚠️",
+        "m3_dom_fail": "M365: {} 🔽 [dominios: {}]",
+        "m3_dom_ok": "M365: {} — {} dominio(s), todos verificados ✅",
+        "m3_dom_unverified": "M365: {} — dominio(s) sin verificar: {} ⚠️",
+        "m3_ann_fail": "M365: {} 🔽 [avisos de servicio: {}]",
+        "m3_ann_ok": "M365: {} — {} aviso(s) de servicio, ninguno requiere acción ✅",
+        "m3_ann_due": "M365: {} — {} aviso(s) requieren acción en {} días; el más próximo «{}» en {} ⚠️"
     },
     "messages_vars": {
         "m3_no_creds": [
@@ -285,6 +321,94 @@
         "m3_risk_ok": [
             "conexión",
             "cantidad"
+        ],
+        "m3_lic_none": [
+            "conexión"
+        ],
+        "m3_lic_sku_ok": [
+            "conexión",
+            "sku",
+            "asignadas",
+            "total"
+        ],
+        "m3_lic_sku_low": [
+            "conexión",
+            "sku",
+            "libres",
+            "total"
+        ],
+        "m3_mfa_fail": [
+            "connection",
+            "error"
+        ],
+        "m3_mfa_ok": [
+            "connection",
+            "percent",
+            "registered",
+            "total"
+        ],
+        "m3_mfa_low": [
+            "connection",
+            "percent",
+            "registered",
+            "total",
+            "floor"
+        ],
+        "m3_unused_fail": [
+            "connection",
+            "error"
+        ],
+        "m3_unused_none": [
+            "connection",
+            "licensed",
+            "days"
+        ],
+        "m3_unused_some": [
+            "connection",
+            "idle",
+            "licensed",
+            "days",
+            "by licence"
+        ],
+        "m3_priv_fail": [
+            "connection",
+            "error"
+        ],
+        "m3_priv_ok": [
+            "connection",
+            "admins"
+        ],
+        "m3_priv_many": [
+            "connection",
+            "admins",
+            "max"
+        ],
+        "m3_dom_fail": [
+            "connection",
+            "error"
+        ],
+        "m3_dom_ok": [
+            "connection",
+            "domains"
+        ],
+        "m3_dom_unverified": [
+            "connection",
+            "domains"
+        ],
+        "m3_ann_fail": [
+            "connection",
+            "error"
+        ],
+        "m3_ann_ok": [
+            "connection",
+            "messages"
+        ],
+        "m3_ann_due": [
+            "connection",
+            "due",
+            "days",
+            "title",
+            "in days"
         ]
     },
     "widget": {

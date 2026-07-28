@@ -13,6 +13,7 @@
 * ``check_risky_users`` — accounts Identity Protection currently flags as at risk.
 """
 
+import re
 from datetime import datetime, timezone
 
 from lib.providers.entraid.graph_api import parse_dt, q
@@ -32,18 +33,31 @@ class IdentityChecks:
             return
         skus = [s for s in (data.get('value') or []) if isinstance(s, dict)]
         threshold = int(it.get('license_min') or 0)
-        low = []
+        if not skus:
+            self._emit(f'{key}/licenses', True, self._msg('m3_lic_none', label),
+                       {'name': f'{label} · Licenses'})
+            return
+        # ONE RESULT PER SKU, like the health check does per service. The numbers behind the
+        # decision — how many units are owned and how many are taken — used to be computed
+        # here and thrown away, leaving a single row that said "4 SKUs" and could not answer
+        # the only question worth asking: which one is filling up, and how full is it.
         for s in skus:
-            enabled = int((s.get('prepaidUnits') or {}).get('enabled') or 0)
-            free = enabled - int(s.get('consumedUnits') or 0)
-            if (threshold > 0 and free < threshold) or (threshold == 0 and enabled > 0 and free <= 0):
-                low.append(f"{s.get('skuPartNumber') or '?'} {free}/{enabled}")
-        extra = {'name': f'{label} · Licenses', 'skus': len(skus)}
-        if not low:
-            self._emit(f'{key}/licenses', True, self._msg('m3_lic_ok', label, len(skus)), extra)
-        else:
-            self._emit(f'{key}/licenses', False, self._msg('m3_lic_low', label, ', '.join(low[:6])),
-                       extra, severity='warning')
+            part = str(s.get('skuPartNumber') or '?').strip() or '?'
+            slug = re.sub(r'[^a-z0-9]+', '-', part.lower()).strip('-') or 'sku'
+            total = int((s.get('prepaidUnits') or {}).get('enabled') or 0)
+            used = int(s.get('consumedUnits') or 0)
+            free = total - used
+            extra = {'name': f'{label} · {part}', 'sku': part,
+                     'assigned': used, 'total': total, 'free': free}
+            low = ((threshold > 0 and free < threshold)
+                   or (threshold == 0 and total > 0 and free <= 0))
+            if low:
+                self._emit(f'{key}/licenses/{slug}', False,
+                           self._msg('m3_lic_sku_low', label, part, free, total),
+                           extra, severity='warning')
+            else:
+                self._emit(f'{key}/licenses/{slug}', True,
+                           self._msg('m3_lic_sku_ok', label, part, used, total), extra)
 
     def _check_secrets(self, it: dict, key: str, label: str, token: str, timeout: int) -> None:
         """App credential (client secret / certificate) expiry for THIS app: warn

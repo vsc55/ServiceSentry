@@ -509,6 +509,18 @@
 
 .ss-table { --bs-table-cell-padding-x: 0.7rem; }
 
+/* .ss-pane-head : the header strip of ONE pane in a two-pane layout.
+   Both panes must start at the same height or the layout reads as two unrelated things that
+   happen to be adjacent — and that alignment cannot be left to luck, because the two sides
+   hold different content (a small label on the left, a title plus a badge on the right) and
+   would otherwise be as tall as whatever they happen to contain. One class, one height. */
+.ss-pane-head {
+    display: flex; align-items: center; gap: .5rem;
+    min-height: 2.5rem; padding: .25rem .75rem;
+    background: var(--bs-secondary-bg);
+    border-bottom: 2px solid var(--bs-border-color);
+}
+
 /* Thead backgrounds.
    `--bs-secondary-bg`, not tertiary: in the dark theme tertiary sits a couple of points from
    the body background, which is enough for a panel edge and not enough for a header ROW —

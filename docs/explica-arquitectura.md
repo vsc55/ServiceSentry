@@ -291,7 +291,8 @@ ServiceSentry/
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
 │   │   ├── modules/
 │   │   │   ├── module_base.py           # Clase base para todos los watchfuls (incluye _emit: registrar + notificar)
-│   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck
+│   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck (el CONTRATO de resultado)
+│   │   │   ├── check_runner.py          # Ejecuta el check() real de un módulo UNA vez, sin monitor (botón "probar" + refresco en vivo); RESULT_FIELDS = qué campos del contrato sobreviven
 │   │   │   ├── page_support.py          # Para watchfuls con sección propia (__page__): lang_section + run_item_once
 │   │   │   └── discovery/               # Descubrimiento por escaneo de watchfuls
 │   │   │       ├── credential_schemas.py  # Catálogo de tipos de credencial (escanea watchfuls + i18n)
