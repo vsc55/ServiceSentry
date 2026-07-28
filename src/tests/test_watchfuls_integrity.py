@@ -477,9 +477,9 @@ class TestRealModuleRuntimeContract:
 _INIT_MAX_LINES = 350
 
 # Modules not yet split. This list may only ever SHRINK: adding to it would turn the guard
-# into a record of what we gave up on. Sizes at the time of writing — proxmox 1087,
-# datastore 1052, dns 719, service_status 389.
-_INIT_SPLIT_PENDING = frozenset({'proxmox', 'datastore', 'dns', 'service_status'})
+# into a record of what we gave up on. Sizes at the time of writing — datastore 1052,
+# dns 719, service_status 389. (snmp and proxmox came off it as they were split.)
+_INIT_SPLIT_PENDING = frozenset({'datastore', 'dns', 'service_status'})
 
 
 class TestModuleFileLayout:

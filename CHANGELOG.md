@@ -8,6 +8,31 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.15] - 2026-07-28
+
+### Changed
+- **The Proxmox watchful split five ways, by the same rule as SNMP.** Its `__init__.py` was
+  1087 lines answering five separate questions, and now answers one. `client.py` holds the
+  HTTPS conversation — request, connect, and the failover between configured nodes, which
+  exists because a cluster with a dead node must still be able to answer about itself.
+  `checks.py` holds the family of questions about cluster health: quorum, per-node status and
+  maintenance, Ceph, network interfaces, pending updates, storage, and the privilege check
+  that runs first because "cannot read that" is a more useful answer than a cluster with no
+  nodes. `actions.py` holds what the panel invokes. `page.py` holds the Overview widget.
+  `provision.py` holds the flows that WRITE to the cluster — creating the monitoring user,
+  its role and its API token over SSH, and repairing privileges — which are deliberately not
+  read-only actions and are audited; they run `pvesh` over SSH rather than through the REST
+  API because the credential they create is the one the API would have needed.
+- `__init__.py` keeps 201 lines: the class, the loop over items and the dispatch to one check.
+  Verified the same way as SNMP — the attribute surface before and after is identical: 77
+  attributes, none added, none lost, all five actions still resolve.
+- `PveError` moved with the transport that raises it, so a test that caught it now imports it
+  from `watchfuls.proxmox.client`. Nothing is re-exported from `__init__` to hide that.
+- The layout guard caught its own success: with proxmox down to 201 lines, the test that keeps
+  the pending-split list honest failed until proxmox was taken off it. Two of the four
+  originally listed are done; `datastore` (1052), `dns` (719) and `service_status` (389)
+  remain.
+
 ## [0.0.1+build.14] - 2026-07-28
 
 ### Changed

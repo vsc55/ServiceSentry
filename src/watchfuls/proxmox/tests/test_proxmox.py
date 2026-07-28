@@ -120,7 +120,8 @@ class TestProxmoxCheck:
     def test_connection_failover_between_nodes(self):
         """A cluster has several nodes: if the first configured address is down,
         the check fails over to the next and still succeeds."""
-        from watchfuls.proxmox import Watchful, PveError
+        from watchfuls.proxmox import Watchful
+        from watchfuls.proxmox.client import PveError
         config = {'watchfuls.proxmox': {'threads': 1, 'alert': 3, 'list': {
             'pve': _item(host='10.0.0.1, 10.0.0.2', check_cluster=True)}}}
         w = Watchful(create_mock_monitor(config))
@@ -160,7 +161,7 @@ class TestProxmoxCheck:
         assert res['pve/node/n3']['other_data'].get('maintenance') is True
 
     def test_nodes_without_ha(self):
-        from watchfuls.proxmox import PveError
+        from watchfuls.proxmox.client import PveError
         api = {
             '/nodes': [{'node': 'n1', 'status': 'online'}],
             '/cluster/ha/status/current': lambda: (_ for _ in ()).throw(PveError(400, 'no ha')),
@@ -181,7 +182,7 @@ class TestProxmoxCheck:
         assert res['pve/ceph']['status'] is False
 
     def test_ceph_not_configured(self):
-        from watchfuls.proxmox import PveError
+        from watchfuls.proxmox.client import PveError
         api = {'/cluster/ceph/status':
                lambda: (_ for _ in ()).throw(PveError(500, "rados_connect failed - No such file"))}
         res = _run(_item(check_ceph=True), api)
@@ -368,7 +369,8 @@ class TestProxmoxCheck:
     # ── connection failure ───────────────────────────────────────────────
 
     def test_connection_error_threshold(self):
-        from watchfuls.proxmox import Watchful, PveError
+        from watchfuls.proxmox import Watchful
+        from watchfuls.proxmox.client import PveError
         config = {'watchfuls.proxmox': {'threads': 1, 'alert': 2,
                                         'list': {'pve': _item(check_cluster=True)}}}
         w = Watchful(create_mock_monitor(config))
