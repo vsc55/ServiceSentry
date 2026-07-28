@@ -652,6 +652,9 @@ módulos (`checks_<área>.py`, `client.py`, `actions.py`, `page.py`, `defaults.p
 |---|---|---|---|
 | `test_init_is_not_a_whole_subsystem[<mod>]` | El `__init__.py` no pasa de 350 líneas | Dentro del límite, o en la lista de pendientes | Nombra el fichero y el tamaño, y remite a la guía |
 | `test_the_pending_list_only_shrinks` | Cada módulo de `_INIT_SPLIT_PENDING` sigue por encima del límite | Sigue pendiente | Uno ya partido debe salir de la lista, o el guard deja de vigilarlo |
+
+La lista arrancó con `{snmp 1596, proxmox 1087, datastore 1052, dns 719, service_status 389}`
+y cada uno sale al partirse, que es la única dirección en la que se le permite moverse.
 | `test_the_pending_list_has_no_ghosts` | La lista no nombra módulos inexistentes | Todos existen | Nombre podrido tras un renombrado |
 
 ### `TestWatchfulActions` — Integridad de `WATCHFUL_ACTIONS`

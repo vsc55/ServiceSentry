@@ -13,8 +13,11 @@ def _force_non_windows(monkeypatch):
     """Most tests exercise the cross-platform dnspython/socket resolution; force
     the non-Windows path so they don't dispatch to Resolve-DnsName on a Windows
     CI/dev box (the Windows path has its own dedicated tests)."""
-    import watchfuls.dns as _d
-    monkeypatch.setattr(_d, '_IS_WINDOWS', False)
+    # One place to patch: every consumer reads client._IS_WINDOWS as an attribute rather
+    # than binding a copy of it, so setting it here reaches the check loop and discovery
+    # alike. Binding copies is what made this fixture silently miss half the module.
+    from watchfuls.dns import client as _c
+    monkeypatch.setattr(_c, '_IS_WINDOWS', False)
 
 
 # Minimal getaddrinfo result format: (family, type, proto, canonname, (addr, port))
@@ -56,7 +59,7 @@ class TestDnsCheck:
         }}}
         assert len(self.Watchful(create_mock_monitor(config)).check().items()) == 0
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_resolution_ok(self, mock_getaddrinfo):
         """Successful A resolution → status True."""
         mock_getaddrinfo.return_value = [_addrinfo4('93.184.216.34')]
@@ -67,7 +70,7 @@ class TestDnsCheck:
         assert 'example.com' in items
         assert items['example.com']['status'] is True
 
-    @patch('watchfuls.dns.socket.getaddrinfo', side_effect=OSError('resolution failed'))
+    @patch('watchfuls.dns.client.socket.getaddrinfo', side_effect=OSError('resolution failed'))
     def test_check_resolution_fails(self, mock_getaddrinfo):
         """Failed A resolution → status False."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -76,7 +79,7 @@ class TestDnsCheck:
         items = self.Watchful(create_mock_monitor(config)).check().list
         assert items['nonexistent.invalid']['status'] is False
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_expected_match(self, mock_getaddrinfo):
         """Resolved value contains expected → status True."""
         mock_getaddrinfo.return_value = [_addrinfo4('93.184.216.34')]
@@ -85,7 +88,7 @@ class TestDnsCheck:
         }}}
         assert self.Watchful(create_mock_monitor(config)).check().list['example.com']['status'] is True
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_expected_mismatch(self, mock_getaddrinfo):
         """Resolved value does not contain expected → status False."""
         mock_getaddrinfo.return_value = [_addrinfo4('93.184.216.34')]
@@ -96,7 +99,7 @@ class TestDnsCheck:
         assert item['status'] is False
         assert 'expected' in item['message'].lower()
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_other_data_populated(self, mock_getaddrinfo):
         """other_data contains host, record_type, resolved, expected."""
         mock_getaddrinfo.return_value = [_addrinfo4('93.184.216.34')]
@@ -109,7 +112,7 @@ class TestDnsCheck:
         assert '93.184.216.34' in od['resolved']
         assert od['expected'] == ''
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_deduplicates_ips(self, mock_getaddrinfo):
         """Duplicate IPs in getaddrinfo result are deduplicated."""
         mock_getaddrinfo.return_value = [_addrinfo4('1.1.1.1'), _addrinfo4('1.1.1.1')]
@@ -119,7 +122,7 @@ class TestDnsCheck:
         od = self.Watchful(create_mock_monitor(config)).check().list['cloudflare.com']['other_data']
         assert od['resolved'].count('1.1.1.1') == 1
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_empty_host_uses_key(self, mock_getaddrinfo):
         """Empty host field falls back to item key."""
         mock_getaddrinfo.return_value = [_addrinfo4('93.184.216.34')]
@@ -129,7 +132,7 @@ class TestDnsCheck:
         od = self.Watchful(create_mock_monitor(config)).check().list['example.com']['other_data']
         assert od['host'] == 'example.com'
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_check_record_type_aaaa(self, mock_getaddrinfo):
         """AAAA record type uses socket with AF_INET6 family."""
         mock_getaddrinfo.return_value = [_addrinfo6('2606:2800:220:1:248:1893:25c8:1946')]
@@ -143,7 +146,7 @@ class TestDnsCheck:
         args = mock_getaddrinfo.call_args
         assert args[0][2] == socket.AF_INET6
 
-    @patch('watchfuls.dns._resolve_dns', return_value=['mail.example.com'])
+    @patch('watchfuls.dns.client._resolve_dns', return_value=['mail.example.com'])
     def test_check_mx_record_via_dnspython(self, mock_resolve):
         """MX record type calls _resolve_dns (dnspython path)."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -154,8 +157,8 @@ class TestDnsCheck:
         assert item['other_data']['record_type'] == 'MX'
         mock_resolve.assert_called_once_with('example.com', 'MX', 5, '')
 
-    @patch('watchfuls.dns._resolve_socket')
-    @patch('watchfuls.dns._resolve_dns', return_value=['1.2.3.4'])
+    @patch('watchfuls.dns.client._resolve_socket')
+    @patch('watchfuls.dns.client._resolve_dns', return_value=['1.2.3.4'])
     def test_check_a_with_nameserver_uses_dnspython(self, mock_dns, mock_sock):
         """An A check with an explicit nameserver queries that server via dnspython,
         not the stdlib socket (which can't target a server)."""
@@ -169,25 +172,25 @@ class TestDnsCheck:
         mock_sock.assert_not_called()
 
     def test_nameserver_ips_passes_through_ip(self):
-        from watchfuls.dns import _nameserver_ips
+        from watchfuls.dns.client import _nameserver_ips
         assert _nameserver_ips('192.168.1.1') == ['192.168.1.1']
         assert _nameserver_ips('') == []
 
     def test_resolve_dns_targets_specified_nameserver(self):
         """When a nameserver is given, the query is sent to that server only."""
-        from watchfuls import dns as dns_mod
+        from watchfuls.dns import client as dns_mod
         fake_resolver = MagicMock()
         fake_resolver.resolve.return_value = ['1.2.3.4']
         fake_mod = MagicMock()
         fake_mod.Resolver.return_value = fake_resolver
         fake_mod.NXDOMAIN = type('NXDOMAIN', (Exception,), {})
         fake_mod.NoAnswer = type('NoAnswer', (Exception,), {})
-        with patch('watchfuls.dns._load_dns_resolver', return_value=fake_mod):
+        with patch('watchfuls.dns.deps._load_dns_resolver', return_value=fake_mod):
             out = dns_mod._resolve_dns('cerebelum.lan', 'A', 5, '192.168.110.253')
         assert fake_resolver.nameservers == ['192.168.110.253']
         assert out == ['1.2.3.4']
 
-    @patch('watchfuls.dns._resolve_dns', return_value=['v=spf1 include:example.com ~all'])
+    @patch('watchfuls.dns.client._resolve_dns', return_value=['v=spf1 include:example.com ~all'])
     def test_check_txt_expected_match(self, _):
         """TXT expected value matched as substring → status True."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -198,7 +201,7 @@ class TestDnsCheck:
         }}}
         assert self.Watchful(create_mock_monitor(config)).check().list['example.com']['status'] is True
 
-    @patch('watchfuls.dns._resolve_dns', side_effect=ImportError('dnspython not installed'))
+    @patch('watchfuls.dns.client._resolve_dns', side_effect=ImportError('dnspython not installed'))
     def test_check_non_a_without_dnspython_returns_false(self, _):
         """Non-A/AAAA query without dnspython → status False with error message."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -208,7 +211,7 @@ class TestDnsCheck:
         assert item['status'] is False
         assert 'dnspython' in item['message'].lower()
 
-    @patch('watchfuls.dns._resolve_dns', return_value=[])
+    @patch('watchfuls.dns.client._resolve_dns', return_value=[])
     def test_check_dns_no_results_is_false(self, _):
         """Non-A query that returns empty list → status False."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -224,7 +227,7 @@ class TestDnsHardening:
         from watchfuls.dns import Watchful
         self.Watchful = Watchful
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_a_expected_requires_exact_match(self, mock_getaddrinfo):
         """A-record 'expected' must match exactly, not as a substring
         ('1.2.3.4' must NOT match '11.2.3.40')."""
@@ -234,7 +237,7 @@ class TestDnsHardening:
         }}}
         assert self.Watchful(create_mock_monitor(config)).check().list['x']['status'] is False
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_other_data_has_response_time(self, mock_getaddrinfo):
         """other_data exposes a numeric response_time (ms) for the latency chart."""
         mock_getaddrinfo.return_value = [_addrinfo4('1.1.1.1')]
@@ -244,7 +247,7 @@ class TestDnsHardening:
         od = self.Watchful(create_mock_monitor(config)).check().list['x']['other_data']
         assert isinstance(od.get('response_time'), (int, float))
 
-    @patch('watchfuls.dns.socket.getaddrinfo')
+    @patch('watchfuls.dns.client.socket.getaddrinfo')
     def test_non_numeric_timeout_does_not_crash(self, mock_getaddrinfo):
         """A bad (non-numeric) timeout in config must not abort the whole check."""
         mock_getaddrinfo.return_value = [_addrinfo4('1.1.1.1')]
@@ -253,7 +256,7 @@ class TestDnsHardening:
         }}}
         assert self.Watchful(create_mock_monitor(config)).check().list['x']['status'] is True
 
-    @patch('watchfuls.dns.socket.getaddrinfo', side_effect=OSError('network down'))
+    @patch('watchfuls.dns.client.socket.getaddrinfo', side_effect=OSError('network down'))
     def test_socket_network_error_is_reported(self, _):
         """A non-resolution OSError is surfaced as an error, not 'no results'."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -263,7 +266,7 @@ class TestDnsHardening:
         assert item['status'] is False
         assert 'network down' in item['message']
 
-    @patch('watchfuls.dns.socket.getaddrinfo', side_effect=socket.gaierror('name not found'))
+    @patch('watchfuls.dns.client.socket.getaddrinfo', side_effect=socket.gaierror('name not found'))
     def test_socket_gaierror_is_no_results(self, _):
         """A name that does not resolve (gaierror) → 'no results', not an error."""
         config = {'watchfuls.dns': {'timeout': 5, 'list': {
@@ -289,7 +292,7 @@ class TestDnsDiscovery:
         assert self.Watchful.discover({'_discovery_input': {}}) == []
         assert self.Watchful.discover({}) == []
 
-    @patch('watchfuls.dns._resolve_dns')
+    @patch('watchfuls.dns.client._resolve_dns')
     def test_probe_returns_existing_types(self, mock_resolve):
         """Probe returns one entry per record type that resolves; empties skipped."""
         mock_resolve.side_effect = lambda host, rt, to: {
@@ -382,7 +385,7 @@ class TestDnsRemote:
         assert 'timed out' in items['c']['message'].lower()
 
     def test_parse_dig_short(self):
-        from watchfuls.dns import _parse_dig_short
+        from watchfuls.dns.client import _parse_dig_short
         assert _parse_dig_short('A', '1.2.3.4\n5.6.7.8\n') == ['1.2.3.4', '5.6.7.8']
         assert _parse_dig_short('MX', '10 mail.example.com.\n') == ['10 mail.example.com']
         assert _parse_dig_short('TXT', '"v=spf1 ~all"\n') == ['v=spf1 ~all']
@@ -410,7 +413,7 @@ class TestDnsWindowsResolver:
     python.exe's direct dnspython queries are commonly firewall-blocked."""
 
     def test_parse_resolve_dnsname(self):
-        from watchfuls.dns import _parse_resolve_dnsname
+        from watchfuls.dns.client import _parse_resolve_dnsname
         recs = [
             {"Type": 15, "NameExchange": "mx1.x.lan", "Preference": 10},
             {"Type": 1, "IPAddress": "1.2.3.4"},   # additional A — filtered out for MX
@@ -423,9 +426,9 @@ class TestDnsWindowsResolver:
                                                "SerialNumber": 7}]) == ['ns1.x.lan serial=7']
 
     def test_resolve_win_invokes_resolve_dnsname(self):
-        from watchfuls import dns as d
+        from watchfuls.dns import client as d
         out = '[{"Type":15,"NameExchange":"mx1.x.lan","Preference":10}]'
-        with patch('watchfuls.dns.subprocess.run',
+        with patch('watchfuls.dns.client.subprocess.run',
                    return_value=MagicMock(stdout=out, stderr='', returncode=0)) as run:
             res = d._resolve_win('x.lan', 'MX', '192.168.1.1', 5)
         assert res == ['10 mx1.x.lan']
@@ -433,13 +436,41 @@ class TestDnsWindowsResolver:
         assert 'Resolve-DnsName' in cmd and "-Server '192.168.1.1'" in cmd
 
     def test_check_on_windows_uses_resolve_dnsname(self, monkeypatch):
-        import watchfuls.dns as d
+        from watchfuls.dns import Watchful, client as d
         monkeypatch.setattr(d, '_IS_WINDOWS', True)   # override the autouse fixture
         config = {'watchfuls.dns': {'list': {
             'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'MX'}}}}
-        w = d.Watchful(create_mock_monitor(config))
-        with patch('watchfuls.dns._resolve_win', return_value=['10 mx1.x.lan']) as rw:
+        w = Watchful(create_mock_monitor(config))
+        with patch('watchfuls.dns.client._resolve_win', return_value=['10 mx1.x.lan']) as rw:
             items = w.check().list
         rw.assert_called_once()
         assert items['c']['status'] is True
         assert items['c']['other_data']['resolved'] == ['10 mx1.x.lan']
+
+
+class TestTheNamingTrap:
+    """No file here may be named after a dnspython submodule.
+
+    The monitor registers this watchful as ``sys.modules['dns']`` before running its
+    ``__init__``, so ``import dns.resolver`` finds US. The loader in deps.py works around that
+    by evicting the package from sys.modules and dropping watchfuls/ from sys.path — but a
+    file called ``resolver.py`` sitting in here would be a second, quieter collision waiting
+    for whoever adds it. This is why the resolvers live in ``client.py``.
+    """
+
+    FORBIDDEN = ('resolver', 'zone', 'query', 'rdatatype', 'exception')
+
+    def test_no_module_shadows_a_dnspython_submodule(self):
+        import os
+        pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        names = {os.path.splitext(f)[0] for f in os.listdir(pkg) if f.endswith('.py')}
+        clash = names & set(self.FORBIDDEN)
+        assert not clash, (
+            f'watchfuls/dns/{sorted(clash)} shadows a dnspython submodule — the package is '
+            f'registered as sys.modules["dns"], so this name is the one dnspython needs. '
+            f'Put resolution code in client.py (see deps.py for the whole trap).')
+
+    def test_the_list_matches_what_the_loader_imports(self):
+        """If the loader learns a new submodule, this guard has to learn it too."""
+        from watchfuls.dns import deps
+        assert set(deps._DNSPY_SUBMODULES) == set(self.FORBIDDEN)

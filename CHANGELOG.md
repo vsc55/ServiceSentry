@@ -8,6 +8,33 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.17] - 2026-07-28
+
+### Changed
+- **The DNS watchful split five ways**, 719 lines down to 214. `client.py` holds the four ways
+  of asking a question — straight through the socket for A/AAAA/PTR, dnspython for everything
+  else, PowerShell's Resolve-DnsName on Windows (where python.exe's own queries are commonly
+  firewall-blocked while the OS DNS client resolves fine), and dig/nslookup over SSH when the
+  question has to be asked from a bound host rather than from here. `deps.py` holds the lazy
+  dnspython loader, `tables.py` the record-type knowledge, `defaults.py` the parsed schema, and
+  `actions.py` discovery — including the zone transfer that turns "add a check per record" into
+  a selection.
+- **The patch that could not take, again**, and this time it had been living in a test fixture:
+  the autouse fixture forcing the non-Windows path set the flag on the package while the
+  resolvers read their own bound copy, so it reached only part of the module and the Windows
+  branch was never really excluded where it mattered. Read as an attribute now, one place to
+  patch, and the fixture says why.
+- `service_status` (389) is the last module left on the pending-split list.
+
+### Added
+- A guard that no file under `watchfuls/dns/` may be named after a dnspython submodule
+  (`resolver`, `zone`, `query`, `rdatatype`, `exception`). The monitor registers that package
+  as `sys.modules['dns']`, so `import dns.resolver` finds the watchful; the loader works around
+  it, but a file with one of those names would be a second, quieter collision waiting for
+  whoever added it. It is why the resolvers are in `client.py`, and the guard fails with that
+  explanation rather than leaving the next person to rediscover it. A second test keeps the
+  forbidden list tied to what the loader actually imports.
+
 ## [0.0.1+build.16] - 2026-07-28
 
 ### Changed
