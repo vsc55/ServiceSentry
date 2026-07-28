@@ -513,3 +513,35 @@ class TestModuleFileLayout:
         assert _INIT_SPLIT_PENDING <= set(_MODULE_NAMES), (
             f"unknown modules on the pending list: {_INIT_SPLIT_PENDING - set(_MODULE_NAMES)}"
         )
+
+
+class TestTheDefaultPathStillFindsTheModules:
+    """``discover_schemas()`` with no argument must find the real watchfuls directory.
+
+    It derives that directory by counting ``..`` from its own file, and a wrong count fails
+    SILENTLY: a missing directory returns an empty catalogue rather than raising, so the panel
+    just shows no module fields and nothing says why. That is exactly what happened when the
+    scanner moved one directory deeper — every schema test failed with a KeyError far from the
+    cause. This guard puts the failure at the cause.
+    """
+
+    def test_the_catalog_is_not_empty(self):
+        from lib.modules.module_base import ModuleBase
+        schemas = ModuleBase.discover_schemas()
+        assert schemas, (
+            'discover_schemas() found nothing. Its default path is derived by counting `..` '
+            'from its own file — if it moved, that count moved with it.'
+        )
+
+    def test_every_module_is_in_it(self):
+        from lib.modules.module_base import ModuleBase
+        schemas = ModuleBase.discover_schemas()
+        found = {k.split('|', 1)[0] for k in schemas}
+        missing = set(_MODULE_NAMES) - found
+        assert not missing, f'discover_schemas() missed: {sorted(missing)}'
+
+    def test_the_explicit_path_and_the_default_agree(self):
+        """Passing the directory and letting it derive one must give the same answer —
+        otherwise the derivation is pointing somewhere else that happens to exist."""
+        from lib.modules.module_base import ModuleBase
+        assert ModuleBase.discover_schemas() == ModuleBase.discover_schemas(_WATCHFULS_DIR)

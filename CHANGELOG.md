@@ -8,6 +8,38 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.20] - 2026-07-28
+
+### Changed
+- **`ModuleBase` gave up two things that were never about a check.** At 1115 lines it held the
+  scanner that reads every watchful's `schema.json` and builds the catalogues the panel renders
+  from (225 lines in one method, ~320 with its helpers) and the resolution of the machine an
+  item is bound to — address, protocol profile, credential, operating system, and therefore
+  which command (~240). Neither needs a monitor or an instance to mean anything. What is left,
+  537 lines, is what a check actually needs from its base: the run loop, config resolution, the
+  module's own messages, and emitting a result.
+- The scanner moved into `lib/modules/discovery/`, **the package that already existed for
+  exactly it**: that package's own docstring says it is "kept apart from the module framework
+  itself (module_base / dict_return_check)", and `credential_schemas.py` documents itself as
+  merged by `ModuleBase.discover_schemas` — the package had grown up around a function that
+  never moved in.
+- Both are mixed back into `ModuleBase`, so every call site is untouched: watchfuls keep
+  calling `self.host_exec` and `ModuleBase._schema_defaults`, and lib keeps calling
+  `ModuleBase.discover_schemas`. That is composition rather than a convenience re-export — the
+  class genuinely provides them, which is why this move needed no caller changes at all.
+
+### Fixed
+- **A scanner that moved one directory deeper and quietly returned nothing.**
+  `discover_schemas` derives its default directory by counting `..` from its own file, and a
+  missing directory is not an error to it — it returns an empty catalogue. So the move did not
+  break loudly: it stopped finding the modules, and surfaced half a dozen files away as
+  `KeyError: 'ping|list'`. The path is no longer counted at all: it is **searched** — walk up
+  for the first ancestor holding both `lib/` and `watchfuls/` — so it survives this file moving
+  anywhere inside `lib/`, which is precisely what broke it. A block comment at the definition
+  says why, and three guards put the failure at the cause: the catalogue is not empty, it
+  contains every discovered module, and the derived path agrees with an explicit one — that
+  last because a wrong derivation can point at some other directory that happens to exist.
+
 ## [0.0.1+build.19] - 2026-07-28
 
 ### Changed

@@ -290,11 +290,13 @@ ServiceSentry/
 │   │   │   ├── debug.py                 # Sistema de debug con niveles
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
 │   │   ├── modules/
-│   │   │   ├── module_base.py           # Clase base para todos los watchfuls (incluye _emit: registrar + notificar)
+│   │   │   ├── module_base.py           # Clase base para todos los watchfuls: bucle, config, mensajes, _emit (registrar + notificar)
+│   │   │   ├── host_binding.py          # Cómo un check alcanza su máquina: host_uid → dirección, perfil, credencial, SO, comando
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck (el CONTRATO de resultado)
 │   │   │   ├── check_runner.py          # Ejecuta el check() real de un módulo UNA vez, sin monitor (botón "probar" + refresco en vivo); RESULT_FIELDS = qué campos del contrato sobreviven
 │   │   │   ├── page_support.py          # Para watchfuls con sección propia (__page__): lang_section + run_item_once
 │   │   │   └── discovery/               # Descubrimiento por escaneo de watchfuls
+│   │   │       ├── schemas.py             # ModuleBase.discover_schemas: escanea schema.json de cada watchful (el catálogo que pinta el panel)
 │   │   │       ├── credential_schemas.py  # Catálogo de tipos de credencial (escanea watchfuls + i18n)
 │   │   │       └── overview_widgets.py    # Catálogo de widgets de Overview (reutiliza helpers de credential_schemas)
 │   │   ├── providers/                   # Integraciones externas (identidad/cloud); capa baja, sin Flask

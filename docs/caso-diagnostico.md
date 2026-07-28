@@ -19,6 +19,40 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un escáner que se mudó un directorio y devolvió un catálogo vacío, sin quejarse
+
+**Fecha:** 2026-07-28 · **Área:** `lib/modules/discovery/schemas.py` (`discover_schemas`)
+
+**Síntoma** — al sacar `discover_schemas` de `module_base.py` a su paquete, media docena de
+tests de esquema empezaron a fallar con `KeyError: 'ping|list'`, `'raid|list'`,
+`'service_status|list'`… lejos de la causa. En la UI habría sido peor: los módulos aparecerían
+sin ningún campo, sin ningún error.
+
+**Diagnóstico** — el `KeyError` decía qué faltaba, no por qué. La función resuelve su
+directorio por defecto **contando `..` desde su propio fichero**: desde `lib/modules/` la
+cuenta `../../watchfuls` daba `src/watchfuls`; desde `lib/modules/discovery/` da
+`lib/watchfuls`, que no existe.
+
+**Causa raíz** — y aquí está lo que importa: `discover_schemas` comprueba
+`if not os.path.isdir(watchfuls_dir): return schemas`, o sea **devuelve un diccionario vacío**.
+Un directorio ausente no es un error para ella, es un resultado. Así que la mudanza no rompió
+nada de forma visible: dejó de encontrar los módulos.
+
+**Solución** — la ruta **ya no se cuenta**: `_find_watchfuls_dir()` sube desde el fichero
+hasta el primer ancestro que contenga a la vez `lib/` y `watchfuls/`, así que sobrevive a que
+este fichero se mueva a cualquier sitio dentro de `lib/` —que es justo lo que lo rompió—. Hay
+un bloque de comentario en su definición explicando por qué, y `TestTheDefaultPathStillFindsTheModules` (3 tests): el catálogo no está vacío, contiene todos los módulos descubiertos, y la
+ruta derivada da **lo mismo** que pasar el directorio a mano —esto último porque una derivación
+equivocada puede apuntar a otro sitio que sí exista—. Comprobado además copiando el fichero un
+nivel arriba: la búsqueda sigue acertando.
+
+**Lección** — **una ruta relativa a `__file__` es una dependencia oculta con la posición del
+fichero**, y mover el fichero es justo lo que uno hace al reorganizar. El agravante no es la
+cuenta, es que el fallo sea *mudo*: cuando «no encontrado» se traduce a «vacío» en vez de a un
+error, el defecto viaja hasta donde alguien intenta usar el resultado y allí se manifiesta como
+otra cosa. Si una función deriva una ruta, la prueba que hay que escribir no es la de la
+función con la ruta dada —esa seguirá pasando— sino la de la función **sin argumentos**.
+
 ## La misma comprobación salía ámbar o roja según quién la ejecutara
 
 **Fecha:** 2026-07-28 · **Área:** `lib/core/hosts/probe.py` (`run_module_check`) · afectaba
