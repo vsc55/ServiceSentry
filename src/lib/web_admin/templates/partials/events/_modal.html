@@ -110,11 +110,12 @@ function _eventConditionsHtml() {
 // webhook destination sub-list shows/hides without losing the active tab.
 function _eventNotifyHtml() {
     const d = _eventDraft;
-    const chIcon = { telegram: 'bi-telegram', email: 'bi-envelope', msteams: 'bi-microsoft-teams', webhook: 'bi-broadcast' };
+    // Icon and label from the shared channel vocabulary (events/_views.html), so the checkbox
+    // you tick here wears the same icon as the badge it produces in every view.
     const ch = (name) => `<div class="form-check">
         <input class="form-check-input" type="checkbox" id="evm-ch-${name}"${(d.channels || []).includes(name) ? ' checked' : ''}
             onchange="_eventDraftToggleChannel('${name}',this.checked)">
-        <label class="form-check-label" for="evm-ch-${name}"><i class="bi ${chIcon[name]} me-1"></i>${esc(t('event_ch_' + name))}</label></div>`;
+        <label class="form-check-label" for="evm-ch-${name}"><i class="bi ${_evChannelIcon(name)} me-1"></i>${esc(_evChannelLabel(name))}</label></div>`;
     let webhookBlock = '';
     if ((d.channels || []).includes('webhook')) {
         const all = (typeof configData !== 'undefined' && configData.webhooks) || [];
@@ -304,7 +305,7 @@ function _evlCell(e, colId) {
         case 'rule_name': return `<td class="text-nowrap"><code>${esc(e.rule_name || '')}</code></td>`;
         case 'source':    return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (e.source || 'audit')))}</span></td>`;
         case 'channels':  return `<td class="small">${esc(e.channels || '')}</td>`;
-        case 'status':    return `<td><span class="badge bg-${e.ok ? 'success' : 'danger'}">${e.ok ? esc(t('event_ok')) : esc(t('event_err'))}</span></td>`;
+        case 'status':    return `<td>${_evStatusBadge(e.ok)}</td>`;   // one vocabulary, four views
         case 'detail':    return `<td class="small text-break">${esc(e.message || '')}</td>`;
         default:          return '<td></td>';
     }
@@ -329,15 +330,25 @@ function _renderEventLog() {
             return _evlSortDir === 'asc' ? c : -c;
         });
     if (_evlPageSize === null) _evlPageSize = _defaultPageSize;
+    const view = _evlView();
+    const lists = !!view.lists;
     const total = rows.length;
     const ps = _evlPageSize || total || 1;
     _evlPage = Math.max(1, Math.min(_evlPage, Math.ceil((total || 1) / ps)));
-    const pageRows = rows.slice((_evlPage - 1) * ps, _evlPage * ps);
+    // A summary describes the whole filtered set — see events/_views.html.
+    const pageRows = lists ? rows.slice((_evlPage - 1) * ps, _evlPage * ps) : rows;
     if (!total) {   // same centered empty-state as the other list tables (no bare table)
         tableWrap.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-send ss-empty-icon"></i>
             <span>${esc(t('event_log_empty'))}</span></div>`;
         for (const el of [pagerTopEl, pagerBotEl]) if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+        return;
+    }
+    if (view.render) {   // any view that is not the built-in table
+        tableWrap.innerHTML = _evlViewBody(pageRows, rows);
+        const pager = lists ? _renderPagination(total, _evlPage, _evlPageSize, '_goEvlPage', '_changeEvlPageSize') : '';
+        for (const el of [pagerTopEl, pagerBotEl])
+            if (el) { el.innerHTML = pager; el.style.display = lists ? '' : 'none'; }
         return;
     }
     const ordered = _evOrdered(_EVL_COLS, _evlColOrder, _evlVisibleCols);

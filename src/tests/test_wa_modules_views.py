@@ -114,7 +114,11 @@ class TestTheSectionOwnsTheState:
     def test_the_switcher_is_driven_by_the_registry(self):
         """Adding a view must be one entry, not an entry plus a button plus a branch."""
         core = _core()
-        assert 'MOD_VIEWS.map(' in core, 'the switcher enumerates the views by hand again'
+        # The enumeration moved into the shared `_viewSwitcher` (core/_utils.html) once six
+        # sections had grown their own copy of the same button group — the registry each of
+        # them keeps is the part that differs, and it is the argument. The rule is unchanged:
+        # a view is one entry, never an entry plus a button plus a branch.
+        assert '_viewSwitcher(MOD_VIEWS' in core, 'the switcher enumerates the views by hand again'
         pane = _read('_pane.html')
         assert 'id="modViewSwitcher"' in pane
         assert 'setModulesView(' not in pane, 'a view is hardcoded in the markup'

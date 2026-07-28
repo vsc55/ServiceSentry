@@ -1,0 +1,124 @@
+{# ================================================================
+   Events — the three rule views that are not the table.
+
+   * cards: a rule as an entity, the way the rest of the panel draws one. Same page, same
+     order; it trades the columns for the description and the conditions in full.
+   * channels: grouped by where a rule sends. The question is "if Telegram breaks, what stops
+     arriving", and the table answers it with a column of icons you have to scan. This also
+     surfaces the rule with NO channel — one that can match perfectly and notify nobody.
+   * delivery: the triage the `last_notif` column can only be sorted by — failing now, never
+     fired, delivering.
+
+   The last two are summaries: they are handed everything the filters left standing (not the
+   page) and draw no pagination, because their counts are the point and a count over one page
+   would change as you paged.
+   ================================================================ #}
+
+// ── Cards ────────────────────────────────────────────────────────────────────
+function _evrViewCards(rows, ctx) {
+    if (!rows.length) return '';
+    return _cardGrid(rows.map(r => {
+        const chans = _evRuleChannels(r);
+        const chips = [
+            chans.length
+                ? chans.map(c => _evChannelPill(c, c === 'webhook' ? (r.webhook_ids || []).length : 0)).join(' ')
+                // Said out loud rather than left as an empty space: a rule with no channel is
+                // configuration that runs and reaches nobody.
+                : `<span class="badge text-bg-warning fw-normal"><i class="bi bi-bell-slash me-1"></i>${esc(t('evr_no_channel'))}</span>`,
+            `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+                <i class="bi bi-funnel me-1"></i>${esc(_eventMatchSummary(r))}</span>`,
+            r.last_fired ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+                <i class="bi bi-clock-history me-1"></i>${esc(_evWhen(r.last_fired))}</span>` : '',
+        ].join(' ');
+        return _entityCard({
+            icon: 'bi-bell', accentClass: 'purple',
+            title: `<code class="fw-semibold ss-fs-4">${esc(r.name || r.id)}</code>`,
+            badges: `<span class="badge bg-secondary fw-normal">${esc(t('event_src_' + (r.source || 'audit')))}</span>
+                     ${_evDisabledBadge(r)}${_evDeliveryBadge(_evRuleDelivery(r))}`,
+            subtitle: r.description ? esc(r.description) : '',
+            chips,
+            actions: _evRuleActions(r, ctx),
+            dimmed: !r.enabled,
+        });
+    }).join(''));
+}
+
+// ── By channel ───────────────────────────────────────────────────────────────
+function _evrViewChannels(rows, ctx) {
+    if (!rows.length) return '';
+    const by = new Map();          // channel → rules
+    const none = [];
+    for (const r of rows) {
+        const chans = _evRuleChannels(r);
+        if (!chans.length) { none.push(r); continue; }
+        for (const c of chans) {
+            if (!by.has(c)) by.set(c, []);
+            by.get(c).push(r);
+        }
+    }
+    // A rule with two channels appears under both: this view answers "what does THIS channel
+    // carry", and a rule that goes to Telegram and email is genuinely part of both answers.
+    // So the group sizes deliberately do not add up to the rule count, and the header says
+    // how many rules there are so the difference cannot read as a miscount.
+    const order = Object.keys(_EV_CH_ICON).filter(c => by.has(c))
+        .concat([...by.keys()].filter(c => !_EV_CH_ICON[c]));
+    const chips = `${_evChip('bi-bell', t('evr_count_rules'), rows.length)}
+        ${_evChip('bi-broadcast', t('evr_count_channels'), order.length)}
+        ${none.length ? _evChip('bi-bell-slash', t('evr_no_channel'), none.length, 'text-bg-warning') : ''}`;
+    const group = (title, icon, items, warn) => `<div class="mb-3">
+        <div class="d-flex align-items-center gap-2 px-1 pb-1 mb-1 border-bottom">
+            <i class="bi ${icon} ${warn ? 'text-warning-emphasis' : 'text-muted'}"></i>
+            <span class="fw-semibold">${esc(title)}</span>
+            <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${items.length}</span>
+        </div>
+        ${items.map(r => _evrRuleLine(r, ctx)).join('')}
+    </div>`;
+    return `<div>
+        ${_evSummaryHeader(chips)}
+        <div class="p-2">
+            ${order.map(c => group(_evChannelLabel(c), _evChannelIcon(c), by.get(c), false)).join('')}
+            ${none.length ? group(t('evr_no_channel'), 'bi-bell-slash', none, true) : ''}
+        </div>
+    </div>`;
+}
+
+// ── By delivery ──────────────────────────────────────────────────────────────
+function _evrViewDelivery(rows, ctx) {
+    if (!rows.length) return '';
+    const buckets = { failed: [], never: [], ok: [] };
+    for (const r of rows) buckets[_evRuleDelivery(r)].push(r);
+    // Worst first, and "never" above "ok": a rule that has never fired is not a success, it
+    // is an unanswered question, and putting it under the working ones would bury it.
+    const order = ['failed', 'never', 'ok'];
+    const chips = order.map(k => buckets[k].length
+        ? _evChip(_EV_DELIVERY[k].icon, t(_EV_DELIVERY[k].key), buckets[k].length,
+                  k === 'failed' ? 'text-bg-danger' : (k === 'ok' ? 'text-bg-success' : ''))
+        : '').join(' ');
+    return `<div>
+        ${_evSummaryHeader(chips)}
+        <div class="p-2">
+            ${order.filter(k => buckets[k].length).map(k => `<div class="mb-3">
+                <div class="d-flex align-items-center gap-2 px-1 pb-1 mb-1 border-bottom">
+                    ${_evDeliveryBadge(k)}
+                    <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${buckets[k].length}</span>
+                    <span class="text-muted small">${esc(t('evr_delivery_' + k + '_hint'))}</span>
+                </div>
+                ${buckets[k].map(r => _evrRuleLine(r, ctx, true)).join('')}
+            </div>`).join('')}
+        </div>
+    </div>`;
+}
+
+/** One rule as a line, shared by both grouped views so a rule reads the same under a channel
+ *  and under a delivery state. */
+function _evrRuleLine(r, ctx, withWhen) {
+    return `<div class="d-flex align-items-center gap-2 px-2 py-1"${r.enabled ? '' : ' style="opacity:.55"'}>
+        <code class="fw-semibold text-nowrap">${esc(r.name || r.id)}</code>
+        ${_evDisabledBadge(r)}
+        <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('event_src_' + (r.source || 'audit')))}</span>
+        <span class="text-muted small text-truncate">${esc(_eventMatchSummary(r))}</span>
+        ${withWhen && r.last_fired
+            ? `<span class="text-muted small text-nowrap"><i class="bi bi-clock-history me-1"></i>${esc(_evWhen(r.last_fired))}</span>` : ''}
+        <span class="ms-auto d-flex align-items-center flex-shrink-0 text-nowrap">${_evRuleActions(r, ctx)}</span>
+    </div>`;
+}

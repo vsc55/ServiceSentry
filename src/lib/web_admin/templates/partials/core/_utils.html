@@ -437,6 +437,36 @@ function jsStr(s) { return escAttr(JSON.stringify(s)); }
 function _loadViewMode(key, def = 'table') { try { return localStorage.getItem(key) || def; } catch (_) { return def; } }
 // The list/card switch, placed via the table's headerLead. `setter` = the name of
 // the table's _set<T>View function.
+/** The day a timestamp belongs to, as `YYYY-MM-DD`, in the READER's timezone — the same day
+ *  its printed label says and the same day its hour is counted under. Built from
+ *  toISOString() this would be the UTC day, so anything either side of local midnight would
+ *  be filed under a date that is not the one shown beside it. Two sections group by day
+ *  (Audit, Events), and they must not disagree about where midnight is. */
+function _dayKeyLocal(dateLike) {
+    const d = new Date(dateLike);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** The view switcher of a multi-view section: one icon button per registered view, the
+ *  current one solid-primary. Six sections had grown their own copy of this markup, which is
+ *  six places for the same button to end up a different size — the registry each of them
+ *  keeps is the part that differs, and it is the argument.
+ *
+ *  views: [{id, label_key, icon}] · cur: the active id · setter: name of the global that
+ *  takes an id · ariaKey: i18n key naming the group · arg: an extra FIRST argument for the
+ *  setter (the module pages switch per page, so theirs is called with the page id). */
+function _viewSwitcher(views, cur, setter, ariaKey, arg) {
+    const lead = (arg == null) ? '' : `${jsStr(arg)},`;
+    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t(ariaKey))}">
+        ${views.map(v => `
+            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
+                onclick="${setter}(${lead}'${escAttr(v.id)}')"
+                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
+                <i class="bi ${escAttr(v.icon)}"></i>
+            </button>`).join('')}
+    </div>`;
+}
+
 function _viewToggleLead(mode, setter) {
     const isTable = mode === 'table';
     return `<div class="btn-group btn-group-sm" role="group" title="${escAttr(t('view_mode') || 'View')}">

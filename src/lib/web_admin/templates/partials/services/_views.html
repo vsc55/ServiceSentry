@@ -43,15 +43,7 @@ function setServicesView(id) {
 }
 
 function _svcViewSwitcher() {
-    const cur = _svcViewId();
-    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('svc_view'))}">
-        ${SERVICE_VIEWS.map(v => `
-            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
-                onclick="setServicesView('${escAttr(v.id)}')"
-                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
-                <i class="bi ${escAttr(v.icon)}"></i>
-            </button>`).join('')}
-    </div>`;
+    return _viewSwitcher(SERVICE_VIEWS, _svcViewId(), 'setServicesView', 'svc_view');
 }
 
 // ── Facts every view reads, computed once ────────────────────────────────────

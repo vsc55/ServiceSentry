@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4360 tests** (4358 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4390 tests** (4388 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -5525,3 +5525,55 @@ de borrar: `audit_delete` se convierte en control en un solo sitio.
 | `TestActivityIsACountNotAVerdict::test_every_cell_states_its_number` | Un tono es una comparación, no un valor |
 | `TestActivityIsACountNotAVerdict::test_the_cap_is_never_silent` | Recortar los días viejos sin decirlo se lee como «esto es todo lo que hay», que es justo lo que una vista de auditoría no puede insinuar |
 | `TestTheLabelsExist::*` (×3) | Las cuatro vistas y el vocabulario de resumen en los dos idiomas, y que el aviso de recorte lleve los **dos** números |
+
+## 125. Events — dos cosas distintas, cuatro vistas cada una
+
+**Archivo:** `tests/test_wa_events_views.py` — 30 tests
+
+La sección guarda dos cosas y cada una tiene su registro:
+
+**Las reglas son configuración** — «cuando pase esto, avisa a esta gente». La tabla contesta
+«qué hay configurado» y deja dos preguntas fuera:
+
+- **qué reglas llegan a un canal.** Si Telegram se rompe, ¿qué deja de llegar? La columna de
+  canales son iconos por fila, así que la respuesta es un barrido; agrupadas por canal es un
+  recuento. Y es donde aparece por fin la regla **sin ningún canal**: una que puede casar
+  perfectamente y no avisar a nadie, cosa que ninguna otra parte de la página hace evidente.
+- **si una regla llega a dispararse alguna vez.** `last_fired` es una columna que se puede
+  ordenar; lo que hace falta es el triaje — fallando ahora, nunca ha disparado, entregando.
+  «Nunca ha disparado» es el estado interesante y no es un error, así que una vista de dos
+  estados tendría que llamarlo éxito.
+
+**El log es historia** — una línea por notificación enviada. Además de leerlo como un log, las
+preguntas son por regla («cuál es ruidosa, cuál está fallando») y por canal («¿el email lleva
+fallando desde las 10:00?»). Las dos son hechos que la lista plana contiene y nunca dice.
+
+Los resúmenes describen todo lo que dejan los filtros y no se paginan, igual que en Audit. Y lo
+que no puede diferir es qué **es** una regla: el vocabulario de canales, el veredicto de
+entrega y los botones — `events_*` se vuelve control en un solo sitio.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Los dos registros, los ficheros y el orden de inclusión |
+| `TestOnePlaceDecidesWhatAUserMayDo::test_the_permissions_become_buttons_once` | **La regla**: cuatro vistas pintan los mismos botones |
+| `TestOnePlaceDecidesWhatAUserMayDo::test_no_view_wires_a_rule_action_itself` | Incluida la tabla (sólo su cuerpo: el «Nueva regla» de la cabecera abre el modal sin regla detrás, que es otra cosa) |
+| `TestOnePlaceDecidesWhatAUserMayDo::test_no_view_asks_the_permission_set` | Se resuelve una vez por render |
+| `TestOnePlaceDecidesWhatAUserMayDo::test_the_log_views_offer_no_actions_at_all` | Una línea de log es historia: botones ahí invitarían a actuar sobre la regla desde el registro de lo que hizo |
+| `TestASummaryIsNotAPage::*` (×4) | Conjunto filtrado entero, sin bandas de paginación, cabecera que dice el conjunto, y el selector de columnas es de la tabla |
+| `TestSwitchingViewIsPresentationOnly::test_neither_switch_refetches` | Las dos sub-secciones se piden juntas: refrescar para cambiar de layout recargaría también la que no estás mirando |
+| `TestSwitchingViewIsPresentationOnly::test_each_switch_returns_to_the_first_page` | |
+| `TestSwitchingViewIsPresentationOnly::test_each_choice_is_remembered_apart` | Elegir tarjetas en reglas no decide cómo se pinta el log |
+| `TestOneChannelVocabulary::test_the_icon_map_exists_once` | Eran dos literales —tabla y modal— y al de la tabla ya le faltaba `msteams`, así que una regla de Teams pintaba la campana genérica |
+| `TestOneChannelVocabulary::test_every_declared_channel_has_an_icon` | |
+| `TestOneChannelVocabulary::test_the_log_splits_the_channel_string_in_one_place` | El backend los guarda como una cadena; una vista que hace su propio split puede discrepar sobre qué cuenta como canal |
+| `TestDeliveryHasThreeStates::test_never_fired_is_not_folded_into_ok` | Un booleano tendría que llamar «bien» a una regla que nunca disparó |
+| `TestDeliveryHasThreeStates::test_the_buckets_are_ordered_worst_first` | Y «nunca» por encima de «entregando»: una pregunta sin responder enterrada bajo lo que funciona no la lee nadie |
+| `TestDeliveryHasThreeStates::test_a_rule_with_no_channel_is_called_out` | Casa, dispara y no llega a nadie |
+| `TestDeliveryHasThreeStates::test_the_channel_groups_are_not_claimed_to_partition` | Una regla con dos canales sale bajo los dos; la cabecera dice cuántas reglas hay para que la diferencia no se lea como un descuadre |
+| `TestTheLogSummariesCountTheSameThing::test_both_share_the_cells` | «Fallos» significa lo mismo por regla y por canal |
+| `TestTheLogSummariesCountTheSameThing::test_the_last_send_carries_its_own_outcome` | 12 fallos de 300 acabando en verde es un transporte que se recuperó; los mismos números acabando en rojo es uno caído ahora |
+| `TestTheLogSummariesCountTheSameThing::test_the_shell_is_told_which_columns_to_draw` | Decidir una columna comparando texto traducido la perdería en el idioma que traduzca dos cabeceras igual |
+| `TestTheLogSummariesCountTheSameThing::test_the_timeline_does_not_re_sort` | |
+| `TestTheLogSummariesCountTheSameThing::test_the_timestamps_are_seconds_and_converted_in_one_place` | `ts` y `last_fired` son segundos unix: una vista que olvide multiplicar pinta enero de 1970 y parece un problema de datos |
+| `TestTheSwitcherItselfIsShared::*` (×2) | **Seis secciones** pintaban el mismo grupo de botones con seis copias del marcado; ahora `_viewSwitcher(registro, actual, setter)` y cada una pasa lo que de verdad difiere |
+| `TestTheLabelsExist::*` (×2) | Las ocho vistas y el vocabulario, en los dos idiomas |

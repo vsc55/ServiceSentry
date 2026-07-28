@@ -40,15 +40,7 @@ function setModulesView(id) {
  *  with four options the cost of showing them is one row and the gain is that you can see
  *  which one you are in without opening anything. */
 function _modViewSwitcher() {
-    const cur = _modViewId();
-    return `<div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('mod_view'))}">
-        ${MOD_VIEWS.map(v => `
-            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
-                onclick="setModulesView('${escAttr(v.id)}')"
-                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
-                <i class="bi ${escAttr(v.icon)}"></i>
-            </button>`).join('')}
-    </div>`;
+    return _viewSwitcher(MOD_VIEWS, _modViewId(), 'setModulesView', 'mod_view');
 }
 
 // ── The filter ───────────────────────────────────────────────────────────────

@@ -15,8 +15,12 @@ function _eventsRender() {
     const canAdd = _evCan('events_add');
     const canRules = _evCanRules();
     const canNotify = _evCan('events_notify_view');
-    const rulesChooser = _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols');
-    const logChooser = _eventLog.length ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
+    // The column chooser belongs to the table view: it configures columns the other three do
+    // not have (see events/_views.html).
+    const rulesChooser = _evrViewId() === 'table'
+        ? _buildColChooser(_EVR_COLS, _evrVisibleCols, '_evrToggleCol', '_resetEvrCols') : '';
+    const logChooser = (_eventLog.length && _evlViewId() === 'table')
+        ? _buildColChooser(_EVL_COLS, _evlVisibleCols, '_evlToggleCol', '_resetEvlCols') : '';
     // Each sub-tab (and its pane) only renders if the user may see it. Honour the
     // saved active sub-tab across reloads (like the Infrastructure sub-tabs); fall
     // back to the first visible one.
@@ -42,6 +46,7 @@ function _eventsRender() {
                     <div class="ss-accent ss-accent-purple"></div>
                     <div class="ss-card-header">
                         <h6 class="mb-0 me-auto"><i class="bi bi-bell me-2"></i>${esc(t('event_subtab_rules'))}</h6>
+                        ${_evrViewSwitcher()}
                         ${rulesChooser}
                         <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
                         ${canAdd ? `<button class="btn btn-sm btn-success" onclick="openEventRuleModal(null)"><i class="bi bi-plus-lg me-1"></i>${esc(t('event_add'))}</button>` : ''}
@@ -57,6 +62,7 @@ function _eventsRender() {
                     <div class="ss-accent ss-accent-slate"></div>
                     <div class="ss-card-header">
                         <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('event_log_title'))}</h6>
+                        ${_evlViewSwitcher()}
                         ${logChooser}
                         <button class="btn btn-sm btn-secondary" onclick="renderEvents()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
                     </div>
@@ -119,10 +125,12 @@ function _eventRulesBody() {
     const _f = _evrFilters;
     const _nq = (_f.name || '').trim().toLowerCase(), _tq = (_f.tags || '').trim().toLowerCase();
     setFilterBarCount('evrF', [_nq, _f.source, _tq].filter(Boolean).length);
-    const canEdit = _evCan('events_edit');
-    const canDelete = _evCan('events_delete');
-    const canClone = _evCan('events_add');
-    const showActions = canEdit || canDelete || canClone;
+    // The permissions are resolved once, in the shared core, and turned into buttons there
+    // too: four views draw the same actions, and four places asking "may this user delete"
+    // is three places that can answer it differently.
+    const ctx = _evRuleCtx();
+    const canEdit = ctx.canEdit;
+    const showActions = ctx.showActions;
     let rows = _eventRules.filter(r =>
         (!_nq || (r.name || '').toLowerCase().includes(_nq))
         && (!_f.source || (r.source || 'audit') === _f.source)
@@ -133,15 +141,28 @@ function _eventRulesBody() {
         return _evrSortDir === 'asc' ? c : -c;
     });
     if (_evrPageSize === null) _evrPageSize = _defaultPageSize;
+    const view = _evrView();
+    const lists = !!view.lists;
     const total = rows.length;
     const ps = _evrPageSize || total || 1;
     _evrPage = Math.max(1, Math.min(_evrPage, Math.ceil((total || 1) / ps)));
-    const pageRows = rows.slice((_evrPage - 1) * ps, _evrPage * ps);
+    // A summary is handed everything the filters left standing: its counts are the point, and
+    // "the first 25 rules grouped by channel" is a statement about the pagination instead.
+    const pageRows = lists ? rows.slice((_evrPage - 1) * ps, _evrPage * ps) : rows;
     if (!total) {   // same centered empty-state as the other list tables (no bare table)
         tableWrap.innerHTML = `<div class="text-center py-5 text-muted">
             <i class="bi bi-bell ss-empty-icon"></i>
             <span>${esc(t('event_none'))}</span></div>`;
         for (const el of [pagerTopEl, pagerBotEl]) if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+        return;
+    }
+    // Any view that is not the built-in table renders through the registry, and only the
+    // table brings pagination bands with it.
+    if (view.render) {
+        tableWrap.innerHTML = _evrViewBody(pageRows, rows, ctx);
+        const pager = lists ? _renderPagination(total, _evrPage, _evrPageSize, '_goEvrPage', '_changeEvrPageSize') : '';
+        for (const el of [pagerTopEl, pagerBotEl])
+            if (el) { el.innerHTML = pager; el.style.display = lists ? '' : 'none'; }
         return;
     }
     const ordered = _evOrdered(_EVR_COLS, _evrColOrder, _evrVisibleCols);
@@ -158,12 +179,7 @@ function _eventRulesBody() {
     }).join('');
     const body = pageRows.map(r => `<tr class="align-middle">
             ${ordered.map(col => { const c = _evrCell(r, col.id, canEdit); return _EVR_FIT.has(col.id) ? c.replace('<td', '<td data-fit') : c; }).join('')}
-            ${showActions ? `<td data-fit class="text-nowrap text-end ss-td-actions">
-                ${canEdit ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('event_test'))}" onclick="_eventTestRule('${r.id}')"><i class="bi bi-send"></i></button>
-                <button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('edit'))}" onclick="openEventRuleModal('${r.id}')"><i class="bi bi-pencil"></i></button>` : ''}
-                ${canClone ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('clone'))}" onclick="cloneEventRuleModal('${r.id}')"><i class="bi bi-copy"></i></button>` : ''}
-                ${canDelete ? `<button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('event_delete'))}" onclick="_eventDeleteRule('${r.id}')"><i class="bi bi-trash"></i></button>` : ''}
-            </td>` : ''}
+            ${showActions ? `<td data-fit class="text-nowrap text-end ss-td-actions">${_evRuleActions(r, ctx)}</td>` : ''}
         </tr>`).join('');
     const pagerHtml = total ? _renderPagination(total, _evrPage, _evrPageSize, '_goEvrPage', '_changeEvrPageSize') : '';
     tableWrap.innerHTML = `<table class="table table-sm table-striped table-hover align-middle mb-0 ss-table" id="ev-rules-table" style="font-size:.85rem;table-layout:auto;width:100%">
@@ -325,11 +341,13 @@ function _evCondRemove(i) {
 }
 
 function _eventChannelsBadges(r) {
-    const icon = { telegram: 'bi-telegram', email: 'bi-envelope', webhook: 'bi-broadcast' };
-    return (r.channels || []).map(c => {
+    // The icon comes from the shared channel vocabulary (events/_views.html), which the modal
+    // and the other three views read too — this literal used to be a second copy, and msteams
+    // was already missing from it, so Teams rules drew the generic bell.
+    return _evRuleChannels(r).map(c => {
         const n = (c === 'webhook' && (r.webhook_ids || []).length) ? (r.webhook_ids.length) : '';
-        const title = c === 'webhook' && n ? `${t('event_ch_webhook')} (${n})` : t('event_ch_' + c);
-        return `<span class="me-1 text-nowrap" title="${escAttr(title)}"><i class="bi ${icon[c] || 'bi-bell'}"></i>${n ? `<sup>${n}</sup>` : ''}</span>`;
+        const title = c === 'webhook' && n ? `${t('event_ch_webhook')} (${n})` : _evChannelLabel(c);
+        return `<span class="me-1 text-nowrap" title="${escAttr(title)}"><i class="bi ${_evChannelIcon(c)}"></i>${n ? `<sup>${n}</sup>` : ''}</span>`;
     }).join('') || '<span class="text-muted">—</span>';
 }
 

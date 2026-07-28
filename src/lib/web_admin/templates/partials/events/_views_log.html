@@ -1,0 +1,136 @@
+{# ================================================================
+   Events — the three notification-log views that are not the table.
+
+   * timeline: the log read as a log — the day stated once, the clock down the left, one
+     sentence per send. Same rows, same order, same page as the table.
+   * by rule: which rule is noisy and which one is failing. The flat list contains this and
+     never states it: forty lines from one rule and one line each from forty rules look the
+     same until they are counted.
+   * by channel: whether a transport is broken. "Email has been failing since 10:00" is a
+     sentence the per-line status column cannot say, because it is about the pattern.
+
+   The last two are summaries: everything the filters left standing, no pagination — their
+   counts are the point, and a count over one page would change as you paged through.
+   ================================================================ #}
+
+// ── Timeline ─────────────────────────────────────────────────────────────────
+function _evlViewTimeline(rows) {
+    if (!rows.length) return '';
+    // Day headings follow the order the rows arrive in — the sort control decides the
+    // direction, and re-sorting here would silently override it.
+    let out = '', day = null;
+    for (const e of rows) {
+        const k = _evDayKey(e.ts);
+        if (k !== day) {
+            day = k;
+            out += `<div class="d-flex align-items-center gap-2 px-3 pt-3 pb-1">
+                <i class="bi bi-calendar3 text-muted"></i>
+                <span class="fw-semibold ss-fs-4">${esc(_evDayLabel(e.ts))}</span>
+                <span class="flex-grow-1" style="height:1px;background:var(--bs-border-color)"></span>
+            </div>`;
+        }
+        out += `<div class="d-flex align-items-start gap-2 px-3 py-1">
+            <span class="text-muted ss-fs-3 text-nowrap pt-1" style="min-width:5.5rem">${esc(_evClock(e.ts))}</span>
+            <span class="flex-shrink-0 pt-1">${_evStatusBadge(e.ok)}</span>
+            <span class="flex-grow-1 min-w-0">
+                <span class="d-flex flex-wrap align-items-center gap-2">
+                    <code class="ss-fs-3">${esc(e.rule_name || '—')}</code>
+                    <span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('event_src_' + (e.source || 'audit')))}</span>
+                    ${_evLogChannels(e).map(c => _evChannelPill(c, 0)).join(' ')}
+                </span>
+                ${e.message ? `<span class="d-block ss-fs-3 text-break">${esc(e.message)}</span>` : ''}
+            </span>
+        </div>`;
+    }
+    return `<div class="pb-2">${out}</div>`;
+}
+
+// ── By rule ──────────────────────────────────────────────────────────────────
+function _evlViewByRule(rows) {
+    if (!rows.length) return '';
+    const by = new Map();
+    for (const e of rows) {
+        const k = e.rule_name || '—';
+        let a = by.get(k);
+        if (!a) { a = { name: k, n: 0, bad: 0, last: 0, lastOk: true, chans: new Set() }; by.set(k, a); }
+        a.n++;
+        if (!e.ok) a.bad++;
+        if ((e.ts || 0) > a.last) { a.last = e.ts || 0; a.lastOk = !!e.ok; }
+        _evLogChannels(e).forEach(c => a.chans.add(c));
+    }
+    // Failing first, then noisiest: the ones that need a decision above the ones that only
+    // need reading.
+    const list = [...by.values()].sort((x, y) => (y.bad - x.bad) || (y.n - x.n) || x.name.localeCompare(y.name));
+    const failing = list.filter(r => r.bad).length;
+    return _evlSummaryTable(
+        `${_evChip('bi-send', t('evl_count_sends'), rows.length)}
+         ${_evChip('bi-bell', t('evl_count_rules'), list.length)}
+         ${failing ? _evChip('bi-x-octagon', t('evl_count_failing'), failing, 'text-bg-danger') : ''}`,
+        t('event_name'), false,
+        list.map(a => `<tr>
+            <td class="text-nowrap"><code class="fw-semibold">${esc(a.name)}</code></td>
+            ${_evlSummaryCells(a, false)}
+        </tr>`).join(''));
+}
+
+// ── By channel ───────────────────────────────────────────────────────────────
+function _evlViewByChannel(rows) {
+    if (!rows.length) return '';
+    const by = new Map();
+    for (const e of rows) {
+        // A line that fanned out to two channels counts under both: this view answers "is
+        // THIS transport working", and that send did travel over both of them.
+        for (const c of _evLogChannels(e)) {
+            let a = by.get(c);
+            if (!a) { a = { name: c, n: 0, bad: 0, last: 0, lastOk: true, chans: new Set() }; by.set(c, a); }
+            a.n++;
+            if (!e.ok) a.bad++;
+            if ((e.ts || 0) > a.last) { a.last = e.ts || 0; a.lastOk = !!e.ok; }
+        }
+    }
+    const list = [...by.values()].sort((x, y) => (y.bad - x.bad) || (y.n - x.n) || x.name.localeCompare(y.name));
+    const failing = list.filter(c => c.bad).length;
+    return _evlSummaryTable(
+        `${_evChip('bi-send', t('evl_count_sends'), rows.length)}
+         ${_evChip('bi-broadcast', t('evr_count_channels'), list.length)}
+         ${failing ? _evChip('bi-x-octagon', t('evl_count_failing'), failing, 'text-bg-danger') : ''}`,
+        t('event_channels'), true,
+        list.map(a => `<tr>
+            <td class="text-nowrap"><i class="bi ${escAttr(_evChannelIcon(a.name))} me-1"></i>${esc(_evChannelLabel(a.name))}</td>
+            ${_evlSummaryCells(a, true)}
+        </tr>`).join(''));
+}
+
+/** The four columns both summaries share, so "failures" means the same thing in each. The
+ *  last send carries its own outcome: 12 failures out of 300 that ended green is a transport
+ *  that recovered, and the same numbers ending red is one that is down right now. */
+function _evlSummaryCells(a, hideChannels) {
+    return `<td class="text-end fw-semibold">${a.n}</td>
+        <td class="text-end">${a.bad
+            ? `<span class="badge text-bg-danger">${a.bad}</span>`
+            : '<span class="text-muted">—</span>'}</td>
+        ${hideChannels ? '' : `<td><span class="d-flex flex-wrap gap-1">${
+            [...a.chans].map(c => _evChannelPill(c, 0)).join(' ') || '<span class="text-muted">—</span>'}</span></td>`}
+        <td class="text-nowrap">${a.last
+            ? `${_evStatusBadge(a.lastOk)} <span class="text-muted ss-fs-3">${esc(_evWhen(a.last))}</span>`
+            : '<span class="text-muted">—</span>'}</td>`;
+}
+
+/** The shell both summaries share. `hideChannels` is passed rather than inferred from the
+ *  first column's label: deciding a column by comparing translated text would make the table
+ *  lose a column in whichever language happened to translate two headers alike. */
+function _evlSummaryTable(chips, firstCol, hideChannels, body) {
+    return `<div>
+        ${_evSummaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(firstCol)}</th>
+                <th class="text-end">${esc(t('evl_col_sends'))}</th>
+                <th class="text-end">${esc(t('evl_col_failures'))}</th>
+                ${hideChannels ? '' : `<th>${esc(t('event_channels'))}</th>`}
+                <th>${esc(t('evl_col_last'))}</th>
+            </tr></thead>
+            <tbody>${body}</tbody>
+        </table></div>
+    </div>`;
+}

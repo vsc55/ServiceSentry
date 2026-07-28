@@ -193,10 +193,16 @@ class TestTheTimelineIsTheSameRowsInTheSameOrder:
     def test_a_day_is_the_readers_day(self):
         """From toISOString() the key would be the UTC day, so an entry either side of local
         midnight would sit under a heading with a different date than its own timestamp —
-        in the timeline AND in the activity grid, which counts hours locally."""
-        body = _fn(_strip_comments(_read(VIEWS)), '_auditDayKey')
-        assert 'toISOString' not in body
-        assert 'getFullYear()' in body and 'getDate()' in body
+        in the timeline AND in the activity grid, which counts hours locally.
+
+        The computation lives in the shared `_dayKeyLocal` because Events groups by day too,
+        and where midnight falls is not something two sections may answer differently.
+        """
+        assert '_dayKeyLocal(ts)' in _fn(_strip_comments(_read(VIEWS)), '_auditDayKey')
+        shared = _fn(_strip_comments(_read(os.path.join(TPL, 'partials', 'core', '_utils.html'))),
+                     '_dayKeyLocal')
+        assert 'toISOString' not in shared
+        assert 'getFullYear()' in shared and 'getDate()' in shared
 
 
 class TestActorsCountsWhatMatters:

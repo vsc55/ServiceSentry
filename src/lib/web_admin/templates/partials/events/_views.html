@@ -1,0 +1,190 @@
+{# ================================================================
+   Events — the part every view of both sub-sections shares.
+
+   The section holds two different things and each one has its own registry below.
+
+   RULES are configuration: "when this happens, tell these people". The table lists them and
+   answers "what is configured", and leaves two questions it cannot:
+
+   * which rules reach a given CHANNEL. If Telegram breaks, what stops arriving? The channel
+     column shows icons per row, so the answer is a scan; grouped by channel it is a count.
+     The same view is where a rule with NO channel shows up — a rule that matches perfectly
+     and notifies nobody, which nothing else on the page makes obvious.
+   * whether a rule ever actually fires. `last_fired` is a column you can sort by; what you
+     want is the triage — failing NOW, never fired at all, or delivering. A rule that has
+     never fired is either a gap in the alerting or dead configuration, and both are worth
+     knowing about before the incident, not after.
+
+   The LOG is history: one line per notification sent. Beyond reading it as a log (the
+   timeline), the two questions are per-rule ("which rule is noisy, which one is failing")
+   and per-channel ("has email been failing since 10:00?"). Both are things the flat list
+   contains and never states.
+
+   The summaries describe the whole filtered set, not the page, and draw no pagination — the
+   same rule the Audit views follow, for the same reason: page 2 of a summary is not a thing.
+
+   What must not differ is what a RULE is: the channel vocabulary, the delivery verdict and —
+   the part that is not cosmetic — the action buttons. The `events_*` permissions become
+   controls in exactly one place here.
+   ================================================================ #}
+
+// ── The registries ───────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time: the view files are concatenated after this
+// one. A null render means the built-in table body. `lists` marks the views that show one
+// row per record (paginated, sortable); the others are summaries over the filtered set.
+const EVENT_RULE_VIEWS = [
+    { id: 'table',    label_key: 'evr_view_table',    icon: 'bi-table',        render: null,                 lists: true  },
+    { id: 'cards',    label_key: 'evr_view_cards',    icon: 'bi-grid-3x3-gap', render: '_evrViewCards',      lists: true  },
+    { id: 'channels', label_key: 'evr_view_channels', icon: 'bi-broadcast',    render: '_evrViewChannels',   lists: false },
+    { id: 'delivery', label_key: 'evr_view_delivery', icon: 'bi-activity',     render: '_evrViewDelivery',   lists: false },
+];
+const EVENT_LOG_VIEWS = [
+    { id: 'table',    label_key: 'evl_view_table',    icon: 'bi-table',        render: null,                 lists: true  },
+    { id: 'timeline', label_key: 'evl_view_timeline', icon: 'bi-list-nested',  render: '_evlViewTimeline',   lists: true  },
+    { id: 'rules',    label_key: 'evl_view_rules',    icon: 'bi-bell',         render: '_evlViewByRule',     lists: false },
+    { id: 'channels', label_key: 'evl_view_channels', icon: 'bi-broadcast',    render: '_evlViewByChannel',  lists: false },
+];
+
+const _EVR_VIEW_KEY = 'ss_events_rules_view';
+const _EVL_VIEW_KEY = 'ss_events_log_view';
+
+function _evReadView(key, views) {
+    try {
+        const s = localStorage.getItem(key);
+        return views.some(v => v.id === s) ? s : 'table';
+    } catch (_) { return 'table'; }
+}
+
+let _evrViewMode = _evReadView(_EVR_VIEW_KEY, EVENT_RULE_VIEWS);
+let _evlViewMode = _evReadView(_EVL_VIEW_KEY, EVENT_LOG_VIEWS);
+
+function _evrViewId() { return _evrViewMode; }
+function _evrView()   { return EVENT_RULE_VIEWS.find(v => v.id === _evrViewMode) || EVENT_RULE_VIEWS[0]; }
+function _evlViewId() { return _evlViewMode; }
+function _evlView()   { return EVENT_LOG_VIEWS.find(v => v.id === _evlViewMode) || EVENT_LOG_VIEWS[0]; }
+
+/** Switching redraws what is already loaded. Both sub-sections were fetched together when
+ *  the section opened, and re-fetching to answer a question about presentation would also
+ *  reload the OTHER sub-section, which the user is not even looking at. */
+function setEventRulesView(id) {
+    if (!EVENT_RULE_VIEWS.some(v => v.id === id)) return;
+    _evrViewMode = id;
+    try { localStorage.setItem(_EVR_VIEW_KEY, id); } catch (_) {}
+    _evrPage = 1;              // page 3 of the table is not page 3 of anything else
+    _eventsRender();           // the header owns the switcher, so the card is redrawn too
+}
+function setEventLogView(id) {
+    if (!EVENT_LOG_VIEWS.some(v => v.id === id)) return;
+    _evlViewMode = id;
+    try { localStorage.setItem(_EVL_VIEW_KEY, id); } catch (_) {}
+    _evlPage = 1;
+    _eventsRender();
+}
+
+function _evrViewSwitcher() {
+    return _viewSwitcher(EVENT_RULE_VIEWS, _evrViewId(), 'setEventRulesView', 'view_mode');
+}
+function _evlViewSwitcher() {
+    return _viewSwitcher(EVENT_LOG_VIEWS, _evlViewId(), 'setEventLogView', 'view_mode');
+}
+
+/** The non-table bodies, dispatched by name. A list view is handed the current page; a
+ *  summary is handed everything the filters left, because that is what it describes. */
+function _evrViewBody(pageRows, rows, ctx) {
+    const v = _evrView();
+    const fn = v.render ? window[v.render] : null;
+    return fn ? fn(v.lists ? pageRows : rows, ctx) : '';
+}
+function _evlViewBody(pageRows, rows) {
+    const v = _evlView();
+    const fn = v.render ? window[v.render] : null;
+    return fn ? fn(v.lists ? pageRows : rows) : '';
+}
+
+// ── What a rule means, decided once ──────────────────────────────────────────
+/** The permission context every rule view is handed, resolved once per render. */
+function _evRuleCtx() {
+    const canEdit = _evCan('events_edit'), canClone = _evCan('events_add'), canDelete = _evCan('events_delete');
+    return { canEdit, canClone, canDelete, showActions: canEdit || canClone || canDelete };
+}
+
+/** The action buttons — the ONE place the `events_*` permissions become controls. Test and
+ *  Edit are the same permission on purpose: sending a rule's notification by hand is an edit
+ *  of the world, not a read of it. */
+function _evRuleActions(r, ctx) {
+    if (!ctx.showActions) return '';
+    return `${ctx.canEdit ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('event_test'))}" onclick="_eventTestRule('${r.id}')"><i class="bi bi-send"></i></button>
+        <button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('edit'))}" onclick="openEventRuleModal('${r.id}')"><i class="bi bi-pencil"></i></button>` : ''}
+        ${ctx.canClone ? `<button class="btn btn-sm btn-link p-0 me-2" title="${escAttr(t('clone'))}" onclick="cloneEventRuleModal('${r.id}')"><i class="bi bi-copy"></i></button>` : ''}
+        ${ctx.canDelete ? `<button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('event_delete'))}" onclick="_eventDeleteRule('${r.id}')"><i class="bi bi-trash"></i></button>` : ''}`;
+}
+
+// The channel vocabulary, in one place: the rules table, the modal and every view below draw
+// the same icon for the same channel. It lived in two separate literals, which is two places
+// for one of them to end up with a different icon than the other.
+const _EV_CH_ICON = { telegram: 'bi-telegram', email: 'bi-envelope',
+                      msteams: 'bi-microsoft-teams', webhook: 'bi-broadcast' };
+function _evChannelIcon(c)  { return _EV_CH_ICON[c] || 'bi-bell'; }
+function _evChannelLabel(c) { return t('event_ch_' + c) || c; }
+function _evRuleChannels(r) { return Array.isArray(r.channels) ? r.channels : []; }
+
+/** A channel as a pill. `n` decorates the webhook one with how many endpoints it fans out to
+ *  — "webhook" alone is not an address. */
+function _evChannelPill(c, n) {
+    return `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+        <i class="bi ${escAttr(_evChannelIcon(c))} me-1"></i>${esc(_evChannelLabel(c))}${n ? ` <span class="fw-semibold">${n}</span>` : ''}</span>`;
+}
+
+/** The delivery verdict of a rule, which is three states and not two:
+ *   - `failed`: its last notification did not go out. Broken NOW.
+ *   - `never`:  it has never fired. Either a gap in the alerting or dead configuration —
+ *               not an error, but not "fine" either, and a boolean would have to call it one.
+ *   - `ok`:     it fired and the last one went out. */
+function _evRuleDelivery(r) {
+    if (!r.last_fired) return 'never';
+    return r.last_ok ? 'ok' : 'failed';
+}
+const _EV_DELIVERY = {
+    failed: { cls: 'text-bg-danger',    icon: 'bi-x-octagon',        key: 'evr_delivery_failed' },
+    never:  { cls: 'text-bg-secondary', icon: 'bi-slash-circle',     key: 'evr_delivery_never'  },
+    ok:     { cls: 'text-bg-success',   icon: 'bi-check2-circle',    key: 'evr_delivery_ok'     },
+};
+function _evDeliveryBadge(state) {
+    const d = _EV_DELIVERY[state] || _EV_DELIVERY.never;
+    return `<span class="badge ${d.cls} fw-normal"><i class="bi ${d.icon} me-1"></i>${esc(t(d.key))}</span>`;
+}
+
+/** Enabled/disabled as a marker rather than a switch: outside the table there is no column
+ *  to put a toggle in, and a rule that is off matters wherever it is drawn. */
+function _evDisabledBadge(r) {
+    return r.enabled ? '' : `<span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>`;
+}
+
+// ── What a log entry means ───────────────────────────────────────────────────
+// Its `ts` is unix SECONDS (the rules carry `last_fired` the same way), so every conversion
+// goes through here rather than each view remembering to multiply — one that forgot would
+// draw January 1970 and look like a data problem.
+function _evMs(ts)      { return (ts || 0) * 1000; }
+function _evDayKey(ts)  { return _dayKeyLocal(_evMs(ts)); }
+function _evDayLabel(ts) { return new Date(_evMs(ts)).toLocaleDateString(); }
+function _evClock(ts)   { return new Date(_evMs(ts)).toLocaleTimeString(); }
+
+function _evStatusBadge(ok) {
+    return `<span class="badge bg-${ok ? 'success' : 'danger'}">${ok ? esc(t('event_ok')) : esc(t('event_err'))}</span>`;
+}
+/** The channels a log line went to. The backend stores them as one string, so this is the
+ *  only place that decides how it splits — a view doing its own split is a view that can
+ *  disagree about what counts as a channel. */
+function _evLogChannels(e) {
+    return String(e.channels || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+}
+
+/** The header of a summary view: what set it describes, in absolute terms, so a view showing
+ *  four rows can never suggest the log holds four lines. */
+function _evSummaryHeader(chips) {
+    return `<div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2 border-bottom">${chips}</div>`;
+}
+function _evChip(icon, label, value, cls) {
+    return `<span class="badge rounded-pill ${cls || 'bg-body-secondary text-body-secondary'} fw-normal">
+        <i class="bi ${icon} me-1"></i>${esc(label)} <span class="fw-semibold">${esc(String(value))}</span></span>`;
+}

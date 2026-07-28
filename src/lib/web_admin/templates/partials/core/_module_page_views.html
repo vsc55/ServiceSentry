@@ -36,15 +36,7 @@ function setModulePageView(pageId, id) {
 }
 
 function _mpViewSwitcher(pageId) {
-    const cur = _mpViewId(pageId);
-    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('page_view'))}">
-        ${MP_VIEWS.map(v => `
-            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
-                onclick="setModulePageView('${escAttr(pageId)}','${escAttr(v.id)}')"
-                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
-                <i class="bi ${escAttr(v.icon)}"></i>
-            </button>`).join('')}
-    </div>`;
+    return _viewSwitcher(MP_VIEWS, _mpViewId(pageId), 'setModulePageView', 'page_view', pageId);
 }
 
 // ── Filters, per page and shared by its views ────────────────────────────────

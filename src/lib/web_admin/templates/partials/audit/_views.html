@@ -62,15 +62,7 @@ function setAuditView(id) {
 }
 
 function _auditViewSwitcher() {
-    const cur = _auditViewId();
-    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('view_mode'))}">
-        ${AUDIT_VIEWS.map(v => `
-            <button type="button" class="btn btn-sm ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
-                onclick="setAuditView('${escAttr(v.id)}')"
-                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
-                <i class="bi ${escAttr(v.icon)}"></i>
-            </button>`).join('')}
-    </div>`;
+    return _viewSwitcher(AUDIT_VIEWS, _auditViewId(), 'setAuditView', 'view_mode');
 }
 
 /** Sort and Group by live in the filter strip, which is built once and OUTSIDE the body this
@@ -111,14 +103,10 @@ function _auditDeleteBtn(e, ctx) {
 }
 
 // Time, three ways, so two views cannot format the same instant differently.
-/** The day an entry belongs to, in the READER's timezone — the same day its label says and
- *  the same day its hour is counted under. Built from toISOString() this would be the UTC
- *  day, so anything either side of local midnight would sit in a row whose date is not the
- *  one printed beside it. */
-function _auditDayKey(ts) {
-    const d = new Date(ts);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+// The day comes from the shared `_dayKeyLocal` (core/_utils.html): it is the reader's day,
+// not the UTC one, and Events groups by day too — where midnight falls is not something two
+// sections may answer differently.
+function _auditDayKey(ts)  { return _dayKeyLocal(ts); }
 function _auditDayLabel(ts) { return new Date(ts).toLocaleDateString(); }
 function _auditClock(ts)   { return new Date(ts).toLocaleTimeString(); }
 

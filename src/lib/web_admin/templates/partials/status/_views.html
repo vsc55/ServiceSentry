@@ -38,15 +38,7 @@ function setStatusView(id) {
 }
 
 function _stViewSwitcher() {
-    const cur = _stViewId();
-    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('st_view'))}">
-        ${STATUS_VIEWS.map(v => `
-            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
-                onclick="setStatusView('${escAttr(v.id)}')"
-                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
-                <i class="bi ${escAttr(v.icon)}"></i>
-            </button>`).join('')}
-    </div>`;
+    return _viewSwitcher(STATUS_VIEWS, _stViewId(), 'setStatusView', 'st_view');
 }
 
 // ── Filters, shared by every view ────────────────────────────────────────────

@@ -8,6 +8,46 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.28] - 2026-07-28
+
+### Added
+- **Event rules can be read four ways.** Beside the table: **cards** (a rule drawn the way the
+  panel draws any entity), **by channel** and **delivery**.
+- **By channel** answers the question the icon column can only be scanned for: if Telegram
+  breaks, what stops arriving? It is also where a rule with **no channel at all** finally
+  shows up — one that can match perfectly and notify nobody, which nothing else on the page
+  made obvious. A rule with two channels appears under both, on purpose: the view answers
+  "what does THIS channel carry", and the header states the rule count so the difference
+  cannot read as a miscount.
+- **Delivery** is the triage `last_fired` could only be sorted by: failing now, never fired,
+  delivering. "Never fired" is its own state rather than a shade of success — a rule that has
+  never fired is either a gap in the alerting or dead configuration, and a two-state view
+  would have to call it fine.
+- **The notification log gets the same treatment**: **timeline** (the day stated once, the
+  clock down the left), **by rule** (which one is noisy, which one is failing) and **by
+  channel** (whether a transport is broken). Forty lines from one rule and one line each from
+  forty rules look identical in a flat list until they are counted. The last send carries its
+  own outcome beside the totals: 12 failures out of 300 ending green is a transport that
+  recovered, and the same numbers ending red is one that is down right now.
+- Both sub-sections remember their view separately — choosing cards for the rules does not
+  decide how the log is drawn — and the summaries describe everything the filters left
+  standing, with no pagination, like the Audit ones.
+
+### Changed
+- **One view switcher for the whole panel.** Six sections (Status, Modules, module pages,
+  Services, Credentials, Audit) had each grown their own copy of the same button group, which
+  is six places for the same control to end up a different size. `_viewSwitcher(registry,
+  current, setter)` now draws it and each section passes the part that actually differs.
+- **One channel vocabulary in Events.** The icon map existed twice — the rules table and the
+  modal — and the copy in the table had already lost `msteams`, so a Teams rule drew a generic
+  bell. Same for the send-status badge, now composed by all four log views.
+- The `events_*` permissions become buttons in one place, composed by every rule view, and
+  guarded. The log views offer no rule actions at all: a log line is history, and a row that
+  carried Edit and Delete would invite acting on a rule from a record of what it once did.
+- "Which day is this" is decided once for the whole panel (`_dayKeyLocal`), in the reader's
+  timezone. Audit and Events both group by day, and where midnight falls is not something two
+  sections may answer differently.
+
 ## [0.0.1+build.27] - 2026-07-28
 
 ### Added
