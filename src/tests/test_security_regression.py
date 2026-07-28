@@ -83,62 +83,79 @@ def _user_with_perm(admin, name: str, perms: list, password: str = "Testpass1"):
 # ── Fix #1 · Path traversal in SNMP MIB file operations ──────────────────────
 
 class TestPathTraversalSnmpMib:
-    """Fix: _safe_mib_filename() allowlist + _confined_path() confinement.
+    """Fix: the MIB file operations refuse to leave their directory.
 
-    An attacker with modules_view cannot escape the MIB directory by supplying
-    path-traversal sequences in the 'name' parameter of file operations.
+    Attacked where an attacker actually arrives — the actions themselves — rather than at the
+    helpers behind them. Those have their own unit tests next to the code
+    (``watchfuls/snmp/tests/test_snmp.py``), and they prove the allowlist works; they cannot
+    prove that every file operation USES it. A new action that forgot the guard would leave
+    them all green, which is the failure this class exists to catch.
+
+    The user needed only ``modules_view`` to reach these, so escaping the MIB directory would
+    have turned a read-only role into an arbitrary file read and write.
     """
 
-    def test_safe_filename_rejects_path_separator(self):
-        from watchfuls.snmp import _safe_mib_filename
-        assert _safe_mib_filename('../../../etc/passwd') is None
-        assert _safe_mib_filename('../../config.json') is None
-        assert _safe_mib_filename('dir/file.mib') is None
-        assert _safe_mib_filename('dir\\file.mib') is None
+    _PAYLOADS = (
+        '../../../etc/passwd',
+        '..\..\..\windows\win.ini',
+        '../config.json',
+        'sub/dir.mib',
+        '..',
+        '.hidden',
+    )
 
-    def test_safe_filename_rejects_dot_prefix(self):
-        from watchfuls.snmp import _safe_mib_filename
-        assert _safe_mib_filename('.hidden') is None
-        assert _safe_mib_filename('..') is None
-        assert _safe_mib_filename('.mibrc') is None
+    @staticmethod
+    def _mib_dirs(tmp_path):
+        """A var_dir with the two MIB directories, and a secret one level above them."""
+        var_dir = tmp_path / 'var'
+        for kind in ('raw', 'compiled'):
+            (var_dir / 'snmp_mibs' / kind).mkdir(parents=True)
+        secret = var_dir / 'snmp_mibs' / 'secret.txt'
+        secret.write_text('do not read me', encoding='utf-8')
+        return str(var_dir), secret
 
-    def test_safe_filename_rejects_shell_metacharacters(self):
-        from watchfuls.snmp import _safe_mib_filename
-        assert _safe_mib_filename('file*.mib') is None
-        assert _safe_mib_filename('file;rm.mib') is None
-        assert _safe_mib_filename('file:stream') is None  # NTFS alternate stream
-        assert _safe_mib_filename('file name.mib') is None  # space
+    def test_upload_cannot_write_outside_the_mib_directory(self, tmp_path):
+        """Containment, not rejection: ``upload_mib`` takes the basename BEFORE validating,
+        so ``../../../etc/passwd`` is not refused — it is defused into ``passwd`` and lands
+        inside raw/ like any other name. That is a fine defence and the property worth
+        pinning is the one that matters: whatever the caller sends, nothing is created
+        outside the MIB directory."""
+        from watchfuls.snmp import Watchful
+        var_dir, secret = self._mib_dirs(tmp_path)
+        raw_dir = os.path.join(var_dir, 'snmp_mibs', 'raw')
+        for payload in self._PAYLOADS:
+            Watchful.upload_mib({'__var_dir__': var_dir, 'filename': payload,
+                                 'content': 'pwned'})
+        strays = [str(p) for p in (tmp_path / 'var').rglob('*')
+                  if p.is_file() and p != secret and os.path.dirname(str(p)) != raw_dir]
+        assert not strays, f'upload escaped the MIB directory: {strays}'
+        assert secret.read_text(encoding='utf-8') == 'do not read me'
 
-    def test_safe_filename_accepts_valid_names(self):
-        from watchfuls.snmp import _safe_mib_filename
-        assert _safe_mib_filename('AGENTX-MIB.mib') == 'AGENTX-MIB.mib'
-        assert _safe_mib_filename('MY_MODULE.txt') == 'MY_MODULE.txt'
-        assert _safe_mib_filename('module-1.2.mib') == 'module-1.2.mib'
+    def test_delete_refuses_a_path_outside_its_kind_directory(self, tmp_path):
+        from watchfuls.snmp import Watchful
+        var_dir, secret = self._mib_dirs(tmp_path)
+        for kind in ('raw', 'compiled'):
+            for payload in self._PAYLOADS + ('../secret.txt',):
+                res = Watchful.delete_mib({'__var_dir__': var_dir, 'kind': kind,
+                                           'name': payload})
+                assert res.get('ok') is not True, f'delete accepted {payload!r} ({kind})'
+        assert secret.is_file(), 'delete_mib removed a file outside the MIB directory'
 
-    def test_safe_filename_rejects_wrong_extension_for_compiled(self):
-        from watchfuls.snmp import _safe_mib_filename
-        # For compiled MIBs, only .py is valid
-        assert _safe_mib_filename('module.mib', kind='compiled') is None
-        assert _safe_mib_filename('module.txt', kind='compiled') is None
-        assert _safe_mib_filename('module.py',  kind='compiled') == 'module.py'
-        # For raw, extension is validated by the caller (upload_mib / import_mib_from_url)
-        # _safe_mib_filename only enforces the character allowlist for raw files
-        assert _safe_mib_filename('module.mib', kind='raw') == 'module.mib'
+    def test_reading_a_raw_mib_cannot_escape_its_directory(self, tmp_path):
+        from watchfuls.snmp import Watchful
+        var_dir, secret = self._mib_dirs(tmp_path)
+        for payload in self._PAYLOADS + ('../secret.txt',):
+            res = Watchful.get_raw_mib_details({'__var_dir__': var_dir, 'name': payload})
+            assert res.get('ok') is not True, f'read accepted {payload!r}'
+            assert 'do not read me' not in str(res)
 
-    def test_confined_path_blocks_traversal(self, tmp_path):
-        from watchfuls.snmp import _confined_path
-        base = str(tmp_path / 'mib_dir')
-        os.makedirs(base)
-        assert _confined_path(base, '../../../etc/passwd') is None
-        assert _confined_path(base, '..', '..', 'secret') is None
-
-    def test_confined_path_allows_valid_subpath(self, tmp_path):
-        from watchfuls.snmp import _confined_path
-        base = str(tmp_path / 'mib_dir')
-        os.makedirs(base)
-        result = _confined_path(base, 'MY-MIB.py')
-        assert result is not None
-        assert result.startswith(base)
+    def test_a_legitimate_name_still_works(self):
+        """A guard that refuses everything would pass the tests above and break the feature."""
+        from watchfuls.snmp import Watchful
+        res = Watchful.upload_mib({'__var_dir__': '', 'filename': 'AGENTX-MIB.mib',
+                                   'content': 'x'})
+        # Rejected for the missing var_dir, NOT for the name — the name got through.
+        assert res.get('ok') is False and 'filename' not in res.get('message', '').lower()
 
 
 # ── Fix #2 (complete) · Non-admin cannot delete an admin account ──────────────

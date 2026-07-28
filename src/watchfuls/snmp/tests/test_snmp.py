@@ -15,6 +15,9 @@ from conftest import create_mock_monitor
 
 import watchfuls.snmp as snmp
 from watchfuls.snmp import Watchful
+# El manejo del catalogo MIB (subir, compilar, importar) vive en su propio modulo desde que
+# dejo de ser la mitad del __init__: los tests lo nombran donde esta.
+from watchfuls.snmp import mib_admin
 from watchfuls.snmp import mib_resolver
 from watchfuls.snmp import mib_catalog
 
@@ -203,7 +206,7 @@ class TestGetCategory:
         assert mib_resolver.get_category(snmp_type) == cat
 
 
-@pytest.mark.skipif(not snmp._HAS_PYSMI, reason='pysmi not installed')
+@pytest.mark.skipif(not mib_admin._HAS_PYSMI, reason='pysmi not installed')
 class TestHttpFetchTimeout:
     """The pysmi HTTP fallback must carry a timeout so a slow/unreachable mirror
     can't freeze a compilation (the 'stuck at MIB N/M' bug)."""
@@ -239,7 +242,7 @@ class TestGithubFolderParse:
          ('o', 'r', '', '')),
     ])
     def test_parse_ok(self, url, expected):
-        assert snmp._parse_github_folder(url) == expected
+        assert mib_admin._parse_github_folder(url) == expected
 
     @pytest.mark.parametrize('url', [
         'https://example.com/o/r/tree/master',
@@ -248,7 +251,7 @@ class TestGithubFolderParse:
         '',
     ])
     def test_parse_rejects_non_github(self, url):
-        assert snmp._parse_github_folder(url) is None
+        assert mib_admin._parse_github_folder(url) is None
 
 
 class TestLooksLikeMib:
@@ -260,7 +263,7 @@ class TestLooksLikeMib:
         ('notes.md', False), ('data.json', False), ('script.py', False),
     ])
     def test_looks_like(self, name, ok):
-        assert snmp._looks_like_mib_file(name) is ok
+        assert mib_admin._looks_like_mib_file(name) is ok
 
 
 class TestLoadMibSources:
@@ -281,7 +284,7 @@ class TestLoadMibSources:
             'order': 1, 'name': 'Alpha',
             'folder': 'https://github.com/o/a/tree/main/mibs',
             'dep_templates': ['https://raw.githubusercontent.com/o/a/main/mibs/@mib@.txt']})
-        repos = snmp._load_mib_sources(str(tmp_path))
+        repos = mib_admin._load_mib_sources(str(tmp_path))
         assert [r['name'] for r in repos] == ['Alpha', 'Beta']   # by order, not filename
         assert all('order' not in r for r in repos)              # internal key stripped
 
@@ -289,7 +292,7 @@ class TestLoadMibSources:
         self._write(tmp_path, 's.json', {
             'name': 'Solo', 'folder': 'https://github.com/o/s',
             'dep_templates': 'https://raw.githubusercontent.com/o/s/master/@mib@'})
-        repos = snmp._load_mib_sources(str(tmp_path))
+        repos = mib_admin._load_mib_sources(str(tmp_path))
         assert repos[0]['dep_templates'] == ['https://raw.githubusercontent.com/o/s/master/@mib@']
 
     def test_skips_malformed_and_invalid(self, tmp_path):
@@ -300,15 +303,15 @@ class TestLoadMibSources:
         self._write(tmp_path, 'ok.json', {
             'name': 'Good', 'folder': 'https://github.com/o/r/tree/main/mibs',
             'dep_templates': ['https://raw.githubusercontent.com/o/r/main/mibs/@mib@']})
-        repos = snmp._load_mib_sources(str(tmp_path))
+        repos = mib_admin._load_mib_sources(str(tmp_path))
         assert [r['name'] for r in repos] == ['Good']
 
     def test_missing_directory_is_empty(self, tmp_path):
-        assert snmp._load_mib_sources(str(tmp_path / 'nope')) == []
+        assert mib_admin._load_mib_sources(str(tmp_path / 'nope')) == []
 
     def test_real_sources_dir_loads(self):
         # The shipped mib_sources/ must yield the known repos.
-        assert len(snmp._load_mib_sources()) == len(snmp._KNOWN_MIB_REPOS) >= 1
+        assert len(mib_admin._load_mib_sources()) == len(mib_admin._KNOWN_MIB_REPOS) >= 1
 
 
 class TestKnownRepos:
@@ -317,10 +320,10 @@ class TestKnownRepos:
     imported MIBs (the .my/.mib coexistence bug)."""
 
     def test_structure(self):
-        assert snmp._KNOWN_MIB_REPOS
-        for r in snmp._KNOWN_MIB_REPOS:
+        assert mib_admin._KNOWN_MIB_REPOS
+        for r in mib_admin._KNOWN_MIB_REPOS:
             assert r.get('name')
-            assert snmp._parse_github_folder(r['folder']) is not None
+            assert mib_admin._parse_github_folder(r['folder']) is not None
             tpls = r.get('dep_templates')
             assert isinstance(tpls, list) and tpls
             for t in tpls:
@@ -329,7 +332,7 @@ class TestKnownRepos:
     def test_extensions_covered(self):
         # Each repo must offer both an extension-less and a suffixed variant so
         # dependencies stored either way resolve.
-        for r in snmp._KNOWN_MIB_REPOS:
+        for r in mib_admin._KNOWN_MIB_REPOS:
             tpls = r['dep_templates']
             has_plain    = any(t.rstrip('/').endswith('@mib@') for t in tpls)
             has_suffixed = any(t.split('@mib@')[-1] for t in tpls)
@@ -402,7 +405,7 @@ class TestImportFromGithub:
         calls = []
         with patch('urllib.request.urlopen', side_effect=self._fake_urlopen), \
              patch('lib.security.net_guard.validate_external_url', return_value=None):
-            res = snmp._run_github_import(
+            res = mib_admin._run_github_import(
                 str(tmp_path), 'https://github.com/o/r/tree/master/mibs', True,
                 lambda done, total, failed, cur: calls.append((done, total)))
         assert res['total'] == 2
@@ -492,7 +495,7 @@ class TestImportFromGithubAsync:
 
     def test_start_poll_done(self, tmp_path):
         import time
-        snmp._github_jobs.clear()
+        mib_admin._github_jobs.clear()
         cfg = {'__var_dir__': str(tmp_path),
                'url': 'https://github.com/o/r/tree/master/mibs', 'recursive': True}
         with patch('urllib.request.urlopen', side_effect=self._fake_urlopen), \
@@ -572,7 +575,7 @@ class TestImportFromGithubAsync:
             m.__enter__ = lambda s: s; m.__exit__ = MagicMock(return_value=False)
             return m
 
-        snmp._github_jobs.clear()
+        mib_admin._github_jobs.clear()
         with patch('urllib.request.urlopen', side_effect=fake), \
              patch('lib.security.net_guard.validate_external_url', return_value=None):
             start = Watchful.import_mib_from_github_start(
@@ -687,7 +690,7 @@ class TestCompilePhase:
     progress bar can label what it's doing instead of looking stuck."""
 
     def setup_method(self):
-        snmp._compile_jobs.clear()
+        mib_admin._compile_jobs.clear()
 
     def test_initial_phase_is_compiling(self, tmp_path, monkeypatch):
         raw = tmp_path / 'snmp_mibs' / 'raw'
@@ -696,7 +699,7 @@ class TestCompilePhase:
         # Hold the compile open so we can observe the initial phase.
         import threading
         gate = threading.Event()
-        monkeypatch.setattr(snmp._mib_resolver, 'compile_raw_mibs_progressive',
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
                             lambda *a, **k: (gate.wait(2),
                                              {'ok': True, 'compiled': False, 'partial': False,
                                               'failed': [], 'results': {}})[1])
@@ -712,13 +715,13 @@ class TestCompilePhase:
         raw.mkdir(parents=True)
         (raw / 'FOO-MIB.txt').write_text('x')
         gate = threading.Event()
-        monkeypatch.setattr(snmp._mib_resolver, 'compile_raw_mibs_progressive',
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
                             lambda *a, **k: {'ok': True, 'compiled': True, 'partial': False,
                                              'failed': [], 'results': {}, 'message': ''})
         # Hold the indexing step open so the 'indexing' phase is observable.
-        monkeypatch.setattr(snmp._mib_resolver, 'build_oid_index',
+        monkeypatch.setattr(mib_admin._mib_resolver, 'build_oid_index',
                             lambda *a, **k: (gate.wait(2), 0)[1])
-        monkeypatch.setattr(snmp._mib_catalog, 'build_catalog', lambda *a, **k: 0)
+        monkeypatch.setattr(mib_admin._mib_catalog, 'build_catalog', lambda *a, **k: 0)
         start = Watchful.compile_mibs_start({'__var_dir__': str(tmp_path)})
         jid = start['job_id']
         seen = None
@@ -739,7 +742,7 @@ class TestCompileCancel:
     stop the UI poll (otherwise it keeps compiling — files keep appearing)."""
 
     def setup_method(self):
-        snmp._compile_jobs.clear()
+        mib_admin._compile_jobs.clear()
 
     def test_action_registered_and_not_read_only(self):
         assert 'compile_mibs_cancel' in Watchful.WATCHFUL_ACTIONS
@@ -748,7 +751,7 @@ class TestCompileCancel:
     def test_cancel_sets_job_event(self):
         import threading
         ev = threading.Event()
-        snmp._compile_jobs['J'] = {'_cancel': ev, 'done': False}
+        mib_admin._compile_jobs['J'] = {'_cancel': ev, 'done': False}
         out = Watchful.compile_mibs_cancel({'job_id': 'J'})
         assert out['ok'] is True and out['cancelling'] is True
         assert ev.is_set()
@@ -760,7 +763,7 @@ class TestCompileCancel:
     def test_status_omits_cancel_event(self):
         # The threading.Event must never reach the JSON response.
         import threading
-        snmp._compile_jobs['K'] = {
+        mib_admin._compile_jobs['K'] = {
             '_cancel': threading.Event(), 'done': False, 'phase': 'compiling',
             'completed': 0, 'total': 1, 'result_ok': None,
         }
@@ -768,7 +771,7 @@ class TestCompileCancel:
         assert '_cancel' not in out
         assert out['ok'] is True and out['phase'] == 'compiling'
 
-    @pytest.mark.skipif(not snmp._HAS_PYSMI, reason='pysmi not installed')
+    @pytest.mark.skipif(not mib_admin._HAS_PYSMI, reason='pysmi not installed')
     def test_should_cancel_stops_resolver_loop(self, tmp_path):
         # should_cancel() True from the start → the batch loop breaks before
         # compiling anything and the result is flagged cancelled.
@@ -780,3 +783,60 @@ class TestCompileCancel:
             str(raw), str(compiled), should_cancel=lambda: True)
         assert res.get('cancelled') is True
         assert res.get('compiled') is False
+
+
+class TestMibFilenameGuards:
+    """The allowlist and the confinement behind every MIB file operation.
+
+    These live here, next to the code, because they name private helpers: a central file that
+    reached into ``mib_admin`` for them would break the day one of them moved — which is
+    exactly what happened when the MIB catalogue left ``__init__``. What the security suite
+    keeps is the other half, and the stronger one: that the ACTIONS cannot escape their
+    directory, which is what an attacker actually reaches and what would still fail if a new
+    operation forgot to call these (see tests/test_security_regression.py).
+    """
+
+    def test_rejects_a_path_separator(self):
+        assert mib_admin._safe_mib_filename('../../../etc/passwd') is None
+        assert mib_admin._safe_mib_filename('../../config.json') is None
+        assert mib_admin._safe_mib_filename('dir/file.mib') is None
+        assert mib_admin._safe_mib_filename('dir\file.mib') is None
+
+    def test_rejects_a_leading_dot(self):
+        assert mib_admin._safe_mib_filename('.hidden') is None
+        assert mib_admin._safe_mib_filename('..') is None
+        assert mib_admin._safe_mib_filename('.mibrc') is None
+
+    def test_rejects_shell_metacharacters(self):
+        assert mib_admin._safe_mib_filename('file*.mib') is None
+        assert mib_admin._safe_mib_filename('file;rm.mib') is None
+        assert mib_admin._safe_mib_filename('file:stream') is None  # NTFS alternate stream
+        assert mib_admin._safe_mib_filename('file name.mib') is None  # space
+
+    def test_accepts_a_real_mib_name(self):
+        """A guard that refused everything would pass every test above."""
+        assert mib_admin._safe_mib_filename('AGENTX-MIB.mib') == 'AGENTX-MIB.mib'
+        assert mib_admin._safe_mib_filename('MY_MODULE.txt') == 'MY_MODULE.txt'
+        assert mib_admin._safe_mib_filename('module-1.2.mib') == 'module-1.2.mib'
+
+    def test_a_compiled_mib_must_be_a_py_file(self):
+        assert mib_admin._safe_mib_filename('module.mib', kind='compiled') is None
+        assert mib_admin._safe_mib_filename('module.txt', kind='compiled') is None
+        assert mib_admin._safe_mib_filename('module.py',  kind='compiled') == 'module.py'
+        # For raw, the extension is checked by the caller (upload_mib / import_mib_from_url);
+        # this helper only enforces the character allowlist.
+        assert mib_admin._safe_mib_filename('module.mib', kind='raw') == 'module.mib'
+
+    def test_confinement_blocks_traversal(self, tmp_path):
+        import os
+        base = str(tmp_path / 'mib_dir')
+        os.makedirs(base)
+        assert mib_admin._confined_path(base, '../../../etc/passwd') is None
+        assert mib_admin._confined_path(base, '..', '..', 'secret') is None
+
+    def test_confinement_allows_a_subpath(self, tmp_path):
+        import os
+        base = str(tmp_path / 'mib_dir')
+        os.makedirs(base)
+        result = mib_admin._confined_path(base, 'MY-MIB.py')
+        assert result is not None and result.startswith(base)

@@ -8,6 +8,35 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.14] - 2026-07-28
+
+### Changed
+- **The SNMP watchful stopped being three subsystems in one file.** Its `__init__.py` was 1596
+  lines, of which about six hundred never checked anything: they upload a MIB, compile raw
+  ASN.1, import a folder from GitHub or a file from a URL, and answer for the contents — a
+  small file manager with a background job runner. Another hundred and fifty were the SNMP
+  conversation itself. Split by the question each part answers, not by size: `mib_admin.py`
+  (the catalogue, joining the `mib_resolver`/`mib_catalog` it already had), `client.py` (GET
+  and WALK, and the pysnmp guard), `actions.py` (discovery and audit detail) and `defaults.py`
+  (the parsed schema), leaving 259 lines that are the module itself — the class, the loop over
+  items and the dispatch to one check. The class is composed from those by inheritance, so
+  from the outside nothing changed: same 76 attributes, same 16 actions, same signatures.
+- **Those file names are now the convention**, written down in the watchful guide with the
+  line at ~350 lines, and enforced: a module whose `__init__.py` grows past it fails, with the
+  four not yet split listed explicitly in a list that may only shrink. Nothing is re-exported
+  from `__init__` to soften the move — a convenience import would leave the code looking like
+  it never moved, and the next caller would reach for it in the wrong place.
+- **The SNMP path-traversal regression tests now attack the actions, not the helpers.** Seven
+  of them called `_safe_mib_filename` and `_confined_path` directly from the central security
+  file, which proved the allowlist works but not that the file operations use it — a new
+  operation that forgot the guard would have left every one of them green. They moved next to
+  the code they name, and the security suite keeps the stronger half: `upload_mib`,
+  `delete_mib` and `get_raw_mib_details` fed traversal payloads, asserting nothing is written,
+  removed or read outside the MIB directory. Writing it that way turned up that `upload_mib`
+  does not reject `../../../etc/passwd` at all — it takes the basename first, so the payload is
+  defused into `passwd` and lands inside `raw/` like any other name. The defence is sound; the
+  test now pins containment, which is the property that actually matters.
+
 ## [0.0.1+build.13] - 2026-07-28
 
 ### Changed

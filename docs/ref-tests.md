@@ -637,6 +637,23 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_i18n_icon_populated[<mod>]` | Cada locale tiene `icon` no vacío | Emoji o string | Si es vacío |
 | `test_schema_fields_have_label_i18n_when_lang_exists[<mod>]` | Todos los campos del schema tienen `label_i18n` mergeado de `lang/` | Clave `label_i18n` en cada campo | Si falta (indica que el merge de idiomas falló) |
 
+### `TestModuleFileLayout` — El `__init__.py` no es un subsistema entero
+
+Un módulo pequeño cabe entero en `__init__.py` y así debe quedarse; pasadas las **350 líneas**
+deja de ser una cosa. El último en cruzarlo, `snmp`, tenía **1596**: seiscientas no comprobaban
+nada —eran un gestor de ficheros MIB con su ejecutor de trabajos en segundo plano— y otras
+ciento cincuenta eran la conversación SNMP. Tres subsistemas compartiendo un namespace.
+
+El corte no es por tamaño sino **por pregunta respondida**, con los mismos nombres en todos los
+módulos (`checks_<área>.py`, `client.py`, `actions.py`, `page.py`, `defaults.py`) — ver
+[caso-guia-watchful.md §2b](caso-guia-watchful.md#2b-cuando-el-módulo-crece-nombres-estándar-por-contenido).
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_init_is_not_a_whole_subsystem[<mod>]` | El `__init__.py` no pasa de 350 líneas | Dentro del límite, o en la lista de pendientes | Nombra el fichero y el tamaño, y remite a la guía |
+| `test_the_pending_list_only_shrinks` | Cada módulo de `_INIT_SPLIT_PENDING` sigue por encima del límite | Sigue pendiente | Uno ya partido debe salir de la lista, o el guard deja de vigilarlo |
+| `test_the_pending_list_has_no_ghosts` | La lista no nombra módulos inexistentes | Todos existen | Nombre podrido tras un renombrado |
+
 ### `TestWatchfulActions` — Integridad de `WATCHFUL_ACTIONS`
 
 | Test | Qué comprueba | OK | Error |
@@ -3180,7 +3197,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 63 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 70 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 

@@ -51,6 +51,42 @@ watchfuls/
 No es necesario registrar el módulo en ningún sitio. El `Monitor` descubre
 automáticamente cualquier carpeta con `__init__.py` dentro de `watchfuls/`.
 
+### 2b. Cuando el módulo crece: nombres estándar por contenido
+
+Un módulo pequeño cabe entero en `__init__.py` y así debe quedarse. Cuando deja de caber
+—la raya práctica está sobre las **350 líneas**— no se parte por tamaño sino **por pregunta
+respondida**, y los ficheros se llaman igual en todos los módulos:
+
+| fichero | qué contiene |
+|---|---|
+| `__init__.py` | la clase `Watchful`, `check()` (el bucle sobre items) y `_check_item()` (el reparto). Nada más |
+| `checks_<área>.py` | una familia de comprobaciones, como clase mixin (`checks_health.py`, `checks_identity.py`…) |
+| `client.py` | la conversación con el protocolo: HTTP, SNMP, NUT, ICMP. Un check decide **qué** preguntar; esto, **cómo** |
+| `actions.py` | lo que invoca la UI por nombre (`WATCHFUL_ACTIONS`): probar conexión, descubrir, selectores |
+| `page.py` | los hooks de `__page__` y `overview_widget()` |
+| `provision.py` | flujos de aprovisionamiento de credenciales, cuando los hay (no son ni check ni action) |
+| `defaults.py` | `schema.json` ya parseado y los defaults derivados, cuando más de una mitad del módulo los necesita |
+| `tables.py` | tablas estáticas de consulta (regiones, nombres de tipo…) |
+
+El `Watchful` se compone por herencia múltiple de esos mixins:
+
+```python
+class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
+```
+
+Así la clase es **idéntica vista desde fuera** —mismos métodos, mismas acciones— y cada
+fichero se abre por lo que se va a tocar. `azure`, `m365` y `snmp` están montados así.
+
+Dos avisos que ha dejado la experiencia:
+
+- **No re-exportes desde `__init__.py`** lo que has movido. Un import de conveniencia deja el
+  código pareciendo que sigue ahí y el siguiente que lo necesite lo volverá a buscar en el
+  sitio equivocado. Si un test importaba `snmp._safe_mib_filename`, que pase a importar
+  `snmp.mib_admin._safe_mib_filename`: nombrar el hogar real es el objetivo, no un efecto
+  colateral.
+- **`defaults.py` existe para romper el ciclo.** Si un mixin necesita los defaults del schema
+  y estos viven en `__init__.py`, el mixin acaba importando el paquete que lo importa a él.
+
 ---
 
 ## 3. Plantilla mínima de módulo

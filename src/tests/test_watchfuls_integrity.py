@@ -464,3 +464,51 @@ class TestRealModuleRuntimeContract:
         assert module_host_collections().get(mod_name), (
             f"{mod_name} host-capable but has no host-bindable collection"
         )
+
+
+# ──────────────── Module file layout (see docs/caso-guia-watchful.md §2b) ─────
+
+# A module's __init__.py holds the class, the loop over items and the dispatch to one
+# check. Everything answering a different question — speaking the protocol, administering a
+# catalogue, the operations the panel invokes, the page hooks — gets its own file, named the
+# same way in every module. The number is a smoke alarm, not a style rule: past it, a file
+# has stopped being one thing, and the last one to cross it (snmp, 1596 lines) turned out to
+# be three subsystems sharing a namespace.
+_INIT_MAX_LINES = 350
+
+# Modules not yet split. This list may only ever SHRINK: adding to it would turn the guard
+# into a record of what we gave up on. Sizes at the time of writing — proxmox 1087,
+# datastore 1052, dns 719, service_status 389.
+_INIT_SPLIT_PENDING = frozenset({'proxmox', 'datastore', 'dns', 'service_status'})
+
+
+class TestModuleFileLayout:
+
+    @pytest.mark.parametrize("mod_name", _MODULE_NAMES)
+    def test_init_is_not_a_whole_subsystem(self, mod_name):
+        path = os.path.join(_WATCHFULS_DIR, mod_name, "__init__.py")
+        with open(path, encoding="utf-8") as fh:
+            lines = sum(1 for _ in fh)
+        if mod_name in _INIT_SPLIT_PENDING:
+            pytest.skip(f"{mod_name} is on the pending-split list ({lines} lines)")
+        assert lines <= _INIT_MAX_LINES, (
+            f"watchfuls/{mod_name}/__init__.py is {lines} lines. Split it by the question "
+            f"each part answers — checks_<area>.py / client.py / actions.py / page.py — "
+            f"see docs/caso-guia-watchful.md §2b. Do not add it to _INIT_SPLIT_PENDING."
+        )
+
+    def test_the_pending_list_only_shrinks(self):
+        """Every name on it must still be over the limit. One that has been split has to
+        leave the list, or the guard stops watching a module that is now clean."""
+        for mod_name in sorted(_INIT_SPLIT_PENDING):
+            path = os.path.join(_WATCHFULS_DIR, mod_name, "__init__.py")
+            with open(path, encoding="utf-8") as fh:
+                lines = sum(1 for _ in fh)
+            assert lines > _INIT_MAX_LINES, (
+                f"{mod_name} is down to {lines} lines — remove it from _INIT_SPLIT_PENDING"
+            )
+
+    def test_the_pending_list_has_no_ghosts(self):
+        assert _INIT_SPLIT_PENDING <= set(_MODULE_NAMES), (
+            f"unknown modules on the pending list: {_INIT_SPLIT_PENDING - set(_MODULE_NAMES)}"
+        )
