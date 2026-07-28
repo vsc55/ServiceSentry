@@ -8,6 +8,50 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.27] - 2026-07-28
+
+### Added
+- **The audit log can be read four ways, and two of them are not lists.** The table reads it
+  one line at a time, which is right for "what happened at 14:32" and wrong for every question
+  about the log as a whole. **Timeline** reads it as a log — the day stated once, the clock
+  down the left, each entry one sentence — instead of making you re-read five column headers
+  per line to follow a sequence.
+- **By actor** sums the log up by WHO: entries, failed logins, how many kinds of thing, from
+  which addresses, first and last seen. The table shows every line by every actor and never a
+  per-actor total, so "an account nobody uses did forty things last night" was invisible unless
+  you already suspected it and filtered by that user — you had to know the answer to ask the
+  question. Failed logins get their own column rather than being folded into the total: a
+  hundred entries from an admin who was working is not news, six failed logins from an account
+  that did nothing else is, and averaged into one number they look the same.
+- **Activity by hour** is a day × hour grid. A 03:00 login and an 11:00 login read identically
+  in a list sorted by time — the timestamp is a value in a column and nothing about it says
+  "this is an odd hour". Side by side on a grid they are in different places, and "does
+  anything happen here outside working hours" becomes a shape you see rather than a query you
+  have to think of. One hue getting darker, never a red-to-green ramp: the colour carries a
+  count, and this view has no opinion about whether activity is good.
+- Those last two are **summaries**, and they behave like it: computed over everything the
+  filters left standing rather than over the page, not paginated (page 2 of a heat map is not
+  a thing), and their header always states the whole set. The grid caps at the 62 most recent
+  days and says so on screen when it does — a silent truncation would read as "this is all
+  there is", which is the one thing an audit view must not imply.
+
+### Changed
+- `audit_delete` becomes a button in exactly one place, composed by the table and the
+  timeline alike, and guarded.
+- Sort and Group by are hidden while a summary view is on screen. They decide the order of a
+  LIST; a summary picks its own axis, and a control that does nothing when you use it is worse
+  than one that is not there. The column chooser follows the same rule — it configures columns
+  the other three views do not have.
+- The chosen view travels with the rest of the section's UI state (sort, grouping, filters)
+  rather than growing a storage key of its own, and switching returns to the first page:
+  page 3 of the table is not page 3 of anything else.
+
+### Fixed
+- The day an entry belongs to is computed in the reader's timezone. Built from `toISOString()`
+  it would have been the UTC day, so entries either side of local midnight would have sat
+  under a heading whose date was not their own — in the timeline and in the activity grid,
+  which counts hours locally.
+
 ## [0.0.1+build.26] - 2026-07-28
 
 ### Added

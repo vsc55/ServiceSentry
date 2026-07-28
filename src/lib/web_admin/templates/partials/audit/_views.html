@@ -1,0 +1,152 @@
+{# ================================================================
+   Audit — the part every view shares.
+
+   The log is a list of lines and the table reads it one line at a time, which is the right
+   shape for "what happened at 14:32" and the wrong one for every question that is about the
+   log as a whole. Two of those matter enough to deserve their own view:
+
+   * WHO has been active. The table shows every line by every actor and never a per-actor
+     summary, so "an account nobody uses did forty things last night" is invisible unless you
+     already suspected it and filtered by that user — which means you have to know the answer
+     before you can ask the question.
+   * WHEN it happened. Access at 03:00 on a Sunday and access at 11:00 on a Tuesday read
+     identically in a list sorted by time; side by side on a day × hour grid, one of them is
+     a shape you notice from across the room.
+
+   Those two are SUMMARIES: they describe a set, so they are computed over everything the
+   filters left standing rather than over the page on screen, and they are not paginated —
+   page 2 of a summary is not a thing. The two list views (table and timeline) stay
+   paginated, because they are the log itself.
+
+   What must not differ is what an ENTRY is: the event badge, the actor, the time and — the
+   one that is not cosmetic — the delete button. `audit_delete` becomes a control in exactly
+   one place here, so no view can offer it to somebody who may not press it.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time: the view files are separate partials
+// concatenated after this one. A null render means the built-in table body (flat or grouped).
+//
+// `lists` separates the two families: a list view shows entries (paginated, sortable,
+// groupable) and a summary view describes the filtered set as a whole. The Sort and Group by
+// controls belong to the first family only — see _auditSyncListControls.
+const AUDIT_VIEWS = [
+    { id: 'table',    label_key: 'audit_view_table',    icon: 'bi-table',        render: null,                 lists: true  },
+    { id: 'timeline', label_key: 'audit_view_timeline', icon: 'bi-list-nested',  render: '_auditViewTimeline', lists: true  },
+    { id: 'actors',   label_key: 'audit_view_actors',   icon: 'bi-people',       render: '_auditViewActors',   lists: false },
+    { id: 'activity', label_key: 'audit_view_activity', icon: 'bi-calendar3',    render: '_auditViewActivity', lists: false },
+];
+
+let _auditViewMode = 'table';    // restored from the saved UI state (see initAuditControls)
+
+function _auditViewId() { return _auditViewMode; }
+function _auditView(id) { return AUDIT_VIEWS.find(v => v.id === (id || _auditViewMode)) || AUDIT_VIEWS[0]; }
+function _auditViewLists() { return !!_auditView().lists; }
+
+/** Restore a saved view id. Unknown or absent means the table — what a user who has never
+ *  touched the switcher gets. */
+function _auditApplyView(id) {
+    _auditViewMode = AUDIT_VIEWS.some(v => v.id === id) ? id : 'table';
+}
+
+/** Switching redraws what is already loaded: every view reads the same `_auditEntries`, and
+ *  re-fetching the log to answer a question about presentation would be a request for
+ *  nothing — on a section whose fetch returns the WHOLE log. */
+function setAuditView(id) {
+    if (!AUDIT_VIEWS.some(v => v.id === id)) return;
+    _auditViewMode = id;
+    _auditPage = 1;              // page 3 of the old view means nothing in the new one
+    _saveAuditUiState();
+    _auditSyncListControls();
+    renderAuditTable();
+}
+
+function _auditViewSwitcher() {
+    const cur = _auditViewId();
+    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('view_mode'))}">
+        ${AUDIT_VIEWS.map(v => `
+            <button type="button" class="btn btn-sm ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
+                onclick="setAuditView('${escAttr(v.id)}')"
+                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
+                <i class="bi ${escAttr(v.icon)}"></i>
+            </button>`).join('')}
+    </div>`;
+}
+
+/** Sort and Group by live in the filter strip, which is built once and OUTSIDE the body this
+ *  file redraws (so typing in a filter never loses focus). They only mean something for a
+ *  list of entries, so they are hidden rather than left to look broken while a summary is on
+ *  screen — a control that does nothing when you use it is worse than one that is not there. */
+function _auditSyncListControls() {
+    const lists = _auditViewLists();
+    // Marked in the schema's leadHtml rather than found by climbing from the <select>: the
+    // markup around a control is exactly the kind of thing that gets restyled, and a guard
+    // that broke silently would leave a dead control on screen.
+    document.querySelectorAll('.ss-audit-listctl')
+        .forEach(el => { el.style.display = lists ? '' : 'none'; });
+}
+
+/** The non-table body, dispatched by name. List views are handed the current page; summary
+ *  views are handed everything the filters left, because that is what they describe. */
+function _auditViewBody(pageEntries, filtered, ctx) {
+    const v = _auditView();
+    const fn = v.render ? window[v.render] : null;
+    if (!fn) return '';
+    return fn(v.lists ? pageEntries : filtered, ctx);
+}
+
+// ── What an entry means, decided once ────────────────────────────────────────
+/** The permission context every view is handed. Resolved once per render so no view asks the
+ *  permission set itself. */
+function _auditCtx() {
+    return { canDelete: new Set(currentUser.permissions || []).has('audit_delete') };
+}
+
+/** The delete control — the ONE place `audit_delete` becomes a button. Only the list views
+ *  call it: a summary row is a count, and there is no single entry behind it to delete. */
+function _auditDeleteBtn(e, ctx) {
+    if (!ctx.canDelete) return '';
+    return `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteAuditEntry(${e._id})"
+        title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>`;
+}
+
+// Time, three ways, so two views cannot format the same instant differently.
+/** The day an entry belongs to, in the READER's timezone — the same day its label says and
+ *  the same day its hour is counted under. Built from toISOString() this would be the UTC
+ *  day, so anything either side of local midnight would sit in a row whose date is not the
+ *  one printed beside it. */
+function _auditDayKey(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function _auditDayLabel(ts) { return new Date(ts).toLocaleDateString(); }
+function _auditClock(ts)   { return new Date(ts).toLocaleTimeString(); }
+
+/** The actor of an entry. An empty user is not a user called "—": the daemon writes entries
+ *  with no session behind them, and calling that "unknown" would suggest something is missing. */
+function _auditActor(e) { return e.user || t('audit_actor_system'); }
+
+/** Entries that are a failure worth counting per actor. Deliberately narrow: a failed login
+ *  is a fact about credentials, and burying it among "everything that is not a success"
+ *  would make the count mean nothing. */
+function _auditIsFailedLogin(e) { return e.event === 'login_failed'; }
+
+/** The summary header of a summary view: what set it describes, always in absolute terms, so
+ *  a view that shows twelve rows can never suggest the log only has twelve entries. */
+function _auditSummaryHeader(entries, extraChips) {
+    const first = entries.length ? entries[entries.length - 1].ts : null;
+    const last = entries.length ? entries[0].ts : null;
+    const chip = (icon, label, value) =>
+        `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+            <i class="bi ${icon} me-1"></i>${esc(label)} <span class="fw-semibold">${esc(String(value))}</span></span>`;
+    // The endpoints are read off the set rather than off the date filters: a filter says what
+    // was ASKED for, and these say what is actually in there.
+    const range = (first && last)
+        ? `<span class="text-muted small">${esc(_auditDayLabel(Math.min(new Date(first), new Date(last))))}
+             — ${esc(_auditDayLabel(Math.max(new Date(first), new Date(last))))}</span>` : '';
+    return `<div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2 border-bottom">
+        ${chip('bi-journal-text', t('audit_count_entries'), entries.length)}
+        ${extraChips || ''}
+        ${range}
+    </div>`;
+}

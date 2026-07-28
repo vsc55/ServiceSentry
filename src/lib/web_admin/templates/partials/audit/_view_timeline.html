@@ -1,0 +1,58 @@
+{# ================================================================
+   Audit — timeline: the log read as a log.
+
+   The table gives every entry the same five columns, which is right when you are comparing
+   entries and wrong when you are following them: reading a sequence of events in a grid
+   means re-reading the same column headers on every line to find out what happened. Here the
+   day is stated once, the clock runs down the left, and each entry is one sentence — who did
+   what, from where.
+
+   It is the same rows the table would draw, in the same order, on the same page: the sort
+   control still decides the direction, and the day headers follow it (oldest-first reads
+   forwards, newest-first reads backwards). Nothing here re-sorts anything, so switching view
+   never silently changes which entries you are looking at.
+   ================================================================ #}
+
+function _auditViewTimeline(entries, ctx) {
+    if (!entries.length) return '';
+    // Day headings come from the ORDER the entries arrive in, never from re-sorting them.
+    // Grouping by day and then sorting the days would quietly override the direction the
+    // user picked in the sort control, and the page would stop matching the pagination band.
+    let out = '';
+    let day = null;
+    for (const e of entries) {
+        const k = _auditDayKey(e.ts);
+        if (k !== day) {
+            day = k;
+            out += `<div class="d-flex align-items-center gap-2 px-3 pt-3 pb-1">
+                <i class="bi bi-calendar3 text-muted"></i>
+                <span class="fw-semibold ss-fs-4">${esc(_auditDayLabel(e.ts))}</span>
+                <span class="flex-grow-1" style="height:1px;background:var(--bs-border-color)"></span>
+            </div>`;
+        }
+        out += _auditTimelineRow(e, ctx);
+    }
+    return `<div class="pb-2">${out}</div>`;
+}
+
+function _auditTimelineRow(e, ctx) {
+    const del = _auditDeleteBtn(e, ctx);
+    // The rail: a hairline with a dot per entry, so a burst of activity reads as a cluster
+    // rather than as a wall of identical rows.
+    return `<div class="d-flex align-items-start gap-2 px-3 py-1">
+        <span class="text-muted ss-fs-3 text-nowrap pt-1" style="min-width:5.5rem">${esc(_auditClock(e.ts))}</span>
+        <span class="d-flex flex-column align-items-center align-self-stretch" aria-hidden="true">
+            <span class="rounded-circle mt-2" style="width:.4rem;height:.4rem;background:var(--bs-secondary-color)"></span>
+            <span class="flex-grow-1" style="width:1px;background:var(--bs-border-color)"></span>
+        </span>
+        <span class="flex-grow-1 min-w-0">
+            <span class="d-flex flex-wrap align-items-center gap-2">
+                ${_auditEventBadge(e.event)}
+                <code class="ss-fs-3">${esc(_auditActor(e))}</code>
+                ${e.ip ? `<span class="text-muted ss-fs-2"><i class="bi bi-hdd-network me-1"></i>${esc(e.ip)}</span>` : ''}
+            </span>
+            <span class="d-block ss-fs-3">${auditSummaryHtml(e._idx, e.detail)}</span>
+        </span>
+        ${del ? `<span class="flex-shrink-0 pt-1">${del}</span>` : ''}
+    </div>`;
+}

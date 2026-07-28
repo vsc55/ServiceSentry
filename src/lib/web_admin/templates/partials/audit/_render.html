@@ -49,7 +49,11 @@ function _auditOrderedCols(hideCol) {
 }
 
 function renderFlatAudit(entries, hideCol = null, tableId = null) {
-    const canDelete   = new Set(currentUser.permissions || []).has('audit_delete');
+    // The permission is resolved in the shared core and turned into a button there too (see
+    // audit/_views.html): the timeline draws the same control, and two places asking the same
+    // question is one place that can answer it differently.
+    const ctx = _auditCtx();
+    const canDelete   = ctx.canDelete;
     const orderedCols = _auditOrderedCols(hideCol);
 
     // ── Column widths ──────────────────────────────────────────────
@@ -81,7 +85,7 @@ function renderFlatAudit(entries, hideCol = null, tableId = null) {
                 default:       return '<td></td>';
             }
         }).join('');
-        h += `<tr>${cells}${canDelete ? `<td><button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteAuditEntry(${e._id})" title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button></td>` : ''}</tr>`;
+        h += `<tr>${cells}${canDelete ? `<td>${_auditDeleteBtn(e, ctx)}</td>` : ''}</tr>`;
     }
     h += `</tbody></table>`;
     return h;
@@ -176,24 +180,35 @@ function renderAuditTable() {
         return;
     }
 
-    // Paginate
+    // Paginate — the LIST views only. A summary describes the whole filtered set (see
+    // audit/_views.html), so paging it would mean "the first 25 of the actors", which is not
+    // a summary of anything, and the bands below would be counting entries against rows.
+    const view       = _auditView();
+    const lists      = !!view.lists;
+    const ctx        = _auditCtx();
     const total      = filtered.length;
     const pageSize   = _auditPageSize || total;
     _auditPage       = Math.max(1, Math.min(_auditPage, Math.ceil(total / pageSize)));
-    const pageEntries = filtered.slice((_auditPage - 1) * pageSize, _auditPage * pageSize);
+    const pageEntries = lists
+        ? filtered.slice((_auditPage - 1) * pageSize, _auditPage * pageSize)
+        : filtered;
 
-    const isFlat         = _auditGroup === 'none';
+    // The built-in table body, flat or grouped by the Group-by control. The other views are
+    // dispatched by the registry and never see the grouping — it is a control of this one.
+    const isFlat         = view.id === 'table' && _auditGroup === 'none';
     // Top band: "Showing …" on the left, then the column chooser immediately before
     // the pagination controls on the right (split the parts so the chooser sits
     // between the info text and the page buttons).
     const pagTop         = _paginationParts(total, _auditPage, _auditPageSize, '_goAuditPage', '_changeAuditPageSize');
     const paginationBot  = _renderAuditPagination(total);
-    const tableHtml      = isFlat
-        ? renderFlatAudit(pageEntries, null, 'audit-table')
-        : renderGroupedAudit(pageEntries);
+    const tableHtml      = view.render
+        ? _auditViewBody(pageEntries, filtered, ctx)
+        : (isFlat ? renderFlatAudit(pageEntries, null, 'audit-table')
+                  : renderGroupedAudit(pageEntries));
 
-    // Column chooser
-    const colChooser = _buildColChooser(_AUDIT_COLS, _auditVisibleCols, '_auditToggleCol', '_resetAuditCols', 150);
+    // Column chooser — the table's own tool: it configures columns the other three do not have.
+    const colChooser = view.id === 'table'
+        ? _buildColChooser(_AUDIT_COLS, _auditVisibleCols, '_auditToggleCol', '_resetAuditCols', 150) : '';
 
     // Title header between the accent strip and the pagination band — same place every other
     // section keeps its tools, so Refresh/Export live with the table they act on (they used to
@@ -203,6 +218,7 @@ function renderAuditTable() {
         <div class="ss-accent ss-accent-slate"></div>
         <div class="ss-card-header">
             <h6 class="mb-0 me-auto"><i class="bi bi-clock-history me-2"></i>${esc(t('tab_audit'))}</h6>
+            ${_auditViewSwitcher()}
             ${colChooser}
             <button class="btn btn-sm btn-secondary" onclick="renderAudit()" title="${escAttr(t('refresh_tt'))}">
                 <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
@@ -217,12 +233,12 @@ function renderAuditTable() {
                 </ul>
             </div>
         </div>
-        <div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
+        ${lists ? `<div class="ss-card-band ss-card-band-top d-flex align-items-center justify-content-between flex-wrap gap-2">
             ${pagTop.info}
             ${pagTop.controls}
-        </div>
+        </div>` : ''}
         <div class="ss-vscroll">${tableHtml}</div>
-        <div class="ss-card-band ss-card-band-bottom">${paginationBot}</div>
+        ${lists ? `<div class="ss-card-band ss-card-band-bottom">${paginationBot}</div>` : ''}
     </div>`;
 
     if (isFlat) setTimeout(_initAuditTableFeatures, 0);

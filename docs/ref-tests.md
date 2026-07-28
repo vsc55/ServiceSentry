@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4330 tests** (4329 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4360 tests** (4358 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -5473,3 +5473,55 @@ guard que no es cosmético es `test_no_view_builds_its_own_action_buttons`: los 
 | `TestGroupingTellsTheTruth::test_a_type_no_module_declares_any_more_is_still_shown` | Se quitó un módulo y sus credenciales le sobrevivieron — justo el caso que hay que ver |
 | `TestTheLabelsExist::*` (×3) | Las cuatro vistas y el vocabulario de uso en los dos idiomas, y que el aviso de huérfanas lleve los **dos** números: 3 de 4 y 3 de 400 no son la misma noticia |
 | `TestTheViewModeRestoreIsRegistryDriven::*` (×3) | El modo de vista lo restaura la propia tabla (`persistExtra`/`applyExtra`). Antes era una línea fija `tc.sessions.view` en la capa de persistencia, así que cada tabla con una preferencia nueva tenía que venir a editar esa función |
+
+## 124. Audit — cuatro vistas, y dos de ellas no son listas
+
+**Archivo:** `tests/test_wa_audit_views.py` — 29 tests
+
+La tabla lee el registro línea a línea: es la forma correcta para «qué pasó a las 14:32» y la
+equivocada para cualquier pregunta sobre el registro **entero**. Dos de ésas merecen vista
+propia:
+
+- **quién** ha estado activo. La tabla enseña todas las líneas de todos los actores y ningún
+  total por actor, así que «una cuenta que no usa nadie hizo cuarenta cosas anoche» era
+  invisible salvo que ya lo sospecharas y filtraras por ese usuario — hay que saber la
+  respuesta para poder hacer la pregunta;
+- **cuándo** pasó. Un inicio de sesión a las 03:00 y otro a las 11:00 se leen igual en una
+  lista ordenada por tiempo; en una rejilla día × hora están en sitios distintos, y «¿pasa algo
+  aquí fuera del horario?» pasa de ser una consulta que hay que idear a una forma que se ve.
+
+Esas dos son **resúmenes**, y casi todos los guards van de lo que cuesta esa palabra: describen
+un conjunto, así que se calculan sobre todo lo que dejaron los filtros y no sobre la página, no
+se paginan (la página 2 de un mapa de calor no existe) y eligen su propio eje — por eso Orden y
+Agrupar se ocultan mientras una está en pantalla, en vez de quedarse ahí sin hacer nada.
+
+Lo que no puede diferir es qué es una **entrada**, y la parte no cosmética de eso es el botón
+de borrar: `audit_delete` se convierte en control en un solo sitio.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Registro, ficheros y que el bundle los incluya **después** del registro |
+| `TestOnePlaceDecidesWhoMayDelete::test_the_permission_becomes_a_button_once` | **La regla**: dos sitios preguntando «¿puede borrar?» es un sitio que puede contestar distinto |
+| `TestOnePlaceDecidesWhoMayDelete::test_no_view_builds_its_own_delete_button` | Ni las vistas nuevas ni la tabla |
+| `TestOnePlaceDecidesWhoMayDelete::test_no_view_reads_the_permission_set` | Se resuelve una vez por render en un `ctx` |
+| `TestOnePlaceDecidesWhoMayDelete::test_a_summary_row_offers_no_delete` | No hay una entrada detrás de un recuento; borrar «42 entradas de este usuario» sería otra función |
+| `TestASummaryIsNotAPage::test_summaries_are_handed_the_whole_filtered_set` | Sobre la página describirían «las 25 primeras entradas», que es una afirmación sobre la paginación |
+| `TestASummaryIsNotAPage::test_only_the_list_views_are_paginated` | Ni bandas ni recorte para un resumen |
+| `TestASummaryIsNotAPage::test_the_summary_header_states_the_whole_set` | Doce filas no pueden sugerir que el registro tiene doce entradas |
+| `TestASummaryIsNotAPage::test_the_list_only_controls_are_hidden_for_a_summary` | Un control que no hace nada al usarlo es peor que uno que no está |
+| `TestASummaryIsNotAPage::test_the_column_chooser_belongs_to_the_table` | Configura columnas que las otras tres no tienen |
+| `TestSwitchingViewIsPresentationOnly::test_it_redraws_instead_of_refetching` | El fetch de esta sección devuelve el registro **entero**: volver a pedirlo para cambiar de layout sería la forma más cara posible |
+| `TestSwitchingViewIsPresentationOnly::test_it_returns_to_the_first_page` | La página 3 de la tabla no es la página 3 de nada más |
+| `TestSwitchingViewIsPresentationOnly::test_the_choice_is_remembered_with_the_rest_of_the_ui_state` | Orden, agrupación, filtros y vista en una sola clave |
+| `TestTheTimelineIsTheSameRowsInTheSameOrder::test_it_does_not_re_sort` | Agrupar por día y ordenar los días pisaría en silencio la dirección elegida en el control de orden |
+| `TestTheTimelineIsTheSameRowsInTheSameOrder::test_the_day_header_follows_the_entries` | |
+| `TestTheTimelineIsTheSameRowsInTheSameOrder::test_a_day_is_the_readers_day` | Con `toISOString()` la clave sería el día **UTC**: una entrada al otro lado de la medianoche local caería bajo una cabecera con otra fecha que la suya, en la cronología y en la rejilla |
+| `TestActorsCountsWhatMatters::test_failed_logins_are_counted_apart` | Cien entradas de un admin trabajando no es noticia; seis fallos de una cuenta que no hizo nada más sí, y promediados se parecen |
+| `TestActorsCountsWhatMatters::test_the_failure_definition_is_narrow_and_shared` | «Todo lo que no es un éxito» haría que el número no significara nada |
+| `TestActorsCountsWhatMatters::test_it_lists_the_addresses_rather_than_only_counting_them` | «3 IPs» es un número; **cuáles** es el hecho sobre el que se actúa |
+| `TestActorsCountsWhatMatters::test_an_entry_with_no_user_is_not_called_unknown` | El demonio escribe entradas sin sesión detrás: llamarlo «desconocido» sugeriría que falta algo |
+| `TestActivityIsACountNotAVerdict::test_the_ramp_is_one_hue` | El color lleva un recuento y nada más; una rampa rojo-verde inventaría una opinión |
+| `TestActivityIsACountNotAVerdict::test_it_is_theme_aware` | Los dos extremos son variables del tema: una escala afinada contra un fondo está mal en el otro |
+| `TestActivityIsACountNotAVerdict::test_every_cell_states_its_number` | Un tono es una comparación, no un valor |
+| `TestActivityIsACountNotAVerdict::test_the_cap_is_never_silent` | Recortar los días viejos sin decirlo se lee como «esto es todo lo que hay», que es justo lo que una vista de auditoría no puede insinuar |
+| `TestTheLabelsExist::*` (×3) | Las cuatro vistas y el vocabulario de resumen en los dos idiomas, y que el aviso de recorte lleve los **dos** números |

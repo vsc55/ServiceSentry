@@ -1,0 +1,77 @@
+{# ================================================================
+   Audit — actors: the log summed up by WHO.
+
+   The table shows every line by every actor and never a per-actor total, so a question like
+   "did an account that nobody uses do forty things last night" can only be answered by
+   filtering to that account — which means you have to suspect the answer before you can ask.
+   Here every actor is one row: how much they did, how many kinds of thing, from how many
+   addresses, and when they were first and last seen in this set.
+
+   Failed logins get their own column rather than being folded into the total. A hundred
+   entries from an admin who was working is not news; six failed logins from an account that
+   did nothing else is, and averaged into one number they look the same.
+
+   It is a SUMMARY: it describes everything the filters left standing, not the page, and it is
+   not paginated. It also picks its own order — most active first — because "sort by time"
+   means nothing for a row that spans a week; the sort control is hidden while it is on
+   screen for exactly that reason.
+   ================================================================ #}
+
+function _auditViewActors(entries) {
+    if (!entries.length) return '';
+    const by = new Map();
+    for (const e of entries) {
+        const who = _auditActor(e);
+        let a = by.get(who);
+        if (!a) { a = { who, n: 0, failed: 0, events: new Set(), ips: new Set(), first: e.ts, last: e.ts }; by.set(who, a); }
+        a.n++;
+        if (_auditIsFailedLogin(e)) a.failed++;
+        a.events.add(e.event);
+        if (e.ip) a.ips.add(e.ip);
+        if (e.ts < a.first) a.first = e.ts;
+        if (e.ts > a.last) a.last = e.ts;
+    }
+    // Most active first, then by name so equal counts keep a stable, readable order.
+    const rows = [...by.values()].sort((x, y) => (y.n - x.n) || x.who.localeCompare(y.who));
+    const failing = rows.filter(r => r.failed).length;
+    const chips = `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+            <i class="bi bi-people me-1"></i>${esc(t('audit_count_actors'))} <span class="fw-semibold">${rows.length}</span></span>
+        ${failing ? `<span class="badge text-bg-danger fw-normal">
+            <i class="bi bi-shield-exclamation me-1"></i>${esc(tf('audit_actors_failing', failing))}</span>` : ''}`;
+    return `<div>
+        ${_auditSummaryHeader(entries, chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('col_user'))}</th>
+                <th class="text-end">${esc(t('audit_col_entries'))}</th>
+                <th class="text-end">${esc(t('audit_col_failed'))}</th>
+                <th class="text-end">${esc(t('audit_col_kinds'))}</th>
+                <th>${esc(t('col_ip'))}</th>
+                <th class="text-nowrap">${esc(t('audit_col_first'))}</th>
+                <th class="text-nowrap">${esc(t('audit_col_last'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_auditActorRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _auditActorRow(a) {
+    // The addresses are listed, not just counted: "3 IPs" is a number, and which three is the
+    // fact you act on. Cut to a few so one row cannot become a paragraph.
+    const ips = [...a.ips];
+    const ipCell = ips.length
+        ? ips.slice(0, 3).map(ip => `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ss-fs-2">${esc(ip)}</span>`).join(' ')
+          + (ips.length > 3 ? `<span class="text-muted small ms-1">+${ips.length - 3}</span>` : '')
+        : '<span class="text-muted">—</span>';
+    return `<tr>
+        <td class="text-nowrap"><code class="fw-semibold">${esc(a.who)}</code></td>
+        <td class="text-end fw-semibold">${a.n}</td>
+        <td class="text-end">${a.failed
+            ? `<span class="badge text-bg-danger">${a.failed}</span>`
+            : '<span class="text-muted">—</span>'}</td>
+        <td class="text-end text-muted">${a.events.size}</td>
+        <td><span class="d-flex flex-wrap gap-1">${ipCell}</span></td>
+        <td class="text-nowrap text-muted ss-fs-3">${esc(new Date(a.first).toLocaleString())}</td>
+        <td class="text-nowrap text-muted ss-fs-3">${esc(new Date(a.last).toLocaleString())}</td>
+    </tr>`;
+}

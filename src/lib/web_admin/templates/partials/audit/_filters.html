@@ -19,8 +19,11 @@ const _AUDIT_FILTER_SCHEMA = {
     onChange: 'applyAuditControls',
     onClear:  'clearAuditFilters',
     values:   () => _auditFilters,
+    // `ss-audit-listctl` marks the controls that only mean something for a LIST of entries:
+    // the summary views (actors, activity) pick their own axis, so these are hidden while one
+    // of them is on screen rather than left there doing nothing (see _auditSyncListControls).
     leadHtml: () => `
-        <div><label class="form-label small mb-1">${esc(t('sort'))}</label>
+        <div class="ss-audit-listctl"><label class="form-label small mb-1">${esc(t('sort'))}</label>
             <div class="input-group input-group-sm">
                 <select class="form-select form-select-sm" id="auditSortField" onchange="applyAuditControls()">
                     ${['time', 'event', 'user', 'ip'].map(v =>
@@ -30,7 +33,7 @@ const _AUDIT_FILTER_SCHEMA = {
                     <i class="bi bi-sort-${_auditSortDir === 'asc' ? 'up' : 'down'}" id="iconAuditSortDir"></i>
                 </button>
             </div></div>
-        <div><label class="form-label small mb-1">${esc(t('group_by'))}</label>
+        <div class="ss-audit-listctl"><label class="form-label small mb-1">${esc(t('group_by'))}</label>
             <select class="form-select form-select-sm" id="auditGroupBy" onchange="applyAuditControls()" style="min-width:130px">
                 <option value="none"${_auditGroup === 'none' ? ' selected' : ''}>${esc(t('none'))}</option>
                 ${['date', 'event', 'user', 'ip'].map(v =>
@@ -54,7 +57,7 @@ const _AUDIT_UI_KEY = 'ss_audit_ui';
 function _saveAuditUiState() {
     try {
         localStorage.setItem(_AUDIT_UI_KEY, JSON.stringify({
-            sort: _auditSort, sortDir: _auditSortDir, group: _auditGroup,
+            sort: _auditSort, sortDir: _auditSortDir, group: _auditGroup, view: _auditViewId(),
             event: _auditFilters.event, user: _auditFilters.user, ip: _auditFilters.ip,
             dateFrom: _auditFilters.dateFrom, dateTo: _auditFilters.dateTo,
             detail: _auditFilters.detail,
@@ -81,6 +84,11 @@ function initAuditControls() {
     _auditGroup = saved?.group || 'none';
     const gb = document.getElementById('auditGroupBy');
     if (gb) gb.value = _auditGroup;
+    // …and the view, which travels with the rest of this section's UI state rather than in a
+    // key of its own. Sync right after: a saved summary view must not paint with the list-only
+    // controls still showing.
+    _auditApplyView(saved?.view);
+    _auditSyncListControls();
     // Restore text/date filters
     if (saved) {
         _auditFilters.event    = saved.event    || '';
