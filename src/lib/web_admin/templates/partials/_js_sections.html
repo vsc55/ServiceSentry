@@ -173,7 +173,11 @@
    Services tab — background-service status and start/stop.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/services/_views.html" %}
 {% include "partials/services/_render.html" %}
+{% include "partials/services/_view_table.html" %}
+{% include "partials/services/_view_fleet.html" %}
+{% include "partials/services/_view_strip.html" %}
 {# ================================================================
    Events tab — notification rules (table helpers, render, modal + log).
    Thin orchestrator: includes sub-partials in order.

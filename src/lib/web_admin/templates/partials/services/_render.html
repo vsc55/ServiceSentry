@@ -137,16 +137,21 @@ function _svcInstancesHtml(meta) {
 
 // Footer (hint · ⋯ commands · start/stop) — shared by every card style.
 // (No per-card refresh: the Services header already has a global Refresh.)
-function _svcFooter(meta) {
+// The buttons a user may press on a service: the commands menu and start/stop. Extracted
+// from the card footer because every view offers them, and the permission gate must be
+// asked ONCE — a view that assembled its own buttons would be a view free to offer Stop to
+// somebody who may not press it. `compact` drops the labels for table-ish rows, where the
+// icon is enough and the words would set the column width.
+function _svcActionsHtml(meta, compact) {
     const canCtl = currentUser.permissions?.includes('services_control');
     let primary = '';
     if (meta.controllable && canCtl) {
-        primary = meta.running
-            ? `<button class="btn btn-warning btn-sm" onclick="servicesControl('${meta.key}','stop')"><i class="bi bi-stop-fill me-1"></i>${esc(t('svc_stop'))}</button>`
-            : `<button class="btn btn-success btn-sm" onclick="servicesControl('${meta.key}','start')"><i class="bi bi-play-fill me-1"></i>${esc(t('svc_start'))}</button>`;
+        const [act, cls, icon, key] = meta.running
+            ? ['stop',  'warning', 'bi-stop-fill', 'svc_stop']
+            : ['start', 'success', 'bi-play-fill', 'svc_start'];
+        primary = `<button class="btn btn-${cls} btn-sm" onclick="servicesControl('${escAttr(meta.key)}','${act}')"
+            title="${escAttr(t(key))}"><i class="bi ${icon}${compact ? '' : ' me-1'}"></i>${compact ? '' : esc(t(key))}</button>`;
     }
-    const hint = (!meta.embedded)
-        ? `<span class="small text-muted fst-italic">${esc(t('svc_external_managed'))}</span>` : '';
     let cmdMenu = '';
     const cmds = _SVC_COMMANDS[meta.key];
     if (cmds && canCtl) {
@@ -159,7 +164,13 @@ function _svcFooter(meta) {
             <button class="btn btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="${esc(t('svc_commands'))}"><i class="bi bi-three-dots"></i></button>
             <ul class="dropdown-menu dropdown-menu-end">${items}</ul></div>`;
     }
-    const right = `${cmdMenu}${primary}`;
+    return (cmdMenu || primary) ? `<span class="d-inline-flex gap-2">${cmdMenu}${primary}</span>` : '';
+}
+
+function _svcFooter(meta) {
+    const hint = (!meta.embedded)
+        ? `<span class="small text-muted fst-italic">${esc(t('svc_external_managed'))}</span>` : '';
+    const right = _svcActionsHtml(meta, false);
     return (hint || right)
         ? `<div class="mt-2 d-flex justify-content-between align-items-center gap-2 ss-svc-footer">
                 <span class="d-flex align-items-center gap-2">${hint}</span>
@@ -213,28 +224,41 @@ function _svcMeta(key, d) {
     };
 }
 
+// The last payload, so switching view redraws instead of re-fetching: every view reads the
+// same data, and putting a request on the wire to answer a question about presentation would
+// also race the poll timer that was about to fetch anyway.
+let _svcLastData = null;
+
 async function renderServices() {
     const c = document.getElementById('services-container');
     if (!c) return;
     const resp = await apiGet('/api/v1/services');
     if (!resp) { _scheduleServicesPoll(); return; }   // transient error (e.g. connection lost) → keep the current view, retry later
-    const s = resp.services || {};
-
-    // Render one card per registered service, in registry order. Identity
-    // (title/icon) + state/controllability come from the backend entry; the
-    // service-specific detail rows from _SVC_DETAIL (or none for an unknown key).
-    const cards = Object.entries(s).map(([key, d]) => _svcCard(_svcMeta(key, d)));
-
-    const refreshBtn = `<button class="btn btn-secondary btn-sm" onclick="renderServices()">
-        <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('svc_refresh'))}</button>`;
-
-    c.innerHTML = `<div class="ss-toolbar">
-            <h6 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>${esc(t('tab_services'))}</h6>
-            ${refreshBtn}
-        </div>
-        <div class="row">${cards.join('') || `<p class="text-muted">${esc(t('svc_none'))}</p>`}</div>`;
-
+    _svcLastData = resp.services || {};
+    _svcDrawBody();
     _scheduleServicesPoll();
+}
+
+/** Paint the header and hand the body to whichever view is selected. The header is drawn
+ *  here rather than by each view so the totals, the switcher and Refresh cannot drift apart
+ *  between layouts — and so a view is only ever responsible for the rows. */
+function _svcDrawBody() {
+    const c = document.getElementById('services-container');
+    if (!c || !_svcLastData) return;
+    c.innerHTML = _svcResultsHeader(_svcLastData) + '<div id="svc-view-body"></div>';
+    const view = SERVICE_VIEWS.find(v => v.id === _svcViewId()) || SERVICE_VIEWS[0];
+    const draw = window[view.render];
+    (typeof draw === 'function' ? draw : _svcViewCards)(_svcLastData, c.querySelector('#svc-view-body'));
+}
+
+// ── View: cards ──────────────────────────────────────────────────────────────
+// What the section had before there was a choice: one card per service, everything about it
+// in view at once. Kept as the baseline the other three are compared against, and kept in
+// registry order for the same reason — reordering it would change the thing being compared.
+function _svcViewCards(data, c) {
+    const cards = _svcAllMeta(data).map(_svcCard);
+    c.innerHTML = `<div class="row">${cards.join('')
+        || `<p class="text-muted">${esc(t('svc_none'))}</p>`}</div>`;
 }
 
 // Light auto-refresh while the Services tab stays visible.

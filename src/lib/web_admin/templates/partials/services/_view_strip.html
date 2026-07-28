@@ -1,0 +1,36 @@
+{# ================================================================
+   Services — strip: one line per service, and nothing else.
+
+   For the case the other three serve badly: you are not reading, you are acting. Something
+   needs restarting and you want the button, not the biography. Every service is one line —
+   a state dot, its name, how many instances, when it last reported, and the same buttons the
+   card carries — so the whole control plane fits above the fold with room to spare and the
+   click target is where you left it last time.
+
+   It shows less than any other view ON PURPOSE. That is only safe because the header above
+   it always states the totals for the whole set, so a strip cannot understate how much
+   there is.
+   ================================================================ #}
+
+function _svcViewStrip(data, c) {
+    const rows = _svcAllMeta(data);
+    if (!rows.length) { c.innerHTML = `<p class="text-muted">${esc(t('svc_none'))}</p>`; return; }
+    c.innerHTML = `<div class="ss-card">${rows.map(_svcStripRow).join('')}</div>`;
+}
+
+function _svcStripRow(meta) {
+    const cls = _SVC_STATE_CLS[meta.state] || 'secondary';
+    const n = (meta.instances || []).length;
+    // The dot carries the state as colour; the label spells it out beside it. Colour alone
+    // would leave the row unreadable to anyone who cannot separate the greens from the reds,
+    // and this is the view with the least other context to fall back on.
+    return `<div class="d-flex align-items-center gap-2 px-2 py-2 border-bottom">
+        <span class="ss-svc-dot rounded-circle bg-${cls} flex-shrink-0"></span>
+        <span class="fw-semibold text-truncate" style="min-width:8rem">${esc(meta.title)}</span>
+        <span class="badge text-bg-${cls} text-uppercase">${esc(_svcStateLabel(meta.state))}</span>
+        ${n ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+                 <i class="bi bi-hdd-stack me-1"></i>${n}</span>` : ''}
+        <span class="text-muted small text-nowrap">${esc(_svcSeenText(_svcLastSeen(meta)))}</span>
+        <span class="ms-auto d-flex align-items-center gap-2">${_svcActionsHtml(meta, true)}</span>
+    </div>`;
+}

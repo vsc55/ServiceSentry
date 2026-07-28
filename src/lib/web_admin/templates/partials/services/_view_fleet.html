@@ -1,0 +1,92 @@
+{# ================================================================
+   Services — fleet: one row per INSTANCE, across every service.
+
+   The pivot the card grid cannot do. Today an instance is only visible inside the card of
+   the service it belongs to, so the fleet can be read one service at a time and never as a
+   whole — which hides exactly the two failures a multi-container install has and a
+   single-container one does not:
+
+   * a follower that stopped reporting while the leader carries on, so the service still
+     says RUNNING and the redundancy is quietly gone;
+   * a container left behind on an older version, which no per-service card can show because
+     the drift is only visible when the versions sit next to each other.
+
+   So this view puts the instance in the subject position and the service becomes one of its
+   attributes. It is a reading surface: no start/stop here, because those act on a SERVICE
+   and this page is not showing services — offering them per row would invite pressing them
+   against the row you happen to be looking at.
+   ================================================================ #}
+
+function _svcViewFleet(data, c) {
+    const all = _svcAllInstances(data);
+    if (!all.length) {
+        c.innerHTML = `<div class="text-center text-muted py-4">
+            <i class="bi bi-hdd-stack me-1"></i>${esc(t('svc_no_instances'))}</div>`;
+        return;
+    }
+    // Sorted by STATE first, then by identity — never by the heartbeat.
+    //
+    // The first attempt sorted by newest heartbeat, which reads well and is unusable: the
+    // timestamp is the most volatile field in the row, so every poll re-shuffled instances
+    // that tick at similar intervals and the table moved under the cursor. A list that
+    // reorders itself on a timer cannot be read, and cannot be clicked.
+    //
+    // State changes rarely and only when something happened, so an instance jumping to the
+    // top IS the news rather than noise. Below that the order is identity — service, then
+    // host — which does not move at all, so a row stays where you left it between refreshes.
+    const rows = all.slice().sort((a, b) =>
+        (_svcRank(b.inst.derived_state) - _svcRank(a.inst.derived_state))
+        || (a.service.title || '').localeCompare(b.service.title || '')
+        || String(a.inst.host || '').localeCompare(String(b.inst.host || '')));
+    // Version drift is a fact about the FLEET, not about any one row, so it is computed
+    // across all of them and marked where it shows. With one version there is nothing to say.
+    const versions = new Set(rows.map(r => r.inst.version).filter(Boolean));
+    const drift = versions.size > 1;
+    c.innerHTML = `<div class="ss-card ss-card-flush">
+        <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('svc_col_host'))}</th>
+                <th>${esc(t('svc_col_service'))}</th>
+                <th>${esc(t('svc_col_state'))}</th>
+                <th>${esc(t('svc_col_role'))}</th>
+                <th>${esc(t('svc_col_mode'))}</th>
+                <th>${esc(t('svc_col_version'))}</th>
+                <th class="text-end">${esc(t('svc_col_last'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(r => _svcFleetRow(r, drift)).join('')}</tbody>
+        </table></div>
+        ${drift ? `<div class="px-2 py-1 small text-warning-emphasis bg-warning-subtle border-top">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('svc_version_drift'))}</div>` : ''}
+    </div>`;
+}
+
+function _svcFleetRow(r, drift) {
+    const inst = r.inst;
+    const when = inst.last_cycle_at || inst.last_seen;
+    // Role: only leader-gated services publish it. Absent is not "standby" — an
+    // active-active service has no leader at all, and saying "standby" would invent a
+    // hierarchy it does not have.
+    const lv = inst.detail && inst.detail.leader;
+    const role = (typeof lv === 'boolean')
+        ? (lv ? `<span class="badge text-bg-primary"><i class="bi bi-star-fill me-1"></i>${esc(t('svc_leader'))}</span>`
+              : `<span class="badge text-bg-secondary">${esc(t('svc_standby'))}</span>`)
+        : '<span class="text-muted">—</span>';
+    const modeK = inst.mode === 'embedded' ? 'svc_mode_embedded' : 'svc_mode_container';
+    const modeI = inst.mode === 'embedded' ? 'bi-box-seam' : 'bi-hdd-network';
+    const ver = inst.version
+        ? `<span class="${drift ? 'fw-semibold text-warning-emphasis' : ''}">v${esc(inst.version)}</span>`
+        : '<span class="text-muted">—</span>';
+    const self = inst.is_self
+        ? `<span class="badge rounded-pill bg-primary-subtle text-primary-emphasis fw-normal ms-1">
+             <i class="bi bi-pc-display me-1"></i>${esc(t('svc_self_tag'))}</span>` : '';
+    return `<tr>
+        <td class="text-nowrap"><span class="fw-semibold">${esc(inst.host || '—')}</span>${self}</td>
+        <td class="text-nowrap">${esc(r.service.title)}</td>
+        <td class="text-nowrap">${_svcStateBadge(inst.derived_state)}</td>
+        <td class="text-nowrap">${role}</td>
+        <td class="text-nowrap text-muted small"><i class="bi ${modeI} me-1"></i>${esc(t(modeK))}</td>
+        <td class="text-nowrap small">${ver}</td>
+        <td class="text-end text-nowrap text-muted small">${esc(_svcSeenText(when))}</td>
+    </tr>`;
+}

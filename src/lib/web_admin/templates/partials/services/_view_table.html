@@ -1,0 +1,50 @@
+{# ================================================================
+   Services — table: one row per service.
+
+   The fastest answer to "what is running", and the one that survives growth: the card grid
+   is four columns of tall cards, so a deployment with a dozen services becomes a scroll.
+   Here every service is one line and the whole control plane is visible at once.
+
+   It gives up the instance detail on purpose — that is what the fleet view is for — and
+   keeps the two things a control surface must never make you hunt for: the state, and the
+   buttons.
+   ================================================================ #}
+
+function _svcViewTable(data, c) {
+    const rows = _svcAllMeta(data);
+    if (!rows.length) { c.innerHTML = `<p class="text-muted">${esc(t('svc_none'))}</p>`; return; }
+    c.innerHTML = `<div class="ss-card ss-card-flush">
+        <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('svc_col_service'))}</th>
+                <th>${esc(t('svc_col_state'))}</th>
+                <th class="text-end">${esc(t('svc_instances'))}</th>
+                <th>${esc(t('svc_col_last'))}</th>
+                <th>${esc(t('svc_col_detail'))}</th>
+                <th class="text-end">${esc(t('svc_col_actions'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_svcTableRow).join('')}</tbody>
+        </table></div></div>`;
+}
+
+function _svcTableRow(meta) {
+    // The detail chips a service publishes, kept to the first few: a table row that wrapped
+    // to three lines would stop being a table row. The card view shows all of them.
+    const chips = (meta.detail || []).slice(0, 3).map(r =>
+        `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal border">
+            ${esc(t(r.label_key))} <span class="fw-semibold text-body">${_svcDetailValue(r)}</span></span>`).join(' ');
+    const more = (meta.detail || []).length > 3
+        ? `<span class="text-muted small ms-1">+${(meta.detail || []).length - 3}</span>` : '';
+    const n = (meta.instances || []).length;
+    return `<tr>
+        <td class="text-nowrap"><div class="d-flex align-items-center gap-2">
+            ${_svcAvatar(meta, _SVC_STATE_CLS[meta.state] || 'secondary', false)}
+            <span class="fw-semibold">${esc(meta.title)}</span></div></td>
+        <td class="text-nowrap">${_svcStateBadge(meta.state)}</td>
+        <td class="text-end text-nowrap">${n ? n : '<span class="text-muted">—</span>'}</td>
+        <td class="text-nowrap text-muted small">${esc(_svcSeenText(_svcLastSeen(meta)))}</td>
+        <td><div class="d-flex flex-wrap gap-1">${chips}${more}</div></td>
+        <td class="text-end text-nowrap">${_svcActionsHtml(meta, true)}</td>
+    </tr>`;
+}

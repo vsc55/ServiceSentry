@@ -143,6 +143,7 @@
 119. [Ejecutar un check una vez — la proyección es el contrato](#119-ejecutar-un-check-una-vez--la-proyección-es-el-contrato)
 120. [Credentials es una sección, no una sub-pestaña](#120-credentials-es-una-sección-no-una-sub-pestaña-de-infrastructure)
 121. [Un widget de módulo, añadido varias veces](#121-un-widget-de-módulo-añadido-varias-veces-y-configurado-por-instancia)
+122. [Services — cuatro vistas, y la que pivota sobre la instancia](#122-services--cuatro-vistas-y-la-que-pivota-sobre-la-instancia)
 
 ---
 
@@ -5370,3 +5371,48 @@ cajas correctas enseñando lo que no era** — el scope y el filtro se perdían 
 | `TestTheCoreOnlyDraws::test_the_aggregate_scope_draws_none` | Un anillo ahí sería una cifra sin pregunta detrás |
 | `TestTheCoreOnlyDraws::*` (resto ×3) | Opt-in por instancia, sin total no dibuja, y sin librería de gráficos |
 | `TestTheLabelExists::test_the_toggle_is_named_in_both_languages` | |
+
+---
+
+## 122. Services — cuatro vistas, y la que pivota sobre la instancia
+
+**Archivo:** `tests/test_wa_services_views.py` — 22 tests
+
+Services es una superficie de **control**, así que sus vistas se diferencian en qué ponen en
+posición de sujeto. La rejilla de tarjetas pone el servicio, y eso está bien hasta que hay
+instancias: entonces cada una solo se ve dentro de la tarjeta de su servicio, la flota se lee
+de una en una y nunca entera. Eso esconde justo los dos fallos que tiene un despliegue
+multi-contenedor y no tiene uno de un solo contenedor:
+
+- un **seguidor que dejó de reportar** mientras el líder sigue, así que el servicio sigue
+  diciendo RUNNING y la redundancia se ha ido en silencio;
+- un **contenedor rezagado en otra versión**, que ninguna tarjeta por servicio puede enseñar
+  porque la deriva solo se ve cuando las versiones están una al lado de la otra.
+
+La vista **flota** invierte eso: la instancia es el sujeto y el servicio pasa a ser uno de sus
+atributos. Es superficie de **lectura**: no ofrece arrancar/parar, porque esas acciones son
+sobre un SERVICIO y esta página no está enseñando servicios — un botón por fila invitaría a
+pulsarlo contra la fila que tengas delante.
+
+El guard que no es cosmético es `test_no_view_builds_its_own_action_buttons`: el permiso
+`services_control` se comprueba dentro de `_svcActionsHtml` y **en un solo sitio**. Una vista
+que se montara sus propios botones sería una vista libre de ofrecer «Parar» a quien no puede
+pulsarlo, y eso no es un fallo de estilo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Registro, ficheros y que el bundle los incluya **después** del registro (si no, la vista cae en silencio al fallback) |
+| `TestAViewIsChromeOnly::test_no_view_builds_its_own_action_buttons` | **La regla**: ninguna vista cablea `servicesControl` ni re-comprueba el permiso |
+| `TestAViewIsChromeOnly::test_the_permission_is_asked_in_exactly_one_place` | |
+| `TestAViewIsChromeOnly::test_no_view_invents_a_state_colour` | `stale` es un color en todas partes |
+| `TestAViewIsChromeOnly::test_the_state_badge_comes_from_one_helper` | |
+| `TestTheHeaderIsDrawnOnce::*` (×3) | Totales, conmutador y Refresh en el despachador; los totales cuentan **también instancias**, que es lo que se mueve |
+| `TestSwitchingViewCostsNothing::*` (×3) | Conmutar redibuja: pedir datos para contestar una pregunta de presentación además correría contra el temporizador de sondeo |
+| `TestTheFleetViewIsThePoint::test_it_offers_no_start_or_stop` | La instancia es el sujeto; las acciones no son suyas |
+| `TestTheFleetViewIsThePoint::test_a_service_with_no_leader_is_not_called_standby` | Un servicio activo-activo no tiene líder; decir «standby» inventaría una jerarquía |
+| `TestTheFleetViewIsThePoint::test_version_drift_is_computed_across_the_fleet` | Es un hecho del conjunto: ninguna fila puede saberlo sola |
+| `TestTheFleetViewIsThePoint::test_the_list_does_not_reorder_itself_on_a_timer` | **Reportado**: las filas cambiaban de sitio en cada refresco. Ordenaba por último latido —el campo más volátil de la fila— así que instancias con ritmos parecidos se adelantaban unas a otras en cada sondeo. Una lista que se reordena sola no se puede leer ni pulsar |
+| `TestTheFleetViewIsThePoint::test_the_rank_is_not_the_colour_vocabulary` | Para ordenar bastan tres rangos; el badge conserva el vocabulario completo |
+| `TestTheFleetViewIsThePoint::test_it_reads_every_instance_across_every_service` | |
+| `TestSilenceIsNotFreshness::test_never_reported_is_not_drawn_as_a_time` | «Nunca reportó» y «hace mucho» no pueden parecer lo mismo |
+| `TestTheLabelsExist::*` (×2) | Las cuatro vistas y las nueve columnas, en los dos idiomas |

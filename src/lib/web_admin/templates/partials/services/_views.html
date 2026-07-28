@@ -1,0 +1,150 @@
+{# ================================================================
+   Services — the part every view shares.
+
+   Services is a CONTROL surface: the questions it answers are "is it running", "who is
+   running it" and "make it do something". The card grid answers the first well and buries
+   the second — every instance's host, role, version and heartbeat lives inside the card of
+   its service, so the fleet can only be read one service at a time. In a single-container
+   install that costs nothing. In a multi-container one it hides the two failures that
+   matter: a follower that stopped reporting, and a container left behind on an old version.
+
+   What must NOT differ between views is what a service and an instance mean. The state
+   vocabulary, the coloured badge, the instance row, and the actions a user may take are
+   decided once — here and in _render.html — and every view composes them. A view that drew
+   its own status badge would be free to disagree with the view beside it about whether the
+   same service is up, and a view that built its own action footer would be free to offer
+   Stop to somebody who may not press it.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time: the view files are separate partials
+// concatenated after this one, so their functions do not exist yet when this is evaluated.
+const SERVICE_VIEWS = [
+    { id: 'cards', label_key: 'svc_view_cards', icon: 'bi-grid-3x2-gap', render: '_svcViewCards' },
+    { id: 'table', label_key: 'svc_view_table', icon: 'bi-list-ul',      render: '_svcViewTable' },
+    { id: 'fleet', label_key: 'svc_view_fleet', icon: 'bi-hdd-stack',    render: '_svcViewFleet' },
+    { id: 'strip', label_key: 'svc_view_strip', icon: 'bi-list',         render: '_svcViewStrip' },
+];
+const _SVC_VIEW_KEY = 'ss_services_view';
+
+function _svcViewId() {
+    const stored = localStorage.getItem(_SVC_VIEW_KEY);
+    return SERVICE_VIEWS.some(v => v.id === stored) ? stored : SERVICE_VIEWS[0].id;
+}
+
+/** Switching view redraws what is already on screen. This page polls on its own and every
+ *  view reads the same payload, so re-fetching to change how it is drawn would put a
+ *  request on the wire to answer a question about presentation — and race the poll timer
+ *  that was going to fetch anyway. */
+function setServicesView(id) {
+    if (!SERVICE_VIEWS.some(v => v.id === id)) return;
+    localStorage.setItem(_SVC_VIEW_KEY, id);
+    if (_svcLastData) _svcDrawBody(); else renderServices();
+}
+
+function _svcViewSwitcher() {
+    const cur = _svcViewId();
+    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t('svc_view'))}">
+        ${SERVICE_VIEWS.map(v => `
+            <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
+                onclick="setServicesView('${escAttr(v.id)}')"
+                title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
+                <i class="bi ${escAttr(v.icon)}"></i>
+            </button>`).join('')}
+    </div>`;
+}
+
+// ── Facts every view reads, computed once ────────────────────────────────────
+// A service is "up" when the backend says it is running. Everything else — stopped,
+// disabled, external, stale — is a different statement and none of them is a failure on its
+// own, which is why the totals below count RUNNING and not "ok".
+function _svcIsUp(meta)   { return !!meta.running; }
+function _svcIsDown(meta) { return meta.state === 'down' || meta.state === 'error'; }
+
+/** Every service, as the shared meta shape, in registry order. The backend decides that
+ *  order and the views keep it: it groups the control plane the way the deployment thinks
+ *  about it, and re-sorting alphabetically would scatter that for no gain. */
+function _svcAllMeta(data) {
+    return Object.entries(data || {}).map(([key, d]) => _svcMeta(key, d));
+}
+
+// How bad a state is, for sorting. Only three ranks because only three matter here: a
+// problem, a maybe, and everything else. Ranking is NOT the same as colouring — the badge
+// keeps using the full vocabulary — but a sort needs an order and "external" is not worse
+// than "stopped" in any way worth reordering a table for.
+const _SVC_RANK = { down: 3, error: 3, stale: 2 };
+function _svcRank(state) { return _SVC_RANK[state] || 0; }
+
+/** One entry per INSTANCE across every service — the pivot the card grid cannot show.
+ *  Carries its service alongside, because on this view the instance is the subject and the
+ *  service is one of its attributes. */
+function _svcAllInstances(data) {
+    const out = [];
+    for (const meta of _svcAllMeta(data)) {
+        for (const inst of (meta.instances || []))
+            out.push({ inst, service: meta });
+    }
+    return out;
+}
+
+/** Totals for the results header. Instances are counted too: on a multi-container install
+ *  "4 services" and "9 instances" are different facts and the second is the one that moves. */
+function _svcTotals(data) {
+    const all = _svcAllMeta(data);
+    return {
+        total: all.length,
+        up: all.filter(_svcIsUp).length,
+        down: all.filter(_svcIsDown).length,
+        instances: _svcAllInstances(data).length,
+    };
+}
+
+// The newest heartbeat across a service's instances — "when did we last hear from this at
+// all". Null when it reports no instances, which is not the same as "long ago" and must not
+// be drawn as if it were.
+function _svcLastSeen(meta) {
+    let newest = null;
+    for (const i of (meta.instances || [])) {
+        const ts = i.last_cycle_at || i.last_seen;
+        if (ts && (newest === null || ts > newest)) newest = ts;
+    }
+    return newest;
+}
+
+// ── The results header ───────────────────────────────────────────────────────
+// Title, totals, the switcher and the global refresh on one line. The totals always state
+// the WHOLE set, so a view that shows less than everything cannot understate how much
+// there is — the same rule the Status header follows.
+function _svcResultsHeader(data) {
+    const c = _svcTotals(data);
+    const chip = (icon, label, value, cls) =>
+        `<span class="badge rounded-pill ${cls} fw-normal">
+            <i class="bi ${icon} me-1"></i>${esc(label)} <span class="fw-semibold">${value}</span></span>`;
+    return `<div class="ss-toolbar flex-wrap gap-2">
+        <h6 class="mb-0 me-1"><i class="bi bi-hdd-rack me-2"></i>${esc(t('tab_services'))}</h6>
+        <div class="d-flex flex-wrap align-items-center gap-1">
+            ${chip('bi-hdd-rack', t('svc_count_services'), c.total, 'bg-body-secondary text-body-secondary')}
+            ${chip('bi-play-circle', t('svc_count_running'), c.up, 'text-bg-success')}
+            ${c.down ? chip('bi-x-circle', t('svc_count_down'), c.down, 'text-bg-danger') : ''}
+            ${c.instances ? chip('bi-hdd-stack', t('svc_instances'), c.instances,
+                                 'bg-body-secondary text-body-secondary') : ''}
+        </div>
+        <div class="ms-auto d-flex align-items-center gap-2">
+            ${_svcViewSwitcher()}
+            <button class="btn btn-secondary btn-sm" onclick="renderServices()">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('svc_refresh'))}</button>
+        </div>
+    </div>`;
+}
+
+// ── Pieces the table-ish views share ─────────────────────────────────────────
+// The status badge, drawn from the same vocabulary as the cards. Every view calls this
+// rather than reaching for _SVC_STATE_CLS itself, so "stale" is one colour everywhere.
+function _svcStateBadge(state) {
+    const cls = _SVC_STATE_CLS[state] || 'secondary';
+    return `<span class="badge text-bg-${cls} text-uppercase">${esc(_svcStateLabel(state))}</span>`;
+}
+
+// "how long ago", or an em dash when there is nothing to say. Never "just now" for a
+// service that has never reported: silence and freshness must not look alike.
+function _svcSeenText(ts) { return ts ? _svcAgo(ts) : '—'; }

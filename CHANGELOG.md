@@ -8,6 +8,46 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.25] - 2026-07-28
+
+### Added
+- **Services can be read four ways.** It is a control surface, so its layouts differ in what
+  they put in the subject position: **cards** (what it had — one per service, everything in
+  view), **service table** (one row each: state, instances, last heartbeat, actions — the
+  fastest answer to "what is running", and the one that survives a deployment growing to a
+  dozen services), **fleet** (one row per INSTANCE across every service) and **compact** (one
+  line each, for when you are not reading but acting and want the button, not the biography).
+- **The fleet view is the point.** An instance was only ever visible inside the card of its
+  own service, so the fleet could be read one service at a time and never as a whole — which
+  hides the two failures a multi-container install has and a single-container one does not: a
+  follower that stopped reporting while the leader carries on, so the service still says
+  RUNNING and the redundancy is quietly gone; and a container left behind on an older version,
+  which no per-service card can show because drift is only visible when the versions sit side
+  by side. It flags that drift explicitly, computed across the whole fleet rather than per row.
+- It deliberately offers no start/stop: those act on a SERVICE and this view is not showing
+  services, so a button per row would invite pressing it against the row you happen to be
+  looking at.
+- **It sorts by state, then by identity — never by the heartbeat.** The first version sorted by
+  newest heartbeat, which reads well and is unusable: the timestamp is the most volatile field
+  in the row, so instances ticking at similar intervals overtook each other on every poll and
+  the table moved under the cursor. A list that reorders itself on a timer cannot be read and
+  cannot be clicked. State changes only when something happened, so a row jumping to the top is
+  the news rather than noise; below that the order is service and host, which do not move at
+  all. Guarded: the comparator may not touch a heartbeat field.
+- Switching view redraws what is on screen rather than re-fetching. Every view reads the same
+  payload, and a request to answer a question about presentation would also race the poll
+  timer that was about to fetch anyway.
+
+### Changed
+- The action buttons came out of the card footer into one helper every view composes. That is
+  not tidiness: `services_control` is now asked in exactly one place, and a guard fails if a
+  view wires its own control call — a view assembling its own buttons is a view free to offer
+  Stop to somebody who may not press it.
+- The header — totals, switcher, Refresh — is drawn by the dispatcher rather than by each
+  view, so it cannot drift apart between layouts and a view is only ever responsible for its
+  rows. The totals count instances as well as services: on a multi-container install those are
+  different facts and the second is the one that moves.
+
 ## [0.0.1+build.24] - 2026-07-28
 
 ### Added
