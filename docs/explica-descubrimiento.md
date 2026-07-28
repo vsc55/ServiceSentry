@@ -760,7 +760,7 @@ notificar. Cada `kind` (`down`/`recovery`/`warn`/`manual_run`/`ipban_*`/`service
 `cert_expiring`/`syslog`/`event`…) es el valor de `dispatch(kind=…)` y la clave de la matriz
 `notifications|{canal}_on_{kind}`.
 
-**Descriptor** (`lib/<raíz>/<dominio>/notify_events.py` · `NOTIFY_EVENTS`) — data pura, etiquetas
+**Descriptor** (`lib/<raíz>/<dominio>/manifest.py` · `NOTIFY_EVENTS`) — data pura, etiquetas
 i18n por `label_key`:
 
 ```python
@@ -778,7 +778,7 @@ routing (p.ej. `syslog`, sin dispatcher activo).
 
 ```mermaid
 flowchart TB
-    scan["discover_events()<br/>escanea lib.core.* / lib.services.* / lib.providers.*<br/>importa <dominio>/notify_events.py"] --> decl["NOTIFY_EVENTS de cada dominio<br/>(+ register_event() manual, p.ej. auth)"]
+    scan["discover_events()<br/>escanea lib.core.* / lib.services.* / lib.providers.*<br/>importa <dominio>/manifest.py"] --> decl["NOTIFY_EVENTS de cada dominio<br/>(+ register_event() manual, p.ej. auth)"]
     decl --> merged["events() → deduplicado + ordenado por 'order'"]
     merged --> mtx["matrix_events() → kinds con matrix=True<br/>ui_matrix_events() → filas visibles en la grid"]
     mtx --> grid(["UI de routing (filas=kinds · columnas=canales)<br/>+ claves de config {canal}_on_{kind}"])
@@ -806,6 +806,6 @@ flowchart TB
 | Registrar una app de Entra para un módulo | `schema.json` → `__entraid_provision__` |
 | Una opción de configuración | `Cfg(...)` en `spec.py` (+ entrada en `CARDS` de `layout.py`) |
 | Un canal de notificación nuevo | un `lib/core/notify/<canal>/channel.py` → `register_channel(Channel(...))` |
-| Un evento/tipo notificable nuevo | `notify_events.py` → `NOTIFY_EVENTS` (o `register_event(...)`) en el dominio |
+| Un evento/tipo notificable nuevo | `manifest.py` → `NOTIFY_EVENTS` (o `register_event(...)`) en el dominio |
 
 En todos los casos: **solo el descriptor del módulo** — el núcleo lo descubre y lo integra solo.

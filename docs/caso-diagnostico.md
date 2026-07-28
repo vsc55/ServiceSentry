@@ -19,6 +19,50 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un test que solo podía fallar en la máquina de otro
+
+**Fecha:** 2026-07-28 · **Área:** `tests/test_wa_favicon.py`
+(`TestTheBinaryIsReproducible`), `tools/make_favicon.py`
+
+**Síntoma** — GitHub Actions en rojo con
+`the icon and tools/make_favicon.py have diverged`, y un diff binario enorme en el que solo
+difería el PNG de 48 px: los de 16 y 32 eran idénticos, y el IDAT de 48 medía **exactamente lo
+mismo** (384 bytes) en ambos lados. En local, los 10 tests del favicon en verde. Siempre.
+
+**Diagnóstico** — la primera trampa fue el signo del diff. Pytest pinta `-` para el operando
+**derecho** y `+` para el **izquierdo**, al revés de lo que sugiere la intuición, así que la
+lectura ingenua atribuía cada mitad al lado contrario. Se resolvió empíricamente, con un test
+de dos líneas que compara `b'IZQUIERDA'` con `b'DERECHA'` y mira qué signo le toca a cada uno.
+Con los lados bien asignados: el fichero commiteado coincide byte a byte con el mío, y lo que
+difiere es lo que **CI genera**.
+
+**Causa raíz** — `build_ico()` termina en `zlib.compress(raw, 9)`, y `zlib.compress` **no es
+una función estable entre implementaciones**. Este Python trae `zlib-ng` (`zlib.ZLIB_VERSION`
+lo dice: `1.3.1.zlib-ng`); el runner trae zlib estándar. Para las mismas scanlines emiten
+DEFLATE distintos, ambos válidos y aquí incluso de la misma longitud. Solo divergió el de 48 px
+porque es el único con entropía suficiente para que las dos elijan distinto.
+
+Y de ahí lo que hace este caso interesante: **el test comparaba el artefacto commiteado con el
+resultado de regenerarlo en la máquina que lo ejecuta**. El icono se generó aquí, así que aquí
+la igualdad es cierta *por construcción*. No es que se escapara entre 4000 tests: es que era
+**imposible** que fallara en esta máquina, y seguro que fallara en cualquier otra. Estaba roto
+desde el commit que añadió el icono.
+
+**Solución** — comparar imágenes, no bytes: `_ico_images()` recorre el directorio del `.ico`,
+saca el IHDR y **descomprime** el IDAT de cada PNG, y el test compara geometría y píxeles.
+Verificado en las dos direcciones: forzando otra compresión (nivel 1) los bytes difieren y el
+test pasa —que reproduce el fallo de CI en local—, y cambiando el color del escudo en el
+generador falla nombrando los píxeles.
+
+**Lección** — **un test que regenera un artefacto y lo compara con el commiteado solo vale si
+la generación es determinista entre entornos**, y la compresión no lo es. Pinear la salida de
+un compresor convierte una diferencia que no es diferencia en un rojo que nadie puede arreglar.
+Corolario más general y más útil: **desconfía del test que no puede fallar donde lo escribes**.
+Si su resultado depende de que la máquina sea la que fabricó el dato, el verde local no
+significa nada — y el único sitio donde da información es aquel al que no estás mirando.
+
+---
+
 ## Un escáner que se mudó un directorio y devolvió un catálogo vacío, sin quejarse
 
 **Fecha:** 2026-07-28 · **Área:** `lib/modules/discovery/schemas.py` (`discover_schemas`)

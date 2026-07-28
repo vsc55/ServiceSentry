@@ -8,6 +8,47 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.23] - 2026-07-28
+
+### Fixed
+- **A full audit of every line anchor in the documentation: 15 of 74 pointed at the wrong
+  code.** Three were out of range after `app.py` lost 700 lines — the only kind the guard can
+  see, and what started the audit. The other twelve were inside their files and therefore
+  invisible to it: `ThreadPoolExecutor` per module, the mtime cache-buster, `MAX_CONTENT_LENGTH`,
+  `_csrf_protect`, `reconcile_table`, `_apply_incremental`, `_apply_rebuild`, `_type_map`, the
+  history downsampling query, the `global|log_level` field, and the two permission decorators,
+  each landing on unrelated lines. The prettiest one: the SNMP MIB-source warnings are still on
+  **line 110**, but of `mib_admin.py` rather than `__init__.py` — right number, wrong file,
+  guard content.
+- **Stale file names in prose.** `NOTIFY_EVENTS` has not lived in a `notify_events.py` for some
+  time — each package declares it in its `manifest.py` — and four documents still named the old
+  file, in nine places. `explica-seguridad.md` named `test_wa_saml.py`, which is
+  `test_providers_saml.py`. Both predate this work.
+- **File listings that had fallen behind.** The architecture tree was missing six `entraid`
+  modules (`device_flow`, `cred_link`, `sections`, `teams`, `tab_sso`, `sso_routes`) and still
+  said the config domain had no mixin, which stopped being true one build ago.
+  What the guard checks is that the line exists, is not blank, and matches the number written in
+  the link text — all of which passed for months while the anchors pointed at unrelated code. A
+  line anchor rots silently whenever content moves inside a file that stays long enough; only a
+  file getting *shorter* makes it detectable, which is why the rest had to be read by hand.
+- **A test that could only ever fail on somebody else's machine.** The favicon guard rebuilt
+  the icon and compared it byte-for-byte with the committed `.ico`, and `zlib.compress` is not
+  a stable function across implementations: this machine ships zlib-ng, the CI runner ships
+  stock zlib, and the two emit different — equally valid, here even equally long — DEFLATE for
+  identical scanlines. Only the 48px image diverged, being the only one with enough entropy for
+  the two to choose differently.
+- The consequence is what makes it worth recording: the icon was generated here, so locally the
+  comparison was true **by construction** — green every time, no matter what. It was not missed
+  among four thousand tests; it was impossible to fail on this machine and certain to fail on
+  any other, and it had been red in CI since the commit that added the icon.
+- It compares **images** now: the ICO directory is walked, each PNG's IHDR read and its IDAT
+  decompressed, and the geometry and pixels compared. What the generator decides is the shape
+  and the colour; which DEFLATE encoding those end up in is the compressor's business. Verified
+  both ways — forcing a different compression level makes bytes differ and the test pass (the
+  CI failure, reproduced locally), while changing the shield colour makes it fail naming the
+  pixels. A second test states the sizes separately, because a pixel mismatch and a missing
+  size read very differently to whoever hits them.
+
 ## [0.0.1+build.22] - 2026-07-28
 
 ### Changed

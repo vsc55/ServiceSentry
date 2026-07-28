@@ -6,9 +6,9 @@
 > módulos (definición de campos de configuración), **no** la base de datos.
 
 **Fuente de verdad:** cada tabla se declara **una sola vez** como un `TableSpec`
-([lib/db/schema.py:50](../src/lib/db/schema.py#L50)) compuesto de `Column` / `Index`, y se
+([lib/db/schema.py:51](../src/lib/db/schema.py#L51)) compuesto de `Column` / `Index`, y se
 reconcilia en el arranque de cada *store* mediante `connector.reconcile_table(spec)`
-([lib/db/base.py:222](../src/lib/db/base.py#L222)). Los tipos simbólicos (`TEXT`, `INTEGER`,
+([lib/db/base.py:232](../src/lib/db/base.py#L232)). Los tipos simbólicos (`TEXT`, `INTEGER`,
 `REAL`, `AUTOINCREMENT`) se traducen a DDL nativo por motor (ver
 [§ Portabilidad multi-motor](#portabilidad-multi-motor)).
 
@@ -183,7 +183,7 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 ---
 
 ### `entity_versions` — contador de cambios por tabla
-[lib/db/freshness.py:36](../src/lib/db/freshness.py#L36)
+[lib/db/freshness.py:35](../src/lib/db/freshness.py#L35)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -208,7 +208,7 @@ Ver [explica-arquitectura.md](explica-arquitectura.md#más-de-un-proceso-sobre-l
 ## Configuración
 
 ### `config` — configuración editable (una fila por campo)
-[lib/core/config/store.py:36](../src/lib/core/config/store.py#L36)
+[lib/core/config/store.py:33](../src/lib/core/config/store.py#L33)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -223,7 +223,7 @@ Ver [explica-arquitectura.md](explica-arquitectura.md#más-de-un-proceso-sobre-l
 config.json (solo lectura/arranque) → BD (editable).
 
 ### `module_config` — configuración por módulo watchful
-[lib/core/modules/store.py:65](../src/lib/core/modules/store.py#L65)
+[lib/core/modules/store.py:62](../src/lib/core/modules/store.py#L62)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -237,7 +237,7 @@ config.json (solo lectura/arranque) → BD (editable).
 Índices: `idx_module_config_module(module)`.
 
 ### `module_config_items` — configuración por item
-[lib/core/modules/store.py:79](../src/lib/core/modules/store.py#L79)
+[lib/core/modules/store.py:75](../src/lib/core/modules/store.py#L75)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -665,7 +665,7 @@ Cada tabla es un `TableSpec` inmutable de `Column` (nombre, tipo simbólico, nul
 default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraints` y
 `renames` (viejo→nuevo) opcionales.
 
-### Reconcile en el arranque — `reconcile_table(spec)` ([base.py:222](../src/lib/db/base.py#L222))
+### Reconcile en el arranque — `reconcile_table(spec)` ([base.py:232](../src/lib/db/base.py#L232))
 
 1. Si la tabla no existe → `create_table_ddl` + un `create_index_ddl` por índice.
 2. Aplica renames declarados primero (solo si la col vieja existe y la nueva no) — portable
@@ -676,7 +676,7 @@ default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraint
 5. Columnas/índices presentes en la BD pero **ausentes** del spec se **conservan y registran,
    nunca se eliminan**.
 
-### Camino incremental — `_apply_incremental` ([base.py:315](../src/lib/db/base.py#L315))
+### Camino incremental — `_apply_incremental` ([base.py:325](../src/lib/db/base.py#L325))
 
 - `add_column_if_missing` para columnas finales.
 - Una columna NOT NULL **sin default** se añade **nullable** (seguridad multi-motor).
@@ -684,14 +684,14 @@ default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraint
   `ux_<tabla>_<col>`.
 - Índices cambiados se eliminan y recrean.
 
-### Camino de reconstrucción — `_apply_rebuild` ([base.py:358](../src/lib/db/base.py#L358))
+### Camino de reconstrucción — `_apply_rebuild` ([base.py:368](../src/lib/db/base.py#L368))
 
 Crear-copiar-borrar-renombrar en una transacción (SQLite/PostgreSQL, DDL transaccional).
 `COALESCE(col, default)` rellena columnas recién NOT NULL. MySQL lo sobreescribe
 ([mysql.py:96](../src/lib/db/mysql.py#L96)) porque su DDL auto-commitea: construye la tabla
 de reemplazo y hace un `RENAME TABLE` atómico.
 
-### Mapa de tipos por motor — `_type_map` ([base.py:211](../src/lib/db/base.py#L211))
+### Mapa de tipos por motor — `_type_map` ([base.py:222](../src/lib/db/base.py#L222))
 
 | Token simbólico | SQLite | MySQL | PostgreSQL |
 |---|---|---|---|

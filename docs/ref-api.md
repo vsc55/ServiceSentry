@@ -15,7 +15,7 @@ Para el detalle funcional de cada subsistema ver [explica-web-admin.md](explica-
 **No hay Blueprints de Flask.** Cada ruta es un `@app.route(...)` declarado dentro de una
 función `register(app, wa)` a nivel de módulo. El registro está centralizado:
 
-- [lib/web_admin/routes/__init__.py:96](../src/lib/web_admin/routes/__init__.py#L96) —
+- [lib/web_admin/routes/__init__.py:100](../src/lib/web_admin/routes/__init__.py#L100) —
   `register_all(app, wa)` importa el símbolo `register` de cada `routes.py` de dominio /
   servicio / provider y los invoca en secuencia. Su docstring es el índice autoritativo de
   toda la superficie de URLs.
@@ -33,8 +33,8 @@ dependencia de Flask, y hacen `jsonify`. Ejemplos: `lib/core/users/routes.py` �
 
 | Decorador | Efecto | Fuente |
 |---|---|---|
-| `wa._perm_required(*perms)` | Requiere **cualquiera** de los permisos listados | [app.py:339](../src/lib/web_admin/app.py#L339) |
-| `wa._login_required` | Solo sesión, sin permiso concreto | [app.py:354](../src/lib/web_admin/app.py#L354) |
+| `wa._perm_required(*perms)` | Requiere **cualquiera** de los permisos listados | [app.py:332](../src/lib/web_admin/app.py#L332) |
+| `wa._login_required` | Solo sesión, sin permiso concreto | [app.py:347](../src/lib/web_admin/app.py#L347) |
 
 Ambos llaman a `self._check_session()`. Una request `/api/*` sin autenticar recibe **401
 JSON**; el resto redirige a `/login`. `_admin_required`/`_write_required` son shims obsoletos
@@ -47,7 +47,7 @@ sin uso en rutas. Ver el catálogo completo de permisos en [explica-seguridad.md
   (cookie de sesión + CSRF). Las superficies externas/estándar quedan fuera: `/scim/v2/*`
   (RFC 7643/7644), `/auth/<provider>/*` (callbacks de IdP, Teams). No existe `/api/v2`.
 - **CSRF:** double-submit token. `@app.before_request _csrf_protect`
-  ([app.py:980](../src/lib/web_admin/app.py#L980)) solo comprueba `POST/PUT/PATCH/DELETE`
+  ([app.py:604](../src/lib/web_admin/app.py#L604)) solo comprueba `POST/PUT/PATCH/DELETE`
   ([lib/security/csrf.py:21](../src/lib/security/csrf.py#L21)). El frontend adjunta
   `X-CSRF-Token` automáticamente en el wrapper de `fetch`
   ([core/_api.html:22](../src/lib/web_admin/templates/partials/core/_api.html#L22)).

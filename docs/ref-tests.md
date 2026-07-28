@@ -4864,7 +4864,7 @@ justo donde ya estabas.
 
 ## 111. El icono del sitio existe y pedirlo no da 404
 
-**Archivo:** `tests/test_wa_favicon.py` — 10 tests
+**Archivo:** `tests/test_wa_favicon.py` — 11 tests
 
 No había favicon, así que cada visita dejaba un `GET /favicon.ico 404` — inofensivo en sí, y
 ruido en el log de acceso de todos los despliegues para siempre. Los navegadores piden ese

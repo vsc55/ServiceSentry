@@ -273,7 +273,7 @@ Notificaciones → Routing** del panel web.
 | `syslog` | syslog | *(solo compatibilidad — ver nota)* |
 
 > **`syslog`** se mantiene con `matrix=True` **únicamente por compatibilidad de
-> configuración** (`lib/services/syslog/notify_events.py`): es `ui=False` (no
+> configuración** (`lib/services/syslog/manifest.py`): es `ui=False` (no
 > aparece como fila en la grid de routing) y **sin dispatcher activo**. El alertado
 > de syslog lo hacen ahora las reglas del [Gestor de eventos](#gestor-de-eventos)
 > (kind `event`), no este flag; por eso no es routing activo pese a seguir en la matriz.

@@ -29,7 +29,7 @@ La entrega se articula sobre cuatro piezas, todas en `lib/core/notify`:
 | **`NotifyContext`** | `context.py` | Bundle explícito de colaboradores que el router necesita de su host — **valores/callables planos**, nunca Flask ni el web admin: `db` (conector para los stores de canal), `read_config` (`() -> dict`), `fernet` (cifra secretos en reposo), `dbg`, `audit`, `public_url`, `panel_user_emails`. |
 | **`NotificationRouter`** | `router.py` | **Posee** los stores de canal y **es** el routing. Se construye a partir de un `NotifyContext`; expone `dispatch(kind, …)`. Es también la "superficie" a la que los canales llaman de vuelta (`_read_config_file`, `_config_section`, `store(key, factory)`, `_panel_user_emails`, `public_base_url`…). No sabe que Flask existe. |
 | **Registro de canales** | `registry.py` | Qué canales existen. Cada canal es un `Channel(name, send, flush)` que **se auto-registra** al importarse. `load_builtin_channels()` **descubre** todos los `lib/core/notify/<name>/channel.py` (orden estable, alfabético) e importa; no hay lista central. |
-| **Registro de eventos** | `events.py` | Qué se puede notificar (los *kinds*). Cada dominio declara un `notify_events.py` con `NOTIFY_EVENTS`; `discover_events()` escanea `lib.core.*`, `lib.services.*`, `lib.providers.*` y los recolecta. |
+| **Registro de eventos** | `events.py` | Qué se puede notificar (los *kinds*). Cada dominio declara `NOTIFY_EVENTS` en su `manifest.py`; `discover_events()` escanea `lib.core.*`, `lib.services.*`, `lib.providers.*` y los recolecta. |
 
 La idea central: **cada host construye un `NotifyContext` desde su propia superficie y crea
 un router**; todo subsistema notifica **a través de ese router** en vez de cablear canales.
@@ -89,7 +89,7 @@ router ni en el monitor cambia.
 
 Un **kind** es el valor que viaja en `dispatch(kind=…)` y la clave de la matriz de routing
 `notifications|{canal}_on_{kind}`. Los kinds son **descubiertos**, no hardcodeados: cada
-dominio declara un `notify_events.py` con una lista `NOTIFY_EVENTS`. Descriptor:
+dominio declara en su `manifest.py` una lista `NOTIFY_EVENTS`. Descriptor:
 
 ```python
 {'key': 'down', 'source': 'monitoring', 'label_key': 'notif_event_down',
@@ -104,9 +104,9 @@ dominio declara un `notify_events.py` con una lista `NOTIFY_EVENTS`. Descriptor:
   `syslog`).
 - **`source`** — dominio propietario (agrupa en la UI).
 
-Kinds actuales (declarados en los `notify_events.py`):
+Kinds actuales (declarados en los `manifest.py`):
 
-| kind | source | `notify_events.py` | matrix / ui |
+| kind | source | paquete (`manifest.py`) | matrix / ui |
 |---|---|---|---|
 | `down`, `recovery`, `warn` | monitoring | `lib/services/monitoring` | ✓ / ✓ |
 | `scheduler_started`, `scheduler_stopped` | monitoring | `lib/services/monitoring` | ✓ / ✓ |

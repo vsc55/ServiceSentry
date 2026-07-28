@@ -22,8 +22,8 @@ durante la espera.
 | Nivel | Mecanismo | Límite | Fuente |
 |---|---|---|---|
 | Entre módulos (un ciclo) | `ThreadPoolExecutor` compartido | `max_workers = min(nº módulos, 16)` | [executor.py:112](../src/lib/services/monitoring/executor.py#L112) |
-| Entre items (dentro de un módulo) | `ThreadPoolExecutor` por módulo | `max_workers = workers` (config del módulo) | [module_base.py:423](../src/lib/modules/module_base.py#L423) |
-| Camino legacy `Monitor.check()` | `ThreadPoolExecutor` propio | `max_workers = max_threads` | [monitor.py:809](../src/lib/services/monitoring/monitor.py#L809) |
+| Entre items (dentro de un módulo) | `ThreadPoolExecutor` por módulo | `max_workers = workers` (config del módulo) | [module_base.py:88](../src/lib/modules/module_base.py#L88) |
+| Camino legacy `Monitor.check()` | `ThreadPoolExecutor` propio | `max_workers = max_threads` | [monitor.py:811](../src/lib/services/monitoring/monitor.py#L811) |
 | Notificaciones | **síncrono** en `flush()` al final del ciclo | — (sin hilo de fondo) | [executor.py:143](../src/lib/services/monitoring/executor.py#L143) |
 
 El **on-demand** (botón "ejecutar checks" de la UI) y el **scheduler** comparten el mismo
@@ -78,7 +78,7 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
   `ts`/`severity`/`hostname`/`app`/`facility`). Ver el detalle en [ref-esquema-bd.md](ref-esquema-bd.md).
 - **Downsampling de historial**: las gráficas agregan por buckets con
   `CAST(FLOOR((ts - ?) / ?) AS <int>)` en SQL (portable), evitando traer todas las filas al
-  cliente ([history/store.py:39](../src/lib/core/history/store.py#L39)).
+  cliente ([history/store.py:253](../src/lib/core/history/store.py#L253)).
 
 ### Reconcile de esquema en el arranque
 
@@ -107,7 +107,7 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
   vendorizados). El JS se ensambla server-side como un único bundle inline vía
   `partials/_js_sections.html`.
 - **Cache-busting por mtime**: CSS/JS se enlazan con `?v=<asset_v>` calculado por `stat` del
-  fichero ([app.py:1097](../src/lib/web_admin/app.py#L1097)), de modo que un fichero editado
+  fichero ([app.py:742](../src/lib/web_admin/app.py#L742)), de modo que un fichero editado
   siempre llega al navegador sin invalidación manual.
 - **Polling ligero + overlay de conexión perdida**: el cliente sondea endpoints ligeros
   (`/api/v1/health`, `/api/v1/config/versions`, estado) y muestra un overlay si el servidor no
@@ -135,7 +135,7 @@ insertar, el store poda las filas más antiguas por encima del tope:
 - **`history`** y **`syslog`** (mensajes) **no** llevan un tope fijo de filas: crecen según la
   retención configurada. Revisar la retención en [ref-configuracion.md](ref-configuracion.md).
 - **`MAX_CONTENT_LENGTH = 8 MiB`** limita el tamaño de request entrante
-  ([app.py:952](../src/lib/web_admin/app.py#L952)).
+  ([app.py:559](../src/lib/web_admin/app.py#L559)).
 
 ---
 

@@ -225,7 +225,7 @@ ServiceSentry/
 │   │   │   ├── permissions/             # Dominio permisos: __init__.py = catálogo (PERMISSIONS/PERMISSION_GROUPS/BUILTIN_ROLE_PERMISSIONS + is_*_perm/is_valid_perm + discover_permissions()) · mixin.py = resolución efectiva (sin store: no se persisten; las identidades → constants.py)
 │   │   │   #   Cada dominio: routes.py fino (HTTP) + service.py (lógica sin Flask, reutilizable por CLI)
 │   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + service.py + manifest.py
-│   │   │   ├── credentials/ history/ config/            # store.py + routes.py + service.py + manifest.py (sin mixin; store lo importan servicios; config/service.py incluye INT/BOOL_RULES + build_config_schema)
+│   │   │   ├── credentials/ history/ config/            # store.py + routes.py + service.py + manifest.py. credentials/history no tienen mixin (sus stores los importan los servicios); config/ SÍ: mixin.py es su pegamento con el panel (_read_config_file/_write_config/_apply_config_on_save + overlay SS_*), y añade overview_widget.py. config/service.py incluye INT/BOOL_RULES + build_config_schema
 │   │   │   ├── modules/                                 # store.py + facade.py + service.py + routes.py (config CRUD + /api/v1/modules/watchfuls action dispatch) + manifest.py
 │   │   │   ├── hosts/                                   # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + manifest.py (grupo perm = 'servers')
 │   │   │   ├── overview/                                # service.py (layout/widgets) + routes.py + manifest.py (grupo virtual, sin store)
@@ -233,13 +233,13 @@ ServiceSentry/
 │   │   │   ├── health/                  # Auto-monitorización de la plataforma (sin Flask); emite notificaciones vía el router
 │   │   │   │   ├── health.py            # ServiceHealthMonitor: clasifica heartbeats up/down/idle → service_down/service_up (una vez por transición, leader-gated)
 │   │   │   │   ├── cert_scan.py         # CertExpiryScanner: escanea certs de los checks ssl_cert → cert_expiring (una vez por severidad expiring/expired)
-│   │   │   │   └── notify_events.py     # NOTIFY_EVENTS: service_down/service_up/cert_expiring (matrix)
+│   │   │   │   └── manifest.py          # NOTIFY_EVENTS: service_down/service_up/cert_expiring (matrix)
 │   │   │   └── notify/                  # Subsistema de notificación / ENTREGA (sin Flask; lo usan web, monitor, health y daemons syslog/events) — ver explica-notificaciones.md
 │   │   │       ├── context.py          # NotifyContext: bundle de colaboradores del router (db, read_config, fernet, dbg, audit, public_url, panel_user_emails); sin Flask
 │   │   │       ├── doc_store.py        # JsonDocStore: CRUD sobre tabla uid + JSON data + auditoría; lo heredan los stores de webhook y msteams (cada uno solo declara su tabla)
 │   │   │       ├── router.py           # NotificationRouter (posee los stores de canal + ES el routing) + run_dispatch(surface, kind, …)
 │   │   │       ├── registry.py         # Registro de canales: Channel(send/flush) auto-descubierto de <canal>/channel.py (sin lista central)
-│   │   │       ├── events.py           # Registro de kinds descubiertos (NOTIFY_EVENTS en lib/**/notify_events.py; flags matrix/ui)
+│   │   │       ├── events.py           # Registro de kinds descubiertos (NOTIFY_EVENTS en lib/**/manifest.py; flags matrix/ui)
 │   │   │       ├── monitor_notifier.py # MonitorNotifier: acumula las alertas de un ciclo y hace un único flush agrupado por canal
 │   │   │       ├── notification_dispatcher.py  # SHIM legacy dispatch(wa, kind, …): ya NO enruta, delega en run_dispatch
 │   │   │       ├── formatting.py       # Capa de texto: resolución custom→i18n (notify_text/text_override/event_title/notify_lang/_fill)
@@ -326,6 +326,12 @@ ServiceSentry/
 │   │   │   │   ├── provision_saml.py    # SAML2: certificado de firma, modo SSO, reply URL, claims
 │   │   │   │   ├── provision_scim.py    # SCIM: Entra empuja usuarios HACIA nosotros (dirección contraria)
 │   │   │   │   ├── app_secrets.py       # Añadir secreto sin invalidar el anterior (rotación segura)
+│   │   │   │   ├── device_flow.py       # El flujo device-code, UNA vez: aparcar, sondear, consumir
+│   │   │   │   ├── cred_link.py         # Costura entre una app de Entra y la credencial que la guarda
+│   │   │   │   ├── sections.py          # Qué es una *sección* de auth para Entra (SAML ACS, SCIM base…)
+│   │   │   │   ├── teams.py             # Entrega dirigida a usuario en Teams (activity feed / bot)
+│   │   │   │   ├── tab_sso.py           # Valida el token de tab SSO de Teams (getAuthToken del JS SDK)
+│   │   │   │   ├── sso_routes.py        # Login de pestaña personal de Teams (flujo de auth de Entra)
 │   │   │   │   ├── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
 │   │   │   │   └── routes.py            # /api/v1/auth/entraid/* (registro de app + device-code de provisión SCIM)
 │   │   │   └── azure/                   # Azure Resource Manager — audiencia y consentimiento DISTINTOS de Graph
@@ -537,7 +543,7 @@ El subsistema de entrega vive en `lib/core/notify` (**sin Flask**, **sin** depen
   **auto-registra** al importarse; `load_builtin_channels()` descubre todos los
   `lib/core/notify/<canal>/channel.py` (orden estable), sin lista central.
 - **Registro de eventos/kinds** (`events.py`): los *kinds* son **descubiertos** de los
-  `notify_events.py` (`NOTIFY_EVENTS`) por dominio, con flags `matrix`/`ui`.
+  `manifest.py` (`NOTIFY_EVENTS`) por dominio, con flags `matrix`/`ui`.
 
 `notification_dispatcher.py` es ahora un **shim** de compatibilidad (`dispatch(wa, kind, …)`):
 ya **no** enruta, delega en `run_dispatch`. Los canales son **cuatro** (Telegram/Email/Webhook/

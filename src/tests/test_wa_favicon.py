@@ -60,20 +60,72 @@ class TestTheFilesExist:
         assert 32 in sizes
 
 
+def _ico_images(data: bytes) -> list[tuple]:
+    """(width, height, IHDR, decompressed pixels) for every PNG inside an .ico.
+
+    The pixels, not the compressed stream. ``zlib.compress`` is not a stable function of its
+    input across implementations: this repo's CI runs stock zlib while a developer machine may
+    ship zlib-ng, and the two emit different — equally valid — DEFLATE for identical scanlines.
+    Comparing the raw bytes therefore fails on a difference the generator did not make and
+    nobody can act on, which is exactly what happened.
+    """
+    import struct                                         # noqa: PLC0415
+    import zlib                                           # noqa: PLC0415
+    out = []
+    count = struct.unpack('<H', data[4:6])[0]
+    for i in range(count):
+        entry = data[6 + 16 * i:6 + 16 * (i + 1)]
+        size, offset = struct.unpack('<II', entry[8:16])
+        png = data[offset:offset + size]
+        assert png.startswith(bytes([0x89]) + b'PNG' + bytes([0x0d, 0x0a, 0x1a, 0x0a])), (
+            'entry is not PNG-in-ICO')
+        ihdr = png[16:16 + 13]                            # w, h, depth, colour, …
+        w, h = struct.unpack('>II', ihdr[:8])
+        idat = b''
+        pos = 8
+        while pos < len(png):                             # IDAT may be split across chunks
+            ln = struct.unpack('>I', png[pos:pos + 4])[0]
+            tag = png[pos + 4:pos + 8]
+            if tag == b'IDAT':
+                idat += png[pos + 8:pos + 8 + ln]
+            pos += 12 + ln
+        out.append((w, h, ihdr, zlib.decompress(idat)))
+    return out
+
+
 class TestTheBinaryIsReproducible:
 
     def test_the_committed_ico_matches_its_generator(self):
         """A committed binary with no source is a dead end: nobody can change the colour or
-        the shape without starting over."""
+        the shape without starting over.
+
+        Compared as IMAGES rather than as bytes — see :func:`_ico_images` for why. What the
+        generator decides is the geometry and the pixels; which DEFLATE encoding those end up
+        in is the compressor's business, and pinning it made CI fail over a difference that
+        was not a difference.
+        """
         sys.path.insert(0, os.path.join(SRC, 'tools'))
         try:
             import make_favicon                           # noqa: PLC0415
         finally:
             sys.path.pop(0)
         on_disk = io.open(os.path.join(IMG, 'favicon.ico'), 'rb').read()
-        assert make_favicon.build_ico() == on_disk, (
-            'the icon and tools/make_favicon.py have diverged — re-run the generator, or the '
-            'source no longer describes what ships')
+        built = make_favicon.build_ico()
+        assert _ico_images(built) == _ico_images(on_disk), (
+            'the icon and tools/make_favicon.py have diverged in the PIXELS — re-run the '
+            'generator, or the source no longer describes what ships')
+
+    def test_the_sizes_it_ships_are_the_ones_it_generates(self):
+        """Geometry is the generator's decision too, and cheap to state separately: a
+        pixel mismatch and a missing size read very differently to whoever hits it."""
+        sys.path.insert(0, os.path.join(SRC, 'tools'))
+        try:
+            import make_favicon                           # noqa: PLC0415
+        finally:
+            sys.path.pop(0)
+        on_disk = io.open(os.path.join(IMG, 'favicon.ico'), 'rb').read()
+        assert ([(w, h) for w, h, _i, _p in _ico_images(make_favicon.build_ico())]
+                == [(w, h) for w, h, _i, _p in _ico_images(on_disk)])
 
 
 class TestThePageDeclaresIt:
