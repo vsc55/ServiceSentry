@@ -50,7 +50,7 @@ class TestWhatTheAppIsRegisteredWith:
         import io                                              # noqa: PLC0415
         import os                                              # noqa: PLC0415
         src = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                   'lib', 'providers', 'entraid', 'provisioning.py'),
+                                   'lib', 'providers', 'entraid', 'provision_saml.py'),
                       encoding='utf-8-sig').read()
         assert 'GROUP_READ_ALL' in src
 

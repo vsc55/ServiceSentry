@@ -270,7 +270,7 @@ Google / Keycloak) que rellenan `provider_url` + claims.
 
 ### Qué automatiza
 
-`provisioning.provision_saml2_app`:
+`provision_saml.provision_saml2_app`:
 
 1. **`POST /applicationTemplates/8adf8e6e-67b2-4cf2-a259-e3dc5476c621/instantiate`** — crea
    la **aplicación y el service principal enlazados** en una sola llamada. Esto es

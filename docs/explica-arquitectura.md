@@ -317,10 +317,15 @@ ServiceSentry/
 │   │   │   │   ├── auth.py              # Tenant/token app-only + device-code (start/poll) [requests]
 │   │   │   │   ├── graph_api.py         # EntraApi: transporte del lado MONITOR (urllib, sin requests).
 │   │   │   │   │                        #   Lo heredan los watchfuls m365 y azure: request/token/paginado
-│   │   │   │   ├── permissions.py       # Inspección de permisos concedidos + merge_row() (costura genérica)
+│   │   │   │   ├── permissions.py       # LEE permisos concedidos + merge_row(). Solo-stdlib a propósito:
+│   │   │   │   │                        #   el demonio de monitorización lo importa barato
+│   │   │   │   ├── app_permissions.py   # ESCRIBE: concede a una app existente lo que le falta (par del anterior)
 │   │   │   │   ├── directory.py         # Grupos de Entra (fetch_groups, lookup_group)
 │   │   │   │   ├── mail.py              # Envío de correo vía Graph (Microsoft 365)
-│   │   │   │   ├── provisioning.py      # Alta de apps (roles/scopes/consent/SSO)
+│   │   │   │   ├── provisioning.py      # Alta de app de la que parten los demás (app-only / OIDC)
+│   │   │   │   ├── provision_saml.py    # SAML2: certificado de firma, modo SSO, reply URL, claims
+│   │   │   │   ├── provision_scim.py    # SCIM: Entra empuja usuarios HACIA nosotros (dirección contraria)
+│   │   │   │   ├── app_secrets.py       # Añadir secreto sin invalidar el anterior (rotación segura)
 │   │   │   │   ├── declarations.py      # Descubrimiento de __entraid_provision__ en watchfuls
 │   │   │   │   └── routes.py            # /api/v1/auth/entraid/* (registro de app + device-code de provisión SCIM)
 │   │   │   └── azure/                   # Azure Resource Manager — audiencia y consentimiento DISTINTOS de Graph

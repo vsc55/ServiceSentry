@@ -48,7 +48,9 @@ Routes registered by this file:
 
 from flask import jsonify
 
-from lib.providers.entraid import auth, cred_link, declarations, device_flow, directory, provisioning, sections
+from lib.providers.entraid import (app_permissions, app_secrets, auth, cred_link, declarations,
+                                   device_flow, directory, provision_saml, provision_scim,
+                                   provisioning, sections)
 from lib.providers.entraid.client import GRAPH_CLI_CLIENT_ID, PROVISION_SCOPE, SCIM_PROVISION_SCOPE
 
 # Azure Resource Manager audience — the RBAC step signs in for Graph and redeems the
@@ -258,7 +260,7 @@ def register(app, wa):
         if resp:
             return jsonify(resp)
         try:
-            res = provisioning.add_app_secret(body['access_token'], flow['app_id'],
+            res = app_secrets.add_app_secret(body['access_token'], flow['app_id'],
                                               display_name='ServiceSentry OIDC')
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'status': 'error', 'message': str(exc)})
@@ -292,7 +294,7 @@ def register(app, wa):
         # without recreating it.
         if kind == 'saml2_secret':
             try:
-                secret = provisioning.add_graph_secret(access_token, flow['app_id'])
+                secret = app_secrets.add_graph_secret(access_token, flow['app_id'])
             except Exception as exc:  # pylint: disable=broad-except
                 return jsonify({'status': 'error', 'message': str(exc)})
             wa._audit('entra_saml2_graph_secret', detail={'app_id': flow['app_id']})
@@ -303,7 +305,7 @@ def register(app, wa):
             return jsonify({'status': 'error', 'message': wa._t('entra_no_tenant')})
 
         try:
-            result = provisioning.provision_saml2_app(
+            result = provision_saml.provision_saml2_app(
                 access_token, sections.saml_acs_uri(wa), sections.saml_entity_id(wa), tenant_id,
                 app_name=flow.get('app_name', provisioning.SAML2_APP_NAME))
         except Exception as exc:
@@ -379,7 +381,7 @@ def register(app, wa):
         # Re-sync mode: an app already exists → just re-push the token to it.
         if flow.get('sp_object_id'):
             try:
-                result = provisioning.update_scim_secrets(
+                result = provision_scim.update_scim_secrets(
                     body['access_token'], flow['sp_object_id'],
                     flow['scim_base'], flow['scim_token'])
             except Exception as exc:  # pylint: disable=broad-except
@@ -391,7 +393,7 @@ def register(app, wa):
             return jsonify({'status': 'complete', 'resync': True, **result})
 
         try:
-            result = provisioning.provision_scim_app(
+            result = provision_scim.provision_scim_app(
                 body['access_token'], tenant_id, flow['scim_base'], flow['scim_token'],
                 app_name=flow.get('app_name', provisioning.SCIM_APP_NAME))
         except Exception as exc:  # pylint: disable=broad-except
@@ -460,7 +462,7 @@ def register(app, wa):
         if resp:
             return jsonify(resp)
         try:
-            res = provisioning.add_app_secret(body['access_token'], flow['app_id'],
+            res = app_secrets.add_app_secret(body['access_token'], flow['app_id'],
                                               display_name='ServiceSentry')
         except Exception as exc:  # pylint: disable=broad-except
             _wiz_err('cred_secret', str(exc))
@@ -600,7 +602,7 @@ def register(app, wa):
         ensure_cid = flow.get('ensure_client_id')
         if ensure_cid:
             try:
-                report = provisioning.ensure_app_permissions(
+                report = app_permissions.ensure_app_permissions(
                     b['access_token'], tenant_id, ensure_cid, flow['resources'])
             except Exception as exc:  # pylint: disable=broad-except
                 wa._audit('entra_app_permissions_failed',

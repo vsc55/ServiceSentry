@@ -264,7 +264,7 @@ def test_ensure_permissions_flow_updates_existing_app(client):
     with patch('lib.providers.entraid.routes.auth.device_code_poll',
                return_value={'access_token': 'AT'}), \
          patch('lib.providers.entraid.routes.auth.extract_tenant_id', return_value='contoso'), \
-         patch('lib.providers.entraid.routes.provisioning.ensure_app_permissions',
+         patch('lib.providers.entraid.routes.app_permissions.ensure_app_permissions',
                return_value=report) as ens, \
          patch('lib.providers.entraid.routes.provisioning.provision_entra_app') as prov:
         r2 = client.post('/api/v1/auth/entraid/provision/device-poll', json={'flow_token': ftok})
@@ -340,8 +340,8 @@ class _FakeEnsure:
 
 
 def _ensure(fake, roles):
-    from lib.providers.entraid.provisioning import ensure_app_permissions
-    with patch('lib.providers.entraid.provisioning._req', fake):
+    from lib.providers.entraid.app_permissions import ensure_app_permissions
+    with patch('lib.providers.entraid.app_permissions._req', fake),          patch('lib.providers.entraid.provisioning._req', fake):   # resource_sp lives there
         return ensure_app_permissions('admin-tok', 'contoso', 'cid-1',
                                       [{'resource': _GRAPH_ID, 'roles': roles}])
 
@@ -429,8 +429,9 @@ def test_ensure_unknown_app_raises():
             if '/applications?' in url:
                 return _Resp({'value': []})
             return super().get(url)
-    from lib.providers.entraid.provisioning import ensure_app_permissions
-    with patch('lib.providers.entraid.provisioning._req', _NoApp()):
+    from lib.providers.entraid.app_permissions import ensure_app_permissions
+    _no_app = _NoApp()
+    with patch('lib.providers.entraid.app_permissions._req', _no_app),          patch('lib.providers.entraid.provisioning._req', _no_app):
         try:
             ensure_app_permissions('t', 'contoso', 'ghost', [{'resource': _GRAPH_ID, 'roles': ['Sites.Read.All']}])
             assert False, 'expected RuntimeError'

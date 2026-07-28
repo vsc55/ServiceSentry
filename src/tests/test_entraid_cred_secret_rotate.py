@@ -132,12 +132,12 @@ class TestTheFlow:
         secret nobody kept the moment the editor is closed without saving."""
         _login(client)
         uid = self._cred(admin)
-        from lib.providers.entraid import auth, provisioning     # noqa: PLC0415
+        from lib.providers.entraid import app_secrets, auth      # noqa: PLC0415
         monkeypatch.setattr(auth, 'device_code_start', lambda: {
             'device_code': 'dc', 'user_code': 'UC', 'verification_uri': 'https://x',
             'expires_in': 900, 'interval': 5})
         monkeypatch.setattr(auth, 'device_code_poll', lambda _dc: {'access_token': 'tok'})
-        monkeypatch.setattr(provisioning, 'add_app_secret',
+        monkeypatch.setattr(app_secrets, 'add_app_secret',
                             lambda *a, **k: {'secret': 'brand-new', 'expires_at': '2027-01-01'})
         token = client.post(START, json={'cred_uid': uid}).get_json()['flow_token']
         d = client.post(POLL, json={'flow_token': token}).get_json()
@@ -154,12 +154,12 @@ class TestTheFlow:
         consent are all untouched, which is the entire reason to rotate."""
         _login(client)
         uid = self._cred(admin)
-        from lib.providers.entraid import auth, provisioning     # noqa: PLC0415
+        from lib.providers.entraid import app_secrets, auth      # noqa: PLC0415
         monkeypatch.setattr(auth, 'device_code_start', lambda: {
             'device_code': 'dc', 'user_code': 'UC', 'verification_uri': 'https://x',
             'expires_in': 900, 'interval': 5})
         monkeypatch.setattr(auth, 'device_code_poll', lambda _dc: {'access_token': 'tok'})
-        monkeypatch.setattr(provisioning, 'add_app_secret',
+        monkeypatch.setattr(app_secrets, 'add_app_secret',
                             lambda *a, **k: {'secret': 's', 'expires_at': '2027-01-01'})
         token = client.post(START, json={'cred_uid': uid}).get_json()['flow_token']
         d = client.post(POLL, json={'flow_token': token}).get_json()
@@ -169,12 +169,12 @@ class TestTheFlow:
         """No uid yet (the credential is being created): nothing to store, but the editor
         must still receive the secret or the sign-in was spent for nothing."""
         _login(client)
-        from lib.providers.entraid import auth, provisioning     # noqa: PLC0415
+        from lib.providers.entraid import app_secrets, auth      # noqa: PLC0415
         monkeypatch.setattr(auth, 'device_code_start', lambda: {
             'device_code': 'dc', 'user_code': 'UC', 'verification_uri': 'https://x',
             'expires_in': 900, 'interval': 5})
         monkeypatch.setattr(auth, 'device_code_poll', lambda _dc: {'access_token': 'tok'})
-        monkeypatch.setattr(provisioning, 'add_app_secret',
+        monkeypatch.setattr(app_secrets, 'add_app_secret',
                             lambda *a, **k: {'secret': 'fresh', 'expires_at': ''})
         token = client.post(START, json={'client_id': 'app-9'}).get_json()['flow_token']
         d = client.post(POLL, json={'flow_token': token}).get_json()

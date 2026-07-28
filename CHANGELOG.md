@@ -8,6 +8,34 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.22] - 2026-07-28
+
+### Changed
+- **Entra ID provisioning split by flow**, 683 lines down to 226. Each protocol needed things
+  none of the others do, and they were sharing a file: `provision_saml.py` (the token-signing
+  certificate, the SSO mode, the reply URL and the claim mapping — none of which OIDC or
+  app-only monitoring ever touch), `provision_scim.py` (the one flow that runs the other way:
+  Entra pushes users INTO ServiceSentry, so what it creates is the token Entra will present to
+  us), `app_permissions.py` (granting an existing app what it is missing) and `app_secrets.py`
+  (adding a secret without invalidating the previous one, which is what makes a rotation safe
+  while the old value is still in use). What remains is the app registration the other flows
+  start from.
+- **`app_permissions.py` is named to pair with `permissions.py`, not to merge into it.** That
+  module already says why: it is read-only and stdlib-only so the monitoring daemon can import
+  it cheaply, and it names `provisioning` as its write counterpart. Moving the granting code in
+  there would have broken exactly the property its docstring exists to protect — so the two ends
+  are now visible from their names instead of from a comment.
+- Callers name the new homes: `entraid/routes.py` and the tests reach `app_secrets.add_app_secret`,
+  `provision_saml.provision_saml2_app` and the rest directly. Nothing is re-exported from
+  `provisioning` to spare them.
+
+### Fixed
+- **Tests were making real calls to Microsoft.** They patch `requests` on the module that uses
+  it, and moving a function moved which module that is — so the patch stopped applying and the
+  request went out, failing with Graph's own `IDX14100: JWT is not well formed`. Two of them
+  now patch both modules the flow legitimately crosses, with the reason written beside it: the
+  granting code calls `resource_sp`, which stays in `provisioning`.
+
 ## [0.0.1+build.21] - 2026-07-28
 
 ### Changed
