@@ -155,6 +155,36 @@ class M365Page:
         return {'ok': True, 'sections': sections, 'counts': cls._totals(sections), 'live': True}
 
     @classmethod
+    def _widget_ratio(cls, sfx: str, rows_v: list) -> dict | None:
+        """The used/total pair for a check kind, summed across its results.
+
+        The Overview card for a kind is an aggregate by nature — it already says "N of M
+        OK" — so summing the fraction asks the same kind of question: how full is what this
+        kind measures, across everything monitored. That is NOT true on the module page,
+        where the ring is drawn per row precisely because summing the sites hides which one
+        is filling up; the two views are answering different questions on purpose.
+
+        Returns None unless EVERY result carries both measurements. A ratio computed from a
+        missing total is a confident-looking zero, and a card is the worst place for one.
+        """
+        spec = cls._CHARTS.get(sfx)
+        if not spec:
+            return None
+        used = total = 0.0
+        for v in rows_v:
+            od = v.get('other_data') or {}
+            try:
+                u, t = float(od[spec['used']]), float(od[spec['total']])
+            except (KeyError, TypeError, ValueError):
+                return None
+            used += u
+            total += t
+        if not total > 0:
+            return None
+        return {'used': used, 'total': total,
+                'pct': round(min(100.0, max(0.0, used * 100.0 / total)), 1)}
+
+    @classmethod
     def overview_widget(cls, items: dict, status: dict, lang: str = 'en_EN') -> dict:
         """Overview-widget data: ONE entry per check KIND (Service health, Licenses,
         OneDrive, …) aggregated across every m365 item, so the widget's scope selector
@@ -197,8 +227,11 @@ class M365Page:
                     od = v.get('other_data') or {}
                     st = ('ok' if v.get('status') is True
                           else ('warn' if (v.get('severity') or '') == 'warning' else 'error'))
+                    one = cls._widget_ratio(sfx, [v])
                     rows.append({'name': od.get('service') or od.get('name') or '',
-                                 'state': st, 'detail': ''})
+                                 'state': st, 'detail': '',
+                                 **({'chart': one} if one else {})})
+            ratio = cls._widget_ratio(sfx, rows_v)
             entries.append({
                 'id': sfx,
                 'name': labels.get(_tog) or sfx,
@@ -208,6 +241,7 @@ class M365Page:
                            'state': 'ok' if ok else ('error' if hard else 'warn')}],
                 'counts': {'ok': n_ok, 'warn': n_warn, 'error': n_err, 'total': n_total},
                 'rows': rows,
+                **({'chart': ratio} if ratio else {}),
             })
         return {
             'entries': entries,

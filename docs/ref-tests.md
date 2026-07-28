@@ -142,6 +142,7 @@
 118. [Páginas de módulo — cuatro layouts que son del núcleo](#118-páginas-de-módulo--cuatro-layouts-que-son-del-núcleo-no-de-un-módulo)
 119. [Ejecutar un check una vez — la proyección es el contrato](#119-ejecutar-un-check-una-vez--la-proyección-es-el-contrato)
 120. [Credentials es una sección, no una sub-pestaña](#120-credentials-es-una-sección-no-una-sub-pestaña-de-infrastructure)
+121. [Un widget de módulo, añadido varias veces](#121-un-widget-de-módulo-añadido-varias-veces-y-configurado-por-instancia)
 
 ---
 
@@ -5328,3 +5329,44 @@ nada, así que la sección simplemente no se abre y no hay error que seguir.
 | `TestTheGateTravelledWithIt::test_the_section_is_shown_by_its_own_permissions` | |
 | `TestTheGateTravelledWithIt::test_infrastructure_is_no_longer_revealed_by_a_credential_permission` | Antes `credentials_view` abría Infrastructure por ella; ahora sería una pestaña vacía |
 | `TestTheGateTravelledWithIt::test_it_still_loads_on_access` | Cargar al abrir, no al arrancar: un panel que precargara todo pagaría por todas para enseñar una |
+
+---
+
+## 121. Un widget de módulo, añadido varias veces y configurado por instancia
+
+**Archivo:** `tests/test_overview_module_widget_instances.py` — 20 tests
+
+Una sola tarjeta no puede contestar «cómo va Microsoft 365»: esa pregunta son varias —cuánto
+almacenamiento queda, cuánto del directorio registró MFA, cuánto margen hay de licencias— y
+querer dos a la vez en pantalla es el caso normal, no el exótico.
+
+Lo llamativo es que **el mecanismo ya estaba construido y nunca se encendió**: los ids de
+instancia llevan sufijo `:N`, `mws`/`mwlvl` se guardan por instancia, y la barra de añadir
+sigue ofreciendo un widget cuya declaración diga `multi`. Faltaba la declaración. Incluso había
+un `_dwIsMulti()` definido y sin usar en ningún sitio.
+
+El **anillo de uso** es el mismo trato que en las páginas de módulo: el módulo dice qué dos
+medidas son una fracción y entrega los números **ya divididos**; el núcleo no divide ni conoce
+ningún nombre de métrica —hay un guard que falla si aparece uno— y decide solo dónde va y de
+qué color, que lo toma del estado de la entrada. Dos sitios donde deliberadamente **no**
+aparece: en el scope agregado, porque no se suman porcentajes de almacenamiento con los de un
+score; y cuando falta el total, porque un anillo sin total es un 0 % con pinta de dato.
+
+De paso cazó un fallo anterior: `normalize_layout()` se quedaba solo con la geometría, así que
+un admin que publicara su Overview como layout por defecto de la organización repartía **las
+cajas correctas enseñando lo que no era** — el scope y el filtro se perdían por el camino.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheWidgetCanBeAddedMoreThanOnce::*` (×3) | La declaración `multi`, la regla que la hace valer, y que `mw_x:2` resuelva a su tipo |
+| `TestEachInstanceKeepsItsOwnSettings::test_the_three_settings_are_saved_per_instance` | `mws`, `mwlvl` y `mwchart` viajan con el layout |
+| `TestEachInstanceKeepsItsOwnSettings::test_a_saved_default_layout_keeps_them` | **El fallo que cazó**: el default de la organización los perdía |
+| `TestEachInstanceKeepsItsOwnSettings::test_absent_settings_are_not_invented` | Ausente y vacío se leen igual, pero no en un diff de dos layouts |
+| `TestEachInstanceKeepsItsOwnSettings::test_junk_entries_are_still_dropped` | |
+| `TestTheModuleSuppliesTheRatio::*` (×6) | Quién mide una fracción, quién no, y que un total ausente no produzca un cero |
+| `TestTheModuleSuppliesTheRatio::test_one_incomplete_result_disqualifies_the_whole_kind` | Sumar lo presente e ignorar lo que falta reporta **menos lleno** de lo que está |
+| `TestTheCoreOnlyDraws::test_no_metric_name_reaches_the_core` | El día que el núcleo conozca `used_bytes`, añadir un módulo será editar el núcleo |
+| `TestTheCoreOnlyDraws::test_the_colour_comes_from_the_state_not_from_the_percentage` | Dos señales discrepando sobre un registro es peor que una sola equivocada |
+| `TestTheCoreOnlyDraws::test_the_aggregate_scope_draws_none` | Un anillo ahí sería una cifra sin pregunta detrás |
+| `TestTheCoreOnlyDraws::*` (resto ×3) | Opt-in por instancia, sin total no dibuja, y sin librería de gráficos |
+| `TestTheLabelExists::test_the_toggle_is_named_in_both_languages` | |

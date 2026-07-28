@@ -8,7 +8,7 @@
         {"id": "health", "view": "stat", "icon": "bi-cloud-haze2", "perm": "modules_view",
          "scope": "health", "link": "https://portal.azure.com/#view/Microsoft_Azure_Health/AzureHealthBrowseBlade"},
         {"id": "table", "view": "table", "icon": "bi-cloud-haze2", "perm": "modules_view",
-         "selector": true, "cols": 4, "h": 340}
+         "selector": true, "multi": true, "cols": 4, "h": 340}
     ],
     "__module__": {
         "api_ver": "v1",

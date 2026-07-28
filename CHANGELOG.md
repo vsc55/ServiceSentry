@@ -8,6 +8,38 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.24] - 2026-07-28
+
+### Added
+- **The Microsoft 365 and Azure table widgets can be added to the Overview more than once**,
+  each configured on its own. One card cannot answer "how is Microsoft 365" — that question is
+  really several, and wanting storage next to MFA coverage next to licence capacity is the
+  normal case rather than an exotic one. The mechanism was already built and never switched on:
+  instance ids carry a `:N` suffix, the scope and level are stored per instance, and the add bar
+  keeps offering a widget whose declaration says `multi`. What was missing was the declaration.
+- **A usage ring, opt-in per instance.** Any module widget can now draw one where the module
+  publishes a fraction worth drawing, toggled per instance so two cards of the same kind can sit
+  side by side with and without it. Declared for site and tenant storage, OneDrive, Secure Score,
+  licence capacity, MFA coverage and unused licences.
+- The same bargain as the module pages: the MODULE decides which two measurements are a fraction
+  and hands them over already divided; the core divides nothing and knows no metric name — there
+  is a guard that fails if one appears. The ring takes its colour from the entry's own state
+  rather than from a threshold of its own, because a card the module called a warning must not
+  carry a green ring.
+- Two places it deliberately does NOT appear. At the aggregate scope, because storage, a score,
+  licences and MFA coverage cannot be added together and a ring there would be a number with no
+  question behind it. And where a total is missing, because a ring computed without one is a
+  confident-looking 0% — a card is the worst place to put one.
+- On a card the ring replaces the icon rather than joining it: they occupy the same slot, and
+  showing both says less about each in the same width.
+
+### Fixed
+- **A published default layout lost every widget's configuration.** `normalize_layout()` kept
+  only geometry, so an admin arranging the Overview and publishing it as the org default handed
+  everyone the right boxes showing the wrong things — the scope and level filters were dropped on
+  the way. It carries them now, along with the new ring toggle. The bug predates this work; it
+  only became visible once a widget could exist twice with different settings.
+
 ## [0.0.1+build.23] - 2026-07-28
 
 ### Fixed

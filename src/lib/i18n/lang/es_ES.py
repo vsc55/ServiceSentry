@@ -368,6 +368,7 @@ LANG = {
     'dw_mw_sum':             'Agregado',
     'dw_mw_table':           'Tabla',
     'dw_mw_level':           'Nivel mínimo',
+    'dw_mw_chart':           'Mostrar anillo de uso',
     'dw_filter':             'Filtro',
     'dw_sev_op':             'Al menos (≥) / exactamente (=) este nivel',
     'dw_mod_on':             'Activos',

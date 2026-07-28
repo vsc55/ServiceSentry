@@ -206,7 +206,8 @@ específico de un módulo vive ahí (ni URLs, ni scopes, ni iconos): todo lo apo
 "__overview_widget__": [
     {"id": "health", "view": "stat",  "icon": "bi-...", "scope": "health",
      "link": "https://ejemplo/estado"},
-    {"id": "table",  "view": "table", "icon": "bi-...", "selector": true, "cols": 4, "h": 340}
+    {"id": "table",  "view": "table", "icon": "bi-...", "selector": true, "multi": true,
+     "cols": 4, "h": 340}
 ]
 ```
 
@@ -224,8 +225,18 @@ Claves por widget (todas opcionales salvo lo indicado):
   ordena **peor primero** (error → warning → ok) y ofrece un **filtro de nivel** (Todos / ≥ warning /
   solo error, dataset `mwlvl`). En scope Agregado la tabla se colapsa a una stat card (altura auto,
   no redimensionable, sin filtro de nivel).
+- `multi` — el widget se puede añadir **varias veces**. Sin él, su botón desaparece de la barra
+  en cuanto existe una instancia. Tiene sentido junto a `selector`: cada instancia guarda su propio
+  scope, así que dos copias del mismo widget pueden mostrar cosas distintas —«licencias» al lado de
+  «cobertura MFA»— que es la pregunta normal, no la exótica. Las instancias se identifican con
+  sufijo `:N` (`mw_m365_table:2`); `_dwBaseId()` resuelve el tipo desde cualquiera de ellas.
 - `link` — hace el widget **clicable**: abre esa URL externa en pestaña nueva (soporte genérico en
   `_dwIsNavigable` / `_dwNavigate`).
+
+**Ajustes por instancia** — `mws` (scope), `mwlvl` (nivel mínimo) y `mwchart` (anillo de uso) se
+guardan **por instancia** en el layout, y `normalize_layout()` los conserva también en el layout
+por defecto de la organización: son lo único que distingue dos copias del mismo widget, así que un
+default que los perdiera repartiría las cajas correctas enseñando lo que no es.
 
 **Datos** — el hook del módulo `Watchful.overview_widget(items, status, lang) -> dict`:
 
@@ -235,7 +246,13 @@ Claves por widget (todas opcionales salvo lo indicado):
     {'id': 'health', 'name': 'Service health', 'ok': False, 'state': 'warn',
      'counts': {'ok': 23, 'warn': 4, 'error': 0, 'total': 27},   # alimenta los badges del stat card
      'rows': [{'name': 'Exchange Online', 'state': 'warn', 'detail': ''}, …],  # filas de la tabla
-     'stats': [{'label': 'OK', 'value': '23/27', 'state': 'warn'}]},
+     'stats': [{'label': 'OK', 'value': '23/27', 'state': 'warn'}],
+     # Opcional: los dos números que son una fracción digna de un anillo, YA divididos.
+     # El core no divide ni conoce ningún nombre de métrica — igual que en las páginas de
+     # módulo. Se omite si falta el total: un anillo sin total es un 0 % con pinta de dato.
+     # Cada fila puede llevar el suyo; el agregado NO lleva (no se suman porcentajes de
+     # cosas distintas).
+     'chart': {'used': 61.0, 'total': 100.0, 'pct': 61.0}},
   ],
   'aggregate': {'count': 8, 'count_label': 'Checks',
                 'counts': {'ok': 30, 'warn': 4, 'error': 0, 'total': 34}},

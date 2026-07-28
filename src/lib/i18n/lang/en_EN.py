@@ -362,6 +362,7 @@ LANG = {
     'dw_mw_sum':             'Aggregate',
     'dw_mw_table':           'Table',
     'dw_mw_level':           'Minimum level',
+    'dw_mw_chart':           'Show usage ring',
     'dw_filter':             'Filter',
     'dw_sev_op':             'At least (≥) / exactly (=) this level',
     'dw_mod_on':             'Active',

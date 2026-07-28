@@ -4,7 +4,7 @@
         {"id": "health", "view": "stat", "icon": "bi-microsoft", "perm": "modules_view",
          "scope": "health", "link": "https://admin.microsoft.com/#/servicehealth"},
         {"id": "table", "view": "table", "icon": "bi-microsoft", "perm": "modules_view",
-         "selector": true, "cols": 4, "h": 340}
+         "selector": true, "multi": true, "cols": 4, "h": 340}
     ],
     "__page__": {
         "id": "m365", "icon": "bi-microsoft", "order": 40,

@@ -539,6 +539,7 @@ function _dwModuleWidgetContent(id, data, item) {
         return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
     const wd = (data.module_widgets || {})[def.module] || {};
     const entries = wd.entries || [];
+    const ring = _dwMwWantsChart(id, item);   // per-instance: see _dwSetModuleChart
     const title = _dwLabel(def);
     const icon = def.icon || 'bi-grid-1x2';
     const acc = 'linear-gradient(90deg,#6366f1,#8b5cf6)', bg = 'rgba(99,102,241,.12)', fg = '#6366f1';
@@ -550,17 +551,21 @@ function _dwModuleWidgetContent(id, data, item) {
         const level = item ? (item.mwlvl || '') : (dw?.dataset.mwlvl || '');   // '' | warn | error
         if (scope === 'sum') {                          // aggregate → one summary stat card
             const c = (wd.aggregate || {}).counts;
+            // No ring at the aggregate scope, even when asked for one. Every kind measures
+            // something different — storage, a score, licences, MFA coverage — and a
+            // percentage of one cannot be added to a percentage of another. A ring here would
+            // be a number with no question behind it.
             return _dwMwStatCard(c ? c.total : entries.length,
                 (wd.aggregate || {}).count_label || title, c, acc, bg, fg, icon);
         }
         if (scope) {                                    // a specific kind → its per-service rows
             const e = entries.find(x => x.id === scope);
             const rows = _dwMwSortFilter(e ? e.rows : [], level);   // error→warn→ok, level-filtered
-            const body = `<table class="table table-sm table-hover align-middle mb-0"><tbody>${_dwMwDetailRows(rows)}</tbody></table>`;
+            const body = `<table class="table table-sm table-hover align-middle mb-0"><tbody>${_dwMwDetailRows(rows, ring)}</tbody></table>`;
             return _dwTableCard(acc, bg, fg, icon, e ? e.name : title, body);
         }
         const rows = _dwMwSortFilter(entries, level);   // one row per kind, error→warn→ok
-        const body = `<table class="table table-sm table-hover align-middle mb-0"><tbody>${_dwMwEntryRows(rows)}</tbody></table>`;
+        const body = `<table class="table table-sm table-hover align-middle mb-0"><tbody>${_dwMwEntryRows(rows, ring)}</tbody></table>`;
         return _dwTableCard(acc, bg, fg, icon, title, body);
     }
 
@@ -568,11 +573,42 @@ function _dwModuleWidgetContent(id, data, item) {
     // id, e.g. m365 → "health" = Service health); no scope defaults to the aggregate.
     if (def.scope) {
         const e = entries.find(x => x.id === def.scope);
-        return _dwMwStatCard((e && e.counts ? e.counts.total : 0),
-            e ? e.name : title, e && e.counts, acc, bg, fg, icon);
+        return _dwMwStatCard((e && e.counts ? e.counts.total : 0), e ? e.name : title,
+            e && e.counts, acc, bg, fg, icon, ring && e ? e.chart : null, e && e.state);
     }
     const c = (wd.aggregate || {}).counts;
     return _dwMwStatCard(c ? c.total : entries.length, title, c, acc, bg, fg, icon);
+}
+
+// ── Usage ring ──
+// The module hands over {used, total, pct} already divided; the core only draws. No metric
+// name reaches this file — which pair of measurements is a fraction worth showing is the
+// module's answer, the same arrangement the module page uses for its per-row ring.
+// Coloured by the entry's own state rather than by a threshold of its own: a card the module
+// called a warning must not carry a green ring, and two signals disagreeing about one record
+// is worse than either being wrong alone.
+function _dwMwDonut(chart, state, size) {
+    if (!chart || !(chart.total > 0)) return '';
+    const pct = Math.min(100, Math.max(0, Number(chart.pct)));
+    if (!Number.isFinite(pct)) return '';
+    const col = state === 'error' ? 'var(--bs-danger)'
+              : state === 'warn'  ? 'var(--bs-warning)'
+              : state === 'ok'    ? 'var(--bs-success)' : 'var(--bs-secondary)';
+    const R = 15.9155, sz = size || 44;
+    return `<svg width="${sz}" height="${sz}" viewBox="0 0 36 36" class="flex-shrink-0"
+         role="img" aria-label="${escAttr(String(pct) + '%')}">
+        <circle cx="18" cy="18" r="${R}" fill="none" stroke="var(--bs-border-color)" stroke-width="3.2"></circle>
+        <circle cx="18" cy="18" r="${R}" fill="none" stroke="${col}" stroke-width="3.2"
+            stroke-dasharray="${pct} ${100 - pct}" stroke-dashoffset="25" stroke-linecap="round"></circle>
+        <text x="18" y="18" text-anchor="middle" dominant-baseline="central"
+            style="font-size:9px;font-weight:600;fill:var(--bs-body-color)">${esc(String(Math.round(pct)))}%</text>
+    </svg>`;
+}
+// Whether this instance was asked to show rings (per-instance, like scope and level).
+function _dwMwWantsChart(id, item) {
+    if (item) return (item.mwchart || '') === '1';
+    const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    return (document.querySelector(`.dw[data-wid="${sel}"]`)?.dataset.mwchart || '') === '1';
 }
 
 // ── Table-view helpers (dense listing) ──
@@ -603,19 +639,25 @@ function _dwMwStats(stats) {       // module key/value chips, coloured by state
         return `<span class="badge rounded-pill me-1" style="color:${cfg};background:${cbg};font-size:.72rem">${esc(s.label)}: ${esc(String(s.value))}</span>`;
     }).join('');
 }
-function _dwMwEntryRows(entries) {       // one row per check kind (all-entries view)
+function _dwMwEntryRows(entries, ring) {  // one row per check kind (all-entries view)
     if (!entries || !entries.length)
         return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
-    return entries.map(e => `<tr>
-        <td class="text-nowrap fw-semibold align-middle">${_dwMwBadge(e.state || (e.ok ? 'ok' : 'error'))} ${esc(e.name)}</td>
-        <td>${_dwMwStats(e.stats)}</td></tr>`).join('');
+    return entries.map(e => {
+        const st = e.state || (e.ok ? 'ok' : 'error');
+        const svg = ring ? _dwMwDonut(e.chart, st, 34) : '';
+        return `<tr>
+        <td class="text-nowrap fw-semibold align-middle">${_dwMwBadge(st)} ${esc(e.name)}</td>
+        <td><div class="d-flex align-items-center gap-2">${svg}<div>${_dwMwStats(e.stats)}</div></div></td></tr>`;
+    }).join('');
 }
-function _dwMwDetailRows(rows) {         // one row per sub-item (single-kind view)
+function _dwMwDetailRows(rows, ring) {    // one row per sub-item (single-kind view)
     if (!rows || !rows.length)
         return `<tr><td colspan="2" class="text-center text-muted py-3">${t('overview_no_status')}</td></tr>`;
     return rows.map(r => {
         const nm = esc(r.name) + (r.detail ? ` <span class="text-muted small">${esc(r.detail)}</span>` : '');
-        return `<tr><td class="text-nowrap">${nm}</td><td class="text-end">${_dwMwBadge(r.state)}</td></tr>`;
+        const svg = ring ? _dwMwDonut(r.chart, r.state, 34) : '';
+        return `<tr><td class="text-nowrap">${nm}</td>
+            <td class="text-end"><div class="d-flex align-items-center justify-content-end gap-2">${svg}${_dwMwBadge(r.state)}</div></td></tr>`;
     }).join('');
 }
 
@@ -634,13 +676,19 @@ function _dwMwStateBadges(counts) {
         .join('');
     return b || `<span class="text-muted small">—</span>`;
 }
-function _dwMwStatCard(count, label, counts, acc, bg, fg, icon) {
+function _dwMwStatCard(count, label, counts, acc, bg, fg, icon, chart, state) {
+    // The ring takes the icon's place rather than sitting beside it: they occupy the same
+    // slot, and a card carrying both says less about each in the same width.
+    const badge = chart
+        ? `<span class="d-flex align-items-center justify-content-center flex-shrink-0"
+                 style="width:46px;height:46px">${_dwMwDonut(chart, state, 46)}</span>`
+        : `<span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                 style="width:46px;height:46px;background:${bg};color:${fg};font-size:1.3rem"><i class="bi ${icon}"></i></span>`;
     return `<div class="rounded-3 overflow-hidden border h-100" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
         <div style="height:3px;background:${acc};border-radius:var(--bs-border-radius-lg) var(--bs-border-radius-lg) 0 0"></div>
         <div class="p-3">
           <div class="d-flex align-items-center gap-3 mb-2">
-            <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                  style="width:46px;height:46px;background:${bg};color:${fg};font-size:1.3rem"><i class="bi ${icon}"></i></span>
+            ${badge}
             <div><div class="fs-2 fw-bold lh-1">${count}</div>
                  <div class="fw-semibold text-muted mt-1 ss-section-title">${esc(label)}</div></div>
           </div>

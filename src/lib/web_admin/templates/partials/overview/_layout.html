@@ -259,6 +259,7 @@ function _dwSave() {
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
         ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
+        ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
         ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
@@ -420,6 +421,18 @@ function _dwSetModuleLevel(sel) {
     const dw = sel.closest('.dw[data-wid]');
     if (!dw) return;
     if (sel.value === '') delete dw.dataset.mwlvl; else dw.dataset.mwlvl = sel.value;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwSave();
+}
+
+// Show or hide the usage ring on a module widget instance. Per instance, like the scope
+// and the level: two cards of the same kind side by side, one with the ring and one without,
+// is a legitimate thing to want and a single global preference would forbid it.
+function _dwSetModuleChart(cb) {
+    const dw = cb.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (cb.checked) dw.dataset.mwchart = '1'; else delete dw.dataset.mwchart;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwSave();
@@ -657,6 +670,7 @@ async function _dwSaveDb() {
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
         ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
+        ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
         ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
@@ -683,6 +697,7 @@ async function _dwSetDefault() {
         ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
         ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
         ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
+        ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
         ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     const r = await apiPut('/api/v1/overview/default-layout', { layout });
@@ -768,6 +783,15 @@ function _dwToolbar(id, cols, h, item) {
             .map(([v, lbl]) => `<option value="${v}"${lv === v ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
         tb += `<select class="form-select form-select-sm dw-mwlvl py-0" title="${escAttr(t('dw_mw_level'))}"
             style="width:auto;min-width:6em;font-size:.72rem${f === 'sum' ? ';display:none' : ''}" onchange="_dwSetModuleLevel(this)">${lvOpts}</select>`;
+        // Ring toggle. Offered on every module table widget rather than gated on the current
+        // scope having one: which kinds carry a used/total pair is the MODULE's answer and it
+        // changes with the data, so a control that appeared and vanished as you switched scope
+        // would read as a glitch. With nothing to draw the preference simply has no effect.
+        const ch = item ? (item.mwchart ?? '') : '';
+        tb += `<label class="d-inline-flex align-items-center gap-1 small text-muted mb-0" style="cursor:pointer"
+            title="${escAttr(t('dw_mw_chart'))}">
+            <input type="checkbox" class="form-check-input mt-0 dw-mwchart"${ch === '1' ? ' checked' : ''}
+                onchange="_dwSetModuleChart(this)"><i class="bi bi-pie-chart"></i></label>`;
     }
     // Width
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;
