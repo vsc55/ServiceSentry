@@ -102,6 +102,13 @@ createListTable({
     columns: _SES_COLS, defaultVisible: _SESSIONS_DEFAULT_COLS,
     persist: true, clearLabelKey: 'subtab_sessions',
     persistExtra: () => ({ view: _sessionsViewMode }),
+    // …and the way back: restore the saved mode on login, defaulting to 'card' when the
+    // server has nothing (or the layout was cleared for this user).
+    applyExtra: cfg => {
+        const v = cfg && cfg.view;
+        _sessionsViewMode = (v === 'card' || v === 'table') ? v : 'card';
+        localStorage.setItem('ss_sessions_view', _sessionsViewMode);
+    },
     // Filter strip (shared design — see createListTable's spec.filters). User and IP are the
     // two axes you chase a session by; the free-text one also reaches the user agent.
     filters: {

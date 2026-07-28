@@ -12,15 +12,29 @@ resolving the identity for a test connection.  Pure functions over plain dicts; 
 from __future__ import annotations
 
 
-def find_credential_usage(uid: str, hosts: list, modules: dict) -> dict:
-    """Where credential *uid* is referenced: hosts (ssh profile ``cred_uid``) and module
-    checks (inline ``cred_uid``).  Returns ``{'hosts': [...], 'checks': [...]}``."""
-    used_hosts = []
+def find_all_credential_usage(hosts: list, modules: dict) -> dict:
+    """Every credential's references, in ONE pass: ``{uid: {'hosts': […], 'checks': […]}}``.
+
+    The scan cost is the same whether it answers about one credential or all of them — it
+    walks every host profile and every module check either way — so asking per credential
+    means paying for the whole walk once per row.  The catalogue view asks about all of them
+    at once and this is what it calls.
+
+    A uid appears only when something references it: the caller holds the catalogue, so an
+    ABSENT uid is the answer "nothing uses this", and that is the reading the view is built
+    on.  A dangling cred_uid (the credential was deleted) still lands here under its own
+    key — harmless, and it is real: the reference is still written down somewhere.
+    """
+    out: dict = {}
+
+    def _bucket(uid: str, key: str) -> list:
+        return out.setdefault(uid, {'hosts': [], 'checks': []})[key]
+
     for h in hosts:
         ssh = (h.get('profiles') or {}).get('ssh') or {}
-        if ssh.get('cred_uid') == uid:
-            used_hosts.append({'uid': h.get('uid'), 'name': h.get('name')})
-    checks = []
+        uid = ssh.get('cred_uid')
+        if uid:
+            _bucket(uid, 'hosts').append({'uid': h.get('uid'), 'name': h.get('name')})
     for mod_key, mod_cfg in modules.items():
         if not isinstance(mod_cfg, dict):
             continue
@@ -29,10 +43,17 @@ def find_credential_usage(uid: str, hosts: list, modules: dict) -> dict:
             if coll.startswith('__') or not isinstance(items, dict):
                 continue
             for key, item in items.items():
-                if isinstance(item, dict) and item.get('cred_uid') == uid:
-                    checks.append({'module': bare, 'key': key,
-                                   'label': str(item.get('label') or key)})
-    return {'hosts': used_hosts, 'checks': checks}
+                uid = item.get('cred_uid') if isinstance(item, dict) else None
+                if uid:
+                    _bucket(uid, 'checks').append({'module': bare, 'key': key,
+                                                   'label': str(item.get('label') or key)})
+    return out
+
+
+def find_credential_usage(uid: str, hosts: list, modules: dict) -> dict:
+    """Where credential *uid* is referenced: hosts (ssh profile ``cred_uid``) and module
+    checks (inline ``cred_uid``).  Returns ``{'hosts': [...], 'checks': [...]}``."""
+    return find_all_credential_usage(hosts, modules).get(uid) or {'hosts': [], 'checks': []}
 
 
 def clone_payload(src: dict) -> dict:

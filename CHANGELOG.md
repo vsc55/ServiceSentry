@@ -8,6 +8,52 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.26] - 2026-07-28
+
+### Added
+- **The credential catalogue can be read four ways.** The table answers "what have I got" and
+  nothing else; two questions sit on top of the same data and it cannot answer either.
+  **Cards** give a credential the shape the rest of the panel gives an entity, with the two
+  facts you actually chase one by — its type and the identity inside it — at a glance.
+  **Grouped by type** separates animals the table interleaves: an SSH identity reaches a
+  machine, a tenant app registration is an application with consented permissions and no host
+  behind it, and sorting by the Type column only mixes them into one list.
+- **"Who uses them" is the view that was missing.** A credential's consumers are not part of
+  the credential — they live in the hosts store and inside every module's config — so until
+  now the only way to see them was to open one credential and click its Usage tab, which
+  answers "can I delete THIS one" and never "what is this catalogue full of". Seen whole it
+  answers the question that rots a credential store: a secret nobody references is a secret
+  nobody rotates, and it stays valid. Those rows are marked and the banner counts them.
+- The orphan count is computed over the **whole catalogue**, not the page on screen — a count
+  that shrank as you paged through would be worse than no count at all. The rows keep the sort
+  the table header decides: floating the unused ones to the top reads well and would silently
+  override the order the user chose.
+- New endpoint `GET /api/v1/credentials/usage` — every credential's references in one pass.
+  The scan walks every host profile and every module check whichever way it is asked, so
+  asking per credential repeats one walk N times to answer N slices of the same result. The
+  per-credential route now delegates to it, so the two cannot drift apart. Same permission
+  gate, which is also exactly what opens the Credentials section.
+
+### Changed
+- The action buttons came out of the table spec into one helper every view composes: the
+  `credentials_*` permissions are asked in exactly one place, and a guard fails if a view
+  wires `deleteCred` itself — a view assembling its own buttons is a view free to offer Delete
+  to somebody who may not press it.
+- Switching to a grouped view clears the selection. Those views draw no checkboxes, so
+  carrying one into them would leave the bulk bar armed over rows that are no longer on
+  screen.
+- **A table's view mode is now restored by the table itself.** The persistence layer had a
+  hardcoded `tc.sessions.view` line, so every table that grew a preference beside its columns
+  had to come and edit that function; a spec now declares both directions (`persistExtra` /
+  `applyExtra`) and the loop calls them. Sessions moved onto it with no change in behaviour.
+- `_entityCard` accepts an accent by NAME (`accentClass`), so a section's colour stays written
+  down once in the CSS instead of being re-typed as a gradient in JavaScript.
+
+### Fixed
+- The usage fetch does not retry itself after a failure. It runs from the render and redraws
+  when it lands, so an error would have been a request → redraw → request loop against a
+  server already saying no; the failed state carries its own Retry instead.
+
 ## [0.0.1+build.25] - 2026-07-28
 
 ### Added

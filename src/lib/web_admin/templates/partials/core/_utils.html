@@ -454,8 +454,14 @@ function _cardGrid(inner) {
 //        subtitle, chips, actions, dimmed}
 function _entityCard(o) {
     const acc = o.accent || 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
+    // accentClass names one of the shared .ss-accent-* strips (the same ones the card
+    // headers use), so a section's colour is written down in ONE place — the CSS — instead
+    // of being re-typed as a gradient here. `accent` stays for the literal-gradient callers.
+    const strip = o.accentClass
+        ? `<div class="ss-accent ss-accent-${o.accentClass}"></div>`
+        : `<div style="height:3px;background:${acc}"></div>`;
     return `<div class="rounded-3 overflow-hidden border" style="background:var(--bs-tertiary-bg);box-shadow:0 2px 6px rgba(0,0,0,.06)${o.dimmed ? ';opacity:.55' : ''}">
-        <div style="height:3px;background:${acc}"></div>
+        ${strip}
         <div class="d-flex align-items-center gap-2 px-3 py-2">
             ${o.toggle ? `<input type="checkbox" class="form-check-input flex-shrink-0" ${o.selected ? 'checked' : ''} onchange="${o.toggle}">` : ''}
             <span class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"

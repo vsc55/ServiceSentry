@@ -63,6 +63,7 @@ function _tcTables() {
     // table moves from literal to registry the moment it joins the factory.
     const out = _LIST_TABLE_REGISTRY.map(d => ({
         k: d.k, def: d.def(), all: d.all(), getVis: d.getVis, setVis: d.setVis, setOrd: d.setOrd, ls: d.ls,
+        applyExtra: d.applyExtra,   // the table's own non-column preferences (see _applyUserTableConfig)
     }));
     const _reg = new Set(out.map(d => d.k));
     const lit = desc => { if (!_reg.has(desc.k)) out.push(desc); };
@@ -108,6 +109,9 @@ function _applyUserTableConfig(tc) {
             localStorage.removeItem(lsVis);
             localStorage.removeItem(lsOrd);
             localStorage.removeItem(lsW);
+            // …including whatever else the table stores beside its columns (a view mode):
+            // an empty config means factory defaults for ALL of it, not just the columns.
+            if (td.applyExtra) td.applyExtra({});
             continue;
         }
         if (Array.isArray(cfg.cols)) {
@@ -123,11 +127,12 @@ function _applyUserTableConfig(tc) {
         } else {
             localStorage.removeItem(lsW);
         }
+        // Anything a table persists BESIDE its columns (its view mode) is restored by the
+        // table itself: persistExtra writes it, applyExtra reads it back. This used to be a
+        // hardcoded `tc.sessions.view` line down here, which meant every table that grew a
+        // second preference had to come and edit this function.
+        if (td.applyExtra) td.applyExtra(cfg);
     }
-    // Sessions view mode (card/table) — defaults to 'card' when absent/cleared.
-    const _sv = tc.sessions && tc.sessions.view;
-    _sessionsViewMode = (_sv === 'card' || _sv === 'table') ? _sv : 'card';
-    localStorage.setItem('ss_sessions_view', _sessionsViewMode);
 }
 
 // Re-sync layout prefs pushed from the server (keepalive poll). When an admin

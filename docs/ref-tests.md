@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4040 tests** (4038 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4330 tests** (4329 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2372,7 +2372,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 40. BD — CredentialsStore
 
-**Archivo:** `tests/test_credentials.py` — 29 tests
+**Archivo:** `tests/test_credentials.py` — 37 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2405,6 +2405,14 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_modules_save_strips_inline_cred_fields` | Modules save strips inline cred fields |
 | `test_usage_lists_referencing_host` | Usage lists referencing host |
 | `test_test_endpoint_uses_stored_secret` | Test endpoint uses stored secret |
+| `TestFindAllCredentialUsage::test_it_buckets_every_reference_by_credential` | Una sola pasada contesta por todas: el escaneo recorre los perfiles de host y los checks de todos los módulos igual pregunte por una credencial o por el catálogo entero |
+| `TestFindAllCredentialUsage::test_an_unreferenced_credential_has_no_entry` | Ausente **es** la respuesta «no la usa nadie»; inventar una entrada vacía rompería la lectura sobre la que se construye la vista |
+| `TestFindAllCredentialUsage::test_module_metadata_is_not_a_check` | Las claves `__…` son config del módulo, no ítems que definiera un usuario: contarlas mantendría viva una credencial cuyo último check real se borró |
+| `TestFindAllCredentialUsage::test_the_module_name_loses_its_package_prefix` | `watchfuls.web` es cómo se guarda; `web` es cómo lo llama el usuario |
+| `TestFindAllCredentialUsage::test_the_single_credential_answer_is_the_same_slice` | La ruta por credencial delega en la de bloque: no pueden discrepar |
+| `test_bulk_usage_answers_for_the_whole_catalogue` | El endpoint nuevo, extremo a extremo |
+| `test_bulk_usage_matches_the_per_credential_answer` | Dos rutas, un escaneo |
+| `test_bulk_usage_needs_a_credential_permission` | Misma puerta que la ruta por credencial —que es exactamente lo que abre la sección—, así que no concede nada que la vista no alcanzara ya |
 
 ## 41. Core — Cliente SSH
 
@@ -5416,3 +5424,52 @@ pulsarlo, y eso no es un fallo de estilo.
 | `TestTheFleetViewIsThePoint::test_it_reads_every_instance_across_every_service` | |
 | `TestSilenceIsNotFreshness::test_never_reported_is_not_drawn_as_a_time` | «Nunca reportó» y «hace mucho» no pueden parecer lo mismo |
 | `TestTheLabelsExist::*` (×2) | Las cuatro vistas y las nueve columnas, en los dos idiomas |
+
+## 123. Credentials — cuatro vistas, y la que pregunta quién las usa
+
+**Archivo:** `tests/test_wa_credentials_views.py` — 29 tests
+
+La tabla contesta «qué tengo» y nada más. Encima de los mismos datos hay dos preguntas que no
+puede contestar:
+
+- **qué CLASE de secreto es cada uno.** Una identidad SSH y un registro de aplicación de
+  tenant no son el mismo animal —una llega a una máquina, el otro es una aplicación con
+  permisos consentidos y ningún host detrás— y ordenar por la columna Tipo solo los
+  entremezcla en una lista;
+- **quién la REFERENCIA todavía**, que no forma parte de la credencial: sus consumidores viven
+  en el store de hosts y dentro de la config de cada módulo. Hasta ahora la única forma de
+  verlo era abrir una credencial y pulsar su pestaña Uso — de una en una, que contesta «¿puedo
+  borrar ésta?» y nunca «¿de qué está lleno este catálogo?».
+
+Vista entera, la de uso contesta la pregunta que pudre un almacén de credenciales: un secreto
+que no referencia nadie es un secreto que no rota nadie, y sigue siendo válido.
+
+Lo que **no** puede diferir entre vistas es qué significa una credencial: el badge de tipo, la
+marca de inactiva y sobre todo las **acciones** se deciden una vez y las compone cada vista. El
+guard que no es cosmético es `test_no_view_builds_its_own_action_buttons`: los permisos
+`credentials_*` se convierten en botones dentro de `_credActionsHtml` y en un solo sitio.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Registro, ficheros y que el bundle los incluya **después** del registro (si no, la vista cae en silencio a un cuerpo vacío) |
+| `TestAViewIsChromeOnly::test_no_view_builds_its_own_action_buttons` | **La regla**: ninguna vista cablea `deleteCred`/`cloneCred`/`openEditCredModal` |
+| `TestAViewIsChromeOnly::test_the_table_composes_the_same_builder` | También la tabla: en cuanto una de las cuatro se monta sus botones, «qué botones tiene una credencial» tiene dos respuestas |
+| `TestAViewIsChromeOnly::test_the_permissions_are_asked_in_one_place` | `canEdit`/`canAdd`/`canDelete` se resuelven en `prepare()` y se vuelven controles en una única función |
+| `TestAViewIsChromeOnly::test_no_view_picks_the_type_colour_itself` | El color del tipo sale del mismo hash que usa el widget de Overview, así que un tipo viste un color en todo el panel — incluidos los tipos que este build no ha visto nunca |
+| `TestTheFourViewsShareOnePage::test_the_non_table_views_go_through_the_factory` | Filtro, orden y paginación siguen en `createListTable`: ninguna vista puede enseñar un conjunto distinto del que anuncia la banda de paginación |
+| `TestTheFourViewsShareOnePage::test_no_view_fetches_the_catalogue_again` | |
+| `TestTheFourViewsShareOnePage::test_the_switcher_is_drawn_by_the_header_not_the_views` | |
+| `TestTheFourViewsShareOnePage::test_the_column_chooser_belongs_to_the_table` | Configura columnas; las otras tres no tienen |
+| `TestTheFourViewsShareOnePage::test_the_choice_is_remembered_both_ways` | En este navegador y en la config del usuario, para que le siga al siguiente |
+| `TestTheFourViewsShareOnePage::test_switching_view_does_not_refetch` | |
+| `TestASelectionYouCannotSee::*` (×2) | Las vistas agrupadas no dibujan casillas, así que arrastrar una selección hasta ellas dejaría la barra de acciones masivas armada sobre filas que ya no están en pantalla |
+| `TestUsageIsADifferentFact::test_it_is_asked_once_for_the_whole_catalogue` | Una llamada, no una por fila |
+| `TestUsageIsADifferentFact::test_never_loaded_is_not_drawn_as_loaded_and_empty` | Una pregunta que nadie ha hecho y la respuesta «no la usa nadie» se parecerían — y la segunda es una llamada a la acción |
+| `TestUsageIsADifferentFact::test_a_failed_fetch_does_not_retry_itself` | Se ejecuta desde el render y su fetch redibuja al llegar: reintentar sería petición → redibujo → petición contra un servidor que ya dice que no |
+| `TestUsageIsADifferentFact::test_a_refresh_drops_the_cached_map` | Puede quedarse rancio por cosas que el catálogo no ve: un host o un check editados en otra sección |
+| `TestUsageIsADifferentFact::test_the_orphan_count_is_catalogue_wide` | Contado sobre la página encogería al pasar de página, que es peor que no contar |
+| `TestUsageIsADifferentFact::test_the_rows_keep_the_sort_the_user_chose` | Subir las no usadas arriba se lee bien y pisaría en silencio el orden que eligió el usuario; el badge dice lo mismo sin mover nada |
+| `TestGroupingTellsTheTruth::test_the_empty_types_line_is_computed_over_the_catalogue` | «Ningún credencial de este tipo» es una afirmación sobre la instalación: sobre la página sería mentira |
+| `TestGroupingTellsTheTruth::test_a_type_no_module_declares_any_more_is_still_shown` | Se quitó un módulo y sus credenciales le sobrevivieron — justo el caso que hay que ver |
+| `TestTheLabelsExist::*` (×3) | Las cuatro vistas y el vocabulario de uso en los dos idiomas, y que el aviso de huérfanas lleve los **dos** números: 3 de 4 y 3 de 400 no son la misma noticia |
+| `TestTheViewModeRestoreIsRegistryDriven::*` (×3) | El modo de vista lo restaura la propia tabla (`persistExtra`/`applyExtra`). Antes era una línea fija `tc.sessions.view` en la capa de persistencia, así que cada tabla con una preferencia nueva tenía que venir a editar esa función |

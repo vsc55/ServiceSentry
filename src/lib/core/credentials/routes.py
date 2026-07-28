@@ -17,6 +17,7 @@ Routes registered by this file:
     GET    /api/v1/credentials                  list credentials (secrets masked)
     POST   /api/v1/credentials                  create a credential
     POST   /api/v1/credentials/<uid>/clone      duplicate a credential (secrets incl.)
+    GET    /api/v1/credentials/usage            where EVERY credential is referenced
     GET    /api/v1/credentials/<uid>/usage      where a credential is referenced
     PUT    /api/v1/credentials/<uid>            update a credential (masked restored)
     DELETE /api/v1/credentials/<uid>            delete a credential
@@ -107,6 +108,26 @@ def register(app, wa):
             return jsonify({'error': wa._t('cred_name_exists')}), 400
         wa._audit('credential_cloned', detail={'from': uid, 'uid': new_uid, 'name': cand})
         return jsonify({'ok': True, 'uid': new_uid})
+
+    @app.route('/api/v1/credentials/usage', methods=['GET'])
+    @login_required
+    def api_credentials_usage_all():
+        """Where every credential is referenced, as ``{uid: {hosts, checks}}``.
+
+        The catalogue's usage view asks this once instead of once per row: the scan walks
+        every host profile and every module check whichever way it is asked, so N calls
+        would repeat the same walk N times to answer N slices of one result.
+
+        Same gate as the per-credential endpoint below, which is also exactly what opens the
+        Credentials section in the UI — so anyone who can reach the view can read this.
+        """
+        perms = wa._get_session_permissions()
+        if not (perms & {'credentials_view', 'credentials_edit',
+                         'credentials_add', 'credentials_delete'}):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        hs = getattr(wa, '_hosts_store', None)
+        hosts = hs.list(decrypt=False) if hs is not None else []
+        return jsonify({'usage': cred_svc.find_all_credential_usage(hosts, wa._load_modules())})
 
     @app.route('/api/v1/credentials/<uid>/usage', methods=['GET'])
     @login_required

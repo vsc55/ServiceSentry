@@ -168,6 +168,53 @@ class TestResolveCredential:
         assert out['auth_user'] == 'admin' and out['auth_password'] == 'pw'
 
 
+class TestFindAllCredentialUsage:
+    """One scan answers for every credential at once (the catalogue's usage view)."""
+
+    HOSTS = [
+        {'uid': 'h1', 'name': 'web-01', 'profiles': {'ssh': {'cred_uid': 'c1'}}},
+        {'uid': 'h2', 'name': 'web-02', 'profiles': {'ssh': {'cred_uid': 'c2'}}},
+        {'uid': 'h3', 'name': 'no-cred', 'profiles': {'ssh': {'ssh_user': 'root'}}},
+    ]
+    MODULES = {
+        'watchfuls.web': {'list': {'k1': {'cred_uid': 'c1', 'label': 'Portal'},
+                                   'k2': {'url': 'http://x'}},
+                          '__host_profile__': {'cred_uid': 'ignored'}},
+        'watchfuls.ping': {'list': {'k3': {'address': '1.1.1.1'}}},
+    }
+
+    def _usage(self):
+        from lib.core.credentials.service import find_all_credential_usage
+        return find_all_credential_usage(self.HOSTS, self.MODULES)
+
+    def test_it_buckets_every_reference_by_credential(self):
+        u = self._usage()
+        assert [h['name'] for h in u['c1']['hosts']] == ['web-01']
+        assert [c['label'] for c in u['c1']['checks']] == ['Portal']
+        assert [h['name'] for h in u['c2']['hosts']] == ['web-02']
+
+    def test_an_unreferenced_credential_has_no_entry(self):
+        """Absent IS the answer "nothing uses this" — the view reads it that way, so an empty
+        entry must not be invented."""
+        assert 'c9' not in self._usage()
+
+    def test_module_metadata_is_not_a_check(self):
+        """Keys starting with `__` are the module's own config (host profile, defaults), not
+        items a user defined — counting one as a consumer would keep a credential looking
+        alive after its last real check was deleted."""
+        assert 'ignored' not in self._usage()
+
+    def test_the_module_name_loses_its_package_prefix(self):
+        """`watchfuls.web` is how the config stores it; `web` is what the user calls it."""
+        assert self._usage()['c1']['checks'][0]['module'] == 'web'
+
+    def test_the_single_credential_answer_is_the_same_slice(self):
+        """find_credential_usage delegates, so the two cannot drift apart."""
+        from lib.core.credentials.service import find_credential_usage
+        assert find_credential_usage('c1', self.HOSTS, self.MODULES) == self._usage()['c1']
+        assert find_credential_usage('c9', self.HOSTS, self.MODULES) == {'hosts': [], 'checks': []}
+
+
 class TestCredentialSchemas:
     """Discovery of credential-type schemas: built-in ssh + module-declared."""
 
@@ -319,6 +366,40 @@ class TestApiCredentials:
         r = client.get(f'/api/v1/credentials/{uid}/usage')
         assert r.status_code == 200
         assert 'h-ref' in [h['name'] for h in r.get_json()['hosts']]
+
+    def test_bulk_usage_answers_for_the_whole_catalogue(self, client, admin):
+        """The catalogue's usage view asks once instead of once per row: the scan walks every
+        host profile and every module check whichever way it is asked, so N calls would
+        repeat one walk N times to answer N slices of the same result."""
+        _login(client)
+        used = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
+        unused = client.post('/api/v1/credentials', json={
+            'name': 'nobody-uses-me', 'ctype': 'ssh', 'data': {'ssh_user': 'x'}}).get_json()['uid']
+        admin._hosts_store.create({'name': 'h-bulk', 'address': '10.0.0.9', 'kind': 'remote',
+                                   'profiles': {'ssh': {'ssh_user': 'x', 'cred_uid': used}}}, actor='admin')
+        usage = client.get('/api/v1/credentials/usage').get_json()['usage']
+        assert 'h-bulk' in [h['name'] for h in usage[used]['hosts']]
+        # An ABSENT uid is the answer "nothing references this" — the view is built on that
+        # reading, so an empty entry must not be invented for it.
+        assert unused not in usage
+
+    def test_bulk_usage_matches_the_per_credential_answer(self, client, admin):
+        """Two endpoints, one scan: the per-credential route now delegates, so they cannot
+        drift apart and disagree about who uses what."""
+        _login(client)
+        uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
+        admin._hosts_store.create({'name': 'h-same', 'address': '10.0.0.8', 'kind': 'remote',
+                                   'profiles': {'ssh': {'ssh_user': 'x', 'cred_uid': uid}}}, actor='admin')
+        one = client.get(f'/api/v1/credentials/{uid}/usage').get_json()
+        allof = client.get('/api/v1/credentials/usage').get_json()['usage'][uid]
+        assert one == allof
+
+    def test_bulk_usage_needs_a_credential_permission(self, client, admin):
+        """Same gate as the per-credential route — which is also exactly what opens the
+        Credentials section, so it grants nothing the view did not already reach."""
+        _login(client)
+        with patch.object(admin, '_get_session_permissions', return_value={'servers_view'}):
+            assert client.get('/api/v1/credentials/usage').status_code == 403
 
     def test_test_endpoint_uses_stored_secret(self, client, admin):
         _login(client)

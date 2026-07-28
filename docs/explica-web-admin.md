@@ -435,6 +435,7 @@ la BD y se enmascaran en lectura.
 | `GET` | `/api/v1/credentials` | `credentials_view` (o `servers_view`/`modules_view`/`*_edit`) | Listar credenciales (secretos enmascarados) |
 | `POST` | `/api/v1/credentials` | `credentials_add` | Crear una credencial |
 | `POST` | `/api/v1/credentials/<uid>/clone` | `credentials_add` | Clonar una credencial existente |
+| `GET` | `/api/v1/credentials/usage` | `credentials_view` | Dónde se usa **cada** credencial, en una sola pasada (vista «Quién las usa») |
 | `GET` | `/api/v1/credentials/<uid>/usage` | `credentials_view` | Dónde se usa la credencial (hosts/checks) |
 | `PUT` | `/api/v1/credentials/<uid>` | `credentials_edit` | Editar una credencial (secretos omitidos se conservan) |
 | `DELETE` | `/api/v1/credentials/<uid>` | `credentials_delete` | Eliminar una credencial |

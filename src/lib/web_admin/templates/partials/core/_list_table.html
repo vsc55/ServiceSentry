@@ -380,7 +380,8 @@ function createListTable(spec) {
             ls: [lsCols, lsOrder, lsW],
             clearLabelKey: spec.clearLabelKey,
             umCustomised: spec.umCustomised || null,
-            extra: spec.persistExtra || null,   // extra table_config fields (e.g. sessions view mode)
+            extra: spec.persistExtra || null,      // extra table_config fields (e.g. a view mode)
+            applyExtra: spec.applyExtra || null,   // …and how to read them back on login
         });
     }
 

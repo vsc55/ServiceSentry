@@ -264,6 +264,7 @@ alimenta a fail2ban:
 | GET | `/api/v1/credentials` | sesión | Listar, secretos enmascarados |
 | POST | `/api/v1/credentials` | sesión + `credentials_add` (inline) | Crear |
 | POST | `/api/v1/credentials/<uid>/clone` | sesión | Duplicar |
+| GET | `/api/v1/credentials/usage` | sesión + `credentials_*` | Dónde se referencia **cada** credencial (una pasada) |
 | GET | `/api/v1/credentials/<uid>/usage` | sesión | Dónde se referencia |
 | PUT | `/api/v1/credentials/<uid>` | sesión | Actualizar (secretos enmascarados restaurados) |
 | DELETE | `/api/v1/credentials/<uid>` | sesión | Borrar |
