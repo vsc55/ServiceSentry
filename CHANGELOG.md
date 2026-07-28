@@ -8,6 +8,22 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.19] - 2026-07-28
+
+### Changed
+- **The Ping watchful moved ICMP into its own file**, 332 lines down to 200. `client.py` holds
+  the echo request, the echo reply and the socket that carries them — written by hand rather
+  than shelling out to the system `ping`, because parsing another program's localised,
+  per-platform output to learn a round-trip time is a worse contract than building the packet
+  ourselves. The check keeps what a lost packet MEANS: how many attempts, which threshold.
+- It was under the 350-line limit and split anyway, on request. The guard is a smoke alarm for
+  a file that has stopped being one thing, not a target to refactor towards — ping was simply
+  two things at 332 lines rather than one at 400.
+- The move exposed a reference that only worked by accident of being in the same file:
+  `_build_icmp_packet` called `Watchful._icmp_checksum` by the composed class's name, from
+  inside it. Correct before, broken the moment the method moved to a mixin, and it now calls
+  the class that actually defines it.
+
 ## [0.0.1+build.18] - 2026-07-28
 
 ### Changed

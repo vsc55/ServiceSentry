@@ -289,7 +289,7 @@ class TestIcmpNative:
 
     def test_icmp_ping_no_socket(self):
         """If no socket can be created, returns None (native path)."""
-        with patch('watchfuls.ping._PYTHONPING_AVAILABLE', False):
+        with patch('watchfuls.ping.client._PYTHONPING_AVAILABLE', False):
             with patch.object(self.Watchful, '_create_icmp_socket',
                               return_value=None):
                 assert self.w._icmp_ping('127.0.0.1', 1) is None
@@ -299,7 +299,7 @@ class TestIcmpNative:
         mock_sock = patch('socket.socket').start()
         mock_instance = mock_sock.return_value
         mock_instance.sendto.side_effect = OSError("Network unreachable")
-        with patch('watchfuls.ping._PYTHONPING_AVAILABLE', False):
+        with patch('watchfuls.ping.client._PYTHONPING_AVAILABLE', False):
             with patch.object(self.Watchful, '_create_icmp_socket',
                               return_value=mock_instance):
                 result = self.w._icmp_ping('127.0.0.1', 1)

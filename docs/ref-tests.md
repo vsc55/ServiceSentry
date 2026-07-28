@@ -655,7 +655,7 @@ módulos (`checks_<área>.py`, `client.py`, `actions.py`, `page.py`, `defaults.p
 
 La lista arrancó con `{snmp 1596, proxmox 1087, datastore 1052, dns 719, service_status 389}`
 y **está vacía**: los cinco salieron al partirse, que es la única dirección en la que se le
-permite moverse. El mayor `__init__.py` del repo es hoy `ping`, con 332.
+permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 | `test_the_pending_list_has_no_ghosts` | La lista no nombra módulos inexistentes | Todos existen | Nombre podrido tras un renombrado |
 
 ### `TestWatchfulActions` — Integridad de `WATCHFUL_ACTIONS`
