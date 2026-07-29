@@ -29,13 +29,12 @@ function _svcViewTable(data, c) {
 }
 
 function _svcTableRow(meta) {
-    // The detail chips a service publishes, kept to the first few: a table row that wrapped
-    // to three lines would stop being a table row. The card view shows all of them.
-    const chips = (meta.detail || []).slice(0, 3).map(r =>
+    // The detail chips a service publishes, kept to the first few by the shared `_chipList`:
+    // a table row that wrapped to three lines would stop being a table row. The card view
+    // shows all of them.
+    const chips = _chipList(meta.detail || [], r =>
         `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal border">
-            ${esc(t(r.label_key))} <span class="fw-semibold text-body">${_svcDetailValue(r)}</span></span>`).join(' ');
-    const more = (meta.detail || []).length > 3
-        ? `<span class="text-muted small ms-1">+${(meta.detail || []).length - 3}</span>` : '';
+            ${esc(t(r.label_key))} <span class="fw-semibold text-body">${_svcDetailValue(r)}</span></span>`, 3, '');
     const n = (meta.instances || []).length;
     return `<tr>
         <td class="text-nowrap"><div class="d-flex align-items-center gap-2">
@@ -44,7 +43,7 @@ function _svcTableRow(meta) {
         <td class="text-nowrap">${_svcStateBadge(meta.state)}</td>
         <td class="text-end text-nowrap">${n ? n : '<span class="text-muted">—</span>'}</td>
         <td class="text-nowrap text-muted small">${esc(_svcSeenText(_svcLastSeen(meta)))}</td>
-        <td><div class="d-flex flex-wrap gap-1">${chips}${more}</div></td>
+        <td><div class="d-flex flex-wrap gap-1">${chips}</div></td>
         <td class="text-end text-nowrap">${_svcActionsHtml(meta, true)}</td>
     </tr>`;
 }

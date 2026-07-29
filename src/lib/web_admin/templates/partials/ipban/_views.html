@@ -1,0 +1,76 @@
+{# ================================================================
+   fail2ban — the part its two tables share.
+
+   Both are lists of IP addresses, and an IP is the one kind of row where the interesting
+   fact is almost never in the row:
+
+   * a ban list of forty addresses is usually three or four NETWORKS. Whoever is knocking
+     rotates the last octet, so every row looks like a separate incident and the shape —
+     "everything is coming from one /24" — is only visible when they are grouped. That shape
+     is also the one that changes what you do: you stop banning addresses and ban a range.
+   * a ban history is a list of events, and the question asked of it is about a REPEAT: who
+     keeps coming back after the ban expires. Sorted by time, an address banned six times is
+     six rows scattered through the log; counted, it is the first line.
+
+   Both new views are summaries: they describe everything the filters left standing rather
+   than the page, and they draw no pagination — a count of "6 bans" that only counted the
+   current page would be worse than no count.
+
+   The address arithmetic lives here, in one place, because the two views must agree about
+   what a network is. It is deliberately blunt: /24 for IPv4 and /64 for IPv6, the two
+   allocation sizes that actually correlate with "the same person", and no attempt to guess
+   a real prefix length from the data.
+   ================================================================ #}
+
+const IPBAN_BANS_VIEWS = [
+    { id: 'table',    label_key: 'ipb_view_table',    icon: 'bi-table',      render: null,                mode: 'table'   },
+    { id: 'networks', label_key: 'ipb_view_networks', icon: 'bi-diagram-2',  render: '_ipbBansNetworks',  mode: 'summary' },
+];
+const IPBAN_HIST_VIEWS = [
+    { id: 'table', label_key: 'ipb_view_table', icon: 'bi-table',  render: null,             mode: 'table'   },
+    { id: 'ips',   label_key: 'ipb_view_ips',   icon: 'bi-people', render: '_ipbHistByIp',   mode: 'summary' },
+];
+
+const IPBAN_WL_VIEWS = [
+    { id: 'table', label_key: 'ipb_view_table', icon: 'bi-table',     render: null,               mode: 'table'   },
+    { id: 'reach', label_key: 'ipb_view_reach', icon: 'bi-rulers',    render: '_ipbWlViewReach',  mode: 'summary' },
+];
+
+const _ipbBansView = createViewState('ss_ipban_bans_view', IPBAN_BANS_VIEWS, () => {
+    _persistTableConfig();
+    _ipbanBansRender();
+});
+const _ipbHistView = createViewState('ss_ipban_hist_view', IPBAN_HIST_VIEWS, () => {
+    _persistTableConfig();
+    _ipbanHistRender();
+});
+const _ipbWlView = createViewState('ss_ipban_wl_view', IPBAN_WL_VIEWS, () => {
+    _persistTableConfig();
+    _ipbanWlRender();
+});
+function setIpbanBansView(id) { _ipbBansView.set(id); }
+function setIpbanWlView(id) { _ipbWlView.set(id); }
+function setIpbanHistView(id) { _ipbHistView.set(id); }
+
+// ── Address arithmetic, in one place ─────────────────────────────────────────
+/** The network an address belongs to, as a label: /24 for IPv4, /64 for IPv6.
+ *
+ *  Blunt on purpose. The real prefix is not in the data and guessing one from the addresses
+ *  present would make the grouping change every time a ban expires. These two sizes are the
+ *  ones that correlate with "the same person or the same rented box", which is the question
+ *  the view exists to answer — and when it is wrong it is wrong by grouping too little, not
+ *  by inventing a relationship. */
+function _ipbNetwork(ip) {
+    const s = String(ip || '').trim();
+    if (!s) return '';
+    if (s.includes(':')) {
+        const parts = s.split(':');
+        return parts.slice(0, 4).join(':') + '::/64';
+    }
+    const o = s.split('.');
+    return (o.length === 4) ? `${o[0]}.${o[1]}.${o[2]}.0/24` : s;
+}
+
+/** An address, always as code and always with its network beside it in the summaries: the
+ *  network is the fact the plain list cannot show, so it never has to be inferred by eye. */
+function _ipbAddr(ip) { return `<code class="fw-semibold">${esc(ip)}</code>`; }

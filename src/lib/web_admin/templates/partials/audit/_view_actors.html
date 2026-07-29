@@ -34,8 +34,7 @@ function _auditViewActors(entries) {
     // Most active first, then by name so equal counts keep a stable, readable order.
     const rows = [...by.values()].sort((x, y) => (y.n - x.n) || x.who.localeCompare(y.who));
     const failing = rows.filter(r => r.failed).length;
-    const chips = `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
-            <i class="bi bi-people me-1"></i>${esc(t('audit_count_actors'))} <span class="fw-semibold">${rows.length}</span></span>
+    const chips = `${_summaryChip('bi-people', t('audit_count_actors'), rows.length)}
         ${failing ? `<span class="badge text-bg-danger fw-normal">
             <i class="bi bi-shield-exclamation me-1"></i>${esc(tf('audit_actors_failing', failing))}</span>` : ''}`;
     return `<div>
@@ -58,11 +57,7 @@ function _auditViewActors(entries) {
 function _auditActorRow(a) {
     // The addresses are listed, not just counted: "3 IPs" is a number, and which three is the
     // fact you act on. Cut to a few so one row cannot become a paragraph.
-    const ips = [...a.ips];
-    const ipCell = ips.length
-        ? ips.slice(0, 3).map(ip => `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ss-fs-2">${esc(ip)}</span>`).join(' ')
-          + (ips.length > 3 ? `<span class="text-muted small ms-1">+${ips.length - 3}</span>` : '')
-        : '<span class="text-muted">—</span>';
+    const ipCell = _chipList([...a.ips], ip => _chipText(ip), 3);
     return `<tr>
         <td class="text-nowrap"><code class="fw-semibold">${esc(a.who)}</code></td>
         <td class="text-end fw-semibold">${a.n}</td>

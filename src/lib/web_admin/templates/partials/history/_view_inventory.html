@@ -1,0 +1,181 @@
+{# ================================================================
+   History — inventory: every series as a row, with the numbers the sidebar turns into a dot.
+
+   The sidebar is navigation: names, and a dot that encodes uptime in three colours. That is
+   the right thing for picking a series and the wrong thing for two questions the index
+   already answers:
+
+   * which series STOPPED recording. A removed or renamed check leaves its history behind and
+     the sidebar draws it exactly like a healthy one — you find out by clicking it and seeing
+     an empty right-hand edge.
+   * which checks have the worst uptime. You cannot sort dots.
+
+   So: one row per series, sortable, with the sample count, the uptime, when the last sample
+   landed and what it said. Clicking a row selects that series and goes back to the chart,
+   which is what you were going to do next anyway.
+   ================================================================ #}
+
+let _hInvSort = 'uptime';     // uptime | module | label | count | last
+let _hInvDir  = 'asc';        // worst-first for uptime, which is the reason to open this
+
+// The columns, declared like every other table in the panel so they get the same machinery:
+// drag to reorder, drag the edge to resize, double-click to fit. `resizable: false` means the
+// column sizes itself to its content and is not hand-resizable — right for a number, a
+// percentage and a short age, wrong for the two name columns that hold the long strings.
+const _HINV_COLS = [
+    { id: 'module', label: () => t('col_module'),      sortKey: 'module', resizable: true  },
+    { id: 'label',  label: () => t('hist_col_series'), sortKey: 'label',  resizable: true  },
+    { id: 'count',  label: () => t('hist_col_points'), sortKey: 'count',  resizable: false, cls: 'text-end' },
+    { id: 'uptime', label: () => t('hist_col_uptime'), sortKey: 'uptime', resizable: false, cls: 'text-end' },
+    { id: 'last',   label: () => t('hist_col_last'),   sortKey: 'last',   resizable: false },
+    { id: 'value',  label: () => t('hist_col_value'),  sortKey: null,     resizable: false },
+];
+const _HINV_ORDER_KEY = 'ss_history_inv_col_order';
+const _HINV_W_KEY     = 'ss_history_inv_col_w';
+
+let _hInvOrder = (() => {
+    try {
+        const s = JSON.parse(localStorage.getItem(_HINV_ORDER_KEY) || 'null');
+        if (Array.isArray(s)) return s;
+    } catch (_) {}
+    return _HINV_COLS.map(c => c.id);
+})();
+function _hInvSaveOrder() { localStorage.setItem(_HINV_ORDER_KEY, JSON.stringify(_hInvOrder)); }
+function _hInvWidths() { try { return JSON.parse(localStorage.getItem(_HINV_W_KEY) || '{}'); } catch (_) { return {}; } }
+
+/** The columns in the user's order, dropping ids from an older build and appending ones it
+ *  has never seen — a saved order must never be able to hide a column that exists. */
+function _hInvOrdered() {
+    const known = new Set(_HINV_COLS.map(c => c.id));
+    _HINV_COLS.forEach(c => { if (!_hInvOrder.includes(c.id)) _hInvOrder.push(c.id); });
+    _hInvOrder = _hInvOrder.filter(id => known.has(id));
+    return _hInvOrder.map(id => _HINV_COLS.find(c => c.id === id));
+}
+
+function _hInvSortBy(col) {
+    if (_hInvSort === col) _hInvDir = _hInvDir === 'asc' ? 'desc' : 'asc';
+    else { _hInvSort = col; _hInvDir = (col === 'uptime') ? 'asc' : 'desc'; }
+    _historyRenderInventory();
+}
+
+function _hInvValue(s, col) {
+    switch (col) {
+        case 'module': return (s.pretty_name || s.module || '').toLowerCase();
+        case 'label':  return (s.label || s.key || '').toLowerCase();
+        case 'count':  return s.count || 0;
+        case 'last':   return s.last_ts || 0;
+        default:       return typeof s.uptime === 'number' ? s.uptime : -1;
+    }
+}
+
+function _historyRenderInventory() {
+    const el = document.getElementById('history-inventory');
+    if (!el) return;
+    const rows = _historyFilteredIndex().slice().sort((a, b) => {
+        const va = _hInvValue(a, _hInvSort), vb = _hInvValue(b, _hInvSort);
+        const c = (typeof va === 'number' && typeof vb === 'number')
+            ? (va - vb) : String(va).localeCompare(String(vb));
+        return _hInvDir === 'asc' ? c : -c;
+    });
+    if (!rows.length) {
+        el.innerHTML = `<div class="text-center text-muted py-5">
+            <i class="bi bi-graph-up ss-empty-icon"></i>
+            <span>${esc(t('history_empty'))}</span></div>`;
+        return;
+    }
+    const stale = rows.filter(_historyIsStale).length;
+    const points = rows.reduce((n, s) => n + (s.count || 0), 0);
+    const cols = _hInvOrdered();
+    const cw = _hInvWidths();
+    const thRow = cols.map(c => {
+        const inner = c.sortKey
+            ? _thSortInner(c.label(), c.sortKey, _hInvSort, _hInvDir, '_hInvSortBy')
+            : `<span class="small">${esc(c.label())}</span>`;
+        const extra = c.cls ? ' ' + c.cls : '';
+        // Content-fit columns get width:1% + nowrap, which is how every other table in the
+        // panel makes a column shrink to its content and leave the rest of the width to the
+        // flexible ones. Without it the browser shares the width evenly and the two name
+        // columns end up as narrow as the number beside them.
+        return c.resizable === false
+            ? `<th class="ss-th ss-th-fit${extra}" data-col="${c.id}" draggable="true" style="width:1%;white-space:nowrap">${inner}</th>`
+            : `<th class="ss-th ss-th-resizable${extra}" data-col="${c.id}" draggable="true"${cw[c.id] ? ` style="width:${cw[c.id]}"` : ''}>${inner}</th>`;
+    }).join('');
+    // Header and chips from core/_utils.html — the same strip every summary in the panel draws.
+    el.innerHTML = `${_summaryHeader(`
+            ${_summaryChip('bi-graph-up', t('history_series'), rows.length)}
+            ${_summaryChip('bi-database', t('hist_col_points'), points)}
+            ${stale ? _summaryChip('bi-hourglass-bottom', t('hist_stale'), stale, 'text-bg-warning') : ''}
+            <span class="text-muted small">${esc(t('hist_stale_hint'))}</span>`)}
+        <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0 ss-table" id="history-inv-table">
+            <thead class="ss-thead"><tr>${thRow}</tr></thead>
+            <tbody>${rows.map(s => _hInvRow(s, cols)).join('')}</tbody>
+        </table></div>`;
+    // Reorder / resize / double-click-to-fit, the shared implementation every list table uses.
+    setTimeout(() => _attachColFeatures('history-inv-table',
+        () => _hInvOrder, o => { _hInvOrder = o; }, _hInvSaveOrder, _historyRenderInventory,
+        (col, w) => { const m = _hInvWidths(); m[col] = w; localStorage.setItem(_HINV_W_KEY, JSON.stringify(m)); }), 0);
+}
+
+/** One cell, by column id — so the row follows whatever order the user dragged the headers
+ *  into. A row that built its cells in a fixed order would put the values under the wrong
+ *  titles the moment a column moved. */
+function _hInvCell(s, colId) {
+    const up = typeof s.uptime === 'number' ? s.uptime : null;
+    switch (colId) {
+        // The two flexible columns clip with the panel's own idiom (`ss-td-ellipsis` sets
+        // max-width:0, which is what makes `text-truncate` do anything inside a table cell).
+        // Without it a long series label pushes the column wider than the width the user
+        // dragged it to, which is half of "the width does not adjust".
+        case 'module': return `<td class="text-truncate ss-td-ellipsis" title="${escAttr(s.pretty_name || s.module)}">${esc(s.pretty_name || s.module)}</td>`;
+        case 'label':  return `<td class="text-truncate ss-td-ellipsis" title="${escAttr(s.label || s.key)}">${esc(s.label || s.key)}</td>`;
+        case 'count':  return `<td class="text-end text-muted">${s.count || 0}</td>`;
+        case 'uptime': return `<td class="text-end">${up === null
+            ? '<span class="text-muted">—</span>'
+            : `<span class="badge text-bg-${_historyUptimeClass(up)}">${up}%</span>`}</td>`;
+        case 'last':   return `<td class="text-nowrap" title="${escAttr(_historyLastWhen(s))}">
+            ${_historyIsStale(s) ? `<span class="badge text-bg-warning fw-normal me-1"><i class="bi bi-hourglass-bottom me-1"></i>${esc(t('hist_stale'))}</span>` : ''}
+            <span class="text-muted ss-fs-3">${esc(_historyAgeText(s))}</span></td>`;
+        case 'value':  {
+            const val = _historyLastVal(s);
+            return `<td class="text-nowrap ss-fs-3">${val !== null ? val : '<span class="text-muted">—</span>'}</td>`;
+        }
+        default:       return '<td></td>';
+    }
+}
+
+function _hInvRow(s, cols) {
+    // The whole row opens the chart: this is a list you read to decide what to look at, and
+    // making the user find a small link at the end of the row would add a step to the only
+    // thing anybody does from here.
+    const cells = cols.map(c => {
+        const td = _hInvCell(s, c.id);
+        // `data-fit` marks the cells of a content-fit column, which is what the shared
+        // _applyFitCols keeps from stretching.
+        return c.resizable === false ? td.replace('<td', '<td data-fit') : td;
+    }).join('');
+    return `<tr role="button" style="cursor:pointer"
+        data-hmod="${escAttr(s.module)}" data-hkey="${escAttr(s.key)}"
+        onclick="_historyOpenFromInventory(this.dataset.hmod, this.dataset.hkey)">
+        ${cells}
+    </tr>`;
+}
+
+/** Open a series from the inventory: select it, go back to the chart, draw it. Selecting
+ *  without switching would leave the click looking like it did nothing. */
+function _historyOpenFromInventory(mod, key) {
+    const s = _historyIndex.find(x => x.module === mod && x.key === key);
+    _historyMod = mod;
+    _historyKey = key;
+    _historyUid = s ? (s.item_uid || null) : null;
+    try {
+        localStorage.setItem(_HLS_MOD, mod);
+        localStorage.setItem(_HLS_KEY, key);
+    } catch (_) {}
+    // The series list groups by module and this one may be in a collapsed group — expand it
+    // so the chart's own sidebar shows what it is drawing.
+    _historyCollapsed.delete(mod);
+    _historySaveCollapsed();
+    setHistoryView('chart');
+    _historyScrollToActive();
+}

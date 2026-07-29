@@ -1,0 +1,30 @@
+{# ================================================================
+   Clusters — cards: a cluster as one object.
+
+   The table needs the Members column turned on to tell you how many hosts a cluster has,
+   and even then it is a number. Here the member hosts are named, which is the difference
+   between "3" and "the three that are all in the same rack".
+
+   Same page, same order, same filters as the table.
+   ================================================================ #}
+
+function _clViewCards(rows) {
+    return _cardGrid(rows.map(row => {
+        const members = _clMembers(row);
+        const alone = _clIsAlone(row);
+        // Named, not counted — and cut, because a twelve-host cluster would otherwise make
+        // its card twice the height of every other one.
+        const chips = _chipList(members, m => _chipText(m.name, 'bi-hdd-network'), 6, '');
+        return _entityCard({
+            icon: 'bi-diagram-3', accentClass: 'blue',
+            title: `<span class="fw-semibold ss-fs-4">${esc(row.name || row.key)}</span>`,
+            badges: `${_clStateBadge(row)}
+                ${alone ? `<span class="badge text-bg-warning fw-normal"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('cl_alone'))}</span>` : ''}
+                ${row.item.enabled === false ? `<span class="badge bg-secondary fw-normal ss-fs-1">${esc(t('status_disabled'))}</span>` : ''}`,
+            subtitle: `${esc(modulePrettyName(row.mod, {}))}${row.item.description ? ' · ' + esc(row.item.description) : ''}`,
+            chips: chips.trim() || `<span class="text-muted small">${esc(t('cl_no_members'))}</span>`,
+            actions: _clActionsHtml(row),
+            dimmed: row.item.enabled === false,
+        });
+    }).join(''));
+}

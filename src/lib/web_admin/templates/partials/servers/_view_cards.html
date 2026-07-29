@@ -1,0 +1,39 @@
+{# ================================================================
+   Servers — cards: a host as one object instead of a row of columns.
+
+   The table can show everything about a host, but only if you turn on eight columns and
+   then read them left to right. A card holds the same facts in the shape you think about a
+   machine in: what it is called and where it lives, what kind it is, how it is doing, and
+   what is watching it.
+
+   Same page, same order, same filters as the table — this is a shape, not a different set.
+   ================================================================ #}
+
+function _srvViewCards(hosts, ctx) {
+    return _cardGrid(hosts.map(h => {
+        const clusters = (typeof _hostClusterMemberships === 'function') ? _hostClusterMemberships(h.uid) : [];
+        const chips = [
+            _srvModulesPill(h),
+            (h.os && h.os !== 'auto')
+                ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${esc(_osLabel(h.os))}</span>` : '',
+            ...clusters.map(m => `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+                    <i class="bi bi-diagram-3 me-1"></i>${esc(m.label)}</span>`),
+            ...(h.tags || []).map(tg => `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${esc(tg)}</span>`),
+        ].join(' ');
+        return _entityCard({
+            icon: h.kind === 'remote' ? 'bi-hdd-network' : 'bi-pc-display', accentClass: 'teal',
+            selected: _selectedServers.has(h.uid),
+            toggle: ctx.canDelete ? `_serversToggleOne(${jsStr(h.uid)}, this.checked)` : '',
+            title: `<span class="fw-semibold ss-fs-4"${h.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(h.name)}</span>`,
+            // The status badge is the shared one: "maintenance" is orange in the table and
+            // must be orange here, or the same host would look like two different states in
+            // two views of the same page.
+            badges: `${_srvStatusBadge(h)}${h.virtual
+                ? ` <span class="badge text-bg-info" title="${escAttr(t('host_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</span>` : ''}`,
+            subtitle: `<code>${esc(h.address || '')}</code>${h.description ? ' · ' + esc(h.description) : ''}`,
+            chips,
+            actions: _srvActionsHtml(h, ctx),
+            dimmed: !!h.maintenance,
+        });
+    }).join(''));
+}

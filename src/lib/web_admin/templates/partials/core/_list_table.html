@@ -225,8 +225,16 @@ function createListTable(spec) {
 
         const total = rows.length;
         const sel = st.selected ? st.selected() : null;
-        // Optional alternate body modes (e.g. sessions card/table toggle).
+        // Optional alternate body modes: 'cards' (an alternate body over the same PAGE — the
+        // sessions/users/roles card grids) and 'summary' (a body that describes the whole
+        // filtered SET: it is handed every row, and the pagination bands are not drawn).
+        //
+        // The distinction is not cosmetic. A summary counts things — "4 hosts have no checks
+        // at all" — and counted over one page that number changes as you page through, which
+        // is worse than not counting. So the factory hands it everything and stops claiming
+        // there are pages.
         const mode = spec.bodyMode ? spec.bodyMode(ctx) : 'table';
+        const summary = mode === 'summary';
         const showChooser = spec.showChooser ? spec.showChooser(mode) : true;
 
         // Card header — shared by the empty and populated states.
@@ -272,14 +280,16 @@ function createListTable(spec) {
         const ps = st.pageSize.get() || total;
         const page = Math.max(1, Math.min(st.page.get(), Math.ceil(total / ps)));
         st.page.set(page);
-        const pageRows = rows.slice((page - 1) * ps, page * ps);
+        const pageRows = summary ? rows : rows.slice((page - 1) * ps, page * ps);
         st.currentPage.set(pageRows.map(r => spec.rowKey(r)));
 
         let h;
-        if (mode === 'cards' && spec.cardsBody) {
+        if (mode !== 'table' && spec.cardsBody) {
             // Alternate (non-table) body — e.g. the sessions card grid. Selection
             // checkboxes inside it call the same toggleOne; no columns/resize.
-            h = spec.cardsBody(pageRows, ctx);
+            // The third argument is every filtered row: a 'cards' body is looking at the
+            // page and can ignore it, a 'summary' body gets the same list twice on purpose.
+            h = spec.cardsBody(pageRows, ctx, rows);
         } else {
             // Ordered, visible columns.
             const knownIds = new Set(cols.map(co => co.id));
@@ -336,15 +346,20 @@ function createListTable(spec) {
             h += `</tbody></table>`;
         }
 
-        const pagination = _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
+        // A summary is not paginated, so it gets no bands: a "showing 1–25 of 60" over a body
+        // that is describing all 60 would be counting a different thing than the body is.
+        const pagination = summary ? ''
+            : _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
+        const band = pos => pagination
+            ? `<div class="ss-card-band ss-card-band-${pos}">${pagination}</div>` : '';
         host.innerHTML = `<div class="${cardClass} ss-vfill">
         ${accentDiv}
         ${headerHtml}
-        <div class="ss-card-band ss-card-band-top">${pagination}</div>
+        ${band('top')}
         <div class="ss-vscroll">${h}</div>
-        <div class="ss-card-band ss-card-band-bottom">${pagination}</div>
+        ${band('bottom')}
     </div>`;
-        if (mode !== 'cards') setTimeout(initFeatures, 0);
+        if (mode === 'table') setTimeout(initFeatures, 0);
         } catch (err) {
             // Never leave the tab blank on a render/prepare error: log it and show a
             // minimal empty state (e.g. a table whose emptyBody/prepare threw).

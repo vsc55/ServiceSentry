@@ -1,0 +1,99 @@
+{# ================================================================
+   Access — the graph the four sub-sections all describe from a different corner.
+
+   Users, Roles and Groups are three tables over ONE structure: a user holds a role directly,
+   belongs to groups, and a group grants roles. Each table shows its own row and the edge
+   leaving it, which means the composition — what a user can actually DO — is written down
+   nowhere. The Users table has a role column; a user whose column says "viewer" and who sits
+   in a group mapped to admin is an admin, and the table says viewer.
+
+   That is not a display quirk. It is the question an access review asks, and the panel could
+   not answer it: you had to open Groups, read the member lists, and hold it in your head.
+
+   So the helpers below compute the graph once, in one place, and the three views built on it
+   (Users → access, Roles → usage, Groups → access) read the SAME answers. A view resolving
+   membership itself would be free to disagree with the one beside it about who is an admin.
+
+   One rule from the backend is reproduced here and matters: a DISABLED group grants nothing
+   (`_is_admin_requester` in lib/core/permissions/mixin.py checks `enabled`). Showing its
+   roles as if they applied would report access that does not exist — the opposite of the
+   error an access review can afford.
+   ================================================================ #}
+
+/** The display name of a role reference (uid or key), falling back to the reference itself so
+ *  a role deleted while still referenced is visible rather than blank. */
+function _accRoleName(r) {
+    const rd = rolesData[r] || {};
+    return rd.name || (typeof ROLE_LABELS !== 'undefined' ? ROLE_LABELS[rd.key || r] : '') || r;
+}
+function _accRoleBadge(r) {
+    return `<span class="badge ${roleBadgeClass(r)}">${esc(_accRoleName(r))}</span>`;
+}
+/** True for the role that can do everything. Identified by its built-in key rather than by
+ *  its label, which an administrator may rename. */
+function _accIsAdminRole(r) {
+    const rd = rolesData[r] || {};
+    return (rd.key || r) === 'admin';
+}
+
+/** The groups a user belongs to. Membership is published per group (`members`), so this is
+ *  the one place that walks it — every view asking the same question gets the same answer. */
+function _accGroupsOf(username) {
+    return Object.entries(groupsData || {})
+        .filter(([, g]) => (g.members || []).includes(username))
+        .map(([key, g]) => ({ key, ...g }));
+}
+
+/** Roles a user holds THROUGH groups: `Map(role → [group names])`.
+ *
+ *  Disabled groups are skipped, because the backend skips them: reporting access that the
+ *  server would refuse is the one direction an access review must not be wrong in. */
+function _accRolesViaGroups(username) {
+    const out = new Map();
+    for (const g of _accGroupsOf(username)) {
+        if (g.enabled === false) continue;
+        for (const r of (g.roles || [])) {
+            if (!out.has(r)) out.set(r, []);
+            out.get(r).push(g.name || g.key);
+        }
+    }
+    return out;
+}
+
+/** Everything a user effectively holds: the direct role, the ones their groups add, and
+ *  whether the total reaches admin. `extra` is what the Users table does NOT show. */
+function _accEffective(username) {
+    const u = (usersData || {})[username] || {};
+    const direct = u.role || 'viewer';
+    const via = _accRolesViaGroups(username);
+    const extra = [...via.keys()].filter(r => r !== direct);
+    return {
+        direct, via, extra,
+        adminDirect: _accIsAdminRole(direct),
+        adminViaGroup: [...via.keys()].some(_accIsAdminRole),
+    };
+}
+
+/** Who holds a role directly. */
+function _accUsersOfRole(role) {
+    return Object.keys(usersData || {}).filter(u => (usersData[u].role || 'viewer') === role);
+}
+/** Which groups grant a role, and whether each one actually applies (a disabled group is
+ *  listed — it IS configured that way — but marked, because it grants nothing today). */
+function _accGroupsWithRole(role) {
+    return Object.entries(groupsData || {})
+        .filter(([, g]) => (g.roles || []).includes(role))
+        .map(([key, g]) => ({ key, name: g.name || key, enabled: g.enabled !== false,
+                              members: (g.members || []).length }));
+}
+
+// The summary header and its counted chips are the shared ones (core/_utils.html): every
+// section that grew a summary had written the same strip, and seven copies of one line of
+// markup is seven places for the padding to end up different.
+
+/** "Nothing holds this" — the shared way of drawing a dead edge of the graph: a role nobody
+ *  has, a group with no members. Not an error, and not nothing either: it is configuration
+ *  that does not do anything, which is worth seeing before an audit asks. */
+function _accUnusedBadge(key) {
+    return `<span class="badge text-bg-warning fw-normal"><i class="bi bi-slash-circle me-1"></i>${esc(t(key))}</span>`;
+}

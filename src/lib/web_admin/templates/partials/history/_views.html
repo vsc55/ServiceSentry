@@ -1,0 +1,117 @@
+{# ================================================================
+   History — the part both views share.
+
+   This section is a chart with a series list beside it, and the chart is the point: one
+   series at a time, or several overlaid. What it cannot do is say anything about the series
+   as a SET, and the sidebar hides that by design — it is a navigation list, so it shows
+   names and a coloured dot and nothing you could compare.
+
+   Two questions live in the index it already loads and are answered nowhere:
+
+   * which series stopped recording. A check that was removed, renamed or has been failing to
+     produce a sample leaves its history behind, and the sidebar draws it exactly like a
+     healthy one. You only find out by clicking it and reading an empty right-hand edge.
+   * which checks have poor uptime. It is in every entry (`uptime`), the sidebar turns it
+     into a three-colour dot, and "which of my hundred checks are the worst" is a question
+     the dot cannot answer because you cannot sort dots.
+
+   So the second view is an INVENTORY: one row per series with its sample count, uptime, last
+   sample and last value, sortable. It is a reading surface — clicking a row goes back to the
+   chart with that series selected, which is what you wanted to do next anyway.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// Two views, and the difference is structural rather than cosmetic: the chart view is a
+// sidebar plus a drawing area, the inventory replaces both with one table. `chartTools` says
+// whether the header's chart controls (field, range, export, compare) mean anything.
+const HISTORY_VIEWS = [
+    { id: 'chart',     label_key: 'hist_view_chart',     icon: 'bi-graph-up', chartTools: true  },
+    { id: 'inventory', label_key: 'hist_view_inventory', icon: 'bi-table',    chartTools: false },
+];
+const _HIST_VIEW_KEY = 'ss_history_view';
+
+let _historyView = (() => {
+    try {
+        const s = localStorage.getItem(_HIST_VIEW_KEY);
+        return HISTORY_VIEWS.some(v => v.id === s) ? s : 'chart';
+    } catch (_) { return 'chart'; }
+})();
+
+function _historyViewId() { return _historyView; }
+function _historyIsChart() { return _historyView === 'chart'; }
+
+/** Switching rebuilds the body, because the two views are different layouts rather than two
+ *  renderings of one. The auto-refresh timer is stopped on the way out of the chart: it
+ *  exists to redraw a chart that is no longer on screen, and a page left on the inventory
+ *  would keep polling for nothing. */
+function setHistoryView(id) {
+    if (!HISTORY_VIEWS.some(v => v.id === id)) return;
+    _historyView = id;
+    try { localStorage.setItem(_HIST_VIEW_KEY, id); } catch (_) {}
+    _historyStopTimer();
+    _historyRenderLayout();
+    _historyRestoreAfterLayout();
+}
+
+function _historyViewSwitcher() {
+    return _viewSwitcher(HISTORY_VIEWS, _historyViewId(), 'setHistoryView', 'view_mode');
+}
+
+/** Put the chart back the way the section found it after a layout rebuild: the selected
+ *  series redrawn with its toolbar, or the placeholder. The inventory needs neither. */
+function _historyRestoreAfterLayout() {
+    if (!_historyIsChart()) return;
+    if (_historyMod && _historyKey) {
+        _historyShowToolbar();
+        _historyLoadChart();
+        setHistoryAutoRefresh(parseInt(localStorage.getItem(_HLS_AUTO) || '0', 10) || 0);
+    } else {
+        _historyShowPlaceholder();
+    }
+}
+
+// ── Facts both views read ────────────────────────────────────────────────────
+// When a series counts as having stopped. There is no per-check interval in the index, so
+// this is a stated threshold rather than a derived one: a day without a single sample is
+// long enough that no ordinary schedule explains it, and short enough to still be news.
+// It is written on screen next to the count for exactly that reason — a "stale" badge whose
+// rule nobody can see is a badge nobody can trust.
+const _H_STALE_SECS = 24 * 3600;
+
+function _historyLastAge(s) {
+    if (!s || !s.last_ts) return null;
+    return Math.max(0, Math.floor(Date.now() / 1000) - s.last_ts);
+}
+function _historyIsStale(s) {
+    const age = _historyLastAge(s);
+    return age === null || age > _H_STALE_SECS;
+}
+
+/** An age as "3h", "2d" — the exact instant is in the row's title attribute. A series that
+ *  never recorded anything is not "very old": it has no last sample at all. */
+function _historyAgeText(s) {
+    const age = _historyLastAge(s);
+    if (age === null) return '—';
+    if (age < 90) return `${age}s`;
+    if (age < 5400) return `${Math.round(age / 60)}m`;
+    if (age < 172800) return `${Math.round(age / 3600)}h`;
+    return `${Math.round(age / 86400)}d`;
+}
+function _historyLastWhen(s) {
+    return (s && s.last_ts) ? new Date(s.last_ts * 1000).toLocaleString() : '';
+}
+
+/** The uptime bands the sidebar dot already uses, kept in one place so the table and the dot
+ *  cannot disagree about what counts as healthy. */
+function _historyUptimeClass(u) {
+    return (u >= 95) ? 'success' : (u >= 80) ? 'warning' : 'danger';
+}
+
+/** The series the current filter leaves standing — the same filter the sidebar uses, so
+ *  typing in one view and switching to the other does not silently change the set. */
+function _historyFilteredIndex() {
+    const f = _historyFilter;
+    if (!f) return _historyIndex.slice();
+    return _historyIndex.filter(s =>
+        ((s.pretty_name || s.module) + ' ' + (s.label || '') + ' ' + s.key).toLowerCase().includes(f));
+}

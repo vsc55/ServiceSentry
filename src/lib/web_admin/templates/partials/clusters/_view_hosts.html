@@ -1,0 +1,67 @@
+{# ================================================================
+   Clusters — by host: which machines are actually carrying the redundancy.
+
+   Every cluster row looks redundant on its own. The two ways that is false are both facts
+   about the intersection of the rows, which is why no per-cluster view can show them:
+
+   * one host carrying several clusters. Each of them says "3 members" and they are the same
+     three, so a single reboot takes out all of them at once. Here that host is one line with
+     several clusters on it, and it sorts to the top.
+   * a cluster with one member. A failover pair with nothing to fail over to — counted in the
+     header rather than hidden in a Members column that reads "1" the same way it reads "3".
+
+   Pivoted this way the subject is the host and the cluster becomes one of its attributes, so
+   there are no per-cluster actions here: those act on a CLUSTER, and this page is not showing
+   clusters. Offering them per row would invite pressing them against the row in front of you.
+   ================================================================ #}
+
+function _clViewHosts(rows) {
+    if (!rows.length) return '';
+    const by = new Map();          // host uid → {name, clusters: [row]}
+    let orphan = 0;                // clusters naming no host at all
+    for (const row of rows) {
+        const members = _clMembers(row);
+        if (!members.length) { orphan++; continue; }
+        for (const m of members) {
+            let h = by.get(m.uid);
+            if (!h) { h = { uid: m.uid, name: m.name, clusters: [] }; by.set(m.uid, h); }
+            h.clusters.push(row);
+        }
+    }
+    // Most-loaded host first: the machine several clusters depend on is the one this view
+    // was opened for, and it is the one whose reboot is a decision rather than a chore.
+    const hosts = [...by.values()].sort((a, b) =>
+        (b.clusters.length - a.clusters.length) || a.name.localeCompare(b.name));
+    const alone = rows.filter(_clIsAlone).length;
+    const shared = hosts.filter(h => h.clusters.length > 1).length;
+    const chips = `${_summaryChip('bi-diagram-3', t('cl_count_clusters'), rows.length)}
+        ${_summaryChip('bi-hdd-network', t('cl_count_hosts'), hosts.length)}
+        ${alone ? _summaryChip('bi-exclamation-triangle', t('cl_count_alone'), alone, 'text-bg-warning') : ''}
+        ${shared ? _summaryChip('bi-layers', t('cl_count_shared'), shared) : ''}
+        ${orphan ? _summaryChip('bi-slash-circle', t('cl_count_orphan'), orphan, 'text-bg-warning') : ''}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('col_host_name'))}</th>
+                <th class="text-end">${esc(t('cl_col_clusters'))}</th>
+                <th>${esc(t('cl_col_in_clusters'))}</th>
+            </tr></thead>
+            <tbody>${hosts.map(_clHostRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _clHostRow(h) {
+    const host = hostsData[h.uid] || {};
+    return `<tr>
+        <td class="text-nowrap"><span class="fw-semibold">${esc(h.name)}</span>
+            ${host.address ? ` <code class="text-muted ss-fs-2">${esc(host.address)}</code>` : ''}
+            ${host.maintenance ? ` <span class="badge fw-normal ss-fs-1" style="background-color:#fd7e14;color:#fff">${esc(t('host_status_maintenance'))}</span>` : ''}</td>
+        <td class="text-end ${h.clusters.length > 1 ? 'fw-semibold' : 'text-muted'}">${h.clusters.length}</td>
+        <td><span class="d-flex flex-wrap gap-1">${h.clusters.map(row =>
+            `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+                ${_clIsAlone(row) ? '<i class="bi bi-exclamation-triangle me-1 text-warning-emphasis"></i>' : ''}
+                ${esc(row.name || row.key)}</span>`).join(' ')}</span></td>
+    </tr>`;
+}

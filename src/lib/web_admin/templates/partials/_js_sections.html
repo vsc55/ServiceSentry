@@ -14,6 +14,9 @@
 {% include "partials/core/_field_render.html" %}
 {% include "partials/core/_collection_render.html" %}
 {% include "partials/core/_list_table.html" %}
+{# The auto-refresh split button + its toolbar — six sections draw it, so it is core,
+   not a thing hiding inside whichever section happened to write it first. #}
+{% include "partials/core/_auto_refresh.html" %}
 {# Shared "are these permissions actually granted?" checklist — used by the credentials
    editor and by the OIDC/SAML2 sections of Configuration. #}
 {% include "partials/core/_perm_check.html" %}
@@ -48,10 +51,14 @@
    Exposed-services config card lives in partials/cfg/_ipban.html).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/ipban/_views.html" %}
 {% include "partials/ipban/_render.html" %}
 {% include "partials/ipban/_bans.html" %}
 {% include "partials/ipban/_history.html" %}
 {% include "partials/ipban/_whitelist.html" %}
+{% include "partials/ipban/_view_networks.html" %}
+{% include "partials/ipban/_view_ips.html" %}
+{% include "partials/ipban/_view_reach.html" %}
 {# ================================================================
    Status tab — check cards and the scheduler/daemon panel.
    Thin orchestrator: includes sub-partials in order.
@@ -81,18 +88,26 @@
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
 {% include "partials/account/_render.html" %}
+{# Access — the user/group/role graph the four sub-sections all describe (must load before them). #}
+{% include "partials/access/_views.html" %}
 {# ================================================================
    Users tab — user table, create/edit/delete, reset password.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/users/_views.html" %}
 {% include "partials/users/_list.html" %}
+{% include "partials/users/_view_access.html" %}
 {% include "partials/users/_modal.html" %}
 {% include "partials/users/_password.html" %}
 {# ================================================================
    Servers tab — host registry (list, modal, monitoring, checks, save).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/servers/_views.html" %}
 {% include "partials/servers/_list.html" %}
+{% include "partials/servers/_view_cards.html" %}
+{% include "partials/servers/_view_status.html" %}
+{% include "partials/servers/_view_coverage.html" %}
 {% include "partials/servers/_modal.html" %}
 {% include "partials/servers/_monitoring.html" %}
 {% include "partials/servers/_checks.html" %}
@@ -101,7 +116,10 @@
    Cluster tab — multi-bind checks (table + edit modal).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/clusters/_views.html" %}
 {% include "partials/clusters/_list.html" %}
+{% include "partials/clusters/_view_cards.html" %}
+{% include "partials/clusters/_view_hosts.html" %}
 {% include "partials/clusters/_modal.html" %}
 {# ================================================================
    Credentials tab — reusable SSH identities (picker, list, modal).
@@ -124,13 +142,17 @@
    Sessions tab — active sessions list and revoke actions.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/sessions/_views.html" %}
 {% include "partials/sessions/_list.html" %}
+{% include "partials/sessions/_view_users.html" %}
 {% include "partials/sessions/_actions.html" %}
 {# ================================================================
    Roles tab — list, create, edit (incl. built-in), delete roles.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/roles/_views.html" %}
 {% include "partials/roles/_list.html" %}
+{% include "partials/roles/_view_usage.html" %}
 {% include "partials/roles/_modal.html" %}
 {# ================================================================
    Permissions section (Access › Permissions) — the ONE place permissions are assigned
@@ -146,7 +168,9 @@
    Groups tab — list, create, edit, delete groups.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/groups/_views.html" %}
 {% include "partials/groups/_list.html" %}
+{% include "partials/groups/_view_access.html" %}
 {% include "partials/groups/_modal.html" %}
 {# ================================================================
    Audit log tab — event history table.
@@ -164,8 +188,10 @@
    History tab — series list, range/export, compare and chart drawing.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{% include "partials/history/_views.html" %}
 {% include "partials/history/_render.html" %}
 {% include "partials/history/_series.html" %}
+{% include "partials/history/_view_inventory.html" %}
 {% include "partials/history/_export.html" %}
 {% include "partials/history/_compare.html" %}
 {% include "partials/history/_chart.html" %}
@@ -174,7 +200,10 @@
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
 {% include "partials/syslog/_columns.html" %}
+{% include "partials/syslog/_views.html" %}
 {% include "partials/syslog/_render.html" %}
+{% include "partials/syslog/_view_stream.html" %}
+{% include "partials/syslog/_view_patterns.html" %}
 {% include "partials/syslog/_drops.html" %}
 {% include "partials/syslog/_poll.html" %}
 {# ================================================================

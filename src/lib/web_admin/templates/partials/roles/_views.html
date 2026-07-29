@@ -1,0 +1,16 @@
+{# ================================================================
+   Roles — the view registry. Table and cards were already here; "usage" is the new one
+   (roles/_view_usage.html).
+   ================================================================ #}
+
+const ROLE_VIEWS = [
+    { id: 'table', label_key: 'rol_view_table', icon: 'bi-table',        render: null,              mode: 'table'   },
+    { id: 'card',  label_key: 'rol_view_cards', icon: 'bi-grid-3x3-gap', render: '_rolesCardsBody', mode: 'cards'   },
+    { id: 'usage', label_key: 'rol_view_usage', icon: 'bi-people',       render: '_rolViewUsage',   mode: 'summary' },
+];
+
+const _rolView = createViewState('ss_roles_view', ROLE_VIEWS, () => {
+    _persistTableConfig();
+    renderRoles();
+});
+function setRolesView(id) { _rolView.set(id); }

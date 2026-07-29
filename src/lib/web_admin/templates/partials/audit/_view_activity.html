@@ -44,11 +44,9 @@ function _auditViewActivity(entries) {
             if (d.hours[h] > max) { max = d.hours[h]; peak = { d, h }; }
         }
     }
-    const chips = `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
-            <i class="bi bi-calendar3 me-1"></i>${esc(t('audit_count_days'))} <span class="fw-semibold">${all.length}</span></span>
-        ${peak ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
-            <i class="bi bi-graph-up me-1"></i>${esc(t('audit_peak'))}
-            <span class="fw-semibold">${esc(peak.d.label)} ${String(peak.h).padStart(2, '0')}:00 · ${max}</span></span>` : ''}`;
+    const chips = `${_summaryChip('bi-calendar3', t('audit_count_days'), all.length)}
+        ${peak ? _summaryChip('bi-graph-up', t('audit_peak'),
+                              `${peak.d.label} ${String(peak.h).padStart(2, '0')}:00 · ${max}`) : ''}`;
 
     return `<div>
         ${_auditSummaryHeader(entries, chips)}

@@ -1,0 +1,73 @@
+{# ================================================================
+   fail2ban › Ban history — by address.
+
+   The history is a list of events, and what is asked of it is a repeat: who keeps coming
+   back after the ban expires. Sorted by time, an address banned six times is six rows
+   scattered through the log — each one reading like a first offence — and the escalation
+   that fail2ban is actually doing (longer bans, higher level) is invisible.
+
+   Counted per address it is one line: how many times it was banned, how far the level got,
+   when it started and when it last happened. An address at the top of this list is one to
+   put on a permanent range ban; an address with one entry is the system working.
+
+   It counts the events the FILTERS left standing, not the page, and says so implicitly by
+   stating the total beside the address count — the history table is client-side, so that is
+   the whole loaded history rather than a window into it.
+   ================================================================ #}
+
+function _ipbHistByIp(events) {
+    if (!events.length) return '';
+    const by = new Map();
+    for (const e of events) {
+        const ip = e.ip || '—';
+        let a = by.get(ip);
+        if (!a) { a = { ip, net: _ipbNetwork(ip), n: 0, bans: 0, unbans: 0, level: 0,
+                        first: null, last: null, reasons: new Set() }; by.set(ip, a); }
+        a.n++;
+        // `banned` and `unbanned` are the two ends of one incident; counting only the bans
+        // is what makes "six times" mean six incidents rather than twelve rows.
+        if (e.event === 'unbanned') a.unbans++; else a.bans++;
+        const lvl = Number(e.level || 0);
+        if (lvl > a.level) a.level = lvl;
+        const ts = e.ts || 0;
+        if (a.first === null || ts < a.first) a.first = ts;
+        if (a.last === null || ts > a.last) a.last = ts;
+        if (e.reason) a.reasons.add(_ipbanReason(e.reason));
+    }
+    // Most-banned first: the repeat offender is the reason this view exists.
+    const rows = [...by.values()].sort((x, y) => (y.bans - x.bans) || (y.last - x.last));
+    const repeat = rows.filter(r => r.bans > 1).length;
+    const chips = `${_summaryChip('bi-clock-history', t('ipban_hist_title'), events.length)}
+        ${_summaryChip('bi-hdd-network', t('ipb_col_addresses'), rows.length)}
+        ${repeat ? _summaryChip('bi-arrow-repeat', t('ipb_count_repeat'), repeat, 'text-bg-warning') : ''}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('ipban_col_ip'))}</th>
+                <th>${esc(t('ipb_col_network'))}</th>
+                <th class="text-end">${esc(t('ipb_col_bans'))}</th>
+                <th class="text-end">${esc(t('ipb_col_max_level'))}</th>
+                <th>${esc(t('ipban_col_reason'))}</th>
+                <th class="text-nowrap">${esc(t('ipb_col_window'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_ipbIpRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _ipbIpRow(a) {
+    const when = ts => ts ? new Date(ts * 1000).toLocaleString() : '—';
+    const reasons = [...a.reasons];
+    return `<tr>
+        <td class="text-nowrap">${_ipbAddr(a.ip)}
+            ${a.bans > 1 ? `<span class="badge text-bg-warning fw-normal ms-1">${esc(t('ipb_repeat'))}</span>` : ''}</td>
+        <td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(a.net)}</code></td>
+        <td class="text-end fw-semibold">${a.bans}</td>
+        <td class="text-end text-muted">${a.level || '—'}</td>
+        <td class="text-truncate" title="${escAttr(reasons.join(' · '))}">
+            ${reasons.length ? esc(reasons.slice(0, 2).join(' · ')) : '<span class="text-muted">—</span>'}
+            ${reasons.length > 2 ? `<span class="text-muted small ms-1">+${reasons.length - 2}</span>` : ''}</td>
+        <td class="text-nowrap text-muted ss-fs-2">${esc(when(a.first))} → ${esc(when(a.last))}</td>
+    </tr>`;
+}

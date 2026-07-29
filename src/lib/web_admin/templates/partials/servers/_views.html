@@ -1,0 +1,163 @@
+{# ================================================================
+   Servers — the part every view shares.
+
+   The host registry is the one list where the rows are not the point: what you actually
+   want from it is a state of the fleet, and the table gives you that one host at a time.
+   Three questions it leaves on the floor:
+
+   * how is the fleet RIGHT NOW. There is a status column and you can sort by it, which
+     answers "which is the worst host" and never "how many are broken". Grouped by state the
+     answer is the first thing on screen, and an empty error group is itself the good news.
+   * which hosts are not actually being MONITORED. A host with no checks is registered and
+     watched by nothing; a host whose checks are all disabled is worse, because somebody
+     turned them off and the row still looks configured. Both read as ordinary rows in the
+     table — the modules column says "0/0" and "0/3" in the same grey pill — and both mean
+     the fleet is smaller than the list suggests.
+   * what a host IS, as one object rather than a row of columns: its address, kind, OS,
+     tags, clusters and check count together. That is the card view.
+
+   The last two are SUMMARIES: they are handed everything the filters left standing rather
+   than the page on screen, and they draw no pagination — a count over one page changes as
+   you page through it, which is worse than not counting.
+
+   What must NOT differ between views is what a host means: the status vocabulary, the
+   maintenance override that wins over it, and the ACTIONS. Servers is the section with
+   per-host permissions (`server.<uid>.edit`), so a view assembling its own buttons would be
+   a view that forgot somebody may edit exactly one host — the buttons are built in one place
+   and every view composes them.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time: the view files are concatenated after this
+// one. A null render means the factory's own table body. `mode` is what createListTable is
+// told: 'cards' is an alternate body over the same page, 'summary' gets every filtered row
+// and no pagination bands.
+const SERVER_VIEWS = [
+    { id: 'table',    label_key: 'srv_view_table',    icon: 'bi-table',        render: null,                mode: 'table'   },
+    { id: 'cards',    label_key: 'srv_view_cards',    icon: 'bi-grid-3x3-gap', render: '_srvViewCards',     mode: 'cards'   },
+    { id: 'status',   label_key: 'srv_view_status',   icon: 'bi-activity',     render: '_srvViewStatus',    mode: 'summary' },
+    { id: 'coverage', label_key: 'srv_view_coverage', icon: 'bi-puzzle',       render: '_srvViewCoverage',  mode: 'summary' },
+];
+const _SRV_VIEW_KEY = 'ss_servers_view';
+
+let _srvViewMode = (() => {
+    try {
+        const s = localStorage.getItem(_SRV_VIEW_KEY);
+        return SERVER_VIEWS.some(v => v.id === s) ? s : 'table';
+    } catch (_) { return 'table'; }
+})();
+
+function _srvViewId() { return _srvViewMode; }
+function _srvView()   { return SERVER_VIEWS.find(v => v.id === _srvViewMode) || SERVER_VIEWS[0]; }
+function _srvBodyMode() { return _srvView().mode; }
+
+/** Restore the saved view on login (the table config's `view` field). Unknown or absent
+ *  means the table — what a user who has never touched the switcher gets. */
+function _srvApplyView(id) {
+    _srvViewMode = SERVER_VIEWS.some(v => v.id === id) ? id : 'table';
+    try { localStorage.setItem(_SRV_VIEW_KEY, _srvViewMode); } catch (_) {}
+}
+
+/** Switching view redraws what is already loaded: every view reads the same `hostsData`,
+ *  and the fleet's status comes with it, so re-fetching would be a request that changes
+ *  nothing but the layout. */
+function setServersView(id) {
+    if (!SERVER_VIEWS.some(v => v.id === id)) return;
+    _srvViewMode = id;
+    try { localStorage.setItem(_SRV_VIEW_KEY, id); } catch (_) {}
+    _persistTableConfig();
+    // The summaries draw no checkboxes, so a selection carried into them would leave the
+    // bulk-delete bar armed over rows that are no longer on screen.
+    if (_srvView().mode === 'summary') _selectedServers.clear();
+    renderServers();
+}
+
+function _srvViewSwitcher() {
+    return _viewSwitcher(SERVER_VIEWS, _srvViewId(), 'setServersView', 'view_mode');
+}
+
+/** The non-table body. A 'cards' view is handed the page; a 'summary' the whole filtered
+ *  set — see the `summary` mode in createListTable. */
+function _srvViewBody(pageRows, ctx, allRows) {
+    const v = _srvView();
+    const fn = v.render ? window[v.render] : null;
+    if (!fn) return '';
+    return fn(v.mode === 'summary' ? allRows : pageRows, ctx);
+}
+
+// ── What a host means, decided once ──────────────────────────────────────────
+/** The action buttons — the ONE place the server permissions become controls, and the only
+ *  section where that is per host: `server.<uid>.edit` grants exactly one row. A view
+ *  building its own buttons would be a view that forgot the granular case exists. */
+function _srvActionsHtml(host, ctx) {
+    const canEdit = _canEditHost(host.uid);
+    const canDelete = _canDeleteHost(host.uid);
+    return `${canEdit ? `<button class="btn btn-sm btn-info py-0 px-1 me-1" onclick="testHostRow(${jsStr(host.uid)})"
+            title="${escAttr(t('host_test'))}"><i class="bi bi-play-circle"></i></button>` : ''}
+        <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1" onclick="openEditHostModal(${jsStr(host.uid)})"
+            title="${escAttr(canEdit ? t('host_edit') : t('host_view'))}"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>
+        ${ctx.canEdit ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="openCloneHostModal(${jsStr(host.uid)})"
+            title="${escAttr(t('host_clone'))}"><i class="bi bi-copy"></i></button>` : ''}
+        ${canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteHost(${jsStr(host.uid)})"
+            title="${escAttr(t('delete_tt') || t('delete') || 'Delete')}"><i class="bi bi-trash3"></i></button>` : ''}`;
+}
+
+// The states a host can be in, in the order they matter. Empty (no checks at all) is last
+// and is NOT a state of the host but the absence of one — it gets its own group rather than
+// being drawn as a fifth colour, because "we do not know" is not a shade of "fine".
+const _SRV_STATES = ['error', 'warning', 'maintenance', 'ok', ''];
+const _SRV_STATE_META = {
+    error:       { icon: 'bi-x-circle-fill',   key: 'host_status_error'       },
+    warning:     { icon: 'bi-hourglass-split', key: 'host_status_warning'     },
+    maintenance: { icon: 'bi-cone-striped',    key: 'host_status_maintenance' },
+    ok:          { icon: 'bi-check-circle-fill', key: 'host_status_ok'        },
+    '':          { icon: 'bi-question-circle', key: 'srv_status_unknown'      },
+};
+function _srvStateLabel(state) { return t((_SRV_STATE_META[state] || {}).key) || state || '—'; }
+
+/** How much of this host is actually being watched, which is three answers and not two:
+ *   - `none`:     no checks at all. Registered, monitored by nothing.
+ *   - `inactive`: it has checks and every one of them is off. Worse than none, because the
+ *                 row looks configured and somebody turned it off.
+ *   - `ok`:       at least one check is running. */
+function _srvCoverage(host) {
+    const total = host.modules_total || 0, active = host.modules_active || 0;
+    if (!total) return 'none';
+    return active ? 'ok' : 'inactive';
+}
+const _SRV_COVERAGE = {
+    none:     { cls: 'text-bg-danger',    icon: 'bi-slash-circle',  key: 'srv_cov_none'     },
+    inactive: { cls: 'text-bg-warning',   icon: 'bi-pause-circle',  key: 'srv_cov_inactive' },
+    ok:       { cls: 'text-bg-success',   icon: 'bi-check2-circle', key: 'srv_cov_ok'       },
+};
+function _srvCoverageBadge(state) {
+    const c = _SRV_COVERAGE[state] || _SRV_COVERAGE.none;
+    return `<span class="badge ${c.cls} fw-normal"><i class="bi ${c.icon} me-1"></i>${esc(t(c.key))}</span>`;
+}
+
+/** The modules pill: active / added. Both numbers, always — "3" alone cannot tell you
+ *  whether the other two were never added or were switched off. */
+function _srvModulesPill(host) {
+    const tot = host.modules_total || 0, act = host.modules_active || 0;
+    if (!tot) return `<span class="badge text-bg-danger fw-normal"><i class="bi bi-slash-circle me-1"></i>${esc(t('srv_cov_none'))}</span>`;
+    return `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+        <i class="bi bi-puzzle me-1"></i>${act}/${tot}</span>`;
+}
+
+// The summary header and its counted chips come from core/_utils.html — the same strip every
+// section's summary draws, so a view showing three groups can never suggest the fleet is
+// three hosts, and it cannot drift in padding from the section next door.
+
+/** One host as a line, shared by both grouped views so a host reads the same under a state
+ *  and under a coverage bucket. */
+function _srvHostLine(host, ctx, extraHtml) {
+    return `<div class="d-flex align-items-center gap-2 px-2 py-1">
+        <span class="fw-semibold text-nowrap"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}</span>
+        <code class="text-muted ss-fs-2 text-nowrap">${esc(host.address || '')}</code>
+        ${host.kind === 'remote'
+            ? `<span class="badge bg-body-secondary text-body-secondary fw-normal ss-fs-1"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_kind_remote'))}</span>`
+            : `<span class="badge bg-body-secondary text-body-secondary fw-normal ss-fs-1">${esc(t('host_kind_local'))}</span>`}
+        ${extraHtml || ''}
+        <span class="ms-auto d-flex align-items-center flex-shrink-0 text-nowrap">${_srvActionsHtml(host, ctx)}</span>
+    </div>`;
+}

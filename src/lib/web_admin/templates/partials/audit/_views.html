@@ -124,17 +124,13 @@ function _auditIsFailedLogin(e) { return e.event === 'login_failed'; }
 function _auditSummaryHeader(entries, extraChips) {
     const first = entries.length ? entries[entries.length - 1].ts : null;
     const last = entries.length ? entries[0].ts : null;
-    const chip = (icon, label, value) =>
-        `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
-            <i class="bi ${icon} me-1"></i>${esc(label)} <span class="fw-semibold">${esc(String(value))}</span></span>`;
     // The endpoints are read off the set rather than off the date filters: a filter says what
     // was ASKED for, and these say what is actually in there.
     const range = (first && last)
         ? `<span class="text-muted small">${esc(_auditDayLabel(Math.min(new Date(first), new Date(last))))}
              — ${esc(_auditDayLabel(Math.max(new Date(first), new Date(last))))}</span>` : '';
-    return `<div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2 border-bottom">
-        ${chip('bi-journal-text', t('audit_count_entries'), entries.length)}
+    return _summaryHeader(`
+        ${_summaryChip('bi-journal-text', t('audit_count_entries'), entries.length)}
         ${extraChips || ''}
-        ${range}
-    </div>`;
+        ${range}`);
 }

@@ -1,0 +1,49 @@
+{# ================================================================
+   Syslog — stream: the log the shape a log is read in.
+
+   A grid makes you re-read five column headers per line to follow one machine's story, and
+   spends a third of the width on chrome. A console line puts the severity, the clock, the
+   host and the text where the eye already expects them, fits about twice as many lines on a
+   screen, and lets the message run to the full width instead of wrapping inside a cell.
+
+   Same rows, same order, same page as the table: the server decided which ones those are.
+   The date is stated once per day rather than repeated on every line — a log read at 3am is
+   almost always one day's worth, and the column that repeats the same eight characters two
+   hundred times is the one worth removing.
+   ================================================================ #}
+
+function _slViewStream(rows) {
+    let out = '', day = null;
+    for (const m of rows) {
+        const d = _slDay(m);
+        if (d !== day) {
+            day = d;
+            out += `<div class="d-flex align-items-center gap-2 px-2 pt-2 pb-1">
+                <i class="bi bi-calendar3 text-muted"></i>
+                <span class="fw-semibold ss-fs-3">${esc(d)}</span>
+                <span class="flex-grow-1" style="height:1px;background:var(--bs-border-color)"></span>
+            </div>`;
+        }
+        out += _slStreamLine(m);
+    }
+    return `<div class="pb-2">${out}</div>`;
+}
+
+function _slStreamLine(m) {
+    // The severity is a coloured bar down the left AND a name in the line: colour alone
+    // would leave the stream unreadable to anyone who cannot separate the reds from the
+    // greys, and this is the view with the least other context to fall back on.
+    const cls = _slSevClass(m);
+    const host = _slHost(m), app = _slApp(m);
+    return `<div class="d-flex align-items-start gap-2 px-2 py-1 sl-row-${cls}">
+        <span class="flex-shrink-0 rounded" style="width:3px;align-self:stretch;background:var(--bs-${cls})"></span>
+        <span class="text-muted ss-fs-2 text-nowrap" style="min-width:4.5rem">${esc(_slClock(m))}</span>
+        <span class="text-nowrap ss-fs-2" style="min-width:5rem">${_slSevBadge(m)}</span>
+        ${host ? `<span class="text-nowrap ss-fs-2 fw-semibold" style="min-width:7rem">${esc(host)}</span>` : ''}
+        ${app ? `<code class="ss-fs-2 text-nowrap">${esc(app)}</code>` : ''}
+        <span class="flex-grow-1 ss-fs-3" style="word-break:break-word">${esc(m.message || '')}</span>
+        <button class="btn btn-sm btn-link p-0 text-muted sl-copy-btn flex-shrink-0" tabindex="-1"
+            title="${escAttr(t('syslog_copy'))}" data-msg="${escAttr(m.message || '')}"
+            onclick="_syslogCopyMsg(this)"><i class="bi bi-clipboard"></i></button>
+    </div>`;
+}

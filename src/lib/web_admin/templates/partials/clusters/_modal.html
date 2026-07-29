@@ -363,7 +363,7 @@ async function _clLoadLastData() {
         const ok = !!(v && v.status === true);
         const sev = (v && v.severity) || '';
         return {
-            host, check: od.name || sub || _modPrettyName(mod), ok, sev,
+            host, check: od.name || sub || modulePrettyName(mod), ok, sev,
             level: ok ? 'ok' : (sev === 'warning' ? 'warning' : 'error'),
             message: (v && v.message) || '', data: od, ts: (v && v.ts) || 0,
         };
@@ -378,7 +378,7 @@ async function _clLoadLastData() {
         for (const r of ((hs && hs.results) || [])) {
             const lvl = r.level || (r.ok ? 'ok' : 'error');
             rows.push({
-                host: provName, check: r.name || r.key || _modPrettyName(r.module || ''),
+                host: provName, check: r.name || r.key || modulePrettyName(r.module || ''),
                 ok: !!r.ok, sev: lvl === 'warning' ? 'warning' : (r.ok ? '' : 'error'), level: lvl,
                 message: r.message || '', data: r.data || {}, ts: r.ts || 0,
             });
@@ -534,7 +534,7 @@ function _clLogsApplyTimer() {
     _clLogsStopTimer();
     const a = _clLogsState ? _clLogsState.auto : 0;
     const live = a === 'live';
-    const secs = live ? (typeof _SL_LIVE_SECS !== 'undefined' ? _SL_LIVE_SECS : 2) : (parseInt(a, 10) || 0);
+    const secs = live ? _SL_LIVE_SECS : (parseInt(a, 10) || 0);
     if (secs > 0) {
         _clLogsTimer = setInterval(() => {
             const pane = document.getElementById('clt-logs');

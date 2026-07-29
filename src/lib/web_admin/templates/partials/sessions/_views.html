@@ -1,0 +1,18 @@
+{# ================================================================
+   Sessions — the view registry. Cards and table were already here; "by user" is the new one
+   (sessions/_view_users.html).
+   ================================================================ #}
+
+// Cards lead: this list is short and a session is a small object, so the grid was the default
+// long before there was a switcher, and the stored value ('card') keeps working.
+const SESSION_VIEWS = [
+    { id: 'card',  label_key: 'ses_view_cards', icon: 'bi-grid-3x3-gap', render: '_sessionsCardsBody', mode: 'cards'   },
+    { id: 'table', label_key: 'ses_view_table', icon: 'bi-table',        render: null,                 mode: 'table'   },
+    { id: 'users', label_key: 'ses_view_users', icon: 'bi-people',       render: '_sesViewUsers',      mode: 'summary' },
+];
+
+const _sesView = createViewState('ss_sessions_view', SESSION_VIEWS, () => {
+    _persistTableConfig();
+    renderSessions();
+});
+function setSessionsView(id) { _sesView.set(id); }

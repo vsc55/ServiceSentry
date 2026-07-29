@@ -62,9 +62,9 @@ function _evrViewChannels(rows, ctx) {
     // how many rules there are so the difference cannot read as a miscount.
     const order = Object.keys(_EV_CH_ICON).filter(c => by.has(c))
         .concat([...by.keys()].filter(c => !_EV_CH_ICON[c]));
-    const chips = `${_evChip('bi-bell', t('evr_count_rules'), rows.length)}
-        ${_evChip('bi-broadcast', t('evr_count_channels'), order.length)}
-        ${none.length ? _evChip('bi-bell-slash', t('evr_no_channel'), none.length, 'text-bg-warning') : ''}`;
+    const chips = `${_summaryChip('bi-bell', t('evr_count_rules'), rows.length)}
+        ${_summaryChip('bi-broadcast', t('evr_count_channels'), order.length)}
+        ${none.length ? _summaryChip('bi-bell-slash', t('evr_no_channel'), none.length, 'text-bg-warning') : ''}`;
     const group = (title, icon, items, warn) => `<div class="mb-3">
         <div class="d-flex align-items-center gap-2 px-1 pb-1 mb-1 border-bottom">
             <i class="bi ${icon} ${warn ? 'text-warning-emphasis' : 'text-muted'}"></i>
@@ -74,7 +74,7 @@ function _evrViewChannels(rows, ctx) {
         ${items.map(r => _evrRuleLine(r, ctx)).join('')}
     </div>`;
     return `<div>
-        ${_evSummaryHeader(chips)}
+        ${_summaryHeader(chips)}
         <div class="p-2">
             ${order.map(c => group(_evChannelLabel(c), _evChannelIcon(c), by.get(c), false)).join('')}
             ${none.length ? group(t('evr_no_channel'), 'bi-bell-slash', none, true) : ''}
@@ -91,11 +91,11 @@ function _evrViewDelivery(rows, ctx) {
     // is an unanswered question, and putting it under the working ones would bury it.
     const order = ['failed', 'never', 'ok'];
     const chips = order.map(k => buckets[k].length
-        ? _evChip(_EV_DELIVERY[k].icon, t(_EV_DELIVERY[k].key), buckets[k].length,
+        ? _summaryChip(_EV_DELIVERY[k].icon, t(_EV_DELIVERY[k].key), buckets[k].length,
                   k === 'failed' ? 'text-bg-danger' : (k === 'ok' ? 'text-bg-success' : ''))
         : '').join(' ');
     return `<div>
-        ${_evSummaryHeader(chips)}
+        ${_summaryHeader(chips)}
         <div class="p-2">
             ${order.filter(k => buckets[k].length).map(k => `<div class="mb-3">
                 <div class="d-flex align-items-center gap-2 px-1 pb-1 mb-1 border-bottom">

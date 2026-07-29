@@ -1,25 +1,8 @@
-﻿{# ================================================================
+{# ================================================================
    Account — shared role constants, shared utilities, and own
    account actions (change password, dark mode toggle).
    Must be included before _js_users, _js_roles and _js_groups.
    ================================================================ #}
-
-// ──────────────────────── Shared role constants ────────────────────
-// Badge classes keyed by built-in role internal key
-const BUILTIN_ROLE_BADGES = {
-    admin:  'bg-danger',
-    editor: 'bg-primary',
-    viewer: 'bg-secondary',
-    none:   'bg-dark',
-};
-const ROLE_LABELS = I18N.role_labels || {};
-const PERM_LABELS = I18N.permission_labels || {};
-
-// rolesData is keyed by UID; rd.key holds the internal key for built-ins
-function roleBadgeClass(uid) {
-    const rd = rolesData[uid] || {};
-    return BUILTIN_ROLE_BADGES[rd.key || uid] || 'text-bg-info';
-}
 
 // Render role radio buttons in #umRoleContainer, filtered by searchVal.
 // Selection state lives in _umSelectedRole (defined in _js_users.html).

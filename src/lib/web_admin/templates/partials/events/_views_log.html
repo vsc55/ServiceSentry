@@ -63,9 +63,9 @@ function _evlViewByRule(rows) {
     const list = [...by.values()].sort((x, y) => (y.bad - x.bad) || (y.n - x.n) || x.name.localeCompare(y.name));
     const failing = list.filter(r => r.bad).length;
     return _evlSummaryTable(
-        `${_evChip('bi-send', t('evl_count_sends'), rows.length)}
-         ${_evChip('bi-bell', t('evl_count_rules'), list.length)}
-         ${failing ? _evChip('bi-x-octagon', t('evl_count_failing'), failing, 'text-bg-danger') : ''}`,
+        `${_summaryChip('bi-send', t('evl_count_sends'), rows.length)}
+         ${_summaryChip('bi-bell', t('evl_count_rules'), list.length)}
+         ${failing ? _summaryChip('bi-x-octagon', t('evl_count_failing'), failing, 'text-bg-danger') : ''}`,
         t('event_name'), false,
         list.map(a => `<tr>
             <td class="text-nowrap"><code class="fw-semibold">${esc(a.name)}</code></td>
@@ -91,9 +91,9 @@ function _evlViewByChannel(rows) {
     const list = [...by.values()].sort((x, y) => (y.bad - x.bad) || (y.n - x.n) || x.name.localeCompare(y.name));
     const failing = list.filter(c => c.bad).length;
     return _evlSummaryTable(
-        `${_evChip('bi-send', t('evl_count_sends'), rows.length)}
-         ${_evChip('bi-broadcast', t('evr_count_channels'), list.length)}
-         ${failing ? _evChip('bi-x-octagon', t('evl_count_failing'), failing, 'text-bg-danger') : ''}`,
+        `${_summaryChip('bi-send', t('evl_count_sends'), rows.length)}
+         ${_summaryChip('bi-broadcast', t('evr_count_channels'), list.length)}
+         ${failing ? _summaryChip('bi-x-octagon', t('evl_count_failing'), failing, 'text-bg-danger') : ''}`,
         t('event_channels'), true,
         list.map(a => `<tr>
             <td class="text-nowrap"><i class="bi ${escAttr(_evChannelIcon(a.name))} me-1"></i>${esc(_evChannelLabel(a.name))}</td>
@@ -121,7 +121,7 @@ function _evlSummaryCells(a, hideChannels) {
  *  lose a column in whichever language happened to translate two headers alike. */
 function _evlSummaryTable(chips, firstCol, hideChannels, body) {
     return `<div>
-        ${_evSummaryHeader(chips)}
+        ${_summaryHeader(chips)}
         <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
             <thead class="ss-thead"><tr>
                 <th>${esc(firstCol)}</th>

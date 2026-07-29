@@ -111,7 +111,10 @@ async function renderHistory() {
     // Refresh scheduler state for the "Auto" option, then update the control.
     _loadSchedulerState().then(_historyRenderAutoRefresh);
 
-    // Restore previously selected series if it still exists in the index
+    // Restore previously selected series if it still exists in the index. Only in the chart
+    // view: the inventory has no chart to draw into, no toolbar to show and nothing for the
+    // auto-refresh timer to redraw — see history/_views.html.
+    if (!_historyIsChart()) return;
     if (savedMod && savedKey &&
         _historyIndex.some(s => s.module === savedMod && s.key === savedKey)) {
         _historyMod = savedMod;
@@ -261,15 +264,28 @@ function _historyRenderLayout() {
   <!-- Always-on actions: Compare, refresh, auto-refresh. (Data wipes live in
        Config → General → Maintenance, away from a page kept open all day.) -->
   <div class="d-flex flex-nowrap align-items-center gap-2 flex-shrink-0">
-    <button class="btn btn-sm btn-secondary" id="history-compare-btn"
+    <!-- The inventory's filter lives here, beside the view buttons: it is the only control
+         that view has, and its own row above the table spent a whole band on one input. In
+         the chart view the same filter is in the series sidebar, where the list it filters
+         is. Both write to the same _historyFilter (see _historyOnSearch), so switching view
+         never changes which series you are looking at. -->
+    ${_historyIsChart() ? '' : `<div class="input-group input-group-sm" style="width:15rem">
+      <span class="input-group-text px-2"><i class="bi bi-funnel"></i></span>
+      <input type="search" class="form-control" id="history-series-filter"
+             placeholder="${escAttr(t('history_search'))}" value="${escAttr(_historyFilter)}"
+             oninput="_historyOnSearch(this.value)">
+    </div>`}
+    ${_historyViewSwitcher()}
+    ${_historyIsChart() ? `<button class="btn btn-sm btn-secondary" id="history-compare-btn"
             onclick="_historyToggleCompareMode()" title="${escAttr(t('history_compare_tt'))}">
       <i class="bi bi-bar-chart-steps me-1"></i>${esc(t('history_compare'))}
     </button>
     <!-- Unified refresh: main button refreshes now, caret sets the auto-refresh interval. -->
-    <span id="history-auto-refresh" class="d-flex align-items-center gap-2"></span>
+    <span id="history-auto-refresh" class="d-flex align-items-center gap-2"></span>` : ''}
   </div>
 </div>
 
+${_historyIsChart() ? `
 <!-- Body: series sidebar (left) + chart drawing zone (right) -->
 <div class="ss-history-body d-flex flex-grow-1 overflow-hidden">
 
@@ -305,10 +321,18 @@ function _historyRenderLayout() {
       </div>
     </div>
   </div>
-</div>
+</div>` : `
+<!-- Inventory: one row per series, full width. The sidebar's job (pick a series) is done by
+     clicking a row, so there is nothing to keep beside it — and its filter moved up into the
+     header, next to the view switcher. -->
+<div id="history-inventory" class="ss-vscroll flex-grow-1"></div>`}
 </div>`;
 
-    _historyRenderSeriesList();
-    _historyUpdateCompareBtn();
+    if (_historyIsChart()) {
+        _historyRenderSeriesList();
+        _historyUpdateCompareBtn();
+    } else {
+        _historyRenderInventory();
+    }
 }
 

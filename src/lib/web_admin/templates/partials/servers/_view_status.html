@@ -1,0 +1,43 @@
+{# ================================================================
+   Servers — status: the fleet grouped by how it is doing.
+
+   The table has a status column and you can sort by it, which answers "which host is worst"
+   and never "how many are broken". This is the answer you actually want from a fleet list,
+   and it is the first thing on screen: the counts are in the header and the groups are in
+   the order that matters — errors, then warnings, then maintenance, then the working ones.
+
+   An empty error group is the good news, so it is not drawn at all; the header still states
+   the total, which is what makes the absence readable rather than ambiguous.
+
+   Hosts with no checks at all get their own group at the bottom. That is not a fifth state
+   of a host, it is the absence of one — "we do not know how this machine is" is not a shade
+   of "fine", and colouring it green would say it was.
+   ================================================================ #}
+
+function _srvViewStatus(hosts, ctx) {
+    if (!hosts.length) return '';
+    const by = new Map(_SRV_STATES.map(s => [s, []]));
+    for (const h of hosts) {
+        const s = _srvStatusOf(h);
+        (by.get(s) || by.get('')).push(h);
+    }
+    const bad = (by.get('error') || []).length + (by.get('warning') || []).length;
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
+        ${_SRV_STATES.filter(s => (by.get(s) || []).length).map(s =>
+            _summaryChip(_SRV_STATE_META[s].icon, _srvStateLabel(s), by.get(s).length,
+                     s === 'error' ? 'text-bg-danger' : (s === 'ok' ? 'text-bg-success' : ''))).join(' ')}
+        ${bad ? '' : `<span class="text-success-emphasis small"><i class="bi bi-check2-circle me-1"></i>${esc(t('srv_all_healthy'))}</span>`}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="p-2">
+            ${_SRV_STATES.filter(s => (by.get(s) || []).length).map(s => `<div class="mb-3">
+                <div class="d-flex align-items-center gap-2 px-1 pb-1 mb-1 border-bottom">
+                    <i class="bi ${_SRV_STATE_META[s].icon} text-muted"></i>
+                    <span class="fw-semibold">${esc(_srvStateLabel(s))}</span>
+                    <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${by.get(s).length}</span>
+                </div>
+                ${by.get(s).map(h => _srvHostLine(h, ctx, _srvModulesPill(h))).join('')}
+            </div>`).join('')}
+        </div>
+    </div>`;
+}

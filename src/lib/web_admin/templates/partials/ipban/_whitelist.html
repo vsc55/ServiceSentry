@@ -171,7 +171,8 @@ function _ipbanWlRender() {
     </div>`;
     const header = `<div class="ss-card-header">
         <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-shield-check me-1"></i>${esc(t('ipban_wl_title'))}</span>
-        ${_buildColChooser(_IPBAN_WL_COLS, _ipbanWlVisibleCols, '_ipbanWlToggleCol', '_ipbanWlResetCols', 150)}
+        ${_ipbWlView.switcher('setIpbanWlView')}
+        ${_ipbWlView.is('table') ? _buildColChooser(_IPBAN_WL_COLS, _ipbanWlVisibleCols, '_ipbanWlToggleCol', '_ipbanWlResetCols', 150) : ''}
         <button class="btn btn-secondary btn-sm" onclick="_ipbanWlLoad()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('ipban_refresh'))}</button>
     </div>`;
 
@@ -194,6 +195,18 @@ function _ipbanWlRender() {
         const cmp = av < bv ? -1 : av > bv ? 1 : 0;
         return _ipbanWlSortDir === 'asc' ? cmp : -cmp;
     });
+
+    // "By reach" describes every whitelisted entry the filters left standing — how much each
+    // one exempts, and which are already inside another — so it is handed `sorted` whole and
+    // draws no pagination.
+    if (!_ipbWlView.is('table')) {
+        c.innerHTML = `<div class="ss-card ss-vfill">
+            <div class="ss-accent ss-accent-teal"></div>
+            ${header}${addForm}
+            <div class="ss-vscroll">${_ipbWlView.body(sorted, null, sorted)}</div>
+        </div>`;
+        return;
+    }
 
     const total    = sorted.length;
     const pageSize  = _ipbanWlPageSize || total;

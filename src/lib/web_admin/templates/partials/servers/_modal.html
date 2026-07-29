@@ -48,7 +48,7 @@ function _renderCloneChecks(uid) {
         `<label class="form-check d-flex align-items-center gap-2 mb-1 ss-pointer">
             <input class="form-check-input mt-0" type="checkbox" checked value="${escAttr(c.key)}" data-clone-check
                    onchange="_cloneChecksCount()">
-            <span class="text-truncate"><span class="badge bg-secondary me-1 ss-fs-1">${esc(_modPrettyName(c.module, modulesData[c.module] || {}))}</span>${esc(c.label)}</span>
+            <span class="text-truncate"><span class="badge bg-secondary me-1 ss-fs-1">${esc(modulePrettyName(c.module, modulesData[c.module] || {}))}</span>${esc(c.label)}</span>
         </label>`).join('');
     _cloneChecksCount();
 }
@@ -529,7 +529,7 @@ async function testHostModule(mod) {
         .map(it => ({ module: mod, collection: st.collection, key: it._key || '',
                       fields: { ...it.fields }, cred_uid: it.cred_uid || '' }));
     if (!checks.length) { showToast(t('host_test_none') || '—'); return; }
-    _openHostTestModal(_modPrettyName(mod));
+    _openHostTestModal(modulePrettyName(mod));
     // no_ssh: a module-scoped test skips the host's SSH connection check.
     const res = await apiPost('/api/v1/hosts/test', { ..._hostDraftPayload(), checks, no_ssh: true });
     _renderHostTestResults(res && res.data);

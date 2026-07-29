@@ -34,7 +34,7 @@ function _renderClustersMembershipCards(memberships) {
         const prof = (_hostDraft.profiles || {})[pkey] || {};
         const head = `<div class="d-flex align-items-center gap-2 flex-wrap">
                 <i class="bi bi-diagram-3"></i>
-                <span class="fw-semibold">${esc(_modPrettyName(m.mod))}</span>
+                <span class="fw-semibold">${esc(modulePrettyName(m.mod))}</span>
                 <span class="badge bg-secondary">${esc(t('host_cluster_member'))}</span>
                 <span class="text-muted small ms-auto">${esc(m.label)} · ${m.count} ${esc(t('host_cluster_nodes'))}</span>
             </div>`;
@@ -231,7 +231,7 @@ function _renderSingleCheck(mod) {
     const fieldsHtml = st.fieldsMeta.length
         ? _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
         : `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
-    const title = `<span class="fw-semibold">${esc(_modPrettyName(mod))}</span>`;
+    const title = `<span class="fw-semibold">${esc(modulePrettyName(mod))}</span>`;
     // Just an enable switch (no redundant "Monitor with X" text) + run-test.
     const actions = `<div class="d-flex align-items-center gap-2">
         <div class="form-check form-switch mb-0">
@@ -255,12 +255,6 @@ function _toggleSingleCheck(mod, on) {
     if (it) it.enabled = on;
     const el = document.getElementById('hmCard_' + mod.replace(/\W/g, '_'));
     if (el) bootstrap.Collapse.getOrCreateInstance(el)[on ? 'show' : 'hide']();
-}
-
-function _modPrettyName(mod) {
-    const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
-    const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
-    return (ld && (ld.pretty_name || ld.label)) || mod;
 }
 
 function _renderHostCheckList(mod) {
@@ -403,7 +397,7 @@ async function openHostDiscover(mod) {
     const inputsEl = document.getElementById('discoverInputs');
     if (inputsEl) inputsEl.innerHTML = '';
     const titleEl = document.getElementById('discoverModalTitle');
-    if (titleEl) titleEl.textContent = (t('discover') || 'Discover') + ' — ' + _modPrettyName(mod);
+    if (titleEl) titleEl.textContent = (t('discover') || 'Discover') + ' — ' + modulePrettyName(mod);
     const filterEl = document.getElementById('discoverFilter');
     if (filterEl) filterEl.value = '';
     const body = document.getElementById('discoverModalBody');

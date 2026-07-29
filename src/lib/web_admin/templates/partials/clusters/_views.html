@@ -1,0 +1,81 @@
+{# ================================================================
+   Clusters — the part every view shares.
+
+   A cluster is one check bound to several hosts at once, and the reason it exists is
+   redundancy: if a host is down, another one answers. The table lists clusters and counts
+   their members, which reads fine and hides the two things that make a cluster a lie:
+
+   * a cluster with ONE member host. It is a failover pair with nothing to fail over to, and
+     in the table it is a row with a "1" in the members column — indistinguishable at a
+     glance from a "3". Usually it is a cluster that lost hosts one at a time.
+   * the same host carrying several clusters. Every cluster looks redundant on its own row,
+     and they are all pinned to the same machine, so one reboot takes out all of them. No
+     per-cluster row can show that: it is a fact about the intersection.
+
+   So the third view pivots onto the HOST and the header counts the single-member clusters.
+   Both are summaries: computed over everything the filters left standing and not paginated,
+   because "3 clusters have one host" is a statement about the deployment and a count over
+   one page changes as you page through it.
+
+   What must not differ between views is what a cluster means — its status vocabulary comes
+   from the same aggregation the table uses (`_clStatusAgg`), and the actions are gated by
+   the same per-cluster permissions (`cluster.<uid>.<action>`), asked in one place.
+   ================================================================ #}
+
+const CLUSTER_VIEWS = [
+    { id: 'table', label_key: 'cl_view_table', icon: 'bi-table',        render: null,             mode: 'table'   },
+    { id: 'cards', label_key: 'cl_view_cards', icon: 'bi-grid-3x3-gap', render: '_clViewCards',   mode: 'cards'   },
+    { id: 'hosts', label_key: 'cl_view_hosts', icon: 'bi-hdd-network',  render: '_clViewHosts',   mode: 'summary' },
+];
+
+const _clView = createViewState('ss_clusters_view', CLUSTER_VIEWS, () => {
+    _persistTableConfig();
+    renderClusters();
+});
+function setClustersView(id) { _clView.set(id); }
+
+// ── What a cluster means, decided once ───────────────────────────────────────
+/** The member hosts of a cluster row, as {uid, name} — resolved through the host registry so
+ *  a cluster naming a host that was deleted still shows the uid rather than an empty cell. */
+function _clMembers(row) {
+    const uids = Array.isArray(row.item.host_uids) ? row.item.host_uids : [];
+    return uids.map(uid => ({ uid, name: (hostsData[uid] || {}).name || uid }));
+}
+
+/** The status badge, from the same aggregation the table's Status column uses: a cluster
+ *  must not look healthy in one view and broken in the one beside it. */
+function _clStateBadge(row) {
+    // The aggregation answers 'ok' | 'warn' | 'err' | 'unknown' — "unknown" being a cluster
+    // the daemon has not reported on yet, which is not a state of the cluster and must not
+    // be painted as one.
+    const agg = _clStatusAgg(row.mod, row.key);
+    const meta = {
+        ok:   ['text-bg-success', t('status_ok')],
+        warn: ['text-bg-warning', t('status_warning')],
+        err:  ['text-bg-danger',  t('status_error')],
+    }[agg];
+    if (!meta) return '<span class="text-muted small">—</span>';
+    return `<span class="badge ${meta[0]}">${esc(meta[1])}</span>`;
+}
+
+/** The action buttons — the ONE place the per-cluster permissions become controls. Like
+ *  Servers, `cluster.<uid>.edit` grants exactly one row, so a view building its own buttons
+ *  would be a view that forgot the granular case exists. */
+function _clActionsHtml(row) {
+    const { mod, coll, key, item } = row;
+    const uid = item.uid || key;
+    const canEdit = _clCan(uid, 'edit'), canDelete = _clCan(uid, 'delete');
+    return `${canEdit ? `<button class="btn btn-sm btn-info py-0 px-1 me-1" title="${escAttr(t('host_test'))}"
+            onclick="_clTestRow('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi bi-play-circle"></i></button>` : ''}
+        <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1"
+            title="${escAttr(canEdit ? t('edit') : (t('cl_view') || t('host_view')))}"
+            onclick="openClusterEdit('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>
+        ${canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+            onclick="removeItem('modules','${esc(mod)}|${esc(coll)}',${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : ''}`;
+}
+
+/** A cluster with a single member is the case this section exists to prevent: one check,
+ *  one host, and the word "cluster" on it. Not an error — it is a valid configuration on the
+ *  way to a second host — which is why it is a marker and a count, not a red row. */
+function _clIsAlone(row) { return _clMembers(row).length < 2; }
+

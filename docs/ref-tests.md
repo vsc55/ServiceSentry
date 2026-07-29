@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4390 tests** (4388 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4520 tests** (4514 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -5175,9 +5175,9 @@ página que se auto-refresca, un redibujado que pide datos además compite con s
 
 ## 117. Marcado que no hace lo que sugiere el nombre de la clase
 
-**Archivo:** `tests/test_wa_css_traps.py` — 5 tests
+**Archivo:** `tests/test_wa_css_traps.py` — 9 tests
 
-Dos trampas, las dos encontradas la misma tarde mirando la tabla de Status, las dos invisibles en revisión y evidentes en pantalla.
+Tres trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
 
 **Una clase que ignora el tema.** El panel se sirve en claro y oscuro y recuerda cuál elegiste, así que un componente que
 decide sus propios colores acierta la mitad de las veces. El que cayó fue una cabecera de
@@ -5194,6 +5194,18 @@ así que ya no participa en la altura de la fila y su borde inferior se dibuja a
 de su propio contenido. El separador de filas se parte en esa columna mientras el resto de
 tablas del panel mantienen la línea recta.
 
+**Un botón del color de lo que tiene debajo.** `btn-dark` no es ciego al tema: es correcto en
+el claro y casi invisible en el oscuro, donde cae a un tono o dos de la superficie de la
+tarjeta (#181818 / #212121 / #2a2a2a). Reportado desde una captura del botón de auto-refresco:
+con el intervalo apagado el control desaparecía en la cabecera y solo el caret delataba que
+había algo. Un botón de refresco que no se ve mientras está apagado es un botón que nadie
+encuentra para encenderlo.
+
+La sustituta es `.ss-btn-graphite`, un botón sólido oscuro un escalón por encima de la misma
+escala de grises del tema oscuro — discreto, que es lo correcto para un estado apagado, sin
+ser la tarjeta sobre la que se apoya. Gris y no un oscuro con tinte a propósito: primero se
+probó un slate azulado y se leía como un color venido de otra paleta.
+
 La regla del tema es que un componente pida una **variable** de Bootstrap (`--bs-tertiary-bg` y
 compañía) o una de las clases propias del panel construidas sobre ellas, y decida el tema.
 
@@ -5208,6 +5220,10 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 | `TestNoTemplatePinsALightSurface::test_none_of_the_theme_blind_classes_is_used` | **La regresión**: `class="… table-light …"`, solo en marcado, no en un comentario |
 | `TestNoTemplatePinsALightSurface::test_the_replacement_exists_and_is_theme_driven` | Si la clase sustituta fijara un color, el guard solo habría movido el problema detrás de un nombre mejor |
 | `TestNoTemplatePinsALightSurface::test_the_tables_that_had_it_use_the_replacement` | Las tres donde apareció, nombradas: volver atrás en cualquiera es la regresión que este fichero vigila |
+| `TestNoControlWearsTheSurfaceColour::test_no_button_uses_btn_dark` | **La tercera trampa**, global: ninguna plantilla puede volver a vestir `btn-dark` (ignorando comentarios, que nombran la clase para explicar por qué se abandonó) |
+| `TestNoControlWearsTheSurfaceColour::test_the_auto_refresh_off_state_uses_the_graphite_button` | Nombrado explícitamente: el estado apagado es el que una vuelta atrás silenciosa escondería otra vez — nadie se fija en un botón que solo está mal mientras no hace nada |
+| `TestNoControlWearsTheSurfaceColour::test_the_graphite_button_is_not_one_of_the_surfaces` | Si se define con una variable de superficie, vuelve a ser invisible sobre esa superficie |
+| `TestNoControlWearsTheSurfaceColour::test_it_stays_on_the_neutral_ramp` | Los tres canales del hex, iguales: el tema oscuro es una escala de grises y su único botón oscuro también tiene que serlo |
 | `TestATableCellStaysATableCell::test_no_cell_is_turned_into_a_flex_container` | **La segunda trampa**: `d-flex` en un `<td>` lo saca de `display:table-cell`, deja de contar para la altura de la fila y su borde se dibuja a la altura del contenido — el separador se parte justo en esa columna |
 
 ---
@@ -5427,7 +5443,7 @@ pulsarlo, y eso no es un fallo de estilo.
 
 ## 123. Credentials — cuatro vistas, y la que pregunta quién las usa
 
-**Archivo:** `tests/test_wa_credentials_views.py` — 29 tests
+**Archivo:** `tests/test_wa_credentials_views.py` — 30 tests
 
 La tabla contesta «qué tengo» y nada más. Encima de los mismos datos hay dos preguntas que no
 puede contestar:
@@ -5457,6 +5473,7 @@ guard que no es cosmético es `test_no_view_builds_its_own_action_buttons`: los 
 | `TestAViewIsChromeOnly::test_the_permissions_are_asked_in_one_place` | `canEdit`/`canAdd`/`canDelete` se resuelven en `prepare()` y se vuelven controles en una única función |
 | `TestAViewIsChromeOnly::test_no_view_picks_the_type_colour_itself` | El color del tipo sale del mismo hash que usa el widget de Overview, así que un tipo viste un color en todo el panel — incluidos los tipos que este build no ha visto nunca |
 | `TestTheFourViewsShareOnePage::test_the_non_table_views_go_through_the_factory` | Filtro, orden y paginación siguen en `createListTable`: ninguna vista puede enseñar un conjunto distinto del que anuncia la banda de paginación |
+| `TestTheFourViewsShareOnePage::test_the_grouped_views_are_summaries_not_pages` | Cuentan cosas —cuántas de cada tipo, cuántas huérfanas— y un recuento sobre una página es una afirmación sobre la paginación: tres SSH cuando hay diez, y otras tres en la página siguiente |
 | `TestTheFourViewsShareOnePage::test_no_view_fetches_the_catalogue_again` | |
 | `TestTheFourViewsShareOnePage::test_the_switcher_is_drawn_by_the_header_not_the_views` | |
 | `TestTheFourViewsShareOnePage::test_the_column_chooser_belongs_to_the_table` | Configura columnas; las otras tres no tienen |
@@ -5577,3 +5594,223 @@ entrega y los botones — `events_*` se vuelve control en un solo sitio.
 | `TestTheLogSummariesCountTheSameThing::test_the_timestamps_are_seconds_and_converted_in_one_place` | `ts` y `last_fired` son segundos unix: una vista que olvide multiplicar pinta enero de 1970 y parece un problema de datos |
 | `TestTheSwitcherItselfIsShared::*` (×2) | **Seis secciones** pintaban el mismo grupo de botones con seis copias del marcado; ahora `_viewSwitcher(registro, actual, setter)` y cada una pasa lo que de verdad difiere |
 | `TestTheLabelsExist::*` (×2) | Las ocho vistas y el vocabulario, en los dos idiomas |
+
+## 126. Servers — cuatro vistas, y dos que hablan de la flota
+
+**Archivo:** `tests/test_wa_servers_views.py` — 24 tests
+
+Servers es la única lista donde las filas no son el asunto: lo que quieres de ella es un
+estado de la flota, y una tabla te lo da de host en host. Tres cosas que deja fuera:
+
+- **cómo está la flota AHORA.** Hay columna de estado y se puede ordenar, lo que contesta
+  «cuál es el peor host» y nunca «cuántos están rotos».
+- **qué hosts no se están vigilando.** La columna de módulos pinta «0/0» y «0/3» con la misma
+  píldora gris: a uno no se le puso nunca una comprobación, al otro se las apagaron todas, y
+  los dos significan que la flota es más pequeña de lo que aparenta la lista. Así es como un
+  panel se queda verde mientras una máquina está caída.
+- **qué es un host** como objeto y no como ocho columnas que enciendes y lees de izquierda a
+  derecha.
+
+Las dos vistas agrupadas son **resúmenes**: reciben todas las filas que dejaron los filtros,
+no la página, y no pintan paginación. La fábrica aprendió ese modo para esta sección
+(`bodyMode: 'summary'`), y Credentials se alineó con él.
+
+Y la parte que no es cosmética: Servers es la sección con permisos **por host**
+(`server.<uid>.edit` da exactamente una fila), así que una vista que se montara sus botones
+sería una vista que olvidó que el caso granular existe.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Registro, ficheros y orden de inclusión |
+| `TestPerHostPermissionsAreAskedOnce::*` (×3) | **La regla**: los botones se construyen en un sitio y siguen decidiéndose por el permiso **por host** |
+| `TestASummaryIsNotAPage::test_the_factory_knows_what_a_summary_is` | `'cards'` es otro cuerpo sobre la misma página; `'summary'` describe el conjunto: recibe todas las filas y quita las bandas |
+| `TestASummaryIsNotAPage::test_the_grouped_views_declare_it` | |
+| `TestASummaryIsNotAPage::test_a_summary_is_handed_every_filtered_row` | |
+| `TestASummaryIsNotAPage::test_both_summaries_state_the_whole_fleet` | Tres grupos no pueden sugerir que la flota son tres hosts |
+| `TestASummaryIsNotAPage::test_the_column_chooser_belongs_to_the_table` | |
+| `TestOneStatusVocabulary::test_no_view_paints_its_own_status` | Mantenimiento es naranja en todas partes: el mismo host no puede parecer dos estados en dos vistas de la misma página |
+| `TestOneStatusVocabulary::test_no_checks_is_not_a_fifth_state` | «No sabemos cómo está» no es un matiz de «bien» |
+| `TestOneStatusVocabulary::test_the_worst_group_leads` | |
+| `TestOneStatusVocabulary::test_an_empty_error_group_is_not_drawn` | Y la cabecera sigue diciendo el total, que es lo que hace legible la ausencia |
+| `TestCoverageHasThreeAnswers::test_never_checked_and_all_disabled_are_not_the_same` | 0/0 nunca tuvo comprobación; 0/3 se las apagaron, y eso es peor porque la fila parece configurada |
+| `TestCoverageHasThreeAnswers::test_the_gaps_lead` | |
+| `TestCoverageHasThreeAnswers::test_the_pill_always_shows_both_numbers` | «3» a secas no dice si las otras dos faltan o están apagadas |
+| `TestCoverageHasThreeAnswers::test_the_ratio_names_both_numbers` | |
+| `TestSwitchingViewIsPresentationOnly::*` (×3) | Redibuja sin pedir datos, no arrastra una selección a un resumen sin casillas, y recuerda la elección en las dos capas |
+| `TestTheLabelsExist::*` (×2) | Las cuatro vistas y el vocabulario de cobertura, en los dos idiomas |
+
+## 127. Syslog — tres vistas sobre la misma página del servidor
+
+**Archivo:** `tests/test_wa_syslog_views.py` — 19 tests
+
+Es la única sección cuyas filas llegan ya filtradas, ordenadas y paginadas **por el
+servidor**: lo que hay en pantalla es una página de una consulta, no un trozo de algo que
+tenga el navegador. Eso cambia dos cosas. El paginador se queda en todas las vistas —aquí es
+el control que **carga** las filas siguientes, no un recorte de presentación— y un recuento
+significa otra cosa, porque el almacén puede tener millones de filas y el navegador tiene unas
+decenas.
+
+Dos formas que la tabla no puede tener:
+
+- **stream**: leer un log en una rejilla obliga a releer cinco cabeceras por línea para seguir
+  la historia de una máquina, y gasta un tercio del ancho en adornos.
+- **patrones**: quinientas líneas suelen ser una docena de mensajes distintos repetidos, y el
+  que importa es muchas veces el que aparece dos veces.
+
+Los guards van sobre todo del segundo: como cuenta, tiene que decir **sobre qué** contó, y la
+agrupación que lo hace posible tiene que ser conservadora — que dos mensajes distintos se
+fundan en uno es peor fallo que dos parecidos que no se junten.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Registro, ficheros y orden de inclusión |
+| `TestEveryViewShowsTheSamePage::test_no_view_re_queries_the_store` | Estas consultas son las caras del panel, y además correrían contra el auto-refresco |
+| `TestEveryViewShowsTheSamePage::test_every_view_is_handed_the_loaded_page` | |
+| `TestEveryViewShowsTheSamePage::test_the_pager_survives_every_view` | Quitarlo dejaría al usuario encallado en la página uno |
+| `TestEveryViewShowsTheSamePage::test_the_column_chooser_belongs_to_the_table` | Vive en la cabecera, fuera del cuerpo: lo refresca el despachador o seguiría ofreciendo columnas a una vista que no tiene |
+| `TestOneSeverityVocabulary::test_no_view_picks_the_severity_colour_itself` | `err` es un color en todas partes |
+| `TestOneSeverityVocabulary::test_the_stream_says_the_severity_as_well_as_colours_it` | Solo con color, el stream es ilegible para quien no separa rojos de grises — y es la vista con menos contexto de apoyo |
+| `TestOneSeverityVocabulary::test_the_arrival_time_is_read_the_same_way_everywhere` | `received_at` es lo que registró el almacén; `ts` es lo que dijo el emisor, y un reloj mal puesto es lo bastante común como para preferir el primero |
+| `TestPatternsCountHonestly::test_it_says_what_it_counted_over` | Un número a secas se leería como «el log» |
+| `TestPatternsCountHonestly::test_the_loaded_message_names_the_number` | |
+| `TestPatternsCountHonestly::test_the_grouping_never_touches_words` | Es una ayuda de lectura, no un identificador |
+| `TestPatternsCountHonestly::test_addresses_are_replaced_before_bare_numbers` | Una IPv4 lleva dígitos: con la regla de números primero se la comería a trozos y el patrón dejaría de casar consigo mismo |
+| `TestPatternsCountHonestly::test_severity_is_part_of_the_key` | El mismo texto en `err` y en `info` son dos sucesos; juntarlos dejaría que un aviso se escondiera dentro del ruido |
+| `TestPatternsCountHonestly::test_the_hosts_are_listed_not_just_counted` | Un mensaje desde doce máquinas y doce desde una son incidentes distintos |
+| `TestPatternsCountHonestly::test_the_rare_line_is_findable` | Colapsar sirve para que la línea que sale dos veces deje de estar enterrada |
+| `TestTheLabelsExist::*` (×2) | Las tres vistas y el vocabulario, en los dos idiomas |
+
+## 128. History — la gráfica, y el inventario de series del que nunca habla
+
+**Archivo:** `tests/test_wa_history_views.py` — 21 tests
+
+La sección es una gráfica con una lista de series al lado, y la gráfica es el asunto: una
+serie cada vez, o varias superpuestas. La barra lateral es **navegación** —nombres y un punto
+de color—, lo cual está bien para elegir y esconde dos hechos que el índice ya trae:
+
+- **qué series han dejado de registrar.** Un check borrado, renombrado o que lleva tiempo sin
+  producir muestra deja su historial detrás, y la barra lateral lo dibuja igual que a uno
+  sano. Te enteras al pincharlo y ver el borde derecho vacío.
+- **qué checks tienen peor disponibilidad.** Está en cada entrada; la barra lo convierte en un
+  punto de tres colores, y los puntos no se pueden ordenar.
+
+Así que el inventario es una fila por serie con los números, ordenable, y pinchar una fila
+vuelve a la gráfica con esa serie seleccionada — que es lo que ibas a hacer después.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Registro, ficheros y orden de inclusión |
+| `TestTheTwoViewsAreOneSection::test_one_filter_drives_both` | Escribir en una y cambiar de vista no puede cambiar en silencio qué series estás mirando |
+| `TestTheTwoViewsAreOneSection::test_one_uptime_scale` | La tabla y el punto de la barra no pueden discrepar sobre qué es «sano» |
+| `TestTheTwoViewsAreOneSection::test_the_chart_tools_are_hidden_in_the_inventory` | Comparar, rango y auto-refresco actúan sobre una gráfica |
+| `TestTheTwoViewsAreOneSection::test_switching_stops_the_auto_refresh` | Existe para redibujar una gráfica que ya no está en pantalla |
+| `TestTheTwoViewsAreOneSection::test_the_chart_comes_back_the_way_it_was` | Ir y volver redibuja la serie, no te deja en el placeholder |
+| `TestTheTwoViewsAreOneSection::test_the_initial_render_does_not_chart_into_the_inventory` | |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_it_is_sortable` | |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_its_columns_behave_like_every_other_table` | **Reportado**: las columnas no se ajustaban al contenido ni se podían redimensionar. La tabla era marcado a mano en vez de la maquinaria de columnas del panel, así que no tenía nada de ella: el navegador repartía el ancho a partes iguales y las dos columnas de nombre acababan tan estrechas como el número de al lado |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_the_saved_order_cannot_hide_a_column` | Un orden guardado de un build anterior no puede esconder una columna nueva |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_the_cells_follow_the_column_order` | Una fila con celdas en orden fijo pondría los valores bajo el título equivocado en cuanto se mueve una columna |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_the_filter_sits_with_the_view_switcher` | Es el único control de esta vista, y su propia fila gastaba una banda entera en un input; la gráfica mantiene el suyo en la barra lateral, donde está la lista que filtra |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_it_opens_worst_first` | La razón de abrir esta vista es el final de la lista, así que empieza ahí |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_a_stopped_series_is_marked` | |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_the_staleness_rule_is_stated_on_screen` | Un umbral que nadie puede ver es una insignia en la que nadie puede confiar |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_never_recorded_is_not_drawn_as_very_old` | «—» y «412d» son afirmaciones distintas |
+| `TestTheInventoryAnswersWhatTheDotCannot::test_a_row_opens_its_chart` | Y expande su grupo: si no, la gráfica se abre con su serie escondida en un grupo plegado |
+| `TestTheLabelsExist::*` (×2) | Las dos vistas y las columnas, en los dos idiomas |
+
+## 129. Access — cuatro tablas sobre un solo grafo
+
+**Archivo:** `tests/test_wa_access_views.py` — 28 tests
+
+Un usuario tiene un rol directo, pertenece a grupos, y un grupo concede roles. Cada tabla
+enseña su fila y la arista que sale de ella, así que **la composición no estaba escrita en
+ningún sitio**: una cuenta cuya columna de rol dice «viewer» y que está en un grupo mapeado a
+admin **es** admin, y la tabla decía viewer. Enterarse pasaba por abrir Grupos, leer listas de
+miembros y sostenerlo en la cabeza — que es justo el trabajo que se supone que es una revisión
+de accesos.
+
+Por eso cada sección mira el grafo desde su esquina —usuarios → acceso efectivo, roles → quién
+lo tiene, grupos → qué concede— y las tres leen **los mismos helpers**: que dos vistas
+discrepen sobre quién es admin es peor que no tener ninguna.
+
+Hay una regla del backend reproducida en el cliente y estos guards la fijan: **un grupo
+desactivado no concede nada** (`_is_admin_requester` comprueba `enabled`). Sobre-reportar
+acceso es la única dirección en la que una revisión no se puede equivocar: te manda a perseguir
+algo que no existe y entierra lo que sí.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×4) | Ficheros, registros con vista de resumen, y que el grafo cargue **antes** que las cuatro secciones |
+| `TestOneGraphNotThree::test_membership_is_walked_in_one_place` | **La regla**: ninguna vista recorre la lista de miembros por su cuenta |
+| `TestOneGraphNotThree::test_a_disabled_group_grants_nothing` | Igual que el servidor |
+| `TestOneGraphNotThree::test_admin_is_recognised_by_its_key_not_its_label` | El rol se puede renombrar; la clave es lo que mira el backend |
+| `TestOneGraphNotThree::test_the_three_access_views_read_the_shared_helpers` | |
+| `TestUsersShowWhatTheRoleColumnCannot::test_it_separates_direct_from_inherited` | |
+| `TestUsersShowWhatTheRoleColumnCannot::test_admin_through_a_group_is_called_out` | Es la única diferencia que cambia lo que alguien puede hacerle a todo |
+| `TestUsersShowWhatTheRoleColumnCannot::test_the_warning_counts_only_the_hidden_ones` | Un admin cuya columna ya dice admin no es noticia |
+| `TestUsersShowWhatTheRoleColumnCannot::test_a_disabled_group_is_shown_but_marked` | Es cómo está configurada la cuenta, pero hoy no concede nada |
+| `TestRolesCountTheirReach::test_reach_is_a_union` | Quien lo tiene directo **y** por grupo no cuenta dos veces: un rol podría declarar más titulares que usuarios hay |
+| `TestRolesCountTheirReach::test_a_disabled_group_adds_nobody` | |
+| `TestRolesCountTheirReach::test_a_role_nobody_holds_is_marked_not_alarmed` | Configuración muerta: se ve antes de que la pregunte una auditoría, y no es un error |
+| `TestGroupsSayWhatTheyDoToday::test_the_three_idle_states_are_distinguished` | Desactivado, sin roles y sin miembros son tres razones distintas de no hacer nada |
+| `TestGroupsSayWhatTheyDoToday::test_admin_granting_groups_lead` | Meter a alguien ahí es más fuerte que editarle el rol, y se hace desde otra pantalla |
+| `TestSessionsPerUser::test_it_counts_addresses_and_lists_them` | Varias sesiones desde una IP es alguien trabajando; la misma cuenta desde cuatro es una pregunta |
+| `TestSessionsPerUser::test_the_busiest_account_leads` | |
+| `TestTheSharedViewState::test_the_factory_exists_and_validates` | Cuatro secciones iban a copiar las mismas veinte líneas de «lee, valida, cae a la primera vista» |
+| `TestTheSharedViewState::test_every_access_section_uses_it` | |
+| `TestTheSharedViewState::test_each_list_is_wired_to_its_state` | `bodyMode`, cuerpo, conmutador y las dos direcciones de la persistencia |
+| `TestTheSharedViewState::test_the_card_views_keep_the_id_the_toggle_used` | Renombrar el id resetearía en silencio a todo el mundo a la tabla |
+| `TestTheSharedViewState::test_the_old_toggle_names_still_resolve` | |
+| `TestTheSharedViewState::test_the_persistence_layer_has_no_view_variables_left` | Antes buscaba `_sessionsViewMode` por nombre; ahora cada tabla es dueña de su preferencia |
+| `TestTheLabelsExist::*` (×3) | Las doce vistas, el vocabulario y los dos mensajes con número |
+
+## 130. Clusters y fail2ban — las dos últimas superficies de tabla
+
+**Archivo:** `tests/test_wa_clusters_ipban_views.py` — 29 tests
+
+**Los clústeres existen por redundancia**: un check atado a varios hosts para que una máquina
+caída no se lleve el check con ella. La tabla los lista y cuenta miembros, lo que se lee bien y
+esconde las dos formas de que un clúster sea mentira:
+
+- **un solo miembro**: una pareja de failover sin nada a lo que conmutar, y en la tabla es una
+  fila con un «1» donde otra tiene un «3»;
+- **varios clústeres clavados en el mismo host**: cada fila parece redundante por su cuenta y
+  todos se caen juntos. Es un hecho sobre la **intersección** de las filas, así que ninguna
+  vista por clúster puede enseñarlo — de ahí el pivote sobre el host.
+
+**fail2ban** lista direcciones, y una IP es el tipo de fila cuyo dato interesante casi nunca
+está en la fila. Cuarenta baneos suelen ser tres redes (quien llama rota el último octeto), y a
+un historial se le pregunta por reincidencia: una dirección baneada seis veces son seis filas
+desperdigadas por un log ordenado por tiempo.
+
+Las tres vistas nuevas son resúmenes: todas las filas filtradas, sin paginación. Un «6 baneos»
+que en silencio significara «6 en esta página» sería peor que no contar.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (×3) | Ficheros, los tres registros y el orden de inclusión |
+| `TestClustersPivotOntoTheHost::test_a_single_member_cluster_is_named` | La columna Miembros lee «1» igual que lee «3» |
+| `TestClustersPivotOntoTheHost::test_the_host_view_counts_the_shared_ones` | Varios clústeres en una máquina se caen juntos |
+| `TestClustersPivotOntoTheHost::test_the_busiest_host_leads` | |
+| `TestClustersPivotOntoTheHost::test_it_offers_no_per_cluster_actions` | Actúan sobre un CLÚSTER y esta vista enseña hosts |
+| `TestClustersPivotOntoTheHost::test_the_per_cluster_permission_is_asked_in_one_place` | `cluster.<uid>.edit` concede exactamente una fila |
+| `TestClustersPivotOntoTheHost::test_no_view_invents_the_status` | Un clúster no puede parecer sano en una vista y roto en la de al lado |
+| `TestClustersPivotOntoTheHost::test_unknown_is_not_painted_as_a_state` | Un clúster del que el demonio no ha informado no tiene estado, y verde diría que sí |
+| `TestClustersPivotOntoTheHost::test_the_summary_is_not_a_page` | |
+| `TestFail2banGroupsAddresses::test_the_network_rule_is_stated_and_blunt` | /24 y /64: deducir el prefijo de las direcciones presentes cambiaría el agrupado cada vez que caduca un baneo |
+| `TestFail2banGroupsAddresses::test_both_views_use_the_same_arithmetic` | |
+| `TestFail2banGroupsAddresses::test_the_busiest_network_leads` | |
+| `TestFail2banGroupsAddresses::test_the_addresses_are_listed_not_only_counted` | Cuáles es lo que copias a un baneo de rango |
+| `TestFail2banGroupsAddresses::test_a_ban_and_its_unban_are_one_incident` | Contar los dos extremos convertiría seis baneos en doce filas |
+| `TestFail2banGroupsAddresses::test_the_repeat_offender_leads` | |
+| `TestFail2banGroupsAddresses::test_neither_summary_is_paginated` | |
+| `TestFail2banGroupsAddresses::test_the_column_chooser_belongs_to_the_table` | |
+| `TestFail2banGroupsAddresses::test_each_table_keeps_its_own_switcher` | Baneos e historial son dos listas de una misma sección |
+| `TestTheWhitelistMeasuresItsHoles::test_the_reach_view_is_registered_and_wired` | La whitelist es la única lista del panel donde una entrada **es un agujero**, hecho a propósito |
+| `TestTheWhitelistMeasuresItsHoles::test_the_address_maths_is_unsigned` | Los operadores de bits de JS trabajan con enteros **con signo**: sin `>>> 0`, toda dirección desde 128.0.0.0 sale negativa y la comparación de contención contesta lo contrario de la verdad |
+| `TestTheWhitelistMeasuresItsHoles::test_ipv6_is_listed_but_not_compared` | Equivocarse en la aritmética de 128 bits sería llamar redundante a la única entrada que exime a un host |
+| `TestTheWhitelistMeasuresItsHoles::test_an_unmeasured_entry_is_not_drawn_as_zero` | «0 direcciones» se lee como que no exime nada |
+| `TestTheWhitelistMeasuresItsHoles::test_duplicates_do_not_cover_each_other` | Dos entradas con el mismo rango se marcarían redundantes la una por la otra, y borrar «la redundante» dos veces quita la regla entera |
+| `TestTheWhitelistMeasuresItsHoles::test_the_widest_entry_leads` | Un 8 donde querías un 24 es un error de un carácter que ninguna columna enseña |
+| `TestTheWhitelistMeasuresItsHoles::test_the_broad_threshold_is_stated_on_screen` | Una insignia cuya regla nadie ve es una insignia sobre la que nadie puede actuar |
+| `TestTheLabelsExist::*` (×2) | Las siete vistas y el vocabulario, en los dos idiomas |

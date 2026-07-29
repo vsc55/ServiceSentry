@@ -155,6 +155,16 @@ createListTable({
     },
     rows: () => Object.values(hostsData), rowKey: host => host.uid,
     record: host => host,
+    // Four ways to read the fleet (see servers/_views.html). The two summaries are handed
+    // every filtered row instead of the page, and the factory drops the pagination bands for
+    // them — a count of "hosts with no checks" that shrank as you paged would be worse than
+    // no count at all.
+    bodyMode: () => _srvBodyMode(),
+    showChooser: mode => mode === 'table',
+    cardsBody: (rows, ctx, all) => _srvViewBody(rows, ctx, all),
+    headerLead: () => _srvViewSwitcher(),
+    persistExtra: () => ({ view: _srvViewId() }),
+    applyExtra: cfg => _srvApplyView(cfg && cfg.view),
     prepare: () => {
         const p = currentUser.permissions || [];
         return { canEdit: p.includes('servers_edit'), canDelete: p.includes('servers_delete') };
@@ -199,7 +209,7 @@ createListTable({
                 const mem = (typeof _hostClusterMemberships === 'function') ? _hostClusterMemberships(host.uid) : [];
                 if (!mem.length) return `<td><span class="text-muted small">—</span></td>`;
                 return `<td class="text-nowrap">${mem.map(m =>
-                    `<span class="badge bg-secondary me-1" title="${escAttr(_modPrettyName(m.mod) + ' · ' + m.count + ' ' + (t('host_cluster_nodes')||'nodes'))}">
+                    `<span class="badge bg-secondary me-1" title="${escAttr(modulePrettyName(m.mod) + ' · ' + m.count + ' ' + (t('host_cluster_nodes')||'nodes'))}">
                         <i class="bi bi-diagram-3 me-1"></i>${esc(m.label)}</span>`).join('')}</td>`;
             }
             case 'tags':    return `<td>${(host.tags || []).map(tg =>
@@ -208,18 +218,10 @@ createListTable({
             default:            return '<td></td>';
         }
     },
-    actions: (host, ctx) => {
-        const ceHost = _canEditHost(host.uid);
-        const cdHost = _canDeleteHost(host.uid);
-        return `${ceHost ? `<button class="btn btn-sm btn-info py-0 px-1 me-1" onclick="testHostRow(${jsStr(host.uid)})"
-                        title="${escAttr(t('host_test'))}"><i class="bi bi-play-circle"></i></button>` : ''}
-                <button class="btn btn-sm ${ceHost ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1" onclick="openEditHostModal(${jsStr(host.uid)})"
-                        title="${escAttr(ceHost ? t('host_edit') : t('host_view'))}"><i class="bi ${ceHost ? 'bi-pencil' : 'bi-eye'}"></i></button>
-                ${ctx.canEdit ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="openCloneHostModal(${jsStr(host.uid)})"
-                        title="${escAttr(t('host_clone'))}"><i class="bi bi-copy"></i></button>` : ''}
-                ${cdHost ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteHost(${jsStr(host.uid)})"
-                        title="${escAttr(t('delete_tt')||t('delete')||'Delete')}"><i class="bi bi-trash3"></i></button>` : ''}`;
-    },
+    // The buttons come from the shared builder: this is the section with PER-HOST
+    // permissions, so "may this user edit" has a different answer per row and must be asked
+    // in one place — see servers/_views.html.
+    actions: (host, ctx) => _srvActionsHtml(host, ctx),
     bulkBar: (ctx, sel) => _serversBulkBar(ctx.canDelete),
     headerButtons: ctx => _serversToolbar(ctx.canEdit),
     emptyBody: () => `<div class="text-center py-5 text-muted">

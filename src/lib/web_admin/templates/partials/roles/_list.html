@@ -56,8 +56,8 @@ function _rolesRowActions(name, ctx) {
 }
 
 // List/card view toggle (persisted per browser).
-let _rolesViewMode = _loadViewMode('ss_roles_view');
-function _setRolesView(mode) { _rolesViewMode = mode === 'card' ? 'card' : 'table'; localStorage.setItem('ss_roles_view', _rolesViewMode); renderRoles(); }
+// The view is owned by the registry now (roles/_views.html).
+function _setRolesView(id) { setRolesView(id); }
 function _rolesCardsBody(names, ctx) {
     return _cardGrid(names.map(name => {
         const rd = rolesData[name];
@@ -143,10 +143,12 @@ createListTable({
     },
     actions: (name, ctx) => _rolesRowActions(name, ctx),
     // List/card view toggle (like the Sessions table).
-    bodyMode: () => _rolesViewMode === 'table' ? 'table' : 'cards',
+    bodyMode: () => _rolView.mode(),
     showChooser: mode => mode === 'table',
-    cardsBody: (names, ctx) => _rolesCardsBody(names, ctx),
-    headerLead: (ctx, mode) => _viewToggleLead(mode, '_setRolesView'),
+    cardsBody: (names, ctx, all) => _rolView.body(names, ctx, all),
+    headerLead: () => _rolView.switcher('setRolesView'),
+    persistExtra: () => ({ view: _rolView.id() }),
+    applyExtra: cfg => _rolView.apply(cfg && cfg.view),
     bulkBar: (ctx, sel) => {
         const _nonBuiltinSelected = [...sel].filter(n => !rolesData[n]?.builtin).length;
         return (ctx.showActions && sel.size > 0) ? `

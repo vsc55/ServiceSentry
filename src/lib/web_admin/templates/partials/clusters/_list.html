@@ -185,7 +185,7 @@ function _clSortVal(row, key) {
     switch (key) {
         case 'status':
         case 'summary':    return { err: 0, warn: 1, unknown: 2, ok: 3 }[_clStatusAgg(row.mod, row.key)] ?? 4;
-        case 'module':     return _modPrettyName(row.mod).toLowerCase();
+        case 'module':     return modulePrettyName(row.mod).toLowerCase();
         case 'description':return String(row.item.description || '').toLowerCase();
         case 'members':    return Array.isArray(row.item.host_uids) ? row.item.host_uids.length : 0;
         case 'name':       return String(row.name || '').toLowerCase();
@@ -250,6 +250,15 @@ createListTable({
     },
     rowKey: r => r.key,
     record: r => r.item,
+    // Three ways to read the set (clusters/_views.html). "By host" is a summary: it is handed
+    // every filtered row and drops the pagination, because "3 clusters have a single member"
+    // is a statement about the deployment, not about the page.
+    bodyMode: () => _clView.mode(),
+    showChooser: mode => mode === 'table',
+    cardsBody: (rows, ctx, all) => _clView.body(rows, ctx, all),
+    headerLead: () => _clView.switcher('setClustersView'),
+    persistExtra: () => ({ view: _clView.id() }),
+    applyExtra: cfg => _clView.apply(cfg && cfg.view),
     // Filter strip (shared design — see createListTable's spec.filters). match() takes the
     // 4th arg (the raw row) because a cluster row carries its module alongside the item.
     filters: {
@@ -263,7 +272,7 @@ createListTable({
               minWidth: '170px',
               options: () => [{ value: '', label: t('all') }].concat(
                   [...new Set(_clusterModules())].sort().map(
-                      m => ({ value: m, label: _modPrettyName(m) }))) },
+                      m => ({ value: m, label: modulePrettyName(m) }))) },
             { key: 'state',  label: () => t('col_status'), type: 'select', minWidth: '140px',
               options: () => [{ value: '', label: t('all') },
                               { value: '1', label: t('enabled') },
@@ -295,7 +304,7 @@ createListTable({
         switch (colId) {
             case 'status':     return `<td class="text-center">${_clStatusHtml(_clStatusAgg(mod, key))}</td>`;
             case 'name':       return `<td class="text-nowrap fw-semibold">${esc(name)}</td>`;
-            case 'module':     return `<td class="text-nowrap"><i class="bi bi-puzzle me-1" style="opacity:.6"></i>${esc(_modPrettyName(mod))}</td>`;
+            case 'module':     return `<td class="text-nowrap"><i class="bi bi-puzzle me-1" style="opacity:.6"></i>${esc(modulePrettyName(mod))}</td>`;
             case 'description': { const _d = String(item.description || '').trim();
                 return `<td class="small text-truncate" style="max-width:280px" title="${escAttr(_d)}">${_d ? esc(_d) : '<span class="text-muted">—</span>'}</td>`; }
             case 'members':    return `<td>${_clMembersHtml(item)}</td>`;
@@ -311,25 +320,10 @@ createListTable({
             }
         }
     },
-    actions: row => {
-        const { mod, coll, key, item } = row;
-        const _uid = item.uid || key;
-        const canEdit = _clCan(_uid, 'edit');
-        const canDelete = _clCan(_uid, 'delete');
-        // Run this cluster check once and show the per-member breakdown (mirrors
-        // the Servers list "test" button). Gated on edit (the test endpoint is).
-        const _testBtn = canEdit ? `
-            <button class="btn btn-sm btn-info py-0 px-1 me-1" title="${escAttr(t('host_test'))}"
-                onclick="_clTestRow('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi bi-play-circle"></i></button>` : '';
-        const _openBtn = `
-            <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1"
-                title="${escAttr(canEdit ? t('edit') : (t('cl_view') || t('host_view')))}"
-                onclick="openClusterEdit('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>`;
-        const _delBtn = canDelete ? `
-            <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
-                onclick="removeItem('modules','${esc(mod)}|${esc(coll)}',${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : '';
-        return _testBtn + _openBtn + _delBtn;
-    },
+    // The buttons come from the shared builder: `cluster.<uid>.edit` grants exactly one row,
+    // so "may this user edit" has a different answer per cluster and is asked in one place
+    // (clusters/_views.html). The test button is gated on edit because the endpoint is.
+    actions: row => _clActionsHtml(row),
     refreshButton: () => `<button class="btn btn-sm btn-secondary ms-1" onclick="renderClusters()" title="${escAttr(t('refresh_tt'))}">
                 <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
     headerButtons: ctx => `${_canAddClusters() && (ctx.addable || []).length ? `<span class="ms-1">${_clNewControl()}</span>` : ''}
@@ -372,7 +366,7 @@ async function _clTestRow(mod, coll, key) {
     const item = ((modulesData[mod] || {})[coll] || {})[key];
     if (!item) return;
     const label = item.label || key;
-    _openHostTestModal(`${_modPrettyName(mod)} — ${label}`);
+    _openHostTestModal(`${modulePrettyName(mod)} — ${label}`);
     const res = await apiPost('/api/v1/hosts/test', {
         no_ssh: true,
         checks: [{ module: mod, collection: coll, key,

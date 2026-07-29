@@ -1,0 +1,77 @@
+{# ================================================================
+   Groups — access: what each group actually hands out, and to whom.
+
+   A group is a machine with two ends: members in, roles out. The table shows both ends as
+   counts and badges in separate columns, which is enough to read one group and not enough to
+   see the three states that matter:
+
+   * a group that grants roles and has NO members. It does nothing, and it is the one a new
+     hire gets added to next month, inheriting whatever it was left holding.
+   * a group with members and NO roles. Those people are in a bucket that gives them nothing,
+     which is usually a half-finished migration rather than a decision.
+   * a DISABLED group with both. It looks fully configured and grants nothing at all, because
+     the server skips it — the difference between "configured" and "in effect", and the one
+     that makes an access review wrong if it is missed.
+
+   The admin-granting groups lead, because membership of one is the strongest thing on this
+   page: adding a user there is a bigger act than editing their role, and it is done from a
+   different screen.
+   ================================================================ #}
+
+function _grpViewAccess(names) {
+    if (!names.length) return '';
+    const rows = names.map(key => {
+        const g = groupsData[key] || {};
+        const roles = g.roles || [];
+        return {
+            key, g, roles,
+            members: (g.members || []).length,
+            enabled: g.enabled !== false,
+            admin: roles.some(_accIsAdminRole),
+        };
+    });
+    // Admin-granting first, then the ones that hand out nothing or reach nobody, then the
+    // rest by size: the order is "what would surprise you", not the alphabet.
+    const rank = r => (r.admin ? 0 : (!r.roles.length || !r.members ? 1 : 2));
+    rows.sort((a, b) => rank(a) - rank(b) || b.members - a.members
+        || String(a.g.name || a.key).localeCompare(String(b.g.name || b.key)));
+    const admins = rows.filter(r => r.admin).length;
+    const idle = rows.filter(r => !r.members || !r.roles.length).length;
+    const off = rows.filter(r => !r.enabled).length;
+    const chips = `${_summaryChip('bi-diagram-3', t('grp_count_groups'), rows.length)}
+        ${admins ? _summaryChip('bi-shield-lock', t('grp_count_admin'), admins, 'text-bg-warning') : ''}
+        ${idle ? _summaryChip('bi-slash-circle', t('grp_count_idle'), idle) : ''}
+        ${off ? _summaryChip('bi-toggle-off', t('grp_count_disabled'), off) : ''}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('col_group_name'))}</th>
+                <th class="text-end">${esc(t('col_group_members'))}</th>
+                <th>${esc(t('col_group_roles'))}</th>
+                <th>${esc(t('grp_col_effect'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_grpAccessRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _grpAccessRow(r) {
+    // What this group does TODAY, said in one cell: the three states the table's separate
+    // columns can only be read as a pair of numbers.
+    let effect;
+    if (!r.enabled) effect = `<span class="badge bg-secondary fw-normal">${esc(t('grp_effect_disabled'))}</span>`;
+    else if (!r.roles.length) effect = `<span class="badge text-bg-warning fw-normal">${esc(t('grp_effect_no_roles'))}</span>`;
+    else if (!r.members) effect = `<span class="badge text-bg-warning fw-normal">${esc(t('grp_effect_no_members'))}</span>`;
+    else effect = `<span class="badge text-bg-success fw-normal">${esc(tf('grp_effect_grants', r.members))}</span>`;
+    return `<tr${r.enabled ? '' : ' style="opacity:.55"'}>
+        <td class="text-nowrap"><code class="fw-semibold">${esc(r.g.name || r.key)}</code>
+            ${r.g.builtin ? `<i class="bi bi-lock-fill text-muted ms-1 ss-fs-2" title="${escAttr(t('group_builtin_badge'))}"></i>` : ''}
+            ${r.admin ? `<span class="badge text-bg-warning fw-normal ms-1"><i class="bi bi-shield-exclamation me-1"></i>${esc(t('grp_grants_admin'))}</span>` : ''}</td>
+        <td class="text-end">${r.members
+            ? `<span class="fw-semibold">${r.members}</span>`
+            : '<span class="text-muted">0</span>'}</td>
+        <td>${r.roles.length ? r.roles.map(_accRoleBadge).join(' ') : '<span class="text-muted">—</span>'}</td>
+        <td class="text-nowrap">${effect}</td>
+    </tr>`;
+}

@@ -12,7 +12,6 @@ let _syslogTimer = null;        // {_id, _interval} interval-driven refresh
 let _syslogCountId = null;      // cosmetic countdown ticker
 let _syslogLive = false;        // live mode (fast poll)
 let _syslogAutoInit = false;    // restore-from-storage done once
-const _SL_LIVE_SECS = 2;
 const _SL_AUTO_KEY = 'ss_syslog_auto';
 const _SL_STATS_KEY = 'ss_syslog_stats_collapsed';
 
@@ -103,6 +102,13 @@ function _slRenderTable() {
     if (!wrap) return;
     const pagerTop = document.getElementById('sl-pager-top');
     const pagerBot = document.getElementById('sl-pager');
+    // The header lives outside this body (it is written once by renderSyslog), so the two
+    // controls that depend on the current view are refreshed here.
+    const swEl = document.getElementById('sl-view-switcher');
+    if (swEl) swEl.innerHTML = _slViewSwitcher();
+    const chEl = document.getElementById('sl-col-chooser');
+    if (chEl) chEl.innerHTML = _slView().cols
+        ? _buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols') : '';
     // No rows → centered empty-state, not a bare table with only column headers.
     if (!_slRowsData.length) {
         wrap.innerHTML = `<div class="text-center text-muted py-5">
@@ -112,6 +118,13 @@ function _slRenderTable() {
         return;
     }
     for (const el of [pagerTop, pagerBot]) if (el) el.style.display = '';
+    // Any view that is not the built-in table renders through the registry. The pager stays
+    // in all of them: here it is the control that LOADS the next rows from the server, not a
+    // presentation slice, so taking it away would strand the user on page one.
+    if (_slView().render) {
+        wrap.innerHTML = _slViewBody(_slRowsData);
+        return;
+    }
     const ordered = _slOrdered();
     const cw = _slCW();
     const thW = id => cw[id] ? ` style="width:${cw[id]}"` : '';

@@ -437,6 +437,153 @@ function jsStr(s) { return escAttr(JSON.stringify(s)); }
 function _loadViewMode(key, def = 'table') { try { return localStorage.getItem(key) || def; } catch (_) { return def; } }
 // The list/card switch, placed via the table's headerLead. `setter` = the name of
 // the table's _set<T>View function.
+/** The header of a summary view: the set it describes, stated in absolute terms so a body
+ *  showing four groups can never suggest the whole set is four things. Every section that
+ *  grew a summary wrote this same strip; seven copies of one line of markup is seven places
+ *  for the padding to end up different. */
+function _summaryHeader(chips) {
+    return `<div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2 border-bottom">${chips}</div>`;
+}
+
+/** One counted fact in that header: an icon, what it counts, and the number. `cls` overrides
+ *  the neutral pill for the ones that are news (danger for failures, warning for gaps). */
+function _summaryChip(icon, label, value, cls) {
+    return `<span class="badge rounded-pill ${cls || 'bg-body-secondary text-body-secondary'} fw-normal">
+        <i class="bi ${icon} me-1"></i>${esc(label)} <span class="fw-semibold">${esc(String(value))}</span></span>`;
+}
+
+/** A list of things as chips, cut to the first few with a "+n" tail.
+ *
+ *  The cut is the point: naming the members of a set is almost always more useful than
+ *  counting them ("3 IPs" is a number, *which* three is what you act on), and without a limit
+ *  one row with forty of them becomes a paragraph and the table stops being readable. Nine
+ *  views had written this same slice/join/+n by hand.
+ *
+ *  `render` builds one chip so each caller keeps its own shape (a code span, an icon, a
+ *  count inside the pill); `_chipText` is the plain one most of them want. */
+function _chipList(items, render, max = 4, empty = '—') {
+    const list = items || [];
+    if (!list.length) return `<span class="text-muted">${esc(empty)}</span>`;
+    const shown = list.slice(0, max).map(render).join(' ');
+    const more = list.length > max
+        ? `<span class="text-muted small ms-1">+${list.length - max}</span>` : '';
+    return shown + more;
+}
+/** The plain chip: neutral pill, optional leading icon. */
+function _chipText(text, icon) {
+    return `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
+        ${icon ? `<i class="bi ${escAttr(icon)} me-1"></i>` : ''}${esc(text)}</span>`;
+}
+
+/** The state behind a section's view switcher: which view is current, how it is remembered,
+ *  and which body to call. Every multi-view section was writing the same twenty lines — read
+ *  localStorage, validate against the registry, fall back to the first view, write it back —
+ *  and twenty lines copied four times is four places for the fallback to differ.
+ *
+ *  `views` are `{id, label_key, icon, render, mode}`; `mode` is what createListTable is told
+ *  ('table' | 'cards' | 'summary'), so a summary body is handed every filtered row instead of
+ *  the page. `onSet` runs after a switch (persist, redraw — whatever the section needs). */
+function createViewState(storageKey, views, onSet) {
+    const valid = id => views.some(v => v.id === id);
+    let cur = (() => {
+        try { const s = localStorage.getItem(storageKey); return valid(s) ? s : views[0].id; }
+        catch (_) { return views[0].id; }
+    })();
+    const api = {
+        id: () => cur,
+        view: () => views.find(v => v.id === cur) || views[0],
+        mode: () => api.view().mode || 'table',
+        is: id => cur === id,
+        /** Switch, remember, and let the section react. Unknown ids are ignored rather than
+         *  stored: a stale id from an older build must not blank the section. */
+        set: id => {
+            if (!valid(id)) return;
+            cur = id;
+            try { localStorage.setItem(storageKey, id); } catch (_) {}
+            if (onSet) onSet(id);
+        },
+        /** Restore from the server-side table config, without reacting: the section renders
+         *  right after (see applyExtra in createListTable). */
+        apply: id => {
+            cur = valid(id) ? id : views[0].id;
+            try { localStorage.setItem(storageKey, cur); } catch (_) {}
+        },
+        switcher: setter => _viewSwitcher(views, cur, setter, 'view_mode'),
+        /** The body of the current view, dispatched BY NAME — the view files are separate
+         *  partials concatenated after the registry, so their functions do not exist yet when
+         *  it is declared. */
+        body: (pageRows, ctx, allRows) => {
+            const v = api.view();
+            const fn = v.render ? window[v.render] : null;
+            if (!fn) return '';
+            return fn(v.mode === 'summary' ? allRows : pageRows, ctx);
+        },
+    };
+    return api;
+}
+
+// ── Things several sections need, which is why they are here ────────────────
+// Each of these was defined inside whichever section wrote it first and then read from three
+// or four others — the same shape as a generic module runner living in the hosts domain. A
+// section's file is for what only that section does.
+
+/** A stable hue (0–359) for a module name: the colour half the panel tints a module with.
+ *  Lives beside moduleIcon/modulePrettyName, which answer the other two "what does this
+ *  module look like" questions — they were in core and this one was not. */
+function _moduleHue(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+    return h % 360;
+}
+
+/** A random UUID for item keys (browsers expose crypto.randomUUID on secure origins incl.
+ *  localhost; fall back to a v4 generator otherwise). Used wherever a new record needs an
+ *  opaque key — clusters, host checks, module discovery. */
+function _genUuid() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
+// ── The role vocabulary ─────────────────────────────────────────────────────
+// Badge classes keyed by built-in role internal key. This lived in the ACCOUNT section — the
+// "my own password and theme" page — with a comment in the bundle warning that it had to load
+// before Users, Roles and Groups. It is read by those three plus Access and Overview, so the
+// warning was really saying "this is in the wrong file".
+const BUILTIN_ROLE_BADGES = {
+    admin:  'bg-danger',
+    editor: 'bg-primary',
+    viewer: 'bg-secondary',
+    none:   'bg-dark',
+};
+const ROLE_LABELS = I18N.role_labels || {};
+const PERM_LABELS = I18N.permission_labels || {};
+
+// rolesData is keyed by UID; rd.key holds the internal key for built-ins
+function roleBadgeClass(uid) {
+    const rd = rolesData[uid] || {};
+    return BUILTIN_ROLE_BADGES[rd.key || uid] || 'text-bg-info';
+}
+
+// ── datetime-local ⇄ unix seconds ───────────────────────────────────────────
+// The pair every date filter in the panel needs (Syslog wrote them; the cluster modal and the
+// Servers monitoring panel then reached across for them). Local time on purpose: a
+// <input type="datetime-local"> shows the reader's clock, so converting through UTC would
+// move every filter by the timezone offset.
+function _localInputToTs(v) {
+    if (!v) return '';
+    const ms = new Date(v).getTime();
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : '';
+}
+function _tsToLocalInput(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    if (isNaN(d)) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** The day a timestamp belongs to, as `YYYY-MM-DD`, in the READER's timezone — the same day
  *  its printed label says and the same day its hour is counted under. Built from
  *  toISOString() this would be the UTC day, so anything either side of local midnight would

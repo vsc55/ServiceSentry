@@ -681,6 +681,30 @@
     border-radius: .2rem;
 }
 
+/* ── Graphite: the dark solid button ────────────────────────────────
+   For a control that should read as dark rather than as the section's neutral grey, and
+   still be visible on a dark card. Bootstrap's own `btn-dark` cannot do that here: the dark
+   theme's surfaces are #181818 / #212121 / #2a2a2a, so a "dark" button lands within a shade
+   or two of whatever it sits on and disappears — which is exactly what happened to the
+   auto-refresh split button while its interval was off.
+
+   Deliberately GREY and not a tinted dark: the panel's dark theme is a neutral greyscale, so
+   a blue-ish slate reads as a colour that wandered in from somewhere else. This is simply the
+   next step up that ramp (#3a3a3a over #2a2a2a), with a border light enough to draw the edge.
+
+   A FIXED pair rather than theme variables, on purpose: the point is a button that is the
+   same dark control against a white card and against a near-black one. */
+.btn.ss-btn-graphite {
+    background-color: #3a3a3a;
+    border-color: #565656;
+    color: #ededed;
+}
+.btn.ss-btn-graphite:hover,
+.btn.ss-btn-graphite:focus-visible { background-color: #474747; border-color: #6a6a6a; color: #fff; }
+.btn.ss-btn-graphite:active,
+.btn.ss-btn-graphite.active,
+.btn.ss-btn-graphite.show { background-color: #313131; border-color: #565656; color: #ededed; }
+
 /* ── Modal title ────────────────────────────────────────────────── */
 .modal-title {
     color: var(--bs-secondary-color);

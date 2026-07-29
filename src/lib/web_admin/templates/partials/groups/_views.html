@@ -1,0 +1,16 @@
+{# ================================================================
+   Groups — the view registry. Table and cards were already here; "access" is the new one
+   (groups/_view_access.html).
+   ================================================================ #}
+
+const GROUP_VIEWS = [
+    { id: 'table',  label_key: 'grp_view_table',  icon: 'bi-table',        render: null,               mode: 'table'   },
+    { id: 'card',   label_key: 'grp_view_cards',  icon: 'bi-grid-3x3-gap', render: '_groupsCardsBody', mode: 'cards'   },
+    { id: 'access', label_key: 'grp_view_access', icon: 'bi-shield-lock',  render: '_grpViewAccess',   mode: 'summary' },
+];
+
+const _grpView = createViewState('ss_groups_view', GROUP_VIEWS, () => {
+    _persistTableConfig();
+    renderGroups();
+});
+function setGroupsView(id) { _grpView.set(id); }

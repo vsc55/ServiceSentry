@@ -223,7 +223,9 @@ class TestActorsCountsWhatMatters:
     def test_it_lists_the_addresses_rather_than_only_counting_them(self):
         """"3 IPs" is a number; WHICH three is the fact you act on."""
         body = _strip_comments(_read(VIEW_FILES['actors']))
-        assert 'a.ips' in body and 'slice(0, 3)' in body
+        # The cut itself is the shared `_chipList` (core/_utils.html) — nine views had written
+        # the same slice/join/+n by hand.
+        assert 'a.ips' in body and '_chipList(' in body
 
     def test_an_entry_with_no_user_is_not_called_unknown(self):
         """The daemon writes entries with no session behind them. Calling that "unknown"

@@ -45,8 +45,8 @@ function _groupsRowActions(name, ctx) {
 }
 
 // List/card view toggle (persisted per browser).
-let _groupsViewMode = _loadViewMode('ss_groups_view');
-function _setGroupsView(mode) { _groupsViewMode = mode === 'card' ? 'card' : 'table'; localStorage.setItem('ss_groups_view', _groupsViewMode); renderGroups(); }
+// The view is owned by the registry now (groups/_views.html).
+function _setGroupsView(id) { setGroupsView(id); }
 function _groupsCardsBody(names, ctx) {
     return _cardGrid(names.map(name => {
         const gd = groupsData[name];
@@ -141,10 +141,12 @@ createListTable({
     },
     actions: (name, ctx) => _groupsRowActions(name, ctx),
     // List/card view toggle (like the Sessions table).
-    bodyMode: () => _groupsViewMode === 'table' ? 'table' : 'cards',
+    bodyMode: () => _grpView.mode(),
     showChooser: mode => mode === 'table',
-    cardsBody: (names, ctx) => _groupsCardsBody(names, ctx),
-    headerLead: (ctx, mode) => _viewToggleLead(mode, '_setGroupsView'),
+    cardsBody: (names, ctx, all) => _grpView.body(names, ctx, all),
+    headerLead: () => _grpView.switcher('setGroupsView'),
+    persistExtra: () => ({ view: _grpView.id() }),
+    applyExtra: cfg => _grpView.apply(cfg && cfg.view),
     bulkBar: (ctx, sel) => (ctx.showActions && sel.size > 0) ? `
         <div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
             <span class="badge bg-secondary rounded-pill">${sel.size}</span>

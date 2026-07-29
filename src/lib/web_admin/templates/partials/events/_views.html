@@ -179,12 +179,6 @@ function _evLogChannels(e) {
     return String(e.channels || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
 }
 
-/** The header of a summary view: what set it describes, in absolute terms, so a view showing
- *  four rows can never suggest the log holds four lines. */
-function _evSummaryHeader(chips) {
-    return `<div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2 border-bottom">${chips}</div>`;
-}
-function _evChip(icon, label, value, cls) {
-    return `<span class="badge rounded-pill ${cls || 'bg-body-secondary text-body-secondary'} fw-normal">
-        <i class="bi ${icon} me-1"></i>${esc(label)} <span class="fw-semibold">${esc(String(value))}</span></span>`;
-}
+// The summary header and its counted chips are the shared ones (core/_utils.html), so a view
+// showing four rows can never suggest the log holds four lines — and says it the same way the
+// other sections do.

@@ -18,6 +18,18 @@ the argument for a guard rather than three fixes.
 draws at the height of its own content. The row separator then breaks at that one column
 while every other table in the panel keeps a straight line.
 
+**A button the colour of the thing it sits on.** ``btn-dark`` is not theme-blind — it is
+correct in the light theme and nearly invisible in the dark one, where it lands within a
+shade or two of the card surface (#181818 / #212121 / #2a2a2a). Reported from a screenshot of
+the auto-refresh split button: with the interval off, the control disappeared into the header
+and only the little caret gave away that anything was there. A refresh button nobody can see
+while it is off is a button nobody finds to turn on.
+
+The replacement is ``.ss-btn-graphite``, a solid dark button one step up the same neutral
+greyscale the dark theme is built from — quiet, which is right for an off state, without
+becoming the card it sits on. Grey and not a tinted dark on purpose: a blue-ish slate was
+tried first and read as a colour that had wandered in from another palette.
+
 The checks are deliberately narrow and mechanical — the vocabulary that is banned and the
 class that replaced it — not "does this look right", which no test can answer.
 """
@@ -54,10 +66,64 @@ def _read(path: str) -> str:
     return io.open(path, encoding='utf-8-sig').read()
 
 
+def _code(path: str) -> str:
+    """Markup and script only. The comment that explains why a class was abandoned names it,
+    so a guard reading the prose would flag the very file that fixed the problem."""
+    src = re.sub(r'\{#.*?#\}', '', _read(path), flags=re.S)
+    src = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
+    return re.sub(r'^\s*//.*$', '', src, flags=re.M)
+
+
 class TestTheScanItself:
 
     def test_templates_are_found(self):
         assert sum(1 for _ in _templates()) > 50
+
+
+class TestNoControlWearsTheSurfaceColour:
+    """Reported from a screenshot: the auto-refresh split button, with the interval off, was a
+    `btn-dark` on a dark card — within a shade of the surface, so only its caret showed."""
+
+    def test_no_button_uses_btn_dark(self):
+        bad = [os.path.relpath(path, TPL) for path in _templates()
+               if re.search(r'btn-dark\b', _code(path))]
+        assert not bad, (
+            'these controls wear btn-dark, which in the dark theme is nearly the card surface '
+            'they sit on: ' + ', '.join(sorted(set(bad)))
+            + ' — use .ss-btn-graphite, the panel’s dark solid button')
+
+    def test_the_auto_refresh_off_state_uses_the_graphite_button(self):
+        """Named explicitly because it is where it was found, and because the off state is the
+        one a silent revert would hide again: nobody notices a button that is only wrong while
+        it is doing nothing."""
+        # In core/, not in a section: six sections draw this control, so it is not the
+        # property of whichever one happened to write it first.
+        src = _read(os.path.join(TPL, 'partials', 'core', '_auto_refresh.html'))
+        m = re.search(r'const btnCls = `btn btn-sm \$\{[^`]*`', src)
+        assert m, 'the auto-refresh button classes moved — this guard needs re-aiming'
+        assert 'ss-btn-graphite' in m.group(0)
+
+    def test_the_graphite_button_is_not_one_of_the_surfaces(self):
+        """The whole point of it: a dark button that is still a button. If it ever gets defined
+        in terms of a surface variable it is back to being invisible on that surface."""
+        css = _read(CSS)
+        m = re.search(r'\.btn\.ss-btn-graphite\s*\{([^}]*)\}', css)
+        assert m, '.ss-btn-graphite is gone — the off state has nothing to wear'
+        body = m.group(1)
+        assert 'background-color:' in body and 'color:' in body
+        for surface in ('--bs-body-bg', '--bs-secondary-bg', '--bs-tertiary-bg'):
+            assert surface not in body, f'the graphite button is painted with {surface}'
+
+    def test_it_stays_on_the_neutral_ramp(self):
+        """A tinted dark was tried first and read as a colour from another palette: the dark
+        theme is a neutral greyscale, so its one dark button has to be grey too — which for a
+        hex triplet means all three channels equal."""
+        css = _read(CSS)
+        m = re.search(r'\.btn\.ss-btn-graphite\s*\{([^}]*)\}', css)
+        assert m
+        for hexval in re.findall(r'#([0-9a-fA-F]{6})', m.group(1)):
+            r, g, b = hexval[0:2], hexval[2:4], hexval[4:6]
+            assert r == g == b, f'#{hexval} is tinted — the dark button drifted off the greys'
 
 
 class TestATableCellStaysATableCell:

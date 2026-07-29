@@ -1,0 +1,20 @@
+{# ================================================================
+   Users — the view registry.
+
+   Table and cards were already here (the card/table toggle); the third one is the reason
+   this section needed a registry at all. See users/_view_access.html.
+   ================================================================ #}
+
+// The card view keeps the id the toggle used ('card'), so a browser that remembers the card
+// layout from before the switcher existed still opens on it.
+const USER_VIEWS = [
+    { id: 'table',  label_key: 'usr_view_table',  icon: 'bi-table',        render: null,               mode: 'table'   },
+    { id: 'card',   label_key: 'usr_view_cards',  icon: 'bi-grid-3x3-gap', render: '_usersCardsBody',  mode: 'cards'   },
+    { id: 'access', label_key: 'usr_view_access', icon: 'bi-shield-lock',  render: '_usrViewAccess',   mode: 'summary' },
+];
+
+const _usrView = createViewState('ss_users_view', USER_VIEWS, () => {
+    _persistTableConfig();
+    renderUsers();
+});
+function setUsersView(id) { _usrView.set(id); }

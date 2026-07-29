@@ -1,4 +1,4 @@
-﻿{# ================================================================
+{# ================================================================
 Initialisation — role restrictions, event listeners, data load.
 ================================================================ #}
 
@@ -24,8 +24,7 @@ function _persistTableConfig() {
         lit('users',    { cols: [...(typeof _usersVisibleCols  !== 'undefined' ? _usersVisibleCols  : [])], order: (typeof _usersColOrder  !== 'undefined' ? _usersColOrder  : []) || [], w: _cw('users')  });
         lit('roles',    { cols: [...(typeof _rolesVisibleCols  !== 'undefined' ? _rolesVisibleCols  : [])], order: (typeof _rolesColOrder  !== 'undefined' ? _rolesColOrder  : []) || [], w: _cw('roles')  });
         lit('audit',    { cols: [...(typeof _auditVisibleCols  !== 'undefined' ? _auditVisibleCols  : [])], order: (typeof _auditColOrder  !== 'undefined' ? _auditColOrder  : []) || [], w: _cw('audit')  });
-        lit('sessions', { cols: [...(typeof _sessionsVisibleCols !== 'undefined' ? _sessionsVisibleCols : [])], order: (typeof _sessionsColOrder !== 'undefined' ? _sessionsColOrder : []) || [], w: _cw('sessions'),
-                          view: (typeof _sessionsViewMode !== 'undefined' ? _sessionsViewMode : 'card') });
+        lit('sessions', { cols: [...(typeof _sessionsVisibleCols !== 'undefined' ? _sessionsVisibleCols : [])], order: (typeof _sessionsColOrder !== 'undefined' ? _sessionsColOrder : []) || [], w: _cw('sessions') });
         lit('evrules',  { cols: [...(typeof _evrVisibleCols !== 'undefined' ? _evrVisibleCols : [])], order: (typeof _evrColOrder !== 'undefined' ? _evrColOrder : []), w: _cw('evrules') });
         lit('evlog',    { cols: [...(typeof _evlVisibleCols !== 'undefined' ? _evlVisibleCols : [])], order: (typeof _evlColOrder !== 'undefined' ? _evlColOrder : []), w: _cw('evlog') });
         lit('syslog',   { cols: [...(typeof _slVisibleCols  !== 'undefined' ? _slVisibleCols  : [])], order: (typeof _slColOrder  !== 'undefined' ? _slColOrder  : []), w: _cw('syslog') });

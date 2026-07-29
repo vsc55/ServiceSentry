@@ -797,6 +797,8 @@ Vocabulario dentro de cada carpeta de dominio:
 | `_list.html` | la lista de la sección: la spec de `createListTable`, o la lista escrita a mano si no usa la fábrica. |
 | `_columns.html` | definición de columnas + estado de visibilidad/orden/anchura, para tablas construidas a mano (`events`, `syslog`). |
 | `_modal.html` | el modal de alta/edición. |
+| `_views.html` | el **registro de vistas** de la sección y lo que todas comparten: el conmutador, el estado (`createViewState`) y el vocabulario del dominio — incluido el **único** sitio donde sus permisos se vuelven botones. Uno por carpeta. |
+| `_view_<nombre>.html` | **una** vista alternativa (`_view_cards`, `_view_status`, `_view_usage`…). El registro la nombra por cadena y estos ficheros se concatenan **después** de él. |
 | `_index.html` | orquestador de carpeta: solo incluye a sus hermanos (`cfg/auth`, `cfg/notify`). |
 | `_macros.html` | biblioteca de macros Jinja; se **importa** (`{% from … import %}`), por eso sí puede usarse desde varias plantillas. |
 | `_<concern>.html` | una preocupación extraída al crecer: `_filters`, `_export`, `_poll`, `_detail`, `_series`, `_bans`… |
@@ -807,6 +809,15 @@ Vocabulario dentro de cada carpeta de dominio:
 Una sección con varias sub-secciones (syslog, events, fail2ban) deja el shell en `_render.html`
 y pone cada sub-sección en su propio fichero (`_bans` / `_history` / `_whitelist`). Si un
 `_render.html` se dispara de tamaño, casi siempre es que arrastra sub-secciones sin separar.
+
+**Y la regla que decide entre `core/` y una carpeta de sección:** el fichero de una sección es
+para lo que **solo** esa sección hace. En cuanto dos o tres secciones leen algo, deja de ser
+suyo — da igual quién lo escribiera primero. Los síntomas son fáciles de reconocer: un
+`typeof _COSA !== 'undefined' ? _COSA : <valor>` (alguien sabe que puede no estar cargado), un
+comentario que dice «shared across …» sin haberse movido, o dos funciones con el mismo
+propósito y nombres parecidos (`_modPrettyName` frente a `modulePrettyName`) que además no
+contestan igual. Se detecta a máquina: para cada símbolo definido en una sección, contar desde
+cuántas **otras** secciones se referencia.
 
 Todo esto lo verifica `tests/test_wa_partials_convention.py`: nombres, un solo `_render` por
 carpeta, sin `_table`, sin partials huérfanos, sin dobles inclusiones y un tope de líneas

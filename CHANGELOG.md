@@ -8,6 +8,150 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.29] - 2026-07-29
+
+### Added
+- **The host registry can be read four ways.** Beside the table: **cards** (a host as one
+  object instead of eight columns you turn on and read left to right), **by status** and
+  **coverage**.
+- **By status** is the answer you actually want from a fleet list. There was a status column
+  you could sort by, which answers "which host is worst" and never "how many are broken";
+  grouped, the counts are the first thing on screen and an empty error group is itself the
+  good news. Hosts with no checks get their own group rather than a fifth colour — "we do not
+  know how this machine is" is not a shade of "fine", and painting it green would say it was.
+- **Coverage** is the one that finds the gap: a host with no checks at all is registered and
+  watched by nothing, and a host whose checks are all disabled is worse, because the row looks
+  configured and somebody turned them off. The table drew "0/0" and "0/3" in the same grey
+  pill, which is how a panel stays green while a machine is down. Both lead; the working
+  majority is at the bottom.
+- The modules pill always shows both numbers — "3" alone cannot say whether the other two were
+  never added or were switched off.
+- **Syslog can be read three ways.** A **stream** — the shape a log is actually read in:
+  reading one in a grid means re-reading five column headers per line to follow one machine's
+  story, and spends a third of the width on chrome. And **patterns**, which collapses "the
+  same message with different numbers in it": five hundred lines are usually a dozen distinct
+  messages, and the one that matters is often the one that appears twice.
+- Patterns says what it counted over, on screen. This is the section whose rows arrive already
+  paged by the SERVER: the store can hold millions of lines and the browser has a few dozen, so
+  a bare count would be read as "the log". The page-size control is how you widen it. The
+  grouping replaces numbers, addresses, UUIDs, hex blobs and quoted strings and never touches
+  words — two different messages collapsing into one is a worse failure than two similar ones
+  staying apart. The pager stays in every view, because here it is what loads the next rows.
+- **History gained a series inventory** beside the chart: one row per series with its sample
+  count, uptime, last sample and last value, sortable, opening worst-first. The sidebar is
+  navigation — names and a three-colour dot — and it hides two things the index already
+  carries: which series **stopped recording** (a removed or renamed check leaves its history
+  behind and looks identical to a healthy one) and which checks have the worst uptime, because
+  you cannot sort dots. Clicking a row goes back to the chart with that series selected.
+- A series counts as stopped after 24 h without a single sample, and the rule is written next
+  to the count: a threshold nobody can see is a badge nobody can trust.
+- **Access gained the view it never had: what an account can actually do.** Users, Roles and
+  Groups are three tables over one graph — a user holds a role directly, belongs to groups, and
+  a group grants roles — and each table showed its own row and the edge leaving it. The
+  composition was written down nowhere: an account whose role column says "viewer" and which
+  sits in a group mapped to admin IS an admin, and the table said viewer. Finding that out
+  meant opening Groups, reading member lists and holding it in your head, which is the work an
+  access review is supposed to be.
+- **Users → effective access**: the direct role, what the groups add, and a flag on every
+  account that reaches admin through a group. **Roles → who holds it**: reach counted as a
+  union of direct holders and group members (a user in both is not counted twice), with the
+  roles nobody holds marked. **Groups → what it grants**: the three ways a group does nothing
+  — disabled, no roles, no members — which the table's separate columns could only be read as a
+  pair of numbers. **Sessions → by user**: twelve rows can be one person with twelve tabs or
+  twelve people, and a list sorted by time reads the same either way.
+- A **disabled group grants nothing**, here as on the server. Over-reporting access is the one
+  direction an access review must not be wrong in: it sends you chasing something that is not
+  there and buries what is. The group is still shown — it is how the account is configured —
+  and marked as granting nothing today.
+- The four sections share one view state (`createViewState`): read, validate against the
+  registry, fall back to the first view. It was about to be the same twenty lines four times,
+  which is four places for the fallback to differ. Their card views keep the id the old
+  card/table toggle stored, so nobody's saved layout resets.
+- **Clusters gained cards and a by-host view.** A cluster exists for redundancy, and the table
+  hides the two ways it can be a lie: a cluster with ONE member is a failover pair with nothing
+  to fail over to (a "1" where another row has a "3"), and several clusters pinned to the same
+  host all go down together while each row looks redundant on its own. The second is a fact
+  about the intersection of the rows, so no per-cluster view can show it — hence the pivot onto
+  the host, with the most-loaded machine first.
+- **fail2ban's two lists gained the grouping an address list needs.** Banned IPs **by network**:
+  forty bans are usually three networks, because whoever is knocking rotates the last octet, and
+  that shape is what changes the decision from banning addresses to banning a range. Ban history
+  **by address**: the question asked of a history is who keeps coming back, and sorted by time an
+  address banned six times is six scattered rows. A ban and its unban count as one incident.
+- The network rule is deliberately blunt and stated in the code: /24 and /64, the two sizes that
+  correlate with "the same person". Deriving a prefix from the addresses present would make the
+  grouping change every time a ban expires.
+- **The never-ban whitelist can be read by reach**, which is the one list in the panel where an
+  entry is a hole made on purpose. `10.0.0.7` and `10.0.0.0/8` are one line each and the second
+  exempts sixteen million addresses — typing an 8 where you meant a 24 is a one-character
+  mistake no column shows. It sorts widest first, states how many addresses each entry covers,
+  and marks the ones already inside another (a whitelist grows by accretion, so the narrow entry
+  that looks like the rule protecting a host often does nothing). Containment is computed for
+  IPv4 only and says so: getting 128-bit arithmetic subtly wrong would mean calling an entry
+  redundant when it is the only thing exempting a host.
+- Left alone on purpose: Syslog's dropped-senders panel — a short table already sorted by the
+  only thing you ask it, where a switcher would be chrome rather than an answer.
+
+### Fixed
+- **The auto-refresh button was invisible while it was off.** It wore Bootstrap's `btn-dark`,
+  and the dark theme's surfaces are #181818 / #212121 / #2a2a2a — so "dark" landed within a
+  shade of the card it sits on and only the caret gave the control away. A refresh button
+  nobody can see while it is off is a button nobody finds to turn on. It now wears
+  `.ss-btn-graphite`, one step up that same neutral greyscale: still quiet, which is right for
+  an off state, without being the surface. Grey rather than a tinted dark on purpose — a
+  blue-ish slate was tried first and read as a colour from another palette. Guarded three ways,
+  including that its hex stays on the neutral ramp.
+- **The control lives in `core/` now.** It was defined inside `overview/_render.html` — its own
+  comment said "shared across Status / Overview / History" and it stayed there anyway — while
+  six sections draw it: Overview, Status, History, Syslog, the Servers monitoring panel and the
+  cluster modal. A section's file is for what only that section does; this is the same mistake
+  as a generic module runner living in the hosts domain.
+- **Two answers to "what is this module called".** `servers/_checks.html` defined a second
+  `_modPrettyName` beside core's `modulePrettyName`, and they disagreed: the local one returned
+  the raw module id where core title-cases it, and it took no config override. One caller was
+  already passing a config to it — `_modPrettyName(c.module, modulesData[c.module])` — which the
+  one-argument local version silently dropped. Deleted; every call site now reaches the core
+  helper, and that caller finally gets the override it asked for.
+- **Five more shared things moved out of the section that happened to write them first**, all
+  found by the same audit rather than by eye: `_moduleHue` (a module's colour, which now sits
+  beside `moduleIcon` and `modulePrettyName` instead of inside the Modules list), `_genUuid`,
+  the `datetime-local` ⇄ unix pair, the role vocabulary (`ROLE_LABELS`, `roleBadgeClass` and
+  friends, which lived in the "my own account" page and forced a load-order warning in the
+  bundle), and the Live poll interval — Syslog owned it while the cluster modal and the Servers
+  panel reached across with `typeof _SL_LIVE_SECS !== 'undefined' ? … : 2`, and a fallback is
+  what code writes when it knows a value might not be there.
+- **The series inventory's columns did not fit their content and could not be resized.** Its
+  table was hand-written markup instead of the panel's column machinery, so it got none of it:
+  the browser shared the width evenly and the two name columns ended up as narrow as the number
+  beside them. It now declares its columns like every other table — drag to reorder, drag the
+  edge to resize, double-click to fit, and content-fit sizing for the number, the percentage
+  and the age. The order and the widths are remembered.
+- The inventory's search moved up beside the view switcher. It is the only control that view
+  has, and its own row above the table spent a whole band on one input; the chart view keeps
+  its copy in the series sidebar, where the list it filters is.
+
+### Removed
+- **The duplication this round introduced, before it set.** Building eleven sections' worth of
+  views produced seven copies of the summary-header strip, six identical chip helpers and nine
+  hand-written "cut this list to N with a +n tail" blocks. They are now `_summaryHeader`,
+  `_summaryChip` and `_chipList` in one place: seven copies of one line of markup is seven
+  places for the padding to end up different, and the cut is worth sharing because naming the
+  members of a set is nearly always more useful than counting them — while one row with forty
+  of them stops being a row.
+
+### Changed
+- **createListTable learned what a summary body is.** `bodyMode: 'summary'` is handed every
+  filtered row instead of the page and draws no pagination bands, because a summary counts
+  things: "4 hosts have no checks" is a fact about the fleet, and counted over one page that
+  number changes as you page through it. `cardsBody` now receives the full row list as a third
+  argument, so an existing card view can ignore it and nothing else had to change.
+- Credentials' two grouped views (by type, who uses them) became summaries on the same
+  mechanism, which removes the caveat they carried: their groups now partition the catalogue
+  rather than the page.
+- The per-host permissions become buttons in one place, composed by every view and guarded.
+  Servers is the section where `server.<uid>.edit` grants exactly one row, so a view
+  assembling its own buttons would be a view that forgot the granular case exists.
+
 ## [0.0.1+build.28] - 2026-07-28
 
 ### Added

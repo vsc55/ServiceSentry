@@ -72,7 +72,7 @@ function _runItemMultiCheck(mod, colSchema, itemKey, url, itemData, mc) {
     };
     const el = _itemMultiCheckModal();
     document.getElementById('imcTitle').textContent =
-        (typeof _modPrettyName === 'function' ? _modPrettyName(mod) : mod) + (itemKey ? ' — ' + itemKey : '');
+        modulePrettyName(mod, {}) + (itemKey ? ' — ' + itemKey : '');
     document.getElementById('imcLead').innerHTML =
         `<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>${esc(t('cred_prov_waiting') || 'Checking…')}</span>`;
     // One container per enabled sub-check; a sub-check may expand into several rows

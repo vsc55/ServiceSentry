@@ -1080,6 +1080,51 @@ ordenación, selección/acciones masivas y la fontanería de persistencia.
 > forma genérica en `_buildColChooser`/`_colChooserToggle` (`partials/core/_utils.html`),
 > así que aplica a todas las tablas por igual.
 
+### Vistas: cada sección se puede leer de varias formas
+
+Una tabla contesta «qué tengo» y casi siempre deja fuera la pregunta por la que abriste la
+sección. Por eso **catorce secciones** llevan un conmutador en su cabecera con dos a cuatro
+vistas sobre **los mismos datos y los mismos filtros**:
+
+| Sección | Vistas además de la tabla |
+| ------- | ------------------------- |
+| Status, Modules, páginas de módulo | resumen, tabla, mosaico / los cuatro layouts |
+| Services | tarjetas, flota (una fila por **instancia**), compacta |
+| Credentials | tarjetas, por tipo, **quién las usa** |
+| Servers | tarjetas, por estado, **cobertura** (qué host no vigila nadie) |
+| Audit | cronología, por actor, actividad por hora |
+| Syslog | stream, patrones |
+| Events (reglas / log) | tarjetas · por canal · entrega / cronología · por regla · por canal |
+| History | inventario de series |
+| Users, Roles, Groups, Sessions | tarjetas + **acceso efectivo / quién lo tiene / qué concede / por usuario** |
+| Clusters | tarjetas, por host |
+| fail2ban (baneos / historial / whitelist) | por red / por dirección / por alcance |
+
+La forma es siempre la misma, y vive en `partials/core/`:
+
+- **el registro** — `<seccion>/_views.html` declara `[{id, label_key, icon, render, mode}]`, y
+  cada vista va en su `_view_<nombre>.html`. El `render` se resuelve **por nombre** en tiempo
+  de llamada, porque los ficheros de vista se concatenan después del registro.
+- **el estado** — `createViewState(clave, vistas, onSet)` (`core/_utils.html`): leer, validar
+  contra el registro y caer a la primera vista, en un solo sitio.
+- **el conmutador** — `_viewSwitcher(...)`, un grupo de botones idéntico en todo el panel.
+- **el cuerpo** — `bodyMode` de `createListTable`: `'cards'` es otro cuerpo sobre la **misma
+  página**; `'summary'` recibe **todas** las filas filtradas y **no dibuja paginación**.
+
+Esa última distinción es la regla que gobierna las vistas nuevas: un resumen **cuenta cosas**
+(«4 hosts sin ninguna comprobación», «6 baneos de esta IP»), y un recuento hecho sobre una
+página cambia según avanzas — que es peor que no contar. Por eso una cabecera de resumen
+siempre declara el conjunto entero (`_summaryHeader` + `_summaryChip`), y las listas largas se
+recortan con `_chipList`, que nombra los primeros y añade «+n»: *cuáles* suele ser el dato
+sobre el que se actúa, y *cuántos* no.
+
+Y la parte que no es cosmética: **los permisos se convierten en botones en un solo sitio por
+sección** (`_credActionsHtml`, `_srvActionsHtml`, `_evRuleActions`, `_clActionsHtml`,
+`_auditDeleteBtn`…), y cada vista los compone. Una vista que se montara sus propios botones
+sería una vista libre de ofrecer «Borrar» a quien no puede pulsarlo — y en Servers y Clusters,
+donde el permiso es **por fila** (`server.<uid>.edit`, `cluster.<uid>.edit`), de olvidar que
+el caso granular existe. Hay guards por sección que lo fijan (ref-tests §115-§130).
+
 ### Persistencia por usuario
 
 Las columnas visibles, su orden, el ancho y la ordenación de cada tabla se guardan

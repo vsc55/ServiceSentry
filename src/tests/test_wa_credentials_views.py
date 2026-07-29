@@ -134,8 +134,22 @@ class TestTheFourViewsShareOnePage:
         filtered on its own could show a different set of rows than the pagination band above
         it claims."""
         src = _strip_comments(_read(LIST))
-        assert 'cardsBody: (uids, ctx) => _credViewBody(uids, ctx)' in src
-        assert re.search(r"bodyMode:\s*\(\)\s*=>\s*_credViewId\(\)\s*===\s*'table'", src)
+        assert 'cardsBody: (uids, ctx, all) => _credViewBody(uids, ctx, all)' in src
+        assert 'bodyMode: () => _credBodyMode()' in src
+
+    def test_the_grouped_views_are_summaries_not_pages(self):
+        """They count things — how many of each type, how many orphans — and a count over one
+        page is a statement about the pagination instead: three SSH credentials when there
+        are ten, and a different three on the next page. The factory hands a `summary` body
+        every filtered row and drops the pagination bands."""
+        src = _strip_comments(_read(VIEWS))
+        reg = src[src.index('const CREDENTIAL_VIEWS'):]
+        reg = reg[:reg.index('];')]
+        for line in reg.splitlines():
+            for vid in ('types', 'usage'):
+                if f"id: '{vid}'" in line:
+                    assert "mode: 'summary'" in line, f'{vid} is drawn as a page again'
+        assert "v.mode === 'summary' ? allUids : uids" in _fn(src, '_credViewBody')
 
     def test_no_view_fetches_the_catalogue_again(self):
         """Every view reads the same `credentialsData`. The usage map is the one extra fetch

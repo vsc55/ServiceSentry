@@ -139,7 +139,7 @@ class TestASummaryIsNotAPage:
     def test_every_summary_states_the_set_it_describes(self):
         """A view showing four rows must never suggest the log holds four lines."""
         for path in (V_RULES, V_LOG):
-            assert '_evSummaryHeader(' in _strip_comments(_read(path)), path
+            assert '_summaryHeader(' in _strip_comments(_read(path)), path
 
     def test_the_column_chooser_belongs_to_the_table(self):
         body = _fn(_strip_comments(_read(RENDER)), '_eventsRender')
@@ -225,7 +225,7 @@ class TestDeliveryHasThreeStates:
         channel carry". The header states the rule count so the difference cannot read as a
         miscount."""
         body = _fn(_strip_comments(_read(V_RULES)), '_evrViewChannels')
-        assert "_evChip('bi-bell', t('evr_count_rules'), rows.length)" in body
+        assert "_summaryChip('bi-bell', t('evr_count_rules'), rows.length)" in body
 
 
 class TestTheLogSummariesCountTheSameThing:

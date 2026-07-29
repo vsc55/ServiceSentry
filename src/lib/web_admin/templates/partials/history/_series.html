@@ -20,7 +20,9 @@ function _historyOnSearch(val) {
     // e.g. when a deep-link / compare action sets the filter programmatically.
     const inp = document.getElementById('history-series-filter');
     if (inp && inp !== document.activeElement && inp.value !== val) inp.value = val;
-    _historyRenderSeriesList();
+    // One filter, two views: the inventory draws the same set the sidebar would, so typing
+    // in either and switching must not silently change which series you are looking at.
+    if (_historyIsChart()) _historyRenderSeriesList(); else _historyRenderInventory();
 }
 
 function _historyRenderSeriesList() {

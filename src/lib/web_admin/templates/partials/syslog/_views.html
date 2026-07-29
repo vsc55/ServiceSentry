@@ -1,0 +1,127 @@
+{# ================================================================
+   Syslog — the part every view shares.
+
+   This is the one section whose rows arrive already filtered, sorted and paged BY THE
+   SERVER: the table you see is one page of a query, not a slice of something the browser
+   holds. So the views here differ only in how that page is drawn, and every one of them
+   keeps the pager — it is the control that loads more, not a presentation trick.
+
+   Two shapes the table cannot be:
+
+   * a STREAM. Reading a log in a grid means re-reading five column headers per line to
+     follow one machine's story; a console line puts the severity, the clock, the host and
+     the text where the eye already expects them, and fits twice as many lines on screen.
+     Logs are read, not compared, and this is the shape reading wants.
+   * PATTERNS. Five hundred lines are usually a dozen distinct messages repeated, and the
+     one that matters is often the one that appears twice. Collapsing by "the same message
+     with different numbers in it" turns a wall into a list you can finish, and puts the
+     rare line where you can see it.
+
+   Patterns describes what is LOADED, and says so on screen: the store can hold millions of
+   rows and the browser has one page of them. A count that silently meant "of the last 50"
+   would be worse than no count — so the header states it, and the page-size control (up to
+   "all") is how you widen what it covers.
+   ================================================================ #}
+
+// ── The registry ─────────────────────────────────────────────────────────────
+// `render` is looked up by NAME at call time: the view files are concatenated after this
+// one. A null render means the built-in table body.
+const SYSLOG_VIEWS = [
+    { id: 'table',    label_key: 'sl_view_table',    icon: 'bi-table',       render: null,               cols: true  },
+    { id: 'stream',   label_key: 'sl_view_stream',   icon: 'bi-terminal',    render: '_slViewStream',    cols: false },
+    { id: 'patterns', label_key: 'sl_view_patterns', icon: 'bi-collection',  render: '_slViewPatterns',  cols: false },
+];
+const _SL_VIEW_KEY = 'ss_syslog_view';
+
+let _slViewMode = (() => {
+    try {
+        const s = localStorage.getItem(_SL_VIEW_KEY);
+        return SYSLOG_VIEWS.some(v => v.id === s) ? s : 'table';
+    } catch (_) { return 'table'; }
+})();
+
+function _slViewId() { return _slViewMode; }
+function _slView()   { return SYSLOG_VIEWS.find(v => v.id === _slViewMode) || SYSLOG_VIEWS[0]; }
+
+/** Switching redraws the page already in memory (`_slRowsData`). Re-querying to change how
+ *  the same rows are drawn would put a database GROUP BY on the wire — this section's
+ *  queries are the expensive ones in the panel — and would race the auto-refresh timer. */
+function setSyslogView(id) {
+    if (!SYSLOG_VIEWS.some(v => v.id === id)) return;
+    _slViewMode = id;
+    try { localStorage.setItem(_SL_VIEW_KEY, id); } catch (_) {}
+    _persistTableConfig();
+    _slRenderTable();
+}
+
+function _slViewSwitcher() {
+    return _viewSwitcher(SYSLOG_VIEWS, _slViewId(), 'setSyslogView', 'view_mode');
+}
+
+/** The non-table body, dispatched by name. Every view is handed the same loaded page: the
+ *  server decided which rows those are, and no view may quietly show a different set. */
+function _slViewBody(rows) {
+    const v = _slView();
+    const fn = v.render ? window[v.render] : null;
+    return fn ? fn(rows) : '';
+}
+
+// ── What a message means, decided once ───────────────────────────────────────
+/** The severity pill. Every view calls this rather than reaching for _SYSLOG_SEV_CLS, so
+ *  `err` is one colour everywhere — including next to the same message in another view. */
+function _slSevBadge(m) {
+    const cls = _SYSLOG_SEV_CLS[m.severity] || 'secondary';
+    return `<span class="badge bg-${cls}">${esc(m.severity_name || '')}</span>`;
+}
+function _slSevClass(m) { return _SYSLOG_SEV_CLS[m.severity] || 'secondary'; }
+
+/** When a message arrived, as text. `received_at` is what the store recorded; `ts` is what
+ *  the sender claimed, and a device with a wrong clock is common enough that the first is
+ *  the one to trust — the table already prefers it and the other views must agree. */
+function _slWhen(m) {
+    const when = m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '');
+    return String(when).replace('T', ' ').replace('Z', '');
+}
+/** Just the clock part, for the stream — the date is in the group heading. */
+function _slClock(m) {
+    const s = _slWhen(m);
+    const i = s.indexOf(' ');
+    return i > 0 ? s.slice(i + 1, i + 9) : s;
+}
+function _slDay(m) {
+    const s = _slWhen(m);
+    const i = s.indexOf(' ');
+    return i > 0 ? s.slice(0, i) : s;
+}
+
+/** The sender, as the table shows it: hostname when the message carries one, else the
+ *  address it came from. */
+function _slHost(m) { return m.hostname || m.source || ''; }
+/** app[pid], the way syslog itself writes it. */
+function _slApp(m) { return (m.app || '') + (m.procid ? `[${m.procid}]` : ''); }
+
+/** The shape of a message, with the variable parts taken out, so "Failed login from
+ *  10.0.0.4" and "Failed login from 10.0.0.9" are recognised as one pattern.
+ *
+ *  Deliberately crude and in this order: addresses and hex blobs first (they contain digits
+ *  and would otherwise be eaten by the number rule), then quoted strings, then bare numbers.
+ *  It is a reading aid, not an identifier — two different messages collapsing together is a
+ *  worse outcome than two similar ones staying apart, which is why nothing here touches
+ *  words. */
+function _slPattern(msg) {
+    return String(msg || '')
+        .replace(/\b(?:[0-9a-fA-F]{1,4}:){2,}[0-9a-fA-F]{0,4}\b/g, '‹addr›')      // IPv6-ish
+        .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, '‹addr›')               // IPv4[:port]
+        .replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '‹uuid›')
+        .replace(/\b[0-9a-fA-F]{12,}\b/g, '‹hex›')
+        .replace(/"[^"]*"|'[^']*'/g, '‹str›')
+        .replace(/\b\d+(?:\.\d+)?\b/g, '‹n›')
+        .trim();
+}
+
+/** The header of a view that counts: it names what it is counting over, because the store
+ *  holds far more than the browser does and a bare number would be read as "the log". */
+function _slLoadedHeader(chips, n) {
+    return _summaryHeader(`${chips}
+        <span class="text-muted small">${esc(tf('sl_of_loaded', n))}</span>`);
+}

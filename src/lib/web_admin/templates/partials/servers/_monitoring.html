@@ -91,7 +91,7 @@ function _hostLogsApplyTimer() {
     _hostLogsStopTimer();
     const a = _hostLogsState ? _hostLogsState.auto : 0;
     const live = a === 'live';
-    const secs = live ? (typeof _SL_LIVE_SECS !== 'undefined' ? _SL_LIVE_SECS : 2) : (parseInt(a, 10) || 0);
+    const secs = live ? _SL_LIVE_SECS : (parseInt(a, 10) || 0);
     if (secs > 0) {
         _hostLogsTimer = setInterval(() => {
             const pane = document.getElementById('hmTabLogs');
@@ -329,7 +329,7 @@ function _addHostModule(mod) {
 // Remove a module from this host: hide it and drop its checks (deleted on save).
 function _removeHostModule(mod) {
     const msg = (t('host_module_remove_confirm') || 'Remove module "{name}" and its checks?')
-        .replace('{name}', _modPrettyName(mod));
+        .replace('{name}', modulePrettyName(mod));
     showConfirmModal(msg, () => {
         const st = _hostChecks[mod];
         if (st) {
@@ -439,7 +439,7 @@ function _renderMonitoringSection() {
             // Several checks allowed (e.g. datastore, web): a toolbar (Discover /
             // Add) inside the card + per-item list. Header shows an active/total
             // count (like the Modules section) and an icon-only "test all".
-            const title = `<span class="fw-semibold">${esc(_modPrettyName(mod))}</span>
+            const title = `<span class="fw-semibold">${esc(modulePrettyName(mod))}</span>
                 <span class="badge rounded-pill flex-shrink-0 ms-2" id="hmCnt_${slug}"
                       style="font-size:.7rem;background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color)">${_hostCountHtml(st)}</span>`;
             const _sch = ITEM_SCHEMAS[mod + '|' + st.collection] || {};

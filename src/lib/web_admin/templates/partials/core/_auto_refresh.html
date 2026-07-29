@@ -1,0 +1,145 @@
+{# ================================================================
+   The auto-refresh control, and the toolbar that carries it.
+
+   Six sections draw this: Overview, Status, History, Syslog, the Servers monitoring panel and
+   the cluster modal. It lived inside overview/_render.html — its own comment said "shared
+   across Status / Overview / History" and it stayed there anyway — which made a control every
+   section depends on a thing you had to know was hiding in one of them. Same mistake as a
+   generic module runner living in the hosts domain: a section's file is for what only that
+   section does.
+
+   What it is: a split button whose main side refreshes now and whose caret opens the interval
+   menu (OFF / Auto / presets / a free seconds field). "Auto" mirrors the background
+   scheduler's own interval and is disabled while it is stopped, which is why the scheduler
+   state lives here too — it exists for this menu.
+
+   Syslog is the one caller that swaps "Auto" for "Live" (`liveFn` + `hideAuto`): its messages
+   arrive over the network when they arrive, so following the monitoring daemon's cycle would
+   mean nothing there, and a fast poll is what is useful instead.
+   ================================================================ #}
+
+// ─────────────────── Shared auto-refresh control ──────────────────
+// How fast "Live" polls. It is part of THIS control's vocabulary, not of the section that
+// first offered it: Syslog defined it and the cluster modal and the Servers monitoring panel
+// both reached across for it with `typeof _SL_LIVE_SECS !== 'undefined' ? … : 2` — a fallback
+// is what code writes when it knows a value might not be there.
+const _SL_LIVE_SECS = 2;
+
+// Background-scheduler state, used by the "Auto" option (mirrors its interval
+// and is disabled when stopped). Shared across Status / Overview / History.
+let _schedulerState = { running: false, interval: 0 };
+async function _loadSchedulerState() {
+    const res = await apiGetSilent('/api/v1/monitoring/status');   // needs checks_run
+    const st  = res ? (res.data ?? res) : null;
+    _schedulerState = st
+        ? { running: !!st.running, interval: parseInt(st.interval, 10) || 0 }
+        : { running: false, interval: 0 };
+}
+
+// Compact auto-refresh dropdown: a single button (showing the live countdown
+// with a draining fill when active) + a menu with Auto / OFF / presets / a free
+// seconds input. opts: { id, interval, setFn, countId|countClass, fillId|fillClass }.
+function _autoRefreshControl(o) {
+    const presets = [10, 30, 60];           // OFF and Auto are handled separately
+    const cur = o.interval || 0;
+    const sec = t('status_seconds_abbr');
+    // Scheduler interval backing the "Auto" option (0 when stopped).
+    const si  = _schedulerState.running ? (parseInt(_schedulerState.interval, 10) || 0) : 0;
+    // "Custom" is active when a non-preset, non-Auto interval is running.
+    const isCustom = cur > 0 && !presets.includes(cur) && cur !== si;
+    const idAttr = (x) => x ? ` id="${x}"` : '';
+    const countEl = `<span${idAttr(o.countId)} class="${o.countClass || ''}">${cur || ''}</span>`;
+    // Optional "Live" mode (fast poll) — when on, it owns the toggle label/state.
+    const liveActive = !!o.liveActive;
+    const toggleLbl = liveActive ? esc(t('auto_refresh_live'))
+        : (cur > 0 ? `${countEl}${sec}` : esc(t('auto_refresh_off')));
+    // Two columns: icon + name on the left, the interval value right-aligned
+    // (fills the row and lines the values up in a tidy column). Active → check.
+    const item = (val, label, active, icon, right) =>
+        `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2 ${active ? 'active' : ''}"
+            onclick="${o.setFn}(${val})"><i class="bi ${active ? 'bi-check2' : icon}" style="width:1em;flex-shrink:0"></i><span>${label}</span>${
+            right ? `<span class="ms-auto ps-3 small" style="opacity:.7;font-variant-numeric:tabular-nums">${right}</span>` : ''}</button></li>`;
+    let items = `<li><h6 class="dropdown-header py-1">${esc(t('auto_refresh'))}</h6></li>`;
+    // Order: OFF, [Live | Auto], then the presets.
+    items += item(0, t('auto_refresh_off'), cur === 0 && !liveActive, 'bi-x-circle');
+    // "Live": a fast poll, offered when the caller passes a liveFn (e.g. syslog).
+    if (o.liveFn) {
+        items += `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2 ${liveActive ? 'active' : ''}"
+            onclick="${o.liveFn}()"><i class="bi ${liveActive ? 'bi-check2' : 'bi-broadcast'}" style="width:1em;flex-shrink:0"></i><span>${esc(t('auto_refresh_live'))}</span></button></li>`;
+    }
+    // "Auto" follows the scheduler's interval; disabled while it is stopped.
+    // Hidden when the caller replaces it with Live (o.hideAuto).
+    if (!o.hideAuto) {
+        if (si > 0) {
+            items += item(si, t('auto_refresh_auto'), cur === si, 'bi-magic', `${si}${sec}`);
+        } else {
+            items += `<li><span class="dropdown-item disabled d-flex align-items-center gap-2 text-muted">
+                <i class="bi bi-magic" style="width:1em;flex-shrink:0"></i><span>${esc(t('auto_refresh_auto'))}</span>
+                <span class="ms-auto ps-3 small">(${esc(t('daemon_stopped'))})</span></span></li>`;
+        }
+    }
+    for (const s of presets) items += item(s, t('auto_refresh_every'), cur === s, 'bi-clock', `${s}${sec}`);
+    // Custom row — the prefix turns into a highlighted check when it is active.
+    items += `<li><hr class="dropdown-divider my-1"></li>
+      <li class="px-2 pb-1"><div class="input-group input-group-sm flex-nowrap${isCustom ? ' border border-primary rounded' : ''}">
+        <span class="input-group-text${isCustom ? ' text-bg-primary' : ''}"><i class="bi ${isCustom ? 'bi-check2' : 'bi-stopwatch'}"></i></span>
+        <input type="number" min="1" max="3600" id="${o.id}-auto-custom" class="form-control"
+               placeholder="${escAttr(t('history_auto_custom'))}" value="${isCustom ? cur : ''}"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();_applyAutoCustom('${o.id}','${o.setFn}');}">
+        <button class="btn btn-primary" type="button" onclick="_applyAutoCustom('${o.id}','${o.setFn}')">${esc(t('apply'))}</button>
+      </div></li>`;
+    const fill = cur > 0 ? `<span${idAttr(o.fillId)} class="ss-ar-fill ${o.fillClass || ''}"></span>` : '';
+    // OFF wears `ss-btn-graphite` (see web_admin.css): still a dark button — this control is
+    // meant to sit back while it is off — but a grey that is visibly not the surface. It used
+    // to be Bootstrap's `btn-dark`, and the dark theme's surfaces are #181818/#212121/#2a2a2a,
+    // so "dark" landed within a shade of the card and the whole button vanished: only the
+    // caret gave it away. A refresh button nobody can see while it is off is a button nobody
+    // finds to turn on.
+    const btnCls = `btn btn-sm ${(cur > 0 || liveActive) ? 'btn-primary ss-ar-btn' : 'ss-btn-graphite'}`;
+    const menu = `<ul class="dropdown-menu dropdown-menu-end p-1" style="font-size:.8rem;min-width:12rem">${items}</ul>`;
+    // Split-button variant (o.refreshFn): the main button refreshes NOW and shows the
+    // auto-refresh state (OFF / countdown); the caret opens the interval menu — unifying the
+    // separate "Refresh" button and the auto-refresh dropdown into one control.
+    if (o.refreshFn) {
+        return `<div class="btn-group btn-group-sm">
+          <button type="button" class="${btnCls} text-center" style="min-width:6rem"
+                  onclick="${o.refreshFn}()" title="${escAttr(t('refresh'))}">
+            ${fill}<span class="ss-ar-lbl"><i class="bi bi-arrow-repeat me-1"></i>${toggleLbl}</span>
+          </button>
+          <button type="button" class="${btnCls} dropdown-toggle dropdown-toggle-split"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                  title="${escAttr(t('auto_refresh'))}"></button>
+          ${menu}
+        </div>`;
+    }
+    return `<div class="btn-group btn-group-sm">
+      <button type="button" class="${btnCls} dropdown-toggle text-center"
+              style="min-width:6rem" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+              title="${escAttr(t('auto_refresh'))}">
+        ${fill}<span class="ss-ar-lbl"><i class="bi bi-arrow-repeat me-1"></i>${toggleLbl}</span>
+      </button>
+      ${menu}
+    </div>`;
+}
+
+// Apply a free-form interval typed in an auto-refresh dropdown.
+function _applyAutoCustom(id, setFn) {
+    const el = document.getElementById(id + '-auto-custom');
+    if (!el) return;
+    const v = parseInt(el.value, 10);
+    if (!Number.isFinite(v) || v < 1) return;
+    const fn = window[setFn];
+    if (typeof fn === 'function') fn(Math.min(3600, Math.max(1, v)));
+}
+
+function _renderRefreshBar(containerId, renderFn, timerGet, timerSet, extraBtns = '', arOpts = {}) {
+    // Same bar as the section toolbars (.ss-toolbar), minus the sticking: these sit at
+    // the top of a scrolling list that owns its own header.
+    let h = `<div class="ss-toolbar ss-toolbar-plain">`;
+    // Unified refresh: the split-button's main side runs the manual refresh (renderFn), its
+    // caret opens the auto-refresh interval menu — no separate Refresh button.
+    h += _autoRefreshControl({ interval: timerGet()?._interval || 0, setFn: timerSet, refreshFn: renderFn, ...arOpts });
+    if (extraBtns) h += extraBtns;
+    h += `</div>`;
+    return h;
+}

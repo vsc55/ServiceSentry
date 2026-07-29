@@ -73,8 +73,9 @@ function _usersRowActions(uname, ctx) {
 }
 
 // List/card view toggle (persisted per browser).
-let _usersViewMode = _loadViewMode('ss_users_view');
-function _setUsersView(mode) { _usersViewMode = mode === 'card' ? 'card' : 'table'; localStorage.setItem('ss_users_view', _usersViewMode); renderUsers(); }
+// The view is owned by the registry now (users/_views.html); this stays as the name the
+// older markup called, so nothing that still says _setUsersView breaks.
+function _setUsersView(id) { setUsersView(id); }
 function _usersCardsBody(unames, ctx) {
     const _sso = { ldap: 'LDAP', oidc: 'OIDC', saml2: 'SAML2', scim: 'SCIM' };
     return _cardGrid(unames.map(uname => {
@@ -190,10 +191,12 @@ createListTable({
     },
     actions: (uname, ctx) => _usersRowActions(uname, ctx),
     // List/card view toggle (like the Sessions table).
-    bodyMode: () => _usersViewMode === 'table' ? 'table' : 'cards',
+    bodyMode: () => _usrView.mode(),
     showChooser: mode => mode === 'table',
-    cardsBody: (unames, ctx) => _usersCardsBody(unames, ctx),
-    headerLead: (ctx, mode) => _viewToggleLead(mode, '_setUsersView'),
+    cardsBody: (unames, ctx, all) => _usrView.body(unames, ctx, all),
+    headerLead: () => _usrView.switcher('setUsersView'),
+    persistExtra: () => ({ view: _usrView.id() }),
+    applyExtra: cfg => _usrView.apply(cfg && cfg.view),
     bulkBar: (ctx, sel) => (ctx.showActions && sel.size > 0) ? `
         <div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
             <span class="badge bg-secondary rounded-pill">${sel.size}</span>

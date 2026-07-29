@@ -1,0 +1,46 @@
+{# ================================================================
+   Servers — coverage: which hosts are actually being watched.
+
+   A host in the registry is not the same thing as a host being monitored, and the table
+   draws both the same way. Its modules column says "0/0" and "0/3" in the same grey pill,
+   and neither is a state you notice while scanning names and addresses. They mean:
+
+   * 0/0 — the host was added and never given a check. It is in the fleet count, it is in
+     the list, and nothing is looking at it.
+   * 0/3 — it has checks and every one of them is off. Worse: the row looks configured, and
+     it was somebody turning them off rather than never getting round to it.
+
+   Both are the reason a panel can be green while a machine is down, so they lead. The
+   working majority is at the bottom, collapsed into what it is: the part that needs no
+   decision.
+
+   It counts over everything the filters left standing, not the page — "4 hosts have no
+   checks" is a fact about the fleet, and one that shrank as you paged would be worse than
+   no number at all.
+   ================================================================ #}
+
+function _srvViewCoverage(hosts, ctx) {
+    if (!hosts.length) return '';
+    const buckets = { none: [], inactive: [], ok: [] };
+    for (const h of hosts) buckets[_srvCoverage(h)].push(h);
+    const order = ['none', 'inactive', 'ok'];
+    const watched = buckets.ok.length;
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
+        ${order.filter(k => buckets[k].length).map(k =>
+            _summaryChip(_SRV_COVERAGE[k].icon, t(_SRV_COVERAGE[k].key), buckets[k].length,
+                     k === 'none' ? 'text-bg-danger' : (k === 'inactive' ? 'text-bg-warning' : 'text-bg-success'))).join(' ')}
+        <span class="text-muted small">${esc(tf('srv_cov_ratio', watched, hosts.length))}</span>`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="p-2">
+            ${order.filter(k => buckets[k].length).map(k => `<div class="mb-3">
+                <div class="d-flex align-items-center gap-2 px-1 pb-1 mb-1 border-bottom">
+                    ${_srvCoverageBadge(k)}
+                    <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${buckets[k].length}</span>
+                    <span class="text-muted small">${esc(t('srv_cov_' + k + '_hint'))}</span>
+                </div>
+                ${buckets[k].map(h => _srvHostLine(h, ctx, `${_srvStatusBadge(h)} ${_srvModulesPill(h)}`)).join('')}
+            </div>`).join('')}
+        </div>
+    </div>`;
+}

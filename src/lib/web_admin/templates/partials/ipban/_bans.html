@@ -188,9 +188,11 @@ function _ipbanBansRender() {
     if (_ipbanBansPageSize === null) _ipbanBansPageSize = _defaultPageSize;
     const bans = _ipbanBansFiltered();
 
+    // The column chooser belongs to the table: the network view has no columns to choose.
     const header = `<div class="ss-card-header">
         <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-slash-circle me-1"></i>${esc(t('ipban_manage_title'))}</span>
-        ${_buildColChooser(_IPBAN_BANS_COLS, _ipbanBansVisibleCols, '_ipbanBansToggleCol', '_ipbanBansResetCols', 150)}
+        ${_ipbBansView.switcher('setIpbanBansView')}
+        ${_ipbBansView.is('table') ? _buildColChooser(_IPBAN_BANS_COLS, _ipbanBansVisibleCols, '_ipbanBansToggleCol', '_ipbanBansResetCols', 150) : ''}
         <button class="btn btn-secondary btn-sm" onclick="_ipbanLoad()"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('ipban_refresh'))}</button>
     </div>`;
 
@@ -246,6 +248,16 @@ function _ipbanBansRender() {
     const pageSize  = _ipbanBansPageSize || total;
     _ipbanBansPage  = Math.max(1, Math.min(_ipbanBansPage, Math.ceil(total / pageSize)));
     const pageRows  = sorted.slice((_ipbanBansPage - 1) * pageSize, _ipbanBansPage * pageSize);
+
+    // A summary describes every ban the filters left standing, so it is handed `sorted` and
+    // drops the pagination: "three networks" counted over one page is a statement about the
+    // pagination instead.
+    if (!_ipbBansView.is('table')) {
+        c.innerHTML = `<div class="ss-card ss-vfill">${top}
+            <div class="ss-vscroll">${_ipbBansView.body(sorted, null, sorted)}</div>
+        </div>`;
+        return;
+    }
 
     const pagTop = _paginationParts(total, _ipbanBansPage, _ipbanBansPageSize, '_goIpbanBansPage', '_changeIpbanBansPageSize');
     const pagBot = _renderPagination(total, _ipbanBansPage, _ipbanBansPageSize, '_goIpbanBansPage', '_changeIpbanBansPageSize');

@@ -37,7 +37,11 @@ async function renderSyslog() {
         <div class="ss-accent ss-accent-teal"></div>
         <div class="ss-card-header">
           <span id="sl-status" class="me-auto small mb-0"></span>
-          ${_buildColChooser(_SL_COLS, _slVisibleCols, '_slToggleCol', '_resetSlCols')}
+          <!-- Switcher and column chooser are refreshed by _slRenderTable (which rewrites
+               only the body below), so switching view repaints the active button and takes
+               the chooser away when the view has no columns. -->
+          <span id="sl-view-switcher"></span>
+          <span id="sl-col-chooser"></span>
           <!-- Unified refresh: split-button (main = reload, caret = auto-refresh interval). -->
           <span id="sl-auto-refresh"></span>
           {# Clearing the store is offered in Config → General → Maintenance, not here. #}
@@ -166,20 +170,6 @@ function _syslogToggleStats() {
     // Collapsed → drop the title/panels separator (border-bottom + its spacing) too.
     if (hdr) ['mb-2', 'pb-1', 'border-bottom'].forEach(cls => hdr.classList.toggle(cls, !nowCollapsed));
     try { localStorage.setItem(_SL_STATS_KEY, nowCollapsed ? '1' : '0'); } catch (e) {}
-}
-
-// datetime-local <-> unix seconds helpers (local time, as the user expects).
-function _localInputToTs(v) {
-    if (!v) return '';
-    const ms = new Date(v).getTime();
-    return Number.isFinite(ms) ? Math.floor(ms / 1000) : '';
-}
-function _tsToLocalInput(ts) {
-    if (!ts) return '';
-    const d = new Date(ts * 1000);
-    if (isNaN(d)) return '';
-    const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // A filter changed → back to page 1 and reload.

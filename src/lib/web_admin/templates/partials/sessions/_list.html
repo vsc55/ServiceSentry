@@ -1,4 +1,4 @@
-﻿{# ================================================================
+{# ================================================================
    Sessions tab — list active sessions, revoke, invalidate all.
    ================================================================ #}
 
@@ -10,11 +10,6 @@ let _sessionsPage = 1;
 let _sessionsPageSize = null;
 let _selectedSessions = new Set();
 let _sessionsCurrentPage = [];
-
-// View mode: 'card' (default) or 'table' — persisted per-user.
-let _sessionsViewMode = (() => {
-    try { return localStorage.getItem('ss_sessions_view') || 'card'; } catch(_) { return 'card'; }
-})();
 
 // ── Table column definitions (table mode) ──────────────────────────
 const _SES_COLS = [
@@ -38,12 +33,9 @@ let _sessionsColOrder = (() => {
 let _sessionsSort = 'last_seen';
 let _sessionsSortDir = 'desc';
 
-function _setSessionsView(mode) {
-    _sessionsViewMode = mode === 'table' ? 'table' : 'card';
-    localStorage.setItem('ss_sessions_view', _sessionsViewMode);
-    _persistTableConfig();
-    renderSessions();
-}
+// The view is owned by the registry now (sessions/_views.html); this keeps the old name
+// working for anything that still calls it.
+function _setSessionsView(id) { setSessionsView(id); }
 function _fmtSesDt(v) {
     if (!v) return '—';
     try { return new Date(v).toLocaleString(); } catch(_) { return v; }
@@ -101,14 +93,11 @@ createListTable({
     title: () => `${esc(t('session_active'))} (${Object.keys(sessionsData).length})`,
     columns: _SES_COLS, defaultVisible: _SESSIONS_DEFAULT_COLS,
     persist: true, clearLabelKey: 'subtab_sessions',
-    persistExtra: () => ({ view: _sessionsViewMode }),
-    // …and the way back: restore the saved mode on login, defaulting to 'card' when the
-    // server has nothing (or the layout was cleared for this user).
-    applyExtra: cfg => {
-        const v = cfg && cfg.view;
-        _sessionsViewMode = (v === 'card' || v === 'table') ? v : 'card';
-        localStorage.setItem('ss_sessions_view', _sessionsViewMode);
-    },
+    persistExtra: () => ({ view: _sesView.id() }),
+    // …and the way back: restore the saved view on login. An unknown or absent value falls
+    // back to the registry's first entry, which is the card grid this section has always
+    // opened on.
+    applyExtra: cfg => _sesView.apply(cfg && cfg.view),
     // Filter strip (shared design — see createListTable's spec.filters). User and IP are the
     // two axes you chase a session by; the free-text one also reaches the user agent.
     filters: {
@@ -130,9 +119,9 @@ createListTable({
     rows: () => Object.keys(sessionsData), rowKey: sid => sid,
     record: sid => sessionsData[sid],
     selectable: true,
-    bodyMode: () => _sessionsViewMode === 'table' ? 'table' : 'cards',
+    bodyMode: () => _sesView.mode(),
     showChooser: mode => mode === 'table',
-    cardsBody: (sids) => _sessionsCardsBody(sids),
+    cardsBody: (sids, ctx, all) => _sesView.body(sids, ctx, all),
     sortValue: (sid, sortKey) => {
         const s = sessionsData[sid];
         switch (sortKey) {
@@ -162,13 +151,7 @@ createListTable({
             <button class="btn btn-sm btn-danger" onclick="_bulkRevokeSessions()" title="${escAttr(t('session_revoke_tt'))}"><i class="bi bi-x-lg me-1"></i>${esc(t('session_revoke'))}</button>
             <button class="btn btn-sm btn-secondary" onclick="_selectedSessions.clear();renderSessions()" title="${escAttr(t('clear_filters'))}"><i class="bi bi-x-lg"></i></button>
         </div>` : '',
-    headerLead: (ctx, mode) => {
-        const isTable = mode === 'table';
-        return `<div class="btn-group btn-group-sm" role="group" title="${escAttr(t('view_mode')||'View')}">
-            <button class="btn btn-sm ${isTable?'btn-secondary':'btn-primary'}" onclick="_setSessionsView('card')" title="${escAttr(t('view_cards')||'Cards')}"><i class="bi bi-grid-3x3-gap"></i></button>
-            <button class="btn btn-sm ${isTable?'btn-primary':'btn-secondary'}" onclick="_setSessionsView('table')" title="${escAttr(t('view_table')||'Table')}"><i class="bi bi-table"></i></button>
-        </div>`;
-    },
+    headerLead: () => _sesView.switcher('setSessionsView'),
     refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="refreshAccessData()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>`,
     headerButtons: () => _canRevokeSessions() ? `<button class="btn btn-sm btn-danger ms-1" onclick="invalidateAllSessions()" title="${escAttr(t('session_close_all_tt'))}"><i class="bi bi-x-circle me-1"></i>${esc(t('session_close_all'))}</button>` : '',
     emptyBody: () => `<div class="text-center py-5 text-muted">

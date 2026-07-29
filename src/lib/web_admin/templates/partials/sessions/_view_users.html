@@ -1,0 +1,64 @@
+{# ================================================================
+   Sessions — by user: who is logged in, from where, and how many times.
+
+   The list is one row per session, which is the right shape for revoking one and the wrong
+   shape for the question this page is usually opened with: is anybody logged in who should
+   not be. Twelve rows can be one person with twelve tabs or twelve people, and a list sorted
+   by time reads the same either way.
+
+   Per user it becomes one line: how many sessions, from how many addresses, when the oldest
+   one started and when they were last seen. The address count is the part worth having —
+   several sessions from one address is somebody working; the same account from four
+   addresses is a question.
+   ================================================================ #}
+
+function _sesViewUsers(sids) {
+    if (!sids.length) return '';
+    const by = new Map();
+    for (const sid of sids) {
+        const s = sessionsData[sid] || {};
+        const u = s.username || '—';
+        let a = by.get(u);
+        if (!a) { a = { u, n: 0, ips: new Set(), oldest: null, last: null, current: false }; by.set(u, a); }
+        a.n++;
+        if (s.ip) a.ips.add(s.ip);
+        if (s.is_current) a.current = true;
+        if (s.created && (!a.oldest || s.created < a.oldest)) a.oldest = s.created;
+        if (s.last_seen && (!a.last || s.last_seen > a.last)) a.last = s.last_seen;
+    }
+    // Most sessions first: the account with eight of them is the one you opened this for.
+    const rows = [...by.values()].sort((x, y) => (y.n - x.n) || x.u.localeCompare(y.u));
+    const multiIp = rows.filter(r => r.ips.size > 1).length;
+    const chips = `${_summaryChip('bi-people', t('col_user'), rows.length)}
+        ${_summaryChip('bi-plug', t('session_active'), sids.length)}
+        ${multiIp ? _summaryChip('bi-globe', t('ses_count_multi_ip'), multiIp, 'text-bg-warning') : ''}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('col_user'))}</th>
+                <th class="text-end">${esc(t('ses_col_sessions'))}</th>
+                <th>${esc(t('col_ip'))}</th>
+                <th>${esc(t('ses_col_oldest'))}</th>
+                <th>${esc(t('col_last_seen'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_sesUserRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _sesUserRow(a) {
+    const ips = [...a.ips];
+    // The addresses are listed rather than counted: "4 IPs" is a number, and which four is
+    // what tells you whether it is one office or four countries.
+    const ipCell = _chipList(ips, ip => _chipText(ip));
+    return `<tr>
+        <td class="text-nowrap"><code class="fw-semibold">${esc(a.u)}</code>
+            ${a.current ? `<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${esc(t('session_current'))}</span>` : ''}</td>
+        <td class="text-end fw-semibold">${a.n}</td>
+        <td><span class="d-flex flex-wrap gap-1">${ipCell}
+            ${a.ips.size > 1 ? `<span class="badge text-bg-warning fw-normal ss-fs-1">${a.ips.size}</span>` : ''}</span></td>
+        <td class="text-nowrap text-muted ss-fs-3">${esc(_fmtSesDt(a.oldest))}</td>
+        <td class="text-nowrap text-muted ss-fs-3">${esc(_fmtSesDt(a.last))}</td>
+    </tr>`;
+}

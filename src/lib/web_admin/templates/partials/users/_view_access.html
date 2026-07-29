@@ -1,0 +1,74 @@
+{# ================================================================
+   Users — access: what each account can actually do.
+
+   The Users table has a role column, and the role column is not the answer. A user holds a
+   role directly AND inherits every role their groups grant, so an account whose column says
+   "viewer" and which sits in a group mapped to admin is an admin — and the table says
+   viewer. Finding that out meant opening Groups, reading member lists and holding the
+   composition in your head, which is exactly the work an access review is supposed to be.
+
+   So: one row per user, the direct role, what the groups add, and a flag when the two are
+   not the same. Admin reached through a group is called out on its own, because it is the
+   only difference that changes what somebody can do to everything.
+
+   Disabled groups grant nothing here, because they grant nothing on the server either. An
+   access view that over-reports is useless in a different way than one that under-reports:
+   it makes you chase access that does not exist, and hides the one that does behind noise.
+   ================================================================ #}
+
+function _usrViewAccess(unames, ctx) {
+    if (!unames.length) return '';
+    const rows = unames.map(u => ({ u, eff: _accEffective(u) }));
+    const viaGroups = rows.filter(r => r.eff.extra.length).length;
+    const admins = rows.filter(r => r.eff.adminDirect || r.eff.adminViaGroup).length;
+    const hiddenAdmins = rows.filter(r => !r.eff.adminDirect && r.eff.adminViaGroup).length;
+    const chips = `${_summaryChip('bi-people', t('col_user'), rows.length)}
+        ${admins ? _summaryChip('bi-shield-lock', t('usr_count_admins'), admins,
+                            hiddenAdmins ? 'text-bg-warning' : '') : ''}
+        ${viaGroups ? _summaryChip('bi-diagram-3', t('usr_count_via_groups'), viaGroups) : ''}
+        ${hiddenAdmins ? `<span class="text-warning-emphasis small">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(tf('usr_admin_via_group_n', hiddenAdmins))}</span>` : ''}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('col_user'))}</th>
+                <th>${esc(t('usr_col_direct'))}</th>
+                <th>${esc(t('usr_col_via_groups'))}</th>
+                <th>${esc(t('col_groups'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_usrAccessRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _usrAccessRow(r) {
+    const u = usersData[r.u] || {};
+    const eff = r.eff;
+    const groups = _accGroupsOf(r.u);
+    // A group that is switched off is shown — it IS how the account is configured — but
+    // struck through the fact that it grants nothing today, so the row cannot be read as
+    // access the user has.
+    const groupCell = groups.length
+        ? groups.map(g => `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal"
+              ${g.enabled === false ? `title="${escAttr(t('usr_group_disabled_hint'))}" style="opacity:.5"` : ''}>
+              <i class="bi bi-diagram-3 me-1"></i>${esc(g.name || g.key)}
+              ${g.enabled === false ? `<i class="bi bi-slash-circle ms-1"></i>` : ''}</span>`).join(' ')
+        : '<span class="text-muted">—</span>';
+    const viaCell = eff.via.size
+        ? [...eff.via.entries()].map(([role, gs]) =>
+            `<span class="d-inline-flex align-items-center gap-1 me-2">
+                ${_accRoleBadge(role)}
+                <span class="text-muted ss-fs-2">${esc(gs.join(', '))}</span>
+            </span>`).join('')
+        : '<span class="text-muted">—</span>';
+    return `<tr${u.enabled === false ? ' style="opacity:.55"' : ''}>
+        <td class="text-nowrap"><code class="fw-semibold">${esc(r.u)}</code>
+            ${u.enabled === false ? `<span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${esc(t('status_disabled'))}</span>` : ''}
+            ${(!eff.adminDirect && eff.adminViaGroup)
+                ? `<span class="badge text-bg-warning fw-normal ms-1"><i class="bi bi-shield-exclamation me-1"></i>${esc(t('usr_admin_via_group'))}</span>` : ''}</td>
+        <td class="text-nowrap">${_accRoleBadge(eff.direct)}</td>
+        <td>${viaCell}</td>
+        <td>${groupCell}</td>
+    </tr>`;
+}

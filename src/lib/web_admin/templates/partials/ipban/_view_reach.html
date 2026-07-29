@@ -1,0 +1,113 @@
+{# ================================================================
+   fail2ban › Never-ban whitelist — by reach.
+
+   A whitelist is the one list in the panel where an entry is a HOLE, deliberately made. The
+   table shows the entries and their descriptions, which is the right way to manage them and
+   says nothing about the two things that make a whitelist dangerous:
+
+   * HOW MUCH it exempts. `10.0.0.7` and `10.0.0.0/8` are one line each; the second one makes
+     sixteen million addresses permanently unbannable, and typing an 8 where you meant a 24 is
+     a one-character mistake that no column shows.
+   * entries that are already inside another. A whitelist grows by accretion, so after a year
+     it holds a /32 that some later /24 already covers. Harmless in effect and misleading to
+     read: the narrow entry looks like the rule that is protecting that host, and deleting it
+     changes nothing.
+
+   So this view sorts by reach — widest first, which is worst first — states how many
+   addresses each entry actually covers, and marks the ones contained in another.
+
+   Containment is computed for IPv4 only. IPv6 entries are listed with their prefix and NOT
+   compared: getting 128-bit arithmetic subtly wrong here would mean telling somebody an entry
+   is redundant when it is the only thing exempting a host, and no answer is better than that.
+   ================================================================ #}
+
+// "Broad" is a stated threshold rather than a feeling: anything wider than a /24 exempts more
+// than one ordinary subnet, which is more than a whitelist entry normally needs to. Shown on
+// screen next to the count, because a badge whose rule nobody can see is a badge nobody can
+// act on.
+const _IPB_BROAD_PREFIX = 24;
+
+/** Parse an IPv4 entry into {base, prefix, size}; null for anything else (IPv6, garbage, a
+ *  hostname) so the caller can list it without pretending to have measured it. */
+function _ipbParseV4(value) {
+    const s = String(value || '').trim();
+    if (!s || s.includes(':')) return null;
+    const [addr, pfxRaw] = s.split('/');
+    const o = addr.split('.');
+    if (o.length !== 4) return null;
+    const nums = o.map(x => Number(x));
+    if (nums.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    const prefix = (pfxRaw === undefined || pfxRaw === '') ? 32 : Number(pfxRaw);
+    if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+    // >>> 0 keeps it unsigned: JavaScript's bitwise operators work on signed 32-bit ints, so
+    // any address from 128.0.0.0 up would otherwise come out negative and compare wrong.
+    const raw = ((nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]) >>> 0;
+    const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+    return { base: (raw & mask) >>> 0, prefix, size: Math.pow(2, 32 - prefix) };
+}
+
+/** True when `a` is entirely inside `b` — b is at least as wide, and a's network sits in it. */
+function _ipbContains(b, a) {
+    if (!b || !a || b.prefix > a.prefix) return false;
+    const mask = b.prefix === 0 ? 0 : (0xFFFFFFFF << (32 - b.prefix)) >>> 0;
+    return ((a.base & mask) >>> 0) === b.base;
+}
+
+function _ipbWlViewReach(entries) {
+    if (!entries.length) return '';
+    const rows = entries.map((e, i) => ({ e, i, net: _ipbParseV4(e.value) }));
+    for (const r of rows) {
+        // Covered by ANOTHER entry: one that is strictly wider, or — for two entries naming
+        // the exact same range — the one that was there first. Without that tie-break a pair
+        // of duplicates would each be marked redundant because of the other, and deleting
+        // "the redundant one" twice removes the rule entirely.
+        r.covered = rows.find(o => {
+            if (o === r || !o.net || !r.net || !_ipbContains(o.net, r.net)) return false;
+            return (o.net.prefix === r.net.prefix) ? o.i < r.i : true;
+        });
+    }
+    const broad = rows.filter(r => r.net && r.net.prefix < _IPB_BROAD_PREFIX).length;
+    const covered = rows.filter(r => r.covered).length;
+    const total = rows.reduce((n, r) => n + (r.net ? r.net.size : 0), 0);
+    const chips = `${_summaryChip('bi-shield-check', t('ipban_wl_title'), rows.length)}
+        ${_summaryChip('bi-hdd-network', t('ipb_col_addresses'), total.toLocaleString())}
+        ${broad ? _summaryChip('bi-exclamation-triangle', t('ipb_count_broad'), broad, 'text-bg-warning') : ''}
+        ${covered ? _summaryChip('bi-layers', t('ipb_count_covered'), covered) : ''}
+        <span class="text-muted small">${esc(tf('ipb_broad_hint', _IPB_BROAD_PREFIX))}</span>`;
+    // Widest first: the entry that exempts the most is the one to look at, and it is the one
+    // a mistyped prefix produces.
+    rows.sort((a, b) => (b.net ? b.net.size : 0) - (a.net ? a.net.size : 0)
+        || String(a.e.value).localeCompare(String(b.e.value)));
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th>${esc(t('ipban_col_ip'))}</th>
+                <th class="text-end">${esc(t('ipb_col_reach'))}</th>
+                <th>${esc(t('ipban_col_description'))}</th>
+                <th>${esc(t('col_created_by'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(_ipbWlReachRow).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+function _ipbWlReachRow(r) {
+    const broad = r.net && r.net.prefix < _IPB_BROAD_PREFIX;
+    // An unmeasured entry says so instead of showing a zero: "0 addresses" would read as an
+    // entry that exempts nothing, which is the opposite of "we did not measure this one".
+    const reach = r.net
+        ? `<span class="${broad ? 'fw-semibold text-warning-emphasis' : ''}">${r.net.size.toLocaleString()}</span>`
+        : `<span class="text-muted" title="${escAttr(t('ipb_reach_unknown'))}">—</span>`;
+    return `<tr>
+        <td class="text-nowrap">${_ipbAddr(r.e.value)}
+            ${broad ? `<span class="badge text-bg-warning fw-normal ms-1"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('ipb_broad'))}</span>` : ''}
+            ${r.covered ? `<span class="badge bg-body-secondary text-body-secondary fw-normal ms-1"
+                title="${escAttr(tf('ipb_covered_by', r.covered.e.value))}">
+                <i class="bi bi-layers me-1"></i>${esc(t('ipb_covered'))}</span>` : ''}</td>
+        <td class="text-end">${reach}</td>
+        <td class="text-truncate" title="${escAttr(r.e.description || '')}">
+            ${r.e.description ? esc(r.e.description) : '<span class="text-muted">—</span>'}</td>
+        <td class="text-nowrap text-muted ss-fs-3">${esc(r.e.created_by || '—')}</td>
+    </tr>`;
+}
