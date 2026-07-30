@@ -143,6 +143,52 @@ class TestPaging:
         assert [o['id'] for o in out] == ['a', 'b']
 
 
+class TestBatch:
+    """Per-object questions about a tenant are N requests, and N sequential round-trips is
+    how a check times out on a large one. $batch takes 20 at a time."""
+
+    @staticmethod
+    def _answer(*ids, status=200):
+        return (200, json.dumps({'responses': [{'id': str(i), 'status': status,
+                                                'body': {'n': i}} for i in ids]}))
+
+    def test_the_answers_come_back_keyed_by_the_path_that_asked(self):
+        with patch.object(EntraApi, '_request', return_value=self._answer(0, 1)):
+            out = EntraApi._graph_batch('tok', ['/sites/a/drive', '/sites/b/drive'], 10)
+        assert out == {'/sites/a/drive': {'n': 0}, '/sites/b/drive': {'n': 1}}
+
+    def test_more_than_twenty_is_split_into_several_requests(self):
+        """Graph rejects a 21st sub-request outright, so the chunking is not an optimisation."""
+        paths = [f'/p{i}' for i in range(45)]
+        with patch.object(EntraApi, '_request', side_effect=[
+                self._answer(*range(20)), self._answer(*range(20)),
+                self._answer(*range(5))]) as req:
+            out = EntraApi._graph_batch('tok', paths, 10)
+        assert req.call_count == 3
+        assert len(out) == 45
+        assert [len(c[1]['json_body']['requests']) for c in req.call_args_list] == [20, 20, 5]
+
+    def test_one_forbidden_object_does_not_cost_the_batch(self):
+        """A site that 404s or is denied is dropped from the result — the other nineteen
+        answers are the point of asking."""
+        body = json.dumps({'responses': [{'id': '0', 'status': 403, 'body': {'error': 1}},
+                                         {'id': '1', 'status': 200, 'body': {'n': 1}}]})
+        with patch.object(EntraApi, '_request', return_value=(200, body)):
+            out = EntraApi._graph_batch('tok', ['/a', '/b'], 10)
+        assert out == {'/b': {'n': 1}}
+
+    def test_an_out_of_range_or_unparseable_id_is_ignored(self):
+        body = json.dumps({'responses': [{'id': 'x', 'status': 200, 'body': {}},
+                                         {'id': '9', 'status': 200, 'body': {}}]})
+        with patch.object(EntraApi, '_request', return_value=(200, body)):
+            assert EntraApi._graph_batch('tok', ['/a'], 10) == {}
+
+    def test_nothing_to_ask_is_no_request_at_all(self):
+        with patch.object(EntraApi, '_request') as req:
+            assert EntraApi._graph_batch('tok', [], 10) == {}
+        assert not req.called
+
+
 class TestArm:
     def test_arm_is_a_different_audience_from_graph(self):
         """The classic Azure failure: every Graph permission granted, every ARM call

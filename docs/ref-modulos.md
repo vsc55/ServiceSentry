@@ -1139,8 +1139,8 @@ resultado bajo una clave propia `<ítem>/<servicio>`, así son independientes.
 
 | Check (`list.*.check_*`) | Qué mide | Umbral | Permiso Graph |
 | --- | --- | --- | --- |
-| `check_site` (def. true) | Cuota del drive de un sitio de SharePoint (% usado / libre) | `usage_pct` (%), `free_min`+`free_unit`; `site` (vacío = raíz; botón **discover** `list_sites`) | `Sites.Read.All` |
-| `check_tenant_usage` | Almacenamiento total USADO de SharePoint en el tenant | `tenant_max`+`tenant_unit` (0 = informativo) | `Reports.Read.All` |
+| `check_site` (def. true) | Cuota del drive de **un** sitio de SharePoint (% usado / libre) | `usage_pct` (%), `free_min`+`free_unit`; `site` (vacío = el sitio **raíz**, que es un sitio más y no el total del tenant; botón **discover** `list_sites`) | `Sites.Read.All` |
+| `check_tenant_usage` | **SharePoint completo**: suma lo ocupado por TODOS los sitios frente a la capacidad total, con % real. Los sitios en papelera cuentan (ocupan hasta purgarse) y se informan aparte | `tenant_pct` (% → warning), `tenant_warn_at`+`tenant_warn_unit` (cantidad → warning), **100 % → error**; `tenant_max`+`tenant_unit` = capacidad total (vacío = suma de las cuotas de los sitios, porque Graph no publica el pool). **Desglose por sitio**: `sites_top` (módulo, override por ítem) = cuántos sitios se guardan por ciclo — en blanco hereda, **0 no guarda ninguno** y el desglose solo sale con «Actualizar ahora», que consulta en vivo y los trae todos; `sites_page` (módulo) = cuántos dibuja la página de una vez | `Reports.Read.All` + `Sites.Read.All` (nombres cuando el tenant oculta los informes) |
 | `check_health` | Estado de servicios M365 (degradación = warning, interrupción = down) | `health_services` (filtro opcional por nombre) | `ServiceHealth.Read.All` |
 | `check_licenses` | Capacidad de licencias (SKU): unidades libres = habilitadas − consumidas | `license_min` (0 = avisa al agotarse) | `Organization.Read.All` |
 | `check_secrets` | Caducidad del secreto/certificado **de esta misma app** | `secret_days` (avisa N días antes; caducado avisa siempre) | `Application.Read.All` |

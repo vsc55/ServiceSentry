@@ -8,6 +8,103 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.30] - 2026-07-30
+
+### Added
+- **M365: SharePoint total, with a percentage that means something.** The check now sums what
+  EVERY site occupies and divides it by the capacity, so "how full is SharePoint" is one number
+  instead of an amount you had to judge by eye. It reads the per-SITE usage report, which
+  carries both what each site uses and the quota it was given — the tenant-wide storage report
+  it used before publishes bytes and no denominator, which is why there was never a percentage.
+- **Warn at a percentage, at an amount, or both.** `tenant_pct` warns at % occupied and
+  `tenant_warn_at` + unit warns at an absolute figure, whichever arrives first. They answer
+  different questions: on a large tenant "500 GB" arrives long before "80%", and on a small one
+  the reverse.
+- **100% is an error, not a warning.** Full is the point where writes start being refused, so
+  it must not arrive in the same colour as the warning that preceded it.
+- The capacity can be typed (`tenant_max` + unit). Graph does not publish the pooled tenant
+  quota — it is 1 TB + 10 GB per licensed user and no endpoint exposes it — so an admin who
+  knows it can say so; blank falls back to the sum of the quotas assigned to the sites, which
+  is what they are actually allowed to use. The result says which of the two is in play.
+- Sites in the recycle bin count, because they keep occupying the tenant's storage until they
+  are purged; how many there are is reported separately, since "12 TB used" and "12 TB used,
+  four of those sites deleted" lead to different actions.
+- **The row unfolds into the sites behind it.** The total answers "how much"; the question
+  that always follows is which sites, and until now the only way to ask was to add one
+  per-site check per site. The list is biggest-first, each with a bar showing its share of the
+  total — the same denominator as the ring above it, so a site at 15 % under a tenant at 20 %
+  reads as what it is. Capped at the top 25, with the number left out stated: a list that
+  silently stopped would read as "these are all of them".
+- **Concealed reports get their names back from the other API.** A tenant can hide
+  identifiers in its reports ("Display concealed user, group and site names") and then Graph
+  answers with the bytes and a blank URL — which drew a column of dashes, and then a column of
+  hashes, several of them identical because the surviving identifier was the OWNER's, shared by
+  every site that person owns. The setting belongs to REPORTS: `/sites` — the same enumeration
+  the site field's discover button uses — still publishes names. The site-collection GUID joins
+  the two, so ONE extra call turns the hashes into real URLs. It is only made when something is
+  actually concealed, a tenant that publishes its URLs never pays for it, and a failure there
+  costs the labels and never the measurement.
+- **And when there is nothing to join on, the sites are asked directly.** A tenant can conceal
+  the site id too, and it arrives as the zero GUID — identical on all eighteen rows. So the
+  fallback stops trying to name the report's rows and reads the sites themselves instead
+  (`/sites/{id}/drive`), 20 per `$batch` request: real names, real figures, one round-trip per
+  twenty sites, bounded at 200 so a huge tenant gets the anonymous list rather than a check that
+  spends its cycle naming things. The list says where those rows came from, because they exclude
+  deleted sites — which do count towards the total, and the total is still the report's.
+- **How many sites are stored is now a setting, and 0 means "none".** The cost of the list
+  is bytes written every cycle, for ever — the same nature as `threads` or `timeout`, so it is
+  configured the same way: `sites_top` in the module defaults, overridable per tenant. Three
+  states, three intentions: blank inherits, a number caps, and **0 stores nothing at all** —
+  the breakdown is diagnostic context, not a measurement, so a tenant nobody drills into need
+  not write its site list to the database on every cycle. It stays one click away, because a
+  live refresh queries Graph and builds the list in full.
+- A live refresh now says so (`_live`) and ignores the caps, which exist to keep STORED
+  results small: a list the admin asked for by hand goes nowhere near the database, so it
+  comes back whole — including for the item that stores none.
+- The page size is the module's to state (`breakdown.page`, `sites_page` in the module
+  defaults): a list of 6 partitions and one of 500 tables do not read the same. Declaring
+  nothing still means 25, the same arrangement as the ring's `chart`.
+- **Fixed: the tenant threshold fields were invisible in the item editor.** `__field_order__`
+  does not merely sort — a field missing from it is filtered OUT — so `tenant_pct`,
+  `tenant_warn_at` and `tenant_warn_unit` shipped unreachable.
+- **"40 more" is a button now, and the rest of the list opens in place.** The cap was doing
+  two jobs at once. How many rows are worth STORING in a check result, on every cycle, for
+  ever is the module's call; how many are worth DRAWING at once is the page's. So the module
+  now keeps 100 sites instead of 25 and the core pages through them 25 at a time — those rows
+  are already in the payload, so growing the list is a repaint of one list, with no request,
+  no re-render of the row (which would fold shut the breakdown the click just opened) and no
+  loss of the expansion when a live refresh repaints the page. Only what was never sent stays
+  as text, because the core has nowhere to fetch it from.
+- **The per-site bars stay proportional when the tenant is over capacity.** A share of
+  capacity goes past 100 % for the big sites when more is occupied than was declared (a typed
+  `tenant_max` that is out of date, or a real overage), the bar clamps, and a 3.4 TB site is
+  drawn exactly like a 1.0 TB one. The share is now of the total OR of what is actually
+  occupied, whichever is larger: the bars stay proportional to each other and still sum to the
+  whole, and "667 % of capacity" stays where it belongs, on the ring above. It also fixes the
+  list for a tenant with no denominator at all, where every bar used to be drawn at zero.
+- The per-site list drops the tenant host and the `/sites/` managed path from every label.
+  Both are the same on all eighteen rows, so they pushed the part that DIFFERS off to the
+  right; `/teams/` and `/personal/` stay, because those do say something, and the root site —
+  which has no path — is the one row where the host is the name.
+- A hash is no longer shown as a name at all. The owner's is shared by every site that person
+  owns and a concealed site id is all zeros; neither identifies anything, so identifiers are now
+  join keys only and an unnamed row is numbered.
+- **`breakdown` is a core page contract, not an M365 feature.** A row may declare
+  `{label, items:[{name, text, pct}], more}` and the generic module-page renderer folds it
+  away behind a toggle — so a datastore's tables or a cluster's nodes get the same treatment
+  without a line of front-end. The core reads exactly one field, `pct`; `text` arrives
+  formatted by the module, because bytes-versus-rows-versus-seconds is knowledge the core does
+  not have.
+
+### Fixed
+- **A blank `site` never meant "everything".** It resolves the tenant ROOT site — one site
+  among many — and the field's help implied the total. Both the hint and the module reference
+  now say so, and point at the check that does answer it.
+- The tenant ring on the /m365 page drew "used against the number you asked to be warned at",
+  which is not a fraction of anything: the check published `limit_bytes` (a threshold) where
+  the page expected a capacity. It publishes `total_bytes` now, the same pair the per-site
+  check uses.
+
 ## [0.0.1+build.29] - 2026-07-29
 
 ### Added

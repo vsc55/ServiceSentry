@@ -38,7 +38,11 @@ class M365Page:
     # does not exist.
     _CHARTS = {
         'site':        {'used': 'used_bytes', 'total': 'total_bytes'},
-        'tenant':      {'used': 'used_bytes', 'total': 'limit_bytes'},
+        # The tenant check used to publish `limit_bytes` — an alert threshold, not a
+        # capacity — so its ring drew "used against the number you wanted to be warned at",
+        # which is not a fraction of anything. It now sums every site's quota and publishes a
+        # real `total_bytes`, the same pair the per-site check uses.
+        'tenant':      {'used': 'used_bytes', 'total': 'total_bytes'},
         'onedrive':    {'used': 'used_bytes', 'total': 'limit_bytes'},
         'securescore': {'used': 'score',      'total': 'max'},
         'licenses':    {'used': 'assigned',   'total': 'total'},
@@ -91,6 +95,11 @@ class M365Page:
                     'metrics': {mk: mv for mk, mv in od.items()
                                 if mk not in ('name', 'service') and isinstance(mv, (int, float, str))},
                 })
+                # What the row is made of, when the check published it (SharePoint's sites).
+                # It travels outside `metrics` because that is scalars only — a list would be
+                # dropped by the filter above and never reach the page.
+                if isinstance(od.get('breakdown'), dict):
+                    rows[-1]['breakdown'] = od['breakdown']
             sec = {
                 'id': sfx, 'name': labels.get(tog) or sfx,
                 'state': 'ok' if not (n_warn or n_err) else ('error' if n_err else 'warn'),
@@ -144,6 +153,10 @@ class M365Page:
         as ``page_data``, so the page swaps one for the other without a second renderer.
         Read-only: it queries Microsoft, it changes nothing here."""
         lang = str((config or {}).get('_lang') or 'en_EN')
+        # Nothing this run produces is written anywhere, so the caps that keep a stored check
+        # result small do not apply: a per-site list that the admin asked for by hand comes
+        # back whole, however many rows the item chose to store on its cycle (even none).
+        config = {**(config or {}), '_live': True}
         raw, err = run_item_once('m365', config, modules_dir=modules_dir_for(__file__),
                                  default_key='page')
         if err:

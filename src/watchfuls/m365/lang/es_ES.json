@@ -15,9 +15,9 @@
         "usage_pct": "Alerta al % usado",
         "free_min": "Alerta si el libre baja de",
         "free_unit": "Unidad (libre)",
-        "check_tenant_usage": "Uso del tenant (informes)",
-        "tenant_max": "Alerta si el uso supera",
-        "tenant_unit": "Unidad (tenant)",
+        "check_tenant_usage": "SharePoint completo (todos los sitios)",
+        "tenant_max": "Capacidad total (opcional)",
+        "tenant_unit": "Unidad (capacidad)",
         "check_health": "Estado de servicios",
         "health_services": "Solo estos servicios",
         "check_licenses": "Capacidad de licencias",
@@ -41,7 +41,12 @@
         "privileged_max": "Avisar si los administradores globales superan",
         "check_domains": "Dominios",
         "check_announcements": "Avisos de servicio",
-        "announce_days": "Avisar estos días antes de la fecha límite"
+        "announce_days": "Avisar estos días antes de la fecha límite",
+        "tenant_pct": "Aviso al % ocupado",
+        "tenant_warn_at": "Aviso al llegar a",
+        "sites_top": "Sitios a guardar",
+        "sites_page": "Sitios por página",
+        "tenant_warn_unit": "Unidad (aviso)"
     },
     "hints": {
         "enabled": "Habilita o deshabilita esta conexión de Microsoft 365.",
@@ -52,13 +57,13 @@
         "client_id": "ID de aplicación (cliente) del registro de app en Azure AD/Entra ID.",
         "client_secret": "Secreto de cliente de la app. Se guarda cifrado. La app necesita los permisos de aplicación Sites.Read.All y Reports.Read.All con consentimiento de administrador. Puedes crearla automáticamente con el botón de abajo (inicias sesión como admin y das consentimiento; no hace falta secreto previo).",
         "check_site": "Comprueba la cuota de almacenamiento de un sitio de SharePoint (total, usado y libre).",
-        "site": "URL del sitio de SharePoint a vigilar, p. ej. contoso.sharepoint.com/sites/Marketing. Déjalo vacío para usar el sitio raíz del tenant.",
+        "site": "URL del sitio de SharePoint a vigilar, p. ej. contoso.sharepoint.com/sites/Marketing. Vacío = el sitio RAÍZ del tenant, que es un sitio más y NO el total del tenant: para todos los sitios juntos, activa «SharePoint completo».",
         "usage_pct": "Avisa cuando el porcentaje usado del sitio alcanza este valor (1–100). En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
         "free_min": "Avisa cuando el espacio libre del sitio baja de esta cantidad. En un ítem, déjalo vacío para heredar el valor por defecto del módulo; ponlo a 0 en el módulo para desactivarlo.",
         "free_unit": "Unidad de la cantidad de espacio libre (MB, GB o TB).",
-        "check_tenant_usage": "Almacenamiento total USADO de SharePoint en el tenant, vía la API de informes. Graph no expone la cuota total agrupada, así que la alerta es por cantidad usada.",
-        "tenant_max": "Avisa cuando el uso total de SharePoint del tenant supera esta cantidad. 0 = solo informativo.",
-        "tenant_unit": "Unidad del límite del tenant (GB o TB).",
+        "check_tenant_usage": "Suma lo que ocupan TODOS los sitios de SharePoint del tenant y lo compara con la capacidad total: avisa al alcanzar el porcentaje o la cantidad que fijes, y da error al llegar al 100 %. Los sitios en la papelera siguen ocupando hasta que se purgan, así que cuentan — se informa aparte de cuántos son. Necesita Reports.Read.All.",
+        "tenant_max": "Capacidad total del tenant. Graph no la publica (es 1 TB + 10 GB por usuario con licencia), así que ponla aquí si la conoces. En blanco se usa la suma de las cuotas asignadas a los sitios, que es lo que tienen permitido usar.",
+        "tenant_unit": "Unidad de la capacidad total (GB o TB).",
         "check_health": "Estado de los servicios de Microsoft 365: avisa cuando algún servicio no está plenamente operativo (una interrupción es error duro; una degradación es aviso). Necesita ServiceHealth.Read.All.",
         "health_services": "Opcional: limita a estos servicios (separados por comas, coincidencia por subcadena), p. ej. 'Exchange Online, Microsoft Teams'. Vacío = todos.",
         "check_licenses": "Capacidad de licencias (SKU) suscritas: unidades asignadas frente a disponibles. Necesita Organization.Read.All.",
@@ -82,7 +87,11 @@
         "privileged_max": "Avisar por encima de este número. 0 desactiva el umbral y solo informa del recuento.",
         "check_domains": "Un dominio sin verificar no recibe correo, y la página que lo dice es una que nadie abre. Necesita Domain.Read.All.",
         "check_announcements": "Mensajes de Microsoft con fecha límite de acción (una retirada, un cambio incompatible) — pregunta distinta de si un servicio está caído. Necesita ServiceMessage.Read.All.",
-        "announce_days": "Avisar cuando una fecha límite esté a esta distancia. Las ya pasadas no se reportan: están hechas o perdidas, no próximas."
+        "announce_days": "Avisar cuando una fecha límite esté a esta distancia. Las ya pasadas no se reportan: están hechas o perdidas, no próximas.",
+        "tenant_pct": "Avisa cuando el porcentaje ocupado alcanza este valor. 0 = desactivado. El error al 100 % es fijo y no depende de esto.",
+        "tenant_warn_at": "Avisa cuando lo ocupado alcanza esta cantidad, sea cual sea el porcentaje. 0 = desactivado. Para cuando lo que importa es el volumen y no la fracción.",
+        "sites_top": "Cuántos sitios del desglose se guardan en cada ciclo. En blanco hereda el valor del módulo; 0 no guarda ninguno y el desglose aparece solo al pulsar «Actualizar ahora», que consulta en vivo y los trae todos.",
+        "tenant_warn_unit": "Unidad de la cantidad de aviso (MB, GB o TB)."
     },
     "group_labels": {
         "general": "General",
@@ -122,9 +131,6 @@
         "m3_why_free": "libre < {}",
         "m3_site_alert": "M365: {} — {} — {} ⚠️",
         "m3_tenant_fail": "M365: {} 🔽 [uso del tenant: {}]",
-        "m3_tenant_base": "M365: {} — SharePoint (tenant) usado {}",
-        "m3_tenant_over": "{} — supera el límite {} ⚠️",
-        "m3_tenant_limit_suffix": " (límite {})",
         "m3_health_fail": "M365: {} 🔽 [estado de servicios: {}]",
         "m3_health_none": "M365: {} — sin servicios que coincidan ⚠️",
         "m3_health_ok_all": "M365: {} — los {} servicios operativos ✅",
@@ -168,7 +174,20 @@
         "m3_dom_unverified": "M365: {} — dominio(s) sin verificar: {} ⚠️",
         "m3_ann_fail": "M365: {} 🔽 [avisos de servicio: {}]",
         "m3_ann_ok": "M365: {} — {} aviso(s) de servicio, ninguno requiere acción ✅",
-        "m3_ann_due": "M365: {} — {} aviso(s) requieren acción en {} días; el más próximo «{}» en {} ⚠️"
+        "m3_ann_due": "M365: {} — {} aviso(s) requieren acción en {} días; el más próximo «{}» en {} ⚠️",
+        "m3_sp_summary": "{} sitios · {} de {} ({}%) · libre {}",
+        "m3_sp_ok": "M365: {} — {} ✅",
+        "m3_sp_warn": "M365: {} — {} — {} ⚠️",
+        "m3_sp_full": "M365: {} — {} — SIN ESPACIO 🔴",
+        "m3_sp_no_total": "M365: {} — SharePoint ocupa {} en {} sitios (total desconocido)",
+        "m3_why_pct": "≥ {}% ocupado",
+        "m3_why_used": "ocupado ≥ {}",
+        "m3_sp_breakdown": "Uso por sitio",
+        "m3_sp_site_of_quota": "{} de {}",
+        "m3_sp_site_n": "Sitio {}",
+        "m3_sp_from_api": "Nombres y tamaños leídos de la API de sitios: los informes de este tenant ocultan los nombres. No incluye los sitios eliminados, que sí cuentan en el total.",
+        "m3_sp_anon": "El tenant oculta los nombres en los informes (Centro de administración → Configuración → Informes → «Mostrar nombres ocultos»). Los datos son reales; los nombres, no.",
+        "m3_sp_site_dup": "{} · {}"
     },
     "messages_vars": {
         "m3_no_creds": [
@@ -203,19 +222,8 @@
             "conexión",
             "error"
         ],
-        "m3_tenant_base": [
-            "conexión",
-            "usado"
-        ],
-        "m3_tenant_over": [
-            "mensaje",
-            "límite"
-        ],
         "m3_why_free": [
             "libre mín"
-        ],
-        "m3_tenant_limit_suffix": [
-            "límite"
         ],
         "m3_health_fail": [
             "conexión",
@@ -409,6 +417,51 @@
             "days",
             "title",
             "in days"
+        ],
+        "m3_sp_summary": [
+            "sites",
+            "used",
+            "total",
+            "used %",
+            "free"
+        ],
+        "m3_sp_ok": [
+            "connection",
+            "summary"
+        ],
+        "m3_sp_warn": [
+            "connection",
+            "summary",
+            "reason"
+        ],
+        "m3_sp_full": [
+            "connection",
+            "summary"
+        ],
+        "m3_sp_no_total": [
+            "connection",
+            "used",
+            "sites"
+        ],
+        "m3_why_pct": [
+            "% threshold"
+        ],
+        "m3_why_used": [
+            "threshold"
+        ],
+        "m3_sp_breakdown": [],
+        "m3_sp_site_of_quota": [
+            "usado",
+            "cuota del sitio"
+        ],
+        "m3_sp_site_n": [
+            "posición"
+        ],
+        "m3_sp_from_api": [],
+        "m3_sp_anon": [],
+        "m3_sp_site_dup": [
+            "identificador",
+            "nº entre los que lo comparten"
         ]
     },
     "widget": {

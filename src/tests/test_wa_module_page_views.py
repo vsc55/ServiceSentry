@@ -358,11 +358,84 @@ class TestOnlyProblemsIsHonest:
         assert 'rows.length' in _fn(_read(VIEWS), '_mpVisibleSections')
 
 
+class TestARowCanSayWhatItIsMadeOf:
+    """A check reports one number for a whole — SharePoint's total across every site — and the
+    question that always follows is which parts account for it. Answering it with one check
+    per part does not scale (a tenant has hundreds of sites) and buries the total among them,
+    so a row may carry a `breakdown` the page unfolds on demand.
+
+    It is CORE furniture for the same reason the layouts are: the shape is fixed, so a module
+    contributing one tomorrow — a datastore's tables, a cluster's nodes — needs no front-end.
+    """
+
+    def test_the_core_renders_it(self):
+        src = _read(PAGE)
+        assert 'function _mpBreakdown' in src
+        assert '_mpBreakdown(row)' in _fn(src, '_mpRow'), 'a row no longer offers it'
+
+    def test_it_stays_folded_until_asked_for(self):
+        """The list is long by nature — it is the part, not the summary — so opening it is a
+        decision, not the default."""
+        body = _fn(_read(PAGE), '_mpBreakdown')
+        assert 'data-bs-toggle="collapse"' in body
+
+    def test_the_core_reads_only_the_percentage(self):
+        """`text` arrives formatted by the module: bytes versus rows versus seconds is exactly
+        the knowledge the core does not have, the same reason the ring is declared and never
+        guessed."""
+        body = _fn(_read(PAGE), '_mpBreakdownRow')
+        assert 'parseFloat(it.pct)' in body
+        assert 'esc(it.text' in body, 'the core started formatting the value itself'
+
+    def test_a_truncated_list_says_so(self):
+        """A list that silently stopped at the top few would read as "these are all of them",
+        which is the one thing an inventory must not imply.
+
+        It lives in the footer with the pager: `more` is what the MODULE never sent, so it
+        stays text — the core has nowhere to fetch it from."""
+        body = _fn(_read(PAGE), '_mpBdFoot')
+        assert 'st.more' in body and 'page_breakdown_more' in body
+
+    def test_the_rest_of_the_rows_are_a_repaint_and_not_a_request(self):
+        """The two bounds are different questions: the module decides what is worth STORING
+        every cycle, the core what is worth DRAWING at once. The rows past the first page are
+        already in the payload, so growing the list must not go anywhere to get them."""
+        body = _fn(_read(PAGE), '_mpBdMore')
+        assert 'st.items.slice(0, st.shown)' in body
+        assert 'apiGet' not in body and 'apiPost' not in body and 'fetch(' not in body
+
+    def test_growing_the_list_leaves_the_row_alone(self):
+        """Re-rendering the page would collapse the breakdown the click just expanded, so the
+        pager repaints its own list and footer and nothing else."""
+        body = _fn(_read(PAGE), '_mpBdMore')
+        assert "getElementById(id + '-list')" in body
+        assert '_mpRender' not in body
+
+    def test_an_expanded_list_survives_a_refresh(self):
+        """A live refresh repaints the whole page. A list that folded itself back up on every
+        auto-refresh would be worse than no paging at all."""
+        body = _fn(_read(PAGE), '_mpBreakdown')
+        assert '_mpBd[id] ? _mpBd[id].shown : page' in body
+
+    def test_a_module_can_state_its_own_page_size(self):
+        """A list of 6 partitions and one of 500 tables do not read the same, so `page` is
+        declared like `chart` is — and 25 is what declaring nothing means."""
+        body = _fn(_read(PAGE), '_mpBreakdown')
+        assert "parseInt(b.page, 10) || _MP_BD_PAGE" in body
+
+    def test_the_bar_cannot_leave_its_track(self):
+        """A part bigger than the whole is possible — a site over its quota, a table over its
+        tablespace — and an unclamped width would draw outside the row."""
+        body = _fn(_read(PAGE), '_mpBreakdownRow')
+        assert 'Math.max(0, Math.min(100' in body
+
+
 class TestTheLabelsExist:
 
     def test_every_view_is_named_in_both_languages(self):
         keys = [label for _id, label, _fn2 in _registry()] + [
-            'page_view', 'page_search', 'page_checks', 'page_section', 'page_needs_attention']
+            'page_view', 'page_search', 'page_checks', 'page_section', 'page_needs_attention',
+            'page_breakdown_more']
         for lang in ('es_ES', 'en_EN'):
             src = io.open(os.path.join(SRC, 'lib', 'i18n', 'lang', f'{lang}.py'),
                           encoding='utf-8-sig').read()

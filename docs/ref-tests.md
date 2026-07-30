@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4520 tests** (4514 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4535 tests** (4534 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2764,7 +2764,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55b. Capa Microsoft compartida (Entra ID + ARM)
 
-**Archivo:** `tests/test_providers_graph_api.py` — 26 tests
+**Archivo:** `tests/test_providers_graph_api.py` — 31 tests
 
 Esta capa transporta **a la vez** los watchfuls `m365` y `azure`, así que un fallo aquí es un fallo
 en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests no la cubriría nadie.
@@ -2787,6 +2787,11 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 | `TestPaging::test_arm_uses_its_own_next_key` | ARM dice `nextLink` donde Graph dice `@odata.nextLink`: usar la clave de Graph contra ARM **para en silencio tras la primera página** |
 | `TestPaging::test_a_runaway_next_link_cannot_spin_forever` | Tope de páginas |
 | `TestPaging::test_non_dict_entries_are_skipped` | Entradas basura en `value` |
+| `TestBatch::test_the_answers_come_back_keyed_by_the_path_that_asked` | `$batch`: las respuestas se devuelven indexadas por la ruta que preguntó |
+| `TestBatch::test_more_than_twenty_is_split_into_several_requests` | Graph rechaza la sub-petición 21: el troceo no es una optimización |
+| `TestBatch::test_one_forbidden_object_does_not_cost_the_batch` | Un objeto con 403/404 se cae del resultado; las otras 19 respuestas son el motivo de preguntar |
+| `TestBatch::test_an_out_of_range_or_unparseable_id_is_ignored` | Un `id` que no casa con ninguna petición no inventa una entrada |
+| `TestBatch::test_nothing_to_ask_is_no_request_at_all` | Lista vacía → ni una llamada |
 | `TestArm::test_arm_is_a_different_audience_from_graph` | El fallo clásico de Azure: todos los permisos de Graph concedidos y ARM sigue dando 403 |
 | `TestArm::test_an_arm_read_goes_to_the_arm_base` | Base correcta |
 | `TestArm::test_the_bearer_token_is_sent` | Cabecera `Authorization` |
@@ -3103,7 +3108,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 64. Watchful: m365
 
-**Archivo:** `watchfuls/m365/tests/test_m365.py` — 69 tests
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 99 tests
 
 **Postura del tenant** (14 tests, `TestExtendedChecks`): cinco comprobaciones que contestan
 preguntas que el panel puede y un administrador normalmente no, porque cada una vive en un
@@ -3122,7 +3127,7 @@ Las licencias pasan a **una fila por SKU**, como salud de servicio ya hacía por
 números detrás del veredicto —cuántas unidades hay y cuántas están tomadas— se calculaban y se
 tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se está llenando.
 
-### `TestHelpers`, `TestSite`, `TestTenant`, `TestModule`, `TestListSites`, `TestCredentialAndProvision`
+### `TestHelpers`, `TestSite`, `TestTenantTotal`, `TestModule`, `TestListSites`, `TestCredentialAndProvision`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -3139,8 +3144,38 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_missing_credentials_warns` | Faltan credenciales (client_secret vacío) | item en fallo con `warning` | error duro o OK |
 | `test_auth_failure_smoothed_then_alerts` | Fallo de auth con `alert=1` (sin ventana de suavizado) | item en fallo, mensaje con 'auth' | no alerta |
 | `test_auth_failure_first_is_smoothed` | Fallo de auth con `alert=3`: primer fallo se suaviza | item reportado OK | alerta prematura |
-| `test_tenant_usage_ok` | Uso de tenant bajo el máximo | tenant OK | fallo |
-| `test_tenant_usage_over_warns` | Uso de tenant sobre el máximo | tenant en fallo con `warning` | no avisa |
+| `test_it_sums_every_site_against_the_sum_of_their_quotas` | **SharePoint completo**: suma lo ocupado por todos los sitios frente a la suma de sus cuotas | `used_bytes`, `total_bytes`, `used` (%) y `sites` publicados | sin denominador, como antes |
+| `test_a_typed_capacity_wins_over_the_sum_of_quotas` | Graph no publica el pool del tenant; si el admin lo sabe, manda lo que escribe | `total_bytes` = lo tecleado, `source='manual'` | ignora la capacidad |
+| `test_percentage_threshold_warns` | Aviso por porcentaje ocupado | tenant en fallo con `warning` | no avisa |
+| `test_absolute_threshold_warns_even_when_the_fraction_is_small` | «Avisa a 500 GB» es otra pregunta que «avisa al 80 %», y en un tenant grande llega mucho antes | `warning` con el % lejos del umbral | solo mira el porcentaje |
+| `test_full_is_an_error_not_a_warning` | **100 % no es «acercarse»**: es donde se empiezan a rechazar escrituras | fallo **sin** `warning` (rojo) | llega en el mismo color que el aviso previo |
+| `test_over_capacity_is_also_an_error` | Pasado el 100 % la respuesta es la misma | fallo sin `warning` | vuelve a aviso |
+| `test_deleted_sites_count_but_are_reported_apart` | Un sitio en la papelera sigue ocupando hasta que se purga | sus bytes suman y `deleted` los cuenta | infra-reporta el total |
+| `test_no_denominator_reports_the_amount_without_inventing_a_percentage` | Sin columna de cuota ni capacidad tecleada | dice cuánto y que el total se desconoce | publica un 0 % sobre el que nadie puede actuar |
+| `test_the_breakdown_names_who_is_occupying_it` | **Desglose por sitio**: el total dice cuánto, y lo siguiente que se pregunta es quién | lista de mayor a menor, % sobre la capacidad total | sin desglose, un check por sitio |
+| `test_the_breakdown_is_capped_and_says_what_it_left_out` | Un tenant con miles de sitios guardaría miles de filas en cada resultado y ciclo | top `_SITES_TOP` + `more` con lo omitido | corte silencioso que se lee como «esto es todo» |
+| `test_bars_stay_proportional_when_the_tenant_is_over_capacity` | **Quinta captura**: las tres primeras barras llenas. Con 1 TB declarado y 6.7 TB ocupados, el reparto sobre la CAPACIDAD daba 340/110/100 % y la barra recorta: un sitio de 3.4 TB se dibujaba igual que uno de 1.0 TB | reparto sobre lo ocupado: 60/30/10, y el ítem sigue en FULL | barras indistinguibles justo cuando más importan |
+| `test_bars_are_proportional_even_with_no_denominator_at_all` | Sin capacidad escrita ni cuotas que sumar, dividir por el total dejaba todas las barras a cero | 75/25 | una lista ilegible |
+| `test_concealed_reports_still_produce_a_usable_list` | **Reportado desde una captura**: todos los nombres eran «—». El tenant tenía activado «mostrar nombres ocultos», así que Graph devuelve los bytes y vacía la URL | cae a propietario → id de sitio → numeración, y **dice por qué** | una columna de guiones que se lee como fallo del panel |
+| `test_a_concealed_row_is_named_from_the_sites_api` | **La salida**: la ocultación es de los INFORMES, y `/sites` (la misma enumeración del botón «descubrir») sigue publicando nombres. El GUID de colección de sitio las une | una llamada extra convierte hashes en URL reales | hashes para siempre |
+| `test_the_id_is_matched_however_it_is_spelled` | El informe escribe el GUID sin guiones; la API de sitios, con ellos | casan igual | cruce que falla por un guion |
+| `test_naming_is_not_attempted_when_nothing_is_concealed` | Un tenant que publica sus URL no paga una llamada por una pregunta ya contestada | no se enumera | coste en cada ciclo para nada |
+| `test_a_naming_failure_never_costs_the_measurement` | Los números son el check; las etiquetas, una cortesía | sigue OK con sus bytes | una API de sitios que niega tumba un resultado sano |
+| `test_a_hash_is_never_shown_as_a_name` | **Segunda captura**: cinco filas leían el mismo hash — el del **propietario lo comparten todos sus sitios**. Un identificador es clave de cruce, no un nombre | ni hash de sitio ni de propietario en la etiqueta | filas que parecen el mismo sitio repetido |
+| `test_a_zeroed_site_id_is_not_treated_as_an_identifier` | **Tercera captura**: 18 filas con `00000000-0000-…`. El GUID cero ni nombra ni cruza | ni se muestra ni casa con el primer sitio listado | un cruce falso, o una columna de ceros |
+| `test_an_unjoinable_report_falls_back_to_measuring_the_sites` | Sin id que cruzar, los sitios mismos dicen cuánto ocupan y con su nombre real (`/sites/{id}/drive` en `$batch`) | lista real, nota que lo dice, y el TOTAL sigue siendo el del informe | una lista numerada cuando había una con nombres |
+| `test_a_site_without_a_document_library_is_skipped_not_zeroed` | Un cero inventado se lee como «este sitio está vacío», que es otra afirmación | ausente de la lista | dato falso |
+| `test_the_tenant_host_is_not_repeated_on_every_row` | **Cuarta captura**: las 18 filas empezaban por el mismo `…sharepoint.com/sites/`, empujando a la derecha lo que cambia. `/sites/` es la ruta gestionada por defecto y no dice nada; `/teams/` y `/personal/` sí | `Dev`, `teams/Sales`, `Dev/sub`, y la raíz con su nombre | una columna donde todo lo legible está fuera de pantalla |
+| `test_a_huge_tenant_is_not_probed_site_by_site` | El respaldo está acotado (`_SITES_PROBE_MAX`) | pasado el tope, la lista anónima | un ciclo entero gastado en poner nombres |
+| `test_the_note_only_appears_when_every_name_is_concealed` | Un tenant que sí nombra sus sitios no puede recibir el aviso | sin nota | aviso falso |
+| `test_a_deleted_site_is_marked_in_the_breakdown` | | 🗑 en el nombre | indistinguible de uno vivo |
+| `test_the_page_carries_the_breakdown_to_the_row` | `metrics` es solo escalares: una lista la tiraría ese filtro | viaja al lado y llega a la fila | el desglose nunca llega a la página |
+| `test_how_many_sites_are_stored_is_configurable` | El coste de la lista son bytes escritos en cada ciclo, para siempre — misma naturaleza que `threads`/`timeout` | default de módulo (`sites_top`) con override por ítem | un tope fijo que no se puede ni subir ni quitar |
+| `test_a_blank_item_inherits_and_a_zero_does_not` | Tres estados, tres intenciones; `inherit_blank` guarda null al vaciar y el 0 sigue siendo un valor real | blanco hereda, 0 no guarda nada (y la medida sigue) | 0 y «vacío» confundidos, como en los campos `zero_as_blank` |
+| `test_a_live_read_ignores_the_cap_because_it_is_not_stored` | El tope protege el resultado GUARDADO; una lista pedida a mano no toca la BD | los 30 sitios, incluso con `sites_top=0` | pagar el tope donde no hay nada que proteger |
+| `test_the_live_refresh_declares_itself` | El check no distingue una lectura en vivo de un ciclo si nadie se lo dice | `page_refresh` marca `_live` en la config con la que corre | el tope aplicado también en vivo |
+| `test_the_module_states_its_own_page_size` | Cuántas filas se dibujan de una vez es presentación, y 6 particiones no se leen como 500 tablas | `breakdown.page` desde `sites_page` | una decisión de presentación fija en el núcleo |
+| `test_the_status_bar_only_gets_a_marker_when_one_is_configured` | La barra de Status queda neutra si no hay umbral | `alert` solo cuando se fija | marcador que nadie pidió |
 | `test_init` | Inicialización del módulo | `name_module == 'watchfuls.m365'` | nombre distinto |
 | `test_schema` | Esquema: secret sensible, unidades, `__status_render__` | flags correctos | esquema incorrecto |
 | `test_test_connection` | Acción test_connection con token/site/drive mockeados | `ok=True`, mensaje con `25.0%` | fallo |
@@ -5230,7 +5265,7 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
-**Archivo:** `tests/test_wa_module_page_views.py` — 36 tests
+**Archivo:** `tests/test_wa_module_page_views.py` — 45 tests
 
 Un módulo aporta una sección de primer nivel declarando `__page__` y contestando con una
 forma fija: secciones de filas, cada fila con estado, mensaje y lo que la comprobación haya
@@ -5267,6 +5302,7 @@ porque una ausencia muda obliga a salir de la página para averiguar por qué.
 | `TestTheRingIsDeclaredNotGuessed::test_it_is_drawn_per_row_not_per_section` | |
 | `TestTheRingIsDeclaredNotGuessed::test_every_view_shows_it` | Una cifra en un layout y no en el siguiente hace que se contradigan |
 | `TestTheRingIsDeclaredNotGuessed::test_the_label_is_centred_by_declaration` | El ajuste a ojo solo acierta a un tamaño |
+| `TestARowCanSayWhatItIsMadeOf::*` (×9) | **Una fila puede decir de qué está hecha**: un check informa de un todo (el total de SharePoint) y lo siguiente que se pregunta son sus partes. Es mobiliario del **núcleo** —la forma es fija, así que las tablas de un datastore o los nodos de un clúster lo tendrían sin escribir front-end—, va **plegado** (la lista es la parte, no el resumen), el núcleo solo interpreta `pct` (el `text` llega formateado por el módulo), un recorte se declara, y la barra se acota a 0-100 porque una parte puede superar su todo. **Dos topes distintos**: el módulo decide cuántas filas merece la pena GUARDAR en cada ciclo, el núcleo cuántas DIBUJAR de una vez — pasar de página es un repintado de su propia lista (ni petición, ni `_mpRender` que plegaría lo que el clic acaba de abrir) y sobrevive a un refresco en vivo; solo lo que nunca se envió sigue siendo texto |
 | `TestTheRingIsDeclaredNotGuessed::test_each_declared_pair_is_what_that_check_publishes` | **El error que cazó**: `total_bytes` frente a `limit_bytes`; la declaración equivocada no pintaba nada, en silencio |
 | `TestTheRingIsDeclaredNotGuessed::test_it_is_only_offered_when_the_rows_carry_both` | |
 | `TestTheRingIsDeclaredNotGuessed::test_the_ring_takes_its_colour_from_the_row` | Una escala «más lleno es peor» vale para un disco y no para lo demás: un anillo rojo junto a una fila ámbar son dos señales discrepando sobre el mismo registro |

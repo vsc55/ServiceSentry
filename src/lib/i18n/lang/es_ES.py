@@ -48,6 +48,8 @@ LANG = {
     'page_view_cards':     'Tarjetas apiladas',
     'page_search':         'Filtrar…',
     'page_chart_no_total': 'Sin total ({}): no hay límite del que calcular el porcentaje',
+    'page_breakdown_more':    'y {} más',
+    'page_breakdown_show':    'Ver {} más',
     'page_checks':         'comprobaciones',
     'page_sections':       'Secciones',
     'page_section':        'Sección',

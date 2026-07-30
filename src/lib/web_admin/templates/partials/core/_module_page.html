@@ -9,8 +9,15 @@
    The shape it renders (everything module-supplied, nothing hardcoded here):
 
      {sections: [{id, name, state, counts:{ok,warn,error,total},
-                  rows: [{name, state, message, metrics:{k: v}}]}],
+                  rows: [{name, state, message, metrics:{k: v}, breakdown?}]}],
       counts: {...}, live: bool, items: [{key, label}]}
+
+   `breakdown` is optional and is what a row is MADE of: {label, items:[{name, text, pct}],
+   more, note?, page?}. A total answers "how much"; the breakdown answers "of what" — SharePoint's sites,
+   and tomorrow a database's tables or a cluster's nodes. The core reads exactly one number
+   from it, `pct`, which is the same language the ring already speaks; `text` arrives
+   formatted by the module, because bytes-versus-rows-versus-seconds is knowledge the core
+   does not have.
 
    Live refresh: only when the page declares `refresh` (a watchful action name). The
    action must answer in the same shape, so there is one renderer, not two.
@@ -201,6 +208,94 @@ function _mpViewCards(pageId, st, c) {
         </div>`).join('');
 }
 
+const _mpBd = {};             // {bdId: {items, more, page, shown}} — a breakdown and its paging
+const _MP_BD_PAGE = 25;       // rows drawn at a time, when the module states no preference
+
+/** What a row is made of, folded away until asked for.
+ *
+ *  A check reports one number for a whole — SharePoint's total, a datastore's size — and the
+ *  question that always follows is which of its parts account for it. That list is long by
+ *  nature, so it does not belong open: the row keeps its shape and the parts are one click
+ *  away, biggest first, each with a bar so the share is read rather than computed.
+ *
+ *  `pct` is the only field the core interprets. `text` comes formatted from the module, and
+ *  `more` is what was left out — a list that silently stopped at 25 would read as "these are
+ *  all of them", which is the one thing an inventory must not imply.
+ *
+ *  Two different bounds, and they are not the same question. How many rows are worth STORING
+ *  in a check result, on every cycle, for ever is the module's call; how many are worth
+ *  DRAWING at once is the page's, and the rest are paged through in place — those rows are
+ *  already here, so growing the list is a repaint and not a request. Only what was never sent
+ *  stays as `more`, and it stays as text, because the core cannot go and fetch it.
+ *
+ *  `page` lets a module state its own page size (a list of 6 partitions and one of 500 tables
+ *  do not read the same), and 25 is what it means to state nothing.
+ */
+function _mpBreakdown(row) {
+    const b = row.breakdown;
+    const items = (b && b.items) || [];
+    if (!items.length) return '';
+    // The id is derived from the row so several breakdowns on one page never share a target.
+    const id = 'mpbd-' + String(row.key || row.name || '').replace(/\W+/g, '-').slice(0, 60);
+    const page = Math.max(1, parseInt(b.page, 10) || _MP_BD_PAGE);
+    // A live refresh repaints the whole page; an expanded list that silently folded itself
+    // back up on every auto-refresh would be worse than no paging at all.
+    const shown = Math.min(_mpBd[id] ? _mpBd[id].shown : page, items.length);
+    _mpBd[id] = { items, more: b.more || 0, page, shown };
+    return `<div class="mt-1">
+        <button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2" type="button"
+                data-bs-toggle="collapse" data-bs-target="#${escAttr(id)}" aria-expanded="false">
+            <i class="bi bi-chevron-down me-1"></i>${esc(b.label || '')}
+            <span class="badge bg-body-secondary text-body-secondary ms-1">${items.length}</span>
+        </button>
+        <div class="collapse mt-1" id="${escAttr(id)}">
+            ${b.note ? `<div class="text-muted ss-fs-2 px-1 pb-1">
+                <i class="bi bi-info-circle me-1"></i>${esc(b.note)}</div>` : ''}
+            <div id="${escAttr(id)}-list">${items.slice(0, shown).map(_mpBreakdownRow).join('')}</div>
+            <div id="${escAttr(id)}-foot">${_mpBdFoot(id)}</div>
+        </div>
+    </div>`;
+}
+
+/** A breakdown's footer: what is here but not drawn yet, and what was never sent at all. */
+function _mpBdFoot(id) {
+    const st = _mpBd[id];
+    if (!st) return '';
+    const rest = st.items.length - st.shown;
+    const out = [];
+    if (rest > 0) out.push(`<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2 mt-1"
+            type="button" onclick="_mpBdMore('${escAttr(id)}')">
+        <i class="bi bi-chevron-down me-1"></i>${esc(tf('page_breakdown_show', Math.min(rest, st.page)))}
+        <span class="badge bg-body-secondary text-body-secondary ms-1">${rest}</span></button>`);
+    if (st.more) out.push(`<div class="text-muted ss-fs-2 px-1 pt-1">
+        <i class="bi bi-three-dots me-1"></i>${esc(tf('page_breakdown_more', st.more))}</div>`);
+    return out.join('');
+}
+
+/** Draw the next page of a breakdown, in place — one list repainted, no request, and the
+ *  surrounding row (and its open/closed state) untouched. */
+function _mpBdMore(id) {
+    const st = _mpBd[id];
+    if (!st) return;
+    st.shown = Math.min(st.shown + st.page, st.items.length);
+    const list = document.getElementById(id + '-list');
+    const foot = document.getElementById(id + '-foot');
+    if (list) list.innerHTML = st.items.slice(0, st.shown).map(_mpBreakdownRow).join('');
+    if (foot) foot.innerHTML = _mpBdFoot(id);
+}
+
+function _mpBreakdownRow(it) {
+    const pct = Math.max(0, Math.min(100, parseFloat(it.pct) || 0));
+    return `<div class="d-flex align-items-center gap-2 px-1 py-1">
+        <span class="text-truncate ss-fs-2" style="min-width:8rem;max-width:22rem"
+              title="${escAttr(it.name || '')}">${esc(it.name || '')}</span>
+        <span class="flex-grow-1 rounded" style="height:6px;background:var(--bs-secondary-bg)">
+            <span class="d-block rounded bg-primary" style="height:6px;width:${pct}%"></span></span>
+        <span class="text-muted ss-fs-2 text-nowrap" style="min-width:4rem;text-align:right">${pct}%</span>
+        <span class="ss-fs-2 text-nowrap">${esc(it.text || '')}</span>
+    </div>`;
+}
+
 /** One row. */
 function _mpRow(row, chart) {
     return `<div class="d-flex align-items-start gap-2 py-1 border-bottom">
@@ -210,6 +305,7 @@ function _mpRow(row, chart) {
             <div class="fw-semibold ss-fs-3">${esc(row.name)}</div>
             <div class="text-muted ss-fs-2">${esc(row.message || '')}</div>
             ${_mpMetrics(row)}
+            ${_mpBreakdown(row)}
         </div>
         ${_mpRowChart(chart, row)}
     </div>`;

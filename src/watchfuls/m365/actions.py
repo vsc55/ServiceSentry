@@ -40,31 +40,46 @@ class M365Actions:
         except Exception:  # pylint: disable=broad-except
             return []
         out, seen = [], set()
-        # '/sites?search=*' returns every site the app has access to; follow the
-        # paging links so large tenants are fully enumerated (bounded for safety).
+        for s in cls._enumerate_sites(token, timeout):
+            web = str(s.get('webUrl') or '').strip()
+            name = web.replace('https://', '').replace('http://', '').rstrip('/')
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            out.append({
+                'name': name,
+                'display_name': str(s.get('displayName') or s.get('name') or ''),
+                'kind': 'SharePoint',
+                'status': '',
+            })
+        out.sort(key=lambda x: x['display_name'].lower())
+        return out
+
+    @classmethod
+    def _enumerate_sites(cls, token: str, timeout: int) -> list:
+        """Every SharePoint site the app can see, as Graph returns them
+        (``{id, displayName, name, webUrl}``).
+
+        Extracted from :meth:`list_sites` because the storage check needs the same
+        enumeration for a different reason: a tenant that conceals names in its REPORTS still
+        publishes them here — this is the Sites API, which that setting does not touch — so
+        the ids are what let a concealed usage row be named. One shape, one pager, one place
+        where the page cap lives.
+        """
+        out: list = []
+        # '/sites?search=*' returns every site the app has access to; follow the paging links
+        # so large tenants are fully enumerated (bounded for safety).
         path = '/sites?search=*&$select=id,displayName,name,webUrl&$top=100'
         for _ in range(50):                       # hard page cap (≤ 5000 sites)
             try:
                 data = cls._graph_json(token, path, timeout)
             except Exception:  # pylint: disable=broad-except
                 break
-            for s in (data.get('value') or []):
-                web = str(s.get('webUrl') or '').strip()
-                name = web.replace('https://', '').replace('http://', '').rstrip('/')
-                if not name or name in seen:
-                    continue
-                seen.add(name)
-                out.append({
-                    'name': name,
-                    'display_name': str(s.get('displayName') or s.get('name') or ''),
-                    'kind': 'SharePoint',
-                    'status': '',
-                })
+            out.extend(data.get('value') or [])
             nxt = str(data.get('@odata.nextLink') or '')
             if '/v1.0' not in nxt:
                 break
             path = nxt.split('/v1.0', 1)[1]
-        out.sort(key=lambda x: x['display_name'].lower())
         return out
 
     @classmethod

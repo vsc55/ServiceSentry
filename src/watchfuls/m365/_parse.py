@@ -17,6 +17,66 @@ import csv
 import io
 
 
+def _csv_col(text: str, column: str):
+    """``(rows, index)`` for *column* in a report CSV — the header lookup every reader here
+    needs, done once.  ``index`` is -1 when the column is absent.
+
+    Graph writes a BOM on some reports and spells a few headers slightly differently
+    between them, so an exact match is tried first and a case-insensitive substring second.
+    """
+    rows = list(csv.reader(io.StringIO(text or '')))
+    if len(rows) < 2:
+        return rows, -1
+    header = [h.strip().lstrip('﻿') for h in rows[0]]
+    try:
+        return rows, header.index(column)
+    except ValueError:
+        return rows, next((i for i, h in enumerate(header) if column.lower() in h.lower()), -1)
+
+
+def _csv_int(row: list, idx: int) -> int:
+    """One cell as an int (0 when missing or not a number).  The reports write integers as
+    floats often enough (``1.0``) that ``int(...)`` alone would raise."""
+    if idx < 0 or idx >= len(row):
+        return 0
+    try:
+        return int(float(row[idx] or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _csv_sum(text: str, column: str) -> int:
+    """Sum of *column* across a report's data rows (0 if absent).
+
+    The counterpart of :func:`_csv_max`, and the two are NOT interchangeable — which one is
+    right depends on what the rows are. In a per-DAY report (tenant storage over ``D7``) the
+    rows are the same quantity measured repeatedly, so summing would multiply it by seven.
+    In a per-SITE report (site usage detail) each row is a different site, and the sum is the
+    tenant's total.
+    """
+    rows, idx = _csv_col(text, column)
+    if idx < 0:
+        return 0
+    return sum(_csv_int(r, idx) for r in rows[1:])
+
+
+def _csv_count(text: str, column: str = '', value: str = '') -> int:
+    """How many data rows the report has — or how many carry *value* in *column*.
+
+    Used for "how many sites" and "how many of them are deleted": a site in the recycle bin
+    still occupies the tenant's storage until it is purged, so it belongs in the total AND is
+    worth counting separately.
+    """
+    rows, idx = _csv_col(text, column) if column else (
+        list(csv.reader(io.StringIO(text or ''))), -1)
+    if len(rows) < 2:
+        return 0
+    data = rows[1:]
+    if not column or idx < 0:
+        return sum(1 for r in data if any((c or '').strip() for c in r))
+    return sum(1 for r in data if idx < len(r) and str(r[idx]).strip().lower() == value.lower())
+
+
 def _csv_max(text: str, column: str) -> int:
     """Largest integer value of *column* across a report CSV's data rows (0 if
     absent).  Tolerant of a BOM / slight header variations.

@@ -37,6 +37,9 @@ from lib.providers.entraid.client import (
 # should ever be reached: it exists so a malformed next-link cannot spin forever.
 MAX_PAGES = 20
 
+# Graph's own ceiling for a $batch request.  Not a tunable: asking for 21 is rejected.
+BATCH_MAX = 20
+
 
 def qs(params: dict) -> str:
     """A percent-encoded query string.
@@ -143,6 +146,35 @@ class EntraApi:
     @classmethod
     def _graph_json(cls, token: str, path: str, timeout: int) -> dict:
         return json.loads(cls._graph_text(token, path, timeout) or '{}') or {}
+
+    @classmethod
+    def _graph_batch(cls, token: str, paths: list, timeout: int) -> dict:
+        """Many GETs in as few round-trips as Graph allows → ``{path: body}``.
+
+        Per-object questions about a tenant are N requests, and N sequential HTTPS
+        round-trips is exactly how a check ends up timing out on a large one.  ``$batch``
+        takes 20 at a time, so 200 objects cost 10 requests instead of 200.
+
+        Only the sub-requests that answered 200 come back: one object that 404s or is
+        forbidden is dropped from the result rather than costing the whole batch.  A batch
+        request that fails outright raises, like any other call here.
+        """
+        out: dict = {}
+        for start in range(0, len(paths), BATCH_MAX):
+            chunk = paths[start:start + BATCH_MAX]
+            _code, text = cls._request(
+                GRAPH_BASE + '/$batch', method='POST', timeout=timeout,
+                headers={'Authorization': 'Bearer ' + token},
+                json_body={'requests': [{'id': str(n), 'method': 'GET', 'url': p}
+                                        for n, p in enumerate(chunk)]})
+            for resp in ((json.loads(text or '{}') or {}).get('responses') or []):
+                try:
+                    n = int(resp.get('id'))
+                except (TypeError, ValueError):
+                    continue
+                if int(resp.get('status') or 0) == 200 and 0 <= n < len(chunk):
+                    out[chunk[n]] = resp.get('body') or {}
+        return out
 
     @classmethod
     def _paged(cls, token: str, url: str, timeout: int, *,

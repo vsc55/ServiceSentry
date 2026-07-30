@@ -48,6 +48,8 @@ LANG = {
     'page_view_cards':     'Stacked cards',
     'page_search':         'Filter…',
     'page_chart_no_total': 'No total ({}): nothing to compute a percentage against',
+    'page_breakdown_more':    '{} more',
+    'page_breakdown_show':    'Show {} more',
     'page_checks':         'checks',
     'page_sections':       'Sections',
     'page_section':        'Section',

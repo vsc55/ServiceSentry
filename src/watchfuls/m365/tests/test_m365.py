@@ -26,12 +26,23 @@ def _item(**over):
     base = {'enabled': True, 'label': 'SP', 'tenant_id': 't', 'client_id': 'c',
             'client_secret': 's', 'check_site': True, 'site': '',
             'usage_pct': 90, 'free_min': 0, 'free_unit': 'GB',
-            'check_tenant_usage': False, 'tenant_max': 0, 'tenant_unit': 'TB'}
+            'check_tenant_usage': False, 'tenant_max': 0, 'tenant_unit': 'TB',
+            'tenant_pct': 0, 'tenant_warn_at': 0, 'tenant_warn_unit': 'GB'}
     base.update(over)
     return base
 
 
-def _run(item, *, drive=None, csv_text='', token_exc=None, site='Marketing', module_cfg=None):
+def _run(item, *, drive=None, csv_text='', token_exc=None, site='Marketing', module_cfg=None,
+         sites=None, drives=None, enum_exc=None):
+    """Run the check with every Graph surface faked.
+
+    `_enumerate_sites` and `_graph_batch` are patched on the CLASS, not on the instance:
+    they are classmethods, so a check reaching them through `self` still resolves the class
+    attribute — patching the instance would leave a real HTTPS call in the tests.
+
+    `sites` is what `/sites` answers; `drives` maps a site id to its `quota`, which is what
+    the per-site fallback batches for.
+    """
     from watchfuls.m365 import Watchful
     mod = {'threads': 1, 'alert': 3, 'list': {'m1': item}}
     if module_cfg:
@@ -44,9 +55,25 @@ def _run(item, *, drive=None, csv_text='', token_exc=None, site='Marketing', mod
             raise token_exc
         return 'tok'
 
+    def fake_enum(tok, to):
+        if enum_exc:
+            raise enum_exc
+        return list(sites or [])
+
+    def fake_batch(tok, paths, to):
+        out = {}
+        for p in paths:
+            sid = p.split('/sites/', 1)[-1].split('/drive', 1)[0]
+            quota = (drives or {}).get(sid)
+            if quota is not None:
+                out[p] = {'quota': quota}
+        return out
+
     with patch.object(w, '_get_token', side_effect=fake_token), \
          patch.object(w, '_resolve_site', side_effect=lambda tok, s, to: ('id1', site)), \
          patch.object(w, '_graph_json', side_effect=lambda tok, path, to: drive or {}), \
+         patch.object(Watchful, '_enumerate_sites', side_effect=fake_enum), \
+         patch.object(Watchful, '_graph_batch', side_effect=fake_batch), \
          patch.object(w, '_graph_text', side_effect=lambda tok, path, to: csv_text):
         return w.check().list
 
@@ -173,22 +200,396 @@ class TestSite:
         assert res['m1/tenant']['status'] is False
 
 
-class TestTenant:
+def _detail_concealed(*sites, owner='HASHOWNER', ids=None) -> str:
+    """A concealed report, the way a real tenant returns it: the URL blank and the remaining
+    identifiers replaced by hashes — the OWNER hash being shared by every site that person
+    owns, which is how five rows came back reading identically."""
+    head = ('Report Refresh Date,Site Id,Site URL,Owner Display Name,Is Deleted,'
+            'Storage Used (Byte),Storage Allocated (Byte),Report Period\n')
+    rows = ''
+    for i, (used, alloc) in enumerate(sites):
+        sid = (ids[i] if ids and i < len(ids) else f'SITEHASH{i}')
+        rows += f'2024-01-01,{sid},,{owner},False,{used},{alloc},7\n'
+    return head + rows
 
-    def test_tenant_usage_ok(self):
-        item = _item(check_site=False, check_tenant_usage=True, tenant_max=10, tenant_unit='TB')
-        csv_text = ('Report Refresh Date,Site Type,Storage Used (Byte),Report Date\n'
-                    '2024-01-01,All,%d,2024-01-01\n' % (2 * 1024 ** 4))
-        res = _run(item, csv_text=csv_text)
-        assert res['m1/tenant']['status'] is True
 
-    def test_tenant_usage_over_warns(self):
-        item = _item(check_site=False, check_tenant_usage=True, tenant_max=1, tenant_unit='TB')
-        csv_text = ('Report Refresh Date,Site Type,Storage Used (Byte),Report Date\n'
-                    '2024-01-01,All,%d,2024-01-01\n' % (3 * 1024 ** 4))
-        res = _run(item, csv_text=csv_text)
+def _detail(*sites, anon=False) -> str:
+    """A `getSharePointSiteUsageDetail` CSV: one row per SITE, with what it uses and the
+    quota it was given. `sites` are `(used, allocated)` pairs, optionally `(used, allocated,
+    deleted)`.
+
+    `anon=True` reproduces a tenant with "Display concealed user, group and site names" on:
+    Graph still answers with the bytes and blanks the identifiers."""
+    head = ('Report Refresh Date,Site Id,Site URL,Owner Display Name,Is Deleted,'
+            'Storage Used (Byte),Storage Allocated (Byte),Report Period\n')
+    rows = ''
+    for i, s in enumerate(sites):
+        used, alloc = s[0], s[1]
+        deleted = 'True' if len(s) > 2 and s[2] else 'False'
+        url = '' if anon else f'https://x/sites/s{i}'
+        owner = '' if anon else f'owner{i}'
+        rows += f'2024-01-01,id{i},{url},{owner},{deleted},{used},{alloc},7\n'
+    return head + rows
+
+
+class TestTenantTotal:
+    """SharePoint across every site — the check that answers "how full is it", which the
+    per-site one cannot: a blank `site` resolves the tenant ROOT site, which is one site
+    among many. Reported: it looked like it meant "everything"."""
+
+    def test_it_sums_every_site_against_the_sum_of_their_quotas(self):
+        item = _item(check_site=False, check_tenant_usage=True, tenant_pct=90)
+        res = _run(item, csv_text=_detail((10 * GB, 100 * GB), (30 * GB, 100 * GB)))
+        r = res['m1/tenant']
+        assert r['status'] is True
+        assert r['other_data']['used_bytes'] == 40 * GB
+        assert r['other_data']['total_bytes'] == 200 * GB
+        assert r['other_data']['used'] == 20.0
+        assert r['other_data']['sites'] == 2
+
+    def test_a_typed_capacity_wins_over_the_sum_of_quotas(self):
+        """Graph does not publish the pooled tenant quota, so an admin who knows it may say
+        so — and then that is the denominator, not the sum of what the sites were allowed."""
+        item = _item(check_site=False, check_tenant_usage=True,
+                     tenant_max=1, tenant_unit='TB', tenant_pct=0)
+        res = _run(item, csv_text=_detail((256 * GB, 10 * GB)))
+        d = res['m1/tenant']['other_data']
+        assert d['total_bytes'] == 1024 * GB and d['used'] == 25.0
+        assert d['source'] == 'manual'
+
+    def test_percentage_threshold_warns(self):
+        item = _item(check_site=False, check_tenant_usage=True, tenant_pct=80)
+        res = _run(item, csv_text=_detail((85 * GB, 100 * GB)))
         assert res['m1/tenant']['status'] is False
         assert res['m1/tenant']['severity'] == 'warning'
+
+    def test_absolute_threshold_warns_even_when_the_fraction_is_small(self):
+        """"Warn at 500 GB" is a different question from "warn at 80%", and on a big tenant
+        the amount arrives long before the fraction does."""
+        item = _item(check_site=False, check_tenant_usage=True, tenant_pct=0,
+                     tenant_warn_at=500, tenant_warn_unit='GB')
+        res = _run(item, csv_text=_detail((600 * GB, 10 * 1024 * GB)))
+        r = res['m1/tenant']
+        assert r['status'] is False and r['severity'] == 'warning'
+        assert r['other_data']['used'] < 10          # nowhere near a % threshold
+
+    def test_full_is_an_error_not_a_warning(self):
+        """100% is not "getting close": it is the point where writes start being refused, so
+        it must not arrive in the same colour as the warning that preceded it."""
+        item = _item(check_site=False, check_tenant_usage=True, tenant_pct=90)
+        res = _run(item, csv_text=_detail((100 * GB, 100 * GB)))
+        r = res['m1/tenant']
+        assert r['status'] is False
+        assert r.get('severity') != 'warning'
+
+    def test_over_capacity_is_also_an_error(self):
+        """Sites can exceed a typed pool; past 100% the answer is the same one."""
+        item = _item(check_site=False, check_tenant_usage=True,
+                     tenant_max=1, tenant_unit='GB', tenant_pct=90)
+        res = _run(item, csv_text=_detail((2 * GB, 2 * GB)))
+        assert res['m1/tenant']['status'] is False
+        assert res['m1/tenant'].get('severity') != 'warning'
+
+    def test_deleted_sites_count_but_are_reported_apart(self):
+        """A site in the recycle bin still occupies the tenant's storage until it is purged,
+        so leaving it out would under-report the very number this check exists for."""
+        item = _item(check_site=False, check_tenant_usage=True)
+        res = _run(item, csv_text=_detail((10 * GB, 50 * GB), (20 * GB, 50 * GB, True)))
+        d = res['m1/tenant']['other_data']
+        assert d['used_bytes'] == 30 * GB
+        assert d['deleted'] == 1 and d['sites'] == 2
+
+    def test_no_denominator_reports_the_amount_without_inventing_a_percentage(self):
+        """A report with no allocated column and no typed capacity: say how much, and say
+        that the total is unknown — a 0% would be a number nobody can act on."""
+        item = _item(check_site=False, check_tenant_usage=True)
+        csv_text = ('Report Refresh Date,Site Id,Storage Used (Byte)\n'
+                    '2024-01-01,id0,%d\n' % (7 * GB))
+        res = _run(item, csv_text=csv_text)
+        d = res['m1/tenant']['other_data']
+        assert res['m1/tenant']['status'] is True
+        assert d['used_bytes'] == 7 * GB
+        assert 'used' not in d and 'total_bytes' not in d
+        assert d['source'] == 'none'
+
+    def test_the_breakdown_names_who_is_occupying_it(self):
+        """The total answers "how much"; the question that always follows is which sites, and
+        without this the only way to ask was one per-site check per site."""
+        item = _item(check_site=False, check_tenant_usage=True)
+        res = _run(item, csv_text=_detail((10 * GB, 100 * GB), (30 * GB, 100 * GB)))
+        b = res['m1/tenant']['other_data']['breakdown']
+        names = [i['name'] for i in b['items']]
+        assert len(b['items']) == 2
+        assert names[0].endswith('s1')          # biggest first
+        # 30 GB of the 200 GB CAPACITY, not of the 40 GB in use: the bars then compose with
+        # the ring on the row above (tenant at 20 %), instead of a site reading 75 % under a
+        # parent that says 20 %.
+        assert b['items'][0]['pct'] == 15.0
+        assert b['more'] == 0
+
+    def test_the_breakdown_is_capped_and_says_what_it_left_out(self):
+        """A tenant with thousands of sites would otherwise store thousands of rows in every
+        result, every cycle. A list that silently stopped would read as "these are all"."""
+        from watchfuls.m365.checks_storage import StorageChecks
+        n = StorageChecks._SITES_TOP + 5
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail(*[((i + 1) * GB, 100 * GB) for i in range(n)]))
+        b = res['m1/tenant']['other_data']['breakdown']
+        assert len(b['items']) == StorageChecks._SITES_TOP
+        assert b['more'] == 5
+
+    def test_bars_stay_proportional_when_the_tenant_is_over_capacity(self):
+        """Reported from a screenshot: the first three bars were all full. The typed capacity
+        was 1 TB against 6.7 TB occupied, so a share of CAPACITY put them at 340 %, 110 % and
+        100 % — and the bar clamps, drawing a 3.4 TB site exactly like a 1.0 TB one.
+
+        Over capacity the share is of what is actually occupied: the bars stay proportional to
+        each other and still sum to the whole. "667 % of capacity" is the ring's statement,
+        not this list's."""
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_max=500,
+                         tenant_unit='GB'),
+                   csv_text=_detail((600 * GB, 0), (300 * GB, 0), (100 * GB, 0)))
+        pcts = [i['pct'] for i in res['m1/tenant']['other_data']['breakdown']['items']]
+        assert pcts == [60.0, 30.0, 10.0]
+        assert res['m1/tenant']['status'] is False        # still FULL, which is the point
+
+    def test_bars_are_proportional_even_with_no_denominator_at_all(self):
+        """No typed capacity and no per-site quotas to sum: dividing by the total would make
+        every bar 0 and the list unreadable, when the sites' own sum answers it perfectly."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 0), (1 * GB, 0)))
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'none'
+        assert [i['pct'] for i in od['breakdown']['items']] == [75.0, 25.0]
+
+    def test_concealed_reports_still_produce_a_usable_list(self):
+        """Reported from a screenshot: every name was a dash. The tenant had "Display
+        concealed user, group and site names" on, so Graph answers with the bytes and blanks
+        the URL — the panel was not broken, it was reporting a blank faithfully.
+
+        With nothing left to name them by and nothing to join against, they are numbered:
+        rows that all read the same are indistinguishable, and a list where every line reads
+        `00000000-0000-…` looks like a broken panel rather than a concealed tenant."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 10 * GB), (1 * GB, 10 * GB), anon=True))
+        b = res['m1/tenant']['other_data']['breakdown']
+        assert len(set(i['name'] for i in b['items'])) == 2, 'rows are indistinguishable'
+        assert 'note' in b, 'the reason the names are missing is not stated'
+
+    def test_a_concealed_row_is_named_from_the_sites_api(self):
+        """The two APIs answer about the same sites and only REPORTS are concealed: `/sites`
+        — the enumeration the discover button already uses — still publishes names. The
+        site-collection GUID joins them, so one extra call turns hashes into names."""
+        guid = 'd46ba362-e108-01b4-9456-6d582b410a84'
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), ids=[guid]),
+                   sites=[{'id': f'contoso.sharepoint.com,{guid},{guid}',
+                           'webUrl': 'https://contoso.sharepoint.com/sites/Marketing',
+                           'displayName': 'Marketing'}])
+        b = res['m1/tenant']['other_data']['breakdown']
+        assert b['items'][0]['name'] == 'Marketing'
+        assert 'note' not in b, 'the names were resolved, so there is nothing to explain'
+
+    def test_the_id_is_matched_however_it_is_spelled(self):
+        """The report writes the GUID without dashes; the Sites API id carries it with them."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB),
+                                              ids=['D46BA362E10801B494566D582B410A84']),
+                   sites=[{'id': 'contoso.sharepoint.com,d46ba362-e108-01b4-9456-6d582b410a84,x',
+                           'webUrl': 'https://contoso.sharepoint.com/sites/Ops',
+                           'displayName': 'Ops'}])
+        names = [i['name'] for i in res['m1/tenant']['other_data']['breakdown']['items']]
+        assert names == ['Ops']
+
+    def test_naming_is_not_attempted_when_nothing_is_concealed(self):
+        """A tenant that publishes its URLs must not pay a Graph call for a question it has
+        already answered."""
+        from watchfuls.m365 import Watchful
+        with patch.object(Watchful, '_enumerate_sites', return_value=[]) as enum:
+            _run(_item(check_site=False, check_tenant_usage=True),
+                 csv_text=_detail((3 * GB, 10 * GB)))
+        assert not enum.called, 'the site list was fetched for nothing'
+
+    def test_a_naming_failure_never_costs_the_measurement(self):
+        """The numbers are the check; the labels are a courtesy. A Sites API that refuses
+        must not turn a healthy result into a failure."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB)),
+                   enum_exc=RuntimeError('403'))
+        assert res['m1/tenant']['status'] is True
+        assert res['m1/tenant']['other_data']['used_bytes'] == 3 * GB
+
+    def test_a_hash_is_never_shown_as_a_name(self):
+        """Reported from a second screenshot: five rows read `82D28824…` and two more shared
+        another hash — concealment replaces the OWNER with one hash per person, not per site.
+        Identifiers are join keys; only a URL is a name, and failing that a row is numbered."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), (1 * GB, 10 * GB)))
+        names = ' '.join(i['name'] for i in res['m1/tenant']['other_data']['breakdown']['items'])
+        assert 'HASHOWNER' not in names and 'SITEHASH' not in names
+
+    def test_a_zeroed_site_id_is_not_treated_as_an_identifier(self):
+        """Reported from a third screenshot: eighteen rows all reading
+        `00000000-0000-0000-0000-000000000000`. Concealment blanks the id too, and the zero
+        GUID is neither a name nor something to join on — so it is neither shown nor matched
+        against a real site that happens to be listed first."""
+        zero = '00000000-0000-0000-0000-000000000000'
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), (1 * GB, 10 * GB),
+                                              ids=[zero, zero]))
+        names = [i['name'] for i in res['m1/tenant']['other_data']['breakdown']['items']]
+        assert zero not in ' '.join(names)
+        assert len(set(names)) == 2, f'rows are indistinguishable: {names}'
+
+    def test_an_unjoinable_report_falls_back_to_measuring_the_sites(self):
+        """With the id concealed there is nothing to join on, but the sites themselves still
+        answer how full they are — and under their real names. One batched read per 20 sites
+        buys a real list instead of a numbered one."""
+        zero = '00000000-0000-0000-0000-000000000000'
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_max=100,
+                         tenant_unit='GB'),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), (1 * GB, 10 * GB),
+                                              ids=[zero, zero]),
+                   sites=[{'id': 'h,a,b', 'webUrl': 'https://c.sharepoint.com/sites/Ops'},
+                          {'id': 'h,c,d', 'displayName': 'Legal'}],
+                   drives={'h,a,b': {'used': 30 * GB, 'total': 50 * GB},
+                           'h,c,d': {'used': 10 * GB, 'total': 50 * GB}})
+        b = res['m1/tenant']['other_data']['breakdown']
+        assert [i['name'] for i in b['items']] == ['Ops', 'Legal']
+        assert b['items'][0]['pct'] == 30.0        # 30 GB of the 100 GB typed capacity
+        assert 'note' in b, 'a list from another source, with no deleted sites, must say so'
+        # The TOTAL is still the report's: it counts sites the enumeration cannot see.
+        assert res['m1/tenant']['other_data']['used_bytes'] == 4 * GB
+
+    def test_a_site_without_a_document_library_is_skipped_not_zeroed(self):
+        """A site whose drive says nothing is absent from the list, not a 0-byte row: an
+        invented zero reads as "this site is empty", which is a different claim."""
+        zero = '00000000-0000-0000-0000-000000000000'
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), ids=[zero]),
+                   sites=[{'id': 'h,a,b', 'webUrl': 'https://c/sites/Ops'},
+                          {'id': 'h,c,d', 'displayName': 'NoDrive'}],
+                   drives={'h,a,b': {'used': 30 * GB, 'total': 50 * GB}})
+        names = [i['name'] for i in res['m1/tenant']['other_data']['breakdown']['items']]
+        assert names == ['Ops']
+
+    def test_the_tenant_host_is_not_repeated_on_every_row(self):
+        """Reported from a screenshot: every row began with the same
+        `2m254w.sharepoint.com/sites/`, pushing the part that differs off to the right.
+
+        The host is the same on all of them and `/sites/` is the DEFAULT managed path, so
+        neither says anything — but `/teams/` and `/personal/` do and are kept, and the root
+        site has no path at all, which makes it the one row where the host IS the name."""
+        zero = '00000000-0000-0000-0000-000000000000'
+        listed = [{'id': 'h,1,b', 'webUrl': 'https://t.sharepoint.com/sites/Dev'},
+                  {'id': 'h,2,b', 'webUrl': 'https://t.sharepoint.com/teams/Sales'},
+                  {'id': 'h,3,b', 'webUrl': 'https://t.sharepoint.com/sites/Dev/sub'},
+                  {'id': 'h,4,b', 'webUrl': 'https://t.sharepoint.com', 'displayName': 'Root'}]
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), ids=[zero]),
+                   sites=listed,
+                   drives={s['id']: {'used': (4 - i) * GB, 'total': 10 * GB}
+                           for i, s in enumerate(listed)})
+        names = [i['name'] for i in res['m1/tenant']['other_data']['breakdown']['items']]
+        assert names == ['Dev', 'teams/Sales', 'Dev/sub', 'Root']
+
+    def test_a_huge_tenant_is_not_probed_site_by_site(self):
+        """The fallback is bounded: past the cap the anonymous list is the honest answer,
+        rather than a check that spends its cycle naming things."""
+        from watchfuls.m365 import StorageChecks
+        zero = '00000000-0000-0000-0000-000000000000'
+        n = StorageChecks._SITES_PROBE_MAX + 1
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail_concealed((3 * GB, 10 * GB), ids=[zero]),
+                   sites=[{'id': f'h,{i},b', 'displayName': f's{i}'} for i in range(n)],
+                   drives={f'h,{i},b': {'used': GB, 'total': 10 * GB} for i in range(n)})
+        b = res['m1/tenant']['other_data']['breakdown']
+        assert len(b['items']) == 1, 'the whole tenant was probed'
+
+    def test_the_note_only_appears_when_every_name_is_concealed(self):
+        """A tenant that names its sites must not be told its reports are anonymised."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 10 * GB)))
+        assert 'note' not in res['m1/tenant']['other_data']['breakdown']
+
+    def test_a_deleted_site_is_marked_in_the_breakdown(self):
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((5 * GB, 50 * GB, True)))
+        assert '🗑' in res['m1/tenant']['other_data']['breakdown']['items'][0]['name']
+
+    def test_the_page_carries_the_breakdown_to_the_row(self):
+        """`metrics` is scalars only, so a list would be dropped by that filter and never
+        reach the page — it travels beside it."""
+        from watchfuls.m365 import Watchful
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((10 * GB, 100 * GB)))
+        secs = Watchful._page_sections({'m1/tenant': res['m1/tenant']}, 'en_EN')
+        row = next(r for s in secs for r in s['rows'])
+        assert row['breakdown']['items'][0]['pct'] == 10.0     # 10 GB of the 100 GB quota
+        assert 'breakdown' not in row['metrics']
+
+    def test_how_many_sites_are_stored_is_configurable(self):
+        """The cost of the list is bytes written every cycle, for ever — the same nature as
+        `threads` or `timeout`, so it is configured the same way: a module default that an
+        item may override."""
+        csv = _detail(*[((i + 1) * GB, 100 * GB) for i in range(30)])
+        mod = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=csv, module_cfg={'sites_top': 5})
+        assert len(mod['m1/tenant']['other_data']['breakdown']['items']) == 5
+        item = _run(_item(check_site=False, check_tenant_usage=True, sites_top=3),
+                    csv_text=csv, module_cfg={'sites_top': 5})
+        b = item['m1/tenant']['other_data']['breakdown']
+        assert len(b['items']) == 3 and b['more'] == 27
+
+    def test_a_blank_item_inherits_and_a_zero_does_not(self):
+        """Three states, three intentions — and `inherit_blank` is what keeps them apart:
+        clearing the field stores null, while an explicit 0 stays a real value instead of
+        collapsing into "unset" the way `zero_as_blank` fields do."""
+        csv = _detail(*[((i + 1) * GB, 100 * GB) for i in range(30)])
+        blank = _run(_item(check_site=False, check_tenant_usage=True, sites_top=None),
+                     csv_text=csv, module_cfg={'sites_top': 4})
+        assert len(blank['m1/tenant']['other_data']['breakdown']['items']) == 4
+        none = _run(_item(check_site=False, check_tenant_usage=True, sites_top=0),
+                    csv_text=csv, module_cfg={'sites_top': 4})
+        od = none['m1/tenant']['other_data']
+        assert 'breakdown' not in od, 'a tenant told to store nothing wrote its site list anyway'
+        assert od['used_bytes'] > 0, 'the measurement went with it'
+
+    def test_a_live_read_ignores_the_cap_because_it_is_not_stored(self):
+        """The cap exists to keep STORED results small. A list the admin asked for by hand
+        goes nowhere near the database, so there is nothing for it to protect — including for
+        the item that stores none."""
+        csv = _detail(*[((i + 1) * GB, 100 * GB) for i in range(30)])
+        res = _run(_item(check_site=False, check_tenant_usage=True, sites_top=0, _live=True),
+                   csv_text=csv, module_cfg={'sites_top': 4})
+        b = res['m1/tenant']['other_data']['breakdown']
+        assert len(b['items']) == 30 and b['more'] == 0
+
+    def test_the_live_refresh_declares_itself(self):
+        """`page_refresh` is the only caller that may ignore the caps, and it says so in the
+        config it runs with — the check cannot tell a live run from a cycle otherwise."""
+        from watchfuls.m365 import Watchful
+        seen = {}
+        with patch('watchfuls.m365.page.run_item_once',
+                   side_effect=lambda *a, **kw: (seen.update(cfg=a[1]), ([], None))[1]):
+            Watchful.page_refresh({'label': 'x'})
+        assert seen['cfg'].get('_live') is True
+
+    def test_the_module_states_its_own_page_size(self):
+        """How many rows are worth drawing at once is presentation, and a list of 6 partitions
+        does not read like one of 500 tables — so the module states it and the core honours
+        it, exactly as it is told which two measurements make a ring."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 10 * GB)), module_cfg={'sites_page': 10})
+        assert res['m1/tenant']['other_data']['breakdown']['page'] == 10
+
+    def test_the_status_bar_only_gets_a_marker_when_one_is_configured(self):
+        no_pct = _run(_item(check_site=False, check_tenant_usage=True, tenant_pct=0),
+                      csv_text=_detail((10 * GB, 100 * GB)))
+        assert 'alert' not in no_pct['m1/tenant']['other_data']
+        with_pct = _run(_item(check_site=False, check_tenant_usage=True, tenant_pct=75),
+                        csv_text=_detail((10 * GB, 100 * GB)))
+        assert with_pct['m1/tenant']['other_data']['alert'] == 75
 
 
 class TestModule:
