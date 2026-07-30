@@ -26,9 +26,33 @@
 const _MP_STATE_CLS = { ok: 'success', warn: 'warning', error: 'danger' };
 const _mpState = {};          // {pageId: {spec, data, busy}}
 
+/** Which view of a section to draw: what `_sbPageView` resolved (URL first, then the
+ *  remembered one, then the first), or null for a section that declares none. */
+function _mpActiveView(spec) {
+    const views = spec.views || [];
+    if (!views.length) return null;
+    const slug = (typeof _sbPageView === 'function') ? _sbPageView(spec.id) : '';
+    return views.find(v => v.slug === slug) || views[0];
+}
+
+/** Re-draw a section because its VIEW changed (the sidebar flyout). The pane is already
+ *  open, so this is the same entry point without the tab machinery. */
+function renderModulePageView(pageId) {
+    const spec = (window.SS_STANDALONE_PAGES || []).find(p => p.id === pageId);
+    if (spec) renderModulePage(spec);
+}
+
 /** Section entry point for every module page without its own renderer. The wiring
- *  passes the page descriptor, so one function serves all of them. */
+ *  passes the page descriptor, so one function serves all of them.
+ *
+ *  A section may declare several VIEWS of itself (schema `__page__.views`). They share this
+ *  pane and this permission and differ by a sub-path, so which one to draw is a question
+ *  about the URL, not about the data — resolved once here and never guessed further down. */
 async function renderModulePage(spec) {
+    const view = _mpActiveView(spec);
+    if (view && view.kind === 'table') {
+        return _mptLoad(spec.id, view.slug, spec.id + '-container');
+    }
     const st = _mpState[spec.id] || (_mpState[spec.id] = { spec, data: null, busy: false });
     const c = document.getElementById(spec.id + '-container');
     if (!c) return;

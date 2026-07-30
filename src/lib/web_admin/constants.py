@@ -61,7 +61,13 @@ def _module_home_pages(watchfuls_dir: str | None = None) -> list:
     out = []
     for spec in module_pages_catalog(watchfuls_dir):
         out.append({
-            'id': spec['id'], 'url': '/' + spec['id'], 'label_i18n': spec['label_i18n'],
+            # Namespaced on purpose. A module page used to claim a top-level path, which made
+            # every future core section a potential collision and left the core policing a
+            # blocklist of names it had to remember to grow. Under `/module/` the collision is
+            # impossible by construction rather than by vigilance, and the URL says where the
+            # page comes from. The id is unchanged, so the landing-page setting — which stores
+            # the id, not the path — does not notice.
+            'id': spec['id'], 'url': '/module/' + spec['id'], 'label_i18n': spec['label_i18n'],
             'module': spec['module'],
             # `refresh` travels too: it is what tells the core's generic renderer the
             # module can fetch live data, and therefore whether to offer the button. A
@@ -70,6 +76,10 @@ def _module_home_pages(watchfuls_dir: str | None = None) -> list:
             'standalone': {'pane': 'tab-' + spec['id'], 'render': spec['render'],
                            'refresh': spec['refresh'],
                            'perm': spec['perm'], 'icon': spec['icon'],
+                           # The section's views, when it has more than one. They share
+                           # this page's pane and permission and differ only by a
+                           # sub-path, so they add no route and no second descriptor.
+                           'views': spec['views'],
                            'label_i18n': spec['label_i18n'], 'module': spec['module']},
         })
     return out

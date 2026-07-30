@@ -78,11 +78,13 @@ class Watchful(StorageChecks, HealthChecks, IdentityChecks, PostureChecks,
     # App provisioning is the shared Entra ID device-code wizard (core), driven by the
     # module's __entraid_provision__ roles — not a watchful action here.
     WATCHFUL_ACTIONS: frozenset[str] = frozenset(
-        {'test_connection', 'list_sites', 'list_services', 'page_refresh'})
+        {'test_connection', 'list_sites', 'list_services', 'page_refresh',
+         'storage_report'})
     # All read-only: they query Microsoft and change nothing here, so modules_view is
     # enough (a non-read-only action would additionally demand per-module edit).
     READ_ONLY_ACTIONS: frozenset[str] = frozenset(
-        {'test_connection', 'list_sites', 'list_services', 'page_refresh'})
+        {'test_connection', 'list_sites', 'list_services', 'page_refresh',
+         'storage_report'})
 
     # Per-service checks (extension point): add a (toggle, suffix, handler) triple here
     # + the toggle/fields in schema.json + the method in the matching checks_*.py, and a

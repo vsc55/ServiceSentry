@@ -85,6 +85,13 @@ class StorageChecks:
                        self._msg('m3_site_alert', label, summary, ', '.join(why)),
                        extra, severity='warning')
 
+    # SharePoint Online's hard ceiling for ONE site collection. Under automatic site storage
+    # management — the default — Microsoft assigns every site exactly this, because it is not
+    # reserving anything: the real limit is the pooled tenant quota. So a site sitting at this
+    # number has NO quota of its own, and reading it as one is how a sum of ceilings ends up
+    # posing as a capacity.
+    _SITE_QUOTA_CEILING = 25 * 1024 ** 4
+
     # Fallbacks for the breakdown bounds, used only when the schema is unreadable — the real
     # values are `sites_top` / `accounts_top` / `breakdown_page` in __module__, the first two
     # overridable per item.
@@ -151,6 +158,7 @@ class StorageChecks:
         _, i_id = _csv_col(text, 'Site Id')
         _, i_del = _csv_col(text, 'Is Deleted')
         sites = []
+        unlimited = False        # any site at the per-site ceiling → no quota anywhere
 
         def _cell(r, idx):
             return r[idx].strip() if 0 <= idx < len(r) else ''
@@ -168,16 +176,27 @@ class StorageChecks:
             sid = _cell(r, i_id)
             if not sid.replace('-', '').strip('0'):
                 sid = ''
+            quota = _csv_int(r, i_alloc)
+            unlimited = unlimited or quota >= self._SITE_QUOTA_CEILING
             sites.append({
                 'name': _cell(r, i_url),
                 'sid': sid,
                 'anon': not _cell(r, i_url),
                 'used': _csv_int(r, i_used),
-                'quota': _csv_int(r, i_alloc),
+                # A site at the per-site ceiling has no quota of its own (see the constant):
+                # carrying 25 TB as if it were one puts "of 25.0 TB" on every row and implies
+                # a limit nobody set.
+                'quota': 0 if quota >= self._SITE_QUOTA_CEILING else quota,
                 'deleted': _cell(r, i_del).lower() == 'true',
             })
+        # …and the same reasoning at the tenant level, where it matters far more: a sum of
+        # ceilings is not a capacity. 65 sites × 25 TB is 1.6 PB, against which any real usage
+        # is a comfortable 0 % — a check that can never fire, which is the worst kind. With
+        # automatic storage management the honest answer is that Graph published no total, and
+        # the admin's typed `tenant_max` is the only capacity there is.
+        allocated = 0 if unlimited else _csv_sum(text, 'Storage Allocated (Byte)')
         return (_csv_sum(text, 'Storage Used (Byte)'),
-                _csv_sum(text, 'Storage Allocated (Byte)'),
+                allocated,
                 len(sites),
                 sum(1 for s in sites if s['deleted']),
                 sites)
@@ -340,6 +359,17 @@ class StorageChecks:
                 'name': name + (' 🗑' if s['deleted'] else ''),
                 'text': text,
                 'pct': round(s['used'] / denom * 100, 1) if denom else 0.0,
+                # BOTH readings, always, because they answer different questions and the bar
+                # can only draw one: `share` is how much of the whole this row is, `full` is
+                # how close it is to its own limit — and `full` is None, not 0, where there is
+                # no limit to be close to. A zero there would read as "empty".
+                'share': round(s['used'] / base * 100, 1) if base else 0.0,
+                'full': round(s['used'] / s['quota'] * 100, 1) if s['quota'] else None,
+                # The raw figures travel beside the formatted one. The core ignores them —
+                # it reads `pct` and prints `text` — but a second layout of the SAME rows
+                # (the Storage table) needs numbers to sort by, and parsing "3.0 TB" back
+                # into bytes would be inventing a measurement that is right here.
+                'bytes': s['used'], 'quota_bytes': s['quota'],
             })
         out = {'label': self._msg(keys['label']), 'items': items,
                'more': max(len(rows) - len(top), 0)}

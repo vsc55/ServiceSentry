@@ -16,6 +16,7 @@ last results, instant and free) and ``page_refresh`` (a live run against Graph) 
 """
 
 from lib.modules.page_support import lang_section, modules_dir_for, run_item_once
+from lib.util import fmt_bytes
 
 
 class M365Page:
@@ -166,6 +167,113 @@ class M365Page:
         status = {str(r.get('key')): r for r in (raw or []) if isinstance(r, dict)}
         sections = cls._page_sections(status, lang)
         return {'ok': True, 'sections': sections, 'counts': cls._totals(sections), 'live': True}
+
+    # The Storage view's columns. Declared here because what a column MEANS is module
+    # knowledge; the core is told the id, the label key and the kind, and lays it out.
+    # `filter` marks a column worth a dropdown: the core fills it with the values actually
+    # present, so it offers no choice that matches nothing and learns no vocabulary of ours.
+    # Tenant and kind are the two axes this table is read along — "of my SharePoint, which
+    # site" and "of this tenant, what".
+    _STORAGE_COLS = (
+        ('tenant', 'col_tenant', 'text', True),
+        ('kind',   'col_kind',   'text', True),
+        ('name',   'col_name',   'text', False),
+        ('used',   'col_used',   'num',  False),
+        ('quota',  'col_quota',  'num',  False),
+        ('share',  'col_share',  'pct',  False),
+        ('full',   'col_full',   'pct',  False),
+    )
+
+    @classmethod
+    def storage_report(cls, config: dict) -> dict:
+        """POST /api/v1/modules/watchfuls/m365/storage_report — the Storage view's data.
+
+        One row per PLACE storage is going: every SharePoint site and every OneDrive
+        account, side by side in one table, which is the question this view exists for —
+        the status page answers "is it all right", this one answers "where is it going".
+
+        Live and unstored: it runs the two storage checks now, with the caps lifted (see
+        ``_live``), and keeps nothing. There is no history here because there is nothing
+        to keep — a table of who holds what is a photograph, and the monitor's own checks
+        are what carry the alerting and the trend.
+        """
+        lang = str((config or {}).get('_lang') or 'en_EN')
+        tenant = str((config or {}).get('label') or (config or {}).get('_item_key') or '')
+        # Only the storage checks: this view asks a storage question, and running the
+        # licence/health/identity checks to answer it would spend a dozen Graph calls a
+        # reader did not ask for.
+        cfg = {**(config or {}), '_live': True, 'check_site': False,
+               'check_health': False, 'check_licenses': False, 'check_secrets': False,
+               'check_mailbox': False, 'check_secure_score': False,
+               'check_risky_users': False, 'check_mfa': False,
+               'check_unused_licenses': False, 'check_privileged': False,
+               'check_domains': False, 'check_announcements': False}
+        raw, err = run_item_once('m365', cfg, modules_dir=modules_dir_for(__file__),
+                                 default_key='storage')
+        if err:
+            return {'ok': False, 'columns': [], 'rows': [], 'message': err}
+        ui = cls._lang_section(lang, 'ui')
+        columns = [{'id': cid, 'label': ui.get(key) or cid, 'kind': kind, 'filter': filt}
+                   for cid, key, kind, filt in cls._STORAGE_COLS]
+        rows = []
+        for res in (raw or []):
+            if not isinstance(res, dict):
+                continue
+            od = res.get('other_data') or {}
+            bd = od.get('breakdown')
+            if not isinstance(bd, dict):
+                continue
+            kind = ui.get('kind_onedrive') or 'OneDrive' \
+                if str(res.get('key') or '').endswith('/onedrive') \
+                else (ui.get('kind_sharepoint') or 'SharePoint')
+            rows.extend(cls._storage_rows(bd, tenant, kind))
+        return {
+            'ok': True, 'columns': columns, 'rows': rows, 'message': f'{len(rows)}',
+            # Which column names a row, which one is its magnitude and which one groups it.
+            # Without this the core would be guessing which of six columns is worth drawing,
+            # and a bar of the wrong column is worse than no bar — so declaring it is what
+            # unlocks the bar and grouped layouts.
+            'layout': {'label': 'name', 'value': 'used', 'group': 'kind'},
+        }
+
+    @staticmethod
+    def _storage_rows(breakdown: dict, tenant: str, kind: str) -> list:
+        """A breakdown's items as table rows.
+
+        The breakdown already carries a formatted size and a percentage — the same numbers
+        the collapsible list draws — so this is a reshape, not a second measurement: one
+        source, two layouts, and no way for them to disagree.
+
+        ``{v, s}`` where the two differ: `v` is what sorts and `s` is what is read, which is
+        how "3.0 TB" sorts as its bytes without the core learning what a byte is.
+        """
+        out = []
+        for it in (breakdown.get('items') or []):
+            used = int(it.get('bytes') or 0)
+            quota = int(it.get('quota_bytes') or 0)
+            share = float(it.get('share') or 0)
+            full = it.get('full')
+            out.append({
+                'tenant': tenant, 'kind': kind, 'name': str(it.get('name') or ''),
+                'used':  {'v': used,  's': fmt_bytes(used)},
+                # No quota is "—", never 0 bytes: under automatic site storage management
+                # SharePoint assigns every site the 25 TB ceiling, which is not a limit
+                # anybody set — printing it would invent one.
+                'quota': {'v': quota, 's': fmt_bytes(quota) if quota else '—'},
+                # Two readings, two columns: how much of the whole this row is, and how close
+                # it is to its own limit. One column could only ever mean one of them, and it
+                # meant a different one on each half of the table.
+                # Of its OWN service, not of the two added together. A share of everything
+                # is arithmetic nobody asked for: the question a row provokes is "how much of
+                # my SharePoint is this site eating", and dividing it by SharePoint plus
+                # OneDrive answers a question with no operational meaning — you cannot move a
+                # site into OneDrive. The `kind` column and its filter are what keep the two
+                # halves apart; the column header names the whole.
+                'share': {'v': share, 's': f'{share}%'},
+                'full':  ({'v': full, 's': f'{full}%'} if full is not None
+                          else {'v': -1, 's': '—'}),
+            })
+        return out
 
     @classmethod
     def _widget_ratio(cls, sfx: str, rows_v: list) -> dict | None:

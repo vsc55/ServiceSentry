@@ -1,0 +1,326 @@
+{# ================================================================
+   A module section's `table` VIEW — the generic inventory table.
+
+   The row/section layout answers "is everything all right"; this one answers "where is
+   it all going". They are different questions about the same subsystem, so they are two
+   views of one section rather than two sections: same pane, same permission, a sub-path
+   apart (see partials/_sidebar.html and lib/modules/discovery/pages.py).
+
+   The module declares the view in its schema (`"kind": "table", "action": "<action>"`)
+   and answers that action with:
+
+     {ok: true, columns: [{id, label, kind?, align?, width?}], rows: [{colId: value, …}],
+      message?}
+
+   `kind` is 'text' (default), 'num' or 'pct'. A value is either a scalar — shown and
+   sorted as it is — or `{v, s}`: `v` sorts and `s` is shown, which is how "3.0 TB" can
+   sort as 3298534883328 without the core knowing what a byte is. The module formats,
+   because bytes-versus-rows-versus-seconds is knowledge the core does not have; the core
+   lays out, sorts, filters, paginates and remembers the column choice, which is knowledge
+   the module should never have to acquire.
+
+   Declaring an `action` makes the view LIVE: it asks when opened and keeps nothing. A
+   view of live data has no history to show and no cache to go stale — the only thing it
+   can be is current, so the header says when it was read.
+   ================================================================ #}
+
+// {pageKey: {cols, order, page, pageSize, sort, sortDir, current, rows, columns, at, busy}}
+const _mptState = {};
+// {pageKey: createViewState(...)} — the layouts an inventory can be read in.
+const _mptViewState = {};
+
+/** The layouts of an inventory table.
+ *
+ *  A table answers "which one", sorted and filtered; it is a poor answer to "how is it
+ *  distributed", because comparing forty numbers in a column is work the reader should not
+ *  be doing. Bars make magnitude readable at a glance and groups add the subtotals — the
+ *  same rows, three questions.
+ *
+ *  Offered only when the module declared which column is the label, which is the value and
+ *  which one groups (`layout` in the action's answer): without that the core would be
+ *  guessing which of six columns is worth drawing, and a bar of the wrong column is worse
+ *  than no bar.
+ */
+const _MPT_VIEWS = [
+    { id: 'table',  label_key: 'view_table',  icon: 'bi-table',          mode: 'table' },
+    { id: 'bars',   label_key: 'view_bars',   icon: 'bi-bar-chart-line', mode: 'summary' },
+    { id: 'groups', label_key: 'view_groups', icon: 'bi-collection',     mode: 'summary' },
+];
+
+function _mptViews(key) {
+    return _mptViewState[key] || (_mptViewState[key] = createViewState(
+        'ss_' + key + '_view', _MPT_VIEWS, () => window['_mptDraw_' + key]()));
+}
+
+/** The state a view's table lives in, created on first use. */
+function _mptSt(key) {
+    return _mptState[key] || (_mptState[key] = {
+        visible: null, order: null, page: 1, pageSize: null, sort: '', sortDir: 'desc',
+        current: [], rows: [], columns: [], layout: null, filterSig: '',
+        at: 0, busy: false, made: false, error: '',
+    });
+}
+
+/** A cell's sortable number/string (`v` when the module sent a pair). */
+function _mptVal(row, colId) {
+    const raw = (row || {})[colId];
+    return (raw && typeof raw === 'object') ? raw.v : raw;
+}
+/** A cell's display text (`s` when the module sent a pair). */
+function _mptText(row, colId) {
+    const raw = (row || {})[colId];
+    if (raw && typeof raw === 'object') return raw.s != null ? String(raw.s) : '';
+    return raw == null ? '' : String(raw);
+}
+
+/** Draw one cell by the KIND its column declared — the only thing the core interprets. */
+function _mptCell(row, col) {
+    const txt = _mptText(row, col.id);
+    if (col.kind === 'pct') {
+        const pct = Math.max(0, Math.min(100, parseFloat(_mptVal(row, col.id)) || 0));
+        return `<td class="text-nowrap">
+            <span class="d-inline-flex align-items-center gap-2">
+                <span class="rounded" style="width:70px;height:6px;background:var(--bs-secondary-bg)">
+                    <span class="d-block rounded bg-primary" style="height:6px;width:${pct}%"></span></span>
+                <span class="ss-fs-2 text-muted">${esc(txt || (pct + '%'))}</span>
+            </span></td>`;
+    }
+    if (col.kind === 'num') return `<td class="text-nowrap text-end">${esc(txt)}</td>`;
+    return `<td class="text-truncate" title="${escAttr(txt)}">${esc(txt)}</td>`;
+}
+
+/** Build this view's table ONCE. The factory publishes its handlers under global names, so
+ *  a second call for the same view would leave two tables answering to one set of them. */
+function _mptEnsure(pageId, view, containerId) {
+    const key = 'mpt_' + pageId + '_' + view.slug;
+    const st = _mptSt(key);
+    if (st.made) return key;
+    st.made = true;
+    const cols = () => st.columns.map(c => ({
+        id: c.id, label: () => c.label || c.id, sortKey: c.id, always: !!c.always,
+    }));
+    createListTable({
+        key: key, containerId: containerId, tableId: key + '-table',
+        accent: 'slate', icon: view.icon || 'bi-table',
+        title: () => `${esc(view.label || '')} <span class="badge bg-secondary rounded-pill ms-1">${st.rows.length}</span>`,
+        // Declared by the module, so the chooser and the persistence work with no core
+        // knowledge of what a column means.
+        get columns() { return cols(); },
+        defaultVisible: null,
+        persist: false,
+        filters: {
+            // Free text across every column the module sent — an inventory is searched by
+            // whatever the reader remembers of the row, not by a field they must pick first —
+            // plus one dropdown per column the module marked filterable. Its choices are the
+            // values actually present, so the core offers no filter that matches nothing and
+            // learns no vocabulary of its own.
+            fields: () => [
+                ...st.columns.filter(c => c.filter).map(c => ({
+                    key: c.id, label: () => c.label || c.id, type: 'select', minWidth: '140px',
+                    options: () => [{ value: '', label: t('all') || 'All' }].concat(
+                        _mptChoices(st, c.id).map(v => ({ value: v, label: v }))),
+                })),
+                { key: 'q', label: () => t('search') || 'Search', type: 'search',
+                  grow: true, placeholder: () => t('search') || 'Search' },
+            ],
+            match: (row, f) => {
+                for (const c of st.columns) {
+                    if (c.filter && f[c.id] && _mptText(row, c.id) !== f[c.id]) return false;
+                }
+                return !f.q || st.columns.some(
+                    c => _mptText(row, c.id).toLowerCase().includes(String(f.q).toLowerCase()));
+            },
+        },
+        rows: () => st.rows.map((_, i) => i),
+        rowKey: i => String(i),
+        record: i => st.rows[i],
+        sortValue: (i, sortKey) => {
+            const v = _mptVal(st.rows[i], sortKey);
+            return typeof v === 'number' ? v : String(v == null ? '' : v).toLowerCase();
+        },
+        cell: (i, colId) => {
+            const col = st.columns.find(c => c.id === colId);
+            return col ? _mptCell(st.rows[i], col) : '<td></td>';
+        },
+        // Bars and groups draw EVERY filtered row, with no pagination bands: they are read
+        // as a shape, and a shape cut at row 25 is a different shape.
+        bodyMode: () => (st.layout ? _mptViews(key).mode() : 'table'),
+        showChooser: mode => mode === 'table',
+        cardsBody: (rows, ctx, all) => _mptBody(key, rows, all),
+        refreshButton: () => `<button class="btn btn-sm btn-secondary" ${st.busy ? 'disabled' : ''}
+                onclick="_mptLoad('${escAttr(pageId)}','${escAttr(view.slug)}','${escAttr(containerId)}')"
+                title="${escAttr(t('refresh_tt') || '')}">
+            ${st.busy ? `<span class="spinner-border spinner-border-sm me-1"></span>${esc(t('page_refreshing') || '')}`
+                      : `<i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh') || '')}`}</button>`,
+        // Live data has no history and no cache: saying when it was read is the only honest
+        // timestamp such a view can carry.
+        headerLead: () => (st.layout ? _mptViews(key).switcher('_mptSetView_' + key) : '')
+            + (st.at
+                ? `<span class="text-muted ss-fs-2 ms-2"><i class="bi bi-clock-history me-1"></i>${esc(new Date(st.at).toLocaleTimeString())}</span>`
+                : ''),
+        emptyBody: () => `<div class="text-center py-5 text-muted">
+                <i class="bi bi-inbox ss-empty-icon"></i>
+                <span>${esc(st.error || t('no_items') || '')}</span>
+            </div>`,
+        state: {
+            visible: { get: () => st.visible || new Set(st.columns.map(c => c.id)),
+                       set: s => { st.visible = s; } },
+            order:   { get: () => st.order || st.columns.map(c => c.id), set: o => { st.order = o; } },
+            page:    { get: () => st.page,     set: p => { st.page = p; } },
+            pageSize:{ get: () => st.pageSize, set: v => { st.pageSize = v; } },
+            sort:    { get: () => st.sort || (st.columns[0] || {}).id || '', set: v => { st.sort = v; } },
+            sortDir: { get: () => st.sortDir,  set: v => { st.sortDir = v; } },
+            currentPage: { get: () => st.current, set: a => { st.current = a; } },
+        },
+        globalPrefix: {
+            render: '_mptDraw_' + key, goPage: '_mptGoPage_' + key,
+            changePageSize: '_mptPageSize_' + key, sort: '_mptSort_' + key,
+            toggleCol: '_mptToggleCol_' + key, resetCols: '_mptResetCols_' + key,
+            saveOrder: '_mptSaveOrder_' + key, initFeatures: '_mptInit_' + key,
+        },
+    });
+    // The switcher calls a global by name, like every other handler the factory publishes.
+    window['_mptSetView_' + key] = id => _mptViews(key).set(id);
+    return key;
+}
+
+/** The distinct values of a column, in the order they first appear — a filter offering
+ *  choices that match nothing is a filter that wastes a click. */
+function _mptChoices(st, colId) {
+    const seen = [];
+    for (const row of st.rows) {
+        const v = _mptText(row, colId);
+        if (v && !seen.includes(v)) seen.push(v);
+    }
+    return seen.sort();
+}
+
+/** One row of a bar layout: the label, a bar as a share of the LARGEST row, and the value
+ *  as the module formatted it. Share-of-the-largest, not of the total, because with forty
+ *  rows every bar would be a sliver and the comparison the layout exists for would be lost. */
+function _mptBarRow(row, lay, max, indent) {
+    const v = Number(_mptVal(row, lay.value)) || 0;
+    const pct = max > 0 ? Math.max(0.5, v / max * 100) : 0;
+    return `<div class="d-flex align-items-center gap-2 px-2 py-1${indent ? ' ps-4' : ''}">
+        <span class="text-truncate ss-fs-2" style="min-width:10rem;max-width:24rem"
+              title="${escAttr(_mptText(row, lay.label))}">${esc(_mptText(row, lay.label))}</span>
+        <span class="flex-grow-1 rounded" style="height:8px;background:var(--bs-secondary-bg)">
+            <span class="d-block rounded bg-primary" style="height:8px;width:${pct}%"></span></span>
+        <span class="ss-fs-2 text-nowrap text-end" style="min-width:6rem">${esc(_mptText(row, lay.value))}</span>
+    </div>`;
+}
+
+/** The body for whichever layout is current. `table` never reaches here (the factory draws
+ *  it); the other two get every filtered row. */
+function _mptBody(key, pageRows, allRows) {
+    const st = _mptSt(key);
+    const lay = st.layout || {};
+    const rows = (allRows && allRows.length ? allRows : pageRows).map(i => st.rows[i]);
+    if (!rows.length || !lay.value) return '';
+    const view = _mptViews(key).id();
+    const max = Math.max(...rows.map(r => Number(_mptVal(r, lay.value)) || 0), 0);
+    if (view === 'bars') {
+        return `<div class="py-1">${rows.map(r => _mptBarRow(r, lay, max, false)).join('')}</div>`;
+    }
+    // Groups: the subtotal per group is the answer to "where is it going" — the rows below
+    // it answer "and who inside". Sorted by subtotal, because a group nobody fills is not
+    // where the reader should start.
+    const by = new Map();
+    for (const r of rows) {
+        const g = _mptText(r, lay.group) || '—';
+        if (!by.has(g)) by.set(g, []);
+        by.get(g).push(r);
+    }
+    const total = v => v.reduce((a, r) => a + (Number(_mptVal(r, lay.value)) || 0), 0);
+    const groups = [...by.entries()].sort((a, b) => total(b[1]) - total(a[1]));
+    const grand = Math.max(...groups.map(g => total(g[1])), 0);
+    return `<div class="py-1">${groups.map(([name, rs]) => {
+        const sum = total(rs);
+        const pct = grand > 0 ? Math.max(0.5, sum / grand * 100) : 0;
+        return `<div class="mt-2">
+            <div class="d-flex align-items-center gap-2 px-2 py-1 fw-semibold ss-fs-3">
+                <span class="text-truncate" style="min-width:10rem;max-width:24rem">${esc(name)}
+                    <span class="badge bg-body-secondary text-body-secondary ms-1">${rs.length}</span></span>
+                <span class="flex-grow-1 rounded" style="height:10px;background:var(--bs-secondary-bg)">
+                    <span class="d-block rounded bg-primary" style="height:10px;width:${pct}%"></span></span>
+                <span class="text-nowrap text-end ss-fs-2" style="min-width:6rem">${_mptShare(sum, groups, lay)}</span>
+            </div>
+            ${rs.sort((a, b) => (Number(_mptVal(b, lay.value)) || 0) - (Number(_mptVal(a, lay.value)) || 0))
+                 .map(r => _mptBarRow(r, lay, max, true)).join('')}
+        </div>`;
+    }).join('')}</div>`;
+}
+
+/** A group's weight, as its share of everything shown.
+ *
+ *  A share, not a formatted subtotal: the core cannot add "3.0 TB" to "512 MB" because it
+ *  does not know what either is, and reconstructing a unit from a sample row would be
+ *  inventing a measurement. A percentage is computed from the raw values it already has,
+ *  and it is the number this layout is opened for anyway.
+ */
+function _mptShare(sum, groups, lay) {
+    const all = groups.reduce((a, g) => a + g[1].reduce(
+        (b, r) => b + (Number(_mptVal(r, lay.value)) || 0), 0), 0);
+    return all > 0 ? esc(Math.round(sum / all * 1000) / 10 + '%') : '';
+}
+
+/** Ask the module for this view's data and draw it.
+ *
+ *  One request per configured item, because an action answers for ONE item's credentials —
+ *  the rows are concatenated, and the module is expected to say which item each row came
+ *  from in a column of its own. An item that fails does not cost the others their rows.
+ */
+async function _mptLoad(pageId, slug, containerId) {
+    const page = (window.SS_STANDALONE_PAGES || []).find(p => p.id === pageId);
+    const view = ((page && page.views) || []).find(v => v.slug === slug);
+    if (!page || !view || !view.action) return;
+    const key = 'mpt_' + pageId + '_' + view.slug;
+    const st = _mptSt(key);
+    if (st.busy) return;
+    st.busy = true;
+    // The filter bar is built ONCE, from the fields it sees at that moment — so the table
+    // must not be created before the columns arrive, or its dropdowns are decided while
+    // there are no columns to declare them. Until then the container shows a plain spinner.
+    if (!st.made) {
+        const c0 = document.getElementById(containerId);
+        if (c0) c0.innerHTML = `<div class="text-center py-5 text-muted">
+            <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading') || '')}</div>`;
+    } else {
+        window['_mptDraw_' + key]();
+    }
+    const mod = page.module;
+    const modCfg = modulesData?.[`watchfuls.${mod}`] || modulesData?.[mod] || {};
+    const items = Object.keys(modCfg.list || {}).filter(
+        k => (modCfg.list[k] || {}).enabled !== false);
+    const rows = [];
+    let columns = [], failed = [];
+    for (const itemKey of items) {
+        const cfg = { ...(modCfg.list[itemKey] || {}), _item_key: itemKey, _lang: CURRENT_LANG };
+        const r = await apiPost(
+            `/api/v1/modules/watchfuls/${encodeURIComponent(mod)}/${encodeURIComponent(view.action)}`,
+            cfg);
+        const d = r && r.data;
+        if (!d || !d.ok) { failed.push(`${itemKey}: ${(d && d.message) || ''}`); continue; }
+        if (Array.isArray(d.columns) && d.columns.length) columns = d.columns;
+        if (d.layout && d.layout.value) st.layout = d.layout;
+        for (const row of (d.rows || [])) rows.push(row);
+    }
+    // A module may answer with a different set of filterable columns than last time (a view
+    // reshaped between builds). The bar is not rebuilt on its own — dropping the node is how
+    // the factory is told to build it again, and only when the fields actually changed, so
+    // typing in the search box is never interrupted for nothing.
+    const sig = columns.filter(c => c.filter).map(c => c.id).join(',');
+    if (st.made && sig !== st.filterSig) {
+        document.getElementById(containerId)?.querySelector('.ss-filterbar')?.remove();
+    }
+    st.filterSig = sig;
+    st.columns = columns;
+    st.rows = rows;
+    st.at = Date.now();
+    st.error = failed.join(' · ');
+    st.busy = false;
+    if (!st.sort && columns.length) { st.sort = columns[columns.length - 1].id; st.sortDir = 'desc'; }
+    _mptEnsure(pageId, view, containerId);
+    window['_mptDraw_' + key]();
+    if (failed.length) showToast(esc(failed.join(' · ')), 'danger');
+}

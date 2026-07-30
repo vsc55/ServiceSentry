@@ -8,6 +8,89 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.32] - 2026-07-30
+
+### Fixed
+- **A sum of ceilings was passing itself off as a capacity, and the check could never fire.**
+  Every SharePoint row read "of 25.0 TB": that is the per-site CEILING, which automatic site
+  storage management — the default — assigns to every site because it reserves nothing, the
+  real limit being the pooled tenant quota. Summing it turned 65 sites into 1.6 PB, against
+  which any real usage is a comfortable 0 %. With a typed `tenant_max` nothing changes; with
+  the field blank the check now reports the amount and says there is no total, which is the
+  honest answer, instead of a percentage that can never reach a threshold.
+- The Storage table's share is of each row's OWN service, and the header says so ("% of its
+  service"). Dividing by SharePoint plus OneDrive made the column internally comparable and
+  operationally meaningless — a 3.4 TB site read 26.8 % of a tenant instead of half of the
+  SharePoint it actually fills, and you cannot move a site into OneDrive. The `kind` column
+  and its filter are what keep the two halves apart.
+- A site at that ceiling has no quota to show, so the list says "—" rather than printing a
+  limit nobody set.
+
+### Added
+- **A module section can have more than one VIEW of itself.** The row layout answers "is
+  everything all right"; a table of who holds what answers "where is it all going". Those are
+  two questions about one subsystem, and answering them with two SECTIONS would mean two
+  sidebar entries, two permissions to keep in step, two panes and two routes for a thing the
+  reader thinks of as one place. So `__page__` grew a `views` list, the sidebar entry becomes
+  a parent with a flyout — the pattern Infrastructure and Access already use — and a view is a
+  **sub-path**: `/m365` and `/m365/storage` share the pane, the permission and the descriptor,
+  and cost ONE extra route between them however many views a module declares.
+- **Module sections moved under `/module/<id>`.** A module page used to claim a top-level
+  path, which made every future core section a potential collision and left the core policing
+  a blocklist of names it had to remember to grow — and a module that shipped `/reports` first
+  would have won by accident of ordering. Now the collision is impossible by construction and
+  the URL says where the page comes from: `/module/m365/storage`, `/module/azure`. The URL is
+  decided in one place, so the sidebar links, the pane resolver and the route loop all
+  followed. The landing-page setting stores the page ID, not its path, so every saved landing
+  page still points where it did. `_RESERVED` stays, for the smaller and truer job it always
+  had: the id is also the pane (`tab-<id>`) and that namespace IS shared with the core.
+- Caught right after: the view flyout still pushed the old path, because it composed the
+  URL from the page id instead of reading it from the registry. Where a section lives is
+  the server's decision, and a URL built in the client goes stale the moment it changes —
+  silently, because `pushState` never 404s. A guard now fails on any section URL built
+  from an id.
+- **A generic inventory table, declared not coded.** A view of `"kind": "table"` names an
+  action; the module answers with `{columns, rows}` and the core lays it out on the shared
+  list-table machinery — sortable, searchable, resizable, with the column chooser. A value may
+  be `{v, s}`: `v` sorts and `s` is read, which is how "3.0 TB" sorts as its bytes without the
+  core ever learning what a byte is. The module formats; the core lays out.
+- **M365 → Storage.** One row per place the storage is going: every SharePoint site and every
+  OneDrive account, side by side, with tenant, kind, name, used, quota and TWO percentages:
+  its share of the whole and how full it is against its own limit. Two columns because one
+  meant a different thing on each half of the table — a share of the tenant for a site, how
+  close to full for an account — and "—" where there is no limit to be close to.
+  Live and unstored — it runs the two storage checks now, with the caps lifted, and keeps
+  nothing: a table of who holds what is a photograph, and the monitor's own checks are what
+  carry the alerting and the trend. It runs ONLY the storage checks, because answering a
+  storage question with the licence and identity ones would spend a dozen Graph calls nobody
+  asked for.
+- **The inventory table reads three ways, and filters by what the module declares.** A table
+  answers "which one"; it is a poor answer to "how is it distributed", because comparing forty
+  numbers down a column is work the reader should not be doing. So a table view also offers
+  **bars** (magnitude at a glance, each one a share of the largest row — of the total, forty
+  rows would each be a sliver) and **groups** (subtotals first, then who is inside), drawn from
+  every filtered row with no pagination bands: they are read as a shape, and a shape cut at
+  row 25 is a different shape. Same `createViewState` + `_viewSwitcher` every other section
+  switches views with.
+- A column may ask for its own dropdown (`filter`), and the core fills it with the values
+  actually present — so it offers no choice that matches nothing and learns no vocabulary of
+  its own. M365's Storage marks **tenant** and **kind**, the two axes it is read along. The
+  free-text box still reaches every column.
+- Fixed before it shipped: only the search box appeared. The filter bar is built ONCE, from
+  the fields it sees at that moment, and the table was being created before the module's
+  columns had arrived — so its dropdowns were decided while there were no columns to declare
+  them. The table now waits for its data, and a later answer with a different field set drops
+  the bar so it is rebuilt (only then: typing in the search box is not interrupted for
+  nothing).
+- The extra layouts appear only when the module says which column is the label, which is the
+  magnitude and which one groups (`layout` in the action's answer). Which of six columns is
+  worth drawing is module knowledge, and a bar of the wrong column is worse than no bar. A
+  group reports its SHARE, never a reconstructed total: the core cannot add "3.0 TB" to
+  "512 MB" without learning what either is.
+- The breakdown rows now carry their raw `bytes`/`quota_bytes` beside the formatted text. The
+  core still reads only `pct` and prints `text`; the table needs numbers to sort by, and
+  parsing "3.0 TB" back into bytes would be inventing a measurement that is right there.
+
 ## [0.0.1+build.31] - 2026-07-30
 
 ### Added

@@ -28,6 +28,22 @@ Per-page keys (all optional except where noted):
 * ``perm`` — permission gating BOTH the route and the sidebar entry.  Defaults to
   ``modules_view``: watchful modules own no permission flags of their own (they
   have no Python manifest), so a page must reuse an existing one.
+* ``views`` — optional list of the section's VIEWS.  A module that has more than one
+  thing to show does not claim a second section: it declares its views here and the
+  sidebar entry becomes a parent with a flyout, exactly like Infrastructure's or
+  Access's.  They share the page's URL, its pane and its permission — a view is a
+  sub-path (``/m365/storage``), never a route of its own::
+
+      "views": [{"slug": "status",  "icon": "bi-activity", "label": "view_status"},
+                {"slug": "storage", "icon": "bi-hdd", "label": "view_storage",
+                 "kind": "table", "action": "storage_report"}]
+
+  Per view: ``slug`` (URL-safe, required), ``icon``, ``label`` (a key in the MODULE's
+  own lang file — the core owns no string naming a module's view), ``kind``
+  (``rows`` = the section/row layout, the default; ``table`` = the generic inventory
+  table) and ``action`` (a watchful action answering that view's data; declaring one
+  makes the view LIVE — it asks when opened and keeps nothing).  The first view is the
+  one a bare ``/m365`` opens.
 
 The page's **title** is the module's translated ``pretty_name``, exactly like a
 module-contributed Overview widget — no core string names a module.
@@ -51,9 +67,37 @@ from lib.modules.discovery.credential_schemas import _watchfuls_dir, _module_i18
 # the same shape the action dispatch already demands of a module name.
 _ID_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 
-# Ids the core already owns — a module may not shadow a built-in section, the admin
-# panel or the public status page.
+# Ids the core already owns. The URL is no longer the reason — module pages live under
+# `/module/<id>`, so a path collision is impossible by construction — but the id is ALSO the
+# pane (`tab-<id>`) and the sidebar button (`btn-nav-<id>`), and those share one namespace
+# with the core's. A module calling itself `overview` would render into the core's pane.
 _RESERVED = frozenset({'admin', 'overview', 'history', 'syslog', 'status', 'account', 'login'})
+
+
+def _views(d: dict) -> list:
+    """Normalise the optional ``views`` list.
+
+    Anything unusable is dropped rather than raising: a malformed view costs its own
+    entry in the flyout, never the section.  Fewer than two usable views means the
+    section has nothing to choose between, so it renders as the plain item it was —
+    a parent with one child is a menu that wastes a click.
+    """
+    out, seen = [], set()
+    for v in (d.get('views') or []):
+        if not isinstance(v, dict):
+            continue
+        slug = str(v.get('slug') or '').strip().lower()
+        if not _ID_RE.match(slug) or slug in seen:
+            continue
+        seen.add(slug)
+        out.append({
+            'slug':   slug,
+            'icon':   str(v.get('icon') or 'bi-grid-1x2'),
+            'label':  str(v.get('label') or ''),      # key in the MODULE's lang file
+            'kind':   str(v.get('kind') or 'rows'),
+            'action': str(v.get('action') or ''),     # declared → the view is live
+        })
+    return out if len(out) > 1 else []
 
 
 def _page_spec(module: str, d: dict) -> dict | None:
@@ -75,6 +119,7 @@ def _page_spec(module: str, d: dict) -> dict | None:
         'render': str(d.get('render') or ''),      # '' = core renders from page_data alone
         'refresh': str(d.get('refresh') or ''),    # watchful action for the live refresh
         'perm':   str(d.get('perm') or 'modules_view'),
+        'views':  _views(d),                       # [] = a plain section, no flyout
     }
 
 
@@ -111,5 +156,21 @@ def module_pages_catalog(watchfuls_dir: str | None = None) -> list:
                       for lang, data in lang_data.items()
                       if isinstance(data, dict) and isinstance(data.get('pretty_name'), str)}
         spec['label_i18n'] = label_i18n or {'en_EN': entry}
+        # A view names itself in the MODULE's own lang file, the same rule the section
+        # title follows: no core string may name a module's view. `ui` first because that
+        # is where a module keeps its page vocabulary, `labels` after it for the modules
+        # that never grew a `ui` block.
+        for view in spec['views']:
+            texts = {}
+            for lang, data in lang_data.items():
+                if not isinstance(data, dict):
+                    continue
+                for section in ('ui', 'labels'):
+                    val = (data.get(section) or {}).get(view['label']) \
+                        if isinstance(data.get(section), dict) else None
+                    if isinstance(val, str) and val:
+                        texts[lang] = val
+                        break
+            view['label_i18n'] = texts or {'en_EN': view['slug']}
         out.append(spec)
     return sorted(out, key=lambda p: (p['order'], p['id']))

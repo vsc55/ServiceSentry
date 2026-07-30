@@ -2882,6 +2882,8 @@ LANG = {
     'view_mode':              'Vista',
     'view_cards':             'Vista de tarjetas',
     'view_table':             'Vista de tabla',
+    'view_bars':              'Vista de barras',
+    'view_groups':            'Vista agrupada',
     # Validación de entrada
     'telegram_invalid_token': 'Formato de token del bot de Telegram no válido',
     'telegram_invalid_chat_id': 'El Chat ID debe ser un número válido',

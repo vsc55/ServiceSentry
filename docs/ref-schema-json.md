@@ -723,12 +723,27 @@ Historial y Syslog: su URL, su entrada en la barra lateral y su panel.
 
 | Clave | Por defecto | Descripción |
 | --- | --- | --- |
-| `id` | nombre del módulo | Es la URL (`/<id>`), el panel (`tab-<id>`) y el botón. Debe ser único y apto para URL; **se rechaza** si pisa un id del core (`admin`, `overview`, `history`, `syslog`, `status`, `account`, `login`) |
+| `id` | nombre del módulo | Es la URL (**`/module/<id>`**), el panel (`tab-<id>`) y el botón. Debe ser único y apto para URL; **se rechaza** si pisa un id del core (`admin`, `overview`, `history`, `syslog`, `status`, `account`, `login`) |
 | `icon` | `bi-grid-1x2` | Icono Bootstrap de la barra lateral |
 | `order` | `100` | Posición entre las secciones (las del core usan 10/20/30) |
 | `render` | `""` | Función JS que pinta la sección; el módulo la envía en su `web/_ui.html`. **Vacío = la pinta el renderizador genérico del core** a partir de `page_data`, y el módulo no necesita nada de frontend |
 | `refresh` | `""` | Acción de watchful que el botón de refresco en vivo invoca (debe estar en `WATCHFUL_ACTIONS`). Vacío = la página es solo caché |
 | `perm` | `modules_view` | Permiso que protege la ruta **y** la entrada de la barra lateral. Un watchful no posee flags propios, así que debe reutilizar uno existente |
+| `views` | `[]` | Las **vistas** de la sección. Con dos o más, la entrada de la barra lateral pasa a ser un padre con flyout y cada vista es un **sub-path** (`/module/m365/storage`): comparten panel, permiso y descriptor, y entre todas cuestan **una** ruta más. Con menos de dos se ignora — un padre con un solo hijo es un menú que gasta un clic |
+
+**Cada vista** (`views[]`): `slug` (apto para URL, obligatorio), `icon`, `label` (clave en el
+fichero de idioma **del módulo** — el core no tiene cadenas que nombren la vista de un módulo),
+`kind` (`rows` = la disposición de secciones/filas, por defecto; `table` = la tabla-inventario
+genérica) y `action` (acción de watchful que responde con los datos de esa vista; declararla la
+convierte en **en vivo**: pregunta al abrirse y no guarda nada). La primera vista es la que abre
+un `/module/m365` pelado.
+
+Una vista `table` responde `{ok, columns: [{id, label, kind?, align?}], rows: [{colId: valor}]}`.
+`kind` de columna es `text` (por defecto), `num` o `pct`. Un valor es un escalar, o `{v, s}`
+cuando ordenar y leer no son lo mismo: `v` ordena y `s` se muestra, que es como «3.0 TB» ordena
+por sus bytes sin que el core aprenda qué es un byte. El módulo formatea; el core dispone.
+
+Una columna con `"filter": true` gana un desplegable cuyas opciones son los valores realmente presentes. Y si la respuesta trae `layout: {label, value, group}` —qué columna nombra la fila, cuál es su magnitud y cuál agrupa— la vista ofrece además **barras** y **agrupada**; sin esa declaración el core estaría adivinando cuál de seis columnas merece dibujarse.
 
 El título es el `pretty_name` traducido del módulo. Los datos salen del hook
 `Watchful.page_data(items, status, lang)` (últimos resultados del monitor, servidos por

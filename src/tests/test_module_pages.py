@@ -114,7 +114,7 @@ class TestRegistryMerge:
         from lib.web_admin.constants import home_page_ids, standalone_pages
         assert 'm365' in home_page_ids(), 'a module page must be selectable as a landing page'
         page = next(p for p in standalone_pages() if p['id'] == 'm365')
-        assert page['url'] == '/m365'
+        assert page['url'] == '/module/m365'
         assert page['standalone']['pane'] == 'tab-m365'
         assert page['standalone']['label_i18n']          # module-owned label, not a core key
 
@@ -128,19 +128,38 @@ class TestRegistryMerge:
 class TestServed:
     """The section must be reachable and rendered without web_admin naming the module."""
 
+    def test_a_module_page_lives_under_its_own_namespace(self):
+        """A module page used to claim a TOP-LEVEL path, which made every future core section
+        a potential collision and left the core policing a blocklist of names it had to
+        remember to grow. Under `/module/` the collision is impossible by construction, and
+        the URL says where the page comes from."""
+        from lib.web_admin.constants import home_pages, HOME_PAGES   # noqa: PLC0415
+        core = {p['url'] for p in HOME_PAGES}
+        mods = [p for p in home_pages() if p.get('module')]
+        assert mods, 'no module page to check'
+        for p in mods:
+            assert p['url'].startswith('/module/'), p['url']
+            assert p['url'] not in core
+
+    def test_the_landing_page_setting_does_not_notice(self):
+        """It stores the page ID, not its path, so namespacing the URL leaves every saved
+        landing page — a user's, a group's, the global default — pointing where it did."""
+        from lib.web_admin.constants import home_page_ids            # noqa: PLC0415
+        assert 'm365' in home_page_ids()
+
     def test_its_url_is_routed(self, client):
         _login(client)
-        assert client.get('/m365').status_code == 200
+        assert client.get('/module/m365').status_code == 200
 
     def test_the_url_requires_a_session(self, client):
-        resp = client.get('/m365')
+        resp = client.get('/module/m365')
         assert resp.status_code in (301, 302) and '/login' in resp.headers.get('Location', '')
 
     def test_the_shell_carries_its_pane_and_sidebar_entry(self, client):
         _login(client)
         html = client.get('/admin').data.decode('utf-8', 'replace')
         assert 'id="tab-m365"' in html and 'id="m365-container"' in html
-        assert 'id="btn-nav-m365"' in html and 'data-nav-url="/m365"' in html
+        assert 'id="btn-nav-m365"' in html and 'data-nav-url="/module/m365"' in html
         assert 'Microsoft 365' in html                      # the module's own label
 
     def test_a_module_shipped_ui_fragment_is_injected(self, client):

@@ -1120,6 +1120,8 @@ barra lateral. No trae código de frontend: la pinta el **renderizador genérico
 de su hook `page_data` (ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__)),
 con un botón de refresco que consulta Azure en el momento.
 
+La sección tiene **dos vistas** bajo un desplegable: **Estado** (la de siempre, con sus cuatro disposiciones y su refresco en vivo) y **Almacenamiento** (`/module/m365/storage`), una tabla única con una fila por sitio de SharePoint y por cuenta de OneDrive — tenant, tipo, nombre, ocupado, cuota y % de su propia cuota— ordenable y con buscador. Es **en vivo y sin históricos**: corre los dos checks de almacenamiento al abrirse, con los topes levantados, y no guarda nada; el histórico y las alertas siguen viviendo en los checks del monitor. Acción: `storage_report`.
+
 **Flujo:** token *client-credentials* para `management.azure.com` → eventos de Resource Health en la
 ventana → clasifica por tipo de evento; el check público descarga el RSS y filtra.
 
@@ -1152,7 +1154,7 @@ resultado bajo una clave propia `<ítem>/<servicio>`, así son independientes.
 `tenant_id` / `client_id` / `client_secret` son las credenciales de la app (o una credencial
 `m365_app` reutilizable). `list.*.timeout` / `alert` por ítem (`0` hereda el global).
 
-**Sección propia:** declara `__page__`, así que aporta la sección **`/m365`** con su entrada en la
+**Sección propia:** declara `__page__`, así que aporta la sección **`/module/m365`** con su entrada en la
 barra lateral: salud de servicios, licencias y almacenamiento, seguridad (Secure Score, usuarios de
 riesgo) y caducidad de secretos, agrupado por tipo de check, con un botón que consulta Graph en el
 momento. A diferencia de [azure](#-azure--estado-de-servicio-de-azure), **trae su propio

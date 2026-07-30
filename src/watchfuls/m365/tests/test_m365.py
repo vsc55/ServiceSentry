@@ -277,6 +277,37 @@ class TestTenantTotal:
         assert d['total_bytes'] == 1024 * GB and d['used'] == 25.0
         assert d['source'] == 'manual'
 
+    def test_a_sum_of_ceilings_is_not_a_capacity(self):
+        """Reported from a screenshot: every site read "of 25.0 TB". That is SharePoint's
+        per-site CEILING, which automatic site storage management assigns to everything
+        because it is reserving nothing — the real limit is the pooled tenant quota.
+
+        Summing it made 65 sites into 1.6 PB of "capacity", against which any real usage is a
+        comfortable 0 %: a check that can never fire, which is the worst kind. With no typed
+        capacity the honest answer is that there is no total."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * TB, 25 * TB), (1 * TB, 25 * TB)))
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'none', 'a sum of ceilings passed itself off as a capacity'
+        assert 'used' not in od and od['used_bytes'] == 4 * TB
+        assert res['m1/tenant']['status'] is True
+
+    def test_a_typed_capacity_still_wins_over_the_ceilings(self):
+        """The admin's number is the only capacity there is in that tenant, and it must keep
+        working exactly as before."""
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_max=10,
+                         tenant_unit='TB'),
+                   csv_text=_detail((3 * TB, 25 * TB), (1 * TB, 25 * TB)))
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'manual' and od['used'] == 40.0
+
+    def test_real_per_site_quotas_are_still_summed(self):
+        """A tenant on MANUAL storage management has real per-site quotas, and their sum is a
+        real capacity — the ceiling rule must not take that away."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 10 * GB), (1 * GB, 10 * GB)))
+        assert res['m1/tenant']['other_data']['source'] == 'sites'
+
     def test_percentage_threshold_warns(self):
         item = _item(check_site=False, check_tenant_usage=True, tenant_pct=80)
         res = _run(item, csv_text=_detail((85 * GB, 100 * GB)))
@@ -773,6 +804,123 @@ class TestCredentialAndProvision:
             'User.Read.All',                  # the licensed accounts behind that activity
             'RoleManagement.Read.Directory',  # who holds Global Administrator
             'Domain.Read.All'}                # domain verification state
+
+
+class TestStorageView:
+    """The Storage view: one row per PLACE storage is going, SharePoint and OneDrive side by
+    side. The status page answers "is it all right"; this answers "where is it going", and
+    they are two views of one section rather than two sections."""
+
+    @staticmethod
+    def _report(*, csv_sp='', csv_od='', item=None):
+        """Run the real checks for one item and hand their results to the view, which is
+        the whole point: the table is a reshape of what the checks measured, not a second
+        measurement of the same thing."""
+        from watchfuls.m365 import Watchful
+        base = _item(**{'label': 'Contoso', 'check_site': False,
+                        'check_tenant_usage': True, 'check_onedrive': True, **(item or {})})
+
+        def _raw(_mod, cfg, **_kw):
+            run = {'watchfuls.m365': {'threads': 1, 'alert': 1, 'list': {'m1': cfg}}}
+            w = Watchful(create_mock_monitor(run))
+
+            def fake_text(_tok, path, _to):
+                if 'SharePointSiteUsageDetail' in path:
+                    return csv_sp
+                return csv_od if 'OneDriveUsageAccountDetail' in path else ''
+
+            with patch.object(w, '_get_token', side_effect=lambda *a: 'tok'), \
+                 patch.object(Watchful, '_enumerate_sites', return_value=[]), \
+                 patch.object(Watchful, '_graph_batch', return_value={}), \
+                 patch.object(w, '_graph_text', side_effect=fake_text):
+                res = w.check().list
+            return [{'key': k, **v} for k, v in res.items()], None
+
+        with patch('watchfuls.m365.page.run_item_once', side_effect=_raw):
+            return Watchful.storage_report(base)
+
+    def test_it_lists_both_kinds_in_one_table(self):
+        res = self._report(csv_sp=_detail((3 * GB, 10 * GB)),
+                           csv_od=_accounts((900 * GB, TB)))
+        kinds = sorted({r['kind'] for r in res['rows']})
+        assert res['ok'] is True and kinds == ['OneDrive', 'SharePoint']
+        assert [c['id'] for c in res['columns']] == ['tenant', 'kind', 'name', 'used',
+                                                     'quota', 'share', 'full']
+
+    def test_a_size_sorts_by_its_bytes_and_reads_as_a_size(self):
+        """"3.0 GB" has to sort as its bytes and the core must not learn what a byte is, so
+        the value travels as {v, s}: `v` sorts, `s` is read."""
+        res = self._report(csv_sp=_detail((3 * GB, 10 * GB)))
+        cell = res['rows'][0]['used']
+        assert cell['v'] == 3 * GB and cell['s'].endswith('GB')
+
+    def test_the_rows_are_the_breakdown_reshaped_not_measured_again(self):
+        """One source, two layouts: the collapsible list and this table must never be able
+        to disagree about the same site."""
+        res = self._report(csv_sp=_detail((3 * GB, 10 * GB), (1 * GB, 10 * GB)))
+        names = [r['name'] for r in res['rows']]
+        assert len(names) == 2 and len(set(names)) == 2
+
+    def test_every_row_says_which_tenant_it_came_from(self):
+        """The table concatenates one request per configured tenant, so a row that does not
+        name its own is unattributable the moment there are two."""
+        res = self._report(csv_sp=_detail((3 * GB, 10 * GB)), item={'label': 'Acme'})
+        assert all(r['tenant'] == 'Acme' for r in res['rows'])
+
+    def test_the_two_percentages_are_two_columns(self):
+        """One column meant a different thing on each half of the table: a share of the
+        tenant for a site, how full that person is for an account. `share` and `full` answer
+        those separately, and `full` is "—" where there is no limit to be close to — a 0
+        there would read as "empty"."""
+        res = self._report(csv_sp=_detail((3 * GB, 10 * GB), (1 * GB, 10 * GB)),
+                           csv_od=_accounts((900 * GB, TB)))
+        site = next(r for r in res['rows'] if r['kind'] == 'SharePoint')
+        acct = next(r for r in res['rows'] if r['kind'] == 'OneDrive')
+        assert site['full']['v'] == 30.0        # 3 GB of its OWN 10 GB quota
+        assert acct['full']['v'] == 87.9        # 900 GB of that person's 1 TB
+        assert site['share']['v'] == 15.0       # …and 3 GB of SharePoint's own 20 GB
+
+    def test_the_share_is_of_its_own_service(self):
+        """Reported from a screenshot: a 3.4 TB site read 26.8 % against a ~6 TB SharePoint.
+        It was being divided by SharePoint PLUS OneDrive — arithmetic nobody asked for, since
+        you cannot move a site into OneDrive. The question a row provokes is "how much of my
+        SharePoint is this site eating", so each half divides by its own whole and the header
+        says which."""
+        res = self._report(csv_sp=_detail((300 * GB, 400 * GB)),
+                           csv_od=_accounts((100 * GB, TB)))
+        by = {r['kind']: r['share']['v'] for r in res['rows']}
+        assert by['SharePoint'] == 75.0      # 300 GB of SharePoint's own 400 GB
+        assert by['OneDrive'] == 100.0       # the only account, so all of OneDrive
+
+    def test_a_site_at_the_ceiling_has_no_quota_to_show(self):
+        """Under automatic site storage management SharePoint assigns EVERY site the 25 TB
+        per-site ceiling — it is not reserving anything, the real limit is the pooled tenant
+        quota. Printing it invents a limit nobody set, and it is why every row read
+        "of 25.0 TB"."""
+        res = self._report(csv_sp=_detail((3 * GB, 25 * 1024 ** 4)))
+        row = res['rows'][0]
+        assert row['quota']['s'] == '—' and row['full']['s'] == '—'
+
+    def test_a_failure_is_reported_not_swallowed(self):
+        from watchfuls.m365 import Watchful
+        with patch('watchfuls.m365.page.run_item_once',
+                   side_effect=lambda *a, **kw: (None, 'invalid_client')):
+            res = Watchful.storage_report({'label': 'x'})
+        assert res['ok'] is False and 'invalid_client' in res['message']
+
+    def test_it_runs_only_the_storage_checks(self):
+        """Answering a storage question by running the licence, health and identity checks
+        would spend a dozen Graph calls the reader did not ask for."""
+        from watchfuls.m365 import Watchful
+        seen = {}
+        with patch('watchfuls.m365.page.run_item_once',
+                   side_effect=lambda *a, **kw: (seen.update(cfg=a[1]), ([], None))[1]):
+            Watchful.storage_report({'label': 'x', 'check_health': True,
+                                     'check_licenses': True, 'check_tenant_usage': True})
+        cfg = seen['cfg']
+        assert cfg['check_tenant_usage'] is True and cfg['_live'] is True
+        assert not any(cfg[k] for k in cfg if k.startswith('check_')
+                       and k not in ('check_tenant_usage', 'check_onedrive'))
 
 
 class TestExtendedChecks:

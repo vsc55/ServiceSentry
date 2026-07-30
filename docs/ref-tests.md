@@ -3108,7 +3108,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 64. Watchful: m365
 
-**Archivo:** `watchfuls/m365/tests/test_m365.py` — 107 tests
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 119 tests
 
 **Postura del tenant** (14 tests, `TestExtendedChecks`): cinco comprobaciones que contestan
 preguntas que el panel puede y un administrador normalmente no, porque cada una vive en un
@@ -3146,6 +3146,9 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_auth_failure_first_is_smoothed` | Fallo de auth con `alert=3`: primer fallo se suaviza | item reportado OK | alerta prematura |
 | `test_it_sums_every_site_against_the_sum_of_their_quotas` | **SharePoint completo**: suma lo ocupado por todos los sitios frente a la suma de sus cuotas | `used_bytes`, `total_bytes`, `used` (%) y `sites` publicados | sin denominador, como antes |
 | `test_a_typed_capacity_wins_over_the_sum_of_quotas` | Graph no publica el pool del tenant; si el admin lo sabe, manda lo que escribe | `total_bytes` = lo tecleado, `source='manual'` | ignora la capacidad |
+| `test_a_sum_of_ceilings_is_not_a_capacity` | **Captura**: cada fila leía «de 25.0 TB» — el TECHO por sitio, que la gestión automática asigna a todos porque no reserva nada. Sumarlo convertía 65 sitios en 1.6 PB, contra los que cualquier uso real es un cómodo 0 % | `source='none'` y sin `%` inventado | un check que no puede dispararse nunca |
+| `test_a_typed_capacity_still_wins_over_the_ceilings` | El número escrito por el admin es la única capacidad que hay en ese tenant | `source='manual'`, 40 % | romper al que ya lo tenía bien |
+| `test_real_per_site_quotas_are_still_summed` | Un tenant en gestión MANUAL sí tiene cuotas reales por sitio | `source='sites'` | que la regla del techo se lleve por delante un denominador legítimo |
 | `test_percentage_threshold_warns` | Aviso por porcentaje ocupado | tenant en fallo con `warning` | no avisa |
 | `test_absolute_threshold_warns_even_when_the_fraction_is_small` | «Avisa a 500 GB» es otra pregunta que «avisa al 80 %», y en un tenant grande llega mucho antes | `warning` con el % lejos del umbral | solo mira el porcentaje |
 | `test_full_is_an_error_not_a_warning` | **100 % no es «acercarse»**: es donde se empiezan a rechazar escrituras | fallo **sin** `warning` (rojo) | llega en el mismo color que el aviso previo |
@@ -3176,6 +3179,15 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_the_live_refresh_declares_itself` | El check no distingue una lectura en vivo de un ciclo si nadie se lo dice | `page_refresh` marca `_live` en la config con la que corre | el tope aplicado también en vivo |
 | `test_the_module_states_its_own_page_size` | Cuántas filas se dibujan de una vez es presentación, y 6 particiones no se leen como 500 tablas | `breakdown.page` desde `breakdown_page` | una decisión de presentación fija en el núcleo |
 | `test_the_status_bar_only_gets_a_marker_when_one_is_configured` | La barra de Status queda neutra si no hay umbral | `alert` solo cuando se fija | marcador que nadie pidió |
+| `TestStorageView::test_it_lists_both_kinds_in_one_table` | La vista Storage: una fila por sitio y por cuenta, lado a lado | ambos tipos y las 6 columnas | dos tablas para una pregunta |
+| `TestStorageView::test_a_size_sorts_by_its_bytes_and_reads_as_a_size` | `{v, s}`: `v` ordena, `s` se lee | 3 GB ordena por bytes | «3.0 TB» ordenando alfabéticamente |
+| `TestStorageView::test_the_rows_are_the_breakdown_reshaped_not_measured_again` | Una fuente, dos disposiciones | mismas filas que el desglose | que la lista y la tabla discrepen sobre el mismo sitio |
+| `TestStorageView::test_every_row_says_which_tenant_it_came_from` | La tabla concatena una petición por tenant | cada fila con su tenant | filas inatribuibles en cuanto hay dos |
+| `TestStorageView::test_the_two_percentages_are_two_columns` | Una sola columna significaba una cosa en cada mitad de la tabla | `share` y `full` por separado, y `full` = «—» donde no hay límite | un 0 que se lee como «vacío» |
+| `TestStorageView::test_the_share_is_of_its_own_service` | **Captura**: un sitio de 3.4 TB marcaba 26.8 % contra un SharePoint de ~6 TB — se estaba dividiendo por SharePoint MÁS OneDrive, aritmética que nadie pidió: un sitio no se puede mudar a OneDrive | cada mitad sobre su propio todo, y la cabecera lo dice | un porcentaje comparable entre columnas pero sin significado operativo |
+| `TestStorageView::test_a_site_at_the_ceiling_has_no_quota_to_show` | Imprimir el techo inventa un límite que nadie puso | «—» en cuota y en % | 65 filas leyendo «de 25.0 TB» |
+| `TestStorageView::test_a_failure_is_reported_not_swallowed` | | `ok=False` con el motivo | tabla vacía sin explicación |
+| `TestStorageView::test_it_runs_only_the_storage_checks` | Contestar a una pregunta de almacenamiento corriendo licencias e identidad gastaría una docena de llamadas que nadie pidió | solo los dos checks de storage, en vivo | coste invisible por abrir una pestaña |
 | `test_onedrive_says_who_is_using_the_space` | El informe de almacenamiento da un total y nada sobre quién lo compone; el de **detalle por cuenta** es una fila por persona | desglose + `accounts`/`deleted` | «OneDrive ocupa 2 TB» sin poder preguntar quién |
 | `test_each_account_is_measured_against_its_own_quota` | **Captura**: las cuotas de OneDrive son POR PERSONA (1 TB, 5 TB) y no comparten pool; repartir sobre el total del tenant no dice si alguien se está quedando sin sitio | 87.9 % y 9.8 %, con el orden por bytes usados | una barra que no contesta la única pregunta por cuenta |
 | `test_the_list_is_ordered_by_what_it_draws` | **Captura**: varias filas al 0 % y de pronto una al 5 %. El orden era por bytes y la barra ya era la cuota propia, así que 50 GB de 1 TB quedaba por debajo de 200 GB de 5 TB | ordena por lo que dibuja; los bytes desempatan | un orden real pero invisible, que se lee como lista sin ordenar |
@@ -5858,3 +5870,28 @@ que en silencio significara «6 en esta página» sería peor que no contar.
 | `TestTheWhitelistMeasuresItsHoles::test_the_widest_entry_leads` | Un 8 donde querías un 24 es un error de un carácter que ninguna columna enseña |
 | `TestTheWhitelistMeasuresItsHoles::test_the_broad_threshold_is_stated_on_screen` | Una insignia cuya regla nadie ve es una insignia sobre la que nadie puede actuar |
 | `TestTheLabelsExist::*` (×2) | Las siete vistas y el vocabulario, en los dos idiomas |
+
+---
+
+## 131. Una sección de módulo puede tener más de una VISTA
+
+**Archivo:** `tests/test_module_page_views.py` — 42 tests
+
+La disposición de filas contesta «está todo bien»; una tabla de quién ocupa qué contesta «dónde
+se está yendo». Son dos preguntas sobre un mismo subsistema, y el error que estos tests vigilan es
+contestarlas con dos **secciones**: dos entradas de barra lateral, dos permisos que mantener a la
+par, dos paneles y dos rutas para algo que el lector piensa como un sitio. Así que una sección
+declara sus vistas y todas comparten menos un sub-path.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestTheCatalogReadsViews::*` (×7) | El catálogo normaliza `slug/icon/label/kind/action`, una vista mal declarada cuesta su entrada y nada más, una sola vista no es menú, y la etiqueta sale del fichero de idioma **del módulo** | claves genéricas y cero cadenas del core nombrando una vista de módulo | que el core aprenda qué significa la vista de un módulo |
+| `TestServed::test_a_module_page_lives_under_its_own_namespace` + `::test_the_landing_page_setting_does_not_notice` (en `test_module_pages.py`) | Una página de módulo reclamaba un path de primer nivel: cada sección futura del core era una colisión en potencia y el core patrullaba una lista negra que había que acordarse de ampliar | todas bajo `/module/`, y la landing page (que guarda el **id**) ni se entera | que un módulo gane un path por accidente de orden |
+| `TestAViewIsASubPathNotASection::*` (×7) | Ninguna URL de sección se compone del id — dónde vive la decide el servidor, y una URL construida en el cliente caduca en silencio porque `pushState` nunca da 404. Una regla de ruta extra sirve a todas las vistas; `/module/m365/storage` responde; un slug desconocido cae en la primera vista; un path de dos segmentos que no case con una vista declarada **no** toma prestado un panel; la URL nombra la vista | 2 `add_url_rule` en total | una ruta, un panel y un permiso por vista |
+| `TestTheMenuIsTheOneThatAlreadyExists::*` (×4) | Reutiliza `ss-sb-flywrap` y `data-subtab`, recuerda la elección por sección, y la URL gana a lo recordado | un solo mecanismo de menú y de resaltado | la tercera implementación de un menú, que es donde las tres empiezan a discrepar |
+| `TestTheTableViewIsGeneric::*` (×7) | El core solo interpreta `text`/`num`/`pct`, `{v, s}` separa lo que ordena de lo que se lee, la tabla se construye una vez, las columnas vienen del módulo, y un ítem que falla no cuesta sus filas a los demás | ninguna columna con nombre en el core | que «3.0 TB» ordene alfabéticamente, o que el core aprenda qué es un byte |
+| `TestTheInventoryHasMoreThanOneLayout::*` (×6) | Una tabla contesta «cuál»; comparar cuarenta números en una columna no contesta «cómo se reparte». Barras y grupos, con el mismo `createViewState`/`_viewSwitcher` que el resto; cada barra es share de la fila mayor (del total, cuarenta filas serían cuarenta hilos); un grupo informa de su **share**, nunca de un total reconstruido | modo `summary`, sin bandas de paginado | una cuarta manera de dibujar un grupo de botones, y un total con una unidad inventada |
+| `TestTheFiltersAreDeclaredToo::*` (×6) | Una columna pide su desplegable (`filter`) y el core lo llena con los valores presentes; el texto libre sigue llegando a todas | tenant y tipo en m365 | un filtro que ofrece lo que no existe, o vocabulario propio del core. **Captura**: solo salía el buscador — la barra se construye UNA vez y la tabla se creaba antes de que llegaran las columnas, así que sus desplegables se decidían sin columnas que declararlos |
+| `TestTheRendererPicksTheView::*` (×2) | La vista se resuelve una vez, desde la URL; sin vistas declaradas, todo se comporta igual que antes | | que cada capa vuelva a adivinar qué vista toca |
+| `TestTheStorageViewOfM365::*` (×3) | La acción existe, es de solo lectura y está declarada | | una entrada de menú que abre un error |
+

@@ -38,6 +38,22 @@ from lib.core.overview.discovery import discover_overview_widgets_public as _dis
 from ..constants import page_label, standalone_pages
 
 
+def _view_specs(page: dict, lang: str) -> list:
+    """A section's views, with each label resolved for this language.
+
+    Same rule as the section title: the text comes from the MODULE's lang file, so the
+    core ships no string naming a module's view. A view with no translation falls back to
+    English and then to its own slug — an untranslated menu entry beats a blank one.
+    """
+    out = []
+    for v in (page.get('standalone', {}).get('views') or []):
+        texts = v.get('label_i18n') or {}
+        out.append({'slug': v['slug'], 'icon': v['icon'], 'kind': v['kind'],
+                    'action': v['action'],
+                    'label': texts.get(lang) or texts.get('en_EN') or v['slug']})
+    return out
+
+
 def register(app, wa):
     login_required = wa._login_required
 
@@ -69,6 +85,7 @@ def register(app, wa):
             # page: a core page translates its nav_label_key, a module page carries its
             # own label_i18n (its translated pretty_name).
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
+                               'views': _view_specs(p, _lang),
                                'label': (wa._t(p['standalone']['nav_label_key'])
                                          if p['standalone'].get('nav_label_key')
                                          else page_label(p, _lang))}
@@ -116,11 +133,15 @@ def register(app, wa):
     def _make_standalone_view(page: dict):
         spec = page['standalone']
 
-        def _view():
+        def _view(view: str = ''):
             perms = set(wa._get_effective_permissions(
                 session.get('username', ''), session.get('role', '')) or [])
             if spec.get('perm') and spec['perm'] not in perms:
                 return redirect(url_for('dashboard'))
+            # A view is a sub-path of its section, not a page: same shell, same pane, same
+            # permission — the client reads the slug off the URL and opens that view. An
+            # unknown slug is not a 404, it is the section's first view, because a stale
+            # bookmark should land somewhere rather than nowhere.
             return _render_dashboard()
 
         _view.__name__ = f"page_{page['id']}"
@@ -128,5 +149,8 @@ def register(app, wa):
         return _view
 
     for _page in standalone_pages():
-        app.add_url_rule(_page['url'], endpoint=f"page_{_page['id']}",
-                         view_func=login_required(_make_standalone_view(_page)))
+        _v = login_required(_make_standalone_view(_page))
+        app.add_url_rule(_page['url'], endpoint=f"page_{_page['id']}", view_func=_v)
+        if _page.get('standalone', {}).get('views'):
+            app.add_url_rule(_page['url'] + '/<view>', endpoint=f"page_{_page['id']}_view",
+                             view_func=_v)

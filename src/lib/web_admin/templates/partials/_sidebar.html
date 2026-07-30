@@ -75,9 +75,40 @@
                sections' panes don't exist, so they stay real links. The <li> carries the
                permission gate (applyRoleRestrictions reveals it). #}
             {% for p in standalone_specs %}
-            <li class="nav-item" id="nav-page-{{ p.id }}-li" data-nav-perm="{{ p.perm }}"
+            <li class="nav-item{% if p.views %} ss-sb-has-sub{% endif %}"
+                id="nav-page-{{ p.id }}-li" data-nav-perm="{{ p.perm }}"
                 style="display:none" role="presentation">
-                {% if standalone %}
+                {% if p.views %}
+                {# A section with more than one view: the item opens the section AND a flyout
+                   with its views, the same pattern Infrastructure and Access use. The views
+                   share this pane and permission and differ only by a sub-path, so each is a
+                   link the browser can bookmark rather than a second section. #}
+                <div class="ss-sb-flywrap">
+                    <button class="ss-sb-item nav-link" type="button" id="btn-nav-{{ p.id }}"
+                            data-bs-toggle="tab" data-bs-target="#tab-{{ p.id }}"
+                            data-nav-url="{{ p.url }}" title="{{ p.label }}">
+                        <i class="bi {{ p.icon }} ss-sb-icon"></i>
+                        <span class="ss-sb-label">{{ p.label }}</span>
+                        <i class="bi bi-chevron-right ss-sb-caret"></i>
+                    </button>
+                    <ul class="ss-sb-flyout">
+                        {% for v in p.views %}
+                        <li>
+                            {# `data-subtab` on purpose: the single-highlight and breadcrumb
+                               machinery already keys on it, and a second mechanism for the
+                               same job is how two of them end up disagreeing. #}
+                            <button type="button" class="ss-sb-item ss-sb-subsub"
+                                    data-subtab="#view-{{ p.id }}-{{ v.slug }}"
+                                    onclick="_navPageView('{{ p.id }}', '{{ v.slug }}')"
+                                    title="{{ v.label }}">
+                                <i class="bi {{ v.icon }} ss-sb-icon"></i>
+                                <span class="ss-sb-label">{{ v.label }}</span>
+                            </button>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% elif standalone %}
                 <a class="ss-sb-item{% if p.id == standalone %} active{% endif %}"
                    href="{{ p.url }}" data-nav-section id="nav-page-{{ p.id }}"
                    {% if p.id == standalone %}aria-current="page"{% endif %}

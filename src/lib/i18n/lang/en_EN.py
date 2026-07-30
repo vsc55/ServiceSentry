@@ -2881,6 +2881,8 @@ LANG = {
     'view_mode':              'View',
     'view_cards':             'Card view',
     'view_table':             'Table view',
+    'view_bars':              'Bars view',
+    'view_groups':            'Grouped view',
     # Input validation
     'telegram_invalid_token': 'Invalid Telegram bot token format',
     'telegram_invalid_chat_id': 'Chat ID must be a valid number',

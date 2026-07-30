@@ -8,7 +8,12 @@
     ],
     "__page__": {
         "id": "m365", "icon": "bi-microsoft", "order": 40,
-        "refresh": "page_refresh", "perm": "modules_view"
+        "refresh": "page_refresh", "perm": "modules_view",
+        "views": [
+            {"slug": "status", "icon": "bi-activity", "label": "view_status"},
+            {"slug": "storage", "icon": "bi-hdd-fill", "label": "view_storage",
+             "kind": "table", "action": "storage_report"}
+        ]
     },
     "__module__": {
         "api_ver": "v1",
