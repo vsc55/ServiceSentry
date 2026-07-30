@@ -4170,9 +4170,9 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
 
-**Archivo:** `tests/test_module_pages.py` — 35 tests
+**Archivo:** `tests/test_module_pages.py` — 39 tests
 
-Un watchful puede reclamar una sección propia de primer nivel declarando `__page__`.
+Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo **`/module/<id>`**, en su propio espacio de nombres: así una sección futura del core no puede chocar con ella ni al revés. Las **vistas** de esa sección (varias disposiciones bajo un desplegable) están en [§131](#131-una-sección-de-módulo-puede-tener-más-de-una-vista).
 
 | Test | Qué comprueba |
 |---|---|

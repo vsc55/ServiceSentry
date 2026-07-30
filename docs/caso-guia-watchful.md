@@ -566,6 +566,66 @@ el modal (badges de tipo/categoría, subtítulos) — ver [ref-schema-json.md](r
 
 ---
 
+## 4b-bis. Una sección propia, y sus vistas
+
+Con `__page__` en el `schema.json` el módulo gana una sección de primer nivel bajo
+**`/module/<id>`**: URL, entrada en la barra lateral con su permiso, panel y cableado. El
+core no lo nombra en ningún sitio — lee claves genéricas — y el módulo **no necesita escribir
+front-end**: el renderizador genérico pinta lo que devuelva `page_data(items, status, lang)`.
+
+Cuando el módulo tiene **dos cosas distintas que enseñar**, no reclama una segunda sección:
+declara sus vistas. Serían dos entradas de menú, dos permisos que mantener a la par, dos
+paneles y dos rutas para algo que el lector piensa como un sitio.
+
+```json
+"__page__": {
+  "id": "midulo", "icon": "bi-hdd", "order": 50, "perm": "modules_view",
+  "refresh": "page_refresh",
+  "views": [
+    {"slug": "status",    "icon": "bi-activity", "label": "view_status"},
+    {"slug": "inventory", "icon": "bi-table",    "label": "view_inventory",
+     "kind": "table", "action": "inventory_report"}
+  ]
+}
+```
+
+La entrada del menú pasa a ser un padre con desplegable y cada vista es un **sub-path**
+(`/module/midulo/inventory`): comparten panel y permiso, y entre todas cuestan **una** regla
+de ruta. `label` es una clave del fichero de idioma **del módulo** — el core no tiene cadenas
+que nombren la vista de nadie. La primera vista es la que abre la URL pelada.
+
+### Una vista de tipo tabla
+
+`"kind": "table"` da la tabla-inventario genérica —ordenable, con buscador, columnas
+redimensionables y selector de columnas— sin escribir una línea de front-end. Declarar
+`action` la hace **en vivo**: pregunta al abrirse, una llamada por ítem configurado, y no
+guarda nada. La acción (que debe estar en `WATCHFUL_ACTIONS`) responde:
+
+```python
+{'ok': True,
+ 'columns': [{'id': 'name', 'label': 'Nombre', 'kind': 'text', 'filter': True},
+             {'id': 'size', 'label': 'Tamaño', 'kind': 'num'},
+             {'id': 'pct',  'label': '% de su cuota', 'kind': 'pct'}],
+ 'rows': [{'name': 'ventas', 'size': {'v': 3298534883328, 's': '3.0 TB'},
+           'pct': {'v': 12.0, 's': '12%'}}],
+ 'layout': {'label': 'name', 'value': 'size', 'group': 'kind'}}
+```
+
+Tres reglas que ahorran disgustos:
+
+- **El módulo formatea, el core dispone.** Bytes-contra-filas-contra-segundos es
+  conocimiento que el core no tiene. Un valor es un escalar, o `{v, s}` cuando ordenar y leer
+  no son lo mismo: `v` ordena y `s` se muestra, que es como «3.0 TB» ordena por sus bytes.
+- **`filter: true`** en una columna le da un desplegable cuyas opciones son los valores
+  realmente presentes en las filas.
+- **`layout`** —qué columna nombra la fila, cuál es su magnitud y cuál agrupa— desbloquea las
+  disposiciones de **barras** y **agrupada**. Sin él solo hay tabla, porque el core estaría
+  adivinando cuál de seis columnas merece dibujarse.
+
+Detalle completo del contrato en
+[ref-schema-json.md `__page__`](ref-schema-json.md#__page__) y
+[explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__).
+
 ## 4c. Tablas propias en la base de datos general
 
 Un módulo puede declarar tablas propias (cachés, índices derivados, estado) en

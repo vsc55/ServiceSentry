@@ -300,7 +300,7 @@ alimenta a fail2ban:
 | POST | `/api/v1/modules/checks/run` | `checks_run` | Ejecutar checks bajo demanda |
 | GET | `/api/v1/modules/overview` | `overview_view` | Snapshot ligero del dashboard Overview |
 | GET | `/api/v1/modules/page/<module>` | `modules_view` | Datos de la **sección propia** de un módulo (`__page__`), desde su hook `page_data` (últimos resultados del monitor). 404 si el módulo no declara página |
-| GET, POST | `/api/v1/modules/watchfuls/<module>/<action>` | `modules_view` (+ inline si muta) | Despacha `Watchful.<action>` del módulo |
+| GET, POST | `/api/v1/modules/watchfuls/<module>/<action>` | `modules_view` (+ inline si muta) | Despacha `Watchful.<action>` del módulo. Es también por dónde entran el **refresco en vivo** de una sección (`__page__.refresh`) y los datos de una **vista** que declara `action` — una llamada por ítem configurado, con la config de ese ítem en el cuerpo |
 
 ## Overview — [lib/core/overview/routes.py](../src/lib/core/overview/routes.py)
 

@@ -1111,6 +1111,8 @@ La forma es siempre la misma, y vive en `partials/core/`:
 - **el cuerpo** — `bodyMode` de `createListTable`: `'cards'` es otro cuerpo sobre la **misma
   página**; `'summary'` recibe **todas** las filas filtradas y **no dibuja paginación**.
 
+Hay una vuelta de tuerca en las secciones que aporta un módulo: ahí las vistas no son solo disposiciones de una lista, sino **caras distintas de la sección**, cada una con su sub-path (`/module/m365/storage`) y su sitio en un desplegable de la barra lateral. Se declaran en el `schema.json` del módulo (`__page__.views`), comparten panel y permiso, y una de tipo `table` recibe del módulo sus columnas y sus filas — el núcleo dispone, ordena, filtra y pagina sin saber qué significan. Esas tablas traen además dos disposiciones propias (barras y agrupada) cuando el módulo declara qué columna dibujar. Ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__).
+
 Esa última distinción es la regla que gobierna las vistas nuevas: un resumen **cuenta cosas**
 («4 hosts sin ninguna comprobación», «6 baneos de esta IP»), y un recuento hecho sobre una
 página cambia según avanzas — que es peor que no contar. Por eso una cabecera de resumen

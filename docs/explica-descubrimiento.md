@@ -344,10 +344,26 @@ El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una 
   `WATCHFUL_ACTIONS` y sirve él mismo. Devolviendo la misma forma que `page_data`, la página tiene
   **un solo renderizador**, no dos.
 
+**Vistas.** Cuando el módulo tiene más de una cosa que enseñar no reclama una segunda sección
+—serían dos entradas de menú, dos permisos que mantener a la par, dos paneles y dos rutas para
+algo que el lector piensa como un sitio— sino que declara `views`. La entrada pasa a ser un padre
+con flyout (el patrón de Infraestructura y Acceso) y cada vista es un **sub-path**
+(`/module/m365/storage`) que comparte panel y permiso: entre todas cuestan **una** regla de ruta,
+`/<url>/<view>`. Qué vista abrir lo decide el cliente leyendo la URL; el servidor acepta el slug y
+lo ignora, y uno desconocido cae en la primera vista en vez de dar 404 — un marcador viejo debería
+aterrizar en algún sitio.
+
+Una vista `kind: "table"` recibe la **tabla-inventario genérica**: el módulo responde a su `action`
+con `{columns, rows, layout}` y el core la dispone, ordena, filtra y pagina sin saber qué significa
+ninguna columna. Un valor puede ser `{v, s}` —`v` ordena, `s` se lee— que es como «3.0 TB» ordena
+por sus bytes sin que el core aprenda qué es un byte.
+
 **Consumo:** `module_pages_catalog()` (`lib/modules/discovery/pages.py`) normaliza y ordena; el
 registro `lib/web_admin/constants.py::home_pages()` mezcla las páginas de módulo con las del core,
 y de ahí salen gratis la ruta, la entrada de sidebar (con su permiso), el panel generado en
 `dashboard.html` y el cableado del render — todo eso ya era data-driven salvo el propio registro.
+La URL se decide en **un solo sitio** (`home_pages()`), así que namespacear las páginas de módulo
+bajo `/module/` no tocó ni la barra lateral ni el resolutor de panel ni el bucle de rutas.
 
 > **Ojo:** una clave `__…__` nueva debe añadirse a la lista de exclusión de
 > `ModuleBase.discover_schemas()` o se renderizará como si fuera una colección.
