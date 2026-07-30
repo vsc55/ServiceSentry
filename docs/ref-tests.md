@@ -3108,7 +3108,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 64. Watchful: m365
 
-**Archivo:** `watchfuls/m365/tests/test_m365.py` — 99 tests
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 107 tests
 
 **Postura del tenant** (14 tests, `TestExtendedChecks`): cinco comprobaciones que contestan
 preguntas que el panel puede y un administrador normalmente no, porque cada una vive en un
@@ -3174,8 +3174,16 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_a_blank_item_inherits_and_a_zero_does_not` | Tres estados, tres intenciones; `inherit_blank` guarda null al vaciar y el 0 sigue siendo un valor real | blanco hereda, 0 no guarda nada (y la medida sigue) | 0 y «vacío» confundidos, como en los campos `zero_as_blank` |
 | `test_a_live_read_ignores_the_cap_because_it_is_not_stored` | El tope protege el resultado GUARDADO; una lista pedida a mano no toca la BD | los 30 sitios, incluso con `sites_top=0` | pagar el tope donde no hay nada que proteger |
 | `test_the_live_refresh_declares_itself` | El check no distingue una lectura en vivo de un ciclo si nadie se lo dice | `page_refresh` marca `_live` en la config con la que corre | el tope aplicado también en vivo |
-| `test_the_module_states_its_own_page_size` | Cuántas filas se dibujan de una vez es presentación, y 6 particiones no se leen como 500 tablas | `breakdown.page` desde `sites_page` | una decisión de presentación fija en el núcleo |
+| `test_the_module_states_its_own_page_size` | Cuántas filas se dibujan de una vez es presentación, y 6 particiones no se leen como 500 tablas | `breakdown.page` desde `breakdown_page` | una decisión de presentación fija en el núcleo |
 | `test_the_status_bar_only_gets_a_marker_when_one_is_configured` | La barra de Status queda neutra si no hay umbral | `alert` solo cuando se fija | marcador que nadie pidió |
+| `test_onedrive_says_who_is_using_the_space` | El informe de almacenamiento da un total y nada sobre quién lo compone; el de **detalle por cuenta** es una fila por persona | desglose + `accounts`/`deleted` | «OneDrive ocupa 2 TB» sin poder preguntar quién |
+| `test_each_account_is_measured_against_its_own_quota` | **Captura**: las cuotas de OneDrive son POR PERSONA (1 TB, 5 TB) y no comparten pool; repartir sobre el total del tenant no dice si alguien se está quedando sin sitio | 87.9 % y 9.8 %, con el orden por bytes usados | una barra que no contesta la única pregunta por cuenta |
+| `test_the_list_is_ordered_by_what_it_draws` | **Captura**: varias filas al 0 % y de pronto una al 5 %. El orden era por bytes y la barra ya era la cuota propia, así que 50 GB de 1 TB quedaba por debajo de 200 GB de 5 TB | ordena por lo que dibuja; los bytes desempatan | un orden real pero invisible, que se lee como lista sin ordenar |
+| `test_equal_quotas_still_order_by_size` | El tenant normal da la misma cuota a todos, y ahí los dos órdenes son la misma lista | mismo orden que antes | temer el cambio sin motivo |
+| `test_a_pooled_list_still_orders_by_bytes` | La barra de SharePoint es share del conjunto, luego los bytes SÍ son lo que dibuja | el grande primero, no el más lleno | arrastrar el cambio a donde no toca |
+| `test_a_concealed_onedrive_report_is_named_from_the_users_api` | Una cuenta no tiene identificador que sobreviva a la ocultación Y esté en el directorio: el UPN **es** el identificador, y es lo que se convierte en hash | sin cruce que intentar, se miden las cuentas (`/users/{id}/drive`) | copiar el cruce de sitios donde no aplica |
+| `test_a_concealed_onedrive_report_still_produces_a_usable_list` | Sin nombres y sin nadie enumerable | filas numeradas + nota | una columna de hashes |
+| `test_onedrive_stores_what_it_was_told_to` | `accounts_top` es decisión propia porque estas filas nombran PERSONAS | tope propio, y 0 no guarda ninguna | reutilizar el tope de sitios para otra cosa |
 | `test_init` | Inicialización del módulo | `name_module == 'watchfuls.m365'` | nombre distinto |
 | `test_schema` | Esquema: secret sensible, unidades, `__status_render__` | flags correctos | esquema incorrecto |
 | `test_test_connection` | Acción test_connection con token/site/drive mockeados | `ok=True`, mensaje con `25.0%` | fallo |

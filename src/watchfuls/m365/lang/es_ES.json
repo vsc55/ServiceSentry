@@ -45,8 +45,9 @@
         "tenant_pct": "Aviso al % ocupado",
         "tenant_warn_at": "Aviso al llegar a",
         "sites_top": "Sitios a guardar",
-        "sites_page": "Sitios por página",
-        "tenant_warn_unit": "Unidad (aviso)"
+        "tenant_warn_unit": "Unidad (aviso)",
+        "accounts_top": "Cuentas a guardar",
+        "breakdown_page": "Filas por página"
     },
     "hints": {
         "enabled": "Habilita o deshabilita esta conexión de Microsoft 365.",
@@ -91,7 +92,9 @@
         "tenant_pct": "Avisa cuando el porcentaje ocupado alcanza este valor. 0 = desactivado. El error al 100 % es fijo y no depende de esto.",
         "tenant_warn_at": "Avisa cuando lo ocupado alcanza esta cantidad, sea cual sea el porcentaje. 0 = desactivado. Para cuando lo que importa es el volumen y no la fracción.",
         "sites_top": "Cuántos sitios del desglose se guardan en cada ciclo. En blanco hereda el valor del módulo; 0 no guarda ninguno y el desglose aparece solo al pulsar «Actualizar ahora», que consulta en vivo y los trae todos.",
-        "tenant_warn_unit": "Unidad de la cantidad de aviso (MB, GB o TB)."
+        "tenant_warn_unit": "Unidad de la cantidad de aviso (MB, GB o TB).",
+        "accounts_top": "Cuántas cuentas del desglose de OneDrive se guardan en cada ciclo. En blanco hereda el valor del módulo; 0 no guarda ninguna y la lista aparece solo al pulsar «Actualizar ahora». Estas filas nombran a PERSONAS y cuánto ocupa cada una: guardarlas cada ciclo no es lo mismo que guardar una lista de URLs.",
+        "breakdown_page": "Cuántas filas dibuja la página de una vez en cualquier desglose, con un botón para seguir. No afecta a lo que se guarda."
     },
     "group_labels": {
         "general": "General",
@@ -147,7 +150,7 @@
         "m3_mbx_over": "M365: {} — {} buzón(es) sobre cuota ({} avisados) ⚠️",
         "m3_mbx_ok": "M365: {} — ningún buzón sobre cuota ({} avisados) ✅",
         "m3_od_fail": "M365: {} 🔽 [OneDrive: {}]",
-        "m3_od_base": "M365: {} — OneDrive (tenant) usado {}",
+        "m3_od_base": "M365: {} — OneDrive: {} cuentas · {} usados",
         "m3_od_over": "{} — supera el límite {} ⚠️",
         "m3_od_limit_suffix": " (límite {})",
         "m3_score_fail": "M365: {} 🔽 [Secure Score: {}]",
@@ -187,7 +190,12 @@
         "m3_sp_site_n": "Sitio {}",
         "m3_sp_from_api": "Nombres y tamaños leídos de la API de sitios: los informes de este tenant ocultan los nombres. No incluye los sitios eliminados, que sí cuentan en el total.",
         "m3_sp_anon": "El tenant oculta los nombres en los informes (Centro de administración → Configuración → Informes → «Mostrar nombres ocultos»). Los datos son reales; los nombres, no.",
-        "m3_sp_site_dup": "{} · {}"
+        "m3_sp_site_dup": "{} · {}",
+        "m3_od_breakdown": "Uso por cuenta",
+        "m3_od_acct_n": "Cuenta {}",
+        "m3_od_acct_dup": "{} · {}",
+        "m3_od_anon": "El tenant oculta los nombres en los informes (Centro de administración → Configuración → Informes → «Mostrar nombres ocultos»). Los datos son reales; los nombres, no.",
+        "m3_od_from_api": "Nombres y tamaños leídos de la API de usuarios: los informes de este tenant ocultan los nombres. No incluye cuentas eliminadas, que sí cuentan en el total."
     },
     "messages_vars": {
         "m3_no_creds": [
@@ -293,6 +301,7 @@
         ],
         "m3_od_base": [
             "conexión",
+            "cuentas",
             "usado"
         ],
         "m3_od_over": [
@@ -462,7 +471,17 @@
         "m3_sp_site_dup": [
             "identificador",
             "nº entre los que lo comparten"
-        ]
+        ],
+        "m3_od_breakdown": [],
+        "m3_od_acct_n": [
+            "posición"
+        ],
+        "m3_od_acct_dup": [
+            "nombre",
+            "nº"
+        ],
+        "m3_od_anon": [],
+        "m3_od_from_api": []
     },
     "widget": {
         "checks": "Comprobaciones",

@@ -13,6 +13,7 @@ from unittest.mock import patch
 from conftest import create_mock_monitor
 
 GB = 1024 ** 3
+TB = 1024 ** 4
 
 
 def _drive(total, used, remaining=None):
@@ -198,6 +199,25 @@ class TestSite:
         assert 'm1' not in res
         assert res['m1/site']['status'] is False
         assert res['m1/tenant']['status'] is False
+
+
+def _accounts(*people, anon=False) -> str:
+    """A `getOneDriveUsageAccountDetail` CSV: one row per PERSON, the same shape as the site
+    detail report. `people` are `(used, allocated)` pairs, optionally `(used, allocated,
+    deleted)`.
+
+    `anon=True` is the concealed tenant: the principal name comes back as a hash, and a hash
+    with no `@` in it is not a sign-in name."""
+    head = ('Report Refresh Date,Site Id,Owner Principal Name,Owner Display Name,Is Deleted,'
+            'Storage Used (Byte),Storage Allocated (Byte),Report Period\n')
+    rows = ''
+    for i, p in enumerate(people):
+        used, alloc = p[0], p[1]
+        deleted = 'True' if len(p) > 2 and p[2] else 'False'
+        upn = f'HASH{i}' if anon else f'user{i}@contoso.com'
+        name = '' if anon else f'User {i}'
+        rows += f'2024-01-01,sid{i},{upn},{name},{deleted},{used},{alloc},7\n'
+    return head + rows
 
 
 def _detail_concealed(*sites, owner='HASHOWNER', ids=None) -> str:
@@ -580,7 +600,7 @@ class TestTenantTotal:
         does not read like one of 500 tables — so the module states it and the core honours
         it, exactly as it is told which two measurements make a ring."""
         res = _run(_item(check_site=False, check_tenant_usage=True),
-                   csv_text=_detail((3 * GB, 10 * GB)), module_cfg={'sites_page': 10})
+                   csv_text=_detail((3 * GB, 10 * GB)), module_cfg={'breakdown_page': 10})
         assert res['m1/tenant']['other_data']['breakdown']['page'] == 10
 
     def test_the_status_bar_only_gets_a_marker_when_one_is_configured(self):
@@ -761,11 +781,20 @@ class TestExtendedChecks:
     Secure Score and risky users. Each is opt-in and emits under <item>/<suffix>."""
 
     @staticmethod
-    def _run(item, *, jbp=None, tbp=None, pbp=None):
+    def _run(item, *, jbp=None, tbp=None, pbp=None, bbp=None):
         from watchfuls.m365 import Watchful
         cfg = {'watchfuls.m365': {'threads': 1, 'alert': 1, 'list': {'m1': item}}}
         w = Watchful(create_mock_monitor(cfg))
-        jbp, tbp, pbp = jbp or {}, tbp or {}, pbp or {}
+        jbp, tbp, pbp, bbp = jbp or {}, tbp or {}, pbp or {}, bbp or {}
+
+        def fake_batch(_tok, paths, _to):
+            # Keyed by path fragment like the others: {'/users/u1/drive': {quota…}}
+            out = {}
+            for path in paths:
+                quota = next((r for frag, r in bbp.items() if frag in path), None)
+                if quota is not None:
+                    out[path] = {'quota': quota}
+            return out
 
         def fake_json(tok, path, to):
             return next((r for frag, r in jbp.items() if frag in path), {})
@@ -779,6 +808,7 @@ class TestExtendedChecks:
         with patch.object(w, '_get_token', side_effect=lambda *a: 'tok'), \
              patch.object(w, '_graph_json', side_effect=fake_json), \
              patch.object(w, '_paged', side_effect=fake_paged), \
+             patch.object(Watchful, '_graph_batch', side_effect=fake_batch), \
              patch.object(w, '_graph_text', side_effect=fake_text):
             return w.check().list
 
@@ -1042,17 +1072,111 @@ class TestExtendedChecks:
 
     # ── OneDrive usage ───────────────────────────────────────────────
     def test_onedrive_over_limit_warns(self):
-        csv_text = 'Report Refresh Date,Storage Used (Byte)\n2024-01-01,%d\n' % (2 * 1024 ** 4)
-        res = self._run(_item(check_site=False, check_onedrive=True, onedrive_max=1, onedrive_unit='TB'),
-                        tbp={'OneDriveUsageStorage': csv_text})
+        res = self._run(_item(check_site=False, check_onedrive=True, onedrive_max=1,
+                              onedrive_unit='TB'),
+                        tbp={'OneDriveUsageAccountDetail': _accounts((2 * TB, TB))})
         assert res['m1/onedrive']['status'] is False
         assert res['m1/onedrive']['severity'] == 'warning'
 
     def test_onedrive_informational_ok(self):
-        csv_text = 'Report Refresh Date,Storage Used (Byte)\n2024-01-01,1000\n'
         res = self._run(_item(check_site=False, check_onedrive=True, onedrive_max=0),
-                        tbp={'OneDriveUsageStorage': csv_text})
+                        tbp={'OneDriveUsageAccountDetail': _accounts((1000, TB))})
         assert res['m1/onedrive']['status'] is True
+
+    def test_onedrive_says_who_is_using_the_space(self):
+        """The storage report publishes a tenant total and nothing about who makes it up. The
+        ACCOUNT DETAIL report is one row per person, which is the question that always follows
+        "OneDrive holds 2 TB"."""
+        res = self._run(_item(check_site=False, check_onedrive=True),
+                        tbp={'OneDriveUsageAccountDetail':
+                             _accounts((300 * GB, TB), (900 * GB, TB), (10 * GB, TB))})
+        od = res['m1/onedrive']['other_data']
+        b = od['breakdown']
+        assert od['used_bytes'] == 1210 * GB and od['accounts'] == 3
+        assert [i['name'] for i in b['items']] == ['user1@contoso.com', 'user0@contoso.com',
+                                                   'user2@contoso.com']
+
+    def test_each_account_is_measured_against_its_own_quota(self):
+        """Reported from a screenshot: OneDrive quotas are PER PERSON — 1 TB, 5 TB — and the
+        accounts share no pool. A share of the tenant total would say nothing about whether
+        that person is about to run out, which is the only per-account question worth asking.
+        Ordering stays by bytes used: the list is opened to find who occupies the space."""
+        res = self._run(_item(check_site=False, check_onedrive=True),
+                        tbp={'OneDriveUsageAccountDetail':
+                             _accounts((900 * GB, TB), (500 * GB, 5 * TB))})
+        items = res['m1/onedrive']['other_data']['breakdown']['items']
+        assert [i['pct'] for i in items] == [87.9, 9.8]
+
+    def test_the_list_is_ordered_by_what_it_draws(self):
+        """Reported from a screenshot: several rows at 0 % and then, out of nowhere, one at
+        5 %. The order was by bytes while the bar had become each account's own fullness, so
+        50 GB of 1 TB sorted below 200 GB of 5 TB — the order was there and invisible.
+
+        A list is ordered by what it draws. Bytes still break the ties, so a tenant whose
+        quotas are all equal gets exactly the same list as before."""
+        res = self._run(_item(check_site=False, check_onedrive=True),
+                        tbp={'OneDriveUsageAccountDetail':
+                             _accounts((200 * GB, 5 * TB), (50 * GB, TB))})
+        items = res['m1/onedrive']['other_data']['breakdown']['items']
+        assert [i['pct'] for i in items] == [4.9, 3.9], 'the percentages do not descend'
+        assert items[0]['name'] == 'user1@contoso.com'    # the fuller account, not the bigger
+
+    def test_equal_quotas_still_order_by_size(self):
+        """The ordinary tenant gives everyone the same quota, and there the two orders are the
+        same list — which is what makes changing it safe."""
+        res = self._run(_item(check_site=False, check_onedrive=True),
+                        tbp={'OneDriveUsageAccountDetail':
+                             _accounts((10 * GB, TB), (900 * GB, TB), (300 * GB, TB))})
+        names = [i['name'] for i in res['m1/onedrive']['other_data']['breakdown']['items']]
+        assert names == ['user1@contoso.com', 'user2@contoso.com', 'user0@contoso.com']
+
+    def test_a_pooled_list_still_orders_by_bytes(self):
+        """SharePoint's bar is a share of the whole, so bytes ARE what it draws — the change
+        must not follow it there."""
+        from watchfuls.m365 import Watchful
+        w = Watchful(create_mock_monitor({'watchfuls.m365': {'list': {}}}))
+        rows = [{'name': 'small-but-full', 'used': GB, 'quota': GB, 'deleted': False,
+                 'anon': False},
+                {'name': 'big', 'used': 50 * GB, 'quota': 500 * GB, 'deleted': False,
+                 'anon': False}]
+        out = w._usage_breakdown(rows, 100 * GB, Watchful._SP_KEYS)
+        assert [i['name'] for i in out['items']] == ['big', 'small-but-full']
+
+    def test_a_concealed_onedrive_report_is_named_from_the_users_api(self):
+        """Unlike a site, an account has no identifier in the report that survives concealment
+        AND appears in the directory: the principal name IS the identifier, and it is what gets
+        hashed. So there is no join to try — the accounts are asked directly."""
+        res = self._run(_item(check_site=False, check_onedrive=True),
+                        tbp={'OneDriveUsageAccountDetail': _accounts((300 * GB, TB), anon=True)},
+                        pbp={'/users': [{'id': 'u1', 'userPrincipalName': 'ana@contoso.com'}]},
+                        bbp={'/users/u1/drive': {'used': 300 * GB, 'total': TB}})
+        b = res['m1/onedrive']['other_data']['breakdown']
+        assert [i['name'] for i in b['items']] == ['ana@contoso.com']
+        assert 'note' in b, 'a list from another source, with no deleted accounts, must say so'
+
+    def test_a_concealed_onedrive_report_still_produces_a_usable_list(self):
+        """With nothing to name them by and nobody enumerable, the rows are numbered rather
+        than left reading as a column of hashes."""
+        res = self._run(_item(check_site=False, check_onedrive=True),
+                        tbp={'OneDriveUsageAccountDetail':
+                             _accounts((300 * GB, TB), (10 * GB, TB), anon=True)})
+        b = res['m1/onedrive']['other_data']['breakdown']
+        names = [i['name'] for i in b['items']]
+        assert len(set(names)) == 2 and 'HASH' not in ' '.join(names)
+        assert 'note' in b
+
+    def test_onedrive_stores_what_it_was_told_to(self):
+        """These rows name PEOPLE and how much each one keeps: what gets written every cycle
+        is its own decision, separate from the site list's."""
+        csv = _accounts(*[((i + 1) * GB, TB) for i in range(30)])
+        few = self._run(_item(check_site=False, check_onedrive=True, accounts_top=4),
+                        tbp={'OneDriveUsageAccountDetail': csv})
+        b = few['m1/onedrive']['other_data']['breakdown']
+        assert len(b['items']) == 4 and b['more'] == 26
+        none = self._run(_item(check_site=False, check_onedrive=True, accounts_top=0),
+                         tbp={'OneDriveUsageAccountDetail': csv})
+        assert 'breakdown' not in none['m1/onedrive']['other_data']
+        assert none['m1/onedrive']['other_data']['used_bytes'] > 0
 
     # ── Secure Score ─────────────────────────────────────────────────
     def test_secure_score_below_min_warns(self):

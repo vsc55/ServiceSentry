@@ -45,8 +45,9 @@
         "tenant_pct": "Warn at % used",
         "tenant_warn_at": "Warn when it reaches",
         "sites_top": "Sites to store",
-        "sites_page": "Sites per page",
-        "tenant_warn_unit": "Unit (warning)"
+        "tenant_warn_unit": "Unit (warning)",
+        "accounts_top": "Accounts to store",
+        "breakdown_page": "Rows per page"
     },
     "hints": {
         "enabled": "Enable or disable this Microsoft 365 connection.",
@@ -91,7 +92,9 @@
         "tenant_pct": "Warn when the percentage occupied reaches this value. 0 = off. The failure at 100% is fixed and does not depend on this.",
         "tenant_warn_at": "Warn when the amount occupied reaches this figure, whatever the percentage. 0 = off. For when what matters is the volume rather than the fraction.",
         "sites_top": "How many breakdown sites are stored each cycle. Blank inherits the module value; 0 stores none and the list appears only on \"Refresh now\", which queries live and brings them all.",
-        "tenant_warn_unit": "Unit of the warning amount (MB, GB or TB)."
+        "tenant_warn_unit": "Unit of the warning amount (MB, GB or TB).",
+        "accounts_top": "How many OneDrive breakdown accounts are stored each cycle. Blank inherits the module value; 0 stores none and the list appears only on \"Refresh now\". These rows name PEOPLE and how much each one keeps: storing them every cycle is not the same as storing a list of URLs.",
+        "breakdown_page": "How many rows the page draws at once in any breakdown, with a button for the rest. It does not affect what is stored."
     },
     "group_labels": {
         "general": "General",
@@ -147,7 +150,7 @@
         "m3_mbx_over": "M365: {} — {} mailbox(es) over quota ({} warned) ⚠️",
         "m3_mbx_ok": "M365: {} — no mailboxes over quota ({} warned) ✅",
         "m3_od_fail": "M365: {} 🔽 [OneDrive: {}]",
-        "m3_od_base": "M365: {} — OneDrive (tenant) used {}",
+        "m3_od_base": "M365: {} — OneDrive: {} accounts · {} used",
         "m3_od_over": "{} — over the limit {} ⚠️",
         "m3_od_limit_suffix": " (limit {})",
         "m3_score_fail": "M365: {} 🔽 [Secure Score: {}]",
@@ -187,7 +190,12 @@
         "m3_sp_site_n": "Site {}",
         "m3_sp_from_api": "Names and sizes read from the Sites API: this tenant conceals names in reports. Deleted sites are not listed here, though they do count towards the total.",
         "m3_sp_anon": "This tenant conceals names in reports (Microsoft 365 admin centre → Settings → Reports → \"Display concealed user, group and site names\"). The figures are real; the names are not available.",
-        "m3_sp_site_dup": "{} · {}"
+        "m3_sp_site_dup": "{} · {}",
+        "m3_od_breakdown": "Usage per account",
+        "m3_od_acct_n": "Account {}",
+        "m3_od_acct_dup": "{} · {}",
+        "m3_od_anon": "This tenant conceals names in reports (Microsoft 365 admin centre → Settings → Reports → \"Display concealed user, group and site names\"). The figures are real; the names are not available.",
+        "m3_od_from_api": "Names and sizes read from the Users API: this tenant conceals names in reports. Deleted accounts are not listed here, though they do count towards the total."
     },
     "messages_vars": {
         "m3_no_creds": [
@@ -293,6 +301,7 @@
         ],
         "m3_od_base": [
             "connection",
+            "accounts",
             "used"
         ],
         "m3_od_over": [
@@ -462,7 +471,17 @@
         "m3_sp_site_dup": [
             "identifier",
             "nth among those sharing it"
-        ]
+        ],
+        "m3_od_breakdown": [],
+        "m3_od_acct_n": [
+            "position"
+        ],
+        "m3_od_acct_dup": [
+            "name",
+            "nth"
+        ],
+        "m3_od_anon": [],
+        "m3_od_from_api": []
     },
     "widget": {
         "checks": "Checks",

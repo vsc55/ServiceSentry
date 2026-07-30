@@ -8,6 +8,43 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.31] - 2026-07-30
+
+### Added
+- **OneDrive says who is using the space.** The check read `getOneDriveUsageStorage`, which
+  publishes a tenant total and nothing about who makes it up — so "OneDrive holds 2 TB" could
+  not be followed by the question it always provokes. It now reads the **account detail**
+  report, one row per person, and gets the same breakdown SharePoint has: biggest first, with
+  the account count and how many of them are deleted beside the total.
+- **Each account's bar is against ITS OWN quota.** OneDrive quotas are per person — 1 TB,
+  5 TB — and the accounts share no pool, so a share of the tenant total would say nothing
+  about whether anyone is about to run out. The pooled share stays for SharePoint, whose sites
+  really do draw from one tenant quota. Ordering is by bytes used in both: the list is opened
+  to find who occupies the space, which is a question about size, not about fullness.
+- **A list is ordered by what it draws.** With the bar now showing each account's own
+  fullness, ordering by bytes made the order invisible: 50 GB of 1 TB (5 %) sorted below
+  200 GB of 5 TB (4 %), so the column read as unsorted — several rows at 0 % and then, out of
+  nowhere, one at 5 %. The per-quota list orders by fullness and the pooled one still orders
+  by bytes, each by what its own bar shows. Bytes break the ties, so a tenant whose quotas are
+  all equal — the ordinary one — gets exactly the same list as before.
+- Concealed reports are handled here too, with one difference: an account has no identifier
+  that survives concealment AND appears in the directory — the principal name IS the
+  identifier and it is what gets hashed — so there is no join to try and the accounts are
+  measured directly (`/users/{id}/drive`, batched). Failing that, the rows are numbered.
+- `accounts_top` is its own setting rather than sharing the site one, because it is not the
+  same decision: these rows name PEOPLE and how much each one keeps, which is a different
+  thing to write to a database every cycle than a list of site URLs. Same three states —
+  blank inherits, a number caps, 0 stores none.
+
+### Changed
+- `sites_page` is now `breakdown_page`: it governs both lists, and a name that says "sites"
+  while paging accounts is the kind of small lie that costs an hour later.
+- The breakdown builder takes its nouns as a parameter (`_SP_KEYS` / `_OD_KEYS`). Same list,
+  same maths, different words — a message that calls a person "site 4" is not a translation
+  away from right.
+- `_measure_drives` replaces `_measure_sites`: `/sites/{id}/drive` and `/users/{id}/drive` are
+  the same question asked of two collections, and only the path and the label differ.
+
 ## [0.0.1+build.30] - 2026-07-30
 
 ### Added

@@ -85,13 +85,25 @@ class StorageChecks:
                        self._msg('m3_site_alert', label, summary, ', '.join(why)),
                        extra, severity='warning')
 
-    # Fallbacks for the two per-site bounds, used only when the schema is unreadable — the
-    # real values are `sites_top`/`sites_page` in __module__, overridable per item.
+    # Fallbacks for the breakdown bounds, used only when the schema is unreadable — the real
+    # values are `sites_top` / `accounts_top` / `breakdown_page` in __module__, the first two
+    # overridable per item.
     _SITES_TOP = 25
     _SITES_PAGE = 25
 
-    def _sites_kept(self, it: dict) -> int:
-        """How many per-site rows this item STORES in a check result.
+    # The two vocabularies a breakdown can speak. Same list, same maths, different nouns: one
+    # is naming sites and the other is naming PEOPLE, and a message that calls a person "site
+    # 4" is not a translation away from right. Kept side by side so the pair can be read at
+    # once rather than reconstructed from a prefix.
+    _SP_KEYS = {'label': 'm3_sp_breakdown', 'row_n': 'm3_sp_site_n', 'dup': 'm3_sp_site_dup',
+                'of_quota': 'm3_sp_site_of_quota', 'anon': 'm3_sp_anon',
+                'measured': 'm3_sp_from_api'}
+    _OD_KEYS = {'label': 'm3_od_breakdown', 'row_n': 'm3_od_acct_n', 'dup': 'm3_od_acct_dup',
+                'of_quota': 'm3_sp_site_of_quota', 'anon': 'm3_od_anon',
+                'measured': 'm3_od_from_api'}
+
+    def _rows_kept(self, it: dict, field: str) -> int:
+        """How many breakdown rows this item STORES in a check result.
 
         Three states, and they are three different intentions: blank inherits the module's
         value (the ordinary case), a number caps the list, and **0 stores none** — the
@@ -101,14 +113,23 @@ class StorageChecks:
 
         `inherit_blank` is what makes the three distinguishable — clearing the field stores
         null, and an explicit 0 stays a real value rather than collapsing into "unset".
+
+        Per breakdown, not per module, because they are not the same decision: the OneDrive
+        list names PEOPLE and how much each one keeps, which is a different thing to write to
+        a database every five minutes than a list of site URLs.
         """
-        raw = it.get('sites_top')
+        raw = it.get(field)
         if raw in (None, ''):
-            return max(self.module_default('sites_top', self._SITES_TOP), 0)
+            return max(self.module_default(field, self._SITES_TOP), 0)
         try:
             return max(int(raw), 0)
         except (TypeError, ValueError):
             return self._SITES_TOP
+
+    def _breakdown_page(self) -> int:
+        """How many rows the page draws at once. Module-wide: it is presentation, and the
+        same eyes read both lists."""
+        return max(self.module_default('breakdown_page', self._SITES_PAGE), 1)
 
     def _tenant_totals(self, token: str, timeout: int):
         """``(used, allocated, sites, deleted, rows)`` for SharePoint across the whole tenant.
@@ -143,7 +164,7 @@ class StorageChecks:
             # column of dashes. What is left is kept as the label and as a join key, but a
             # HASH is not a name: the owner's is shared by every site that person owns, and a
             # concealed site id comes back as the zero GUID, identical on every row. Neither
-            # is an identifier, so neither is shown — `_site_breakdown` numbers instead.
+            # is an identifier, so neither is shown — `_usage_breakdown` numbers instead.
             sid = _cell(r, i_id)
             if not sid.replace('-', '').strip('0'):
                 sid = ''
@@ -222,79 +243,106 @@ class StorageChecks:
                 named += 1
         if named:
             return sites, False
-        measured = self._measure_sites(listed, token, timeout)
+        measured = self._measure_drives(listed, '/sites', self._site_label, token, timeout)
         return (measured, True) if measured else (sites, False)
 
-    def _measure_sites(self, listed: list, token: str, timeout: int) -> list:
-        """Per-site usage read from the SITES themselves, in the report's row shape.
+    def _measure_drives(self, listed: list, base: str, label, token: str, timeout: int) -> list:
+        """Per-object usage read from the OBJECTS themselves, in the report's row shape.
 
-        The drive quota is a live read of each site collection, so it neither lags a day nor
-        obeys the reports' concealment.  Sites in the recycle bin are not enumerated, which
-        is why this is a fallback and never the source of the tenant TOTAL: that stays the
-        report's sum, deleted sites included.
+        The drive quota is a live read, so it neither lags a day nor obeys the reports'
+        concealment.  What is not enumerated is not measured — sites in the recycle bin,
+        accounts of deleted users — which is why this is a fallback and never the source of a
+        TOTAL: that stays the report's sum, with those included.
+
+        One method for sites and mailbox accounts because ``/sites/{id}/drive`` and
+        ``/users/{id}/drive`` are the same question asked of two collections; only the path
+        and what to call a row differ.
         """
         if not listed or len(listed) > self._SITES_PROBE_MAX:
             return []
         names = {}
         for s in listed:
-            sid = str(s.get('id') or '').strip()
-            if sid:
-                names[f'/sites/{sid}/drive?$select=quota'] = self._site_label(s)
+            oid = str(s.get('id') or '').strip()
+            if oid:
+                names[f'{base}/{oid}/drive?$select=quota'] = label(s)
         rows = []
         for path, body in self._graph_batch(token, list(names), timeout).items():
             quota = (body or {}).get('quota') or {}
             if quota.get('used') is None:
-                continue                      # a site with no document library says nothing
+                continue                      # an object with no drive says nothing
             rows.append({'name': names.get(path, ''), 'sid': '', 'anon': False,
                          'used': int(quota.get('used') or 0),
                          'quota': int(quota.get('total') or 0), 'deleted': False})
         return rows
 
-    def _site_breakdown(self, sites: list, total: int, probed: bool = False,
-                        limit: int = None, page: int = 0) -> dict:
-        """The per-site list the page can unfold: who is occupying the total, biggest first.
+    def _usage_breakdown(self, rows: list, total: int, keys: dict, probed: bool = False,
+                         limit: int = None, page: int = 0, own_quota: bool = False) -> dict:
+        """The list the page can unfold: who is occupying the total, biggest first.
 
-        The percentage is each site's share of the TENANT total, not of its own quota — that
-        is the question this list is opened with ("of the whole, how much is this one"), and
-        the site's own quota is beside it as text for the cases where it matters.
+        The percentage answers a different question for each of the two lists, because the
+        storage behind them is shared in one case and not in the other:
 
-        …of the total OR of what is actually occupied, whichever is larger.  A tenant can be
-        over its capacity (a typed `tenant_max` that is out of date, or a real overage), and
-        then a share of capacity exceeds 100 % for the big sites: the bar clamps them and a
-        3.4 TB site is drawn exactly like a 1.0 TB one.  Falling back to the occupied total
-        keeps the bars proportional to each other and still summing to the whole — the ring
-        above is where "667 % of capacity" belongs, not here.
+        * **SharePoint** sites draw from one POOLED tenant quota, so the share that matters is
+          of the whole ("of everything, how much is this one") and the site's own quota is
+          beside it as text. The bars then compose with the ring above.
+        * **OneDrive** accounts each have their OWN quota — 1 TB, 5 TB — and no pool anyone
+          can exhaust between them. A share of the tenant total would say nothing about
+          whether that person is about to run out, which is the only per-account question
+          worth asking. So with `own_quota` the bar is used-against-that-person's-quota.
+
+        **A list is ordered by what it draws.** Otherwise the order is invisible: with mixed
+        quotas, 50 GB of 1 TB (5 %) sorts below 200 GB of 5 TB (4 %) and the column reads as
+        unsorted — several rows at 0 % and then, out of nowhere, one at 5 %. So the pooled
+        list orders by bytes, which is what its bar shows, and the per-quota one orders by how
+        full each row is, which is what ITS bar shows. Bytes break the ties, so where the
+        quotas are equal — the ordinary tenant — the two orders are the same list.
+
+        The pooled share is of the total OR of what is actually occupied, whichever is larger.
+        A tenant can be over its capacity (a typed `tenant_max` that is out of date, or a real
+        overage), and then a share of capacity exceeds 100 % for the big sites: the bar clamps
+        them and a 3.4 TB site is drawn exactly like a 1.0 TB one.  Falling back to the
+        occupied total keeps the bars proportional to each other and still summing to the
+        whole — the ring above is where "667 % of capacity" belongs, not here.
 
         `limit` is how many rows are worth STORING and `page` how many are worth DRAWING at
         once; the two are different questions and only the first costs anything per cycle.
         `limit=None` keeps every row, which is what a live read wants: it is not stored.
+
+        `keys` is the vocabulary (_SP_KEYS / _OD_KEYS): the maths is the same for sites and
+        for mailbox accounts, the nouns are not.
         """
-        base = max(total, sum(s['used'] for s in sites))
-        ordered = sorted(sites, key=lambda s: s['used'], reverse=True)
+        base = max(total, sum(s['used'] for s in rows))
+
+        def _rank(s):
+            share = (s['used'] / s['quota']) if (own_quota and s['quota']) else 0.0
+            return (share, s['used'])
+
+        ordered = sorted(rows, key=_rank, reverse=True)
         top = ordered[:limit] if limit else ordered
         items = []
         seen: dict = {}
         for i, s in enumerate(top, 1):
             text = fmt_bytes(s['used'])
             if s['quota']:
-                text = self._msg('m3_sp_site_of_quota', text, fmt_bytes(s['quota']))
+                text = self._msg(keys['of_quota'], text, fmt_bytes(s['quota']))
             # Numbered when the tenant conceals every identifier: rows that all read "—" are
             # indistinguishable, and "site 3" at least lets one be pointed at.
-            name = s['name'] or self._msg('m3_sp_site_n', i)
+            name = s['name'] or self._msg(keys['row_n'], i)
             # …and numbered too when the identifier that survived is SHARED. A concealed
             # report can hand back the same hash for several rows, and a list where five
             # lines read identically is worse than one that admits it cannot name them: it
             # looks like the same site listed five times.
             seen[name] = seen.get(name, 0) + 1
             if seen[name] > 1:
-                name = self._msg('m3_sp_site_dup', name, seen[name])
+                name = self._msg(keys['dup'], name, seen[name])
+            denom = s['quota'] if own_quota else base
             items.append({
                 'name': name + (' 🗑' if s['deleted'] else ''),
                 'text': text,
-                'pct': round(s['used'] / base * 100, 1) if base else 0.0,
+                'pct': round(s['used'] / denom * 100, 1) if denom else 0.0,
             })
-        out = {'label': self._msg('m3_sp_breakdown'), 'items': items,
-               'more': max(len(sites) - len(top), 0)}
+        out = {'label': self._msg(keys['label']), 'items': items,
+               'more': max(len(rows) - len(top), 0)}
         if page:
             out['page'] = page
         # Say once where these rows come from, instead of leaving the reader to reconcile
@@ -302,9 +350,9 @@ class StorageChecks:
         # names, but no deleted ones and a live figure rather than the report's), or nothing
         # could name them — and then the reason is a tenant setting worth naming.
         if probed:
-            out['note'] = self._msg('m3_sp_from_api')
-        elif sites and all(s['anon'] for s in sites):
-            out['note'] = self._msg('m3_sp_anon')
+            out['note'] = self._msg(keys['measured'])
+        elif rows and all(s['anon'] for s in rows):
+            out['note'] = self._msg(keys['anon'])
         return out
 
     def _check_tenant(self, it: dict, key: str, label: str, token: str, timeout: int) -> None:
@@ -347,7 +395,7 @@ class StorageChecks:
         # A live read from the page is not stored anywhere, so the cap that exists to keep
         # check results small has nothing to protect: it answers with every site it found.
         live = bool(it.get('_live'))
-        kept = self._sites_kept(it)
+        kept = self._rows_kept(it, 'sites_top')
         if rows and (live or kept):
             # Names first, when the report concealed them — and only if it did.
             probed = False
@@ -355,9 +403,9 @@ class StorageChecks:
                 rows, probed = self._identify_sites(rows, token, timeout)
             except Exception:  # pylint: disable=broad-except
                 pass          # a naming failure must never cost the measurement
-            extra['breakdown'] = self._site_breakdown(
-                rows, total, probed, None if live else kept,
-                max(self.module_default('sites_page', self._SITES_PAGE), 1))
+            extra['breakdown'] = self._usage_breakdown(
+                rows, total, self._SP_KEYS, probed, None if live else kept,
+                self._breakdown_page())
         # Only advertise a Status-bar threshold when the % alert is actually set, so the bar
         # stays neutral instead of showing a marker nobody asked for (see __status_render__).
         if warn_pct > 0:
@@ -405,19 +453,99 @@ class StorageChecks:
         else:
             self._emit(f'{key}/mailbox', True, self._msg('m3_mbx_ok', label, warned), extra)
 
+    @staticmethod
+    def _account_label(u: dict) -> str:
+        """What to call a person's OneDrive. The sign-in name identifies them and is what an
+        admin will search the tenant for; the display name is what a human recognises."""
+        return str(u.get('userPrincipalName') or u.get('displayName') or '').strip()
+
+    def _enumerate_accounts(self, token: str, timeout: int) -> list:
+        """Every account the app can see. Lives here rather than beside ``_enumerate_sites``
+        (in actions.py) because no field picker asks for it — only this fallback does."""
+        return self._paged(
+            token, '/users?$select=id,displayName,userPrincipalName&$top=100', timeout)
+
+    def _onedrive_totals(self, token: str, timeout: int):
+        """``(used, accounts, deleted, rows)`` for OneDrive across the whole tenant.
+
+        The **account detail** report is one row per PERSON and carries what each one keeps,
+        which the storage report cannot answer: it publishes a tenant total and nothing about
+        who makes it up. Same report shape as SharePoint's site detail, so the same reader.
+        """
+        text = self._graph_text(
+            token, "/reports/getOneDriveUsageAccountDetail(period='D7')", timeout)
+        rows, i_used = _csv_col(text, 'Storage Used (Byte)')
+        _, i_alloc = _csv_col(text, 'Storage Allocated (Byte)')
+        _, i_upn = _csv_col(text, 'Owner Principal Name')
+        _, i_name = _csv_col(text, 'Owner Display Name')
+        _, i_del = _csv_col(text, 'Is Deleted')
+        out = []
+
+        def _cell(r, idx):
+            return r[idx].strip() if 0 <= idx < len(r) else ''
+
+        for r in rows[1:]:
+            if not any((c or '').strip() for c in r):
+                continue
+            # Concealment replaces the principal name with a hash and blanks nothing else
+            # usable, so an unnamed row is genuinely unnamed — see `_identify_accounts`.
+            upn = _cell(r, i_upn)
+            anon = '@' not in upn
+            out.append({
+                'name': '' if anon else upn,
+                'display': _cell(r, i_name), 'sid': '', 'anon': anon,
+                'used': _csv_int(r, i_used), 'quota': _csv_int(r, i_alloc),
+                'deleted': _cell(r, i_del).lower() == 'true',
+            })
+        return (_csv_sum(text, 'Storage Used (Byte)'), len(out),
+                sum(1 for a in out if a['deleted']), out)
+
+    def _identify_accounts(self, rows: list, token: str, timeout: int) -> tuple[list, bool]:
+        """Names for the accounts the report would not name.
+
+        There is no join to try here: unlike a site, an account has no identifier in the
+        report that survives concealment and appears in the directory too — the principal
+        name IS the identifier, and it is what gets hashed. So the one way across is to ask
+        the accounts themselves (``/users/{id}/drive``), batched, exactly as for sites.
+        """
+        if not [a for a in rows if a['anon']]:
+            return rows, False
+        measured = self._measure_drives(self._enumerate_accounts(token, timeout),
+                                        '/users', self._account_label, token, timeout)
+        return (measured, True) if measured else (rows, False)
+
     def _check_onedrive(self, it: dict, key: str, label: str, token: str, timeout: int) -> None:
-        """Tenant-wide OneDrive storage USED (reports API): warn when it exceeds
-        ``onedrive_max`` (0 = informational only)."""
+        """Tenant-wide OneDrive storage USED, and who is using it.
+
+        Warns when the total exceeds ``onedrive_max`` (0 = informational only). There is no
+        percentage and no "full": OneDrive quotas are PER PERSON, so the sum of them is not a
+        pool anyone can exhaust — "OneDrive is 3 % full" would be a sentence about nothing.
+        The question worth answering tenant-wide is who is using the space, and that is the
+        breakdown.
+        """
         try:
-            text = self._graph_text(token, "/reports/getOneDriveUsageStorage(period='D7')", timeout)
-            used = _csv_max(text, 'Storage Used (Byte)')
+            used, accounts, deleted, rows = self._onedrive_totals(token, timeout)
         except Exception as exc:  # pylint: disable=broad-except
             self._emit(f'{key}/onedrive', False, self._msg('m3_od_fail', label, exc),
                        {'name': f'{label} · OneDrive (tenant)'})
             return
         omax = to_bytes(it.get('onedrive_max'), it.get('onedrive_unit') or 'TB')
-        extra = {'name': f'{label} · OneDrive (tenant)', 'used_bytes': used, 'limit_bytes': omax}
-        base = self._msg('m3_od_base', label, fmt_bytes(used))
+        extra = {'name': f'{label} · OneDrive (tenant)', 'used_bytes': used,
+                 'limit_bytes': omax, 'accounts': accounts, 'deleted': deleted}
+        live = bool(it.get('_live'))
+        kept = self._rows_kept(it, 'accounts_top')
+        if rows and (live or kept):
+            probed = False
+            try:
+                rows, probed = self._identify_accounts(rows, token, timeout)
+            except Exception:  # pylint: disable=broad-except
+                pass          # a naming failure must never cost the measurement
+            # Each bar is that person against THEIR OWN quota: the accounts share no pool, so
+            # a share of the tenant total would not say whether anyone is about to run out.
+            extra['breakdown'] = self._usage_breakdown(
+                rows, omax, self._OD_KEYS, probed, None if live else kept,
+                self._breakdown_page(), own_quota=True)
+        base = self._msg('m3_od_base', label, accounts, fmt_bytes(used))
         if omax > 0 and used > omax:
             self._emit(f'{key}/onedrive', False, self._msg('m3_od_over', base, fmt_bytes(omax)),
                        extra, severity='warning')
