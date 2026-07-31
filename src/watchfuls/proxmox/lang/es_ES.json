@@ -31,9 +31,9 @@
         "check_ceph":        "Ceph",
         "check_network":     "Interfaces de red",
         "check_updates":     "Actualizaciones",
-        "updates_threshold": "Umbral de actualizaciones",
+        "updates_threshold": "Alerta si las actualizaciones pendientes superan",
         "check_storage":     "Almacenamiento",
-        "storage_threshold": "Umbral de uso (%)",
+        "storage_threshold": "Alerta al % de almacenamiento usado",
         "check_permissions": "Permisos del token",
         "allow_updates":     "Permitir check de actualizaciones (+Sys.Modify)"
     },

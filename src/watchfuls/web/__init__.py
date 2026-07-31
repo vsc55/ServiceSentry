@@ -119,7 +119,7 @@ class Watchful(ModuleBase):
         label = (it.get('label', '') or '').strip() or url
         scheme       = (it.get('scheme', '') or 'https').strip()
         verify_ssl   = bool(it.get('verify_ssl', True))
-        code_exp     = int(it.get('code', 0) or self.get_conf('code', self._MODULE_DEFAULTS['code']))
+        code_exp     = int(it.get('code', 0) or self.module_default('code', self._MODULE_DEFAULTS['code']))
         timeout      = it.get('timeout', 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         method           = str(it.get('method', 'GET') or 'GET').upper()
         check_content    = bool(it.get('check_content', False))

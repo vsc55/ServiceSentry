@@ -5,7 +5,7 @@
         "enabled":    "Enabled",
         "label":      "Label",
         "threads":    "Threads",
-        "max_offset": "Max offset (s)",
+        "max_offset": "Alert if the offset exceeds (s)",
         "timeout":    "Timeout (s)",
         "server":     "NTP server",
         "port":       "Port"

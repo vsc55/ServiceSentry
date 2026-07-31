@@ -4,41 +4,64 @@
     "labels": {
         "enabled": "Habilitado",
         "threads": "Hilos",
-        "alert":   "Alerta (°C)",
+        "alert": "Alerta (°C)",
         "timeout": "Timeout (s)",
-        "label":   "Etiqueta",
-        "host":    "Host",
-        "port":    "Puerto",
+        "label": "Etiqueta",
+        "host": "Host",
+        "port": "Puerto",
         "exclude": "Dispositivos excluidos"
     },
     "hints": {
-        "label":   "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
+        "label": "Nombre para mostrar en la interfaz. Si está vacío se usa la clave del ítem.",
         "threads": "Número de hosts a consultar en paralelo.",
-        "alert":   "Temperatura máxima (°C) antes de generar una alerta. Se aplica a todos los discos de los hosts que no tienen un umbral propio.",
+        "alert": "Temperatura máxima (°C) antes de generar una alerta. Se aplica a todos los discos de los hosts que no tienen un umbral propio.",
         "timeout": "Timeout de conexión TCP en segundos para cada demonio hddtemp.",
-        "host":    "Dirección IP o hostname del demonio hddtemp.",
-        "port":    "Puerto TCP en el que escucha el demonio hddtemp (por defecto 7634).",
+        "host": "Dirección IP o hostname del demonio hddtemp.",
+        "port": "Puerto TCP en el que escucha el demonio hddtemp (por defecto 7634).",
         "exclude": "Lista de rutas de dispositivos a ignorar, p. ej. [\"/dev/sdc\"]. Útil para omitir discos no monitorizados o problemáticos.",
         "enabled": "Habilitar o deshabilitar la monitorización de este host."
     },
     "new_item_key_label": "Nombre de host o identificador:",
     "rename_item_prompt": "Introduce el nuevo nombre de host o identificador:",
     "group_labels": {
-        "connection": "Conexión"
+        "connection": "Conexión",
+        "alerts": "Alertas"
     },
-    "collections": {"list": "Hosts"},
+    "collections": {
+        "list": "Hosts"
+    },
     "messages": {
-        "hdd_error":       "HDD: {} - Error: {} 💥",
-        "hdd_ok":          "({}): {} ({}º{}) 🔼",
-        "hdd_high":        "({}): {} ({}º{}) 🔽",
-        "hdd_bad":         "({}): {} ({}) 🔥🔥",
+        "hdd_error": "HDD: {} - Error: {} 💥",
+        "hdd_ok": "({}): {} ({}º{}) 🔼",
+        "hdd_high": "({}): {} ({}º{}) 🔽",
+        "hdd_bad": "({}): {} ({}) 🔥🔥",
         "hdd_query_error": "HddTemp: {} - Error: {} 🔽"
     },
     "messages_vars": {
-        "hdd_error": ["host", "error"],
-        "hdd_ok": ["host", "disco", "temp", "unidad"],
-        "hdd_high": ["host", "disco", "temp", "unidad"],
-        "hdd_bad": ["host", "disco", "valor"],
-        "hdd_query_error": ["host", "error"]
+        "hdd_error": [
+            "host",
+            "error"
+        ],
+        "hdd_ok": [
+            "host",
+            "disco",
+            "temp",
+            "unidad"
+        ],
+        "hdd_high": [
+            "host",
+            "disco",
+            "temp",
+            "unidad"
+        ],
+        "hdd_bad": [
+            "host",
+            "disco",
+            "valor"
+        ],
+        "hdd_query_error": [
+            "host",
+            "error"
+        ]
     }
 }

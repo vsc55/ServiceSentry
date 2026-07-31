@@ -2,8 +2,8 @@
     "__icon__": "bi-memory",
     "__module__": {
         "enabled":    {"type": "bool", "default": true},
-        "alert_ram":  {"type": "int",  "default": 60, "min": 0, "max": 100},
-        "alert_swap": {"type": "int",  "default": 60, "min": 0, "max": 100},
+        "alert_ram":  {"type": "int",  "default": 60, "inherit_blank": true, "min": 0, "max": 100},
+        "alert_swap": {"type": "int",  "default": 60, "inherit_blank": true, "min": 0, "max": 100},
         "threads":    {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
         "timeout":    {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600}
     },

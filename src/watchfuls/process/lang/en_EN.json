@@ -6,7 +6,7 @@
         "threads":   "Threads",
         "timeout":   "Timeout (s)",
         "process":   "Process name",
-        "min_count": "Minimum instances"
+        "min_count": "Alert if instances drop below"
     },
     "hints": {
         "enabled":   "Enable or disable process monitoring for this entry.",

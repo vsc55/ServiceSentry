@@ -75,16 +75,29 @@ class Watchful(StorageChecks, HealthChecks, IdentityChecks, PostureChecks,
     _MODULE_DEFAULTS = {k: v['default'] for k, v in _SCHEMA['__module__'].items()
                         if isinstance(v, dict) and 'default' in v}
 
+    def _threshold(self, it: dict, field: str, fallback: int = 0) -> int:
+        """A threshold, resolved item → module → its schema default.
+
+        Ten checks used to read `int(it.get(x) or 0)` and stop there, so their thresholds
+        existed only per item: with several tenants the same policy had to be typed into each
+        one, and three of them hid a different fallback in the code than the schema declared.
+        One chain, one place, and the module pane can finally offer them all.
+
+        Blank or 0 in the item means "use the module's" — the same rule `site_usage_pct` and
+        `site_free_min` have always followed, which is what the field's placeholder shows.
+        """
+        return int(it.get(field) or 0)             or self.module_default(field, self._MODULE_DEFAULTS.get(field, fallback))
+
     # App provisioning is the shared Entra ID device-code wizard (core), driven by the
     # module's __entraid_provision__ roles — not a watchful action here.
     WATCHFUL_ACTIONS: frozenset[str] = frozenset(
         {'test_connection', 'list_sites', 'list_services', 'page_refresh',
-         'storage_report'})
+         'storage_report', 'sharepoint_settings'})
     # All read-only: they query Microsoft and change nothing here, so modules_view is
     # enough (a non-read-only action would additionally demand per-module edit).
     READ_ONLY_ACTIONS: frozenset[str] = frozenset(
         {'test_connection', 'list_sites', 'list_services', 'page_refresh',
-         'storage_report'})
+         'storage_report', 'sharepoint_settings'})
 
     # Per-service checks (extension point): add a (toggle, suffix, handler) triple here
     # + the toggle/fields in schema.json + the method in the matching checks_*.py, and a

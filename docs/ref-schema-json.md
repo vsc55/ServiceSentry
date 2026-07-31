@@ -711,6 +711,11 @@ del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
 Bool. Si es `true`, el check puede vincularse a **varios hosts** (selección múltiple).
 Por defecto `false`.
 
+Un campo numérico puede declarar `"unit_field": "<campo>"`: el selector de unidad se dibuja
+**pegado a la caja del importe** en vez de en una fila propia, y ese campo deja de tener fila
+(sigue guardándose igual). Es lo que convierte «Alerta si el libre baja de / Unidad» en una
+sola línea. Se declara, no se deduce del sufijo `_unit`.
+
 ### `__page__`
 
 Declara que el módulo reclama una **sección de primer nivel propia**, al lado de Overview,

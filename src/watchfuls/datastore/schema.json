@@ -2,7 +2,7 @@
     "__icon__": "bi-database",
     "__module__": {
         "enabled":           {"type": "bool", "default": true},
-        "alert_connections": {"type": "int",  "default": 0, "min": 0, "max": 1000000},
+        "alert_connections": {"type": "int",  "default": 0, "inherit_blank": true, "min": 0, "max": 1000000},
         "threads":           {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
         "timeout":           {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
     },

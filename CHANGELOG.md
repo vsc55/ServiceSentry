@@ -8,6 +8,164 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.33] - 2026-07-31
+
+### Added
+- **The tenant is ASKED about its own storage settings** rather than having them deduced
+  (`/admin/sharepoint/settings`, read-only, `SharePointTenantSettings.Read.All`). Two things
+  this check used to guess at now come from the tenant itself:
+  `isSitesStorageLimitAutomatic`, which decides whether the per-site quotas mean anything at
+  all — a site at 25 TB is a ceiling under automatic management and a real quota under manual,
+  and nothing else can tell those apart — and `siteCreationDefaultStorageLimitInMB`, which IS
+  the ceiling, so the hardcoded 25 TB drops to the fallback it should always have been.
+  Unanswerable — no permission, any failure — keeps the old inference, which errs towards
+  "no capacity".
+
+- **A diagnostic action, `sharepoint_settings`**, that returns the tenant's SharePoint
+  settings verbatim. The pooled quota is the one number the storage check cannot obtain, and
+  how much of `/admin/sharepoint/settings` actually carries is a question about a live tenant
+  rather than about documentation — this answers it with the tenant's own reply instead of
+  anybody's recollection. Read-only, unfiltered on purpose, with the storage-looking
+  properties called out because the reader is hunting one number among twenty-odd.
+
+- **Warn when the free space drops below X** (`tenant_free_min` + `tenant_free_unit`), beside
+  the % and the absolute-used thresholds. It is the third way of asking the same question and
+  the one capacity is actually planned with: a percentage means different amounts as the
+  tenant grows, and "250 GB used" says nothing without knowing the capacity — "under 50 GB
+  free" survives both. Offered only where there IS a capacity: without a total there is no
+  "left", and a threshold that silently never fires is worse than one never offered.
+
+- **Every threshold has a module default now.** Ten of them existed only per item, so with
+  several tenants the same policy had to be typed into each one — and three hid a fallback in
+  the code (30/60/14 days) that the schema never declared. One helper resolves the chain the
+  way `site_usage_pct` always did, item → module → schema, and the module pane finally offers all
+  of them.
+- `global_admins_max` ships **5** as its module default, deliberately: a tenant with more than a
+  handful of Global Administrators is worth saying out loud whether or not anyone configured
+  it, and five is Microsoft's own guidance. The cost is stated rather than discovered — an
+  item left at 0 inherits it, so a tenant that had this alert off gets it back.
+- The other optional ones start at 0 in the module pane on purpose. A 0 in an item used to mean OFF
+  and now means "inherit": with an inherited 90 that would switch on an alert somebody
+  deliberately switched off. A fleet-wide policy is something an admin writes, never something
+  an upgrade decides for them.
+
+- **A module default can be cleared again.** `sites_top`, `accounts_top` and
+  `breakdown_page` had no `inherit_blank`, so emptying one restored the stored value on blur
+  and no placeholder said what a blank would fall back to. They store null now and show the
+  built-in default as the placeholder — which is what a blank at module level means: "use what
+  the system ships with". `alert` stays as it is: it is the consecutive-failure count with a
+  floor of 1, and "no threshold" is not a state that field has.
+- **The guard found twelve more across eight modules, and they are fixed too** — cpu, ntp,
+  ping, process, datastore, ram_swap, ssl_cert, ups and web. Not by setting the flag in bulk:
+  `inherit_blank` stores null, and a read like `int(self.get_conf(x))` meets that null as a
+  TypeError in the middle of a check, which is a monitor that stops monitoring because a box
+  was emptied. Each read moved to `module_default`, which keeps the distinction that matters:
+  blank falls through to what the system ships with, an explicit 0 stays 0.
+- `module_default` now returns the TYPE of its fallback. cpu's `interval` and ntp's
+  `max_offset` are floats, and coercing them to int turns 0.5 s of sampling into 0 — a
+  different measurement, not a rounder one.
+- **An item field now shows what it inherits.** "Sites to store" and "Accounts to store"
+  rendered an empty box with no placeholder: an item field that inherits from its MODULE has
+  `default: null` of its own, and the placeholder cascade only knew about the GLOBAL
+  Configuration>Modules value — so it ended at null and showed nothing, which is exactly what
+  "blank means inherit" must not look like. The cascade gained the module step: global →
+  registry → the module's own value → the field's schema default. A guard fails on any field
+  that inherits without saying what from.
+- **`alert` too**, in all eleven modules that declare it. It had been left out on the theory
+  that "no threshold" is not a state it has; that was the wrong reading. At module level a
+  blank never meant "off", it meant "use what the system ships with", and the placeholder is
+  what says so.
+- **An amount and its unit are one row now.** "Warn under 50 GB" is one thing to decide and
+  it was drawn as two — the number, then the unit on the next row — leaving the reader to
+  assemble it. A field names the sibling that holds its unit (`unit_field`) and the core
+  attaches that sibling to the box; the unit loses its own row, and writes through the same
+  field it always did. Declared rather than guessed from a `*_unit` name, which would work
+  until a module ships one the convention does not fit. A guard fails on any unit nobody
+  claims, so a new amount+unit cannot land as two rows again. The selector states its
+  width in a class of its own: Bootstrap gives a `.form-select` inside an `.input-group`
+  `flex:1 1 auto; width:1%`, so clearing only the growth leaves the 1% behind and the
+  control collapses to its chevron — three options present and nowhere to draw them.
+
+### Fixed
+- **An item can no longer be lost to a repeated uid.** Re-keying items by uid builds a dict
+  keyed by that uid, so two items sharing one meant the second write silently replaced the
+  first — no error, nothing in the audit, a check that stopped existing. A taken uid now gets
+  a fresh one instead of a casualty, and the duplicate is recorded in the audit entry of the
+  save that carried it, because that is the record someone reads when they ask where an item
+  went. (This was NOT the cause of the reported disappearance — those two items were
+  long-lived and distinct — but it is a way to lose one, and it was open.)
+- Two tests walk the reported flow through the real endpoint: two items, one disabled with the
+  item checkbox, saved and reloaded. Both survive, and a disabled item comes back from the
+  GET. The store deletes every uid absent from the payload, so an item dropped anywhere
+  upstream becomes a real DELETE — which is why proving the server side clean matters before
+  looking further.
+- **Every threshold now lives under "Alerts", where its own label says it belongs.** Fourteen
+  fields labelled "Warn when…" sat in "Checks" while an Alerts group existed holding exactly
+  one field. `__field_order__` was reordered with them: the pane emits a group header every
+  time the group CHANGES as it walks that list, so moving fields without reordering would have
+  drawn "Checks / Alerts / Checks / Alerts…" down the form. A guard now fails on any module
+  whose field order jumps back to a group it already left.
+- `sites_top` and `accounts_top` left "Checks" for a group of their own, "Stored data": they
+  are neither a check nor a threshold but how many rows get written each cycle.
+- hddtemp's "Alerts" group header rendered with no text — it used the group and translated it
+  in neither language, and the core only supplies labels for its own two sections. Found by
+  the same new guard, which now covers every module.
+- **`zero_as_blank` was schema vocabulary that did nothing.** The attribute the on-change
+  validator looks for was emitted only as a side effect of a field having a placeholder, so a
+  clearable field that inherits nothing never got it: emptying the box and leaving it snapped
+  back to the stored value, which reads as an input refusing to be cleared. Reported on
+  `tenant_capacity` — "optional", yet it filled itself back in. Five shipped modules declare the
+  key; the core now reads it directly, and a guard fails if it ever stops.
+
+### Changed
+- **And twelve labels renamed for the same reason.** "Alert if % drops below" — of what?
+  Moving the thresholds into their own Alerts group took away the check they used to sit
+  beside, so every label that had been borrowing its subject from that adjacency was suddenly
+  reading alone and saying nothing. Each one names its subject now: the Secure Score, MFA
+  coverage, SharePoint, OneDrive, the site, a licence. The ones that already did were left
+  untouched.
+- **Thirteen fields renamed to say what they measure.** `global_admins_max` counts accounts
+  holding Global Administrator — `privileged_max` did not say *max of what*: users, groups,
+  roles? The rest followed the same test: read the name alone, out of the context of its
+  check, and see whether it still means anything.
+
+  | before | after |
+  |---|---|
+  | `privileged_max` | `global_admins_max` |
+  | `risky_max` | `risky_users_max` |
+  | `secure_min` | `secure_score_min` |
+  | `mfa_min` | `mfa_coverage_min` |
+  | `license_min` | `licenses_free_min` |
+  | `secret_days` | `secret_expiry_days` |
+  | `unused_days` | `unused_after_days` |
+  | `announce_days` | `announce_before_days` |
+  | `tenant_max` + `tenant_unit` | `tenant_capacity` + `tenant_capacity_unit` |
+  | `usage_pct` / `free_min` / `free_unit` | `site_usage_pct` / `site_free_min` / `site_free_unit` |
+
+  `tenant_capacity` is the one worth pausing on: it is a capacity, not a maximum of anything,
+  and calling it a maximum is part of how it ended up holding a typed 1 TB that nobody
+  revisited. **No migration** — the project has not begun releasing, so a value stored under
+  an old name is simply not found and the field falls back to its default.
+
+- **The SharePoint capacity is never guessed.** A licence formula was added and removed within
+  the same build: 1 TB + 10 GB per licence, Microsoft's own published numbers. A real tenant
+  killed it — its admin centre reads **300 GB**, under the formula's 1 TB FLOOR. An estimate
+  that can be three times the truth is not a capacity, and it errs in the direction that hides
+  a tenant filling up; the comment claiming it "errs low" was wrong. Two sources remain, both
+  facts: what the admin typed (`tenant_capacity`) and the sum of real per-site quotas. Neither
+  available → the check reports the amount and says there is no total, which is worse to look
+  at and better to trust.
+- **Verified, not remembered:** a live tenant answers 28 SharePoint settings, three of them
+  about storage — automatic-management on, a 25 TB site ceiling, a 5 TB personal-site default
+  — and none of them the pooled tenant quota. The `sharepoint_settings` diagnostic is what
+  established that, and it stays for the next time somebody wonders.
+- The exact pooled figure exists in exactly one place — the SharePoint admin centre, Active
+  sites, top right — and the only API that serves it is the SharePoint admin one:
+  `Get-SPOTenant`/CSOM, an app-only token SharePoint accepts only when minted with a
+  CERTIFICATE (this module authenticates with a secret), and `Sites.FullControl.All`, full
+  control of every site in the tenant to read one number. Until that trade is worth making,
+  `tenant_capacity` is where that number goes.
+
 ## [0.0.1+build.32] - 2026-07-30
 
 ### Fixed

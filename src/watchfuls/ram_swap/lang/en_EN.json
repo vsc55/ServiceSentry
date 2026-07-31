@@ -6,8 +6,8 @@
         "threads":    "Threads",
         "timeout":    "Timeout (s)",
         "label":      "Label",
-        "alert_ram":  "RAM (%)",
-        "alert_swap": "SWAP (%)"
+        "alert_ram":  "Alert at % of RAM used",
+        "alert_swap": "Alert at % of swap used"
     },
     "hints": {
         "enabled":    "Enable or disable this RAM and SWAP check.",

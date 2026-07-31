@@ -16,9 +16,9 @@
         "user":     "Username",
         "password": "Password",
         "alert_on_battery": "On battery",
-        "alert_battery":    "Battery (%)",
-        "alert_runtime":    "Runtime (min)",
-        "alert_load":       "Load (%)"
+        "alert_battery":    "Alert if the battery drops below (%)",
+        "alert_runtime":    "Alert if the runtime drops below (min)",
+        "alert_load":       "Alert if the load exceeds (%)"
     },
     "hints": {
         "enabled":  "Enable or disable UPS monitoring for this entry.",

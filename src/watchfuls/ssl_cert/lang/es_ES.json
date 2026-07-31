@@ -5,7 +5,7 @@
         "enabled":      "Habilitado",
         "label":        "Etiqueta",
         "threads":      "Hilos",
-        "warning_days": "Umbral (días)",
+        "warning_days": "Alerta estos días antes de caducar el certificado",
         "timeout":      "Timeout (s)",
         "host":         "Host",
         "server_name":  "Nombre de servidor",

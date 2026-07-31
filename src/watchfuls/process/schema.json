@@ -5,7 +5,7 @@
         "enabled":   {"type": "bool", "default": true},
         "threads":   {"type": "int",  "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
         "timeout":   {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600},
-        "min_count": {"type": "int",  "default": 1,  "min": 1, "max": 1000}
+        "min_count": {"type": "int",  "default": 1,  "inherit_blank": true, "min": 1, "max": 1000}
     },
     "__history__": {"field": "count", "unit": "", "label": "Process Count"},
     "__host_profile__": {"key": "ssh", "address_field": "ssh_host",

@@ -16,9 +16,9 @@
         "user":     "Usuario",
         "password": "Contraseña",
         "alert_on_battery": "Con batería",
-        "alert_battery":    "Batería (%)",
-        "alert_runtime":    "Autonomía (min)",
-        "alert_load":       "Carga (%)"
+        "alert_battery":    "Alerta si la batería baja de (%)",
+        "alert_runtime":    "Alerta si la autonomía baja de (min)",
+        "alert_load":       "Alerta si la carga supera (%)"
     },
     "hints": {
         "enabled":  "Habilitar o deshabilitar la monitorización UPS para esta entrada.",

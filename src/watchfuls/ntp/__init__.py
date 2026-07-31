@@ -92,7 +92,7 @@ class Watchful(ModuleBase):
             server = (value.get('server', '') or '').strip() or self._DEFAULTS['server']
             label = (value.get('label', '') or '').strip() or server or key
             port = int(value.get('port', 0) or 0) or 123
-            max_offset = float(value.get('max_offset', 0) or 0) or self.get_conf('max_offset', self._MODULE_DEFAULTS['max_offset'])
+            max_offset = float(value.get('max_offset', 0) or 0) or self.module_default('max_offset', self._MODULE_DEFAULTS['max_offset'])
             timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
             self._debug(f"NTP: {self.item_label(key)} - server={server}:{port} max_offset={max_offset}", DebugLevel.info)
             list_items.append({

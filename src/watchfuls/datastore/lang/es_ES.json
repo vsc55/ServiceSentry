@@ -26,7 +26,7 @@
         "auth_db":      "Base de datos de autenticación",
         "db_index":     "Índice de base de datos",
         "tls":          "TLS / SSL",
-        "alert_connections": "Máx. conexiones"
+        "alert_connections": "Alerta si las conexiones superan"
     },
     "history": {
         "connections": "Conexiones",

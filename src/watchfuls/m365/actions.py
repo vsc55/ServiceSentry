@@ -105,6 +105,38 @@ class M365Actions:
         return {'ok': True, 'items': names, 'message': f'{len(names)} servicios'}
 
     @classmethod
+    def sharepoint_settings(cls, config: dict) -> dict:
+        """POST /api/v1/modules/watchfuls/m365/sharepoint_settings — the tenant's SharePoint
+        settings, verbatim.
+
+        A diagnostic, not a feature. The pooled tenant quota is the one number the storage
+        check cannot obtain, and how much of `/admin/sharepoint/settings` carries is a
+        question about a live tenant rather than about documentation — this answers it with
+        the tenant's own reply instead of anybody's recollection.
+
+        Read-only, and it returns exactly what Graph said: the point is to see what is there,
+        so filtering it would defeat the purpose. Needs SharePointTenantSettings.Read.All."""
+        tenant = str(config.get('tenant_id') or '').strip()
+        client_id = str(config.get('client_id') or '').strip()
+        secret = str(config.get('client_secret') or '').strip()
+        timeout = int(config.get('timeout') or cls._MODULE_DEFAULTS.get('timeout', 15))
+        if not (tenant and client_id and secret):
+            return {'ok': False, 'settings': {},
+                    'message': 'tenant_id, client_id y client_secret requeridos'}
+        try:
+            token = cls._get_token(tenant, client_id, secret, timeout)
+            data = cls._graph_json(token, '/admin/sharepoint/settings', timeout)
+        except Exception as exc:  # pylint: disable=broad-except
+            return {'ok': False, 'settings': {}, 'message': str(exc)}
+        settings = {k: v for k, v in (data or {}).items() if not k.startswith('@')}
+        # Anything that smells like a storage figure, called out — the reader is looking for
+        # one number in twenty-odd properties, and the whole reply is right below it anyway.
+        storage = {k: v for k, v in settings.items()
+                   if any(w in k.lower() for w in ('storage', 'quota', 'limit', 'capacity'))}
+        return {'ok': True, 'settings': settings, 'storage': storage,
+                'message': f'{len(settings)} ajustes, {len(storage)} con pinta de almacenamiento'}
+
+    @classmethod
     def test_connection(cls, config: dict) -> dict:
         """POST /api/v1/modules/watchfuls/m365/test_connection
 

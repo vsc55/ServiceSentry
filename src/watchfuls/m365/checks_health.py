@@ -74,7 +74,7 @@ class HealthChecks:
 
     def _check_announcements(self, it: dict, key: str, label: str, token: str,
                              timeout: int) -> None:
-        """Service messages that require action, within ``announce_days`` days.
+        """Service messages that require action, within ``announce_before_days`` days.
 
         Different question from service health: health says what is broken NOW, this says
         what Microsoft has told you to do before a date — a retirement, a breaking change.
@@ -88,7 +88,7 @@ class HealthChecks:
                        {'name': f'{label} · Service messages'})
             return
         from datetime import datetime, timezone                      # noqa: PLC0415
-        days = int(it.get('announce_days') or 0) or 14
+        days = self._threshold(it, 'announce_before_days', 14)
         now = datetime.now(timezone.utc)
         due = []
         for m in msgs:

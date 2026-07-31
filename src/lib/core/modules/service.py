@@ -212,6 +212,14 @@ def _rekey_collection(coll: dict) -> dict:
             out[old_key] = item
             continue
         uid = str(item.get('uid') or '').strip() or str(uuid.uuid4())
+        # A uid that is already taken USED TO cost the other item its existence: this builds
+        # a dict keyed by uid, so the second write silently replaced the first and a save
+        # came back with one check fewer — no error, nothing in the audit, just a check that
+        # stopped existing. Two items can collide from an imported config, a hand-edited
+        # file, or an item whose key is another item's uid. Whatever put them there, saving
+        # is not allowed to resolve it by dropping one.
+        while uid in out:
+            uid = str(uuid.uuid4())
         item['uid'] = uid
         # Preserve a human-readable old key as the editable label, so re-keying
         # to an opaque UID never loses the name (e.g. ups items keyed by name).
@@ -223,6 +231,32 @@ def _rekey_collection(coll: dict) -> dict:
             if isinstance(sub_val, dict) and sub_val:
                 item[sub] = _rekey_collection(sub_val)
         out[uid] = item
+    return out
+
+
+def duplicate_item_uids(data: dict) -> list:
+    """Every uid that more than one item claims, as ``["<module>/<uid>", …]``.
+
+    Reading this BEFORE the re-key is what makes a collision visible: afterwards there is
+    nothing to see, because the second item has quietly been given a new uid. A duplicate
+    should never exist — knowing one arrived, and from which module, is the difference
+    between finding its cause and guessing at it.
+    """
+    out = []
+    for module, module_cfg in (data or {}).items():
+        if not isinstance(module_cfg, dict):
+            continue
+        for coll_name in _ITEM_COLLECTIONS:
+            coll = module_cfg.get(coll_name)
+            if not isinstance(coll, dict):
+                continue
+            seen: set = set()
+            for item in coll.values():
+                uid = str((item or {}).get('uid') or '').strip() if isinstance(item, dict) else ''
+                if uid and uid in seen:
+                    out.append(f'{module}/{uid}')
+                elif uid:
+                    seen.add(uid)
     return out
 
 

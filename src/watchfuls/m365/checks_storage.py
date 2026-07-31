@@ -52,25 +52,25 @@ class StorageChecks:
 
         # Thresholds inherit the module-level defaults when the item leaves them
         # blank (0) — same item → module → global chain as alert/timeout.
-        usage_pct = int(it.get('usage_pct') or 0) \
-            or self.module_default('usage_pct', self._MODULE_DEFAULTS.get('usage_pct', 0))
+        site_usage_pct = int(it.get('site_usage_pct') or 0) \
+            or self.module_default('site_usage_pct', self._MODULE_DEFAULTS.get('site_usage_pct', 0))
         # Free-space threshold: an explicit per-item value keeps its own unit;
         # a blank one inherits the module default in the module's unit.
-        if it.get('free_min'):
-            free_min = to_bytes(it.get('free_min'), it.get('free_unit') or 'GB')
+        if it.get('site_free_min'):
+            site_free_min = to_bytes(it.get('site_free_min'), it.get('site_free_unit') or 'GB')
         else:
-            free_min = to_bytes(
-                self.module_default('free_min', self._MODULE_DEFAULTS.get('free_min', 0)),
-                self.get_conf('free_unit', self._MODULE_DEFAULTS.get('free_unit', 'GB')))
-        over_pct = usage_pct > 0 and used_pct >= usage_pct
-        low_free = free_min > 0 and remaining < free_min
+            site_free_min = to_bytes(
+                self.module_default('site_free_min', self._MODULE_DEFAULTS.get('site_free_min', 0)),
+                self.get_conf('site_free_unit', self._MODULE_DEFAULTS.get('site_free_unit', 'GB')))
+        over_pct = site_usage_pct > 0 and used_pct >= site_usage_pct
+        low_free = site_free_min > 0 and remaining < site_free_min
         extra = {'name': f'{label} · SharePoint ({disp})', 'used': used_pct,
                  'used_bytes': used, 'total_bytes': total, 'free_bytes': remaining, 'site': disp}
         # Only advertise a Status-bar threshold when the % alert is actually set —
         # otherwise the bar shows no marker and stays neutral (no misleading "/ 90%"
         # nor early red). See __status_render__ (default_threshold 100).
-        if usage_pct > 0:
-            extra['alert'] = usage_pct
+        if site_usage_pct > 0:
+            extra['alert'] = site_usage_pct
         summary = self._msg('m3_summary', disp, used_pct,
                             fmt_bytes(used), fmt_bytes(total), fmt_bytes(remaining))
         if not (over_pct or low_free):
@@ -78,9 +78,9 @@ class StorageChecks:
         else:
             why = []
             if over_pct:
-                why.append(f'≥ {usage_pct}%')
+                why.append(f'≥ {site_usage_pct}%')
             if low_free:
-                why.append(self._msg('m3_why_free', fmt_bytes(free_min)))
+                why.append(self._msg('m3_why_free', fmt_bytes(site_free_min)))
             self._emit(f'{key}/site', False,
                        self._msg('m3_site_alert', label, summary, ', '.join(why)),
                        extra, severity='warning')
@@ -90,7 +90,39 @@ class StorageChecks:
     # reserving anything: the real limit is the pooled tenant quota. So a site sitting at this
     # number has NO quota of its own, and reading it as one is how a sum of ceilings ends up
     # posing as a capacity.
+    #
+    # Kept as a fallback, not as the answer: `_storage_is_automatic` asks the tenant outright
+    # (`/admin/sharepoint/settings`). Inferring a setting from a number that happens to equal
+    # its consequence works until the day Microsoft raises the ceiling.
     _SITE_QUOTA_CEILING = 25 * 1024 ** 4
+
+    def _sp_settings(self, token: str, timeout: int) -> tuple:
+        """``(automatic, ceiling)`` from the tenant's own SharePoint settings.
+
+        Two facts this check used to guess at, asked outright:
+
+        * ``isSitesStorageLimitAutomatic`` decides whether the per-site quotas mean anything.
+          Under automatic management they are all the ceiling and their sum is not a capacity;
+          under manual management a 25 TB quota is a real 25 TB quota. Nothing else can tell
+          the two apart, and inferring one from a number that happens to equal its consequence
+          works right up until Microsoft changes the number.
+        * ``siteCreationDefaultStorageLimitInMB`` IS that ceiling, in the tenant's own words —
+          so the hardcoded 25 TB drops to being the fallback it should always have been.
+
+        `(None, 0)` when the tenant will not say: no ``SharePointTenantSettings.Read.All``, or
+        any other failure. The caller then falls back to what it could always do.
+
+        What is NOT here is the one number this check actually wants. Verified against a live
+        tenant: 28 settings, three about storage, none of them the pooled tenant quota. That
+        figure exists only behind the SharePoint admin API — see `tenant_capacity`.
+        """
+        try:
+            data = self._graph_json(token, '/admin/sharepoint/settings', timeout) or {}
+        except Exception:  # pylint: disable=broad-except
+            return None, 0
+        auto = data.get('isSitesStorageLimitAutomatic')
+        ceiling = int(data.get('siteCreationDefaultStorageLimitInMB') or 0) * 1024 ** 2
+        return (bool(auto) if isinstance(auto, bool) else None), ceiling
 
     # Fallbacks for the breakdown bounds, used only when the schema is unreadable — the real
     # values are `sites_top` / `accounts_top` / `breakdown_page` in __module__, the first two
@@ -158,7 +190,11 @@ class StorageChecks:
         _, i_id = _csv_col(text, 'Site Id')
         _, i_del = _csv_col(text, 'Is Deleted')
         sites = []
-        unlimited = False        # any site at the per-site ceiling → no quota anywhere
+        # Asked once, before reading a single row: the tenant's answer decides how to read
+        # every quota in the report, and its own ceiling beats our constant.
+        automatic, ceiling = self._sp_settings(token, timeout)
+        ceiling = ceiling or self._SITE_QUOTA_CEILING
+        at_ceiling = False
 
         def _cell(r, idx):
             return r[idx].strip() if 0 <= idx < len(r) else ''
@@ -177,7 +213,7 @@ class StorageChecks:
             if not sid.replace('-', '').strip('0'):
                 sid = ''
             quota = _csv_int(r, i_alloc)
-            unlimited = unlimited or quota >= self._SITE_QUOTA_CEILING
+            at_ceiling = at_ceiling or quota >= ceiling
             sites.append({
                 'name': _cell(r, i_url),
                 'sid': sid,
@@ -186,14 +222,18 @@ class StorageChecks:
                 # A site at the per-site ceiling has no quota of its own (see the constant):
                 # carrying 25 TB as if it were one puts "of 25.0 TB" on every row and implies
                 # a limit nobody set.
-                'quota': 0 if quota >= self._SITE_QUOTA_CEILING else quota,
+                'quota': 0 if quota >= ceiling else quota,
                 'deleted': _cell(r, i_del).lower() == 'true',
             })
         # …and the same reasoning at the tenant level, where it matters far more: a sum of
         # ceilings is not a capacity. 65 sites × 25 TB is 1.6 PB, against which any real usage
         # is a comfortable 0 % — a check that can never fire, which is the worst kind. With
         # automatic storage management the honest answer is that Graph published no total, and
-        # the admin's typed `tenant_max` is the only capacity there is.
+        # the admin's typed `tenant_capacity` is the only capacity there is.
+        #
+        # The tenant's own answer when it gave one; the ceiling is only the symptom, and a
+        # site at 25 TB under MANUAL management is a real quota worth summing.
+        unlimited = at_ceiling if automatic is None else automatic
         allocated = 0 if unlimited else _csv_sum(text, 'Storage Allocated (Byte)')
         return (_csv_sum(text, 'Storage Used (Byte)'),
                 allocated,
@@ -317,7 +357,7 @@ class StorageChecks:
         quotas are equal — the ordinary tenant — the two orders are the same list.
 
         The pooled share is of the total OR of what is actually occupied, whichever is larger.
-        A tenant can be over its capacity (a typed `tenant_max` that is out of date, or a real
+        A tenant can be over its capacity (a typed `tenant_capacity` that is out of date, or a real
         overage), and then a share of capacity exceeds 100 % for the big sites: the bar clamps
         them and a 3.4 TB site is drawn exactly like a 1.0 TB one.  Falling back to the
         occupied total keeps the bars proportional to each other and still summing to the
@@ -402,21 +442,39 @@ class StorageChecks:
                        {'name': name})
             return
 
-        # The capacity Graph will not tell us. The pooled tenant quota is 1 TB + 10 GB per
-        # licensed user and no endpoint publishes it, so the admin may type it; blank falls
-        # back to the sum of the per-site quotas, which is what the sites are allowed to use.
-        manual = to_bytes(it.get('tenant_max'), it.get('tenant_unit') or 'TB')
+        # The capacity, and there are only two honest answers: what the admin typed, and the
+        # sum of real per-site quotas when the tenant manages storage manually. Graph
+        # publishes no pooled tenant quota — the SharePoint admin centre reads it from its OWN
+        # admin API, a different audience with different credentials.
+        #
+        # A licence formula lived here for one build: 1 TB + 10 GB per licence, Microsoft's
+        # own published numbers. A real tenant killed it — its admin centre reads 300 GB,
+        # under the formula's 1 TB FLOOR. An estimate that can be three times the truth is not
+        # a capacity, and it errs in the direction that hides a tenant filling up. Reporting
+        # no total is worse to look at and better to trust.
+        manual = to_bytes(it.get('tenant_capacity'), it.get('tenant_capacity_unit') or 'TB')
         total = manual or allocated
         used_pct = round(used / total * 100, 1) if total else 0.0
         free = max(total - used, 0) if total else 0
 
-        warn_pct = int(it.get('tenant_pct') or 0)
+        warn_pct = self._threshold(it, 'tenant_pct')
         warn_at = to_bytes(it.get('tenant_warn_at'), it.get('tenant_warn_unit') or 'GB')
+        # The third way of asking the same question, and the one an admin actually plans
+        # with: not "how full is it" but "how much room is left". A percentage means
+        # different amounts as the tenant grows, and 250 GB used means nothing without
+        # knowing the capacity — "warn me under 50 GB free" survives both.
+        site_free_min = to_bytes(it.get('tenant_free_min'), it.get('tenant_free_unit') or 'GB')
         full = total > 0 and used >= total
         over_pct = total > 0 and warn_pct > 0 and used_pct >= warn_pct
         over_abs = warn_at > 0 and used >= warn_at
+        # Only where there IS a capacity: without a total there is no "left", and a
+        # threshold that silently never fires is worse than one that was never offered.
+        low_free = total > 0 and site_free_min > 0 and free < site_free_min
 
         extra = {'name': name, 'used_bytes': used, 'sites': sites, 'deleted': deleted,
+                 # Where the capacity came from, on the row itself: "667 % full" means one
+                 # thing against a number Microsoft implies and another against one somebody
+                 # typed in March.
                  'source': 'manual' if manual else ('sites' if allocated else 'none')}
         if total:
             extra.update({'used': used_pct, 'total_bytes': total, 'free_bytes': free})
@@ -456,6 +514,8 @@ class StorageChecks:
             why.append(self._msg('m3_why_pct', warn_pct))
         if over_abs:
             why.append(self._msg('m3_why_used', fmt_bytes(warn_at)))
+        if low_free:
+            why.append(self._msg('m3_why_free', fmt_bytes(site_free_min)))
         if why:
             self._emit(f'{key}/tenant', False,
                        self._msg('m3_sp_warn', label, summary, ', '.join(why)),
@@ -475,7 +535,7 @@ class StorageChecks:
             return
         prohibited = _csv_max(text, 'Send Prohibited') + _csv_max(text, 'Send/Receive Prohibited')
         warned = _csv_max(text, 'Warning Issued')
-        threshold = int(it.get('mailbox_over_max') or 0)
+        threshold = self._threshold(it, 'mailbox_over_max')
         extra = {'name': f'{label} · Mailboxes over quota', 'prohibited': prohibited, 'warned': warned}
         if prohibited > threshold:
             self._emit(f'{key}/mailbox', False, self._msg('m3_mbx_over', label, prohibited, warned),

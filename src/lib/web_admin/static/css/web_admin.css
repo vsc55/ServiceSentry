@@ -1773,3 +1773,10 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 
 /* Kiosk mode: hide the whole sidebar + top bar */
 body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; }
+
+/* Unit selector attached to an amount ("50" + "GB" as one control).
+   Bootstrap gives a .form-select inside an .input-group `flex:1 1 auto; width:1%`, so a
+   utility that only clears the growth leaves the 1% behind and the control collapses to its
+   chevron — the options are there and there is nowhere to draw them. The width has to be
+   stated, not merely un-grown. */
+.ss-unit-sel { flex: 0 0 auto !important; width: 5.5rem !important; }

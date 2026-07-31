@@ -4,9 +4,9 @@
         "enabled": {"type": "bool", "default": true},
         "threads": {"type": "int",  "default": 3,  "min": 0, "inherit_blank": true, "max": 100},
         "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 60},
-        "alert_battery": {"type": "int", "default": 20, "min": 0, "max": 100},
-        "alert_runtime": {"type": "int", "default": 10, "min": 0, "max": 1440},
-        "alert_load":    {"type": "int", "default": 0,  "min": 0, "max": 100}
+        "alert_battery": {"type": "int", "default": 20, "inherit_blank": true, "min": 0, "max": 100},
+        "alert_runtime": {"type": "int", "default": 10, "inherit_blank": true, "min": 0, "max": 1440},
+        "alert_load":    {"type": "int", "default": 0,  "inherit_blank": true, "min": 0, "max": 100}
     },
     "__history__": {"field": "battery_charge", "unit": "%", "label": "Battery Charge",
                     "fields": {"battery_charge": {"unit": "%"},

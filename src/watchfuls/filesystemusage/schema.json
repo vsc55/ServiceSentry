@@ -5,7 +5,7 @@
         "enabled": {"type": "bool", "default": true},
         "threads": {"type": "int", "default": 5,  "min": 0, "inherit_blank": true, "max": 100},
         "timeout": {"type": "int", "default": 15, "min": 0, "inherit_blank": true, "max": 600},
-        "alert":   {"type": "int", "default": 85, "min": 0, "max": 100}
+        "alert":   {"type": "int", "default": 85, "inherit_blank": true, "min": 0, "max": 100}
     },
     "__history__": {"field": "used", "unit": "%", "label": "Disk Usage"},
     "__status_render__": [{"type": "bar", "value": "used", "threshold": "alert", "default_threshold": 80, "unit": "%"}],

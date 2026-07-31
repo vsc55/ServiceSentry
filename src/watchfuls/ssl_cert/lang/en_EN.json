@@ -5,7 +5,7 @@
         "enabled":      "Enabled",
         "label":        "Label",
         "threads":      "Threads",
-        "warning_days": "Threshold (days)",
+        "warning_days": "Alert this many days before the certificate expires",
         "timeout":      "Timeout (s)",
         "host":         "Host",
         "server_name":  "Server name",

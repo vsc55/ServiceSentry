@@ -26,8 +26,8 @@ def _drive(total, used, remaining=None):
 def _item(**over):
     base = {'enabled': True, 'label': 'SP', 'tenant_id': 't', 'client_id': 'c',
             'client_secret': 's', 'check_site': True, 'site': '',
-            'usage_pct': 90, 'free_min': 0, 'free_unit': 'GB',
-            'check_tenant_usage': False, 'tenant_max': 0, 'tenant_unit': 'TB',
+            'site_usage_pct': 90, 'site_free_min': 0, 'site_free_unit': 'GB',
+            'check_tenant_usage': False, 'tenant_capacity': 0, 'tenant_capacity_unit': 'TB',
             'tenant_pct': 0, 'tenant_warn_at': 0, 'tenant_warn_unit': 'GB'}
     base.update(over)
     return base
@@ -120,54 +120,54 @@ class TestHelpers:
 class TestSite:
 
     def test_ok_under_thresholds(self):
-        res = _run(_item(usage_pct=90), drive=_drive(100 * GB, 50 * GB, 50 * GB))
+        res = _run(_item(site_usage_pct=90), drive=_drive(100 * GB, 50 * GB, 50 * GB))
         od = res['m1/site']['other_data']
         assert res['m1/site']['status'] is True
         assert od['used'] == 50.0
         assert od['alert'] == 90            # threshold advertised for the Status bar
 
     def test_over_percentage_warns(self):
-        res = _run(_item(usage_pct=90), drive=_drive(100 * GB, 95 * GB, 5 * GB))
+        res = _run(_item(site_usage_pct=90), drive=_drive(100 * GB, 95 * GB, 5 * GB))
         assert res['m1/site']['status'] is False
         assert res['m1/site']['severity'] == 'warning'
         assert res['m1/site']['other_data']['used'] == 95.0
 
     def test_low_free_warns(self):
         # Disable the % alert at module level so only the free-space rule fires.
-        res = _run(_item(usage_pct=0, free_min=10, free_unit='GB'),
+        res = _run(_item(site_usage_pct=0, site_free_min=10, site_free_unit='GB'),
                    drive=_drive(100 * GB, 95 * GB, 5 * GB),
-                   module_cfg={'usage_pct': 0})
+                   module_cfg={'site_usage_pct': 0})
         assert res['m1/site']['status'] is False
         assert res['m1/site']['severity'] == 'warning'
 
     def test_percentage_off_when_module_default_zero(self):
         # Item blank (0) inherits the module default; with the module default also
         # 0 the % alert is off → informational only.
-        res = _run(_item(usage_pct=0, free_min=0), drive=_drive(100 * GB, 99 * GB, 1 * GB),
-                   module_cfg={'usage_pct': 0})
+        res = _run(_item(site_usage_pct=0, site_free_min=0), drive=_drive(100 * GB, 99 * GB, 1 * GB),
+                   module_cfg={'site_usage_pct': 0})
         assert res['m1/site']['status'] is True
         # No threshold advertised → the Status bar stays neutral (no misleading "/90%").
         assert 'alert' not in res['m1/site']['other_data']
 
     def test_usage_pct_inherits_module_default(self):
-        # Item leaves usage_pct blank (0) → inherits the module-level default (80).
-        res = _run(_item(usage_pct=0), drive=_drive(100 * GB, 85 * GB, 15 * GB),
-                   module_cfg={'usage_pct': 80})
+        # Item leaves site_usage_pct blank (0) → inherits the module-level default (80).
+        res = _run(_item(site_usage_pct=0), drive=_drive(100 * GB, 85 * GB, 15 * GB),
+                   module_cfg={'site_usage_pct': 80})
         assert res['m1/site']['status'] is False
         assert res['m1/site']['other_data']['alert'] == 80     # inherited threshold advertised
 
     def test_free_min_inherits_module_default(self):
-        # Item leaves free_min blank (0) → inherits the module default (10 GB).
-        res = _run(_item(usage_pct=0, free_min=0),
+        # Item leaves site_free_min blank (0) → inherits the module default (10 GB).
+        res = _run(_item(site_usage_pct=0, site_free_min=0),
                    drive=_drive(100 * GB, 95 * GB, 5 * GB),
-                   module_cfg={'usage_pct': 0, 'free_min': 10, 'free_unit': 'GB'})
+                   module_cfg={'site_usage_pct': 0, 'site_free_min': 10, 'site_free_unit': 'GB'})
         assert res['m1/site']['status'] is False
         assert res['m1/site']['severity'] == 'warning'
 
     def test_item_value_overrides_module_default(self):
-        # An explicit per-item usage_pct wins over the module default.
-        res = _run(_item(usage_pct=95), drive=_drive(100 * GB, 90 * GB, 10 * GB),
-                   module_cfg={'usage_pct': 80})
+        # An explicit per-item site_usage_pct wins over the module default.
+        res = _run(_item(site_usage_pct=95), drive=_drive(100 * GB, 90 * GB, 10 * GB),
+                   module_cfg={'site_usage_pct': 80})
         assert res['m1/site']['status'] is True                # 90% < item's 95%
         assert res['m1/site']['other_data']['alert'] == 95
 
@@ -271,7 +271,7 @@ class TestTenantTotal:
         """Graph does not publish the pooled tenant quota, so an admin who knows it may say
         so — and then that is the denominator, not the sum of what the sites were allowed."""
         item = _item(check_site=False, check_tenant_usage=True,
-                     tenant_max=1, tenant_unit='TB', tenant_pct=0)
+                     tenant_capacity=1, tenant_capacity_unit='TB', tenant_pct=0)
         res = _run(item, csv_text=_detail((256 * GB, 10 * GB)))
         d = res['m1/tenant']['other_data']
         assert d['total_bytes'] == 1024 * GB and d['used'] == 25.0
@@ -292,11 +292,69 @@ class TestTenantTotal:
         assert 'used' not in od and od['used_bytes'] == 4 * TB
         assert res['m1/tenant']['status'] is True
 
+    def test_the_tenant_is_asked_whether_management_is_automatic(self):
+        """The 25 TB ceiling is only the SYMPTOM. A tenant on MANUAL management may have set a
+        site to 25 TB on purpose, and that is a real quota worth summing — only the setting
+        tells the two apart, and inferring one from a number that happens to equal its
+        consequence works until Microsoft raises the ceiling."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * TB, 25 * TB), (1 * TB, 25 * TB)),
+                   drive={'isSitesStorageLimitAutomatic': False})
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'sites', 'a real 25 TB quota was thrown away'
+        assert od['total_bytes'] == 50 * TB
+
+    def test_the_ceiling_comes_from_the_tenant_not_from_a_constant(self):
+        """`siteCreationDefaultStorageLimitInMB` IS the ceiling, in the tenant's own words —
+        verified against a live one, which answers 26 214 400 MB. The hardcoded 25 TB drops to
+        the fallback it should always have been, so a tenant with a different default (or a
+        Microsoft that changes it) is read correctly rather than approximately."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 40 * GB)),
+                   drive={'isSitesStorageLimitAutomatic': True,
+                          'siteCreationDefaultStorageLimitInMB': 40 * 1024})
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'none', 'a 40 GB ceiling was read as a real quota'
+        b = od['breakdown']['items'][0]
+        assert b['text'].count('of') == 0 or '—' in b['text'] or 'GB' in b['text']
+
+    def test_a_tenant_that_will_not_say_keeps_the_safe_answer(self):
+        """Without `SharePointTenantSettings.Read.All` — or on any other failure — the ceiling
+        inference is what there always was, and it errs towards "no capacity"."""
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * TB, 25 * TB)), drive={})
+        assert res['m1/tenant']['other_data']['source'] == 'none'
+
+    def test_the_setting_is_only_asked_where_it_matters(self):
+        """A tenant with ordinary per-site quotas already has its answer and must not pay a
+        Graph call to be told what it just computed."""
+        seen = []
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * GB, 10 * GB)), drive={'boom': True})
+        assert res['m1/tenant']['other_data']['source'] == 'sites'
+        assert not seen
+
+    def test_the_capacity_is_never_guessed_from_the_licences(self):
+        """A licence formula lived here for one build — 1 TB + 10 GB per licence, Microsoft's
+        own published numbers — and a real tenant killed it: its admin centre reads 300 GB,
+        under the formula's 1 TB FLOOR. An estimate that can be three times the truth is not a
+        capacity, and it errs in the direction that hides a tenant filling up.
+
+        Two sources, both facts: what the admin typed, and real per-site quotas."""
+        skus = {'value': [{'skuPartNumber': 'ENTERPRISEPACK',
+                           'prepaidUnits': {'enabled': 100},
+                           'servicePlans': [{'servicePlanName': 'SHAREPOINTENTERPRISE'}]}]}
+        res = _run(_item(check_site=False, check_tenant_usage=True),
+                   csv_text=_detail((3 * TB, 25 * TB)), drive=skus)
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'none'
+        assert 'total_bytes' not in od, 'a capacity was invented from the licence count'
+
     def test_a_typed_capacity_still_wins_over_the_ceilings(self):
         """The admin's number is the only capacity there is in that tenant, and it must keep
         working exactly as before."""
-        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_max=10,
-                         tenant_unit='TB'),
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_capacity=10,
+                         tenant_capacity_unit='TB'),
                    csv_text=_detail((3 * TB, 25 * TB), (1 * TB, 25 * TB)))
         od = res['m1/tenant']['other_data']
         assert od['source'] == 'manual' and od['used'] == 40.0
@@ -324,6 +382,32 @@ class TestTenantTotal:
         assert r['status'] is False and r['severity'] == 'warning'
         assert r['other_data']['used'] < 10          # nowhere near a % threshold
 
+    def test_low_free_space_warns(self):
+        """The third way of asking the same question, and the one capacity is actually
+        planned with: not "how full" but "how much room is left". A percentage means
+        different amounts as the tenant grows, and "250 GB used" says nothing without the
+        capacity — "warn me under 50 GB free" survives both."""
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_capacity=100,
+                         tenant_capacity_unit='GB', tenant_free_min=50, tenant_free_unit='GB'),
+                   csv_text=_detail((60 * GB, 0)))
+        assert res['m1/tenant']['status'] is False
+        assert res['m1/tenant']['severity'] == 'warning'
+
+    def test_enough_free_space_is_ok(self):
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_capacity=100,
+                         tenant_capacity_unit='GB', tenant_free_min=10, tenant_free_unit='GB'),
+                   csv_text=_detail((60 * GB, 0)))
+        assert res['m1/tenant']['status'] is True
+
+    def test_free_space_needs_a_capacity_to_be_measured_against(self):
+        """Without a total there is no "left", and a threshold that silently never fires is
+        worse than one that was never offered."""
+        res = _run(_item(check_site=False, check_tenant_usage=True,
+                         tenant_free_min=50, tenant_free_unit='GB'),
+                   csv_text=_detail((60 * GB, 25 * TB)))
+        od = res['m1/tenant']['other_data']
+        assert od['source'] == 'none' and res['m1/tenant']['status'] is True
+
     def test_full_is_an_error_not_a_warning(self):
         """100% is not "getting close": it is the point where writes start being refused, so
         it must not arrive in the same colour as the warning that preceded it."""
@@ -336,7 +420,7 @@ class TestTenantTotal:
     def test_over_capacity_is_also_an_error(self):
         """Sites can exceed a typed pool; past 100% the answer is the same one."""
         item = _item(check_site=False, check_tenant_usage=True,
-                     tenant_max=1, tenant_unit='GB', tenant_pct=90)
+                     tenant_capacity=1, tenant_capacity_unit='GB', tenant_pct=90)
         res = _run(item, csv_text=_detail((2 * GB, 2 * GB)))
         assert res['m1/tenant']['status'] is False
         assert res['m1/tenant'].get('severity') != 'warning'
@@ -397,8 +481,8 @@ class TestTenantTotal:
         Over capacity the share is of what is actually occupied: the bars stay proportional to
         each other and still sum to the whole. "667 % of capacity" is the ring's statement,
         not this list's."""
-        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_max=500,
-                         tenant_unit='GB'),
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_capacity=500,
+                         tenant_capacity_unit='GB'),
                    csv_text=_detail((600 * GB, 0), (300 * GB, 0), (100 * GB, 0)))
         pcts = [i['pct'] for i in res['m1/tenant']['other_data']['breakdown']['items']]
         assert pcts == [60.0, 30.0, 10.0]
@@ -497,8 +581,8 @@ class TestTenantTotal:
         answer how full they are — and under their real names. One batched read per 20 sites
         buys a real list instead of a numbered one."""
         zero = '00000000-0000-0000-0000-000000000000'
-        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_max=100,
-                         tenant_unit='GB'),
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_capacity=100,
+                         tenant_capacity_unit='GB'),
                    csv_text=_detail_concealed((3 * GB, 10 * GB), (1 * GB, 10 * GB),
                                               ids=[zero, zero]),
                    sites=[{'id': 'h,a,b', 'webUrl': 'https://c.sharepoint.com/sites/Ops'},
@@ -634,6 +718,41 @@ class TestTenantTotal:
                    csv_text=_detail((3 * GB, 10 * GB)), module_cfg={'breakdown_page': 10})
         assert res['m1/tenant']['other_data']['breakdown']['page'] == 10
 
+    def test_a_threshold_falls_back_to_the_module_default(self):
+        """Ten thresholds existed only per item, so with several tenants the same policy had
+        to be typed into each one. They inherit now, through the chain `site_usage_pct` always
+        used: item value, else the module's."""
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_pct=0,
+                         tenant_capacity=100, tenant_capacity_unit='GB'),
+                   csv_text=_detail((95 * GB, 0)), module_cfg={'tenant_pct': 90})
+        assert res['m1/tenant']['status'] is False
+        assert res['m1/tenant']['other_data']['alert'] == 90
+
+    def test_an_item_value_still_wins(self):
+        res = _run(_item(check_site=False, check_tenant_usage=True, tenant_pct=99,
+                         tenant_capacity=100, tenant_capacity_unit='GB'),
+                   csv_text=_detail((95 * GB, 0)), module_cfg={'tenant_pct': 50})
+        assert res['m1/tenant']['other_data']['alert'] == 99
+
+    def test_an_optional_threshold_starts_off(self):
+        """A 0 in an item used to mean OFF and now means "inherit". Where the inherited value
+        is 90 that would switch on an alert somebody deliberately switched off, so the
+        percentage thresholds start at 0 in the module: a fleet-wide policy is something an
+        admin writes, never something an upgrade decides for them."""
+        from watchfuls.m365 import Watchful
+        for field in ('tenant_pct', 'mfa_coverage_min'):
+            assert Watchful.ITEM_SCHEMA['__module__'][field]['default'] == 0, field
+
+    def test_the_global_admin_cap_ships_a_policy(self):
+        """`global_admins_max` is the exception, and a deliberate one: a tenant with more than a
+        handful of Global Administrators is worth saying out loud whether or not anyone
+        configured it. Five is Microsoft's own guidance, and it is the number this ships with.
+
+        The cost is stated rather than discovered: an item left at 0 inherits it, so a tenant
+        that had this alert off gets it back."""
+        from watchfuls.m365 import Watchful
+        assert Watchful.ITEM_SCHEMA['__module__']['global_admins_max']['default'] == 5
+
     def test_the_status_bar_only_gets_a_marker_when_one_is_configured(self):
         no_pct = _run(_item(check_site=False, check_tenant_usage=True, tenant_pct=0),
                       csv_text=_detail((10 * GB, 100 * GB)))
@@ -654,7 +773,7 @@ class TestModule:
         from watchfuls.m365 import Watchful
         lst = Watchful.ITEM_SCHEMA['list']
         assert lst['client_secret']['sensitive'] is True
-        assert lst['free_unit']['options'] == ['MB', 'GB', 'TB']
+        assert lst['site_free_unit']['options'] == ['MB', 'GB', 'TB']
         assert Watchful.ITEM_SCHEMA['__status_render__'][0]['value'] == 'used'
 
     def test_test_connection(self):
@@ -736,6 +855,33 @@ class TestListServices:
     """health_services can be DISCOVERED (list_services) and multi-picked, so the
     admin filters service-health by service without knowing the names up front."""
 
+    def test_the_settings_diagnostic_returns_what_graph_said(self):
+        """A diagnostic, not a feature: the pooled tenant quota is the one number the storage
+        check cannot obtain, and how much of `/admin/sharepoint/settings` carries it is a
+        question about a live tenant, not about documentation. Filtering the reply would
+        defeat the purpose of asking."""
+        from watchfuls.m365 import Watchful
+        reply = {'@odata.context': 'x', 'isSitesStorageLimitAutomatic': True,
+                 'siteCreationDefaultStorageLimitInMB': 25600, 'sharingCapability': 'none'}
+        with patch.object(Watchful, '_get_token', return_value='tok'),              patch.object(Watchful, '_graph_json', return_value=reply):
+            res = Watchful.sharepoint_settings({'tenant_id': 't', 'client_id': 'c',
+                                                'client_secret': 's'})
+        assert res['ok'] is True
+        assert 'sharingCapability' in res['settings'], 'the reply was filtered'
+        assert '@odata.context' not in res['settings'], 'odata noise is not a setting'
+        # …with the storage-looking ones called out: one number among twenty-odd properties.
+        assert set(res['storage']) == {'isSitesStorageLimitAutomatic',
+                                       'siteCreationDefaultStorageLimitInMB'}
+
+    def test_the_settings_diagnostic_reports_a_refusal(self):
+        """Without SharePointTenantSettings.Read.All this is the call that says so, which is
+        half of what a diagnostic is for."""
+        from watchfuls.m365 import Watchful
+        with patch.object(Watchful, '_get_token', return_value='tok'),              patch.object(Watchful, '_graph_json', side_effect=RuntimeError('403 Forbidden')):
+            res = Watchful.sharepoint_settings({'tenant_id': 't', 'client_id': 'c',
+                                                'client_secret': 's'})
+        assert res['ok'] is False and '403' in res['message']
+
     def test_lists_services_deduped_sorted(self):
         from watchfuls.m365 import Watchful
         payload = {'value': [{'service': 'SharePoint Online'}, {'service': 'Exchange Online'},
@@ -793,6 +939,7 @@ class TestCredentialAndProvision:
         # role here fails against a tenant with a silence nobody can trace.
         assert set(prov['app_roles']) == {
             'Sites.Read.All',                 # SharePoint site + tenant storage
+            'SharePointTenantSettings.Read.All',   # automatic site storage management?
             'Reports.Read.All',               # OneDrive / mailbox usage reports
             'ServiceHealth.Read.All',         # service health
             'ServiceMessage.Read.All',        # service messages with an action deadline
@@ -1034,7 +1181,7 @@ class TestExtendedChecks:
         assert res['m1/licenses/e5']['severity'] == 'warning'
 
     def test_licenses_below_threshold_warns(self):
-        res = self._run(_item(check_site=False, check_licenses=True, license_min=3),
+        res = self._run(_item(check_site=False, check_licenses=True, licenses_free_min=3),
                         jbp={'subscribedSkus': {'value': [
                             {'skuPartNumber': 'E3', 'prepaidUnits': {'enabled': 10}, 'consumedUnits': 8}]}})
         assert res['m1/licenses/e3']['status'] is False
@@ -1053,7 +1200,7 @@ class TestExtendedChecks:
     # an OData FUNCTION with required parameters, so asking for it as a plain segment answers
     # 400 "Resource not found for the segment" — which is how the first attempt failed.
     def test_mfa_coverage_reports_the_fraction(self):
-        res = self._run(_item(check_site=False, check_mfa=True, mfa_min=0),
+        res = self._run(_item(check_site=False, check_mfa=True, mfa_coverage_min=0),
                         pbp={'userRegistrationDetails': [{'isMfaRegistered': True},
                                                          {'isMfaRegistered': True},
                                                          {'isMfaRegistered': True},
@@ -1063,7 +1210,7 @@ class TestExtendedChecks:
         assert od['registered'] == 3 and od['total'] == 4 and od['used'] == 75.0
 
     def test_mfa_below_the_floor_warns(self):
-        res = self._run(_item(check_site=False, check_mfa=True, mfa_min=90),
+        res = self._run(_item(check_site=False, check_mfa=True, mfa_coverage_min=90),
                         pbp={'userRegistrationDetails': [{'isMfaRegistered': True},
                                                          {'isMfaRegistered': False}]})
         assert res['m1/mfa']['status'] is False
@@ -1072,14 +1219,14 @@ class TestExtendedChecks:
     def test_an_empty_directory_is_not_a_breach(self):
         """0% of nobody is a number with no subject; reporting it as a failure would be a
         verdict about an empty set."""
-        res = self._run(_item(check_site=False, check_mfa=True, mfa_min=90),
+        res = self._run(_item(check_site=False, check_mfa=True, mfa_coverage_min=90),
                         pbp={'userRegistrationDetails': []})
         assert res['m1/mfa']['status'] is True
 
     def test_unused_licences_counts_the_idle_ones(self):
         old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat().replace('+00:00', 'Z')
         recent = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=60),
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_after_days=60),
                         pbp={'/users': [
                             {'userPrincipalName': 'a@x', 'assignedLicenses': [{'skuId': '1'}],
                              'signInActivity': {'lastSignInDateTime': recent}},
@@ -1098,7 +1245,7 @@ class TestExtendedChecks:
         """"10 of 11 idle" is a number without an answer: which licences are being paid for?
         The SKU names live in the subscription list, so the check joins the two."""
         old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat().replace('+00:00', 'Z')
-        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=60),
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_after_days=60),
                         pbp={'/users': [
                             {'userPrincipalName': 'a@x',
                              'assignedLicenses': [{'skuId': 'g-e3'}, {'skuId': 'g-e5'}],
@@ -1116,7 +1263,7 @@ class TestExtendedChecks:
         having — failing the whole check over a cosmetic second call would trade a real
         finding for a label."""
         old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat().replace('+00:00', 'Z')
-        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=60),
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_after_days=60),
                         pbp={'/users': [
                             {'userPrincipalName': 'a@x', 'assignedLicenses': [{'skuId': 'g-e3'}],
                              'signInActivity': {'lastSignInDateTime': old}}]})
@@ -1126,14 +1273,14 @@ class TestExtendedChecks:
     def test_never_signed_in_counts_as_unused(self):
         """The strongest case of the thing being looked for — skipping it would report the
         cleanest waste as no waste at all."""
-        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_days=30),
+        res = self._run(_item(check_site=False, check_unused_licenses=True, unused_after_days=30),
                         pbp={'/users': [{'userPrincipalName': 'new@x',
                                          'assignedLicenses': [{'skuId': '1'}]}]})
         assert res['m1/unused']['status'] is False
         assert res['m1/unused']['other_data']['idle'] == 1
 
     def test_privileged_roles_counts_global_admins(self):
-        res = self._run(_item(check_site=False, check_privileged=True, privileged_max=2),
+        res = self._run(_item(check_site=False, check_privileged=True, global_admins_max=2),
                         pbp={'/directoryRoles': [
                             {'displayName': 'Global Administrator',
                              'members': [{'id': '1'}, {'id': '2'}, {'id': '3'}]},
@@ -1144,7 +1291,7 @@ class TestExtendedChecks:
     def test_the_legacy_role_name_counts_too(self):
         """Graph still calls it "Company Administrator" in places; missing that spelling
         would report a tenant full of admins as having none."""
-        res = self._run(_item(check_site=False, check_privileged=True, privileged_max=0),
+        res = self._run(_item(check_site=False, check_privileged=True, global_admins_max=0),
                         pbp={'/directoryRoles': [
                             {'displayName': 'Company Administrator', 'members': [{'id': '1'}]}]})
         assert res['m1/privileged']['other_data']['global_admins'] == 1
@@ -1163,7 +1310,7 @@ class TestExtendedChecks:
 
     def test_a_deadline_inside_the_window_warns(self):
         soon = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat().replace('+00:00', 'Z')
-        res = self._run(_item(check_site=False, check_announcements=True, announce_days=14),
+        res = self._run(_item(check_site=False, check_announcements=True, announce_before_days=14),
                         pbp={'serviceAnnouncement': [
                             {'title': 'Retiring basic auth', 'actionRequiredByDateTime': soon}]})
         assert res['m1/announcements']['status'] is False
@@ -1172,7 +1319,7 @@ class TestExtendedChecks:
     def test_a_deadline_already_past_is_not_upcoming(self):
         """Missed or done — either way not the deadline this check exists to warn about."""
         past = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat().replace('+00:00', 'Z')
-        res = self._run(_item(check_site=False, check_announcements=True, announce_days=14),
+        res = self._run(_item(check_site=False, check_announcements=True, announce_before_days=14),
                         pbp={'serviceAnnouncement': [
                             {'title': 'Old thing', 'actionRequiredByDateTime': past}]})
         assert res['m1/announcements']['status'] is True
@@ -1328,14 +1475,14 @@ class TestExtendedChecks:
 
     # ── Secure Score ─────────────────────────────────────────────────
     def test_secure_score_below_min_warns(self):
-        res = self._run(_item(check_site=False, check_secure_score=True, secure_min=50),
+        res = self._run(_item(check_site=False, check_secure_score=True, secure_score_min=50),
                         jbp={'secureScores': {'value': [{'currentScore': 40, 'maxScore': 100}]}})
         assert res['m1/securescore']['status'] is False
         assert res['m1/securescore']['severity'] == 'warning'
         assert res['m1/securescore']['other_data']['used'] == 40.0
 
     def test_secure_score_informational_ok(self):
-        res = self._run(_item(check_site=False, check_secure_score=True, secure_min=0),
+        res = self._run(_item(check_site=False, check_secure_score=True, secure_score_min=0),
                         jbp={'secureScores': {'value': [{'currentScore': 40, 'maxScore': 100}]}})
         assert res['m1/securescore']['status'] is True
 

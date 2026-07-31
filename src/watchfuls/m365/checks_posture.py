@@ -29,7 +29,7 @@ class PostureChecks:
     """MFA coverage, unused licences, privileged roles and domain verification."""
 
     def _check_mfa(self, it: dict, key: str, label: str, token: str, timeout: int) -> None:
-        """Directory-wide MFA registration, against a floor (``mfa_min``, a percentage).
+        """Directory-wide MFA registration, against a floor (``mfa_coverage_min``, a percentage).
 
         Counted from ``userRegistrationDetails``, the GA report, rather than from the
         aggregate summary next to it: that one is an OData FUNCTION with required parameters
@@ -52,7 +52,7 @@ class PostureChecks:
         pct = round(100.0 * registered / total, 1) if total else 0.0
         extra = {'name': f'{label} · MFA coverage', 'registered': registered,
                  'total': total, 'used': pct}
-        floor = int(it.get('mfa_min') or 0)
+        floor = self._threshold(it, 'mfa_coverage_min')
         # A tenant with no users is not a tenant failing its floor — reporting 0% of nobody
         # as a breach would be a number with no subject.
         if total and floor > 0 and pct < floor:
@@ -65,13 +65,13 @@ class PostureChecks:
 
     def _check_unused_licenses(self, it: dict, key: str, label: str, token: str,
                                timeout: int) -> None:
-        """Licensed accounts with no sign-in for ``unused_days`` days.
+        """Licensed accounts with no sign-in for ``unused_after_days`` days.
 
         ``signInActivity`` is absent for an account that has never signed in at all, which
         is the strongest case of the thing being looked for — so a missing value counts as
         unused rather than being skipped.
         """
-        days = int(it.get('unused_days') or 0) or 60
+        days = self._threshold(it, 'unused_after_days', 60)
         try:
             users = self._paged(
                 token,
@@ -135,7 +135,7 @@ class PostureChecks:
 
     def _check_privileged(self, it: dict, key: str, label: str, token: str,
                           timeout: int) -> None:
-        """How many accounts hold Global Administrator, against ``privileged_max``.
+        """How many accounts hold Global Administrator, against ``global_admins_max``.
 
         Counted from the ACTIVATED directory roles: a role nobody holds is not returned by
         Graph at all, which is the answer "none" rather than a missing check.
@@ -154,7 +154,7 @@ class PostureChecks:
             roles_seen += 1
             if name.lower() in ('global administrator', 'company administrator'):
                 admins = len(members)
-        cap = int(it.get('privileged_max') or 0)
+        cap = self._threshold(it, 'global_admins_max')
         extra = {'name': f'{label} · Privileged roles', 'global_admins': admins,
                  'roles': roles_seen}
         if cap > 0 and admins > cap:

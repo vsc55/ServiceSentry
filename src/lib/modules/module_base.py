@@ -136,7 +136,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         self.__dict__['_mod_sch_defaults'] = defaults
         return defaults
 
-    def module_default(self, field: str, fallback: int = 0) -> int:
+    def module_default(self, field: str, fallback=0):
         """Resolve a module-level config field via the item → module → global
         chain, deciding by PRESENCE in the saved module config:
 
@@ -147,12 +147,19 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
           ``Configuration > Modules`` value (config.json ``modules|<field>``).
 
         Generic for ``threads``, ``timeout`` and any future ``modules|*`` global.
-        Always returns an int."""
+
+        The result takes the TYPE of the fallback, so a float field (cpu's `interval`, ntp's
+        `max_offset`) is not quietly truncated to an int — 0.5 s of sampling became 0, which
+        is a different measurement, not a rounder one."""
         def _int(val, default):
+            cast = type(default) if isinstance(default, (int, float))                 and not isinstance(default, bool) else int
             try:
-                return int(val)
+                return cast(val)
             except (TypeError, ValueError):
-                return int(default)
+                try:
+                    return cast(default)
+                except (TypeError, ValueError):
+                    return 0
 
         schema_default = self._module_schema_defaults().get(field, fallback)
         mod_cfg = self.get_conf() if self.is_monitor_exist else {}

@@ -6,8 +6,8 @@
         "threads":    "Hilos",
         "timeout":    "Timeout (s)",
         "label":      "Etiqueta",
-        "alert_ram":  "RAM (%)",
-        "alert_swap": "SWAP (%)"
+        "alert_ram":  "Alerta al % de RAM usada",
+        "alert_swap": "Alerta al % de SWAP usada"
     },
     "hints": {
         "enabled":    "Habilitar o deshabilitar esta comprobación de RAM y SWAP.",

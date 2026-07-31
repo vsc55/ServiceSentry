@@ -96,6 +96,12 @@ def register(app, wa):
             code = 403 if e.key == 'access_denied' else 400
             return jsonify({'error': wa._t(e.key, *e.args)}), code
         modules_svc.ensure_item_uids(data)     # generate stable UIDs for new items
+        # Read the duplicates BEFORE re-keying resolves them: afterwards there is nothing to
+        # see. A repeated uid used to cost an item its existence (the re-key builds a dict
+        # keyed by uid, so the second write replaced the first); it no longer does, but a
+        # duplicate should never arrive, and knowing one did — with the module and the uid —
+        # is the difference between finding its cause and guessing at it.
+        dup_uids = modules_svc.duplicate_item_uids(data)
         modules_svc.rekey_items_by_uid(data)   # keep each item's dict key == its UID
         # Generic: provision/link a host for any item that declares one
         # (__provision_host__ in its schema) — so address modules (ping/web/
@@ -107,6 +113,10 @@ def register(app, wa):
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._sensitive_fields,
             )
+            # The duplicate goes in the SAME entry as the change that carried it, because
+            # that is the record someone will be reading when they ask where an item went.
+            if dup_uids:
+                changes = (changes or '') + f'\nduplicate item uid(s): {", ".join(dup_uids)}'
             wa._audit('modules_saved', detail=changes or '')
             # A module or a cluster item that just disappeared leaves its scoped keys
             # behind. Module names, unlike UIDs, CAN come back — which is exactly why they

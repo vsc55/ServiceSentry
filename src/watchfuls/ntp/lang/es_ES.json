@@ -5,7 +5,7 @@
         "enabled":    "Habilitado",
         "label":      "Etiqueta",
         "threads":    "Hilos",
-        "max_offset": "Offset máximo (s)",
+        "max_offset": "Alerta si el desfase supera (s)",
         "timeout":    "Timeout (s)",
         "server":     "Servidor NTP",
         "port":       "Puerto"

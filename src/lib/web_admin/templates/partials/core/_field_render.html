@@ -116,6 +116,14 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
     const _term = _fieldTermFor(key, meta, pathStr, target);
     const lbl = esc((_term && _term.label) || LABELS[pathStr] || fieldLabel(key, meta));
     const lblHtml = lbl + _infoIcon;
+    // An amount and its unit are one question — "warn under 50 GB" — so the unit is drawn
+    // attached to the box instead of on a row of its own, where the reader has to assemble
+    // the two halves. Declared (`unit_field`), never guessed from a name.
+    const _unitSel = (meta && meta.unit_field)
+        ? _unitSelect(sch, getPath(target === 'config' ? configData : modulesData,
+                                   pathStr.split('|').slice(0, -1)) || {},
+                      pathStr.split('|').slice(0, -1).join('|'), target, meta.unit_field)
+        : '';
 
     // Hidden fields are stored in data but never rendered to the user.
     if (meta && meta.hidden) return '';
@@ -163,7 +171,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         }
         return _fieldRow(lblHtml, fieldCtl({kind: 'secret',
             inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="" placeholder="${escAttr(t('secret_defined') || '••••••')}"`,
-            onInput: `updateField(${tg},${sp},this.value)`, trailing: _actionBtn}), _hintHtml);
+            onInput: `updateField(${tg},${sp},this.value)`, trailing: _unitSel + _actionBtn}), _hintHtml);
     }
 
     // Nullable int/float that inherits a global Configuration > Modules default
@@ -177,11 +185,20 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         const _minV = meta.min != null ? meta.min : 'null';
         const _maxV = meta.max != null ? meta.max : 'null';
         // Inherited value shown as the placeholder: the live global config value,
-        // else the registered global spec default, else the field's OWN schema
-        // default — so a module-only default (no Configuration > Modules entry,
-        // e.g. m365 usage_pct) still shows its default instead of an empty box.
+        // else the registered global spec default, else what the MODULE has set for this
+        // field, else the field's OWN schema default — so a module-only default (no
+        // Configuration > Modules entry, e.g. m365 usage_pct) still shows its default
+        // instead of an empty box.
+        //
+        // The module step is not optional decoration: an ITEM field that inherits from its
+        // module has `default: null` of its own, so without it the cascade ends at null and
+        // the box shows nothing at all — which is exactly what "blank means inherit" must
+        // not look like.
         let _gv = (typeof configData !== 'undefined' && configData.modules) ? configData.modules[key] : null;
         if (_gv == null || _gv === '') _gv = CONFIG_FIELD_DEFAULTS['modules|' + key];
+        if ((_gv == null || _gv === '') && meta.placeholder_module) {
+            _gv = _placeholderModuleValue(pathStr, meta.placeholder_module);
+        }
         if (_gv == null || _gv === '') _gv = (meta.default != null ? meta.default : null);
         const _gph = (_gv != null && _gv !== '') ? ` placeholder="${escAttr(String(_gv))}"` : '';
         const _dispV = (value == null || value === '') ? '' : value;
@@ -189,7 +206,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${_dispV}"${_minA}${_maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_gph} data-inherit-blank="1" onkeydown="blockNonNumericKey(event,${_isF})"`,
             onInput: `markDirty(${tg})`,
             onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
-            trailing: _actionBtn}), _hintHtml);
+            trailing: _unitSel + _actionBtn}), _hintHtml);
     }
 
     // Nullable int/float (e.g. a DB port): blank is a valid value meaning "use the
@@ -225,7 +242,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${_dispV}"${_minA}${_maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph}${_pm} data-inherit-blank="1" onkeydown="blockNonNumericKey(event,${_isF})"`,
             onInput: `markDirty(${tg})`,
             onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
-            trailing: _actionBtn}), _hintHtml);
+            trailing: _unitSel + _actionBtn}), _hintHtml);
     }
 
     // Unset int/float field (no value in config yet, e.g. a driver-specific DB
@@ -252,14 +269,14 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value=""${minA}${maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph}${_pmAttr} onkeydown="blockNonNumericKey(event,${_isF})"`,
             onInput: `markDirty(${tg})`,
             onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
-            trailing: _actionBtn}), _hintHtml);
+            trailing: _unitSel + _actionBtn}), _hintHtml);
     }
 
     if (typeof value === 'boolean') {
         const _boolItemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
         return _fieldRow(lblHtml, fieldCtl({kind: 'switch', value,
             onChange: `updateField(${tg},${sp},this.checked);_refreshConditionalFields(${_boolItemPath})`,
-            trailing: _actionBtn}), _hintHtml);
+            trailing: _unitSel + _actionBtn}), _hintHtml);
     }
     if (typeof value === 'number' && meta && Array.isArray(meta.options_int)) {
         const opts = meta.options_int.map(s => {
@@ -267,7 +284,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             return `<option value="${s}"${value === s ? ' selected' : ''}>${label}</option>`;
         }).join('');
         return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
-            onChange: `updateField(${tg},${sp},parseInt(this.value,10))`, trailing: _actionBtn}), _hintHtml);
+            onChange: `updateField(${tg},${sp},parseInt(this.value,10))`, trailing: _unitSel + _actionBtn}), _hintHtml);
     }
     if (typeof value === 'number') {
         const minA = meta && meta.min != null ? ` min="${meta.min}"` : '';
@@ -308,12 +325,20 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             extraAttrs += ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}"`;
             extraAttrs += ` data-zero-as-blank="1"`;
             if (value === 0) displayValue = '';
+        } else if (meta && meta.zero_as_blank) {
+            // …and on its own, for a field that is clearable but inherits nothing, so it has
+            // no placeholder to hang the behaviour off. It used to get none: `zero_as_blank`
+            // was read nowhere, so five modules declared a key that did nothing and their
+            // fields could not be emptied — blanking one snapped back to the stored value on
+            // blur, which reads as the box refusing to be cleared.
+            extraAttrs += ` data-zero-as-blank="1"`;
+            if (value === 0) displayValue = '';
         }
         return _fieldRow(lblHtml, fieldCtl({kind: 'number',
             inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs} ${_onkeydown}`,
             onInput: `markDirty(${tg})`,
             onChange: `validateAndUpdateNumber(this,${tg},${sp},${_minV},${_maxV})`,
-            trailing: _actionBtn}), _hintHtml);
+            trailing: _unitSel + _actionBtn}), _hintHtml);
     }
     if (typeof value === 'string') {
         // Unified language selector — every language field renders the same way: each supported
@@ -390,7 +415,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _dbItemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
             return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
                 onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_dbItemPath})`,
-                trailing: _actionBtn}), _hintHtml);
+                trailing: _unitSel + _actionBtn}), _hintHtml);
         }
         // String select — options array defined in schema
         if (meta && Array.isArray(meta.options)) {
@@ -418,7 +443,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
             return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
                 onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})`,
-                trailing: _actionBtn}), _hintHtml);
+                trailing: _unitSel + _actionBtn}), _hintHtml);
         }
         // Multiline PEM text (SAML2 SP/IdP certificates + private key) — declared
         // via schema meta.textarea. A monospace textarea preserves the line breaks
@@ -442,7 +467,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : null);
             return _fieldRow(lblHtml, fieldCtl({kind: 'multi', key: pathStr, value: _norm(value),
                 placeholder: (_mph != null && _mph !== '') ? String(_mph) : '',
-                validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _actionBtn}), _hintHtml);
+                validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _unitSel + _actionBtn}), _hintHtml);
         }
         // Single IP / bind-address field (e.g. web_admin|host) — validate on
         // change, revert + toast on invalid. Placeholder shows the registry default.
@@ -456,7 +481,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 inputAttrs: ` data-field-path="${escAttr(pathStr)}" data-ip-validate="${escAttr(meta.ipkind)}" value="${escAttr(value)}"${_ipPh}`,
                 onInput: `markDirty(${tg})`,
                 onChange: `_ipFieldChange(this,${tg},${sp},${jsStr(meta.ipkind)})`,
-                trailing: _actionBtn}), _hintHtml);
+                trailing: _unitSel + _actionBtn}), _hintHtml);
         }
         // Credential reference field (meta.credential_type) — render a picker of
         // stored credentials of that type (e.g. an ssh credential for the proxmox
@@ -468,7 +493,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             return _fieldRow(lblHtml, fieldCtl({kind: 'select',
                 optionsHtml: credentialOptions(value || '', meta.credential_type),
                 onChange: `updateField(${tg},${sp},this.value);if(typeof _refreshConditionalFields==='function')_refreshConditionalFields(${jsStr(_itemPath)})`,
-                trailing: _actionBtn}), _hintHtml);
+                trailing: _unitSel + _actionBtn}), _hintHtml);
         }
         const isSensitive = (meta && meta.sensitive) || SENSITIVE.has(key);
         const tp = isSensitive ? 'password' : 'text';
@@ -594,7 +619,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
             inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}`,
             onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
-            trailing: _actionBtn}), _hintHtml);
+            trailing: _unitSel + _actionBtn}), _hintHtml);
     }
     if (Array.isArray(value)) {
         const csv = value.map(v => String(v)).join(', ');
@@ -747,6 +772,12 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     if (opts && Array.isArray(opts.onlyGroups)) {
         keys = keys.filter(k => opts.onlyGroups.includes(_effGroup(k)));
     }
+    // An amount and its unit are ONE question — "warn under 50 GB" — and reading it off two
+    // rows makes the reader assemble it. A field that declares `unit_field` draws the unit
+    // beside its own box, so the unit loses its separate row here.
+    const _claimedUnits = new Set(keys
+        .map(k => (fieldMeta(_sch, k) || {}).unit_field).filter(Boolean));
+    if (_claimedUnits.size) keys = keys.filter(k => !_claimedUnits.has(k));
 
     // ── Host binding (host-centric config) ──────────────────────────────────
     // A module whose connection fields are declared in __host_profile__ (exposed
@@ -1235,6 +1266,23 @@ function _ipFieldChange(el, target, pathStr, kind) {
 //   spec = { kind:'switch'|'select'|'number'|'secret'|'textarea'|'multi'|'text',
 //            value, onChange, onInput, key, trailing, optionsHtml,
 //            inputType, inputCls, inputAttrs, rows, placeholder, textareaVal }
+/** The unit selector that belongs to an amount, as a control attached to its box.
+ *
+ *  Declared by the schema (`"unit_field": "free_unit"`), so the core pairs nothing by
+ *  guessing at names. Same `updateField` as any other select — it is the same field, drawn
+ *  in a better place.
+ */
+function _unitSelect(sch, obj, pathPrefix, target, unitKey) {
+    const meta = fieldMeta(sch, unitKey);
+    if (!meta || !Array.isArray(meta.options)) return '';
+    const cur = obj[unitKey];
+    const sp = jsStr(pathPrefix + '|' + unitKey);
+    const opts = meta.options.map(o =>
+        `<option value="${escAttr(o)}"${String(cur) === String(o) ? ' selected' : ''}>${esc(o)}</option>`).join('');
+    return `<select class="form-select ss-unit-sel"
+            onchange="updateField(${jsStr(target)},${sp},this.value)">${opts}</select>`;
+}
+
 function fieldCtl(spec) {
     const tr = spec.trailing || '';
     const oc = spec.onChange ? ` onchange="${spec.onChange}"` : '';

@@ -31,9 +31,9 @@
         "check_ceph":        "Ceph",
         "check_network":     "Network interfaces",
         "check_updates":     "Updates",
-        "updates_threshold": "Updates threshold",
+        "updates_threshold": "Alert if pending updates exceed",
         "check_storage":     "Storage",
-        "storage_threshold": "Usage threshold (%)",
+        "storage_threshold": "Alert at % of storage used",
         "check_permissions": "Token permissions",
         "allow_updates":     "Allow updates check (+Sys.Modify)"
     },

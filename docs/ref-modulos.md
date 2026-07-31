@@ -1141,18 +1141,33 @@ resultado bajo una clave propia `<ítem>/<servicio>`, así son independientes.
 
 | Check (`list.*.check_*`) | Qué mide | Umbral | Permiso Graph |
 | --- | --- | --- | --- |
-| `check_site` (def. true) | Cuota del drive de **un** sitio de SharePoint (% usado / libre) | `usage_pct` (%), `free_min`+`free_unit`; `site` (vacío = el sitio **raíz**, que es un sitio más y no el total del tenant; botón **discover** `list_sites`) | `Sites.Read.All` |
-| `check_tenant_usage` | **SharePoint completo**: suma lo ocupado por TODOS los sitios frente a la capacidad total, con % real. Los sitios en papelera cuentan (ocupan hasta purgarse) y se informan aparte | `tenant_pct` (% → warning), `tenant_warn_at`+`tenant_warn_unit` (cantidad → warning), **100 % → error**; `tenant_max`+`tenant_unit` = capacidad total (vacío = suma de las cuotas de los sitios, porque Graph no publica el pool). **Desglose por sitio**: `sites_top` (módulo, override por ítem) = cuántos sitios se guardan por ciclo — en blanco hereda, **0 no guarda ninguno** y el desglose solo sale con «Actualizar ahora», que consulta en vivo y los trae todos; `breakdown_page` (módulo) = cuántas filas dibuja la página de una vez, y vale para los dos desgloses | `Reports.Read.All` + `Sites.Read.All` (nombres cuando el tenant oculta los informes) |
+| `check_site` (def. true) | Cuota del drive de **un** sitio de SharePoint (% usado / libre) | `site_usage_pct` (%), `site_free_min`+`site_free_unit`; `site` (vacío = el sitio **raíz**, que es un sitio más y no el total del tenant; botón **discover** `list_sites`) | `Sites.Read.All` |
+| `check_tenant_usage` | **SharePoint completo**: suma lo ocupado por TODOS los sitios frente a la capacidad total, con % real. Los sitios en papelera cuentan (ocupan hasta purgarse) y se informan aparte | `tenant_pct` (% → warning), `tenant_warn_at`+`tenant_warn_unit` (ocupado → warning), `tenant_free_min`+`tenant_free_unit` (**libre por debajo de** → warning; necesita capacidad conocida), **100 % → error**; `tenant_capacity`+`tenant_capacity_unit` = capacidad total. Graph **no publica** el pool del tenant: o lo escribes tú (léelo en Centro de administración de SharePoint → Sitios activos, arriba a la derecha) o sale de la suma de cuotas reales por sitio si el tenant las gestiona a mano; sin ninguna de las dos, el check informa de lo ocupado y **admite que no hay total** en vez de inventarlo. La fila dice de dónde salió en `source`. **Desglose por sitio**: `sites_top` (módulo, override por ítem) = cuántos sitios se guardan por ciclo — en blanco hereda, **0 no guarda ninguno** y el desglose solo sale con «Actualizar ahora», que consulta en vivo y los trae todos; `breakdown_page` (módulo) = cuántas filas dibuja la página de una vez, y vale para los dos desgloses | `Reports.Read.All` + `Sites.Read.All` (nombres cuando el tenant oculta los informes) + `SharePointTenantSettings.Read.All` (¿gestión automática de almacenamiento?) + `Organization.Read.All` (estimación por licencias) |
 | `check_health` | Estado de servicios M365 (degradación = warning, interrupción = down) | `health_services` (filtro opcional por nombre) | `ServiceHealth.Read.All` |
-| `check_licenses` | Capacidad de licencias (SKU): unidades libres = habilitadas − consumidas | `license_min` (0 = avisa al agotarse) | `Organization.Read.All` |
-| `check_secrets` | Caducidad del secreto/certificado **de esta misma app** | `secret_days` (avisa N días antes; caducado avisa siempre) | `Application.Read.All` |
+| `check_licenses` | Capacidad de licencias (SKU): unidades libres = habilitadas − consumidas | `licenses_free_min` (0 = avisa al agotarse) | `Organization.Read.All` |
+| `check_secrets` | Caducidad del secreto/certificado **de esta misma app** | `secret_expiry_days` (avisa N días antes; caducado avisa siempre) | `Application.Read.All` |
 | `check_mailbox` | Buzones de Exchange sobre cuota (envío/recepción prohibidos) | `mailbox_over_max` (0 = avisa si hay alguno) | `Reports.Read.All` |
 | `check_onedrive` | Almacenamiento total USADO de OneDrive en el tenant **y quién lo usa**: informe de detalle por cuenta, una fila por persona. Sin % ni «tenant lleno» — las cuotas son por persona y no hay pool que agotar | `onedrive_max`+`onedrive_unit` (0 = informativo); `accounts_top` (módulo, override por ítem) = cuántas cuentas se guardan por ciclo, **0 = ninguna** (solo en vivo). La barra de cada fila es esa cuenta contra **su propia cuota** | `Reports.Read.All` + `User.Read.All`/`Sites.Read.All` (nombres cuando el tenant oculta los informes) |
-| `check_secure_score` | Microsoft Secure Score (actual/máx en %) | `secure_min` (% mínimo; 0 = informativo) | `SecurityEvents.Read.All` |
-| `check_risky_users` | Usuarios en riesgo (Identity Protection, `atRisk`) | `risky_max` (0 = avisa si hay alguno) | `IdentityRiskyUser.Read.All` |
+| `check_secure_score` | Microsoft Secure Score (actual/máx en %) | `secure_score_min` (% mínimo; 0 = informativo) | `SecurityEvents.Read.All` |
+| `check_risky_users` | Usuarios en riesgo (Identity Protection, `atRisk`) | `risky_users_max` (0 = avisa si hay alguno) | `IdentityRiskyUser.Read.All` |
 
 `tenant_id` / `client_id` / `client_secret` son las credenciales de la app (o una credencial
 `m365_app` reutilizable). `list.*.timeout` / `alert` por ítem (`0` hereda el global).
+
+**Mejora pendiente — capacidad exacta de SharePoint (`Get-SPOTenant`).** Hoy `tenant_capacity` se
+escribe a mano porque **Graph no publica la cuota agrupada del tenant**, y eso está verificado
+contra un tenant real: `/admin/sharepoint/settings` devuelve 28 ajustes, tres sobre
+almacenamiento —gestión automática sí/no, techo por sitio (25 TB) y cuota por defecto de OneDrive
+(5 TB)— y **ninguno es el pool**. Ojo con confundirlos: un techo no es capacidad disponible, y
+sumar 18 sitios a 25 TB daría 450 TB de «capacidad». El número real solo lo sirve la API de
+administración de SharePoint (`Get-SPOTenant` → CSOM contra `<tenant>-admin.sharepoint.com`), y
+el precio es doble: token app-only que SharePoint solo acepta si se acuñó con **certificado**
+(este módulo se autentica con secreto, y `lib/providers/entraid/` no tiene camino de
+`client_assertion`) y permiso **`Sites.FullControl.All`**, control total de todos los sitios del
+tenant para leer un dato. Mientras no se pague ese precio, `tenant_capacity` es donde va ese número:
+se lee en Centro de administración de SharePoint → Sitios activos, arriba a la derecha. La
+acción de diagnóstico `sharepoint_settings` sigue ahí para volver a comprobarlo si Microsoft
+añade el dato a Graph.
 
 **Sección propia:** declara `__page__`, así que aporta la sección **`/module/m365`** con su entrada en la
 barra lateral: salud de servicios, licencias y almacenamiento, seguridad (Secure Score, usuarios de

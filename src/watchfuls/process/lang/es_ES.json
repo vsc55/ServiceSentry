@@ -6,7 +6,7 @@
         "threads":   "Hilos",
         "timeout":   "Timeout (s)",
         "process":   "Nombre del proceso",
-        "min_count": "Instancias mínimas"
+        "min_count": "Alerta si las instancias bajan de"
     },
     "hints": {
         "enabled":   "Habilitar o deshabilitar la monitorización de este proceso.",

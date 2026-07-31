@@ -78,7 +78,7 @@ class Watchful(ModuleBase):
             return
         label = (item.get('label') or '').strip() or key
         os_ = self.host_os(item)
-        interval = self.get_conf('interval', self._MODULE_DEFAULTS['interval'])
+        interval = self.module_default('interval', self._MODULE_DEFAULTS['interval'])
         cmd = _cpu_cmd(os_)
         timeout = int(self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])) + 2
 

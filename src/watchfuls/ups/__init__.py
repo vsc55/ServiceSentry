@@ -149,7 +149,7 @@ class Watchful(ModuleBase):
                 # battery/load thresholds fall back to the module-wide default when
                 # the item leaves them blank (0), like the per-item timeout does.
                 if v == 0 and field in self._MODULE_DEFAULTS:
-                    return int(self.get_conf(field, self._MODULE_DEFAULTS[field]) or 0)
+                    return self.module_default(field, self._MODULE_DEFAULTS[field])
                 return v
 
             list_items.append({

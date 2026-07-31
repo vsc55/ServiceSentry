@@ -853,6 +853,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
+| `TestRekeyItemsByUid::test_two_items_sharing_a_uid_both_survive` + `::test_an_item_keyed_as_another_items_uid_survives_too` | **Reportado**: dos ítems, se desactiva uno, se guarda y al recargar queda uno. El re-keyed construye un dict por uid, así que un uid repetido hacía que la segunda escritura pisara a la primera — sin error, sin traza en auditoría, un check que deja de existir | los dos sobreviven, uno con uid nuevo | que guardar resuelva un duplicado tirando un check |
 | `test_rekey_flat_and_nested` | Reindexado de ítems por `uid` (plano y anidado) | Listas rekeyed por uid (generado si falta); escalares (`enabled`/`threads`) intactos | Si reindexa mal o toca escalares |
 
 ### `TestLandingPageApplied` (`test_wa_config.py`)
@@ -3108,7 +3109,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 64. Watchful: m365
 
-**Archivo:** `watchfuls/m365/tests/test_m365.py` — 119 tests
+**Archivo:** `watchfuls/m365/tests/test_m365.py` — 133 tests
 
 **Postura del tenant** (14 tests, `TestExtendedChecks`): cinco comprobaciones que contestan
 preguntas que el panel puede y un administrador normalmente no, porque cada una vive en un
@@ -3138,19 +3139,26 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_over_percentage_warns` | Uso por encima del % configurado | site en fallo, `warning`, `used=95.0` | no avisa |
 | `test_low_free_warns` | Espacio libre por debajo del mínimo (regla de free-space) | site en fallo con `warning` | no avisa |
 | `test_percentage_off_when_module_default_zero` | Umbral % en 0 a nivel item y módulo | site OK, sin `alert` en other_data (barra neutra) | umbral falso publicado |
-| `test_usage_pct_inherits_module_default` | Item con `usage_pct` en blanco hereda default de módulo (80) | site en fallo, `alert=80` heredado | no hereda |
-| `test_free_min_inherits_module_default` | Item con `free_min` en blanco hereda default (10 GB) | site en fallo con `warning` | no hereda |
-| `test_item_value_overrides_module_default` | `usage_pct` explícito de item gana sobre default de módulo | site OK con `alert=95` | usa default |
+| `test_usage_pct_inherits_module_default` | Item con `site_usage_pct` en blanco hereda default de módulo (80) | site en fallo, `alert=80` heredado | no hereda |
+| `test_free_min_inherits_module_default` | Item con `site_free_min` en blanco hereda default (10 GB) | site en fallo con `warning` | no hereda |
+| `test_item_value_overrides_module_default` | `site_usage_pct` explícito de item gana sobre default de módulo | site OK con `alert=95` | usa default |
 | `test_missing_credentials_warns` | Faltan credenciales (client_secret vacío) | item en fallo con `warning` | error duro o OK |
 | `test_auth_failure_smoothed_then_alerts` | Fallo de auth con `alert=1` (sin ventana de suavizado) | item en fallo, mensaje con 'auth' | no alerta |
 | `test_auth_failure_first_is_smoothed` | Fallo de auth con `alert=3`: primer fallo se suaviza | item reportado OK | alerta prematura |
 | `test_it_sums_every_site_against_the_sum_of_their_quotas` | **SharePoint completo**: suma lo ocupado por todos los sitios frente a la suma de sus cuotas | `used_bytes`, `total_bytes`, `used` (%) y `sites` publicados | sin denominador, como antes |
 | `test_a_typed_capacity_wins_over_the_sum_of_quotas` | Graph no publica el pool del tenant; si el admin lo sabe, manda lo que escribe | `total_bytes` = lo tecleado, `source='manual'` | ignora la capacidad |
 | `test_a_sum_of_ceilings_is_not_a_capacity` | **Captura**: cada fila leía «de 25.0 TB» — el TECHO por sitio, que la gestión automática asigna a todos porque no reserva nada. Sumarlo convertía 65 sitios en 1.6 PB, contra los que cualquier uso real es un cómodo 0 % | `source='none'` y sin `%` inventado | un check que no puede dispararse nunca |
+| `test_the_tenant_is_asked_whether_management_is_automatic` | El techo de 25 TB es el SÍNTOMA: un tenant en gestión MANUAL puede haber puesto 25 TB a propósito, y esa sí es cuota real | `/admin/sharepoint/settings` manda; `source='sites'`, 50 TB | tirar una cuota legítima, y una inferencia que caduca el día que Microsoft suba el techo |
+| `test_the_ceiling_comes_from_the_tenant_not_from_a_constant` | `siteCreationDefaultStorageLimitInMB` **es** el techo, en palabras del tenant (uno real contesta 26 214 400 MB); el 25 TB fijo pasa a ser respaldo | un techo de 40 GB se lee como techo, no como cuota | leer aproximadamente un tenant con otro valor por defecto |
+| `test_a_tenant_that_will_not_say_keeps_the_safe_answer` | Sin permiso o con fallo, queda la inferencia de siempre | `source='none'` | inventar capacidad cuando no se sabe |
+| `test_the_setting_is_only_asked_where_it_matters` | Un tenant con cuotas normales ya tiene su respuesta | ni una llamada extra | pagar por que te digan lo que acabas de calcular |
+| `test_the_capacity_is_never_guessed_from_the_licences` | La fórmula 1 TB + 10 GB/licencia vivió un build: un tenant real la mató, su centro de administración marca **300 GB**, por debajo del SUELO de 1 TB de la fórmula | `source='none'`, sin `total_bytes` | una capacidad que puede triplicar la real, y errando hacia el lado que oculta un tenant llenándose |
 | `test_a_typed_capacity_still_wins_over_the_ceilings` | El número escrito por el admin es la única capacidad que hay en ese tenant | `source='manual'`, 40 % | romper al que ya lo tenía bien |
 | `test_real_per_site_quotas_are_still_summed` | Un tenant en gestión MANUAL sí tiene cuotas reales por sitio | `source='sites'` | que la regla del techo se lleve por delante un denominador legítimo |
 | `test_percentage_threshold_warns` | Aviso por porcentaje ocupado | tenant en fallo con `warning` | no avisa |
 | `test_absolute_threshold_warns_even_when_the_fraction_is_small` | «Avisa a 500 GB» es otra pregunta que «avisa al 80 %», y en un tenant grande llega mucho antes | `warning` con el % lejos del umbral | solo mira el porcentaje |
+| `test_low_free_space_warns` + `test_enough_free_space_is_ok` | La tercera forma de preguntar lo mismo, y con la que se planifica de verdad: no «cuán lleno» sino «cuánto queda» — un % significa cantidades distintas según crece el tenant | warning bajo el mínimo, OK por encima | tener que traducir mentalmente % a gigas |
+| `test_free_space_needs_a_capacity_to_be_measured_against` | Sin total no hay «queda» | no dispara y lo dice (`source='none'`) | un umbral que no salta nunca en silencio |
 | `test_full_is_an_error_not_a_warning` | **100 % no es «acercarse»**: es donde se empiezan a rechazar escrituras | fallo **sin** `warning` (rojo) | llega en el mismo color que el aviso previo |
 | `test_over_capacity_is_also_an_error` | Pasado el 100 % la respuesta es la misma | fallo sin `warning` | vuelve a aviso |
 | `test_deleted_sites_count_but_are_reported_apart` | Un sitio en la papelera sigue ocupando hasta que se purga | sus bytes suman y `deleted` los cuenta | infra-reporta el total |
@@ -3178,6 +3186,9 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_a_live_read_ignores_the_cap_because_it_is_not_stored` | El tope protege el resultado GUARDADO; una lista pedida a mano no toca la BD | los 30 sitios, incluso con `sites_top=0` | pagar el tope donde no hay nada que proteger |
 | `test_the_live_refresh_declares_itself` | El check no distingue una lectura en vivo de un ciclo si nadie se lo dice | `page_refresh` marca `_live` en la config con la que corre | el tope aplicado también en vivo |
 | `test_the_module_states_its_own_page_size` | Cuántas filas se dibujan de una vez es presentación, y 6 particiones no se leen como 500 tablas | `breakdown.page` desde `breakdown_page` | una decisión de presentación fija en el núcleo |
+| `test_a_threshold_falls_back_to_the_module_default` + `test_an_item_value_still_wins` | Diez umbrales existían **solo por ítem**: con varios tenants había que teclear la misma política en cada uno | cadena ítem → módulo, la de `site_usage_pct` de siempre | política de flota copiada a mano |
+| `test_the_global_admin_cap_ships_a_policy` | `global_admins_max` es la excepción deliberada: un tenant con más de un puñado de administradores globales merece decirse en voz alta lo haya configurado alguien o no, y 5 es la guía de Microsoft | default de módulo 5 | dejar apagado por omisión algo que casi siempre interesa |
+| `test_an_optional_threshold_starts_off` | Un 0 en el ítem significaba APAGADO y ahora significa «hereda»: con un heredado de 90 se encenderían avisos que alguien apagó a propósito | los opcionales arrancan en 0 también en el módulo | que una actualización decida por el administrador |
 | `test_the_status_bar_only_gets_a_marker_when_one_is_configured` | La barra de Status queda neutra si no hay umbral | `alert` solo cuando se fija | marcador que nadie pidió |
 | `TestStorageView::test_it_lists_both_kinds_in_one_table` | La vista Storage: una fila por sitio y por cuenta, lado a lado | ambos tipos y las 6 columnas | dos tablas para una pregunta |
 | `TestStorageView::test_a_size_sorts_by_its_bytes_and_reads_as_a_size` | `{v, s}`: `v` ordena, `s` se lee | 3 GB ordena por bytes | «3.0 TB» ordenando alfabéticamente |
@@ -3200,6 +3211,8 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_schema` | Esquema: secret sensible, unidades, `__status_render__` | flags correctos | esquema incorrecto |
 | `test_test_connection` | Acción test_connection con token/site/drive mockeados | `ok=True`, mensaje con `25.0%` | fallo |
 | `test_test_connection_missing_creds` | test_connection sin credenciales completas | `ok=False` | `ok=True` |
+| `test_the_settings_diagnostic_returns_what_graph_said` | El pool del tenant es el único dato que el check no puede obtener; cuánto trae `/admin/sharepoint/settings` es una pregunta sobre un tenant vivo, no sobre documentación | respuesta íntegra (sin ruido odata) + las claves con pinta de almacenamiento | filtrar justo lo que se va a mirar |
+| `test_the_settings_diagnostic_reports_a_refusal` | Decir que falta el permiso es la mitad de para lo que sirve un diagnóstico | `ok=False` con el 403 | un diagnóstico mudo |
 | `test_lists_sites_stripped_and_sorted` | Listado de sites (URL sin esquema, ordenado por display_name) | nombres ordenados, `kind='SharePoint'` | orden/formato erróneo |
 | `test_list_sites_missing_creds_is_empty` | list_sites sin credenciales | lista vacía | no vacía |
 | `test_list_sites_auth_error_is_empty` | list_sites con error de auth | lista vacía | excepción propagada |
@@ -5894,4 +5907,27 @@ declara sus vistas y todas comparten menos un sub-path.
 | `TestTheFiltersAreDeclaredToo::*` (×6) | Una columna pide su desplegable (`filter`) y el core lo llena con los valores presentes; el texto libre sigue llegando a todas | tenant y tipo en m365 | un filtro que ofrece lo que no existe, o vocabulario propio del core. **Captura**: solo salía el buscador — la barra se construye UNA vez y la tabla se creaba antes de que llegaran las columnas, así que sus desplegables se decidían sin columnas que declararlos |
 | `TestTheRendererPicksTheView::*` (×2) | La vista se resuelve una vez, desde la URL; sin vistas declaradas, todo se comporta igual que antes | | que cada capa vuelva a adivinar qué vista toca |
 | `TestTheStorageViewOfM365::*` (×3) | La acción existe, es de solo lectura y está declarada | | una entrada de menú que abre un error |
+
+---
+
+## 132. Un campo numérico tiene que poder vaciarse
+
+**Archivo:** `tests/test_wa_number_fields.py` — 20 tests
+
+En una caja numérica se esconden tres estados: un valor, «usa el heredado» y «apagado». El
+esquema los distingue —`inherit_blank` guarda null al vaciar, `zero_as_blank` guarda 0— y el
+renderizador marca el input para que el validador sepa cuál es.
+
+`zero_as_blank` **no lo leía nadie**: el atributo que busca el validador solo se emitía de
+rebote cuando el campo tenía placeholder, así que un campo vaciable que no hereda nada nunca lo
+recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `tenant_capacity`:
+«opcional» y se rellenaba solo. Cinco módulos declaraban la clave.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestTheVocabularyIsRead::*` (×3) | El núcleo lee `meta.zero_as_blank` por sí misma, el validador lee las dos marcas, y los tres estados siguen siendo tres | `null` al heredar, `0` al apagar, valor restaurado solo si no es ninguno | fusionar dos estados, que es cómo una caja vaciada vuelve con un número |
+| `TestAnAmountAndItsUnitAreOneQuestion::*` (×6) | «Avisar bajo 50 GB» es **una** decisión y se dibujaba en dos filas. Un campo nombra el hermano que lleva su unidad (`unit_field`) y el núcleo la pega a la caja; la unidad pierde su fila y escribe por el mismo campo de siempre | declarado, no adivinado por el sufijo `_unit`; y ninguna unidad huérfana | que un par nuevo vuelva a aterrizar en dos filas, una unidad dibujada dos veces, o un selector que se queda en la flecha: Bootstrap da `width:1%` dentro de un `input-group`, así que anular solo el crecimiento lo colapsa — el ancho hay que **declararlo**, y en una clase |
+| `TestAModuleDefaultCanBeCleared::*` (×7) | **Reportado**: vaciar un default de módulo se autocompletaba al salir y sin placeholder. Un número de módulo es la raíz de la cadena ítem→módulo, y vaciarlo significa «usa lo que trae el sistema» — eso es `inherit_blank` | los tres de m365 lo declaran; los 12 de otros 8 módulos también, y `alert` en los 11 que lo declaran — cada lectura movida a `module_default` primero, porque un null en `int(get_conf(x))` es un TypeError **en pleno check**. Y el helper conserva el tipo del fallback: `interval` y `max_offset` son floats, y truncarlos convierte 0.5 s de muestreo en 0 | poner el flag en masa sin mirar cómo se lee cada campo. Y un campo de ítem que hereda del MÓDULO tenía `default: null` propio: la cascada del placeholder solo miraba el global, terminaba en null y dibujaba una caja vacía — justo lo que «vacío = hereda» no puede parecer |
+| `TestGroupsAreContiguous::*` (×2) | El panel emite una cabecera cada vez que **cambia** el grupo al recorrer `__field_order__`: intercalar dos grupos dibuja «Comprobaciones / Alertas / Comprobaciones / Alertas…» con un fragmento bajo cada una. Y un grupo sin etiqueta sale como cabecera en blanco (así estaba hddtemp) | cada grupo visitado una vez, y todos traducidos | mover un campo de grupo y olvidar el orden |
+| `TestEveryDeclaringFieldIsCovered::*` (×2) | Ningún módulo declara una clave que el núcleo ignore, y solo la declaran campos numéricos | | vocabulario de esquema que parece significar algo y es inerte |
 

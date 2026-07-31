@@ -69,7 +69,7 @@ class Watchful(ModuleBase):
             # the FQDN whose certificate you want to check.
             server_name = (value.get('server_name', '') or '').strip() or host
             verify = str(value.get('verify', True)).lower() not in ('false', '0', 'no', 'off', 'disable')
-            warning_days = int(value.get('warning_days', 0) or 0) or self.get_conf('warning_days', self._MODULE_DEFAULTS['warning_days'])
+            warning_days = int(value.get('warning_days', 0) or 0) or self.module_default('warning_days', self._MODULE_DEFAULTS['warning_days'])
             timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
             label = (value.get('label', '') or '').strip() or server_name or host or key
             self._debug(f"SSL Cert: {self.item_label(key)} - host={host}:{port} sni={server_name} verify={verify} warning_days={warning_days}", DebugLevel.info)

@@ -563,9 +563,95 @@ class TestConfigEdgeCases:
         assert c.get("/api/v1/modules").get_json() == {"test": {"enabled": True}}
 
 
+class TestDisablingAnItemKeepsIt:
+    """Reported: two items in a module, one disabled with the item checkbox, saved, and on
+    reload it was gone — from the database, not just from the view.
+
+    The store deletes every uid absent from the payload, so an item lost anywhere upstream
+    becomes a real DELETE. This walks the actual endpoint to place the blame: if the item
+    survives here, whatever dropped it was not the server.
+    """
+
+    @staticmethod
+    def _put(client, data):
+        r = client.put('/api/v1/modules', json=data)
+        assert r.status_code == 200, r.get_json()
+        return client.get('/api/v1/modules').get_json()
+
+    def test_disabling_one_of_two_items_keeps_both(self, client):
+        from tests.conftest import _login                        # noqa: PLC0415
+        _login(client)
+        first = self._put(client, {'ping': {'enabled': True, 'list': {
+            'a': {'label': 'one', 'enabled': True},
+            'b': {'label': 'two', 'enabled': True}}}})
+        items = first['ping']['list']
+        assert len(items) == 2, items
+        uid_off = next(k for k, v in items.items() if v['label'] == 'two')
+
+        items[uid_off]['enabled'] = False          # exactly what the item checkbox does
+        after = self._put(client, first)
+        got = after['ping']['list']
+        assert len(got) == 2, f'an item was lost on save: {got}'
+        assert {v['label'] for v in got.values()} == {'one', 'two'}
+        assert got[uid_off]['enabled'] is False, 'the toggle did not stick'
+
+    def test_a_reload_still_returns_the_disabled_item(self, client):
+        """The other half: a load-side filter on `enabled` would be just as fatal, because
+        the next save builds its payload from what the GET returned — and the store deletes
+        every uid the payload omits."""
+        from tests.conftest import _login                        # noqa: PLC0415
+        _login(client)
+        self._put(client, {'ping': {'enabled': True, 'list': {
+            'a': {'label': 'on', 'enabled': True},
+            'b': {'label': 'off', 'enabled': False}}}})
+        got = client.get('/api/v1/modules').get_json()['ping']['list']
+        assert len(got) == 2, f'the disabled item did not come back: {got}'
+        assert any(v['enabled'] is False for v in got.values())
+
+
 class TestRekeyItemsByUid:
     """_rekey_items_by_uid makes every item's dict key equal its uid, across
     flat ``list`` collections and snmp's nested ``servers``/``checks``."""
+
+    def test_a_duplicate_uid_is_visible_before_it_is_resolved(self):
+        """Re-keying now repairs a collision, which also means it erases the evidence. The
+        duplicate is read BEFORE that and recorded in the same audit entry as the save that
+        carried it — the record somebody will be reading when they ask where an item went."""
+        from lib.core.modules.service import duplicate_item_uids
+        data = {"ping": {"list": {"a": {"uid": "SAME"}, "b": {"uid": "SAME"},
+                                  "c": {"uid": "OTHER"}}}}
+        assert duplicate_item_uids(data) == ["ping/SAME"]
+        assert duplicate_item_uids({"ping": {"list": {"a": {"uid": "U1"}}}}) == []
+
+    def test_two_items_sharing_a_uid_both_survive(self):
+        """Reported after a save: two items in a module, one disabled, and on reload there
+        was one. Re-keying builds a dict keyed by uid, so a repeated uid meant the second
+        write silently replaced the first — no error, nothing in the audit, a check that
+        stopped existing.
+
+        Whatever put the duplicate there (an imported config, a hand-edited file), saving
+        does not get to resolve it by dropping a check."""
+        from lib.core.modules.service import rekey_items_by_uid as _rekey
+        data = {"ping": {"list": {
+            "a": {"uid": "SAME", "label": "keep me", "enabled": False},
+            "b": {"uid": "SAME", "label": "and me"},
+        }}}
+        _rekey(data)
+        lst = data["ping"]["list"]
+        assert len(lst) == 2, f'a check was lost: {lst}'
+        assert {v["label"] for v in lst.values()} == {"keep me", "and me"}
+        assert all(k == v["uid"] for k, v in lst.items()), 'the invariant broke instead'
+
+    def test_an_item_keyed_as_another_items_uid_survives_too(self):
+        """The same collision from the other direction: one item's KEY is another's uid."""
+        from lib.core.modules.service import rekey_items_by_uid as _rekey
+        data = {"ping": {"list": {
+            "U2": {"uid": "U1", "label": "first"},
+            "other": {"uid": "U2", "label": "second"},
+        }}}
+        _rekey(data)
+        assert len(data["ping"]["list"]) == 2
+        assert {v["label"] for v in data["ping"]["list"].values()} == {"first", "second"}
 
     def test_rekey_flat_and_nested(self):
         from lib.core.modules.service import rekey_items_by_uid as _rekey_items_by_uid
