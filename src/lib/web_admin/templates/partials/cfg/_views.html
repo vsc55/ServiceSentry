@@ -1,0 +1,226 @@
+{# ================================================================
+   Configuration — an index down the side, one section beside it.
+
+   Seven sub-tabs held twenty-seven cards, and they answered exactly one question well:
+   "show me the settings about X". Finding a setting meant opening seven of them, and they
+   said nothing about the six you were not looking at — least of all which ones this install
+   had actually changed.
+
+   The index replaces them outright. It is not a view among others: a second navigator over
+   the same cards would be one more thing to keep in step with this one, for a question this
+   one already answers. So there is no view registry and no switcher — this IS the section.
+
+   It is a PASS over the DOM `renderConfig()` produced, exactly like the search filter has
+   always been. No second renderer, no second copy of the field vocabulary, and every field
+   keeps the wiring it was born with. Cards are shown and hidden, never rebuilt, so switching
+   section keeps handlers, tooltips and half-typed values; and every card stays in the DOM, so
+   the search still has all of them to search.
+
+   `data-cfg-path` is what lets the index count: a rendered field knows its own
+   `section|field`, so its value can be compared against CONFIG_REGISTRY_DEFAULTS and the
+   index can say WHERE this install departs from stock before anything is opened. Fields
+   without one (the bespoke cards' buttons and lists) are left alone — they belong to a card,
+   not to an option.
+   ================================================================ #}
+
+/** Where an option lives, as "Tab › Card" — read from the layout, never guessed. */
+function _cfgPathIndex() {
+    const lay = (typeof CONFIG_LAYOUT !== 'undefined' && CONFIG_LAYOUT) || { tabs: [], cards: [] };
+    const tabLabel = {};
+    for (const tab of (lay.tabs || [])) tabLabel[tab.id] = t(tab.label_key) || tab.id;
+    const out = {};
+    for (const card of (lay.cards || [])) {
+        // Title, then the section's own label, then the TAB's — an id like "notifications"
+        // shown to a reader is the layout leaking through the screen.
+        const title = (card.title_key && t(card.title_key))
+            || (typeof SECTION_LABELS !== 'undefined' && SECTION_LABELS[card.section])
+            || tabLabel[card.tab] || card.id;
+        out['cfgcol_' + card.id] = { tab: tabLabel[card.tab] || card.tab, card: title };
+    }
+    return out;
+}
+
+/** Is this option still at the value the system ships with?
+ *
+ *  Compared as strings on purpose: the stored value may be `"5"` where the default is `5`,
+ *  and a type-strict comparison would report every such option as modified — which would make
+ *  the count wrong on its first read, the one that decides whether anybody trusts it again.
+ */
+function _cfgIsDefault(path) {
+    const defs = (typeof CONFIG_REGISTRY_DEFAULTS !== 'undefined' && CONFIG_REGISTRY_DEFAULTS) || {};
+    if (!(path in defs)) return false;          // no shipped default → nothing to differ from
+    const sep = path.indexOf('|');
+    const cur = ((configData || {})[path.slice(0, sep)] || {})[path.slice(sep + 1)];
+    const norm = v => (v === null || v === undefined) ? '' : String(v);
+    return norm(cur) === norm(defs[path]);
+}
+
+/** How many options a section holds that are not at their shipped value.
+ *
+ *  The number is why the index earns its width: it says WHERE this install departs from
+ *  stock before anything is opened, which is the first question of any diagnosis and the one
+ *  a strip of tabs can never answer. Env-locked counts too — the deployment decided it, so it
+ *  is not stock either, and it is the one an admin cannot change from this screen.
+ */
+function _cfgCardChangedCount(node) {
+    if (!node) return 0;
+    let n = 0;
+    node.querySelectorAll('.cfg-field-wrap[data-cfg-path]').forEach(w => {
+        const locked = w.matches('[data-env-locked]') || !!w.querySelector('[data-env-locked]');
+        if (locked || !_cfgIsDefault(w.getAttribute('data-cfg-path'))) n += 1;
+    });
+    return n;
+}
+
+/** The node a layout card renders into: its own `.cfg-card`, or the element itself when the
+ *  section is a block that holds several (notification templates is two).
+ *
+ *  Every card in the layout is now a section in its own right — the four notification panels
+ *  that used to hide behind a nav of their own are four cards, so there is nothing left to
+ *  reach INTO a card for. That nav was the source of three separate bugs; deleting it deleted
+ *  them.
+ */
+function _cfgCardNode(c, card) {
+    const el = c.querySelector('#cfgcol_' + CSS.escape(card.id));
+    if (!el) return null;
+    return el.closest('.cfg-card') || el;
+}
+
+/** A card that fills itself from the API says so with `data-cfg-load`, and this calls it the
+ *  first time the card is shown.
+ *
+ *  Notification templates used to load from the click on its sub-tab, and the day that tab
+ *  stopped existing it sat on "Loading…" for ever with nothing to say why. A card declaring
+ *  its own loader is what keeps the next one built that way from repeating it — the index
+ *  does not need to know which cards fetch.
+ */
+function _cfgCardLoad(el) {
+    const name = el.getAttribute('data-cfg-load');
+    // Once per render: `renderConfig` rebuilds the card, so the flag it clears is the flag
+    // that makes the fetch happen again — and never twice for the same DOM.
+    if (!name || el.dataset.cfgLoaded) return;
+    el.dataset.cfgLoaded = '1';
+    const fn = window[name];
+    if (typeof fn === 'function') fn();
+}
+
+// Which section is open. Remembered, because configuration is edited in visits: you come
+// back to the one you were in, not to the top of the list.
+let _cfgRailCard = (() => {
+    try { return localStorage.getItem('ss_cfg_rail_card') || ''; } catch (_) { return ''; }
+})();
+
+function setConfigRailCard(id) {
+    _cfgRailCard = id;
+    try { localStorage.setItem('ss_cfg_rail_card', id); } catch (_) {}
+    // Picking a section means the search is over. Leaving the term on would open that
+    // section with most of its fields still hidden by a filter the box is not even showing.
+    if (typeof _cfgSearchTerm === 'string' && _cfgSearchTerm) {
+        const box = document.getElementById('cfgSearch');
+        if (box) box.value = '';
+        _filterConfig('');       // ends by handing the screen back to the index
+    }
+    _cfgApplyView();
+    // Back to the top: picking a section and landing halfway down it reads as nothing having
+    // happened.
+    const c = document.getElementById('config-container');
+    if (c) c.scrollTop = 0;
+}
+
+/** Draw the section: the index down the side, one card open beside it.
+ *
+ *  Called at the end of every `renderConfig()`.
+ */
+function _cfgApplyView() {
+    const c = document.getElementById('config-container');
+    if (!c) return;
+    // Undo the previous pass first: the index is rebuilt from the current state, never
+    // composed on top of itself.
+    c.querySelectorAll('[data-cfg-hidden-by-view]').forEach(el => {
+        el.style.display = '';
+        el.removeAttribute('data-cfg-hidden-by-view');
+    });
+    _cfgViewRail(c);
+}
+
+function _cfgViewRail(c) {
+    const lay = (typeof CONFIG_LAYOUT !== 'undefined' && CONFIG_LAYOUT) || { tabs: [], cards: [] };
+    const cards = (lay.cards || []).filter(card => _cfgCardNode(c, card));
+    if (!cards.length) return;
+    if (!cards.some(card => card.id === _cfgRailCard)) _cfgRailCard = cards[0].id;
+
+    // One section on screen; the rest stay in the DOM, hidden — so switching is a toggle
+    // rather than a re-render, and the search box still has every card to search.
+    for (const card of cards) {
+        const el = _cfgCardNode(c, card);
+        if (card.id === _cfgRailCard) {
+            el.style.display = '';
+            el.removeAttribute('data-cfg-hidden-by-view');
+            _cfgCardLoad(el);
+        } else {
+            el.style.display = 'none';
+            el.setAttribute('data-cfg-hidden-by-view', '1');
+        }
+    }
+
+    // The index, grouped by tab and in the layout's order.
+    const byTab = new Map();
+    for (const card of cards) {
+        if (!byTab.has(card.tab)) byTab.set(card.tab, []);
+        byTab.get(card.tab).push(card);
+    }
+    const tabMeta = {};
+    for (const tab of (lay.tabs || [])) {
+        tabMeta[tab.id] = { label: t(tab.label_key) || tab.id, icon: tab.icon };
+    }
+    const where = _cfgPathIndex();
+    let html = '';
+    for (const [tabId, list] of byTab) {
+        const meta = tabMeta[tabId] || { label: tabId, icon: 'bi-dot' };
+        const changed = list.reduce((n, card) => n + _cfgCardChangedCount(_cfgCardNode(c, card)), 0);
+        html += `<div class="cfg-rail-group">
+            <div class="cfg-rail-head"><i class="bi ${escAttr(meta.icon)} me-1"></i>${esc(meta.label)}
+            ${changed ? `<span class="badge text-bg-warning ms-1" title="${escAttr(t('cfg_view_changed'))}">${changed}</span>` : ''}</div>`;
+        for (const card of list) {
+            const n = _cfgCardChangedCount(_cfgCardNode(c, card));
+            const title = (where['cfgcol_' + card.id] || {}).card || card.id;
+            const active = card.id === _cfgRailCard;
+            html += `<button type="button" class="cfg-rail-item${active ? ' active' : ''}"
+                    onclick="setConfigRailCard('${escAttr(card.id)}')" title="${escAttr(title)}">
+                <i class="bi ${escAttr(card.icon || 'bi-dot')} me-1"></i>
+                <span class="text-truncate">${esc(title)}</span>
+                ${n ? `<span class="badge text-bg-warning ms-auto">${n}</span>` : ''}
+            </button>`;
+        }
+        html += `</div>`;
+    }
+
+    // The index sits BESIDE the section, not inside its body: level with the toolbar at the
+    // top and down to the bottom of the pane. Inside the body it began where the body began
+    // and ended where it ended, which is why it kept stopping short of the page however its
+    // height was computed. The toolbar belongs to the detail — reload, save and search are
+    // about what is being edited, not about the index of what could be.
+    //
+    // Nothing is rebuilt to achieve it: the toolbar and the container are MOVED into a column
+    // beside the rail. A copy would be a second set of the same inputs and a second Save
+    // button, with only one of each being the one that works.
+    const pane = c.closest('.tab-pane');
+    if (!pane) return;
+    let shell = pane.querySelector(':scope > .cfg-shell');
+    if (!shell) {
+        shell = document.createElement('div');
+        shell.className = 'cfg-shell';
+        const main = document.createElement('div');
+        main.className = 'cfg-main';
+        const bar = pane.querySelector(':scope > .ss-bleed-top');
+        shell.appendChild(document.createElement('nav'));      // rail slot, filled below
+        shell.appendChild(main);
+        pane.appendChild(shell);
+        if (bar) main.appendChild(bar);
+        main.appendChild(c);
+    }
+    const slot = shell.firstElementChild;
+    slot.className = 'cfg-rail';
+    slot.setAttribute('aria-label', t('tab_config') || 'Configuration');
+    slot.innerHTML = html;
+}

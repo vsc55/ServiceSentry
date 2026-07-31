@@ -80,8 +80,31 @@ CARDS: tuple[dict, ...] = (
     {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity'},
     {'tab': 'monitoring', 'id': 'modules',    'section': 'modules',    'icon': 'bi-grid-3x3-gap-fill'},
 
-    # ══ Notifications (bespoke: Routing / Providers / Templates sub-tabs) ════
-    {'tab': 'notifs', 'id': 'notifications', 'renderer': 'notifications'},
+    # ══ Notifications ═══════════════════════════════════════════════════════
+    # Eight sections, not one card with four sub-tabs inside it. They were nested because the
+    # screen was a strip of tabs and there was nowhere else to put them; with an index down
+    # the side there is, and a section that can only be reached by two clicks and a nav that
+    # the index has to hide is a section pretending to be a card.
+    {'tab': 'notifs', 'id': 'notif_settings',  'icon': 'bi-gear',
+     'title_key': 'cfg_notif_subtab_general', 'renderer': 'notif_general'},
+    {'tab': 'notifs', 'id': 'notifications',   'icon': 'bi-diagram-3',
+     'title_key': 'cfg_notif_subtab_routing',  'renderer': 'notifications'},
+    # Bespoke, all five: a channel card is its whole section plus something the registry
+    # cannot express — a "send a test message" button, a webhook list, a channel picker. They
+    # are cards in the layout so the index can reach them, and `renderer` is how a card says
+    # "my fields are not a list of paths".
+    {'tab': 'notifs', 'id': 'events',          'icon': 'bi-bell',      'section': 'events',
+     'renderer': 'notif_provider'},
+    {'tab': 'notifs', 'id': 'telegram',        'icon': 'bi-telegram',  'section': 'telegram',
+     'renderer': 'notif_provider'},
+    {'tab': 'notifs', 'id': 'email',           'icon': 'bi-envelope',  'section': 'email',
+     'renderer': 'email'},
+    {'tab': 'notifs', 'id': 'msteams',         'icon': 'bi-microsoft-teams', 'section': 'msteams',
+     'renderer': 'msteams'},
+    {'tab': 'notifs', 'id': 'webhook',         'icon': 'bi-link-45deg', 'section': 'webhooks',
+     'renderer': 'webhook'},
+    {'tab': 'notifs', 'id': 'notif_templates', 'icon': 'bi-file-text',
+     'title_key': 'cfg_notif_subtab_templates', 'renderer': 'notif_templates'},
 
     # ══ Syslog ══════════════════════════════════════════════════════════════
     {'tab': 'syslog', 'id': 'syslog_conn',      'title_key': 'syslog_sec_connection', 'icon': 'bi-ethernet'},

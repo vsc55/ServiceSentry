@@ -8,6 +8,79 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.34] - 2026-07-31
+
+### Added
+- **Configuration is an index down the side and one section beside it.** Seven sub-tabs held
+  twenty-seven cards and answered exactly one question well: "show me the settings about X".
+  Finding a setting meant opening seven of them, and they said nothing about the six you were
+  not looking at. The index shows the whole shape at once — and **marks where this install
+  departs from stock**, per section and per group, before anything is opened. That count is
+  why it earns its width: it is the first question of any diagnosis, and a tab strip can
+  never answer it. Env-locked options count too: the deployment decided them, so they are not
+  stock either.
+- **Notifications is eight sections instead of one card with four sub-tabs inside it.**
+  General, routing, events, Telegram, e-mail, Teams, webhooks and templates each stand on
+  their own in the layout. They were nested because the screen was a strip of tabs and there
+  was nowhere else to put them; with an index there is, and a section reachable only by two
+  clicks and a nav the index has to hide is a section pretending to be a card.
+- **A card that fetches declares its own loader** (`data-cfg-load`), and the index calls it
+  when the section is shown. Notification templates used to start that fetch from the click
+  on its sub-tab, and the day the sub-tab stopped existing it sat on "Loading…" for ever with
+  nothing on screen to say why. The next card built that way needs no change to the index.
+
+### Changed
+- The index is a **pass over the DOM `renderConfig()` already produced**, exactly as the
+  search filter has always been. Cards are shown and hidden, never rebuilt, so switching
+  section keeps every field's handlers, tooltips and half-typed values; the detail column
+  **moves** the rendered content rather than copying it, because a copy would be a second set
+  of the same inputs and only one of them would be the one that saves.
+- **The index sits beside the section, not inside its body.** It reads as one change and it
+  is the one that finally made it work: inside the body it began where the body began and
+  ended where it ended, which is why it kept stopping short of the page however its height
+  was computed. It runs the full height of the pane now, and the toolbar sits over the DETAIL
+  — reload, save and search are about what is being edited, not about the index of what could
+  be. Sizing it with a max-height guessed from the viewport was the wrong tool throughout:
+  the number never matched where the pane actually ends. It reaches the frame on all four
+  sides too: the content container's gutters, its top padding and its bottom padding were
+  showing through as strips of page background around it, and an index is a piece of the
+  frame rather than content sitting inside it. The column is what bleeds now — the toolbar
+  inside it gave up its own, because cancelling the same padding twice put it above the
+  header and a gutter past both sides.
+- **The search and the index share one screen, and agree about who is deciding.** Searching
+  still reaches every section — all thirty-four cards stay in the DOM precisely so it can —
+  and emptying the box hands the screen back to the index rather than dumping every card on
+  it at once. Picking a section ends the search, because opening one with most of its fields
+  still hidden by a collapsed filter box is how a screen lies about what it contains.
+
+### Fixed
+- **A module section is a landing page you can actually be sent to.** The post-login redirect
+  resolved landing ids against the CORE page tuple, which module sections were never in — so
+  choosing "m365" saved the setting, logged you into the admin panel anyway, and said nothing.
+  It resolves against every destination now.
+- **The landing menu names its destinations and lists all of them.** A module section names
+  itself in the module's own lang file, which the core catalog has never heard of, so the menu
+  printed the raw id ("m365", "azure") among proper names. And a section with several views is
+  several destinations: "m365" is not a place, it is whichever view happens to be first, so
+  each view is now its own entry ("Microsoft 365 · Almacenamiento") and the bare section drops
+  out of the list — while staying valid, because it is what every landing saved before views
+  existed says. Labels resolve server-side, once, for the three selects that offer them
+  (config, user, group).
+- **Forty-four configuration options had no label in either language.** `fieldLabel()`
+  humanises a missing key instead of failing, so "Landing Page", "Allowed Sources",
+  "Retention Days" and "Max Rows" sat in the middle of a Spanish panel looking enough like
+  labels to survive review. Named now, and a guard fails when the next option ships without
+  one.
+
+### Removed
+- **The sub-tabs, and the switcher that offered them alongside the index.** Both shipped for
+  a while and the second navigator earned nothing: the same cards, reachable a second way,
+  with its own state to keep in step and its own bugs — a card whose sub-panes the index had
+  to reach through, a panel that loaded from a click the index never made. Deleting it
+  deleted them. Three further views went the same way — a flat list, an only-what-changed
+  filter, an all-on-one-page scroll — along with their strings: a view nobody can reach is
+  code that rots unread until someone believes it works.
+
 ## [0.0.1+build.33] - 2026-07-31
 
 ### Added

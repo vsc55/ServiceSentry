@@ -25,7 +25,7 @@ from lib.security.headers import apply_security_headers
 from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
 from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
 from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
-from .constants import HOME_PAGES
+from .constants import landing_options
 from lib.config.spec import CFG_BY_PATH, normalize_url, registry_defaults
 from lib.config.layout import config_layout
 from lib.providers.entraid.declarations import (
@@ -752,7 +752,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'current_session_token': session.get('session_id', ''),
                 'permissions_list': list(PERMISSIONS),
                 'permissions_groups': PERMISSION_GROUPS,
-                'home_pages': list(HOME_PAGES),   # landing-page registry (id/target/li/label_key)
+                # Landing destinations for the three selects that offer them (config, user,
+                # group), labelled server-side: a module section names itself in the module's
+                # own lang file, so a frontend resolving `t(label_key)` had nothing to look up
+                # and printed the raw id. Core pages AND module sections, one entry per view.
+                'home_pages': landing_options(lang, self._default_lang),
                 # Notification routing matrix, registry-driven: rows = discovered event kinds
                 # (lib/core/notify/events.py), columns = registered channels (registry.py).
                 'notify_matrix_events': self._notify_matrix_events(),

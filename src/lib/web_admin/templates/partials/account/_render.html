@@ -51,11 +51,11 @@ function initAccountPage() {
     if (_landSel) {
         const _defId  = currentUser.landing_default || 'admin';
         const _defHp  = (HOME_PAGES || []).find(p => p.id === _defId);
-        const _defLbl = _defHp ? (t(_defHp.label_key) || _defId) : _defId;
+        const _defLbl = _defHp ? _homePageLabel(_defHp) : _defId;
         _landSel.innerHTML =
             `<option value="">${esc(t('pref_landing_default'))} (${esc(_defLbl)})</option>` +
             (HOME_PAGES || []).map(p =>
-                `<option value="${escAttr(p.id)}">${esc(t(p.label_key) || p.id)}</option>`).join('');
+                `<option value="${escAttr(p.id)}">${esc(_homePageLabel(p))}</option>`).join('');
         _landSel.value = currentUser.pref_landing_page || '';
     }
     document.getElementById('settingsPwCurrent').value = '';

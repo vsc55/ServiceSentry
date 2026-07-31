@@ -20,7 +20,7 @@ from lib.config.spec import (
     CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, normalize_url, cfg_validate,
     cfg_default, cfg_meta, frontend_schema,
 )
-from lib.i18n import SUPPORTED_LANGS, TRANSLATIONS
+from lib.i18n import SUPPORTED_LANGS
 from lib.core.users.service import AdminOpError
 
 # Materialized rule dicts derived from the central registry (edit spec.CONFIG_FIELDS, not
@@ -237,7 +237,7 @@ def build_config_schema() -> dict:
     this only layers the UI-specific extras — option lists, placeholder maps, ``ipkind``
     flags, PEM textareas and i18n option labels.  Pure data composition (no Flask), so the
     ``/api/v1/config/schema`` route is a one-line ``jsonify`` over it."""
-    from lib.web_admin.constants import HOME_PAGES, home_page_ids  # noqa: PLC0415
+    from lib.web_admin.constants import landing_pages, page_label  # noqa: PLC0415
     schema = frontend_schema()
     schema['web_admin|default_page_size'] = {
         'options_int': [25, 50, 100, 200, 0],
@@ -255,15 +255,17 @@ def build_config_schema() -> dict:
         'options': [''] + list(SUPPORTED_LANGS),
         'default': '',
     }
-    # Default landing page: a select of the dashboard's top-level tabs, labelled with each
-    # tab's i18n name (per supported language) — from the HOME_PAGES registry.
+    # Default landing page: a select of every destination a user can be sent to, labelled per
+    # supported language. Built from `landing_pages()`, which is the whole list — core pages
+    # AND module sections, one entry per view where a section has several. It used to read the
+    # core tuple only, so a module section was offered with its raw id for a name ("m365") and
+    # a section with two views hid one of them behind the other.
     schema['web_admin|landing_page'] = {
         **cfg_meta('web_admin|landing_page'),
-        'options': home_page_ids(),
+        'options': [p['id'] for p in landing_pages()],
         'options_i18n': {
-            p['id']: {lang: TRANSLATIONS.get(lang, {}).get(p['label_key'], p['id'])
-                      for lang in SUPPORTED_LANGS}
-            for p in HOME_PAGES
+            p['id']: {lang: page_label(p, lang) for lang in SUPPORTED_LANGS}
+            for p in landing_pages()
         },
         'default': cfg_default('web_admin|landing_page'),
     }

@@ -1780,3 +1780,47 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    chevron — the options are there and there is nowhere to draw them. The width has to be
    stated, not merely un-grown. */
 .ss-unit-sel { flex: 0 0 auto !important; width: 5.5rem !important; }
+
+/* Configuration — an index beside the section, not inside its body.
+   The index runs the full height of the pane, level with the toolbar at the top and down to
+   the bottom; the toolbar sits over the DETAIL, because reload, save and search are all about
+   what is being edited, not about the index of what could be. It scrolls on its own: it is as
+   tall as the configuration, and an index that scrolls the page with the detail stops being an
+   index the moment the detail is long.
+
+   The SHELL is what bleeds, on all four edges: it cancels the content container's gutters,
+   its top padding (.container-fluid pt-2 + .tab-content pt-1 = .75rem) and its pb-3. A
+   navigation column is a piece of the frame, not content sitting inside it, and a strip of
+   page background around it reads as the panel having failed to fill.
+   The toolbar gives its own bleed up in here — .ss-bleed-top cancels the same paddings, and
+   two cancellations put it .75rem above the header and a gutter past both sides. It starts
+   flush because the column it lives in already does. */
+.cfg-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
+             margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
+.cfg-main > .ss-bleed-top { margin: 0; }
+/* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
+   the index's border and the first card rather than a strip of page background. */
+.cfg-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
+.cfg-main  { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
+             min-height: 0; }
+.cfg-rail  { flex: 0 0 15.5rem; max-width: 15.5rem; min-height: 0; overflow-y: auto;
+             padding: .5rem .25rem .75rem .25rem;
+             border-right: 1px solid var(--bs-border-color);
+             background: var(--bs-tertiary-bg); scrollbar-width: thin; }
+.cfg-rail-group { margin-bottom: .6rem; }
+.cfg-rail-head { font-size: .72rem; font-weight: 600; text-transform: uppercase;
+                 letter-spacing: .03em; color: var(--bs-secondary-color);
+                 padding: .25rem .5rem; display: flex; align-items: center; gap: .25rem; }
+.cfg-rail-head .badge { margin-left: auto; }
+.cfg-rail-item { display: flex; align-items: center; gap: .35rem; width: 100%;
+                 border: 0; background: transparent; text-align: left;
+                 font-size: .82rem; color: var(--bs-body-color);
+                 padding: .3rem .5rem; border-radius: .375rem; }
+.cfg-rail-item:hover { background: var(--bs-secondary-bg); }
+.cfg-rail-item.active { background: var(--bs-primary); color: #fff; }
+.cfg-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
+@media (max-width: 991.98px) {
+    .cfg-shell { flex-direction: column; }
+    .cfg-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
+                border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
+}

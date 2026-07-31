@@ -1,8 +1,8 @@
 // ──────────────────────────── Config tab ──────────────────────────
 let _cfgSearchTerm = '';
 let _cfgSearchInHints = true;
-let _activeCfgTab    = localStorage.getItem('cfg_active_tab')    || 'cfg-tab-general';
-let _activeNotifSubTab = localStorage.getItem('cfg_notif_subtab') || 'cfg-notif-routing';
+// The section is read through its index; the tab strip and the notifications sub-tabs it
+// used to carry are gone, and so is the state that remembered which of them was open.
 
 // ── Advanced tools: localStorage inspector (Interface tab, behind a toggle) ──
 // Pure client-side: this browser's UI state lives in localStorage (view modes,
@@ -99,21 +99,8 @@ function _filterConfig(term) {
     document.getElementById('badgeCfgFilter')?.classList.toggle('d-none', !q);
     const container = document.getElementById('config-container');
     if (!container) return;
-    const nav  = container.querySelector('#cfg-tab-nav');
-    const panes = container.querySelectorAll('.tab-pane');
-    if (q) {
-        // Show all panes side-by-side while filtering
-        if (nav) nav.style.display = 'none';
-        panes.forEach(p => { p.classList.add('show', 'active'); p.style.cssText = ''; });
-    } else {
-        // Restore tab nav + active pane only
-        if (nav) nav.style.display = '';
-        panes.forEach(p => {
-            const active = p.id === _activeCfgTab;
-            p.classList.toggle('show', active);
-            p.classList.toggle('active', active);
-        });
-    }
+    // Searching shows every card that matches, wherever the index would have put it — and
+    // clearing the box hands the screen back to the index (see _cfgApplyView).
     container.querySelectorAll('.rounded-3.border.overflow-hidden.mb-3').forEach(card => {
         let anyMatch = false;
         card.querySelectorAll('.cfg-field-wrap').forEach(wrap => {
@@ -131,6 +118,9 @@ function _filterConfig(term) {
             if (body) bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).show();
         }
     });
+    // Emptying the box is not "show all thirty-four cards at once" — it is "I am done
+    // searching", and what the section looks like when nobody is searching is the index.
+    if (!q && typeof _cfgApplyView === 'function') _cfgApplyView();
 }
 
 function _refreshStatusLink() {
@@ -482,40 +472,23 @@ function renderConfig() {
         _cardHtml['ipban_services'] = _ipbanServicesCard(cfgCardOpen, cfgCardClose);
     }
 
-    // ── Notifications tab: sub-tabs — General | Routing | Providers | Templates
-    const hNotifGeneral   = _renderNotifGeneralSection(cfgCardOpen, cfgCardClose);
-    const hNotifRouting   = _renderNotificationsMatrix(cfgCardOpen, cfgCardClose);
-    // Fixed order in the Providers sub-tab: Event rules → Telegram → Email → Webhooks.
-    const hNotifProviders = (_notifCards['events'] || '')
-        + (_notifCards['telegram'] || '')
-        + _renderEmailSection(cfgCardOpen, cfgCardClose)
-        + _renderMsTeamsSection(cfgCardOpen, cfgCardClose)
-        + _renderWebhooksSection(cfgCardOpen, cfgCardClose);
-    const hNotifTemplates = _renderNotifTemplatesSection(cfgCardOpen, cfgCardClose);
-    const _notifSubTabs = [
-        { id: 'cfg-notif-general',   label: t('cfg_notif_subtab_general'),   icon: 'bi-gear',      html: hNotifGeneral   },
-        { id: 'cfg-notif-routing',   label: t('cfg_notif_subtab_routing'),   icon: 'bi-diagram-3', html: hNotifRouting   },
-        { id: 'cfg-notif-providers', label: t('cfg_notif_subtab_providers'), icon: 'bi-plug',      html: hNotifProviders },
-        { id: 'cfg-notif-templates', label: t('cfg_notif_subtab_templates'), icon: 'bi-file-text', html: hNotifTemplates },
-    ];
-    let _nNav = `<ul class="nav nav-pills mb-3 gap-1" id="cfg-notif-subtabs" role="tablist">`;
-    let _nContent = `<div class="tab-content">`;
-    for (const st of _notifSubTabs) {
-        const active = st.id === _activeNotifSubTab;
-        const extraClick = st.id === 'cfg-notif-templates' ? ';_notifTplLoad()' : '';
-        _nNav += `<li class="nav-item" role="presentation">
-            <button class="nav-link${active ? ' active' : ''}" id="${st.id}-btn"
-                    data-bs-toggle="tab" data-bs-target="#${st.id}" type="button" role="tab"
-                    onclick="_activeNotifSubTab='${st.id}';localStorage.setItem('cfg_notif_subtab','${st.id}')${extraClick}">
-                <i class="bi ${st.icon} me-1"></i>${esc(st.label)}
-            </button></li>`;
-        _nContent += `<div class="tab-pane fade${active ? ' show active' : ''}" id="${st.id}" role="tabpanel">${st.html}</div>`;
-    }
-    _cardHtml['notifications'] = _nNav + `</ul>` + _nContent + `</div>`;
-    // Auto-load templates data if that sub-tab is already active when the config renders
-    if (_activeNotifSubTab === 'cfg-notif-templates') {
-        setTimeout(_notifTplLoad, 0);
-    }
+    // ── Notifications: eight sections, each its own card in the layout ──────────
+    // They used to be four sub-tabs inside one card because the screen was a strip of tabs
+    // and there was nowhere else to put them. With an index down the side there is.
+    _cardHtml['notif_settings']  = _renderNotifGeneralSection(cfgCardOpen, cfgCardClose);
+    _cardHtml['notifications']   = _renderNotificationsMatrix(cfgCardOpen, cfgCardClose);
+    _cardHtml['events']          = _notifCards['events'] || '';
+    _cardHtml['telegram']        = _notifCards['telegram'] || '';
+    _cardHtml['email']           = _renderEmailSection(cfgCardOpen, cfgCardClose);
+    _cardHtml['msteams']         = _renderMsTeamsSection(cfgCardOpen, cfgCardClose);
+    _cardHtml['webhook']         = _renderWebhooksSection(cfgCardOpen, cfgCardClose);
+    // Templates is two cards that belong together; the wrapper is what the index points at.
+    // It renders as "Loading…" and fills itself from the API, so it declares its loader:
+    // `data-cfg-load` is called when the section is shown. It used to hang off the click on
+    // its sub-tab, and sat on "Loading…" for ever the moment that tab stopped existing —
+    // saying so in its own markup is what keeps the next such card from repeating it.
+    _cardHtml['notif_templates'] =
+        `<div id="cfgcol_notif_templates" data-cfg-load="_notifTplLoad">${_renderNotifTemplatesSection(cfgCardOpen, cfgCardClose)}</div>`;
 
     // ── Interface tab: pub_status + proxy + audit + tables + live_update
     // Public status card
@@ -688,42 +661,19 @@ function renderConfig() {
         _cardHtml[_c.id] = _renderGenericCard(_c);
     }
 
-    // ── Assemble the sub-tabs from the central layout (CONFIG_LAYOUT, injected
-    // server-side from lib.config.layout — single source of truth, no duplicated
-    // copy here): each card's HTML (captured above by its id) lands in the tab the
-    // layout assigns it, in the layout's order.
-    const _lay = (CONFIG_LAYOUT && Array.isArray(CONFIG_LAYOUT.tabs) && CONFIG_LAYOUT.tabs.length)
-        ? CONFIG_LAYOUT : { tabs: [], cards: [] };
-    const _byTab = {};
-    for (const card of _lay.cards)
-        _byTab[card.tab] = (_byTab[card.tab] || '') + (_cardHtml[card.id] || '');
-    const _cfgTabs = _lay.tabs.map(tab => ({
-        id: 'cfg-tab-' + tab.id, label: t(tab.label_key), icon: tab.icon, html: _byTab[tab.id] || '',
-    }));
-    // A stale saved active tab (e.g. the removed "Server") → fall back to the first.
-    // Guard the empty-layout case so an absent/failed layout doesn't crash renderConfig().
-    if (_cfgTabs.length && !_cfgTabs.some(tab => tab.id === _activeCfgTab)) _activeCfgTab = _cfgTabs[0].id;
-    let tabNav = `<ul class="nav nav-tabs mb-3" id="cfg-tab-nav" role="tablist">`;
-    let tabContent = `<div class="tab-content">`;
-    _cfgTabs.forEach(tab => {
-        const active = tab.id === _activeCfgTab;
-        tabNav += `<li class="nav-item" role="presentation">
-            <button class="nav-link${active ? ' active' : ''}" id="${tab.id}-btn"
-                data-bs-toggle="tab" data-bs-target="#${tab.id}"
-                type="button" role="tab"
-                onclick="_activeCfgTab='${tab.id}';localStorage.setItem('cfg_active_tab','${tab.id}')">
-                <i class="bi ${tab.icon} me-1"></i>${esc(tab.label)}
-            </button>
-        </li>`;
-        tabContent += `<div class="tab-pane fade${active ? ' show active' : ''}" id="${tab.id}" role="tabpanel">${tab.html}</div>`;
-    });
-    tabNav += `</ul>`;
-    tabContent += `</div>`;
+    // ── The body is the cards, in the layout's order ────────────────────────────
+    // No tab strip and no panes: the index down the side is how a section is reached, and a
+    // second navigator for the same thirty-four cards would be one to keep in step with it.
+    // Every card is in the DOM — the rail shows one and hides the rest — so the search still
+    // has everything to search.
+    const _lay = (CONFIG_LAYOUT && Array.isArray(CONFIG_LAYOUT.cards)) ? CONFIG_LAYOUT : { tabs: [], cards: [] };
+    let _body = '';
+    for (const card of _lay.cards) _body += _cardHtml[card.id] || '';
 
     // Dispose tooltips before swapping the DOM so none stay stuck on screen
     // (e.g. the field "Restore Default" tips during a config poll re-render).
     disposeTooltips(c);
-    c.innerHTML = tabNav + tabContent;
+    c.innerHTML = _body;
     c.querySelectorAll('[data-env-locked]').forEach(row => {
         row.querySelectorAll('input, select, textarea').forEach(el => {
             el.disabled = true;
@@ -739,6 +689,9 @@ function renderConfig() {
     c.addEventListener('change', _refreshStatusLink);
     const _cfgPerms = new Set(currentUser.permissions || []);
     if (_cfgPerms.has('config_view') && !_cfgPerms.has('config_edit')) _applyReadonly(c);
+    // The view is the last word on what is shown, applied over the same DOM the tabs
+    // and the filter work on — one renderer, several ways to read it.
+    if (typeof _cfgApplyView === 'function') _cfgApplyView();
     if (_cfgSearchTerm) _filterConfig(_cfgSearchTerm);
 }
 

@@ -12,7 +12,7 @@ web_admin for them.  Only genuinely web-facing constants remain here.
 
 __all__ = [
     'HOME_PAGES', 'home_pages', 'page_label', 'home_page_ids',
-    'standalone_pages', 'standalone_page',
+    'landing_pages', 'landing_options', 'standalone_pages', 'standalone_page',
 ]
 
 from lib.modules.discovery.pages import module_pages_catalog
@@ -112,9 +112,79 @@ def page_label(page: dict, lang: str, default_lang: str = 'en_EN') -> str:
     return li.get(lang) or li.get(default_lang) or page.get('id', '')
 
 
+def _page_label_i18n(page: dict) -> dict:
+    """A page's name per language, however it happens to name itself.
+
+    Two conventions meet here: a core page points at a key in the core catalog, a module page
+    carries its own translations because no core string may name a module. Flattening both to
+    the same map is what lets a caller compose a label —  "section · view" — without knowing
+    which kind of page it has.
+    """
+    if page.get('label_i18n'):
+        return dict(page['label_i18n'])
+    key = page.get('label_key')
+    if not key:
+        return {}
+    from lib.i18n import TRANSLATIONS  # noqa: PLC0415
+    return {lang: (data or {}).get(key) for lang, data in TRANSLATIONS.items()
+            if (data or {}).get(key)}
+
+
+def landing_pages(watchfuls_dir: str | None = None) -> list:
+    """The landing destinations a human can CHOOSE, which is not the same list as the pages.
+
+    A section with several views is several destinations: "m365" is not a place, it is
+    whichever of its views happens to be first, and offering it beside "Storage" asks the
+    reader to know that. Each view becomes its own option and the bare section drops out of
+    the list — a menu with a parent and its children in it makes the parent mean "the first
+    child", silently.
+
+    The bare id stays VALID (see :func:`home_page_ids`): it is a working URL and it is what
+    every landing saved before views existed says.
+    """
+    out = []
+    for p in home_pages(watchfuls_dir):
+        views = (p.get('standalone') or {}).get('views') or []
+        if not views:
+            out.append(p)
+            continue
+        page_li = _page_label_i18n(p)
+        for v in views:
+            # The section names the place, the view names which of it — and for a module both
+            # come from the MODULE's lang file, so the core invents a name for neither.
+            view_li = v.get('label_i18n') or {}
+            label_i18n = {
+                lang: '{} · {}'.format(page_li.get(lang) or p['id'],
+                                       view_li.get(lang) or v['slug'])
+                for lang in set(page_li) | set(view_li)
+            }
+            out.append({'id': '{}/{}'.format(p['id'], v['slug']),
+                        'url': '{}/{}'.format(p['url'], v['slug']),
+                        'label_i18n': label_i18n, 'module': p.get('module')})
+    return out
+
+
+def landing_options(lang: str, default_lang: str = 'en_EN') -> list:
+    """:func:`landing_pages` with each label already resolved for *lang*.
+
+    The selects that offer these live in three places (config, user, group) and a module
+    page's name is in the module's own lang file, not in the core catalog — resolving it
+    here once is what keeps those three from each growing their own half of the rule.
+    """
+    return [{'id': p['id'], 'url': p['url'], 'label': page_label(p, lang, default_lang)}
+            for p in landing_pages()]
+
+
 def home_page_ids() -> list:
-    """Ordered list of valid landing-page ids (for config options + validation)."""
-    return [p['id'] for p in home_pages()]
+    """Every landing id that RESOLVES — the choosable ones plus the bare section ids.
+
+    Validation is not the same question as the menu: a landing saved as "m365" before that
+    section grew a second view still points somewhere real, and rejecting it on the next save
+    of an unrelated field would be this list calling a working setting invalid.
+    """
+    ids = [p['id'] for p in landing_pages()]
+    ids += [p['id'] for p in home_pages() if p['id'] not in ids]
+    return ids
 
 
 def standalone_pages() -> list:

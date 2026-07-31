@@ -4349,7 +4349,7 @@ Ver también §88b y §89.
 | `TestPerModuleHeaders::test_headers_use_the_real_parameter_names` | Una cabecera con `<ip>` para una ruta declarada `<path:ip>` se lee bien pero deja de casar — así empezó la deriva |
 | `TestSurfaceIndex::test_every_route_falls_under_an_indexed_prefix` | El índice lista **prefijos**: un dominio nuevo tiene que aparecer, un endpoint dentro de uno conocido no |
 
-**Archivo:** `tests/test_i18n_keys_exist.py` — 8 tests
+**Archivo:** `tests/test_i18n_keys_exist.py` — 10 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4357,6 +4357,7 @@ Ver también §88b y §89.
 | `test_language_files_are_in_parity` | `en_EN` y `es_ES` definen exactamente las mismas claves |
 | `test_the_regression_that_motivated_this` | `insufficient_permissions` la devuelven 6 módulos de rutas en sus 403 |
 | `test_audit_actually_finds_keys` | **Guard del guard**: si las expresiones regulares dejaran de casar, el test pasaría sin comprobar nada |
+| `test_every_config_option_has_a_label` (×2 idiomas) | Toda opción de `CONFIG_FIELDS` tiene etiqueta, por ruta o por nombre. `fieldLabel()` **humaniza** la clave que falta en vez de fallar, así que 44 opciones llevaban «Landing Page», «Allowed Sources», «Retention Days» o «Max Rows» en mitad de un panel en castellano, con pinta suficiente de etiqueta como para pasar revisión. Las 11 exentas están listadas: ids internos que los renderizadores ocultan, y las filas que el editor de webhooks o el selector de Teams etiquetan por su cuenta |
 
 ---
 
@@ -5888,7 +5889,7 @@ que en silencio significara «6 en esta página» sería peor que no contar.
 
 ## 131. Una sección de módulo puede tener más de una VISTA
 
-**Archivo:** `tests/test_module_page_views.py` — 42 tests
+**Archivo:** `tests/test_module_page_views.py` — 48 tests
 
 La disposición de filas contesta «está todo bien»; una tabla de quién ocupa qué contesta «dónde
 se está yendo». Son dos preguntas sobre un mismo subsistema, y el error que estos tests vigilan es
@@ -5907,6 +5908,7 @@ declara sus vistas y todas comparten menos un sub-path.
 | `TestTheFiltersAreDeclaredToo::*` (×6) | Una columna pide su desplegable (`filter`) y el core lo llena con los valores presentes; el texto libre sigue llegando a todas | tenant y tipo en m365 | un filtro que ofrece lo que no existe, o vocabulario propio del core. **Captura**: solo salía el buscador — la barra se construye UNA vez y la tabla se creaba antes de que llegaran las columnas, así que sus desplegables se decidían sin columnas que declararlos |
 | `TestTheRendererPicksTheView::*` (×2) | La vista se resuelve una vez, desde la URL; sin vistas declaradas, todo se comporta igual que antes | | que cada capa vuelva a adivinar qué vista toca |
 | `TestTheStorageViewOfM365::*` (×3) | La acción existe, es de solo lectura y está declarada | | una entrada de menú que abre un error |
+| `TestAViewIsAPlaceYouCanLandOn::*` (×6) | Una sección con vistas se ofrece **una vez por vista** como página de inicio, con el nombre del módulo («Microsoft 365 · Almacenamiento») y no con su id; la sección pelada sale del menú (es «la primera vista», que no es un sitio que puedas nombrar) pero **sigue siendo válida**, porque es lo que guardó toda landing anterior a las vistas; y el redirect de login resuelve contra todos los destinos | `azure` sigue siendo una sola opción | el fallo que motivó la clase: elegir «m365», que se guardara, y aterrizar en el panel de administración sin que nada lo dijera — `_landing_url` resolvía contra la tupla del core, donde ninguna sección de módulo ha estado nunca |
 
 ---
 
@@ -5931,3 +5933,29 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 | `TestGroupsAreContiguous::*` (×2) | El panel emite una cabecera cada vez que **cambia** el grupo al recorrer `__field_order__`: intercalar dos grupos dibuja «Comprobaciones / Alertas / Comprobaciones / Alertas…» con un fragmento bajo cada una. Y un grupo sin etiqueta sale como cabecera en blanco (así estaba hddtemp) | cada grupo visitado una vez, y todos traducidos | mover un campo de grupo y olvidar el orden |
 | `TestEveryDeclaringFieldIsCovered::*` (×2) | Ningún módulo declara una clave que el núcleo ignore, y solo la declaran campos numéricos | | vocabulario de esquema que parece significar algo y es inerte |
 
+---
+
+## 133. Configuration — un índice lateral sobre un solo renderizador
+
+**Archivo:** `tests/test_wa_config_views.py` — 25 tests
+
+Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar
+un ajuste costaba abrir siete, y no decían nada de las seis que no estabas mirando. El índice
+lateral enseña la forma entera de la configuración y **marca dónde esta instalación se aparta
+de fábrica** — la primera pregunta de cualquier diagnóstico, y la que una tira de pestañas no
+puede contestar.
+
+Estos tests defienden dos cosas. Que hay **un solo navegador**: el índice no es una vista entre
+varias, porque un segundo camino a las mismas tarjetas es un estado más que mantener a la par y
+un juego de fallos propios. Y que el índice es **una pasada sobre el DOM que `renderConfig()`
+produjo**, nunca un segundo renderizador: dos renderizadores de los mismos doscientos campos
+divergen, y la divergencia es invisible — al segundo solo se le mira cuando algo ya va mal.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestThereIsOneNavigator::*` (×4) | No queda registro de vistas, ni conmutador, ni sitio para él en la barra; `renderConfig` no vuelve a construir tira de pestañas ni paneles; el cuerpo son las tarjetas **en el orden del layout**; y el índice se carga después del renderizador que post-procesa | | un panel donde el índice no sabe mirar dentro — que es exactamente como falló tres veces |
+| `TestEverySectionIsACard::*` (×3) | Notificaciones son **ocho tarjetas** en el layout (ajustes, enrutamiento, eventos, Telegram, correo, Teams, webhooks, plantillas), cada una se dibuja bajo su propio `#cfgcol_<id>`, y en `cfg/notify/` no queda ningún nav propio | | una sección a la que solo se llega con dos clics y un nav que el índice tiene que esconder |
+| `TestTheIndex::*` (×7) | El índice sale del layout (ningún id de pestaña fijo); las tarjetas se muestran y ocultan, nunca se reconstruyen; una sección se encuentra por su id de layout; se cuenta lo que se aparta de fábrica —lo fijado por entorno incluido—; nunca se enseña un id crudo como nombre; se recuerda dónde estabas; y **una tarjeta que va a buscar sus datos declara su propio cargador** (`data-cfg-load`), que se llama una vez por render | | Plantillas en «Cargando…» para siempre en cuanto desaparece el botón del que colgaba |
+| `TestItSitsBesideTheSection::*` (×5) | El índice vive **al lado** de la sección, no dentro de su cuerpo (dentro empezaba donde empieza el cuerpo y acababa donde acaba: por eso se quedaba corto se calculase como se calculase su altura); llega al marco por los cuatro lados —cancela los gutters del contenedor y su `pb-3`, y la barra pierde su propio sangrado lateral porque cancelar dos veces el mismo gutter la saca del marco—; el detalle se **mueve**, no se copia; la columna se construye una sola vez; y el índice hace su propio scroll | `min-height: 0` en `.cfg-shell` | un segundo juego de los mismos inputs —de los que solo uno guarda—, una franja de fondo de página a su izquierda y bajo sus pies, y una pila de columnas tras cada guardado |
+| `TestItIsAPassNotARenderer::*` (×3) | No dibuja ningún campo, se aplica antes que el filtro, y cada pasada deshace la anterior | | dos pasadas componiendo una tercera que nadie diseñó |
+| `TestTheSearchAndTheIndexShareOneScreen::*` (×3) | Buscar alcanza **todas** las secciones (por eso las 34 tarjetas siguen en el DOM); vaciar la caja devuelve la pantalla al índice en vez de volcar las 34; y elegir una sección termina la búsqueda | | abrir una sección con la mitad de sus campos escondidos por un filtro cuya caja está plegada |
