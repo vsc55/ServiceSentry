@@ -22,6 +22,18 @@ from lib.config.spec import (
 # directory, never the file name, so the source of truth is centralised.
 CONFIG_FILENAME = 'config.json'
 
+# The key file, same rule. It signs Flask's session cookies AND derives the Fernet key that
+# every stored secret is encrypted with — losing it is not "sign in again", it is every secret
+# in the database becoming unreadable. Written 0o600 from the first open (lib.core.sessions).
+# It was spelled out twice: here and as a literal in the CLI context, which is one spelling
+# away from a CLI that silently derives a different key and decrypts nothing.
+SECRET_KEY_FILENAME = '.flask_secret'
+
+
+def secret_key_path(config_dir: str) -> str:
+    """Absolute path to the key file inside *config_dir* (single definition)."""
+    return os.path.join(config_dir, SECRET_KEY_FILENAME)
+
 
 def config_path(config_dir: str) -> str:
     """Absolute path to config.json inside *config_dir* (single definition)."""
@@ -57,5 +69,7 @@ __all__ = [
     'load_config',
     'config_path',
     'CONFIG_FILENAME',
+    'SECRET_KEY_FILENAME',
+    'secret_key_path',
     'normalize_url',
 ]

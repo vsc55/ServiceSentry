@@ -465,7 +465,7 @@ function _clRenderLogs(item) {
         .map(u => { const h = hostsData[u] || {}; return { name: h.name || u, address: h.address || '' }; })
         .filter(m => m.address);
     _clLogsState = { members, addrs: members.map(m => m.address), sel: '',
-                     page: 1, pageSize: _defaultPageSize || 50, severity_max: '', q: '',
+                     page: 1, pageSize: _tableRowsDefault,   // not `|| 50`: 0 is "all", a real answer severity_max: '', q: '',
                      since: '', until: '', auto: 0 };
     return `<div id="clLogsWrap" data-ro-keep="1" style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column"></div>`;
 }

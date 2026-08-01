@@ -5,8 +5,42 @@
 function updateField(target, pathStr, value) {
     const parts = pathStr.split('|');
     setPath(target === 'config' ? configData : modulesData, parts, value);
-    if (target === 'config') _dirtyFields.add(pathStr);
+    // The pending set has to SHRINK as well as grow: putting a value back where it was is not
+    // a pending change, and a set that only grows says one is. It decides the row's "unsaved"
+    // colour and it is what the save sends, so a path left in it after being undone stages a
+    // write of the value the server already holds.
+    if (target === 'config') {
+        const sep = pathStr.indexOf('|');
+        let was = ((_serverConfigData || {})[pathStr.slice(0, sep)] || {})[pathStr.slice(sep + 1)];
+        // The server may never have sent this option at all — plenty are only read as
+        // `cfg.x || <default>` and never stored. What it would use in that case is the
+        // default, and THAT is what "unchanged" means for such an option; comparing against
+        // `undefined` can never match anything the reader can type, so the path would stay
+        // staged for ever. (Reported on the audit sort field, whose sibling happens to be
+        // seeded at render time and therefore worked.)
+        if (was === undefined && typeof cfgDefaultFor === 'function') {
+            const _d = cfgDefaultFor(pathStr);
+            if (_d !== undefined) was = _d;
+        }
+        if (JSON.stringify(was) === JSON.stringify(value)) {
+            _dirtyFields.delete(pathStr);
+            // And put it in the baseline, because the option EXISTS in `configData` now and
+            // did not before. The Save button is decided by comparing the two objects whole,
+            // so a key present on one side and absent on the other reads as a change — which
+            // is how "put it back the way it was" left the button lit. Only ever written when
+            // the two values are equal, so this can never accept a real edit as the new
+            // "as loaded" state.
+            if (_serverConfigData) setPath(_serverConfigData, parts, deepClone(value));
+        } else {
+            _dirtyFields.add(pathStr);
+        }
+    }
     markDirty(target);
+    // The config sheet marks each row stock / edited / pending and counts them in its index.
+    // Both are answers ABOUT the value that just changed, so they are recomputed here rather
+    // than at the next full render — which is a section switch away, and until then the row
+    // you just edited goes on claiming to be untouched.
+    if (target === 'config' && typeof _cfgRefreshMarks === 'function') _cfgRefreshMarks();
     // When a module-level field changes, refresh open item panels so their
     // placeholder_module inputs pick up the new value immediately.
     if (target === 'modules' && parts.length === 2) {
@@ -23,7 +57,12 @@ function updateArray(target, pathStr, csv) {
 }
 function updateIntArray(target, pathStr, csv) {
     const arr = csv.split(',').map(s => parseInt(s.trim(), 10)).filter(s => !isNaN(s) && s >= 0);
-    updateField(target, pathStr, arr);
+    // Cleared box = the shipped default, the same rule the rest of this screen follows and the
+    // one its greyed placeholder has been stating all along. An empty list is not something
+    // anyone means by clearing the box — the server rejects it outright, and it used to be the
+    // only thing clearing produced.
+    const dflt = (typeof cfgDefaultFor === 'function') ? cfgDefaultFor(pathStr) : undefined;
+    updateField(target, pathStr, (!arr.length && Array.isArray(dflt)) ? [...dflt] : arr);
 }
 
 function toggleModule(name, on) {

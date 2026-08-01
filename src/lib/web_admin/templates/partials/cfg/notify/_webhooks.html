@@ -86,6 +86,7 @@ function _renderWebhooksSection(cfgCardOpen, cfgCardClose) {
 
 async function _webhookToggleEnabled(id, enabled) {
     configData.webhooks = (configData.webhooks || []).map(w => w.id === id ? {...w, enabled} : w);
+    _cfgAdoptSection('webhooks');   // written by its own endpoint: saved, not pending
     const wh = configData.webhooks.find(w => w.id === id);
     if (!wh) return;
     const body = {...wh, secret: null};  // null = keep stored secret
@@ -106,6 +107,7 @@ function deleteWebhook(id) {
         const r = await apiDelete(`/api/v1/notify/webhooks/${id}`);
         if (r?.data?.ok) {
             configData.webhooks = (configData.webhooks || []).filter(w => w.id !== id);
+            _cfgAdoptSection('webhooks');
             renderConfig();
             showToast(t('webhook_deleted_ok'), 'success');
         } else {
@@ -307,6 +309,7 @@ async function saveWebhook() {
             if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
             configData.webhooks.push(wh);
         }
+        _cfgAdoptSection('webhooks');
         bootstrap.Modal.getInstance(document.getElementById('modalWebhook'))?.hide();
         renderConfig();
         const msg = _webhookEditId

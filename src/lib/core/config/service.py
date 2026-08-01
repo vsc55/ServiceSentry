@@ -179,15 +179,15 @@ def validate_config(new_data: dict) -> None:
         if not ok:
             raise AdminOpError('invalid_json_field', field)
 
-    # page_sizes: non-empty list of non-negative ints.
+    # table_rows_options: non-empty list of non-negative ints.
     web_data = new_data.get('web_admin')
-    if isinstance(web_data, dict) and 'page_sizes' in web_data:
-        raw_ps = web_data['page_sizes']
+    if isinstance(web_data, dict) and 'table_rows_options' in web_data:
+        raw_ps = web_data['table_rows_options']
         if not isinstance(raw_ps, list) or len(raw_ps) == 0:
-            raise AdminOpError('invalid_page_sizes')
+            raise AdminOpError('invalid_table_rows_options')
         for v in raw_ps:
             if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
-                raise AdminOpError('invalid_page_sizes')
+                raise AdminOpError('invalid_table_rows_options')
 
     # pw_max_len must not be below pw_min_len.
     if isinstance(web_data, dict):
@@ -230,6 +230,20 @@ def syslog_db_changed(old_data: dict, new_data: dict) -> bool:
 
 
 # ── frontend UI metadata ─────────────────────────────────────────────────────────
+def _opt_labels(keys: dict) -> dict:
+    """``{option: {lang: label}}`` from ``{option: i18n key}``.
+
+    The shape ``renderField`` already reads for a select's per-option labels. Built here so a
+    select can be DECLARED rather than hand-written: the labels used to live inside the JS that
+    drew each of these controls, which is what made writing them by hand look necessary.
+    """
+    from lib.i18n import SUPPORTED_LANGS, TRANSLATIONS  # noqa: PLC0415
+    return {
+        opt: {lang: TRANSLATIONS.get(lang, {}).get(key, opt) for lang in SUPPORTED_LANGS}
+        for opt, key in keys.items()
+    }
+
+
 def build_config_schema() -> dict:
     """Assemble the field-level UI metadata for the config screen.
 
@@ -239,17 +253,53 @@ def build_config_schema() -> dict:
     ``/api/v1/config/schema`` route is a one-line ``jsonify`` over it."""
     from lib.web_admin.constants import landing_pages, page_label  # noqa: PLC0415
     schema = frontend_schema()
-    schema['web_admin|default_page_size'] = {
-        'options_int': [25, 50, 100, 200, 0],
-        'default': cfg_default('web_admin|default_page_size'),
+    # Rows per table: the sizes the chooser offers, and which of them a table opens on. The
+    # first is the reference for the second — `_updateConfigPageSizes` re-reads it after every
+    # save, so editing the list changes what the other option can be set to.
+    schema['web_admin|table_rows_options'] = {
+        'int_list': True,
+        'default': cfg_default('web_admin|table_rows_options'),
     }
+    schema['web_admin|table_rows_default'] = {
+        'options_int': list(cfg_default('web_admin|table_rows_options')),
+        'default': cfg_default('web_admin|table_rows_default'),
+    }
+    # Four selects the panel used to draw by hand, each with its option labels written into
+    # the JS. Declared here instead, so `renderField` draws them like every other option and
+    # they inherit what a hand-written control kept missing — chiefly the env/file lock, whose
+    # absence let an admin edit a pinned option and watch the save be discarded in silence.
+    #
+    # `on_change` is the one thing a select could need that the registry could not say: a
+    # sibling to refresh when the value changes. The name of the function belongs to whoever
+    # needs it, not to the core — same rule as a module naming its own action.
     schema['web_admin|audit_sort'] = {
         'options': ['time', 'event', 'user', 'ip'],
+        'options_i18n': _opt_labels({'time': 'col_time', 'event': 'col_event',
+                                     'user': 'col_user', 'ip': 'col_ip'}),
         'default': 'time',
     }
     schema['web_admin|audit_sort_dir'] = {
         'options': ['desc', 'asc'],
+        'options_i18n': _opt_labels({'desc': 'sort_desc', 'asc': 'sort_asc'}),
         'default': 'desc',
+        'on_change': '_applyAuditSortDir',
+    }
+    schema['email|provider'] = {
+        **cfg_meta('email|provider'),
+        'options': ['smtp', 'microsoft365', 'gmail'],
+        'options_i18n': _opt_labels({'smtp': 'email_provider_smtp',
+                                     'microsoft365': 'email_provider_ms365',
+                                     'gmail': 'email_provider_gmail'}),
+        'default': cfg_default('email|provider'),
+        'on_change': '_emailProviderChanged',
+    }
+    schema['msteams|delivery'] = {
+        **cfg_meta('msteams|delivery'),
+        'options': ['activity_feed', 'bot'],
+        'options_i18n': _opt_labels({'activity_feed': 'msteams_delivery_activity',
+                                     'bot': 'msteams_delivery_bot'}),
+        'default': cfg_default('msteams|delivery'),
+        'on_change': '_msteamsDeliveryChanged',
     }
     schema['web_admin|status_lang'] = {
         'options': [''] + list(SUPPORTED_LANGS),
@@ -311,7 +361,7 @@ def build_config_schema() -> dict:
     # Syslog listener numeric fields: blank = use the registry default (shown as the
     # placeholder), so clearing one never auto-fills the previous value.
     for _p in ('syslog|udp_port', 'syslog|tcp_port', 'syslog|tls_port',
-               'syslog|retention_days', 'syslog|max_rows'):
+               'syslog|retention_days', 'syslog|max_messages'):
         schema[_p] = {**cfg_meta(_p), 'nullable': True}
     # Sender allowlist renders as a removable-chips list; each entry must be a valid
     # IPv4/IPv6 address OR a CIDR network (192.168.0.0/24, 2001:db8::/32).

@@ -116,5 +116,5 @@ def test_msteams_sso_csrf_and_embed_declared(admin):
     px = admin._csrf_exempt_prefixes
     assert '/auth/msteams/tab' in px and '/auth/msteams/sso' in px
     profiles = dict(admin._embed_profiles)
-    assert '_embed_in_teams' in profiles
-    assert 'https://teams.microsoft.com' in profiles['_embed_in_teams']
+    assert '_EMBED_IN_TEAMS' in profiles
+    assert 'https://teams.microsoft.com' in profiles['_EMBED_IN_TEAMS']

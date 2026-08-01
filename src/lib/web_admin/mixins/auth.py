@@ -194,7 +194,7 @@ class _AuthMixin:
                 key=lambda x: str(x[0]).lower())
             cand = glp[0][1] if glp else ''
         if cand not in by_id:
-            cand = str(getattr(self, '_landing_page', '') or '').strip()
+            cand = str(getattr(self, '_LANDING_PAGE', '') or '').strip()
         entry = by_id.get(cand) or by_id.get('admin')
         return (entry.get('url') if entry else '/') or '/'
 

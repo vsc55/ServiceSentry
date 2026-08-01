@@ -24,9 +24,9 @@ class TestConfigStore:
         values = {
             'global|log_level': 'info',           # str
             'modules|threads': 5,                  # int
-            'web_admin|dark_mode': True,           # bool
+            'web_admin|default_dark_mode': True,           # bool
             'notifications|matrix': {'a': True},   # dict
-            'web_admin|page_sizes': [10, 25, 50],  # list
+            'web_admin|table_rows_options': [10, 25, 50],  # list
         }
         s.set_many(values)
         assert s.load_all() == values

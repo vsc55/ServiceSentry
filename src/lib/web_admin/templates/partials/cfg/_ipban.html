@@ -49,20 +49,45 @@ async function _ipbanSvcLoad() {
         let opts = supports.length > 1
             ? opt('', t('ipban_action_default') + ' — ' + (acts[s.default] || s.default)) : '';
         for (const a of supports) opts += opt(a, acts[a] || a);
-        const control = `<select class="form-select form-select-sm"${supports.length <= 1 ? ' disabled' : ''}
-            onchange="_ipbanSvcSetAction(${jsStr(s.id)},this.value)">${opts}</select>`;
-        return `<tr>
+        // Overridden = this install picked something other than the service's own default.
+        // Only meaningful where there is a choice: a single-action service cannot be overridden.
+        const overridden = !!s.action && supports.length > 1;
+        // The same "restore" button every other option has, doing the same thing: back to the
+        // default, and inert when it is already there. This card writes through its own
+        // endpoint rather than through the config save, which is a reason for it to behave
+        // differently on the WIRE, not on the screen — a reader has no way to know which
+        // rows are backed by which store, and should not need one.
+        const reset = supports.length > 1
+            ? `<button type="button" class="btn btn-sm btn-secondary${overridden ? '' : ' opacity-50'}"
+                ${overridden ? '' : 'disabled'} onclick="_ipbanSvcSetAction(${jsStr(s.id)},'')"
+                title="${escAttr(overridden ? t('reset_field') : t('cfg_at_default'))}">
+                <i class="bi bi-arrow-counterclockwise"></i></button>`
+            : '';
+        const control = `<div class="input-group input-group-sm">
+            <select class="form-select form-select-sm"${supports.length <= 1 ? ' disabled' : ''}
+                onchange="_ipbanSvcSetAction(${jsStr(s.id)},this.value)">${opts}</select>${reset}</div>`;
+        // `data-cfg-changed` is how a row that is NOT a registry-backed option still answers
+        // the question the sheet asks of every row. The index and the header count it through
+        // the same predicate as everything else, so this card stops being a hole in the total.
+        return `<tr data-cfg-changed="${overridden ? '1' : '0'}"${overridden ? ' class="cfg-row-changed"' : ''}>
             <td><i class="bi bi-hdd-network me-1 text-muted"></i>${esc(name)}</td>
             <td>${_ipbanSvcPorts(s.endpoints)}</td>
             <td>${control}</td>
         </tr>`;
     }).join('');
+    // The rows just changed what they say about themselves; the index and the section header
+    // count them, so they are told rather than left to find out at the next full render.
+    if (typeof _cfgRefreshMarks === 'function') _cfgRefreshMarks();
 }
 
 async function _ipbanSvcSetAction(service, action) {
     const r = await apiPost('/api/v1/ipbans/services/action', { service: service, action: action });
     if (!(r && r.status === 200 && r.data && r.data.ok)) {
         showToast((r && r.data && r.data.error) || t('error'), 'danger');
-        _ipbanSvcLoad();
     }
+    // Reloaded either way. On failure to show what the server actually holds; on success
+    // because the row's own state changed — whether it is now an override, whether its reset
+    // button still has anything to do — and a row that keeps yesterday's marks after being
+    // edited is the bug this card had.
+    _ipbanSvcLoad();
 }

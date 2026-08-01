@@ -225,7 +225,7 @@ function _ipbanHistTableHtml(rows, tableId) {
 function _ipbanHistRender() {
     const c = document.getElementById('ipban-hist-body');
     if (!c) return;
-    if (_ipbanHistPageSize === null) _ipbanHistPageSize = _defaultPageSize;
+    if (_ipbanHistPageSize === null) _ipbanHistPageSize = _tableRowsDefault;
 
     const header = `<div class="ss-card-header">
         <span class="me-auto small mb-0 fw-semibold"><i class="bi bi-clock-history me-1"></i>${esc(t('ipban_hist_title'))}</span>

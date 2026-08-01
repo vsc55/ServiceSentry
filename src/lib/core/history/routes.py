@@ -34,7 +34,7 @@ def register(app, wa):
         """Return metadata for all recorded series, including module pretty names."""
         if not wa._history:
             return jsonify([])
-        lang  = session.get('lang') or wa._default_lang or DEFAULT_LANG
+        lang  = session.get('lang') or wa._DEFAULT_LANG or DEFAULT_LANG
         index = wa._history.get_index()
         modules_cfg = wa._load_modules()
         return jsonify(history_svc.enrich_index(index, wa._modules_dir, modules_cfg, lang))
@@ -74,7 +74,7 @@ def register(app, wa):
         data     = wa._history.query(
             module, key, from_ts, to_ts, points, item_uid=item_uid
         )
-        lang     = session.get('lang') or wa._default_lang or DEFAULT_LANG
+        lang     = session.get('lang') or wa._DEFAULT_LANG or DEFAULT_LANG
         hist_cfg = history_svc.history_meta(wa._modules_dir, module, lang)
 
         # field priority: explicit query param > module schema > auto-detect

@@ -78,7 +78,7 @@ let _hostLogsState = null;   // {addr, page, pageSize, severity_max, q, since, u
 let _hostLogsTimer = null;       // interval-driven / live refresh
 
 function _hostLogsReset(addr) {
-    _hostLogsState = { addr, page: 1, pageSize: _defaultPageSize || 50,
+    _hostLogsState = { addr, page: 1, pageSize: _tableRowsDefault,   // not `|| 50`: 0 is "all", a real answer
                        severity_max: '', q: '', since: '', until: '', auto: 0 };
 }
 

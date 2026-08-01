@@ -50,8 +50,15 @@ let hostsData = {};   // {uid: {name, address, tags, profiles, …}} — host re
 let credentialsData = {};   // {uid: {name, ctype, data:{ssh_*}}} — reusable credentials
 let currentUser = {};
 let _uid = 0;
-let _defaultPageSize = 25;
-let _PAGE_SIZES = [25, 50, 100, 200, 0];
+// How many rows a table opens with. Seeded from the registry below, replaced by the saved
+// value once the config loads (_refreshTableRowChoices).
+let _tableRowsDefault = 0;
+// The row counts a table's chooser offers. Declared ONCE, in the registry
+// (`web_admin|table_rows_options` in lib/config/spec.py), and it arrives here through
+// CONFIG_REGISTRY_DEFAULTS like every other default — it used to be a literal in three files,
+// so changing it meant finding all three. Filled just below the map it reads from; the live
+// value replaces it after the config loads (_updateConfigPageSizes). `0` is "all".
+let _tableRowChoices = [];
 let _addItemCtx = null;          // {target, pathStr}
 let _deleteItemCtx = null;       // {target, parentPathStr, key}
 let _renameItemCtx = null;       // {target, parentPathStr, oldKey}
@@ -89,8 +96,8 @@ const _CFG_PATH_TAB = {
     // Interface tab
     'web_admin|public_status': 'cfg-tab-interface', 'web_admin|status_refresh_secs': 'cfg-tab-interface',
     'web_admin|status_lang': 'cfg-tab-interface', 'web_admin|audit_sort': 'cfg-tab-interface',
-    'web_admin|audit_sort_dir': 'cfg-tab-interface', 'web_admin|default_page_size': 'cfg-tab-interface',
-    'web_admin|page_sizes': 'cfg-tab-interface', 'web_admin|config_poll_secs': 'cfg-tab-interface',
+    'web_admin|audit_sort_dir': 'cfg-tab-interface', 'web_admin|table_rows_default': 'cfg-tab-interface',
+    'web_admin|table_rows_options': 'cfg-tab-interface', 'web_admin|config_poll_secs': 'cfg-tab-interface',
     'web_admin|config_update_banner_secs': 'cfg-tab-interface',
     'web_admin|session_check_secs': 'cfg-tab-interface',
     'web_admin|session_revoke_redirect_secs': 'cfg-tab-interface',
@@ -160,23 +167,27 @@ const RESTART_REQUIRED_FIELDS = new Set(['web_admin|port', 'web_admin|proxy_coun
     'syslog_db|port', 'syslog_db|name', 'syslog_db|user', 'syslog_db|password']);
 
 /**
- * Default values for config fields, keyed by 'section|field'.
- * Only fields listed here (or backfilled from /api/v1/config/schema in
- * _js_init) show the "Restore default" button.
+ * The few options whose default is NOT the registry's — deliberate exceptions, nothing else.
+ * Everything else comes from CONFIG_REGISTRY_DEFAULTS; ask `cfgDefaultFor` and never either
+ * map directly, or you get whichever half of the answer that map happens to hold.
  *
- * Most web_admin defaults are NOT listed here — they are backfilled from the
- * schema endpoint, which derives them from the central registry
- * (lib.config.spec).  Only entries that the registry can't supply live here:
- *   • lang     → restores to the system default language (not the factory one)
- *   • public_url → empty string (a str field, not in frontend_schema)
- *   • audit_sort / page_sizes / role_modal_scrollable → pure UI preferences
- *     (not config.json fields).
+ *   • lang       → restores to the SYSTEM's language, not the factory one. Restoring an
+ *                  install configured in Spanish to English is not "restore default".
+ *   • public_url → empty string (a str field, so `frontend_schema` never carried it)
+ *   • audit_sort / role_modal_scrollable → UI preferences, not config.json fields
+ *
+ * This map used to be back-filled from /api/v1/config/schema at boot, which made it look like
+ * the source of every default. It was not: the schema carries `default` for instance-backed
+ * bool/int fields and no others, so ~136 of the 201 options had no default here at all — no
+ * "restore" button, and no placeholder when their box was emptied.
  */
 const CONFIG_FIELD_DEFAULTS = {
-    'web_admin|lang':                  SYSTEM_DEFAULT_LANG,
+    'web_admin|default_lang':          SYSTEM_DEFAULT_LANG,
     'web_admin|public_url':            '',
     'web_admin|audit_sort':            'time',
-    'web_admin|page_sizes':            [25, 50, 100, 200, 0],
+    // Its sibling was missing, so its "restore" button called a function that bailed on the
+    // spot: a control that looks live, does nothing, and says nothing about it.
+    'web_admin|audit_sort_dir':        'desc',
     'web_admin|role_modal_scrollable': true,
 };
 
@@ -187,6 +198,38 @@ const CONFIG_FIELD_DEFAULTS = {
  * option is ever saved — the single source of truth, never hardcoded literals.
  */
 const CONFIG_REGISTRY_DEFAULTS = {{ config_registry_defaults | default({}) | tojson }};
+// …and the row-count choices come from it, so the panel holds no copy of its own.
+_tableRowChoices = [...(CONFIG_REGISTRY_DEFAULTS['web_admin|table_rows_options'] || [])];
+_tableRowsDefault = CONFIG_REGISTRY_DEFAULTS['web_admin|table_rows_default'];
+
+/**
+ * The value the system falls back to for one config option — THE answer, from both maps.
+ *
+ * The overrides above win, because they exist to differ: `lang` restores to the system's
+ * language rather than to the factory one, and restoring it to the factory value is a
+ * different thing from restoring it to the default. Everything else comes from the registry,
+ * which knows all two hundred options.
+ *
+ * Reading only the override map is a bug that reads like a feature: the five keys it holds
+ * behave perfectly and the other ~195 quietly have no default at all — no "restore" button,
+ * and a placeholder that never appears when the box is emptied. It looked deliberate for a
+ * long time, because the code around it said "the registry default" while asking the wrong
+ * map for it.
+ *
+ * `undefined` means no default is known, which is not the same as a default of null or ''.
+ */
+function cfgDefaultFor(pathStr) {
+    if (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' && (pathStr in CONFIG_FIELD_DEFAULTS)) {
+        return CONFIG_FIELD_DEFAULTS[pathStr];
+    }
+    if (typeof CONFIG_REGISTRY_DEFAULTS !== 'undefined' && (pathStr in CONFIG_REGISTRY_DEFAULTS)) {
+        return CONFIG_REGISTRY_DEFAULTS[pathStr];
+    }
+    return undefined;
+}
+
+/** Is there a value to restore this option TO? */
+function cfgHasDefault(pathStr) { return cfgDefaultFor(pathStr) !== undefined; }
 
 // Field schema loaded from /api/config/schema — min, max, default per field.
 let configSchema = {};

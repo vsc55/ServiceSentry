@@ -41,8 +41,8 @@ class TestTheSessionCookieStaysUsableOverPlainHttp:
 
     def _policy(self, wa, *, ancestors, secure_cookies=False, force_https=False):
         wa._frame_ancestors_list = list(ancestors)
-        wa._secure_cookies = secure_cookies
-        wa._force_https = force_https
+        wa._SECURE_COOKIES = secure_cookies
+        wa._FORCE_HTTPS = force_https
         wa._apply_embed_cookie_policy(wa._app)
         return (wa._app.config['SESSION_COOKIE_SAMESITE'],
                 wa._app.config['SESSION_COOKIE_SECURE'])
@@ -81,9 +81,9 @@ class TestTheSessionCookieStaysUsableOverPlainHttp:
 class TestForcingTheDomainCannotLoop:
 
     def _get(self, admin, client, *, public_url, host, force_https=False):
-        admin._force_fqdn = True
-        admin._public_url = public_url
-        admin._force_https = force_https
+        admin._FORCE_FQDN = True
+        admin._PUBLIC_URL = public_url
+        admin._FORCE_HTTPS = force_https
         return client.get('/login', headers={'Host': host})
 
     def test_a_different_hostname_is_redirected(self, admin, client):
@@ -92,8 +92,8 @@ class TestForcingTheDomainCannotLoop:
         assert r.headers['Location'] == 'http://ss.example.com/login'
 
     def test_the_query_string_survives(self, admin, client):
-        admin._force_fqdn = True
-        admin._public_url = 'ss.example.com'
+        admin._FORCE_FQDN = True
+        admin._PUBLIC_URL = 'ss.example.com'
         r = client.get('/login?next=%2Fusers', headers={'Host': '10.0.0.9'})
         assert r.headers['Location'].endswith('/login?next=%2Fusers')
 
@@ -124,11 +124,11 @@ class TestForcingTheDomainCannotLoop:
         assert loc != 'http://other:8080/login'
 
     def test_it_does_nothing_while_switched_off(self, admin, client):
-        admin._force_fqdn = False
-        admin._public_url = 'ss.example.com'
+        admin._FORCE_FQDN = False
+        admin._PUBLIC_URL = 'ss.example.com'
         assert client.get('/login', headers={'Host': '192.168.0.1:8080'}).status_code != 302
 
     def test_it_does_nothing_without_a_public_url(self, admin, client):
-        admin._force_fqdn = True
-        admin._public_url = ''
+        admin._FORCE_FQDN = True
+        admin._PUBLIC_URL = ''
         assert client.get('/login', headers={'Host': '192.168.0.1:8080'}).status_code != 302

@@ -73,7 +73,7 @@ def register(app, wa):
         the SAME full shell with all panes; the client activates the pane the URL points at
         (``_sbPaneIdFromPath``), so navigating between sections never reloads the page. The
         section routes still exist for shareable/bookmarkable URLs and are permission-gated."""
-        _lang = session.get('lang') or wa._default_lang
+        _lang = session.get('lang') or wa._DEFAULT_LANG
         html = render_template(
             'dashboard.html',
             # Kept for the template's (now vestigial) guards + the SS_STANDALONE_PAGE var:

@@ -107,9 +107,9 @@ class TestDiscoveryMechanism:
             def __init__(self):
                 self.config = {}
         app, saved = _App(), admin._frame_ancestors_list
-        saved_https = admin._force_https
+        saved_https = admin._FORCE_HTTPS
         try:
-            admin._force_https = True
+            admin._FORCE_HTTPS = True
             admin._frame_ancestors_list = ['https://embed.example.com']
             admin._apply_embed_cookie_policy(app)
             assert app.config['SESSION_COOKIE_SAMESITE'] == 'None'
@@ -118,7 +118,7 @@ class TestDiscoveryMechanism:
             admin._apply_embed_cookie_policy(app)
             assert app.config['SESSION_COOKIE_SAMESITE'] == 'Lax'
         finally:
-            admin._frame_ancestors_list, admin._force_https = saved, saved_https
+            admin._frame_ancestors_list, admin._FORCE_HTTPS = saved, saved_https
 
 
 class TestCsrfModule:

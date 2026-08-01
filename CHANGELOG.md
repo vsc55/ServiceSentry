@@ -8,6 +8,257 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.35] - 2026-08-01
+
+### Fixed
+- **Two thirds of the configuration had no default.** No "restore default" button, and an
+  emptied box that showed nothing instead of the value the system would actually use —
+  Platform health, LDAP, the database, the syslog receiver, most of Notifications. The
+  frontend asked `CONFIG_FIELD_DEFAULTS`, which is five deliberate exceptions back-filled at
+  boot from `/api/v1/config/schema`; that schema carries `default` for instance-backed
+  bool/int fields and for nothing else, so ~65 options had one and the other ~136 silently did
+  not. It read as correct because the code around every lookup said "the registry default"
+  while asking a map that only knew a slice. One helper answers now, exceptions first — `lang`
+  still restores to the system's language rather than the factory one, because restoring a
+  Spanish install to English is not "restore default" — and nothing reads either map directly.
+- **A config number sitting at its default is drawn empty**, with that default greyed inside
+  the box. Printing 60 as a value claims an admin chose 60, and leaves nothing on screen to
+  tell a deliberate 60 from the one that shipped. Clearing the box returns to exactly that
+  state, so it stays empty rather than springing back with the number in it. What gets stored
+  is the default itself, never null: a config option has nothing to inherit from, and
+  `cfg.get('x', 60)` returns None for a stored null — it falls back only for an absent key —
+  so the quiet consumers would be the first to break. This is the plain-number branch, where
+  most config options land, since the schema only describes the instance-backed ones. Text
+  options show their default too when it is not empty, but clearing one still means empty —
+  for a string that is usually a real answer.
+
+### Changed
+- **A configuration section is a sheet, not a card.** The frame, the chevron and the colour
+  accent were right when seven tabs showed several cards at once. With one section on screen
+  the box was a frame inside a frame, the chevron collapsed the only thing there, and the
+  accent distinguished it from nothing — the index already says which section you are in, and
+  says it better. What is left is a title, a line saying what the section is for, and its
+  options as hairline-separated rows.
+- **Every section says what it is for**, in one line under its name — thirty-four of them, in
+  both languages. Registered by convention (`cfg_desc_<id>`): writing the string is what
+  registers it, so thirty-four sections cannot become thirty-four chances to add one and
+  forget the line.
+- **An unset option is no longer reported as an edited one.** Blank is how "not set" is
+  stored, and not set IS the default — which is exactly what the greyed placeholder in the
+  empty box says. Comparing the two as text made every unset option look like a change away
+  from a value it had never been given: the bind address sat empty, showing `0.0.0.0` behind
+  it, and was counted and marked as edited. `0` and `false` are real answers and go on being
+  compared.
+- **A locked option is marked wherever it is drawn.** The env/file lock was bolted onto the
+  row by `renderScalarFields`, which only the bespoke cards go through — so the same option
+  was marked inside one kind of card and unmarked inside another, and everything reading the
+  mark disagreed with itself depending on where the option happened to live. `renderField`
+  marks it now, and every renderer goes through there.
+- **Every row says whether it is stock, edited, or edited and not yet saved.** The header
+  counts them and the index counts them per section, but neither answers it for the row in
+  front of you — and "is this 60 mine or theirs?" gets asked one option at a time, in the
+  middle of changing something else. Two signals, because a colour alone is not one: an accent
+  down the left edge to scan a column by, and the row's own "restore" button going dim and
+  inert when there is nothing to restore. That button always sat there offering a no-op on
+  stock rows.
+  Pending is its own state and its own colour: "edited" and "edited a moment ago and not
+  written yet" answer different worries, and collapsed into one, a row you just typed into
+  looks exactly like one somebody configured last year.
+- **Four of the five hand-written selects are declared instead of drawn.** The audit sort and
+  its direction, the e-mail provider and the Teams delivery mechanism are described in the
+  registry now — options, per-option labels, default, and `on_change` for the sibling to
+  refresh — and the shared renderer draws them. A hand-written control quietly misses whatever
+  the shared one learns next, and these four missed the env/file lock: an option pinned in
+  `config.json` looked editable, and the save was discarded server-side without a word.
+  `on_change` is the one thing a select could need that the registry could not say, and the
+  reason all four were written by hand; the function name belongs to whoever needs it, not to
+  the core.
+- **The fifth one too: a list of numbers is now vocabulary** (`int_list`). The renderer knew a
+  list of strings and an array it stored as strings, so an option holding numbers had nowhere
+  to land — which is exactly why the table row-count list was written by hand, missing the
+  env/file lock and repeating its own default as a literal placeholder. Nothing in the
+  Configuration screen draws its own control any more.
+- **The row counts a table's chooser offers are declared once, in the registry**
+  (`web_admin|table_rows_options`), and reach the panel through `CONFIG_REGISTRY_DEFAULTS` like
+  every other default. `[25, 50, 100, 200, 0]` was a literal in three files, so changing it
+  meant finding all three — and one copy per side is still two copies. The list gains **15** as
+  its first choice.
+- **`web_admin|lang` and `web_admin|dark_mode` are `default_lang` and `default_dark_mode`** —
+  which is what they are: the language and theme a user gets *before* choosing their own, since
+  every account keeps its own preference. Under the naming rule above, `lang` produced `_LANG`,
+  and `session['lang'] or wa._LANG or DEFAULT_LANG` then read as "the session's language, else
+  the language, else the system's" with no way to tell which term was the default. The option
+  was the thing named badly, not the rule. `SS_LANG` and `SS_DARK_MODE` are unchanged: an
+  environment variable is a published surface.
+- **The start-up fallbacks stopped restating a default.** `DEFAULT_PORT = 8080` and
+  `DEFAULT_HOST = '0.0.0.0'` sat on `WebAdmin` beside the registry entries that already said
+  exactly that. They come from the registry now: a second copy of a default is a copy that gets
+  to disagree, and the failure it produces is the panel offering one number as the default
+  while the server binds to another, with nothing on either side saying which is real.
+- **Four class constants named files the product no longer writes.** `_ROLES_FILE`,
+  `_GROUPS_FILE`, `_SESSIONS_FILE` and `_STATUS_FILE` were declared on `WebAdmin` and read by
+  nothing: roles, groups and sessions have their own DB stores, and `status.json` became the
+  `check_state` table. Worse than dead weight — they send a reader looking for where the data
+  lives to a file that will never exist.
+- **`.flask_secret` has one name.** It signs Flask's session cookies AND derives the Fernet key
+  every stored secret is encrypted with, so losing it is not "sign in again" — it is every
+  secret in the database becoming unreadable. Its filename was spelled out in six places: the
+  panel, the CLI and the four standalone services, one typo away from a process deriving a
+  different key, decrypting nothing, and reporting the configuration as empty rather than as
+  broken. `lib.config` owns it now, beside `CONFIG_FILENAME`, with a helper for the path.
+- **A mirrored config attribute follows from its option**: `_` plus the option name, upper-cased.
+  It was written out by hand beside each one — thirty-seven `_UPPER_SNAKE`, eleven
+  `_lower_snake`, and ten that matched nothing (`_WEB_PORT` for `port`, `_LOGIN_RL_MAX` for
+  `login_ratelimit_max`). With no rule to check, `_DEFAULT_PAGE_SIZE` outlived the rename of the
+  option it mirrors and nobody noticed; a guard fails now if the two drift again.
+- **Four options were mirrored on two attributes at once.** `_PUBLIC_STATUS`, `_PUBLIC_URL`,
+  `_FORCE_HTTPS` and `_FORCE_FQDN` sat as class defaults beside the lower-case attributes the
+  config actually wrote to. Only one of each pair was ever updated; the other looked
+  authoritative and answered with the value the product shipped with. The rename collapsed
+  each pair into one.
+- **`syslog|max_rows` is `syslog|max_messages`** — the same mistake as `page_size`: table
+  vocabulary for what an admin is actually setting, which is a number of messages. The store
+  keeps `prune(max_rows=…)`, because at that layer they really are rows and renaming it there
+  would have been the opposite error.
+- **Four providers shared "Default role (new items)"**, which names neither who gets the role
+  nor when. LDAP, OIDC and SAML2 assign it when no group maps; SCIM when a user is
+  provisioned — and each says so now.
+- **Two options were labelled with another section's words**, and three more did not say what
+  they were. A label is looked up by path and then by bare name, so `scim|token` inherited
+  Telegram's "Bot token" and a Teams channel's `name` inherited the database's "Database name".
+  The section renderers happen to pass their own text, so the screen was right — but anything
+  resolving a label generically, such as the "config changed elsewhere" dialog, printed the
+  wrong one. Keyed by path now, where nothing else can claim them. And `monitoring|timer_check`
+  ("Interval"), `modules|threads` ("Threads") and `modules|timeout` ("Timeout") now say what
+  they time and what they count.
+- **Clearing a list option means its default.** Making the row-count list editable through the
+  shared renderer made emptying it a natural gesture, and emptying it produced an empty list —
+  the only thing it could produce — which the server rejects outright, contradicting both the
+  rule the rest of the screen teaches and the greyed default in the box's own placeholder. At
+  its default the box is drawn empty now, which is what makes "clear it to get the default
+  back" true rather than a claim. The server keeps refusing an empty list: nothing can produce
+  one any more, so it is the last line of defence instead of the first thing a reader meets.
+- **No table carries a second default.** `let _syslogPageSize = _tableRowsDefault || 50` was
+  two faults in one line: it ran at parse time, before the config had loaded, so the admin's
+  choice never reached it — the number was decided by the declaration and nothing could change
+  it — and `|| 50` turned 0 into fifty, when 0 means "show all". Every table reads the
+  configured value on first use, and no number is supplied beside it. The panel's own copy of
+  that default is gone too; it comes from the registry like the list.
+- **`page_size` renamed to say what it counts**: `web_admin|table_rows_default` (what a table
+  opens with) and `web_admin|table_rows_options` (the counts its chooser offers). "Page size"
+  reads as something about the size of the page and names neither tables nor records; and the
+  two are a pair — the second is the vocabulary the first is expressed in — so they are named
+  as one. Labels and hints follow. "Audit entries" became "audit events", the word the rest of
+  the panel already uses for the same thing.
+- **`web_admin|audit_max_entries` was rendered nowhere.** The registry said "rendered by the
+  'audit' card"; the card drew two selects and nothing else, and the option has no `card=` for
+  a generic card to place it by. It was invisible in the panel, env-lockable and all.
+- **The five hand-written option rows behave like every other row.** Audited on request:
+  Audit's two sort selects, Tables' page sizes, the e-mail provider and the Teams delivery
+  mechanism write their own control instead of going through `renderField`, and every one of
+  them omitted `data-cfg-path`. That attribute is how a row tells the sheet which option it
+  is, and four things hang off it — the stock/edited accent, the section count, the "only what
+  changed" filter, and whether the restore button has anything to do. Without it the row looks
+  identical and is invisible to all four. The Teams row also had no restore button at all, and
+  the two Audit selects wrote `configData` from their own handler, skipping the bookkeeping
+  that refreshes the marks.
+- **A UI preference has a default too.** Sort order and page sizes are deliberately not in
+  `spec.py`, so a check that consulted only the registry found no default for them and
+  reported them as edited for ever; `audit_sort_dir` had none in either map, which left its
+  restore button calling a function that bailed on the spot — a control that looks live, does
+  nothing, and says nothing about it.
+- **fail2ban's exposed services behave like the rest of the screen.** They had no restore
+  button and never reported an edit: each row is a record in its own store, written through
+  its own endpoint, so the registry has nothing to compare it against. That is a reason to
+  behave differently on the wire, not on screen — a reader has no way to know which rows are
+  backed by which store, and should not need one. A row can now answer for itself
+  (`data-cfg-changed`), through the same predicate as every other row, so the card stops being
+  a hole in every total; and it gets the same "back to the default" button, inert when it is
+  already there.
+- **Putting a value back where it was undoes the pending state.** Changing an option and then
+  restoring it left the row marked as unsaved with the Save button still lit. Two causes: the
+  pending set only ever grew, so a path stayed staged after being undone — which also meant the
+  save wrote a value the server already held — and the "as loaded" baseline that decides the
+  Save button was snapshotted BEFORE the renderer seeds the options the server never sent. From
+  the first render the two differed by dozens of keys nobody had touched; the button stayed off
+  only because nothing compared them until the first edit, and after that putting the value back
+  could never turn it off, because the difference was never the value. The baseline is given the
+  seeded keys now — only the ones it lacks, never a value it holds, so a real edit cannot be
+  swallowed. An option the server never sent at all — many are only ever read as
+  `cfg.x || <default>` and never stored — has somewhere to return to as well: what the server
+  would use for it is its default, and comparing against `undefined` can never match anything
+  a reader can type. Once such an option has been typed into, its key exists on one side and
+  not the other, so it is written into the baseline too, but only where the two values already
+  agree.
+  Records with their own routes — webhooks, Teams channels, the scheduler interval — are saved
+  state as well: the panel wrote them to the server and synced only the in-memory copy, so
+  creating a webhook lit "unsaved changes" for something already written, and Save then sent
+  nothing (it sends the staged paths, which these never enter) and could not put the light out.
+- **The marks and the counts follow an edit and a save**, instead of waiting for a full
+  re-render. They were frozen at whatever the last one decided, so a row you had just changed
+  went on claiming to be stock and stayed wrong through the save — until you left the section
+  and came back. A number that is only right at certain moments is worse than no number,
+  because nobody can tell which moment they are in. Neither a re-render nor a re-filter: the
+  fields keep their DOM, so focus, caret and half-typed values survive, and the rows on screen
+  do not shift under the hands of someone in the middle of typing.
+- **"Only what changed" is a switch in the toolbar**, beside search, reload and save — and the
+  "N modified" count in any section header is the same switch. The screen could count that
+  answer and never show it: reading "3 modified" was followed by hunting for the three, which
+  is the work the number was supposed to save. On, sections holding no changes drop out of the
+  index and options still at their shipped value drop out of the section; on a stock install
+  it matches nothing, and says so rather than leaving an empty screen. Env-locked counts as
+  changed — the deployment moved those, and they are the ones an admin cannot move back here.
+  It is a MODE, not a search: everything is still navigated one section at a time from the
+  index. Searching is what replaces the navigation, because being shown one section at a time
+  is not an answer to "where is X"; a mode that also changed how you move around would have
+  stopped being a mode and become a different screen.
+- It runs THROUGH the search filter rather than beside it, so the two compose: **one pass**
+  decides which rows and which sections are on screen, and the index reads the result. Two
+  passes setting the same `display` end with whichever ran last winning by accident — which is
+  also why the redraw is one function in a fixed order (restore, filter, index): restoring
+  after the filter handed visibility straight back to everything the filter had just hidden,
+  and the index saw all thirty-four sections survive. The filter and the index also walk the
+  same unit now; matching `.cfg-card` left the notification-templates wrapper — two cards, and
+  the thing the index actually lists — undecided, so it outlived every filter with nothing in
+  it. Two passes with two ideas of what a section is will always disagree about one. And
+  "changed" is now defined once instead of three times — they agreed only by luck, and the day
+  one of them learned about env-locked and the others did not, the count and the list it was
+  counting would have stopped matching.
+- The search matches sections by `.cfg-card`, the class one is BUILT with, instead of the four
+  Bootstrap utilities its frame happened to carry. That selector stopped being true the day
+  the frame went, and it would have taken the search with it without a word.
+- **Closing the search box clears the term.** Putting the box away is how you say you are done
+  searching, and a filter left running from a control that is no longer on screen leaves the
+  panel showing a fraction of itself with nothing visible to explain why. That state used to
+  be survivable because a warning dot sat on the toggle; the dot is gone with the state it
+  warned about, because a badge for something that cannot happen is one more thing to keep true.
+- **While a search is running, the index is the result list.** It used to answer "here it is"
+  in the sheet and go on listing all thirty-four sections beside it, as if nothing had been
+  asked — and the one question it could have answered there, *where did this turn up*, it was
+  refusing to. Now only the sections that matched appear, each with how many of its options
+  did, empty groups drop out entirely, and a search that matched nothing says so where the
+  results would have been. The badge changes colour with its meaning: "matched here" and
+  "departs from stock" are different questions, and one badge meaning either depending on a
+  box elsewhere on screen means neither.
+
+### Added
+- **The section header is pinned.** Which section you are editing, and how much of it this
+  install has moved, stay readable however far down the options you are — the two things a
+  long list makes you scroll back up to check. Three sheets were built and compared on real
+  data (a plain list, one with every hint in view instead of behind an (i), and this one); the
+  two that lost took their CSS, their strings and their switcher with them the day it was
+  decided, because three ways to draw the same rows is what this screen was rebuilt to stop
+  doing.
+  A pinned header, it turns out, has to be opaque, has to start flush against the bar above
+  it, and must not reach past the rows it covers — and it started as none of the three. The
+  scroll box fades its own top 10px and opens with padding there, both exactly where the
+  header pins; and stretching it to cover Bootstrap's row gutter only painted over the pane's
+  own edge. The FIRST section on screen keeps a square top and a rounded bottom for the same
+  reason the toolbar does: that is the line the scrolling body disappears under, and rounding
+  it is what says so. Every other header — a search puts several on screen — rounds all four,
+  because a block that touches nothing with one square edge looks attached to something that
+  is not there.
+
 ## [0.0.1+build.34] - 2026-07-31
 
 ### Added

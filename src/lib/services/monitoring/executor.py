@@ -143,7 +143,7 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
     _notifier = getattr(monitor, '_notifier', None)
     if _notifier is not None:
         try:
-            _notifier.flush(public_url=getattr(monitor, '_public_url', ''))
+            _notifier.flush(public_url=getattr(monitor, '_PUBLIC_URL', ''))
         except Exception:  # pylint: disable=broad-except
             pass
 

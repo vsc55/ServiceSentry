@@ -212,7 +212,7 @@ def register(app, wa):
             if user_lang and user_lang in SUPPORTED_LANGS:
                 session['lang'] = user_lang
             if 'dark_mode' in data:
-                session['dark_mode'] = user.get('dark_mode', wa._default_dark_mode)
+                session['dark_mode'] = user.get('dark_mode', wa._DEFAULT_DARK_MODE)
         return jsonify({'ok': True})
 
     @app.route('/api/v1/users/<username>', methods=['DELETE'])
@@ -261,7 +261,7 @@ def register(app, wa):
             old_lang = user.get('lang', '')
             if not lang:
                 user.pop('lang', None)
-                session['lang'] = wa._default_lang
+                session['lang'] = wa._DEFAULT_LANG
             else:
                 user['lang'] = lang
                 session['lang'] = lang
@@ -274,7 +274,7 @@ def register(app, wa):
             old_dm = user.get('dark_mode')
             if dm is None:
                 user.pop('dark_mode', None)
-                session['dark_mode'] = wa._default_dark_mode
+                session['dark_mode'] = wa._DEFAULT_DARK_MODE
             else:
                 user['dark_mode'] = dm
                 session['dark_mode'] = dm

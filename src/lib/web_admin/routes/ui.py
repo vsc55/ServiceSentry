@@ -26,7 +26,7 @@ def register(app, wa):
     def set_lang(code):
         """Switch UI language and persist to user profile."""
         if code in SUPPORTED_LANGS:
-            old_lang = session.get('lang', wa._default_lang)
+            old_lang = session.get('lang', wa._DEFAULT_LANG)
             session['lang'] = code
             # Persist to the user profile + audit ONLY on a same-origin navigation. This
             # GET carries no CSRF token, so a cross-site `<img src="/lang/xx">` must not
@@ -88,15 +88,15 @@ def register(app, wa):
              if g in wa._groups and wa._groups[g].get('landing_page')),
             key=lambda x: str(x[0]).lower())
         _landing_default = (_grp_land[0][1] if _grp_land else '') \
-            or str(getattr(wa, '_landing_page', '') or '')
+            or str(getattr(wa, '_LANDING_PAGE', '') or '')
         if _landing_default not in _hp_ids:
             _landing_default = 'admin'
         return jsonify({
             'username': uname_me,
             'display_name': session.get('display_name', ''),
             'role': session.get('role', 'viewer'),
-            'lang': session.get('lang', wa._default_lang),
-            'dark_mode': session.get('dark_mode', wa._default_dark_mode),
+            'lang': session.get('lang', wa._DEFAULT_LANG),
+            'dark_mode': session.get('dark_mode', wa._DEFAULT_DARK_MODE),
             'permissions': list(wa._get_session_permissions()),
             'groups': group_names,
             'pref_lang': user_data.get('lang', ''),

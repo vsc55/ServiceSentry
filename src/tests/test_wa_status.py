@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for the /status public status page and language priority logic."""
 
@@ -289,7 +289,7 @@ class TestPublicStatusPage:
 # Priority order (highest → lowest):
 #   1. User session lang  (set via /lang/<code> after login)
 #   2. wa._STATUS_LANG    (status_lang constructor param / config UI)
-#   3. wa._default_lang   (default_lang constructor param)
+#   3. wa._DEFAULT_LANG   (default_lang constructor param)
 # ---------------------------------------------------------------------------
 
 class TestStatusPageLanguage:

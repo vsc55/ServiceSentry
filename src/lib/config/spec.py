@@ -81,18 +81,28 @@ class Cfg:
 # rest are documentation + point-of-use defaults (no_rule=True).
 CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ web_admin: instance-backed runtime options (feed the rule dicts) ═════
-    Cfg('web_admin|lang', str, _DEFAULT_LANG, attr='_default_lang',
+    # `default_`, because that is what they are: the language and theme a user gets
+    # BEFORE choosing their own (each account keeps its own preference). Named `lang`
+    # and `dark_mode`, the attribute that follows from them read as "the language" in
+    # chains like `session['lang'] or wa._DEFAULT_LANG or DEFAULT_LANG`, where it is the middle
+    # term that is the default. The env var stays `SS_LANG`: it is a published surface.
+    # (`_DEFAULT_LANG` appears twice below and means two things: the module constant at the
+    # top of this file, and the name of the WebAdmin attribute. They agree on purpose.)
+    Cfg('web_admin|default_lang', str, _DEFAULT_LANG, attr='_DEFAULT_LANG',
         env='SS_LANG', card='global'),           # default UI language → General card
-    Cfg('web_admin|dark_mode', bool, False, attr='_default_dark_mode',
+    Cfg('web_admin|default_dark_mode', bool, False, attr='_DEFAULT_DARK_MODE',
         env='SS_DARK_MODE', no_rule=True, card='global'),   # default theme → General card
-    Cfg('web_admin|landing_page', str, 'admin', attr='_landing_page',
+    Cfg('web_admin|landing_page', str, 'admin', attr='_LANDING_PAGE',
         no_rule=True, card='global'),   # default landing page (admin/status/…) → General card
     Cfg('web_admin|remember_me_days', int, 30, attr='_REMEMBER_ME_DAYS',
         min=1, max=365, env='SS_REMEMBER_ME_DAYS', admin_only=True,
         flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
         card='login_security'),
     Cfg('web_admin|audit_max_entries', int, 500, attr='_AUDIT_MAX_ENTRIES',
-        min=0, max=10000, env='SS_AUDIT_MAX_ENTRIES'),   # rendered by the 'audit' card
+        # The 'audit' card is bespoke, so this has no `card=` to be placed by; the card draws
+        # it explicitly. It said the same thing before and the card did not — an option nobody
+        # could see, env-lockable and all.
+        min=0, max=10000, env='SS_AUDIT_MAX_ENTRIES'),
     Cfg('web_admin|pw_min_len', int, 8, attr='_PW_MIN_LEN',
         min=1, max=128, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_max_len', int, 128, attr='_PW_MAX_LEN',
@@ -103,9 +113,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_require_symbol', bool, False, attr='_PW_REQUIRE_SYMBOL',
         admin_only=True, card='pw_policy'),
-    Cfg('web_admin|public_status', bool, False, attr='_public_status',
+    Cfg('web_admin|public_status', bool, False, attr='_PUBLIC_STATUS',
         env='SS_PUBLIC_STATUS', admin_only=True),        # rendered by the 'pub_status' card
-    Cfg('web_admin|public_status_detail', bool, False, attr='_public_status_detail',
+    Cfg('web_admin|public_status_detail', bool, False, attr='_PUBLIC_STATUS_DETAIL',
         env='SS_PUBLIC_STATUS_DETAIL', admin_only=True),
     Cfg('web_admin|status_refresh_secs', int, 60, attr='_STATUS_REFRESH_SECS',
         min=10, max=3600, env='SS_STATUS_REFRESH_SECS'),
@@ -113,29 +123,39 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         env='SS_STATUS_LANG'),
     # ── External Access card (order = host → port → public URL → proxy → HTTPS) ──
     Cfg('web_admin|host', str, '0.0.0.0', no_rule=True, card='proxy'),  # bind addr
-    Cfg('web_admin|port', int, 8080, attr='_WEB_PORT',
+    Cfg('web_admin|port', int, 8080, attr='_PORT',
         min=1, max=65535, env='SS_PORT', card='proxy'),
-    Cfg('web_admin|public_url', str, '', attr='_public_url',
+    Cfg('web_admin|public_url', str, '', attr='_PUBLIC_URL',
         env='SS_PUBLIC_URL', admin_only=True, card='proxy'),
-    Cfg('web_admin|proxy_count', int, 0, attr='_proxy_count',
+    Cfg('web_admin|proxy_count', int, 0, attr='_PROXY_COUNT',
         min=0, max=10, env='SS_PROXY_COUNT', admin_only=True, card='proxy'),
-    Cfg('web_admin|force_https', bool, False, attr='_force_https',
+    Cfg('web_admin|force_https', bool, False, attr='_FORCE_HTTPS',
         env='SS_FORCE_HTTPS', admin_only=True, card='proxy'),
     # Framing allowlist: origins permitted to embed the panel in an iframe (CSP
     # frame-ancestors). Empty = framing blocked (default). embed_in_teams adds the
     # Microsoft Teams/Outlook/M365 origins so the Teams personal tab can render.
     Cfg('web_admin|frame_ancestors', str, '', admin_only=True, no_rule=True, card='proxy'),
-    Cfg('web_admin|embed_in_teams', bool, False, attr='_embed_in_teams',
+    Cfg('web_admin|embed_in_teams', bool, False, attr='_EMBED_IN_TEAMS',
         admin_only=True, card='proxy'),
-    Cfg('web_admin|force_fqdn', bool, False, attr='_force_fqdn',
+    Cfg('web_admin|force_fqdn', bool, False, attr='_FORCE_FQDN',
         env='SS_FORCE_FQDN', admin_only=True, card='proxy'),
-    Cfg('web_admin|secure_cookies', bool, False, attr='_secure_cookies',
+    Cfg('web_admin|secure_cookies', bool, False, attr='_SECURE_COOKIES',
         env='SS_SECURE_COOKIES', admin_only=True, no_rule=True, card='proxy'),
-    Cfg('web_admin|default_page_size', int, 25, attr='_DEFAULT_PAGE_SIZE',
+    # How many records a table paginates by. `table_rows_options` is the list its per-table
+    # chooser offers and `table_rows_default` is the one it opens on — the second is expressed
+    # in the vocabulary of the first, which is why they are named as a pair.
+    # They were `table_rows_default` / `table_rows_options`: "page size" reads as something about the
+    # size of the page, and says nothing about tables or records.
+    # The list lives HERE, in the registry, so its default has one home and reaches the panel
+    # through CONFIG_REGISTRY_DEFAULTS like every other default. It used to be a literal in
+    # three files. `no_rule`: it is a list, so the int/bool rule dicts have nothing to say
+    # about it. `0` means "all".
+    Cfg('web_admin|table_rows_default', int, 25, attr='_TABLE_ROWS_DEFAULT',
         min=0, max=200),                                 # rendered by the 'tables' card
+    Cfg('web_admin|table_rows_options', list, [15, 25, 50, 100, 200, 0], no_rule=True),
     Cfg('web_admin|config_poll_secs', int, 30, attr='_CONFIG_POLL_SECS',
         min=10, max=300),
-    Cfg('web_admin|config_update_banner_secs', int, 8, attr='_CONFIG_BANNER_SECS',
+    Cfg('web_admin|config_update_banner_secs', int, 8, attr='_CONFIG_UPDATE_BANNER_SECS',
         min=0, max=60),
     Cfg('web_admin|lockout_max_attempts', int, 5, attr='_LOCKOUT_MAX_ATTEMPTS',
         min=0, max=100, admin_only=True, card='login_security'),
@@ -150,9 +170,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('web_admin|session_idle_minutes', int, 720, attr='_SESSION_IDLE_MINUTES',
         min=0, max=43200, admin_only=True, card='login_security'),  # idle timeout (0=off)
     # Brute-force throttles (per client IP). 0 = disabled.
-    Cfg('web_admin|login_ratelimit_max', int, 15, attr='_LOGIN_RL_MAX',
+    Cfg('web_admin|login_ratelimit_max', int, 15, attr='_LOGIN_RATELIMIT_MAX',
         min=0, max=1000, admin_only=True, card='login_security'),
-    Cfg('web_admin|login_ratelimit_window_secs', int, 300, attr='_LOGIN_RL_WINDOW',
+    Cfg('web_admin|login_ratelimit_window_secs', int, 300, attr='_LOGIN_RATELIMIT_WINDOW_SECS',
         min=10, max=3600, admin_only=True, card='login_security'),
     # Internal fail2ban — progressive per-IP jail shared by every exposed service
     # (web + syslog). Offenses accumulate per IP; crossing a threshold jails the IP
@@ -163,11 +183,11 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         env='SS_IPBAN_ENABLED', admin_only=True, no_rule=True, card='ipban'),
     Cfg('web_admin|ipban_auth_threshold', int, 10, attr='_IPBAN_AUTH_THRESHOLD',
         min=0, max=1000, admin_only=True, card='ipban'),
-    Cfg('web_admin|ipban_auth_window_secs', int, 600, attr='_IPBAN_AUTH_WINDOW',
+    Cfg('web_admin|ipban_auth_window_secs', int, 600, attr='_IPBAN_AUTH_WINDOW_SECS',
         min=10, max=86400, admin_only=True, card='ipban'),
     Cfg('web_admin|ipban_authz_threshold', int, 30, attr='_IPBAN_AUTHZ_THRESHOLD',
         min=0, max=1000, admin_only=True, card='ipban'),
-    Cfg('web_admin|ipban_authz_window_secs', int, 600, attr='_IPBAN_AUTHZ_WINDOW',
+    Cfg('web_admin|ipban_authz_window_secs', int, 600, attr='_IPBAN_AUTHZ_WINDOW_SECS',
         min=10, max=86400, admin_only=True, card='ipban'),
     Cfg('web_admin|ipban_durations', str, '900,3600,21600,86400', attr='_IPBAN_DURATIONS',
         admin_only=True, no_rule=True, card='ipban'),   # escalating ban terms (s), CSV
@@ -182,9 +202,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # field has no config-UI card.
     Cfg('web_admin|ipban_whitelist', str, '', attr='_IPBAN_WHITELIST',
         env='SS_IPBAN_WHITELIST', admin_only=True, no_rule=True),
-    Cfg('web_admin|scim_ratelimit_max', int, 20, attr='_SCIM_RL_MAX',
+    Cfg('web_admin|scim_ratelimit_max', int, 20, attr='_SCIM_RATELIMIT_MAX',
         min=0, max=1000, admin_only=True, card='scim'),
-    Cfg('web_admin|scim_ratelimit_window_secs', int, 300, attr='_SCIM_RL_WINDOW',
+    Cfg('web_admin|scim_ratelimit_window_secs', int, 300, attr='_SCIM_RATELIMIT_WINDOW_SECS',
         min=10, max=3600, admin_only=True, card='scim'),
     Cfg('web_admin|scim_min_token_len', int, 16, attr='_SCIM_MIN_TOKEN_LEN',
         min=8, max=256, admin_only=True, card='scim'),   # bearer token entropy floor
@@ -406,7 +426,11 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('syslog|allowed_sources', str, '', admin_only=True, card='syslog_security'),  # IPs/CIDRs
     Cfg('syslog|retention_days',  int, 30, min=0, max=3650, admin_only=True, nullable=True,
         card='syslog_retention'),
-    Cfg('syslog|max_rows',        int, 500000, min=0, max=100000000, admin_only=True,
+    # The ceiling is a typo guard, not a product limit: 0 already means "no cap", so anyone
+    # wanting unlimited has a way to say it, and a stray digit on 500000 would otherwise ask
+    # the pruner to keep five billion rows. A hundred million is roughly 20 GB of syslog —
+    # far past any real retention and still short of "the disk fills before you notice".
+    Cfg('syslog|max_messages',    int, 500000, min=0, max=100000000, admin_only=True,
         nullable=True, card='syslog_retention'),
     # Syslog→notification routing is handled by the Event-rules manager (Events
     # tab), not a built-in alert here — one place owns event→notification.

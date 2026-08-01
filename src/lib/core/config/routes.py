@@ -36,8 +36,8 @@ def register(app, wa):
         wa._field_versions = {}
     if not hasattr(wa, '_CONFIG_POLL_SECS'):
         wa._CONFIG_POLL_SECS = CFG_BY_PATH['web_admin|config_poll_secs'].default
-    if not hasattr(wa, '_CONFIG_BANNER_SECS'):
-        wa._CONFIG_BANNER_SECS = CFG_BY_PATH['web_admin|config_update_banner_secs'].default
+    if not hasattr(wa, '_CONFIG_UPDATE_BANNER_SECS'):
+        wa._CONFIG_UPDATE_BANNER_SECS = CFG_BY_PATH['web_admin|config_update_banner_secs'].default
 
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')

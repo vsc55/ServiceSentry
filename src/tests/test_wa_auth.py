@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for authentication routes: /login, /logout."""
 
@@ -233,7 +233,7 @@ class TestAccountLockout:
     def test_lockout_disabled_when_max_attempts_zero(self, admin, client):
         """With max_attempts=0 the account is never locked."""
         self._set_lockout(admin, max_attempts=0)
-        admin._LOGIN_RL_MAX = 0          # isolate: disable the orthogonal per-IP throttle
+        admin._LOGIN_RATELIMIT_MAX = 0          # isolate: disable the orthogonal per-IP throttle
         for _ in range(20):
             _login(client, password="wrong")
         resp = _login(client, password="secret")

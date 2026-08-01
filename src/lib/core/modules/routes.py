@@ -204,7 +204,7 @@ def register(app, wa):
         status_raw = wa._read_check_status()
         modules_raw = wa._load_modules()
         module_widgets = modules_svc.build_module_widgets(
-            wa._modules_dir, status_raw, modules_raw, session.get('lang', wa._default_lang))
+            wa._modules_dir, status_raw, modules_raw, session.get('lang', wa._DEFAULT_LANG))
         from lib.core.roles.overview_widget import role_meta  # noqa: PLC0415
         _resp = {'module_widgets': module_widgets}
         _resp.update(role_meta(wa))
@@ -233,7 +233,7 @@ def register(app, wa):
             return jsonify({'error': 'no such page'}), 404
         data = modules_svc.build_module_page(
             wa._modules_dir, module_name, wa._read_check_status(), wa._load_modules(),
-            session.get('lang', wa._default_lang))
+            session.get('lang', wa._DEFAULT_LANG))
         return jsonify({'module': module_name, 'data': data})
 
     # --- API: per-watchful-module action dispatch ----------------

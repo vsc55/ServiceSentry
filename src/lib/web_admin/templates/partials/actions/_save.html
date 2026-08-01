@@ -95,7 +95,7 @@ async function saveConfig() {
     const hasSaved    = (_saveResp.saved || []).length > 0;
     const hasConflicts = Object.keys(_configConflicts).length > 0;
     if (hasSaved) {
-        _updateConfigPageSizes();
+        _refreshTableRowChoices();
         if (_needsRestart.length > 0) { showToast(t('config_saved_restart'), 'warning'); _showRestartBanner(); }
         else if (hasConflicts)          showToast(t('cfg_partial_conflict'), 'warning');
         else                            showToast(t('config_saved'));
@@ -109,20 +109,26 @@ async function saveConfig() {
         // mirroring only covers what was sent; this makes the snapshot mean what it says.
         _serverConfigData = deepClone(configData);
         clearDirty('config');
+        // Saving changes what every row means: what was pending is now simply what this
+        // install runs. The sheet is not re-rendered on a clean save — deliberately, so the
+        // screen does not jump — but the marks and the index counts have to move, or the row
+        // keeps the "unsaved" colour of a change that was written seconds ago.
+        if (typeof _cfgRefreshMarks === 'function') _cfgRefreshMarks();
     } else {
         if (!hasSaved && hasConflicts) showToast(t('cfg_all_conflict'), 'danger');
         renderConfig();
     }
 }
-function _updateConfigPageSizes() {
-    const rawPS = configData?.web_admin?.page_sizes;
+function _refreshTableRowChoices() {
+    const rawPS = configData?.web_admin?.table_rows_options;
     if (Array.isArray(rawPS) && rawPS.length > 0) {
         const parsed = rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
-        if (parsed.length > 0) _PAGE_SIZES = parsed;
+        if (parsed.length > 0) _tableRowChoices = parsed;
     }
-    _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
-    if (configSchema['web_admin|default_page_size'])
-        configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
+    _tableRowsDefault = configData?.web_admin?.table_rows_default
+        ?? cfgDefaultFor('web_admin|table_rows_default');
+    if (configSchema['web_admin|table_rows_default'])
+        configSchema['web_admin|table_rows_default'].options_int = [..._tableRowChoices];
 }
 // silent=true: no "reloaded" toast — used by the load-on-access tab handlers, which re-fetch
 // every time the section is opened (the manual Reload button keeps the toast).
@@ -141,7 +147,7 @@ async function reloadConfig(silent = false) {
     if (!data) return;
     configData = data;
     _serverConfigData = deepClone(configData);
-    _updateConfigPageSizes();
+    _refreshTableRowChoices();
     clearDirty('config'); // also clears _dirtyFields, _configConflicts, _serverChangedDirtyPaths
     renderConfig();
     if (!silent) showToast(t('config_reloaded'));

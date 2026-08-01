@@ -154,7 +154,7 @@ function _ipbanWlTableHtml(rows, tableId) {
 function _ipbanWlRender() {
     const c = document.getElementById('ipban-wl-body');
     if (!c) return;
-    if (_ipbanWlPageSize === null) _ipbanWlPageSize = _defaultPageSize;
+    if (_ipbanWlPageSize === null) _ipbanWlPageSize = _tableRowsDefault;
 
     // Inline add form (kept above the table, same in the empty state). The pb-3 keeps
     // it from crowding the pagination band / table header right below it.

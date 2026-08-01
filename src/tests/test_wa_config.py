@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for config routes: /api/config (GET, PUT) — comprehensive coverage."""
 
@@ -124,52 +124,52 @@ class TestApiConfigPutSecureCookies:
 
     def test_true_applied_to_instance(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         self._put(client, True)
-        assert admin._secure_cookies is True
+        assert admin._SECURE_COOKIES is True
 
     def test_true_propagates_to_flask_config(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         self._put(client, True)
         assert admin._app.config['SESSION_COOKIE_SECURE'] is True
 
     def test_false_applied(self, client, admin):
         _login(client)
-        admin._secure_cookies = True
+        admin._SECURE_COOKIES = True
         self._put(client, False)
-        assert admin._secure_cookies is False
+        assert admin._SECURE_COOKIES is False
         assert admin._app.config['SESSION_COOKIE_SECURE'] is False
 
     def test_string_ignored(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         self._put(client, "true")
-        assert admin._secure_cookies is False
+        assert admin._SECURE_COOKIES is False
 
     def test_int_ignored(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         self._put(client, 1)
-        assert admin._secure_cookies is False
+        assert admin._SECURE_COOKIES is False
 
     def test_null_ignored(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         self._put(client, None)
-        assert admin._secure_cookies is False
+        assert admin._SECURE_COOKIES is False
 
     def test_list_ignored(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         self._put(client, [True])
-        assert admin._secure_cookies is False
+        assert admin._SECURE_COOKIES is False
 
     def test_absent_unchanged(self, client, admin):
         _login(client)
-        admin._secure_cookies = True
+        admin._SECURE_COOKIES = True
         client.put("/api/v1/config", json={})
-        assert admin._secure_cookies is True
+        assert admin._SECURE_COOKIES is True
 
 
 # ────────────────────────── remember_me_days ───────────────────────
@@ -437,37 +437,37 @@ class TestApiConfigPutLang:
     def test_valid_lang_applied(self, client, admin):
         _login(client)
         self._put(client, _VALID_LANG)
-        assert admin._default_lang == _VALID_LANG
+        assert admin._DEFAULT_LANG == _VALID_LANG
 
     def test_unsupported_lang_ignored(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         self._put(client, _INVALID_LANG)
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_empty_string_ignored(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         self._put(client, "")
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_non_string_type_ignored(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         self._put(client, 42)
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_null_ignored(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         self._put(client, None)
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_absent_unchanged(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         client.put("/api/v1/config", json={})
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
 
 # ──────────────────────────── dark_mode ────────────────────────────
@@ -476,43 +476,43 @@ class TestApiConfigPutDarkMode:
     """PUT /api/config → web_admin.dark_mode aplicado en tiempo de ejecución."""
 
     def _put(self, client, value):
-        return client.put("/api/v1/config", json={"web_admin": {"dark_mode": value}})
+        return client.put("/api/v1/config", json={"web_admin": {"default_dark_mode": value}})
 
     def test_true_applied(self, client, admin):
         _login(client)
-        admin._default_dark_mode = False
+        admin._DEFAULT_DARK_MODE = False
         self._put(client, True)
-        assert admin._default_dark_mode is True
+        assert admin._DEFAULT_DARK_MODE is True
 
     def test_false_applied(self, client, admin):
         _login(client)
-        admin._default_dark_mode = True
+        admin._DEFAULT_DARK_MODE = True
         self._put(client, False)
-        assert admin._default_dark_mode is False
+        assert admin._DEFAULT_DARK_MODE is False
 
     def test_string_ignored(self, client, admin):
         _login(client)
-        admin._default_dark_mode = False
+        admin._DEFAULT_DARK_MODE = False
         self._put(client, "true")
-        assert admin._default_dark_mode is False
+        assert admin._DEFAULT_DARK_MODE is False
 
     def test_int_ignored(self, client, admin):
         _login(client)
-        admin._default_dark_mode = False
+        admin._DEFAULT_DARK_MODE = False
         self._put(client, 1)
-        assert admin._default_dark_mode is False
+        assert admin._DEFAULT_DARK_MODE is False
 
     def test_null_ignored(self, client, admin):
         _login(client)
-        admin._default_dark_mode = False
+        admin._DEFAULT_DARK_MODE = False
         self._put(client, None)
-        assert admin._default_dark_mode is False
+        assert admin._DEFAULT_DARK_MODE is False
 
     def test_absent_unchanged(self, client, admin):
         _login(client)
-        admin._default_dark_mode = True
+        admin._DEFAULT_DARK_MODE = True
         client.put("/api/v1/config", json={})
-        assert admin._default_dark_mode is True
+        assert admin._DEFAULT_DARK_MODE is True
 
 
 # ─────────────────── Clave web_admin — casos borde ─────────────────
@@ -533,16 +533,16 @@ class TestApiConfigPutWebAdminKey:
     def test_web_admin_null_leaves_runtime_state_unchanged(self, client, admin):
         _login(client)
         before = {
-            'lang': admin._default_lang,
-            'dark_mode': admin._default_dark_mode,
-            'secure_cookies': admin._secure_cookies,
+            'default_lang': admin._DEFAULT_LANG,
+            'default_dark_mode': admin._DEFAULT_DARK_MODE,
+            'secure_cookies': admin._SECURE_COOKIES,
             'remember_me_days': admin._REMEMBER_ME_DAYS,
             'audit_max_entries': admin._AUDIT_MAX_ENTRIES,
         }
         client.put("/api/v1/config", json={"web_admin": None})
-        assert admin._default_lang == before['lang']
-        assert admin._default_dark_mode == before['dark_mode']
-        assert admin._secure_cookies == before['secure_cookies']
+        assert admin._DEFAULT_LANG == before['default_lang']
+        assert admin._DEFAULT_DARK_MODE == before['default_dark_mode']
+        assert admin._SECURE_COOKIES == before['secure_cookies']
         assert admin._REMEMBER_ME_DAYS == before['remember_me_days']
         assert admin._AUDIT_MAX_ENTRIES == before['audit_max_entries']
 
@@ -554,21 +554,21 @@ class TestApiConfigPutInjection:
 
     def test_xss_payload_in_lang_not_applied(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         client.put("/api/v1/config", json={"web_admin": {"lang": "<script>alert(1)</script>"}})
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_path_traversal_in_lang_not_applied(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         client.put("/api/v1/config", json={"web_admin": {"lang": "../../etc/passwd"}})
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_very_long_lang_string_not_applied(self, client, admin):
         _login(client)
-        original = admin._default_lang
+        original = admin._DEFAULT_LANG
         client.put("/api/v1/config", json={"web_admin": {"lang": "x" * 10_000}})
-        assert admin._default_lang == original
+        assert admin._DEFAULT_LANG == original
 
     def test_nosql_operator_in_remember_me_days_rejected(self, client, admin):
         _login(client)
@@ -586,9 +586,9 @@ class TestApiConfigPutInjection:
 
     def test_list_in_secure_cookies_ignored(self, client, admin):
         _login(client)
-        admin._secure_cookies = False
+        admin._SECURE_COOKIES = False
         client.put("/api/v1/config", json={"web_admin": {"secure_cookies": [True]}})
-        assert admin._secure_cookies is False
+        assert admin._SECURE_COOKIES is False
 
     def test_arbitrary_string_values_saved_safely_as_json(self, client, config_dir):
         """Valores arbitrarios de admins se guardan en JSON (no se ejecutan)."""
@@ -653,12 +653,12 @@ class TestApiConfigSchema:
     def test_schema_default_page_size_present(self, client):
         _login(client)
         data = client.get("/api/v1/config/schema").get_json()
-        assert "web_admin|default_page_size" in data
+        assert "web_admin|table_rows_default" in data
 
     def test_schema_default_page_size_has_options_int_list(self, client):
         _login(client)
         data = client.get("/api/v1/config/schema").get_json()
-        field = data["web_admin|default_page_size"]
+        field = data["web_admin|table_rows_default"]
         assert "options_int" in field
         assert isinstance(field["options_int"], list)
         assert len(field["options_int"]) > 0
@@ -666,7 +666,7 @@ class TestApiConfigSchema:
     def test_schema_default_page_size_options_include_standard_sizes(self, client):
         _login(client)
         data = client.get("/api/v1/config/schema").get_json()
-        opts = data["web_admin|default_page_size"]["options_int"]
+        opts = data["web_admin|table_rows_default"]["options_int"]
         for size in (25, 50, 100, 200):
             assert size in opts, f"Standard page size {size} missing from options_int"
 
@@ -674,14 +674,14 @@ class TestApiConfigSchema:
         """0 represents the 'All rows' option and must be present."""
         _login(client)
         data = client.get("/api/v1/config/schema").get_json()
-        assert 0 in data["web_admin|default_page_size"]["options_int"]
+        assert 0 in data["web_admin|table_rows_default"]["options_int"]
 
     def test_schema_default_page_size_has_default_matching_instance(self, client, admin):
         _login(client)
         data = client.get("/api/v1/config/schema").get_json()
-        field = data["web_admin|default_page_size"]
+        field = data["web_admin|table_rows_default"]
         assert "default" in field
-        assert field["default"] == admin._DEFAULT_PAGE_SIZE
+        assert field["default"] == admin._TABLE_ROWS_DEFAULT
 
     def test_schema_audit_sort_present_with_options(self, client):
         _login(client)
@@ -706,96 +706,96 @@ class TestApiConfigSchema:
         assert field["min"] == 0 and field["max"] == 10
 
 
-# ─────────────────────── default_page_size ─────────────────────────
+# ─────────────────────── table_rows_default ─────────────────────────
 
 class TestApiConfigPutDefaultPageSize:
-    """PUT /api/config → web_admin.default_page_size aplicado en tiempo de ejecución."""
+    """PUT /api/config → web_admin.table_rows_default aplicado en tiempo de ejecución."""
 
     def _put(self, client, value):
-        return client.put("/api/v1/config", json={"web_admin": {"default_page_size": value}})
+        return client.put("/api/v1/config", json={"web_admin": {"table_rows_default": value}})
 
     def test_valid_applied(self, client, admin):
         _login(client)
         self._put(client, 50)
-        assert admin._DEFAULT_PAGE_SIZE == 50
+        assert admin._TABLE_ROWS_DEFAULT == 50
 
     def test_boundary_min_zero(self, client, admin):
         """0 significa 'Todos' y es el valor mínimo válido."""
         _login(client)
         self._put(client, 0)
-        assert admin._DEFAULT_PAGE_SIZE == 0
+        assert admin._TABLE_ROWS_DEFAULT == 0
 
     def test_boundary_max(self, client, admin):
         _login(client)
         self._put(client, 200)
-        assert admin._DEFAULT_PAGE_SIZE == 200
+        assert admin._TABLE_ROWS_DEFAULT == 200
 
     def test_above_max_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, 201)
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_negative_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, -1)
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_string_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, "50")
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_float_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, 25.5)
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_null_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, None)
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_bool_true_not_treated_as_int(self, client, admin):
         """bool es subclase de int en Python — True no debe valer como 1."""
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, True)
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_bool_false_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, False)
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_dict_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, {"value": 25})
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_list_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         self._put(client, [25])
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_absent_unchanged(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
+        admin._TABLE_ROWS_DEFAULT = 25
         client.put("/api/v1/config", json={})
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     def test_nosql_operator_ignored(self, client, admin):
         _login(client)
-        admin._DEFAULT_PAGE_SIZE = 25
-        client.put("/api/v1/config", json={"web_admin": {"default_page_size": {"$gt": 0}}})
-        assert admin._DEFAULT_PAGE_SIZE == 25
+        admin._TABLE_ROWS_DEFAULT = 25
+        client.put("/api/v1/config", json={"web_admin": {"table_rows_default": {"$gt": 0}}})
+        assert admin._TABLE_ROWS_DEFAULT == 25
 
     # --- disk safety: invalid values must not corrupt config.json ---
 
@@ -804,45 +804,45 @@ class TestApiConfigPutDefaultPageSize:
         self._put(client, 25)
         resp = self._put(client, 201)
         assert resp.status_code == 400
-        assert _effective(admin)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 25
 
     def test_negative_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, -1)
         assert resp.status_code == 400
-        assert _effective(admin)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 25
 
     def test_string_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, "50")
         assert resp.status_code == 400
-        assert _effective(admin)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 25
 
     def test_null_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, None)
         assert resp.status_code == 400
-        assert _effective(admin)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 25
 
     def test_bool_does_not_corrupt_disk(self, client, admin):
         _login(client)
         self._put(client, 25)
         resp = self._put(client, True)
         assert resp.status_code == 400
-        assert _effective(admin)["web_admin"]["default_page_size"] == 25
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 25
 
     def test_valid_value_saved_to_disk(self, client, admin):
         _login(client)
         self._put(client, 100)
-        assert _effective(admin)["web_admin"]["default_page_size"] == 100
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 100
 
     def test_zero_saved_to_disk(self, client, admin):
         _login(client)
         self._put(client, 0)
-        assert _effective(admin)["web_admin"]["default_page_size"] == 0
+        assert _effective(admin)["web_admin"]["table_rows_default"] == 0
 
     def test_returns_ok_on_valid(self, client):
         _login(client)
@@ -851,16 +851,16 @@ class TestApiConfigPutDefaultPageSize:
         assert resp.get_json()["ok"] is True
 
 
-# ─────────────────────────── page_sizes ────────────────────────────
+# ─────────────────────────── table_rows_options ────────────────────────────
 
 class TestApiConfigPutPageSizes:
-    """PUT /api/config → web_admin.page_sizes — saneamiento y seguridad."""
+    """PUT /api/config → web_admin.table_rows_options — saneamiento y seguridad."""
 
     def _put(self, client, value):
-        return client.put("/api/v1/config", json={"web_admin": {"page_sizes": value}})
+        return client.put("/api/v1/config", json={"web_admin": {"table_rows_options": value}})
 
     def _saved(self, admin):
-        return (_effective(admin).get("web_admin") or {}).get("page_sizes")
+        return (_effective(admin).get("web_admin") or {}).get("table_rows_options")
 
     _DEFAULT = [25, 50, 100, 200, 0]
 
@@ -968,10 +968,10 @@ class TestApiConfigPutPageSizes:
     # --- campo ausente del payload ---
 
     def test_absent_from_payload_not_written(self, client, admin):
-        """Si page_sizes no se envía, no debe aparecer en config.json."""
+        """Si table_rows_options no se envía, no debe aparecer en config.json."""
         _login(client)
         client.put("/api/v1/config", json={"web_admin": {}})
-        assert "page_sizes" not in (self._saved(admin) or {})
+        assert "table_rows_options" not in (self._saved(admin) or {})
 
     # --- seguridad: inyección dentro del array → 400 (string/dict no son enteros) ---
 
@@ -1015,16 +1015,16 @@ class TestApiConfigPutPageSizes:
         _login(client)
         assert self._put(client, [10, "bad", 25, None, True, -5, 50, 3.14]).status_code == 400
 
-    # --- interacción con default_page_size ---
+    # --- interacción con table_rows_default ---
 
     def test_page_sizes_and_default_page_size_saved_together(self, client, admin):
         _login(client)
         client.put("/api/v1/config", json={
-            "web_admin": {"page_sizes": [10, 25, 50], "default_page_size": 10}
+            "web_admin": {"table_rows_options": [10, 25, 50], "table_rows_default": 10}
         })
         wa = _effective(admin)["web_admin"]
-        assert wa["page_sizes"] == [10, 25, 50]
-        assert wa["default_page_size"] == 10
+        assert wa["table_rows_options"] == [10, 25, 50]
+        assert wa["table_rows_default"] == 10
 
 
 # ─────────────────────────── proxy_count ───────────────────────────
@@ -1038,65 +1038,65 @@ class TestApiConfigPutProxyCount:
     def test_valid_applied(self, client, admin):
         _login(client)
         self._put(client, 1)
-        assert admin._proxy_count == 1
+        assert admin._PROXY_COUNT == 1
 
     def test_boundary_min_zero(self, client, admin):
         _login(client)
         self._put(client, 0)
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_boundary_max(self, client, admin):
         _login(client)
         self._put(client, 10)
-        assert admin._proxy_count == 10
+        assert admin._PROXY_COUNT == 10
 
     def test_above_max_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, 11).status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_negative_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, -1).status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_string_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, "2").status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_float_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, 1.5).status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_null_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, None).status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_bool_true_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, True).status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_bool_false_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         assert self._put(client, False).status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
     def test_absent_unchanged(self, client, admin):
         _login(client)
-        admin._proxy_count = 2
+        admin._PROXY_COUNT = 2
         client.put("/api/v1/config", json={})
-        assert admin._proxy_count == 2
+        assert admin._PROXY_COUNT == 2
 
     def test_above_max_does_not_corrupt_disk(self, client, admin):
         _login(client)
@@ -1107,24 +1107,24 @@ class TestApiConfigPutProxyCount:
 
     def test_nosql_operator_rejected(self, client, admin):
         _login(client)
-        admin._proxy_count = 0
+        admin._PROXY_COUNT = 0
         resp = client.put("/api/v1/config", json={"web_admin": {"proxy_count": {"$gt": 0}}})
         assert resp.status_code == 400
-        assert admin._proxy_count == 0
+        assert admin._PROXY_COUNT == 0
 
 
 class TestLandingPageApplied:
     """Regression: the global landing_page (a string attr not covered by INT/BOOL rules)
-    must be applied by _apply_saved_config at startup — otherwise wa._landing_page stays
+    must be applied by _apply_saved_config at startup — otherwise wa._LANDING_PAGE stays
     unset and login falls back to /admin even when the saved global is e.g. 'overview'."""
 
     def test_startup_applies_global_landing(self, admin):
         cfg = admin._read_config_file(admin._CONFIG_FILE) or {}
         cfg.setdefault("web_admin", {})["landing_page"] = "overview"
         admin._write_config(cfg)
-        admin._landing_page = "admin"     # simulate a stale/unset attr after a restart
+        admin._LANDING_PAGE = "admin"     # simulate a stale/unset attr after a restart
         admin._apply_saved_config()       # startup re-read must re-derive it from config
-        assert admin._landing_page == "overview"
+        assert admin._LANDING_PAGE == "overview"
         u = admin._users["admin"]
         u.pop("landing_page", None)        # no per-user override → inherit the global
         assert admin._landing_url(u) == "/overview"

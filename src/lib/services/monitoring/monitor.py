@@ -34,7 +34,7 @@ import sys
 import tempfile
 import time
 
-from lib.config import ConfigControl, load_config
+from lib.config import ConfigControl, load_config, secret_key_path
 from lib.config.spec import cfg_default, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
@@ -146,11 +146,11 @@ class Monitor(ObjectBase):
         # Recompute the public URL from the now-effective config.
         _raw_url = normalize_url(self.config.get_conf(['web_admin', 'public_url'], ''))
         if _raw_url:
-            _force_https = self.config.get_conf(
+            _FORCE_HTTPS = self.config.get_conf(
                 ['web_admin', 'force_https'], cfg_default('web_admin|force_https'))
-            self._public_url = ('https://' if _force_https else 'http://') + _raw_url
+            self._PUBLIC_URL = ('https://' if _FORCE_HTTPS else 'http://') + _raw_url
         else:
-            self._public_url = ''
+            self._PUBLIC_URL = ''
 
     @property
     def db(self):
@@ -387,7 +387,7 @@ class Monitor(ObjectBase):
     def _read_config(self):
         """ Read the configuration files. """
         if self.dir_config:
-            _secret_file = os.path.join(self.dir_config, '.flask_secret')
+            _secret_file = secret_key_path(self.dir_config)
             _fernet = secret_manager.fernet_from_secret_file(_secret_file)
             self._fernet = _fernet   # kept for the host registry (decrypts profiles)
 
@@ -407,14 +407,14 @@ class Monitor(ObjectBase):
 
             _raw_url = normalize_url(self.config.get_conf(['web_admin', 'public_url'], ''))
             if _raw_url:
-                _force_https = self.config.get_conf(['web_admin', 'force_https'], cfg_default('web_admin|force_https'))
-                _scheme = 'https://' if _force_https else 'http://'
-                self._public_url = _scheme + _raw_url
+                _FORCE_HTTPS = self.config.get_conf(['web_admin', 'force_https'], cfg_default('web_admin|force_https'))
+                _scheme = 'https://' if _FORCE_HTTPS else 'http://'
+                self._PUBLIC_URL = _scheme + _raw_url
             else:
-                self._public_url = ''
+                self._PUBLIC_URL = ''
         else:
             self.config = ConfigControl(None, {})
-            self._public_url = ''
+            self._PUBLIC_URL = ''
 
     def _init_modules(self):
         """Module configuration store (DB-backed).
@@ -590,7 +590,7 @@ class Monitor(ObjectBase):
         """Flush the cycle's buffered alerts (grouped Telegram + digest email + per-event
         webhooks, each with a summary), routed by the notifications matrix."""
         if self._notifier is not None:
-            self._notifier.flush(public_url=self._public_url)
+            self._notifier.flush(public_url=self._PUBLIC_URL)
 
     def check_status(self, status, module, module_sub_key='') -> bool:
         """Whether the status changed for a module/sub-key — the gate watchful modules use to

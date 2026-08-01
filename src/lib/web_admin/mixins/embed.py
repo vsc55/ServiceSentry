@@ -27,7 +27,7 @@ class _EmbedMixin:
         self._csrf_exempt_prefixes = tuple(dict.fromkeys((*self._csrf_exempt_prefixes, *clean)))
 
     def _register_embed_origins(self, config_attr: str, *origins: str) -> None:
-        """Declare iframe-embed origins gated by a bool config attr (e.g. ``_embed_in_teams``),
+        """Declare iframe-embed origins gated by a bool config attr (e.g. ``_EMBED_IN_TEAMS``),
         so integration-specific frame-ancestors are discovered from the provider rather than
         hardcoded in the core security layer. Recomputes the effective allowlist."""
         prof = (config_attr, tuple(o for o in origins if o))
@@ -66,7 +66,7 @@ class _EmbedMixin:
         over plain HTTP cannot work in any case, so there is nothing to trade away: the embed
         is impossible either way, and this keeps ordinary login working.
         """
-        _https = bool(self._secure_cookies or self._force_https)
+        _https = bool(self._SECURE_COOKIES or self._FORCE_HTTPS)
         if self._frame_ancestors_list and _https:
             app.config['SESSION_COOKIE_SAMESITE'] = 'None'
             app.config['SESSION_COOKIE_SECURE'] = True

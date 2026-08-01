@@ -17,7 +17,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from lib.config import CONFIG_FILENAME
+from lib.config import CONFIG_FILENAME, SECRET_KEY_FILENAME
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
 from lib.security import csrf as _csrf, secret_manager
@@ -82,29 +82,31 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     users and module settings without touching files directly.
     """
 
-    DEFAULT_PORT = 8080
-    DEFAULT_HOST = '0.0.0.0'
-    _ROLES_FILE = 'roles.json'
-    _GROUPS_FILE = 'groups.json'
-    _SECRET_KEY_FILE = '.flask_secret'
-    _SESSIONS_FILE = 'sessions.json'
+    # The fallbacks the CLI and the server start-up use when neither the command line nor the
+    # config says where to listen. Read from the registry, not written out again: `8080` and
+    # `0.0.0.0` are already `web_admin|port` and `web_admin|host`, and a second copy of a
+    # default is a copy that gets to disagree — the panel would offer one number as its
+    # default and bind to another.
+    DEFAULT_PORT = _cfg_default('web_admin|port')
+    DEFAULT_HOST = _cfg_default('web_admin|host')
+    _SECRET_KEY_FILE = SECRET_KEY_FILENAME  # read by _SessionsMixin — the only file left
     _CONFIG_FILE = CONFIG_FILENAME          # single source of truth (lib.config)
-    _STATUS_FILE = 'status.json'
+    # `_ROLES_FILE`, `_GROUPS_FILE`, `_SESSIONS_FILE` and `_STATUS_FILE` were here and nothing
+    # read any of them: roles, groups and sessions have their own DB stores, and `status.json`
+    # became the `check_state` table. Names of files the product no longer writes are worse
+    # than dead weight — they send a reader looking for where the data lives to a file that
+    # will never exist.
     # Defaults below come from the central registry (config_spec.CONFIG_FIELDS)
     # via _cfg_default(); editing a default means editing only that registry.
-    _WEB_PORT = DEFAULT_PORT
+    _PORT = DEFAULT_PORT
     _AUDIT_MAX_ENTRIES = _cfg_default('web_admin|audit_max_entries')
     _REMEMBER_ME_DAYS = _cfg_default('web_admin|remember_me_days')
-    _DEFAULT_PAGE_SIZE = _cfg_default('web_admin|default_page_size')
-    _PUBLIC_STATUS = False
-    _public_status_detail = _cfg_default('web_admin|public_status_detail')  # guests see per-item detail on /status
+    _TABLE_ROWS_DEFAULT = _cfg_default('web_admin|table_rows_default')
+    _PUBLIC_STATUS_DETAIL = _cfg_default('web_admin|public_status_detail')  # guests see per-item detail on /status
     _STATUS_REFRESH_SECS = _cfg_default('web_admin|status_refresh_secs')
     _STATUS_LANG = _cfg_default('web_admin|status_lang')
-    _PUBLIC_URL = ''
-    _FORCE_HTTPS = False
-    _FORCE_FQDN  = False
     _frame_ancestors_list: list = []   # origins allowed to iframe the panel (CSP); set in _apply_config_attrs
-    _embed_in_teams = False
+    _EMBED_IN_TEAMS = False
     # CSRF-exempt path prefixes, DISCOVERED from route modules (each declares its own via
     # _register_csrf_exempt in register()); reassigned (never mutated) so no shared-state risk.
     _csrf_exempt_prefixes: tuple = ()
@@ -130,10 +132,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     _SESSION_CHECK_SECS = _cfg_default('web_admin|session_check_secs')
     _SESSION_IDLE_MINUTES = _cfg_default('web_admin|session_idle_minutes')
     # Brute-force rate limits (per IP)
-    _LOGIN_RL_MAX = _cfg_default('web_admin|login_ratelimit_max')
-    _LOGIN_RL_WINDOW = _cfg_default('web_admin|login_ratelimit_window_secs')
-    _SCIM_RL_MAX = _cfg_default('web_admin|scim_ratelimit_max')
-    _SCIM_RL_WINDOW = _cfg_default('web_admin|scim_ratelimit_window_secs')
+    _LOGIN_RATELIMIT_MAX = _cfg_default('web_admin|login_ratelimit_max')
+    _LOGIN_RATELIMIT_WINDOW_SECS = _cfg_default('web_admin|login_ratelimit_window_secs')
+    _SCIM_RATELIMIT_MAX = _cfg_default('web_admin|scim_ratelimit_max')
+    _SCIM_RATELIMIT_WINDOW_SECS = _cfg_default('web_admin|scim_ratelimit_window_secs')
     _SCIM_MIN_TOKEN_LEN = _cfg_default('web_admin|scim_min_token_len')
     _SCIM_MAX_MEMBERS = _cfg_default('web_admin|scim_max_members')
     # Internal fail2ban (_IPBAN_* defaults + all wiring live in _IpBanMixin)
@@ -154,8 +156,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         username: str = 'admin',
         password: str = 'admin',
         var_dir: str | None = None,
-        default_lang: str = _cfg_default('web_admin|lang'),
-        default_dark_mode: bool = _cfg_default('web_admin|dark_mode'),
+        default_lang: str = _cfg_default('web_admin|default_lang'),
+        default_dark_mode: bool = _cfg_default('web_admin|default_dark_mode'),
         modules_dir: str | None = None,
         secure_cookies: bool = _cfg_default('web_admin|secure_cookies'),
         remember_me_days: int = _cfg_default('web_admin|remember_me_days'),
@@ -215,7 +217,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                              | self._module_secret_fields | _cred_secrets)
         self._sensitive_fields = (self._SENSITIVE_FIELDS | CORE_SSH_SECRET_FIELDS
                                   | self._module_secret_fields | _cred_secrets)
-        self._secure_cookies = bool(secure_cookies)
+        self._SECURE_COOKIES = bool(secure_cookies)
         self._REMEMBER_ME_DAYS = int(remember_me_days)
         self._AUDIT_MAX_ENTRIES = int(audit_max_entries)
         self._PW_MIN_LEN = max(1, int(pw_min_len))
@@ -223,14 +225,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._PW_REQUIRE_UPPER = bool(pw_require_upper)
         self._PW_REQUIRE_DIGIT = bool(pw_require_digit)
         self._PW_REQUIRE_SYMBOL = bool(pw_require_symbol)
-        self._public_status = bool(public_status)
-        self._public_status_detail = bool(public_status_detail)
+        self._PUBLIC_STATUS = bool(public_status)
+        self._PUBLIC_STATUS_DETAIL = bool(public_status_detail)
         self._STATUS_REFRESH_SECS = max(10, int(status_refresh_secs))
         self._STATUS_LANG = coerce_lang(status_lang, '')
-        self._proxy_count = max(0, int(proxy_count))
-        self._public_url = normalize_url(public_url)
-        self._force_https = bool(force_https)
-        self._force_fqdn      = bool(force_fqdn)
+        self._PROXY_COUNT = max(0, int(proxy_count))
+        self._PUBLIC_URL = normalize_url(public_url)
+        self._FORCE_HTTPS = bool(force_https)
+        self._FORCE_FQDN      = bool(force_fqdn)
         self._restart_pending = False
         self._startup_id      = str(uuid.uuid4())
         self._config_version  = str(uuid.uuid4())
@@ -244,8 +246,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._data_lock = threading.RLock()
         self._history = None
         self._check_state_store = None
-        self._default_lang = coerce_lang(default_lang, DEFAULT_LANG)
-        self._default_dark_mode = bool(default_dark_mode)
+        self._DEFAULT_LANG = coerce_lang(default_lang, DEFAULT_LANG)
+        self._DEFAULT_DARK_MODE = bool(default_dark_mode)
         self._users: dict[str, dict] = {}
         self._sessions: dict[str, dict] = {}
         self._custom_roles: dict[str, dict] = {}
@@ -404,9 +406,9 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         (e.g. startup/console messages), where the session proxy is unavailable.
         """
         try:
-            lang = session.get('lang', self._default_lang)
+            lang = session.get('lang', self._DEFAULT_LANG)
         except RuntimeError:           # working outside of request context
-            lang = self._default_lang
+            lang = self._DEFAULT_LANG
         trans = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
         text = trans.get(key, key)
         for arg in args:
@@ -553,18 +555,18 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # for links/notifications and does not imply every request is HTTPS; forcing
         # Secure from it would silently break login over plain HTTP (a Secure cookie is
         # dropped by the browser on http://).
-        app.config['SESSION_COOKIE_SECURE'] = bool(self._secure_cookies or self._force_https)
+        app.config['SESSION_COOKIE_SECURE'] = bool(self._SECURE_COOKIES or self._FORCE_HTTPS)
         # Cap request bodies (JSON APIs + SCIM) so an oversized payload can't exhaust
         # memory before parsing.
         app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024   # 8 MiB
 
-        if self._proxy_count > 0:
+        if self._PROXY_COUNT > 0:
             app.wsgi_app = ProxyFix(
                 app.wsgi_app,
-                x_for=self._proxy_count,
-                x_proto=self._proxy_count,
-                x_host=self._proxy_count,
-                x_prefix=self._proxy_count,
+                x_for=self._PROXY_COUNT,
+                x_proto=self._PROXY_COUNT,
+                x_host=self._PROXY_COUNT,
+                x_prefix=self._PROXY_COUNT,
             )
 
         @app.before_request
@@ -709,16 +711,16 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
               browser follows it forever (``ERR_TOO_MANY_REDIRECTS``).  Refusing is always
               better than looping: the worst case is that the redirect does not happen.
             """
-            if not self._force_fqdn or not self._public_url:
+            if not self._FORCE_FQDN or not self._PUBLIC_URL:
                 return
-            want = self._public_url.strip().lower()      # host[:port], never a scheme
+            want = self._PUBLIC_URL.strip().lower()      # host[:port], never a scheme
             have = (request.host or '').strip().lower()
             if ':' not in want:
                 have = have.split(':', 1)[0]
             if have == want:
                 return
-            scheme = 'https' if self._force_https else 'http'
-            target = f"{scheme}://{self._public_url}{request.path}"
+            scheme = 'https' if self._FORCE_HTTPS else 'http'
+            target = f"{scheme}://{self._PUBLIC_URL}{request.path}"
             if target == request.base_url:
                 return
             qs = request.query_string.decode('utf-8')
@@ -728,8 +730,8 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
         @app.context_processor
         def _inject_i18n():
-            lang = session.get('lang', self._default_lang)
-            dark_mode = session.get('dark_mode', self._default_dark_mode)
+            lang = session.get('lang', self._DEFAULT_LANG)
+            dark_mode = session.get('dark_mode', self._DEFAULT_DARK_MODE)
             trans = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
             _cfg = self._read_config_file(self._CONFIG_FILE) or {}
             _ldap_cfg  = _cfg.get('ldap')  or {}
@@ -745,7 +747,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             return {
                 'asset_v': asset_v,
                 'lang': lang,
-                'default_lang': self._default_lang,
+                'default_lang': self._DEFAULT_LANG,
                 'dark_mode': dark_mode,
                 'i18n': trans,
                 'supported_langs': SUPPORTED_LANGS,
@@ -756,7 +758,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 # group), labelled server-side: a module section names itself in the module's
                 # own lang file, so a frontend resolving `t(label_key)` had nothing to look up
                 # and printed the raw id. Core pages AND module sections, one entry per view.
-                'home_pages': landing_options(lang, self._default_lang),
+                'home_pages': landing_options(lang, self._DEFAULT_LANG),
                 # Notification routing matrix, registry-driven: rows = discovered event kinds
                 # (lib/core/notify/events.py), columns = registered channels (registry.py).
                 'notify_matrix_events': self._notify_matrix_events(),
@@ -765,29 +767,29 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 'wa_sensitive_fields': sorted(self._sensitive_fields),
                 'wa_remember_me_days': self._REMEMBER_ME_DAYS,
                 'wa_audit_max_entries': self._AUDIT_MAX_ENTRIES,
-                'wa_secure_cookies': self._secure_cookies,
+                'wa_secure_cookies': self._SECURE_COOKIES,
                 'wa_pw_min_len': self._PW_MIN_LEN,
                 'wa_pw_max_len': self._PW_MAX_LEN,
                 'wa_pw_require_upper': self._PW_REQUIRE_UPPER,
                 'wa_pw_require_digit': self._PW_REQUIRE_DIGIT,
                 'wa_pw_require_symbol': self._PW_REQUIRE_SYMBOL,
-                'wa_public_status': self._public_status,
-                'wa_public_status_detail': self._public_status_detail,
+                'wa_public_status': self._PUBLIC_STATUS,
+                'wa_public_status_detail': self._PUBLIC_STATUS_DETAIL,
                 'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
                 'wa_status_lang': self._STATUS_LANG,
-                'wa_web_port': self._WEB_PORT,
+                'wa_web_port': self._PORT,
                 'wa_env_locked_fields': sorted(self._env_locked),
                 'wa_file_locked_fields': sorted(getattr(self, '_file_locked', frozenset())),
-                'wa_proxy_count': self._proxy_count,
-                'wa_public_url': self._public_url,
+                'wa_proxy_count': self._PROXY_COUNT,
+                'wa_public_url': self._PUBLIC_URL,
                 'csrf_token': self._csrf_token(),
                 # Effective base URL (config override → else proxy-aware auto-detect),
                 # injected so the JS never re-derives it. See public_base_url().
                 'wa_base_url': self.public_base_url(),
-                'wa_force_https': self._force_https,
-                'wa_force_fqdn':  self._force_fqdn,
+                'wa_force_https': self._FORCE_HTTPS,
+                'wa_force_fqdn':  self._FORCE_FQDN,
                 'wa_startup_id':  self._startup_id,
-                'wa_default_dark_mode': self._default_dark_mode,
+                'wa_default_dark_mode': self._DEFAULT_DARK_MODE,
                 'config_registry_defaults': registry_defaults(),
                 'config_layout': config_layout(),
                 'ldap_enabled':       _ldap_auth.is_available()  and bool(_ldap_cfg.get('enabled')),
@@ -885,20 +887,20 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
            ``X-Forwarded-Host/Proto`` when ``proxy_count`` > 0), so no config is needed
            for a correctly-forwarded reverse proxy.
         3. ``http://localhost:<port>`` outside a request context (last resort)."""
-        base = normalize_url(self._public_url or '')
+        base = normalize_url(self._PUBLIC_URL or '')
         if base:
             if '://' not in base:           # public_url is stored without scheme
-                base = f'{"https" if self._force_https else "http"}://{base}'
+                base = f'{"https" if self._FORCE_HTTPS else "http"}://{base}'
             return base.rstrip('/')
         try:
             if has_request_context() and request.host_url:
                 url = request.host_url.rstrip('/')
-                if self._force_https and url.startswith('http://'):
+                if self._FORCE_HTTPS and url.startswith('http://'):
                     url = 'https://' + url[len('http://'):]
                 return url
         except Exception:  # pylint: disable=broad-except
             pass
-        return f'http://localhost:{getattr(self, "_WEB_PORT", 80)}'
+        return f'http://localhost:{getattr(self, "_PORT", 80)}'
 
     @property
     def debug(self):

@@ -47,12 +47,22 @@ function _cfgPathIndex() {
  *  the count wrong on its first read, the one that decides whether anybody trusts it again.
  */
 function _cfgIsDefault(path) {
-    const defs = (typeof CONFIG_REGISTRY_DEFAULTS !== 'undefined' && CONFIG_REGISTRY_DEFAULTS) || {};
-    if (!(path in defs)) return false;          // no shipped default → nothing to differ from
+    // Through `cfgDefaultFor`, so this agrees with the "restore" button and the placeholder
+    // about what the default IS. Reading the registry alone left the options that are pure UI
+    // preferences — sort order, page sizes — with no default to compare against, so they were
+    // reported as edited for ever: they are not in `spec.py` at all, by design.
+    const dflt = cfgDefaultFor(path);
+    if (dflt === undefined) return false;       // no shipped default → nothing to differ from
     const sep = path.indexOf('|');
     const cur = ((configData || {})[path.slice(0, sep)] || {})[path.slice(sep + 1)];
+    // Blank is how "not set" is stored, and not set IS the default — that is what the greyed
+    // placeholder in the empty box has been saying all along. Reported: the bind address sat
+    // empty, showing 0.0.0.0 behind it, and was marked as edited; comparing the two as text
+    // made every unset option look like a change from a value it had never been given.
+    // `0` and `false` are real answers and are compared, not waved through.
+    if (cur === undefined || cur === null || cur === '') return true;
     const norm = v => (v === null || v === undefined) ? '' : String(v);
-    return norm(cur) === norm(defs[path]);
+    return norm(cur) === norm(dflt);
 }
 
 /** How many options a section holds that are not at their shipped value.
@@ -65,11 +75,31 @@ function _cfgIsDefault(path) {
 function _cfgCardChangedCount(node) {
     if (!node) return 0;
     let n = 0;
-    node.querySelectorAll('.cfg-field-wrap[data-cfg-path]').forEach(w => {
-        const locked = w.matches('[data-env-locked]') || !!w.querySelector('[data-env-locked]');
-        if (locked || !_cfgIsDefault(w.getAttribute('data-cfg-path'))) n += 1;
+    node.querySelectorAll('.cfg-field-wrap[data-cfg-path], [data-cfg-changed]').forEach(w => {
+        if (_cfgFieldIsChanged(w)) n += 1;
     });
     return n;
+}
+
+/** Has this install moved this option off its shipped value?
+ *
+ *  The one definition, used by the count, by the filter and by the index alike. It was written
+ *  out three times and they only agreed by luck; the day one of them learned about env-locked
+ *  and the others did not, the number and the list it was counting stopped matching.
+ *
+ *  Env-locked counts as moved: the deployment decided it, so it is not stock — and it is the
+ *  one an admin cannot move back from this screen, which is the most worth showing.
+ */
+function _cfgFieldIsChanged(w) {
+    // A row that is not a registry-backed option can still answer for itself — the exposed
+    // services are records in their own store, saved through their own endpoint, and the
+    // registry has nothing to compare them against. Saying so declaratively is what keeps
+    // them counted like everything else instead of being a hole in every total.
+    if (w.hasAttribute('data-cfg-changed')) return w.getAttribute('data-cfg-changed') === '1';
+    const path = w.getAttribute('data-cfg-path');
+    if (!path) return false;      // buttons, lists — they belong to a section, not to an option
+    const locked = w.matches('[data-env-locked]') || !!w.querySelector('[data-env-locked]');
+    return locked || !_cfgIsDefault(path);
 }
 
 /** The node a layout card renders into: its own `.cfg-card`, or the element itself when the
@@ -84,6 +114,85 @@ function _cfgCardNode(c, card) {
     const el = c.querySelector('#cfgcol_' + CSS.escape(card.id));
     if (!el) return null;
     return el.closest('.cfg-card') || el;
+}
+
+/** Show only the options this install has moved off their shipped value.
+ *
+ *  "What has this install changed" is the first question of any diagnosis, and until now the
+ *  screen could only count the answer, never show it: reading "3 modified" was followed by
+ *  hunting for the three, which is the work the number was supposed to save.
+ *
+ *  It runs THROUGH the search filter rather than beside it, so the two compose instead of
+ *  fighting: one pass decides which rows and which sections are on screen, and the index reads
+ *  the result. Two passes setting the same `display` end with whichever ran last winning by
+ *  accident, which is not a rule anybody could predict from the screen.
+ */
+let _cfgChangedOnly = false;
+
+function toggleConfigChangedOnly() {
+    _cfgChangedOnly = !_cfgChangedOnly;
+    _cfgApplyView();
+}
+
+/** Say, on the row itself, whether this option is what shipped or something this install
+ *  decided.
+ *
+ *  The section header counts them and the index counts them per section, but neither answers
+ *  it for the row you are actually looking at — and "is this 60 mine or theirs?" is asked one
+ *  option at a time, in the middle of changing something else.
+ *
+ *  Two signals, because a colour alone is not one: an accent down the left edge to scan a
+ *  column by, and the row's own "restore" button, which goes dim and inert when there is
+ *  nothing to restore. That button was always there offering a no-op on stock rows; making it
+ *  report the state costs nothing and gives the answer to a reader who cannot use the colour.
+ */
+function _cfgMarkRow(wrap) {
+    const path = wrap.getAttribute('data-cfg-path');
+    const changed = _cfgFieldIsChanged(wrap);
+    // Three states, not two. "Edited" and "edited and not yet saved" are different answers to
+    // different worries — the first is about this install, the second about the last thirty
+    // seconds — and collapsing them means a row you just typed into looks exactly like one
+    // somebody configured last year. Pending wins while it lasts, including when the edit
+    // takes the option back TO its default: that is still a change waiting to be written.
+    const dirty = !!path && typeof _dirtyFields !== 'undefined' && _dirtyFields.has(path);
+    wrap.classList.toggle('cfg-row-changed', changed && !dirty);
+    wrap.classList.toggle('cfg-row-dirty', dirty);
+    const reset = wrap.querySelector('button[onclick^="resetConfigField"]');
+    if (!reset) return;
+    reset.disabled = !changed;
+    reset.classList.toggle('opacity-50', !changed);
+    // Through the Tooltip instance, not the `title` attribute: Bootstrap moves `title` into
+    // its own store on init and never looks at it again, so writing it here would leave the
+    // tip saying the old thing and add a second, native tooltip underneath it.
+    const text = changed ? (t('reset_field') || '') : (t('cfg_at_default') || '');
+    const tip = (typeof bootstrap !== 'undefined' && bootstrap.Tooltip)
+        ? bootstrap.Tooltip.getInstance(reset) : null;
+    if (tip && typeof tip.setContent === 'function') {
+        reset.setAttribute('data-bs-original-title', text);
+        tip.setContent({ '.tooltip-inner': text });
+    } else if (!tip) {
+        reset.title = text;
+    }
+}
+
+/** Re-answer "is this stock, edited, or pending?" for every row, and re-count the index.
+ *
+ *  Called after every edit and after every save. Both used to leave the marks and the counts
+ *  frozen at whatever the last full render decided, so a row you had just changed went on
+ *  claiming to be stock — and stayed wrong through the save, until you left the section and
+ *  came back. A number that is only right at certain moments is worse than no number: nobody
+ *  can tell which moment they are in.
+ *
+ *  Deliberately NOT a re-render and NOT a re-filter: the fields keep their DOM, so focus,
+ *  caret and half-typed values survive, and which rows are on screen does not shift under the
+ *  hands of someone in the middle of typing. `_cfgViewRail` only re-reads the visibility the
+ *  filter pass already decided.
+ */
+function _cfgRefreshMarks() {
+    const c = document.getElementById('config-container');
+    if (!c) return;
+    c.querySelectorAll('.cfg-field-wrap[data-cfg-path]').forEach(_cfgMarkRow);
+    _cfgViewRail(c);
 }
 
 /** A card that fills itself from the API says so with `data-cfg-load`, and this calls it the
@@ -115,47 +224,117 @@ function setConfigRailCard(id) {
     try { localStorage.setItem('ss_cfg_rail_card', id); } catch (_) {}
     // Picking a section means the search is over. Leaving the term on would open that
     // section with most of its fields still hidden by a filter the box is not even showing.
+    // The MODE stays on: it is not a search, and turning it off behind the reader's back
+    // would be the screen undoing a switch they can see is still flipped.
     if (typeof _cfgSearchTerm === 'string' && _cfgSearchTerm) {
         const box = document.getElementById('cfgSearch');
         if (box) box.value = '';
-        _filterConfig('');       // ends by handing the screen back to the index
+        _filterConfig('');       // records the term, then redraws
+    } else {
+        _cfgApplyView();
     }
-    _cfgApplyView();
     // Back to the top: picking a section and landing halfway down it reads as nothing having
     // happened.
     const c = document.getElementById('config-container');
     if (c) c.scrollTop = 0;
 }
 
-/** Draw the section: the index down the side, one card open beside it.
+/** Draw the screen: restore, filter, index — and in that ORDER, which is the only reason this
+ *  is one function instead of three callers each doing its bit.
  *
- *  Called at the end of every `renderConfig()`.
+ *  The order was wrong once and the bug it caused is worth spelling out. The index hides the
+ *  sections it is not showing and marks them; this pass restores those marks so the next one
+ *  starts from a clean slate. When the restore ran AFTER the filter, it handed visibility back
+ *  to every section the filter had just hidden — because they were the same sections, hidden
+ *  twice for different reasons — and the index, which reads the filter's result off the DOM,
+ *  saw all thirty-four survive.
+ *
+ *  Called at the end of every `renderConfig()`, and whenever the search or the mode changes.
  */
 function _cfgApplyView() {
     const c = document.getElementById('config-container');
     if (!c) return;
-    // Undo the previous pass first: the index is rebuilt from the current state, never
-    // composed on top of itself.
     c.querySelectorAll('[data-cfg-hidden-by-view]').forEach(el => {
         el.style.display = '';
         el.removeAttribute('data-cfg-hidden-by-view');
     });
+    _cfgFilterPass(c);
     _cfgViewRail(c);
+}
+
+/** Finish the open section's header: the count of what departs from stock, and the line
+ *  saying what the section is FOR.
+ *
+ *  Both are filled HERE rather than in `cfgCardOpen` for the same reason: the count is a
+ *  number this pass already computes for every section to draw the index, and a second place
+ *  computing it is a second place for it to be wrong. The description comes from the layout
+ *  (`desc_key`), which is where placement is decided — a renderer inventing a key name would
+ *  be a card able to describe itself differently from how the registry describes it.
+ */
+function _cfgSheetHead(el, card) {
+    const n = _cfgCardChangedCount(el);
+    const count = el.querySelector('.cfg-sheet-count');
+    if (count) {
+        count.classList.toggle('d-none', !n);
+        count.classList.toggle('active', _cfgChangedOnly);
+        count.textContent = tf('cfg_changed_count', n) || String(n);
+        count.title = t('cfg_changed_only');
+    }
+    const desc = el.querySelector('.cfg-sheet-desc');
+    const text = card.desc_key ? t(card.desc_key) : '';
+    if (desc) {
+        desc.textContent = (text && text !== card.desc_key) ? text : '';
+        desc.classList.toggle('d-none', !desc.textContent);
+    }
+    // Which ROWS are on screen is not decided here: `_filterConfig` owns that, for the search
+    // and for "only what changed" alike. This pass used to hide rows too, and the two took
+    // turns overwriting each other's `display` — the visible result depended on which ran last.
+}
+
+/** How many of a section's options the current search actually matched. */
+function _cfgMatchCount(el) {
+    let n = 0;
+    el.querySelectorAll('.cfg-field-wrap').forEach(w => { if (w.style.display !== 'none') n += 1; });
+    return n;
 }
 
 function _cfgViewRail(c) {
     const lay = (typeof CONFIG_LAYOUT !== 'undefined' && CONFIG_LAYOUT) || { tabs: [], cards: [] };
-    const cards = (lay.cards || []).filter(card => _cfgCardNode(c, card));
-    if (!cards.length) return;
-    if (!cards.some(card => card.id === _cfgRailCard)) _cfgRailCard = cards[0].id;
+    const all = (lay.cards || []).filter(card => _cfgCardNode(c, card));
+    if (!all.length) return;
+    // Two different things narrow this screen, and they narrow different parts of it.
+    //
+    // SEARCHING replaces the navigation: the sheet becomes a result list of every section that
+    // matched, and the index becomes that list too. Asking "where is X" and being shown one
+    // section at a time is not an answer.
+    //
+    // "ONLY WHAT CHANGED" is a MODE, not a search. Everything is navigated exactly as before —
+    // one section at a time, picked from the index — and all it does is narrow WHAT IS LISTED:
+    // sections that hold no changes drop out of the index, and options still at their shipped
+    // value drop out of the section. Turning a mode on should not also change how you move
+    // around, or it stops being a mode and becomes a different screen.
+    const searching = !!(typeof _cfgSearchTerm === 'string' && _cfgSearchTerm.trim());
+    const filtering = searching || _cfgChangedOnly;   // `_filterConfig` hid the empty sections
+    const cards = filtering
+        ? all.filter(card => _cfgCardNode(c, card).style.display !== 'none')
+        : all;
+    if (!searching && cards.length && !cards.some(card => card.id === _cfgRailCard)) {
+        // The section you were in holds nothing to show under this mode. Landing on an empty
+        // sheet with a full index beside it reads as a fault, so move to the first that does.
+        _cfgRailCard = cards[0].id;
+    }
 
     // One section on screen; the rest stay in the DOM, hidden — so switching is a toggle
     // rather than a re-render, and the search box still has every card to search.
-    for (const card of cards) {
+    for (const card of (searching ? cards : all)) {
         const el = _cfgCardNode(c, card);
-        if (card.id === _cfgRailCard) {
+        if (searching) {
+            _cfgSheetHead(el, card);          // fill its header; its rows are the filter's
+            _cfgCardLoad(el);
+        } else if (card.id === _cfgRailCard && cards.length) {
             el.style.display = '';
             el.removeAttribute('data-cfg-hidden-by-view');
+            _cfgSheetHead(el, card);
             _cfgCardLoad(el);
         } else {
             el.style.display = 'none';
@@ -163,7 +342,21 @@ function _cfgViewRail(c) {
         }
     }
 
-    // The index, grouped by tab and in the layout's order.
+    // Only the FIRST section on screen sits against the toolbar; the rest float in the middle
+    // of the sheet. So the first keeps a square top edge — it is continuous with the bar above
+    // it — and every other header rounds all four corners, because a block that touches nothing
+    // and has one square edge looks like it is attached to something that is not there.
+    // Marked here rather than with `:first-child`: hidden sections are still in the DOM, so the
+    // first CHILD and the first one VISIBLE are rarely the same element.
+    for (const card of all) {
+        const el = _cfgCardNode(c, card);
+        if (el) el.classList.remove('cfg-card-first');
+    }
+    const onScreen = searching ? cards : cards.filter(card => card.id === _cfgRailCard);
+    if (onScreen.length) _cfgCardNode(c, onScreen[0]).classList.add('cfg-card-first');
+
+    // The index, grouped by tab and in the layout's order. A group with nothing in it does not
+    // appear at all — it is built from the cards, so an empty tab has no heading to leave behind.
     const byTab = new Map();
     for (const card of cards) {
         if (!byTab.has(card.tab)) byTab.set(card.tab, []);
@@ -173,26 +366,41 @@ function _cfgViewRail(c) {
     for (const tab of (lay.tabs || [])) {
         tabMeta[tab.id] = { label: t(tab.label_key) || tab.id, icon: tab.icon };
     }
+    // Searching, the number is how many options matched here; otherwise, how many depart from
+    // stock. Different questions, so different colours — a badge that means two things
+    // depending on a box elsewhere on the screen means neither. "Only what changed" keeps the
+    // stock colour, because that is the question it is asking, filter or no filter.
+    const count = el => searching ? _cfgMatchCount(el) : _cfgCardChangedCount(el);
+    const badge = searching ? 'text-bg-info' : 'text-bg-warning';
+    const badgeTip = searching ? t('config_search_label') : t('cfg_view_changed');
     const where = _cfgPathIndex();
     let html = '';
     for (const [tabId, list] of byTab) {
         const meta = tabMeta[tabId] || { label: tabId, icon: 'bi-dot' };
-        const changed = list.reduce((n, card) => n + _cfgCardChangedCount(_cfgCardNode(c, card)), 0);
+        const total = list.reduce((n, card) => n + count(_cfgCardNode(c, card)), 0);
         html += `<div class="cfg-rail-group">
             <div class="cfg-rail-head"><i class="bi ${escAttr(meta.icon)} me-1"></i>${esc(meta.label)}
-            ${changed ? `<span class="badge text-bg-warning ms-1" title="${escAttr(t('cfg_view_changed'))}">${changed}</span>` : ''}</div>`;
+            ${total ? `<span class="badge ${badge} ms-1" title="${escAttr(badgeTip)}">${total}</span>` : ''}</div>`;
         for (const card of list) {
-            const n = _cfgCardChangedCount(_cfgCardNode(c, card));
+            const n = count(_cfgCardNode(c, card));
             const title = (where['cfgcol_' + card.id] || {}).card || card.id;
-            const active = card.id === _cfgRailCard;
+            const active = !searching && card.id === _cfgRailCard;
             html += `<button type="button" class="cfg-rail-item${active ? ' active' : ''}"
                     onclick="setConfigRailCard('${escAttr(card.id)}')" title="${escAttr(title)}">
                 <i class="bi ${escAttr(card.icon || 'bi-dot')} me-1"></i>
                 <span class="text-truncate">${esc(title)}</span>
-                ${n ? `<span class="badge text-bg-warning ms-auto">${n}</span>` : ''}
+                ${n ? `<span class="badge ${badge} ms-auto">${n}</span>` : ''}
             </button>`;
         }
         html += `</div>`;
+    }
+    // A filter that matched nothing says so where the results would have been. Silence here
+    // reads as "the index broke", which is the wrong thing to be wondering about — and with
+    // "only what changed" on a stock install, matching nothing is the CORRECT answer and the
+    // one most in need of saying out loud.
+    if (filtering && !cards.length) {
+        html = `<div class="cfg-rail-group"><div class="cfg-rail-head text-truncate">
+            <i class="bi bi-search me-1"></i>${esc(t('cfg_search_no_section'))}</div></div>`;
     }
 
     // The index sits BESIDE the section, not inside its body: level with the toolbar at the

@@ -90,37 +90,95 @@ function _toggleCfgSearchHints() {
     _filterConfig(_cfgSearchTerm);
 }
 
+/** Record what is being searched for, then redraw. The drawing itself is `_cfgApplyView`'s,
+ *  which is the only place that knows the right ORDER to do it in. */
 function _filterConfig(term) {
     _cfgSearchTerm = term;
-    const q = term.trim().toLowerCase();
-    // The search box is collapsed by default, so an active filter can be hiding most of the
-    // configuration with nothing on screen to explain it. The badge on the toggle is what
-    // says "you are looking at a subset" once the box itself is out of sight.
-    document.getElementById('badgeCfgFilter')?.classList.toggle('d-none', !q);
-    const container = document.getElementById('config-container');
-    if (!container) return;
-    // Searching shows every card that matches, wherever the index would have put it — and
-    // clearing the box hands the screen back to the index (see _cfgApplyView).
-    container.querySelectorAll('.rounded-3.border.overflow-hidden.mb-3').forEach(card => {
+    // (No "a filter is running" badge any more: closing the box clears the term, so a search
+    // can never be narrowing the panel from off-screen. See partials/init/_wiring.html.)
+    if (typeof _cfgApplyView === 'function') _cfgApplyView();
+}
+
+/** THE one pass that decides which rows and which sections are on screen — for the search box
+ *  and for "only what changed" alike. They are two conditions on the same question, so they
+ *  compose here instead of being two passes taking turns overwriting each other's `display`,
+ *  where the visible result depends on which ran last.
+ *
+ *  A section is whatever `_cfgCardNode` says it is — the SAME unit the index navigates by.
+ *  Matching `.cfg-card` instead was close enough to look right and wrong where it mattered:
+ *  notification templates is two cards inside a wrapper, so the wrapper — the thing the index
+ *  actually lists — was never decided about, and survived every filter with nothing in it.
+ *  Two passes with two ideas of what a section is will always disagree about one of them.
+ */
+function _cfgFilterPass(container) {
+    const q = (_cfgSearchTerm || '').trim().toLowerCase();
+    const changedOnly = (typeof _cfgChangedOnly !== 'undefined') && _cfgChangedOnly;
+    const filtering = !!q || changedOnly;
+    // The switch reports the mode it is in even when something else set it — the count badge
+    // in a section header is the same switch, and a control that only tracks its own clicks
+    // starts lying the first time anything else turns the mode on.
+    const sw = document.getElementById('chkCfgChangedOnly');
+    if (sw) sw.checked = changedOnly;
+    const lay = (typeof CONFIG_LAYOUT !== 'undefined' && CONFIG_LAYOUT) || { cards: [] };
+    const sections = (lay.cards || [])
+        .map(card => _cfgCardNode(container, card))
+        .filter(Boolean);
+    sections.forEach(card => {
         let anyMatch = false;
         card.querySelectorAll('.cfg-field-wrap').forEach(wrap => {
             const labelEl  = wrap.querySelector('label');
             const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
             const hintEl   = _cfgSearchInHints ? wrap.querySelector('[id^="fhint_"]') : null;
             const hintTxt  = hintEl ? hintEl.textContent.trim().toLowerCase() : '';
-            const match    = !q || labelTxt.includes(q) || hintTxt.includes(q);
+            const hit      = !q || labelTxt.includes(q) || hintTxt.includes(q);
+            // A row with no `data-cfg-path` is a button or a list, not an option — it cannot
+            // have been "changed", so it steps aside with the rest under that filter.
+            const match    = hit && (!changedOnly || _cfgFieldIsChanged(wrap));
             wrap.style.display = match ? '' : 'none';
             if (match) anyMatch = true;
+            _cfgMarkRow(wrap);
         });
-        card.style.display = (!q || anyMatch) ? '' : 'none';
-        if (q && anyMatch) {
-            const body = card.querySelector('[id^="cfgcol_"]');
-            if (body) bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).show();
-        }
+        card.style.display = (!filtering || anyMatch) ? '' : 'none';
     });
-    // Emptying the box is not "show all thirty-four cards at once" — it is "I am done
-    // searching", and what the section looks like when nobody is searching is the index.
-    if (!q && typeof _cfgApplyView === 'function') _cfgApplyView();
+}
+
+/** Give the "as loaded" baseline the keys the renderer seeded, so seeding never reads as an
+ *  edit.
+ *
+ *  Adds only what the baseline is MISSING, and never touches a value it already holds — a real
+ *  edit changes a key both sides have, so nothing can be swallowed here.
+ */
+function _cfgMirrorSeeded() {
+    if (typeof _serverConfigData !== 'object' || !_serverConfigData) return;
+    for (const [sec, vals] of Object.entries(configData || {})) {
+        if (Array.isArray(vals) || typeof vals !== 'object' || vals === null) {
+            if (!(sec in _serverConfigData)) _serverConfigData[sec] = deepClone(vals);
+            continue;
+        }
+        if (!_serverConfigData[sec] || typeof _serverConfigData[sec] !== 'object') {
+            _serverConfigData[sec] = {};
+        }
+        for (const [k, v] of Object.entries(vals)) {
+            if (!(k in _serverConfigData[sec])) _serverConfigData[sec][k] = deepClone(v);
+        }
+    }
+}
+
+/** Adopt a section into the "as loaded" baseline: it was written through its OWN endpoint, so
+ *  it is saved state, not a pending edit.
+ *
+ *  Webhooks, Teams channels and the scheduler interval are records with their own routes; the
+ *  panel writes them to the server and then syncs the in-memory copy so the screen agrees.
+ *  Only the copy was synced, though, and the Save button is decided by comparing that copy
+ *  against the baseline — so creating a webhook lit "unsaved changes" for something already
+ *  written, and clicking Save then sent nothing (it sends `_dirtyFields`, which these never
+ *  enter) and could not put the light out.
+ */
+function _cfgAdoptSection(section) {
+    if (typeof _serverConfigData !== 'object' || !_serverConfigData) return;
+    if (!configData || !(section in configData)) return;
+    _serverConfigData[section] = deepClone(configData[section]);
+    if (typeof markDirty === 'function') markDirty('config');
 }
 
 function _refreshStatusLink() {
@@ -185,16 +243,13 @@ function _renderDatabaseSection(db, prefix = 'database') {
 
 function renderConfig() {
     const c = document.getElementById('config-container');
-    // Save collapse state so re-renders preserve open/closed panels
-    const prevState = {};
-    c.querySelectorAll('[id^="cfgcol_"]').forEach(el => {
-        prevState[el.id] = el.classList.contains('show');
-    });
+    // (Nothing to remember across a re-render any more: a section is a sheet, not a panel
+    // that can be shut. What used to be saved here was which cards were collapsed.)
     // Pre-populate all web_admin fields
     if (!configData.web_admin) configData.web_admin = {};
     const wa = configData.web_admin;
-    if (!('lang'              in wa)) wa.lang              = SYSTEM_DEFAULT_LANG;
-    if (!('dark_mode'         in wa)) wa.dark_mode         = false;
+    if (!('default_lang'      in wa)) wa.default_lang      = SYSTEM_DEFAULT_LANG;
+    if (!('default_dark_mode' in wa)) wa.default_dark_mode = false;
     if (!('secure_cookies'    in wa)) wa.secure_cookies    = WA_SECURE_COOKIES;
     if (!('remember_me_days'  in wa)) wa.remember_me_days  = WA_REMEMBER_ME_DAYS;
     if (!('audit_max_entries' in wa)) wa.audit_max_entries = WA_AUDIT_MAX_ENTRIES;
@@ -213,8 +268,8 @@ function renderConfig() {
     if (!('public_url'        in wa)) wa.public_url        = WA_PUBLIC_URL;
     if (!('force_https'       in wa)) wa.force_https       = WA_FORCE_HTTPS;
     if (!('force_fqdn'        in wa)) wa.force_fqdn        = WA_FORCE_FQDN;
-    if (!('default_page_size' in wa)) wa.default_page_size = _defaultPageSize;
-    if (!('page_sizes'        in wa)) wa.page_sizes        = [..._PAGE_SIZES];
+    if (!('table_rows_default' in wa)) wa.table_rows_default = _tableRowsDefault;
+    if (!('table_rows_options'        in wa)) wa.table_rows_options        = [..._tableRowChoices];
     if (!('role_modal_scrollable' in wa)) wa.role_modal_scrollable = true;
     if (!('config_poll_secs'          in wa)) wa.config_poll_secs          = 30;
     if (!('config_update_banner_secs' in wa)) wa.config_update_banner_secs = 8;
@@ -226,42 +281,29 @@ function renderConfig() {
     if (!('force_reload_on_update'       in wa)) wa.force_reload_on_update       = false;
     if (!('force_reload_secs'            in wa)) wa.force_reload_secs            = 10;
 
-    const _cfgSectionAccent = {
-        cfgcol_monitoring:     'linear-gradient(90deg,#6366f1,#8b5cf6)',
-        cfgcol_global:     'linear-gradient(90deg,#0ea5e9,#38bdf8)',
-        cfgcol_telegram:   'linear-gradient(90deg,#0ea5e9,#22d3ee)',
-        cfgcol_web_admin:  'linear-gradient(90deg,#f59e0b,#fbbf24)',
-        cfgcol_pw_policy:  'linear-gradient(90deg,#ef4444,#f97316)',
-        cfgcol_pub_status: 'linear-gradient(90deg,#22c55e,#4ade80)',
-        cfgcol_proxy:      'linear-gradient(90deg,#8b5cf6,#a78bfa)',
-        cfgcol_audit:       'linear-gradient(90deg,#64748b,#94a3b8)',
-        cfgcol_tables:      'linear-gradient(90deg,#14b8a6,#2dd4bf)',
-        cfgcol_live_update:     'linear-gradient(90deg,#06b6d4,#3b82f6)',
-        cfgcol_login_security:  'linear-gradient(90deg,#ef4444,#f43f5e)',
-        cfgcol_ldap:            'linear-gradient(90deg,#7c3aed,#a855f7)',
-        cfgcol_oidc:            'linear-gradient(90deg,#0369a1,#0ea5e9)',
-        cfgcol_saml2:           'linear-gradient(90deg,#b45309,#f59e0b)',
-        cfgcol_email:           'linear-gradient(90deg,#dc2626,#f97316)',
-        cfgcol_notifications:   'linear-gradient(90deg,#10b981,#06b6d4)',
-        cfgcol_webhook:         'linear-gradient(90deg,#8b5cf6,#ec4899)',
-        cfgcol_msteams:         'linear-gradient(90deg,#4b53bc,#7b83eb)',
-    };
 
+    // A section is a SHEET, not a card: a title, a line saying what it is for, and its
+    // options. The frame, the chevron and the colour accent went with the tab strip — with
+    // one section on screen the box was a frame inside a frame, the chevron collapsed the
+    // only thing there, and the accent distinguished it from nothing (the index says which
+    // section you are in, and says it better).
+    //
+    // The count and the description are left EMPTY here and filled by the same pass that
+    // draws the index (`_cfgApplyView`): the count is a number that pass already computes
+    // for every section, and computing it twice is how the two start disagreeing.
     function cfgCardOpen(id, icon, title) {
-        const isShow = prevState[id] !== false;
-        const accent = _cfgSectionAccent[id] || 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
-        return `<div class="rounded-3 border overflow-hidden mb-3 cfg-card">
-            <div class="cfg-card-accent" style="background:${accent}"></div>
-            <div class="d-flex align-items-center gap-2 px-3 py-2 fw-semibold cfg-card-header"
-                 data-bs-toggle="collapse" data-bs-target="#${id}"
-                 aria-expanded="${isShow}" aria-controls="${id}">
-                <span class="me-auto d-flex align-items-center gap-1 cfg-card-title">${icon}${esc(title)}</span>
-                <i class="bi bi-chevron-down cfg-chevron text-muted"></i>
+        return `<div class="cfg-card">
+            <div class="cfg-sheet-head">
+                <div class="cfg-sheet-titlerow">
+                    <span class="cfg-sheet-title">${icon}${esc(title)}</span>
+                    <button type="button" class="cfg-sheet-count d-none" data-card="${escAttr(id)}"
+                            onclick="toggleConfigChangedOnly()"></button>
+                </div>
+                <div class="cfg-sheet-desc d-none" data-card="${escAttr(id)}"></div>
             </div>
-            <div class="collapse${isShow ? ' show' : ''}" id="${id}">
-                <div class="cfg-fields px-3 py-2">`;
+            <div class="cfg-fields" id="${id}">`;
     }
-    const cfgCardClose = `</div></div></div>`;
+    const cfgCardClose = `</div></div>`;
 
     // Pre-populate config sections from the central registry so each card
     // renders before the option has ever been saved. The values come from the
@@ -296,8 +338,8 @@ function renderConfig() {
 
     // Modules card: seed threads/timeout from the schema defaults (also registry).
     if (!configData.modules) configData.modules = {};
-    if (!('threads' in configData.modules)) configData.modules.threads = CONFIG_FIELD_DEFAULTS['modules|threads'];
-    if (!('timeout' in configData.modules)) configData.modules.timeout = CONFIG_FIELD_DEFAULTS['modules|timeout'];
+    if (!('threads' in configData.modules)) configData.modules.threads = cfgDefaultFor('modules|threads');
+    if (!('timeout' in configData.modules)) configData.modules.timeout = cfgDefaultFor('modules|timeout');
 
     // Webhooks list (array — CRUD managed separately)
     if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
@@ -323,6 +365,20 @@ function renderConfig() {
     if (!('group_display_names' in _saml2)) _saml2.group_display_names = '{}';
     if (!('default_role'        in _saml2)) _saml2.default_role        = (rolesData.none?.uid || 'none');
     if (!('auto_create_users' in _saml2)) _saml2.auto_create_users = true;
+
+    // Everything above filled in options the server never sent, so the card can render before
+    // the option was ever saved. That is NOT an edit, and the baseline has to say so.
+    //
+    // It did not, and the consequence was the reported one: `markDirty` decides the Save
+    // button by comparing the whole of `configData` against that baseline, the baseline was
+    // taken at load — before any of this seeding — so from the first render the two differed
+    // by dozens of keys nobody had touched. The button stayed off only because nothing
+    // compared them until the first edit; after that, putting the value back could never turn
+    // it off again, because the difference was never the value.
+    //
+    // Only keys the baseline LACKS are copied, never a value it holds: a real edit changes a
+    // key both sides already have, so this cannot swallow one.
+    _cfgMirrorSeeded();
 
     const AUTH_SECS  = new Set(['ldap', 'oidc', 'saml2']);
     const NOTIF_SECS = new Set(['telegram', 'events']);
@@ -519,93 +575,33 @@ function renderConfig() {
         + cfgCardClose;
 
     // Audit card — audit_sort + audit_sort_dir rendered with custom selects
-    const _auditSortPath = 'web_admin|audit_sort';
-    const auditSort = wa.audit_sort || 'time';
-    const _auditHint = fieldHint(_auditSortPath);
-    const _auditHintId = _auditHint ? 'fhint_' + _auditSortPath.replace(/\W/g, '_') : '';
-    const _auditInfoIcon = _auditHint
-        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
-                data-bs-toggle="collapse" data-bs-target="#${_auditHintId}"
-                aria-expanded="false" aria-controls="${_auditHintId}"><i class="bi bi-info-circle"></i></button>`
-        : '';
-    const _auditHintPanel = _auditHint
-        ? `<div class="collapse" id="${_auditHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_auditHint)}</div></div>`
-        : '';
-    const _auditResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
-        onclick="resetConfigField(${jsStr(_auditSortPath)})"
-        data-bs-toggle="tooltip" data-bs-placement="top"
-        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
-    const auditSortOpts = [['time', t('col_time')], ['event', t('col_event')], ['user', t('col_user')], ['ip', t('col_ip')]]
-        .map(([v, lbl]) => `<option value="${v}" ${auditSort === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
-    const _auditDirPath = 'web_admin|audit_sort_dir';
-    const auditSortDir  = wa.audit_sort_dir || 'desc';
-    const _auditDirHint = fieldHint(_auditDirPath);
-    const _auditDirHintId = _auditDirHint ? 'fhint_' + _auditDirPath.replace(/\W/g, '_') : '';
-    const _auditDirInfoIcon = _auditDirHint
-        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
-                data-bs-toggle="collapse" data-bs-target="#${_auditDirHintId}"
-                aria-expanded="false" aria-controls="${_auditDirHintId}"><i class="bi bi-info-circle"></i></button>`
-        : '';
-    const _auditDirHintPanel = _auditDirHint
-        ? `<div class="collapse" id="${_auditDirHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_auditDirHint)}</div></div>`
-        : '';
-    const _auditDirResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
-        onclick="resetConfigField(${jsStr(_auditDirPath)})"
-        data-bs-toggle="tooltip" data-bs-placement="top"
-        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
-    const auditDirOpts = [['desc', t('sort_desc')], ['asc', t('sort_asc')]]
-        .map(([v, lbl]) => `<option value="${v}" ${auditSortDir === v ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
-
+    // Two selects the registry describes completely — options, per-option labels, default and
+    // the sibling to refresh — so the shared renderer draws them. They were written by hand
+    // here, with their option labels inlined, and a hand-written control is one that quietly
+    // misses whatever the shared one learns next: these two never consulted the env/file lock,
+    // so a pinned option looked editable and the save was discarded without a word.
     _cardHtml['audit'] = cfgCardOpen('cfgcol_audit', '<i class="bi bi-journal-text me-1"></i>', t('tab_audit'));
-    _cardHtml['audit'] += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort'))}${_auditInfoIcon}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <select class="form-select"
-                onchange="configData.web_admin = configData.web_admin || {}; configData.web_admin.audit_sort = this.value; markDirty('config')">
-                ${auditSortOpts}
-            </select>${_auditResetBtn}
-        </div>${_auditHintPanel}</div>
-    </div></div>`;
-    _cardHtml['audit'] += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('audit_default_sort_dir'))}${_auditDirInfoIcon}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <select class="form-select"
-                onchange="configData.web_admin = configData.web_admin || {}; configData.web_admin.audit_sort_dir = this.value; markDirty('config'); _applyAuditSortDir(this.value)">
-                ${auditDirOpts}
-            </select>${_auditDirResetBtn}
-        </div>${_auditDirHintPanel}</div>
-    </div></div>`;
+    _cardHtml['audit'] += renderField('audit_sort', wa.audit_sort || 'time',
+                                      'web_admin|audit_sort', 'config');
+    _cardHtml['audit'] += renderField('audit_sort_dir', wa.audit_sort_dir || 'desc',
+                                      'web_admin|audit_sort_dir', 'config');
+    // `audit_max_entries` says "rendered by the 'audit' card" in the registry and never was:
+    // it has no `card=` (so no generic card claims it) and this card only ever drew the two
+    // selects. It was an option nobody could see, env-lockable and all.
+    _cardHtml['audit'] += renderField('audit_max_entries', wa.audit_max_entries,
+                                      'web_admin|audit_max_entries', 'config');
     _cardHtml['audit'] += cfgCardClose;
 
-    // Tables card — default_page_size select + page_sizes text input
-    const _psPath = 'web_admin|page_sizes';
-    const _psHint = fieldHint(_psPath);
-    const _psHintId = _psHint ? 'fhint_' + _psPath.replace(/\W/g, '_') : '';
-    const _psInfoIcon = _psHint
-        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
-                data-bs-toggle="collapse" data-bs-target="#${_psHintId}"
-                aria-expanded="false" aria-controls="${_psHintId}"><i class="bi bi-info-circle"></i></button>`
-        : '';
-    const _psHintPanel = _psHint
-        ? `<div class="collapse" id="${_psHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_psHint)}</div></div>`
-        : '';
-    const _psResetBtn = `<button type="button" class="btn btn-sm btn-secondary"
-        onclick="resetConfigField(${jsStr(_psPath)})"
-        data-bs-toggle="tooltip" data-bs-placement="top"
-        title="${escAttr(t('reset_field'))}"><i class="bi bi-arrow-counterclockwise"></i></button>`;
-    const psLabel = esc(LABELS['page_sizes'] || t('page_sizes'));
-    const psValue = escAttr((wa.page_sizes || _PAGE_SIZES).join(', '));
-    _cardHtml['tables'] = cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'));
-    _cardHtml['tables'] += renderField('default_page_size', wa.default_page_size, 'web_admin|default_page_size', 'config');
-    _cardHtml['tables'] += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${psLabel}${_psInfoIcon}</label>
-        <div class="col-sm-8"><div class="input-group input-group-sm">
-            <input type="text" class="form-control"
-                value="${psValue}" placeholder="25, 50, 100, 200, 0"
-                onchange="updateIntArray('config','${_psPath}',this.value)">${_psResetBtn}
-        </div>${_psHintPanel}</div>
-    </div></div>`;
-    _cardHtml['tables'] += cfgCardClose;
+    // Tables card — how many rows a table shows, and which sizes its chooser offers.
+    // Both drawn by the shared renderer: the list is declared `int_list` in the schema, which
+    // is the vocabulary that was missing and the reason it was written by hand here. The list
+    // is the REFERENCE for the other option — `_updateConfigPageSizes` re-reads it after every
+    // save, so editing it changes what the default can be set to.
+    _cardHtml['tables'] = cfgCardOpen('cfgcol_tables', '<i class="bi bi-table me-1"></i>', t('tables_section'))
+        + renderField('table_rows_default', wa.table_rows_default, 'web_admin|table_rows_default', 'config')
+        + renderField('table_rows_options', wa.table_rows_options || [..._tableRowChoices],
+                      'web_admin|table_rows_options', 'config')
+        + cfgCardClose;
 
     // Live updates card — poll intervals + session timers
     _cardHtml['live_update'] = cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
@@ -691,8 +687,9 @@ function renderConfig() {
     if (_cfgPerms.has('config_view') && !_cfgPerms.has('config_edit')) _applyReadonly(c);
     // The view is the last word on what is shown, applied over the same DOM the tabs
     // and the filter work on — one renderer, several ways to read it.
+    // The last word on what is shown: restore, filter, index — in that order, which is the
+    // whole point of it being one function (see _cfgApplyView).
     if (typeof _cfgApplyView === 'function') _cfgApplyView();
-    if (_cfgSearchTerm) _filterConfig(_cfgSearchTerm);
 }
 
 async function testTelegram() {

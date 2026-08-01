@@ -36,16 +36,16 @@ class TestPrecedence:
 
     def test_env_overrides_file_and_db(self):
         eff, locked = resolve_config(
-            {'web_admin|lang': 'es_ES'},
+            {'web_admin|default_lang': 'es_ES'},
             {'web_admin': {'lang': 'en_EN'}},
-            {'web_admin|lang': 'fr_FR'}, include_defaults=False)
-        assert eff['web_admin']['lang'] == 'fr_FR'       # env wins
-        assert 'web_admin|lang' in locked
+            {'web_admin|default_lang': 'fr_FR'}, include_defaults=False)
+        assert eff['web_admin']['default_lang'] == 'fr_FR'       # env wins
+        assert 'web_admin|default_lang' in locked
 
     def test_default_when_unset(self):
         eff, locked = resolve_config({}, {}, {})         # include_defaults=True
-        assert eff['web_admin']['lang'] == cfg_default('web_admin|lang')
-        assert 'web_admin|lang' not in locked            # default → editable
+        assert eff['web_admin']['default_lang'] == cfg_default('web_admin|default_lang')
+        assert 'web_admin|default_lang' not in locked            # default → editable
 
     def test_database_section_never_from_db(self):
         # database is bootstrap: a DB-stored value must be ignored; file wins.
@@ -65,15 +65,15 @@ class TestPrecedence:
         _, locked = resolve_config(
             {},
             {'modules': {'timeout': 15}},
-            {'web_admin|lang': 'es_ES'}, include_defaults=False)
-        assert locked == {'modules|timeout', 'web_admin|lang'}
+            {'web_admin|default_lang': 'es_ES'}, include_defaults=False)
+        assert locked == {'modules|timeout', 'web_admin|default_lang'}
 
     def test_opaque_leaf_values_preserved(self):
-        # dict/list leaf values (group_role_map, page_sizes) are single values.
+        # dict/list leaf values (group_role_map, table_rows_options) are single values.
         eff, _ = resolve_config(
-            {'web_admin|page_sizes': [10, 25], 'oidc|group_role_map': {'admins': 'admin'}},
+            {'web_admin|table_rows_options': [10, 25], 'oidc|group_role_map': {'admins': 'admin'}},
             {}, {}, include_defaults=False)
-        assert eff['web_admin']['page_sizes'] == [10, 25]
+        assert eff['web_admin']['table_rows_options'] == [10, 25]
         assert eff['oidc']['group_role_map'] == {'admins': 'admin'}
 
 

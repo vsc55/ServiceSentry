@@ -165,6 +165,12 @@ def config_layout() -> dict:
     named frontend function.  Single source of truth: the UI can never drift."""
     from lib.config.config_actions import discover_config_actions  # noqa: PLC0415
     from lib.config.group_sources import discover_group_sources  # noqa: PLC0415
+    from lib.i18n import DEFAULT_LANG, TRANSLATIONS  # noqa: PLC0415
+    # A card's one-line description is registered by CONVENTION, `cfg_desc_<id>`, not by a
+    # key spelled out on every entry. Thirty-four cards would mean thirty-four chances to add
+    # a section and forget the line; here writing the string IS the registration, and a card
+    # with nothing worth saying simply has no key.
+    _desc = TRANSLATIONS.get(DEFAULT_LANG, {})
     by_section: dict[str, list] = {}
     for a in discover_config_actions():
         by_section.setdefault(a['section'], []).append(a)
@@ -184,5 +190,7 @@ def config_layout() -> dict:
         src = sources.get(d.get('section') or d['id'])
         if src:
             d['group_source'] = src
+        if ('cfg_desc_' + d['id']) in _desc:
+            d['desc_key'] = 'cfg_desc_' + d['id']
         cards.append(d)
     return {'tabs': [dict(t) for t in TABS], 'cards': cards}
