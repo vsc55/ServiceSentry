@@ -20,7 +20,7 @@ from lib.config.spec import (
     CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, normalize_url, cfg_validate,
     cfg_default, cfg_meta, frontend_schema,
 )
-from lib.i18n import SUPPORTED_LANGS, TRANSLATIONS
+from lib.i18n import SUPPORTED_LANGS
 from lib.core.users.service import AdminOpError
 
 # Materialized rule dicts derived from the central registry (edit spec.CONFIG_FIELDS, not
@@ -179,15 +179,15 @@ def validate_config(new_data: dict) -> None:
         if not ok:
             raise AdminOpError('invalid_json_field', field)
 
-    # page_sizes: non-empty list of non-negative ints.
+    # table_rows_options: non-empty list of non-negative ints.
     web_data = new_data.get('web_admin')
-    if isinstance(web_data, dict) and 'page_sizes' in web_data:
-        raw_ps = web_data['page_sizes']
+    if isinstance(web_data, dict) and 'table_rows_options' in web_data:
+        raw_ps = web_data['table_rows_options']
         if not isinstance(raw_ps, list) or len(raw_ps) == 0:
-            raise AdminOpError('invalid_page_sizes')
+            raise AdminOpError('invalid_table_rows_options')
         for v in raw_ps:
             if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
-                raise AdminOpError('invalid_page_sizes')
+                raise AdminOpError('invalid_table_rows_options')
 
     # pw_max_len must not be below pw_min_len.
     if isinstance(web_data, dict):
@@ -230,6 +230,20 @@ def syslog_db_changed(old_data: dict, new_data: dict) -> bool:
 
 
 # ── frontend UI metadata ─────────────────────────────────────────────────────────
+def _opt_labels(keys: dict) -> dict:
+    """``{option: {lang: label}}`` from ``{option: i18n key}``.
+
+    The shape ``renderField`` already reads for a select's per-option labels. Built here so a
+    select can be DECLARED rather than hand-written: the labels used to live inside the JS that
+    drew each of these controls, which is what made writing them by hand look necessary.
+    """
+    from lib.i18n import SUPPORTED_LANGS, TRANSLATIONS  # noqa: PLC0415
+    return {
+        opt: {lang: TRANSLATIONS.get(lang, {}).get(key, opt) for lang in SUPPORTED_LANGS}
+        for opt, key in keys.items()
+    }
+
+
 def build_config_schema() -> dict:
     """Assemble the field-level UI metadata for the config screen.
 
@@ -237,33 +251,71 @@ def build_config_schema() -> dict:
     this only layers the UI-specific extras — option lists, placeholder maps, ``ipkind``
     flags, PEM textareas and i18n option labels.  Pure data composition (no Flask), so the
     ``/api/v1/config/schema`` route is a one-line ``jsonify`` over it."""
-    from lib.web_admin.constants import HOME_PAGES, home_page_ids  # noqa: PLC0415
+    from lib.web_admin.constants import landing_pages, page_label  # noqa: PLC0415
     schema = frontend_schema()
-    schema['web_admin|default_page_size'] = {
-        'options_int': [25, 50, 100, 200, 0],
-        'default': cfg_default('web_admin|default_page_size'),
+    # Rows per table: the sizes the chooser offers, and which of them a table opens on. The
+    # first is the reference for the second — `_updateConfigPageSizes` re-reads it after every
+    # save, so editing the list changes what the other option can be set to.
+    schema['web_admin|table_rows_options'] = {
+        'int_list': True,
+        'default': cfg_default('web_admin|table_rows_options'),
     }
+    schema['web_admin|table_rows_default'] = {
+        'options_int': list(cfg_default('web_admin|table_rows_options')),
+        'default': cfg_default('web_admin|table_rows_default'),
+    }
+    # Four selects the panel used to draw by hand, each with its option labels written into
+    # the JS. Declared here instead, so `renderField` draws them like every other option and
+    # they inherit what a hand-written control kept missing — chiefly the env/file lock, whose
+    # absence let an admin edit a pinned option and watch the save be discarded in silence.
+    #
+    # `on_change` is the one thing a select could need that the registry could not say: a
+    # sibling to refresh when the value changes. The name of the function belongs to whoever
+    # needs it, not to the core — same rule as a module naming its own action.
     schema['web_admin|audit_sort'] = {
         'options': ['time', 'event', 'user', 'ip'],
+        'options_i18n': _opt_labels({'time': 'col_time', 'event': 'col_event',
+                                     'user': 'col_user', 'ip': 'col_ip'}),
         'default': 'time',
     }
     schema['web_admin|audit_sort_dir'] = {
         'options': ['desc', 'asc'],
+        'options_i18n': _opt_labels({'desc': 'sort_desc', 'asc': 'sort_asc'}),
         'default': 'desc',
+        'on_change': '_applyAuditSortDir',
+    }
+    schema['email|provider'] = {
+        **cfg_meta('email|provider'),
+        'options': ['smtp', 'microsoft365', 'gmail'],
+        'options_i18n': _opt_labels({'smtp': 'email_provider_smtp',
+                                     'microsoft365': 'email_provider_ms365',
+                                     'gmail': 'email_provider_gmail'}),
+        'default': cfg_default('email|provider'),
+        'on_change': '_emailProviderChanged',
+    }
+    schema['msteams|delivery'] = {
+        **cfg_meta('msteams|delivery'),
+        'options': ['activity_feed', 'bot'],
+        'options_i18n': _opt_labels({'activity_feed': 'msteams_delivery_activity',
+                                     'bot': 'msteams_delivery_bot'}),
+        'default': cfg_default('msteams|delivery'),
+        'on_change': '_msteamsDeliveryChanged',
     }
     schema['web_admin|status_lang'] = {
         'options': [''] + list(SUPPORTED_LANGS),
         'default': '',
     }
-    # Default landing page: a select of the dashboard's top-level tabs, labelled with each
-    # tab's i18n name (per supported language) — from the HOME_PAGES registry.
+    # Default landing page: a select of every destination a user can be sent to, labelled per
+    # supported language. Built from `landing_pages()`, which is the whole list — core pages
+    # AND module sections, one entry per view where a section has several. It used to read the
+    # core tuple only, so a module section was offered with its raw id for a name ("m365") and
+    # a section with two views hid one of them behind the other.
     schema['web_admin|landing_page'] = {
         **cfg_meta('web_admin|landing_page'),
-        'options': home_page_ids(),
+        'options': [p['id'] for p in landing_pages()],
         'options_i18n': {
-            p['id']: {lang: TRANSLATIONS.get(lang, {}).get(p['label_key'], p['id'])
-                      for lang in SUPPORTED_LANGS}
-            for p in HOME_PAGES
+            p['id']: {lang: page_label(p, lang) for lang in SUPPORTED_LANGS}
+            for p in landing_pages()
         },
         'default': cfg_default('web_admin|landing_page'),
     }
@@ -309,7 +361,7 @@ def build_config_schema() -> dict:
     # Syslog listener numeric fields: blank = use the registry default (shown as the
     # placeholder), so clearing one never auto-fills the previous value.
     for _p in ('syslog|udp_port', 'syslog|tcp_port', 'syslog|tls_port',
-               'syslog|retention_days', 'syslog|max_rows'):
+               'syslog|retention_days', 'syslog|max_messages'):
         schema[_p] = {**cfg_meta(_p), 'nullable': True}
     # Sender allowlist renders as a removable-chips list; each entry must be a valid
     # IPv4/IPv6 address OR a CIDR network (192.168.0.0/24, 2001:db8::/32).

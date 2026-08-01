@@ -188,7 +188,7 @@ def start_web(args):
     # --lang (CLI/env) overrides the banner language; otherwise the web admin's
     # effective (DB-aware) language is used.
     from lib.i18n import translate  # noqa: WPS433
-    blang = _match_lang(getattr(args, 'lang', None)) or admin._default_lang
+    blang = _match_lang(getattr(args, 'lang', None)) or admin._DEFAULT_LANG
     print(translate(blang, 'banner_web'))
     print(f"  {translate(blang, 'banner_url')} http://{host}:{port}")
     print(f"  {translate(blang, 'banner_config')} {config_dir}")

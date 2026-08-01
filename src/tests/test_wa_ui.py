@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for UI routes: /, /api/v1/me, /api/v1/health, /lang/<code>."""
 
@@ -139,13 +139,13 @@ class TestDarkMode:
         assert b'data-bs-theme="dark"' in html
 
     def test_save_config_updates_default_dark_mode(self, admin, client):
-        """Saving config.json web_admin.dark_mode updates the runtime default."""
+        """Saving config.json web_admin.default_dark_mode updates the runtime default."""
         _login(client)
-        assert admin._default_dark_mode is False
+        assert admin._DEFAULT_DARK_MODE is False
         client.put("/api/v1/config", json={
-            "web_admin": {"dark_mode": True},
+            "web_admin": {"default_dark_mode": True},
         })
-        assert admin._default_dark_mode is True
+        assert admin._DEFAULT_DARK_MODE is True
 
     def test_user_dark_mode_in_users_list(self, admin, client):
         """GET /api/v1/users includes dark_mode for each user."""
@@ -171,12 +171,12 @@ class TestConfigDarkMode:
     """Dark mode field appears in the Configuration tab."""
 
     def test_config_tab_renders_dark_mode_field(self, client):
-        """The config tab JS ensures web_admin.dark_mode is rendered."""
+        """The config tab JS ensures web_admin.default_dark_mode is rendered."""
         _login(client)
         html = client.get("/admin").data
         # _js_config.html pre-populates web_admin fields via the 'wa' alias:
-        # const wa = configData.web_admin; ... if (!('dark_mode' in wa)) wa.dark_mode = ...
-        assert b"wa.dark_mode" in html
+        # const wa = configData.web_admin; ... if (!('default_dark_mode' in wa)) …
+        assert b"wa.default_dark_mode" in html
 
 
 # ──────────────────────────── Internationalisation ─────────────────
@@ -316,13 +316,13 @@ class TestI18n:
         assert me["lang"] == "es_ES"
 
     def test_save_config_updates_default_lang(self, admin, client):
-        """Saving config.json with web_admin.lang updates runtime default."""
+        """Saving config.json with web_admin.default_lang updates runtime default."""
         _login(client)
         resp = client.put("/api/v1/config", json={
-            "web_admin": {"lang": "es_ES"},
+            "web_admin": {"default_lang": "es_ES"},
         })
         assert resp.status_code == 200
-        assert admin._default_lang == "es_ES"
+        assert admin._DEFAULT_LANG == "es_ES"
 
     def test_save_config_invalid_lang_ignored(self, admin, client):
         """Saving config.json with invalid lang keeps current default."""
@@ -330,7 +330,7 @@ class TestI18n:
         client.put("/api/v1/config", json={
             "web_admin": {"lang": "xx"},
         })
-        assert admin._default_lang == "en_EN"
+        assert admin._DEFAULT_LANG == "en_EN"
 
     def test_dashboard_exposes_default_lang(self, client):
         """Dashboard HTML includes the system default language."""

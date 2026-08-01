@@ -74,7 +74,7 @@ def register(app, wa):
         # this is the only brute-force signal/limit on the bearer token).
         ip = request.remote_addr or '?'
         allowed, retry = wa._scim_ratelimit.hit(
-            ip, max_hits=wa._SCIM_RL_MAX, window_secs=wa._SCIM_RL_WINDOW)
+            ip, max_hits=wa._SCIM_RATELIMIT_MAX, window_secs=wa._SCIM_RATELIMIT_WINDOW_SECS)
         wa._audit('scim_auth_failed', username='', ip=ip,
                   detail={'path': request.path, 'blocked': not allowed})
         # Feed the internal fail2ban (explicit → also counts the 429 throttle case,

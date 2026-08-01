@@ -185,7 +185,7 @@ function _ipbanBansRender() {
     // Write into the body: the pane also holds the static filter bar, which must survive.
     const c = document.getElementById('ipban-bans-body');
     if (!c) return;
-    if (_ipbanBansPageSize === null) _ipbanBansPageSize = _defaultPageSize;
+    if (_ipbanBansPageSize === null) _ipbanBansPageSize = _tableRowsDefault;
     const bans = _ipbanBansFiltered();
 
     // The column chooser belongs to the table: the network view has no columns to choose.

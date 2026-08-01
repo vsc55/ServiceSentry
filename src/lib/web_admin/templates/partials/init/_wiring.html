@@ -276,22 +276,22 @@ try {
         await loadCredentials();
     }
     configData = await loadConfig() || {};
-    _defaultPageSize = configData?.web_admin?.default_page_size ?? 25;
-    const _rawPS = configData?.web_admin?.page_sizes;
+    _tableRowsDefault = configData?.web_admin?.table_rows_default
+        ?? cfgDefaultFor('web_admin|table_rows_default');
+    const _rawPS = configData?.web_admin?.table_rows_options;
     if (Array.isArray(_rawPS) && _rawPS.length > 0) {
         const _parsedPS = _rawPS.map(s => parseInt(s, 10)).filter(s => !isNaN(s) && s >= 0);
-        if (_parsedPS.length > 0) _PAGE_SIZES = _parsedPS;
+        if (_parsedPS.length > 0) _tableRowChoices = _parsedPS;
     }
     configSchema = await apiGet('/api/v1/config/schema') || {};
-    // Backfill CONFIG_FIELD_DEFAULTS with server defaults from schema
-    for (const [k, v] of Object.entries(configSchema)) {
-        if (!(k in CONFIG_FIELD_DEFAULTS) && v.default !== undefined) {
-            CONFIG_FIELD_DEFAULTS[k] = v.default;
-        }
-    }
-    // Sync default_page_size options to reflect current page_sizes config
-    if (configSchema['web_admin|default_page_size']) {
-        configSchema['web_admin|default_page_size'].options_int = [..._PAGE_SIZES];
+    // (The override map used to be back-filled from this schema. It carried `default` for the
+    // ~65 instance-backed bool/int fields and for nothing else, which is why "restore default"
+    // and the blank-field placeholder existed for those and were silently missing on the other
+    // ~136. Defaults come from CONFIG_REGISTRY_DEFAULTS now — see cfgDefaultFor — which knows
+    // every option, so the map is back to being the handful of deliberate exceptions.)
+    // Sync table_rows_default options to reflect current table_rows_options config
+    if (configSchema['web_admin|table_rows_default']) {
+        configSchema['web_admin|table_rows_default'].options_int = [..._tableRowChoices];
     }
     _serverConfigData = deepClone(configData);
     clearDirty('config'); // ensure config starts clean regardless of loadConfig side-effects
@@ -328,6 +328,16 @@ try {
     // you are about to type, and a box that opens without focus asks for a second click.
     document.getElementById('cfgSearchBox')?.addEventListener('shown.bs.collapse', () => {
         document.getElementById('cfgSearch')?.focus();
+    });
+    // Closing it clears what was typed. Putting the box away is how you say you are done
+    // searching, and a term left running from a control that is no longer on screen leaves the
+    // panel showing a fraction of itself with nothing visible to explain why — a state that
+    // used to need a warning badge to be survivable, and now cannot happen.
+    document.getElementById('cfgSearchBox')?.addEventListener('hidden.bs.collapse', () => {
+        const box = document.getElementById('cfgSearch');
+        if (!box || !box.value) return;
+        box.value = '';
+        _filterConfig('');
     });
     // Keep --ss-top-offset in sync with the sticky header height (navbar + visible banners)
     const _stickyTop = document.getElementById('ss-sticky-top');

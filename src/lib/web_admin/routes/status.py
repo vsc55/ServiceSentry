@@ -87,19 +87,19 @@ def register(app, wa):
     def public_status():
         """Public status page — always visible to logged-in users; only to guests when public_status=True."""
         logged_in = wa._check_session()
-        if not wa._public_status and not logged_in:
+        if not wa._PUBLIC_STATUS and not logged_in:
             abort(404)
 
         # Per-item detail: always for logged-in users; for guests only when the
         # "detail for guests" option is enabled. Otherwise show module-level
         # status only (no per-item breakdown).
-        show_detail = logged_in or bool(getattr(wa, '_public_status_detail', False))
+        show_detail = logged_in or bool(getattr(wa, '_PUBLIC_STATUS_DETAIL', False))
 
         # ── Language priority ──────────────────────────────────────────
         # 1. User preference (set in their session)
         # 2. Status-page-specific language (wa._STATUS_LANG)
-        # 3. Default web-admin language (wa._default_lang)
-        lang = session.get('lang') or wa._STATUS_LANG or wa._default_lang
+        # 3. Default web-admin language (wa._DEFAULT_LANG)
+        lang = session.get('lang') or wa._STATUS_LANG or wa._DEFAULT_LANG
         i18n = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
 
         status_raw: dict = wa._read_check_status()

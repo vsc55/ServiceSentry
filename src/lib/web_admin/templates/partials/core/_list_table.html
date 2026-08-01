@@ -193,7 +193,7 @@ function createListTable(spec) {
             else _fbSyncSelects();      // built already: just refresh the choices in place
             host = c.querySelector('.ss-lt-body');
         }
-        if (st.pageSize.get() == null) st.pageSize.set(_defaultPageSize);
+        if (st.pageSize.get() == null) st.pageSize.set(_tableRowsDefault);
         const cols = _cols(ctx);
 
         // Auto-register columns the user has never seen (dynamic tables).

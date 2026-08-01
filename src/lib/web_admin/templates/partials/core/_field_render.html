@@ -62,9 +62,10 @@ function renderField(key, value, pathStr, target = 'modules') {
     // Env-var-sourced config fields are read-only: disable just the form controls
     // (input/select/textarea). The lock badge + tooltip already flag the source,
     // and the info/hint button (a <button>) stays clickable.
-    if (target === 'config' && (
-            (typeof ENV_LOCKED  !== 'undefined' && ENV_LOCKED.has(pathStr)) ||
-            (typeof FILE_LOCKED !== 'undefined' && FILE_LOCKED.has(pathStr)))) {
+    const _lockedField = target === 'config' && (
+        (typeof ENV_LOCKED  !== 'undefined' && ENV_LOCKED.has(pathStr)) ||
+        (typeof FILE_LOCKED !== 'undefined' && FILE_LOCKED.has(pathStr)));
+    if (_lockedField) {
         _fhtml = _fhtml.replace(/<(input|select|textarea)\b/gi, '<$1 disabled');
     }
     let _conflictBanner = '';
@@ -96,7 +97,13 @@ function renderField(key, value, pathStr, target = 'modules') {
             </div>`;
         }
     }
-    return `<div class="cfg-field-wrap${_wrapCls}" data-cfg-path="${escAttr(pathStr)}">${_conflictBanner}${_fhtml}</div>`;
+    // The locked mark goes on the WRAPPER, here, where every renderer passes through. It used
+    // to be bolted on by `renderScalarFields` alone, so the same option was marked inside a
+    // bespoke card and unmarked inside a generic one — and everything that reads it (the
+    // "modified" count, the row accent) disagreed with itself depending on which kind of card
+    // the option happened to live in.
+    const _lockAttr = _lockedField ? ' data-env-locked="1"' : '';
+    return `<div class="cfg-field-wrap${_wrapCls}"${_lockAttr} data-cfg-path="${escAttr(pathStr)}">${_conflictBanner}${_fhtml}</div>`;
 }
 function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = '', _hintHtml = '') {
     const sp = jsStr(pathStr), tg = jsStr(target);
@@ -138,8 +145,10 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         </div></div>`;
     }
 
-    // Per-field reset button — only in config tab and only when a default is defined
-    const _resetBtn = target === 'config' && (pathStr in CONFIG_FIELD_DEFAULTS)
+    // Per-field reset button — only in config tab and only when there is a value to
+    // restore TO. It used to ask the five-key override map, so ~195 options shipped with
+    // no way back to their default and nothing saying why those five were special.
+    const _resetBtn = target === 'config' && cfgHasDefault(pathStr)
         ? `<button type="button" class="btn btn-sm btn-secondary"
             onclick="resetConfigField(${sp})"
             data-bs-toggle="tooltip" data-bs-placement="top"
@@ -195,7 +204,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         // the box shows nothing at all — which is exactly what "blank means inherit" must
         // not look like.
         let _gv = (typeof configData !== 'undefined' && configData.modules) ? configData.modules[key] : null;
-        if (_gv == null || _gv === '') _gv = CONFIG_FIELD_DEFAULTS['modules|' + key];
+        if (_gv == null || _gv === '') _gv = cfgDefaultFor('modules|' + key);
         if ((_gv == null || _gv === '') && meta.placeholder_module) {
             _gv = _placeholderModuleValue(pathStr, meta.placeholder_module);
         }
@@ -233,8 +242,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         } else {
             // Explicit placeholder, else the registry default for this field — so a
             // blank field always shows the value the system will use.
-            let _pv = (meta.placeholder != null) ? meta.placeholder
-                : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : null);
+            let _pv = (meta.placeholder != null) ? meta.placeholder : cfgDefaultFor(pathStr);
             if (_pv != null && _pv !== '') _ph = ` placeholder="${escAttr(String(_pv))}"`;
         }
         const _dispV = (value == null || value === '') ? '' : value;
@@ -264,6 +272,13 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             const _modPh = _placeholderModuleValue(pathStr, meta.placeholder_module);
             if (_modPh != null && _modPh !== '') _ph = ` placeholder="${escAttr(String(_modPh))}"`;
             _pmAttr = ` data-placeholder-module="${escAttr(String(meta.placeholder_module))}" data-zero-as-blank="1"`;
+        }
+        // Still nothing, and this is a config option with a shipped default: show it. An empty
+        // box is the one place a reader cannot tell "unset" from "unset, and here is what that
+        // means" — which is the whole reason a placeholder exists.
+        if (!_ph && target === 'config' && typeof cfgDefaultFor(pathStr) === 'number') {
+            _ph = ` placeholder="${escAttr(String(cfgDefaultFor(pathStr)))}"`;
+            _pmAttr += ' data-default-blank="1"';
         }
         return _fieldRow(lblHtml, fieldCtl({kind: 'number',
             inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value=""${minA}${maxA}${_isF ? ' step="0.1"' : ' step="1"'}${_ph}${_pmAttr} onkeydown="blockNonNumericKey(event,${_isF})"`,
@@ -333,6 +348,24 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
             // blur, which reads as the box refusing to be cleared.
             extraAttrs += ` data-zero-as-blank="1"`;
             if (value === 0) displayValue = '';
+        } else if (target === 'config' && typeof cfgDefaultFor(pathStr) === 'number') {
+            // A plain config number — most of them, because the schema only describes the
+            // instance-backed ones and the rest arrive here with no `meta` at all.
+            //
+            // AT ITS DEFAULT, THE BOX IS EMPTY and the default sits in it greyed out. That is
+            // the honest rendering of "this option is not something this install decided":
+            // printing 60 as a value says an admin chose 60, and there is then nothing on
+            // screen that distinguishes a deliberate 60 from the shipped one. Clearing the box
+            // returns to exactly this state — which is why it stays empty afterwards instead
+            // of springing back with a number in it.
+            //
+            // The DEFAULT is what gets stored, not null: a config option has nothing to
+            // inherit from, and a null would be a third state whose meaning every consumer
+            // would then have to agree on — `cfg.get('x', 60)` returns None for a stored null
+            // and only works for an absent key, so the quiet ones would break first.
+            extraAttrs += ` placeholder="${escAttr(String(cfgDefaultFor(pathStr)))}"`;
+            extraAttrs += ` data-default-blank="1"`;
+            if (value === cfgDefaultFor(pathStr)) displayValue = '';
         }
         return _fieldRow(lblHtml, fieldCtl({kind: 'number',
             inputAttrs: ` data-cfg-path="${escAttr(pathStr)}" value="${displayValue}"${minA}${maxA}${stepA}${extraAttrs} ${_onkeydown}`,
@@ -345,7 +378,9 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         // code shows its native name (I18N['lang_<code>']); fields that allow "no selection"
         // (status_lang, notif_lang) prepend a translated Default option. One template, no dup.
         const _LANG_DEFAULT_KEY = { status_lang: 'status_lang_default', notif_lang: 'notif_lang_default' };
-        if (key === 'lang' || key in _LANG_DEFAULT_KEY) {
+        // `default_lang` is the panel's own; `lang` is what a module or an item calls its
+        // language field. Both are a language, and both get this selector.
+        if (key === 'lang' || key === 'default_lang' || key in _LANG_DEFAULT_KEY) {
             const _defKey = _LANG_DEFAULT_KEY[key];
             let opts = '';
             if (_defKey) {
@@ -441,8 +476,19 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 return `<option value="${escAttr(o)}"${value === o ? ' selected' : ''}>${label}</option>`;
             }).join('');
             const _itemPath = jsStr(pathStr.split('|').slice(0, -1).join('|'));
+            // `on_change`: the one thing a select could need that the registry could not say —
+            // a sibling to refresh when the value changes (the e-mail provider swaps which
+            // credentials are shown, the Teams mechanism which block). Four options were drawn
+            // by hand for want of it, and a hand-written control is a control that quietly
+            // misses whatever the shared one learns next: these four missed the env/file lock,
+            // so a pinned option looked editable and the save was discarded in silence.
+            //
+            // The function name belongs to whoever needs it, not to the core — the same rule a
+            // module follows when it names its own action.
+            const _onChg = (meta.on_change && typeof meta.on_change === 'string')
+                ? `;if(typeof ${meta.on_change}==='function')${meta.on_change}(this.value)` : '';
             return _fieldRow(lblHtml, fieldCtl({kind: 'select', optionsHtml: opts,
-                onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})`,
+                onChange: `updateField(${tg},${sp},this.value);_refreshConditionalFields(${_itemPath})${_onChg}`,
                 trailing: _unitSel + _actionBtn}), _hintHtml);
         }
         // Multiline PEM text (SAML2 SP/IdP certificates + private key) — declared
@@ -463,8 +509,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 () => _norm(getPath(target === 'config' ? configData : modulesData, pathStr.split('|'))),
                 v => updateField(target, pathStr, v));
             // Empty box shows the registry default as a hint (e.g. bind_host → 0.0.0.0, ::).
-            const _mph = (meta.placeholder != null) ? meta.placeholder
-                : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : null);
+            const _mph = (meta.placeholder != null) ? meta.placeholder : cfgDefaultFor(pathStr);
             return _fieldRow(lblHtml, fieldCtl({kind: 'multi', key: pathStr, value: _norm(value),
                 placeholder: (_mph != null && _mph !== '') ? String(_mph) : '',
                 validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _unitSel + _actionBtn}), _hintHtml);
@@ -474,7 +519,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
         if (meta && meta.ipkind && !meta.multi) {
             const _ipDef = (meta.placeholder != null && meta.placeholder !== '')
                 ? String(meta.placeholder)
-                : (typeof CONFIG_FIELD_DEFAULTS !== 'undefined' ? CONFIG_FIELD_DEFAULTS[pathStr] : '');
+                : (cfgDefaultFor(pathStr) ?? '');
             const _ipPh = _ipDef ? ` placeholder="${escAttr(_ipDef)}"` : '';
             return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: 'text',
                 inputCls: _ipPh ? ' item-key-ph' : '',
@@ -539,6 +584,20 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                     }
                 }
                 _strPh = _phVal ? ` placeholder="${escAttr(_phVal)}"` : '';
+            }
+            // Nothing above applied, and this is a config option shipping a non-empty text
+            // default (a bind address, a log path, an LDAP filter): show it. Only non-empty —
+            // for the many options whose default IS the empty string, blank is the answer and
+            // a placeholder would be inventing one.
+            //
+            // No `data-default-blank` here, unlike the numbers: for a string, empty is usually
+            // a real value ("no proxy", "no filter"), so clearing the box must keep meaning
+            // "empty" and not quietly write the default back.
+            if (!_strPh && target === 'config') {
+                const _cfgDef = cfgDefaultFor(pathStr);
+                if (typeof _cfgDef === 'string' && _cfgDef !== '') {
+                    _strPh = ` placeholder="${escAttr(_cfgDef)}"`;
+                }
             }
         }
         const _strPhCls = _strPh ? ' item-key-ph' : '';
@@ -623,13 +682,26 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
     }
     if (Array.isArray(value)) {
         const csv = value.map(v => String(v)).join(', ');
+        // `int_list`: the same comma-separated box, parsed and STORED as numbers. Without it
+        // there was only the string list, so an option holding numbers had to be written by
+        // hand — and a hand-written control misses whatever this one learns next, which for
+        // the page sizes meant no env/file lock and a default typed out a second time.
+        const _isInts = !!(meta && meta.int_list);
+        const _dflt = _isInts ? (cfgDefaultFor(pathStr) || []) : [];
+        const _dfltCsv = _dflt.map(v => String(v)).join(', ');
+        const _ph = _isInts ? (_dfltCsv || t('comma_separated')) : t('comma_separated');
+        const _upd = _isInts ? 'updateIntArray' : 'updateArray';
+        // At its default the box is EMPTY with the default greyed inside it — the same drawing
+        // every other option at its default gets, and what makes "clear it to get the default
+        // back" true rather than a claim.
+        const _shown = (_isInts && csv === _dfltCsv) ? '' : csv;
         return `<div class="row mb-2 align-items-start">
         <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
         <div class="col-sm-8"><div class="input-group input-group-sm">
             <input type="text" class="form-control"
-                value="${escAttr(csv)}" placeholder="${t('comma_separated')}"
+                value="${escAttr(_shown)}" placeholder="${escAttr(_ph)}"
                 oninput="markDirty(${tg})"
-                onchange="updateArray(${tg},${sp},this.value)">${_actionBtn}
+                onchange="${_upd}(${tg},${sp},this.value)">${_actionBtn}
         </div>${_hintHtml}</div></div>`;
     }
     return '';
@@ -674,6 +746,7 @@ function validateAndUpdateNumber(el, target, pathStr, min, max) {
     const v = parseInt(raw, 10);
     const hasZeroAsBlank = el.hasAttribute('data-zero-as-blank');
     const hasInheritBlank = el.hasAttribute('data-inherit-blank');
+    const hasDefaultBlank = el.hasAttribute('data-default-blank');
     if (raw === '' || isNaN(v)) {
         if (hasInheritBlank) {
             // Blank → null = inherit the global default (distinct from 0, a real value).
@@ -683,6 +756,17 @@ function validateAndUpdateNumber(el, target, pathStr, min, max) {
             // Blank means "use default" — store 0, keep display blank.
             el.value = '';
             updateField(target, pathStr, min ?? 0);
+        } else if (hasDefaultBlank) {
+            // Blank means "the shipped default" — and the box KEEPS looking blank, because at
+            // its default that is how this option is drawn. Refilling it with the number would
+            // undo the clearing in front of the reader and leave them unable to tell their own
+            // 60 from the one that came with the product.
+            //
+            // The default is what gets stored, not null: a config option has nothing to
+            // inherit from, and `cfg.get('x', 60)` returns None for a stored null — it only
+            // falls back for an ABSENT key — so the quiet consumers would break first.
+            el.value = '';
+            updateField(target, pathStr, cfgDefaultFor(pathStr));
         } else {
             const parts = pathStr.split('|');
             let cur = target === 'config' ? configData : modulesData;
@@ -692,8 +776,12 @@ function validateAndUpdateNumber(el, target, pathStr, min, max) {
         return;
     }
     const clamped = (min != null && v < min) ? min : (max != null && v > max) ? max : v;
-    // Show blank when clamped to 0 and this field treats 0 as "use default".
-    el.value = (clamped === 0 && hasZeroAsBlank) ? '' : clamped;
+    // Show blank when clamped to 0 and this field treats 0 as "use default"…
+    // …and likewise when what was typed IS the default: at its default this option is drawn
+    // blank, and waiting for the next full render to agree would show the same value two ways
+    // within one screen.
+    const atDefault = hasDefaultBlank && clamped === cfgDefaultFor(pathStr);
+    el.value = ((clamped === 0 && hasZeroAsBlank) || atDefault) ? '' : clamped;
     updateField(target, pathStr, clamped);
 }
 
@@ -701,8 +789,8 @@ function validateAndUpdateNumber(el, target, pathStr, min, max) {
  * Restore a config field to its built-in default value.
  */
 function resetConfigField(pathStr) {
-    if (!(pathStr in CONFIG_FIELD_DEFAULTS)) return;
-    const dflt = CONFIG_FIELD_DEFAULTS[pathStr];
+    const dflt = cfgDefaultFor(pathStr);
+    if (dflt === undefined) return;
     updateField('config', pathStr, typeof dflt === 'object' && dflt !== null ? deepClone(dflt) : dflt);
     renderConfig();
 }
@@ -829,11 +917,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         const _meta = fieldMeta(_sch, k);
         const _rawFHtml = renderField(k, v, pathPrefix + '|' + k, target);
         const _pp = pathPrefix + '|' + k;
-        const _fhtml = (target === 'config' && _rawFHtml &&
-                        (ENV_LOCKED.has(_pp) ||
-                         (typeof FILE_LOCKED !== 'undefined' && FILE_LOCKED.has(_pp))))
-            ? _rawFHtml.replace(/^<div /, '<div data-env-locked="1" ')
-            : _rawFHtml;
+        const _fhtml = _rawFHtml;   // `renderField` marks locked fields itself, for every caller
 
         const _group = _effGroup(k);
         const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'

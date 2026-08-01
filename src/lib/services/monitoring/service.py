@@ -22,7 +22,7 @@ import os
 import signal
 import threading
 
-from lib.config import CONFIG_FILENAME, config_path
+from lib.config import CONFIG_FILENAME, config_path, secret_key_path
 from lib.config.manager import (
     ConfigManager, bootstrap_database_cfg, overlay_section_env, read_config_raw)
 from lib.db import get_connector
@@ -71,7 +71,7 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             'watchfuls')
         self._log_level_override = log_level or None
-        self._secret_key_path = os.path.join(config_dir, '.flask_secret')
+        self._secret_key_path = secret_key_path(config_dir)
         self._fernet = secret_manager.fernet_from_secret_file(self._secret_key_path)
         self._secret_keys = secret_manager.ENCRYPT_KEYS
 

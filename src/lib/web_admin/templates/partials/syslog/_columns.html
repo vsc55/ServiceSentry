@@ -7,7 +7,10 @@ const _SYSLOG_SEV_CLS = {0:'danger',1:'danger',2:'danger',3:'danger',
 let _syslogFilters = {severity_max:'', severity:[], hostname:[], app:[], facility:[], q:'', since:'', until:''};
 const _SL_MULTI_KEYS = ['hostname', 'app', 'severity', 'facility'];
 let _syslogPage = 1;
-let _syslogPageSize = _defaultPageSize || 50;
+// Lazily, like every other table: read at PARSE time this saw `_tableRowsDefault` before the
+// config had loaded, so the admin's choice never reached it. `|| 50` made it worse — 0 is
+// "show all", a real answer, and it was being turned into fifty.
+let _syslogRows = null;
 let _syslogTimer = null;        // {_id, _interval} interval-driven refresh
 let _syslogCountId = null;      // cosmetic countdown ticker
 let _syslogLive = false;        // live mode (fast poll)

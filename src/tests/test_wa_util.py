@@ -48,23 +48,23 @@ class TestPublicBaseUrl:
     def test_config_override_wins(self, admin):
         # A configured public_url is the authoritative override (proxied setups):
         # served on an IP but public as a domain. Scheme follows force_https.
-        admin._public_url = 'ss.dominio.com'
-        admin._force_https = True
+        admin._PUBLIC_URL = 'ss.dominio.com'
+        admin._FORCE_HTTPS = True
         with admin.app.test_request_context('/', base_url='http://10.0.1.20:8080'):
             assert admin.public_base_url() == 'https://ss.dominio.com'
 
     def test_config_override_respects_force_https(self, admin):
-        admin._public_url = 'ss.dominio.com'
-        admin._force_https = False
+        admin._PUBLIC_URL = 'ss.dominio.com'
+        admin._FORCE_HTTPS = False
         assert admin.public_base_url() == 'http://ss.dominio.com'
 
     def test_autodetect_from_request(self, admin):
         # No override → detect from the request (proxy-aware via ProxyFix in prod).
-        admin._public_url = ''
+        admin._PUBLIC_URL = ''
         with admin.app.test_request_context('/', base_url='https://ss.dominio.com'):
             assert admin.public_base_url() == 'https://ss.dominio.com'
 
     def test_fallback_outside_request(self, admin):
-        admin._public_url = ''
+        admin._PUBLIC_URL = ''
         base = admin.public_base_url()          # no request context
         assert base.startswith('http://localhost:')

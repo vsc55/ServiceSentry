@@ -152,27 +152,27 @@ class _ConfigMixin:
         if self._PW_MAX_LEN < self._PW_MIN_LEN:
             self._PW_MAX_LEN = self._PW_MIN_LEN
         # Language (keep current value if the saved one is missing/invalid)
-        self._default_lang = coerce_lang(wa_cfg.get('lang', ''), self._default_lang)
+        self._DEFAULT_LANG = coerce_lang(wa_cfg.get('default_lang', ''), self._DEFAULT_LANG)
         # Status-page language (empty string = use default)
         if 'status_lang' in wa_cfg and isinstance(wa_cfg['status_lang'], str):
             self._STATUS_LANG = coerce_lang(wa_cfg['status_lang'], '')
         # Dark mode default
-        new_dm = wa_cfg.get('dark_mode')
+        new_dm = wa_cfg.get('default_dark_mode')
         if isinstance(new_dm, bool):
-            self._default_dark_mode = new_dm
-        # Secure cookies (at boot _create_app reads self._secure_cookies directly; on a live
+            self._DEFAULT_DARK_MODE = new_dm
+        # Secure cookies (at boot _create_app reads self._SECURE_COOKIES directly; on a live
         # save the app already exists, so push it onto the running app's config too).
         new_sec = wa_cfg.get('secure_cookies')
         if isinstance(new_sec, bool):
-            self._secure_cookies = new_sec
+            self._SECURE_COOKIES = new_sec
             if live:
                 self._app.config['SESSION_COOKIE_SECURE'] = new_sec
         # Public URL for external links and notifications (stored without scheme)
         if 'public_url' in wa_cfg and isinstance(wa_cfg['public_url'], str):
-            self._public_url = normalize_url(wa_cfg['public_url'])
+            self._PUBLIC_URL = normalize_url(wa_cfg['public_url'])
         # Default landing page (string attr not covered by INT/BOOL rules) — resolves the
         # post-login destination for users/groups that don't override it.
-        self._landing_page = str(wa_cfg.get('landing_page') or 'admin')
+        self._LANDING_PAGE = str(wa_cfg.get('landing_page') or 'admin')
         # Framing allowlist (who may iframe the panel): admin-defined origins + any registered
         # embed profile whose flag is on (e.g. Teams). Precomputed (boot + save) so the
         # per-response header hook stays cheap. At boot the embed profiles aren't registered
@@ -210,9 +210,9 @@ class _ConfigMixin:
         poke = getattr(self, '_poke_services_for_config', None)
         if poke is not None:
             poke(to_apply)
-        _pre_port, _pre_proxy = self._WEB_PORT, self._proxy_count
+        _pre_port, _pre_proxy = self._PORT, self._PROXY_COUNT
         self._apply_config_attrs(new_data, live=True)
-        if self._WEB_PORT != _pre_port or self._proxy_count != _pre_proxy:
+        if self._PORT != _pre_port or self._PROXY_COUNT != _pre_proxy:
             self._restart_pending = True
         # The syslog database connector is built at startup; any change needs a restart to
         # take effect (like the system database section).
@@ -228,11 +228,11 @@ class _ConfigMixin:
         # Rebuild ProxyFix for the (possibly new) trusted-proxy depth.
         if isinstance(self._app.wsgi_app, ProxyFix):
             self._app.wsgi_app = self._app.wsgi_app.app
-        if self._proxy_count > 0:
+        if self._PROXY_COUNT > 0:
             self._app.wsgi_app = ProxyFix(
                 self._app.wsgi_app,
-                x_for=self._proxy_count, x_proto=self._proxy_count,
-                x_host=self._proxy_count, x_prefix=self._proxy_count,
+                x_for=self._PROXY_COUNT, x_proto=self._PROXY_COUNT,
+                x_host=self._PROXY_COUNT, x_prefix=self._PROXY_COUNT,
             )
 
     @staticmethod
@@ -314,16 +314,16 @@ class _ConfigMixin:
                 setattr(self, INT_RULES[path]['attr'], value)
             elif path in BOOL_RULES:
                 setattr(self, BOOL_RULES[path], value)
-            elif field == 'lang':
-                self._default_lang = value
+            elif field == 'default_lang':
+                self._DEFAULT_LANG = value
             elif field == 'status_lang':
                 self._STATUS_LANG = coerce_lang(value, '')
-            elif field == 'dark_mode':
-                self._default_dark_mode = bool(value)
+            elif field == 'default_dark_mode':
+                self._DEFAULT_DARK_MODE = bool(value)
             elif field == 'secure_cookies':
-                self._secure_cookies = bool(value)
+                self._SECURE_COOKIES = bool(value)
             elif field == 'public_url':
-                self._public_url = normalize_url(value)
+                self._PUBLIC_URL = normalize_url(value)
             else:
                 # Generic fallback: any other web_admin env field with a registry attr
                 # (e.g. ipban_whitelist → _IPBAN_WHITELIST, ipban_enabled) is applied

@@ -268,7 +268,7 @@ function _evHelp(key) {
 function _eventGlobalCooldown() {
     const live = (typeof configData !== 'undefined' && configData.events) ? configData.events.cooldown : null;
     if (live != null && live !== '') return live;
-    const def = (typeof CONFIG_FIELD_DEFAULTS !== 'undefined') ? CONFIG_FIELD_DEFAULTS['events|cooldown'] : null;
+    const def = (typeof cfgDefaultFor === 'function') ? cfgDefaultFor('events|cooldown') : null;
     return (def != null) ? def : 0;
 }
 function _evWhen(ts) {

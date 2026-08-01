@@ -336,3 +336,58 @@ class TestTheStorageViewOfM365:
         sp = os.path.join(SRC, 'watchfuls', 'm365', 'schema.json')
         assert isinstance(json.load(io.open(sp, encoding='utf-8-sig'))['__page__']['views'],
                           list)
+
+
+class TestAViewIsAPlaceYouCanLandOn:
+    """The landing-page menu asks "where do you want to be sent after login", and a section
+    with two views is two answers to that.
+
+    It listed one, named it "m365", and — the part nobody would have noticed — sent you to the
+    admin panel anyway if you picked it: the redirect resolved landing ids against the CORE
+    page tuple, which module sections were never in. The setting saved, the login ignored it,
+    and nothing on screen said so."""
+
+    def test_a_section_with_views_is_offered_once_per_view(self):
+        from lib.web_admin.constants import landing_pages
+        ids = [p['id'] for p in landing_pages()]
+        assert 'm365/status' in ids and 'm365/storage' in ids
+        assert 'm365' not in ids, \
+            'the bare section is "whichever view is first", which is not a place you can name'
+
+    def test_a_section_with_one_view_stays_one_option(self):
+        from lib.web_admin.constants import landing_pages
+        assert 'azure' in [p['id'] for p in landing_pages()]
+
+    def test_each_option_carries_the_modules_own_name(self):
+        """"m365" in a menu of proper names is the registry leaking through the screen. The
+        section names itself in the MODULE's lang file — the core owns no string naming a
+        module — so the label is composed, not looked up in the core catalog."""
+        from lib.web_admin.constants import landing_options
+        by_id = {p['id']: p for p in landing_options('es_ES')}
+        assert by_id['m365/storage']['label'].startswith('Microsoft 365')
+        assert by_id['m365/storage']['label'] != 'm365/storage'
+        assert by_id['azure']['label'] == 'Azure'
+
+    def test_every_option_points_at_a_url_that_exists(self):
+        from lib.web_admin.constants import landing_pages
+        for p in landing_pages():
+            assert p['url'].startswith('/'), p
+        by_id = {p['id']: p for p in landing_pages()}
+        assert by_id['m365/storage']['url'] == '/module/m365/storage'
+
+    def test_a_landing_saved_before_views_existed_still_resolves(self):
+        """Validation is not the same question as the menu: "m365" is a working URL and it is
+        what every landing chosen before that section grew a second view says. Rejecting it on
+        the next save of an unrelated field would be the list calling a live setting invalid."""
+        from lib.web_admin.constants import home_page_ids
+        ids = home_page_ids()
+        assert 'm365' in ids and 'm365/storage' in ids
+
+    def test_the_login_redirect_resolves_module_destinations(self):
+        """The bug this class exists for: `_landing_url` read the core tuple, so every module
+        destination it was offered fell through to the admin panel."""
+        src = _read(os.path.join(SRC, 'lib', 'web_admin', 'mixins', 'auth.py'))
+        i = src.index('def _landing_url')
+        body = src[i:src.index('\n    def ', i)]
+        assert 'landing_pages()' in body and 'home_pages()' in body
+        assert 'HOME_PAGES' not in body, 'the core half only — module landings resolve to /admin'

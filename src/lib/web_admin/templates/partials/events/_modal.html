@@ -329,7 +329,7 @@ function _renderEventLog() {
             const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
             return _evlSortDir === 'asc' ? c : -c;
         });
-    if (_evlPageSize === null) _evlPageSize = _defaultPageSize;
+    if (_evlPageSize === null) _evlPageSize = _tableRowsDefault;
     const view = _evlView();
     const lists = !!view.lists;
     const total = rows.length;

@@ -63,29 +63,11 @@ function _renderMsTeamsSection(cfgCardOpen, cfgCardClose) {
     h += `<hr class="my-3"><p class="small fw-semibold text-muted mb-1">${esc(t('msteams_users_title'))}</p>`;
     h += renderField('user_enabled', data.user_enabled, 'msteams|user_enabled', 'config');
 
-    // delivery mechanism selector (custom select)
+    // Delivery mechanism: described by the registry (options, labels, default, and the
+    // `on_change` that swaps which block of fields is shown), so the shared renderer draws it.
+    // Hand-written it had no restore button and never consulted the env/file lock.
     const delivery = data.delivery || 'activity_feed';
-    const delOpts = [
-        ['activity_feed', t('msteams_delivery_activity')],
-        ['bot',           t('msteams_delivery_bot')],
-    ].map(([v, l]) => `<option value="${escAttr(v)}"${delivery === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
-    const _delHint = fieldHint('msteams|delivery');
-    const _delHintId = 'fhint_msteams_delivery';
-    const _delInfo = _delHint
-        ? ` <button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
-               data-bs-toggle="collapse" data-bs-target="#${_delHintId}"
-               aria-expanded="false"><i class="bi bi-info-circle"></i></button>`
-        : '';
-    const _delPanel = _delHint
-        ? `<div class="collapse" id="${_delHintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_delHint)}</div></div>`
-        : '';
-    h += `<div class="cfg-field-wrap"><div class="row mb-2 align-items-center">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('msteams_delivery'))}${_delInfo}</label>
-        <div class="col-sm-8"><select class="form-select form-select-sm"
-            onchange="updateField('config','msteams|delivery',this.value);_msteamsDeliveryChanged(this.value)">
-            ${delOpts}
-        </select>${_delPanel}</div>
-    </div></div>`;
+    h += renderField('delivery', delivery, 'msteams|delivery', 'config');
 
     // recipients (shared by both mechanisms)
     h += renderField('notify_panel_users', data.notify_panel_users, 'msteams|notify_panel_users', 'config');
@@ -143,6 +125,7 @@ function _msteamsDeliveryChanged(val) {
 // ── channel CRUD ────────────────────────────────────────────────────────────
 async function _mstToggleEnabled(id, enabled) {
     configData.msteams_channels = (configData.msteams_channels || []).map(c => c.id === id ? {...c, enabled} : c);
+    _cfgAdoptSection('msteams_channels');   // written by its own endpoint: saved, not pending
     const ch = configData.msteams_channels.find(c => c.id === id);
     if (!ch) return;
     const r = await apiPut(`/api/v1/notify/msteams/channels/${id}`, {...ch, webhook_url: null});
@@ -161,6 +144,7 @@ function deleteMsTeamsChannel(id) {
         const r = await apiDelete(`/api/v1/notify/msteams/channels/${id}`);
         if (r?.data?.ok) {
             configData.msteams_channels = (configData.msteams_channels || []).filter(c => c.id !== id);
+            _cfgAdoptSection('msteams_channels');
             renderConfig();
             showToast(t('msteams_deleted_ok'), 'success');
         } else {
@@ -262,6 +246,7 @@ async function saveMsTeamsChannel() {
         } else {
             configData.msteams_channels.push(ch);
         }
+        _cfgAdoptSection('msteams_channels');   // written by its own endpoint: saved, not pending
         bootstrap.Modal.getInstance(document.getElementById('modalMsTeams'))?.hide();
         renderConfig();
         showToast(tf(_msteamsEditId ? 'msteams_updated_ok' : 'msteams_created_ok', ch?.name || ''), 'success');

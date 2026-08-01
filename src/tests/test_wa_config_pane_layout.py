@@ -165,8 +165,9 @@ class TestTheHeaderDoesNotGoBackToSticky:
 
 class TestTheSearchBoxIsCollapsed:
     """It is for finding one setting among many — not something you need in view the rest of
-    the time. Hiding it costs one thing, though: a filter left on while the box is closed
-    shows a fraction of the configuration with nothing on screen saying why."""
+    the time. Hiding it used to cost one thing: a filter left on while the box was closed showed
+    a fraction of the configuration with nothing on screen saying why. Closing it now clears the
+    term, so that state cannot happen at all."""
 
     def test_it_starts_closed(self):
         head = _pane().split('id="config-container"')[0]
@@ -180,14 +181,17 @@ class TestTheSearchBoxIsCollapsed:
         assert 'aria-expanded="false"' in head, 'the closed state is not announced'
         assert 'aria-controls="cfgSearchBox"' in head
 
-    def test_an_active_filter_is_visible_with_the_box_closed(self):
-        """**The trap.** Without this, closing the box on a filtered view leaves most of the
-        configuration hidden and looks like data loss."""
-        assert 'id="badgeCfgFilter"' in _pane()
-        render = io.open(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
-                                      'cfg', '_render.html'), encoding='utf-8-sig').read()
-        assert "getElementById('badgeCfgFilter')" in render, \
-            'nothing lights the badge, so an active filter is invisible once the box is closed'
+    def test_closing_the_box_clears_the_filter(self):
+        """**The trap, closed at the source.** A filter left running from a control that is no
+        longer on screen leaves most of the configuration hidden and looks like data loss. It
+        used to be survivable because a warning dot sat on the toggle; clearing the term is
+        better, and the dot went with the state it warned about — a badge for something that
+        cannot happen is one more thing to keep true."""
+        wiring = io.open(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                      'init', '_wiring.html'), encoding='utf-8-sig').read()
+        i = wiring.index("getElementById('cfgSearchBox')?.addEventListener('hidden.bs.collapse'")
+        assert "_filterConfig('')" in wiring[i:i + 400]
+        assert 'badgeCfgFilter' not in _pane(), 'a badge for a state that cannot happen'
 
     def test_the_toolbar_closes_the_card_when_the_box_is_hidden(self):
         """With nothing under it, the bar IS the bottom of the card and has to be shaped like

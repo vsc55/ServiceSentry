@@ -1780,3 +1780,162 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    chevron — the options are there and there is nowhere to draw them. The width has to be
    stated, not merely un-grown. */
 .ss-unit-sel { flex: 0 0 auto !important; width: 5.5rem !important; }
+
+/* Configuration — an index beside the section, not inside its body.
+   The index runs the full height of the pane, level with the toolbar at the top and down to
+   the bottom; the toolbar sits over the DETAIL, because reload, save and search are all about
+   what is being edited, not about the index of what could be. It scrolls on its own: it is as
+   tall as the configuration, and an index that scrolls the page with the detail stops being an
+   index the moment the detail is long.
+
+   The SHELL is what bleeds, on all four edges: it cancels the content container's gutters,
+   its top padding (.container-fluid pt-2 + .tab-content pt-1 = .75rem) and its pb-3. A
+   navigation column is a piece of the frame, not content sitting inside it, and a strip of
+   page background around it reads as the panel having failed to fill.
+   The toolbar gives its own bleed up in here — .ss-bleed-top cancels the same paddings, and
+   two cancellations put it .75rem above the header and a gutter past both sides. It starts
+   flush because the column it lives in already does. */
+.cfg-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
+             margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
+.cfg-main > .ss-bleed-top { margin: 0; }
+/* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
+   the index's border and the first card rather than a strip of page background. */
+.cfg-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
+
+/* ── Configuration — the detail is a SHEET, not a card ──────────────────────────────────
+   The frame, the chevron and the colour accent were right when seven tabs showed several
+   cards at once. With one section on screen the box is a frame inside a frame, the chevron
+   collapses the only thing there, and the accent distinguishes it from nothing — the index
+   already says which section you are in, and says it better.
+
+   Scoped under `.cfg-sheet` (the config body) on purpose: `.cfg-card` is also fail2ban's
+   chrome, and that section still shows several cards at once, where all three earn their
+   keep.
+
+   ONE sheet. Three were built and compared on real data; the two that lost took their CSS,
+   their strings and their switcher with them. */
+.cfg-sheet .cfg-card { background: transparent; box-shadow: none; margin-bottom: 1.25rem; }
+/* Air at the top and the bottom of the list, and nowhere between: the first option pressed
+   against the header read as part of it, and the last against the edge of the pane read as
+   cut off. Between rows the hairline is the separation — adding space there too would make
+   four options look like four groups of one. */
+.cfg-sheet .cfg-card .cfg-fields { background: transparent; padding: .55rem 0 .75rem; }
+.cfg-sheet-head { border-bottom: 1px solid var(--bs-border-color); }
+.cfg-sheet-titlerow { display: flex; align-items: center; gap: .5rem; }
+.cfg-sheet-title { font-size: 1.02rem; font-weight: 600; display: flex;
+                   align-items: center; gap: .35rem; }
+/* The count is a button because it DOES something: it filters the sheet to the options this
+   install has moved. Reading "3 modified" and then hunting for the three is the work the
+   number was supposed to save. */
+.cfg-sheet-count { margin-left: auto; border: 0; border-radius: 999px; font-size: .72rem;
+                   padding: .1rem .55rem; background: var(--bs-warning-bg-subtle);
+                   color: var(--bs-warning-text-emphasis); }
+.cfg-sheet-count:hover { filter: brightness(1.08); }
+.cfg-sheet-count.active { background: var(--bs-warning); color: #000; }
+.cfg-sheet-desc { font-size: .82rem; color: var(--bs-secondary-color); margin-top: .15rem;
+                  max-width: 62ch; }
+/* The row is the unit: a hairline between options and a hover that marks the whole of one.
+   `mb-2` on the inner row is what the card spacing needed and the sheet does not. */
+.cfg-sheet .cfg-fields .cfg-field-wrap { padding: .3rem .5rem; border-radius: .25rem;
+                                         border-bottom: 1px dashed var(--bs-border-color); }
+.cfg-sheet .cfg-fields .cfg-field-wrap:last-child { border-bottom: 0; }
+/* An accent down the left edge of any option this install has moved off its shipped value —
+   env-locked included, since the deployment moved those. It answers, for the row in front of
+   you, the question the header and the index only answer in totals: is this 60 mine or theirs?
+   Drawn as an inset shadow rather than a border so a marked row does not shift by 3px against
+   the ones around it. */
+.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-changed {
+    box-shadow: inset 3px 0 0 var(--bs-warning);
+}
+/* Edited and NOT yet saved — a different question from "this install changed it", and asked
+   about the last thirty seconds rather than about the install. Same accent, different colour,
+   so the two read as two states of one thing; it turns into the amber one the moment the save
+   lands, without the screen being rebuilt underneath the reader. */
+/* The same accent for a row that is a TABLE row rather than a field wrapper (the exposed
+   services): a box-shadow on a <tr> is not painted in every engine, so it goes on the first
+   cell, where it lands in exactly the same place on screen. */
+.cfg-sheet tr.cfg-row-changed > td:first-child {
+    box-shadow: inset 3px 0 0 var(--bs-warning);
+}
+.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-dirty {
+    box-shadow: inset 3px 0 0 var(--bs-info);
+    background: color-mix(in srgb, var(--bs-info) 6%, transparent);
+}
+.cfg-sheet .cfg-fields .cfg-field-wrap:hover { background: var(--bs-tertiary-bg); }
+.cfg-sheet .cfg-fields .cfg-field-wrap .row { margin-bottom: 0; }
+.cfg-sheet .cfg-fields > hr { margin: .9rem 0 .5rem; opacity: .25; }
+
+/* The section header is PINNED: which section you are editing, and how much of it this
+   install has moved, stay readable however far down the options you are. Two other sheets
+   were built to compare against it — a plain list, and one with every hint in view instead of
+   behind an (i) — and both are gone. Three ways to draw the same rows is what this screen was
+   rebuilt to stop doing; the comparison was the only reason they existed.
+
+   A pinned header has to be OPAQUE, has to start flush against the bar above it, and must not
+   reach past the rows it covers. This one started as none of the three:
+
+   • `.ss-scroll-fade` masks the top 10px of the scroll box — exactly where the header pins —
+     so the header was fading itself and the rows sliding under showed through it. That fade
+     exists to soften rows clipped by a pinned bar; an opaque header does the same job better,
+     so the mask comes off.
+   • The scroll box opens with .75rem of padding above the first row, again right where the
+     header pins, which put a strip of page background between it and the toolbar. That
+     padding belongs to the header now, and it lands flush.
+   • It wears the TOOLBAR's colour rather than the sheet's: a pinned header is chrome, and
+     chrome a shade off the surface it floats over reads as a rendering seam.
+   • And it stops level with the hairlines under it. Bootstrap's `.row` overflows by half a
+     gutter, but the columns pad that straight back, so nothing VISIBLE passes outside the
+     rows' width — stretching the header to cover it only painted over the pane's own edge,
+     which looks like a mistake rather than like chrome. */
+.cfg-sheet.ss-scroll-fade { -webkit-mask-image: none; mask-image: none; }
+.cfg-sheet.ss-scroll-pad { padding-top: 0; }
+/* The mask was doing two jobs and only one of them was wrong. Softening the header was the
+   bug; saying "the bar is ON TOP of what follows" was worth keeping, and its absence read as
+   the toolbar and the header being two halves of one flat block. So the depth cue comes back
+   as a shadow cast BY the bar — the thing that is actually above — instead of as a fade
+   applied to whatever happens to be under it. Above the header in the stack, so it lands on
+   it rather than behind it. */
+.cfg-main > .ss-bleed-top { position: relative; z-index: 11;
+                            box-shadow: 0 .4rem .75rem -.2rem rgba(0,0,0,.7); }
+.cfg-sheet .cfg-sheet-head {
+    position: sticky; top: 0; z-index: 10;
+    padding: .5rem;
+    background: var(--ss-card-header-bg, var(--bs-secondary-bg));
+    /* All four corners by default: a search puts several sections on screen at once, and one
+       floating in the middle of the sheet with a square top edge looks attached to something
+       that is not there. */
+    border-radius: .375rem;
+}
+/* Except the first on screen, which IS attached to something: the toolbar. Square top, rounded
+   bottom — the same thing `.ss-bleed-top` says about the bar above it, that this is the line
+   the scrolling body disappears under, and rounding it is what says so. */
+.cfg-sheet .cfg-card-first .cfg-sheet-head {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+.cfg-sheet .cfg-subhead { position: sticky; top: 3.4rem; z-index: 9;
+                          padding: .25rem .5rem;
+                          background: var(--ss-card-header-bg, var(--bs-secondary-bg)); }
+.cfg-main  { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
+             min-height: 0; }
+.cfg-rail  { flex: 0 0 15.5rem; max-width: 15.5rem; min-height: 0; overflow-y: auto;
+             padding: .5rem .25rem .75rem .25rem;
+             border-right: 1px solid var(--bs-border-color);
+             background: var(--bs-tertiary-bg); scrollbar-width: thin; }
+.cfg-rail-group { margin-bottom: .6rem; }
+.cfg-rail-head { font-size: .72rem; font-weight: 600; text-transform: uppercase;
+                 letter-spacing: .03em; color: var(--bs-secondary-color);
+                 padding: .25rem .5rem; display: flex; align-items: center; gap: .25rem; }
+.cfg-rail-head .badge { margin-left: auto; }
+.cfg-rail-item { display: flex; align-items: center; gap: .35rem; width: 100%;
+                 border: 0; background: transparent; text-align: left;
+                 font-size: .82rem; color: var(--bs-body-color);
+                 padding: .3rem .5rem; border-radius: .375rem; }
+.cfg-rail-item:hover { background: var(--bs-secondary-bg); }
+.cfg-rail-item.active { background: var(--bs-primary); color: #fff; }
+.cfg-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
+@media (max-width: 991.98px) {
+    .cfg-shell { flex-direction: column; }
+    .cfg-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
+                border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
+}

@@ -162,3 +162,41 @@ def test_the_two_role_deleted_strings_stayed_apart():
     for mod in (en_EN, es_ES):
         keys = _known_keys(mod)
         assert 'role_deleted' in keys and 'role_deleted_ref' in keys
+
+
+# ── every option the config screen DRAWS has a name in both languages ────────
+# A field with no entry in `labels` is not blank: `fieldLabel()` humanises the key, so the
+# screen quietly shows "Retention Days" and "Max Rows" in the middle of a Spanish panel. It
+# never fails, it never logs, and it looks enough like a label that it survives review.
+#
+# These are drawn with a label of their own instead of by name — a bespoke editor supplies it
+# (webhooks, the Teams delivery selector), or the field is an internal id the renderers hide.
+_LABELLED_ELSEWHERE = {
+    # Internal Entra ids: written by the wizards, used for deep links, never shown
+    # (`_hide` in the SCIM and SAML2 renderers).
+    'saml2|sp_app_id', 'saml2|sp_object_id', 'scim|sp_app_id', 'scim|sp_object_id',
+    # The webhook editor labels its own rows (`webhook_url`, `webhook_method`, …): these
+    # names are too generic to key globally — `url` belongs to no one section.
+    'webhooks|url', 'webhooks|method', 'webhooks|secret', 'webhooks|secret_header',
+    'webhooks|headers', 'webhooks|body_template',
+    # Drawn as a custom <select> labelled `msteams_delivery`, not through renderField.
+    'msteams|delivery',
+}
+
+
+@pytest.mark.parametrize('lang_mod,lang', [(en_EN, 'en_EN'), (es_ES, 'es_ES')])
+def test_every_config_option_has_a_label(lang_mod, lang):
+    """Reported from a screenshot: "Landing Page", "Allowed Sources", "Retention Days" and
+    "Max Rows" sitting untranslated in a Spanish configuration screen — forty-four options
+    with no entry at all, each humanised from its key and looking almost like a label.
+
+    Checked by path first, then by field name, which is the order `_field_render.html` reads
+    them in: a name is enough when it means the same everywhere (`group_display_names` in
+    three auth providers), a path is what disambiguates when it does not.
+    """
+    from lib.config.spec import CONFIG_FIELDS
+    labels = lang_mod.LANG['labels']
+    missing = [f.path for f in CONFIG_FIELDS
+               if f.path not in _LABELLED_ELSEWHERE
+               and f.path not in labels and f.path.split('|', 1)[1] not in labels]
+    assert not missing, f'{lang}: {len(missing)} config options have no label: ' + ', '.join(missing)

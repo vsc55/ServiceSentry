@@ -692,7 +692,7 @@ function _paginationParts(total, page, pageSize, goFn, changeFn) {
     const p = Math.min(Math.max(1, page), totalPages);
     const start = (p - 1) * ps + 1;
     const end = Math.min(p * ps, total);
-    const sizeOpts = _PAGE_SIZES.map(s => {
+    const sizeOpts = _tableRowChoices.map(s => {
         const label = s === 0 ? t('all') : s;
         return `<option value="${s}"${pageSize === s ? ' selected' : ''}>${label}</option>`;
     }).join('');

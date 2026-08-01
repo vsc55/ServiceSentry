@@ -1,8 +1,11 @@
 async function _loadSyslog() {
     const qs = _syslogQS();
-    const all = !_syslogPageSize;             // page size 0 → all
-    const limit = all ? 5000 : _syslogPageSize;
-    const offset = all ? 0 : (_syslogPage - 1) * _syslogPageSize;
+    // First use is where the configured value is picked up: at parse time the config has not
+    // loaded yet, which is why this used to be stuck on whatever the declaration said.
+    if (_syslogRows === null) _syslogRows = _tableRowsDefault;
+    const all = !_syslogRows;             // 0 rows → all
+    const limit = all ? 5000 : _syslogRows;
+    const offset = all ? 0 : (_syslogPage - 1) * _syslogRows;
     qs.set('limit', String(limit));
     qs.set('offset', String(offset));
     qs.set('sort', _slSort);
@@ -32,11 +35,11 @@ async function _loadSyslog() {
     const msgs = (data && data.messages) || [];
     // Clamp the page if a filter shrank the result set, then re-fetch once.
     if (!all) {
-        const pages = Math.max(1, Math.ceil(total / _syslogPageSize));
+        const pages = Math.max(1, Math.ceil(total / _syslogRows));
         if (_syslogPage > pages) { _syslogPage = pages; return _loadSyslog(); }
     }
     const pagerHtml = total > 0
-        ? _renderPagination(total, all ? 1 : _syslogPage, all ? 0 : _syslogPageSize,
+        ? _renderPagination(total, all ? 1 : _syslogPage, all ? 0 : _syslogRows,
                             '_syslogGoPage', '_syslogSetPageSize')
         : '';
     for (const pid of ['sl-pager-top', 'sl-pager']) {

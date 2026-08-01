@@ -81,7 +81,7 @@ class _SyslogMixin:
                 f"transports=[{', '.join(ports) or 'none'}] "
                 f"allow={allow or 'any'} "
                 f"retention_days={cfg.get('retention_days', 0) or 0} "
-                f"max_rows={cfg.get('max_rows', 0) or 0}")
+                f"max_messages={cfg.get('max_messages', 0) or 0}")
 
     # ── (re)build / (re)start ───────────────────────────────────────────────────
     def _syslog_apply_config(self) -> list[str]:
@@ -207,7 +207,7 @@ class _SyslogMixin:
         cfg = self._syslog_cfg()
         try:
             deleted = store.prune(retention_days=int(cfg.get('retention_days', 0) or 0),
-                                  max_rows=int(cfg.get('max_rows', 0) or 0))
+                                  max_rows=int(cfg.get('max_messages', 0) or 0))
             if deleted:
                 self._dbg(f'> Syslog >> retention pruned {deleted} message(s)',
                           DebugLevel.info)

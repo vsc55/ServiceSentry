@@ -14,7 +14,7 @@ from lib.debug import DebugLevel
 from lib.security.ratelimit import RateLimiter
 
 # Per-IP login throttle thresholds come from config (web_admin|login_ratelimit_*,
-# attrs _LOGIN_RL_MAX / _LOGIN_RL_WINDOW; 0 = disabled) — a brute-force speed bump
+# attrs _LOGIN_RATELIMIT_MAX / _LOGIN_RATELIMIT_WINDOW_SECS; 0 = disabled) — a brute-force speed bump
 # on top of the per-account lockout (stops single-IP password spraying).
 
 
@@ -74,7 +74,7 @@ def register(app, wa):
             # Per-IP brute-force throttle (before any credential work). Config-driven
             # thresholds (0 = disabled).
             _ip = request.remote_addr or '?'
-            _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RL_MAX, wa._LOGIN_RL_WINDOW)
+            _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX, wa._LOGIN_RATELIMIT_WINDOW_SECS)
             if not _ok:
                 wa._audit('login_throttled', '', _ip, detail={'retry_after': _retry})
                 wa._ipban_offense('login_throttled')

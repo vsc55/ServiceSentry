@@ -70,7 +70,7 @@ def register(app, wa):
     wa._register_csrf_exempt('/auth/msteams/tab', '/auth/msteams/sso')
     # Declare the Teams/Outlook origins that may iframe the panel when embed_in_teams is on
     # (discovered by the security layer — keeps core headers.py provider-agnostic).
-    wa._register_embed_origins('_embed_in_teams', *tab_sso.TEAMS_FRAME_ANCESTORS)
+    wa._register_embed_origins('_EMBED_IN_TEAMS', *tab_sso.TEAMS_FRAME_ANCESTORS)
 
     @app.route('/auth/msteams/tab', methods=['GET'])
     def msteams_tab():

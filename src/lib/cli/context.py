@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-from lib.config import config_path
+from lib.config import config_path, secret_key_path
 from lib.config.manager import ConfigManager, bootstrap_database_cfg, read_config_raw
 from lib.core.config.store import ConfigStore
 from lib.core.groups.store import GroupsStore
@@ -35,7 +35,7 @@ class CliContext:
     def __init__(self, config_dir: str, var_dir: str | None = None):
         self.config_dir = config_dir
         self.var_dir = var_dir or config_dir
-        fernet = secret_manager.fernet_from_secret_file(os.path.join(config_dir, '.flask_secret'))
+        fernet = secret_manager.fernet_from_secret_file(secret_key_path(config_dir))
         db_cfg = bootstrap_database_cfg(read_config_raw(config_path(config_dir), fernet))
         db_path = os.path.join(self.var_dir, 'data.db')
         self.db = get_connector(db_cfg or None, default_sqlite_path=db_path)

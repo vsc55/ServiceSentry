@@ -6,7 +6,7 @@
 const AUDIT_EVENTS = I18N.audit_events || {};
 let _auditEntries  = [];
 let _auditPage     = 1;
-let _auditPageSize = null; // lazy init from _defaultPageSize
+let _auditPageSize = null; // lazy init from _tableRowsDefault
 
 // Full detail renderer — used in the modal
 function formatAuditDetailFull(detail) {

@@ -14,7 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.debug import DebugLevel
 from lib.i18n import SUPPORTED_LANGS
-from ..constants import HOME_PAGES
+from ..constants import home_pages, landing_pages
 
 # i18n key per ``auth_source`` for the login-notification method label (translated in the
 # system notification language, like every other notification string).
@@ -176,9 +176,15 @@ class _AuthMixin:
     # ── post-auth outcome (shared by the login route AND the SSO provider routes) ──
     def _landing_url(self, user: dict) -> str:
         """Effective post-login URL by precedence: per-user → first group (alphabetical)
-        with a landing set → global default. Maps a landing id (admin/status/…) to its URL
-        via HOME_PAGES; unknown/empty ⇒ the admin panel ('/')."""
-        by_id = {p['id']: p for p in HOME_PAGES}
+        with a landing set → global default. Maps a landing id (admin/status/m365/storage/…)
+        to its URL; unknown/empty ⇒ the admin panel ('/').
+
+        Resolved against every destination, not the core tuple: a module section is offered
+        as a landing page, and reading only the core half meant choosing one and being sent to
+        the admin panel anyway — the setting saved, the redirect ignored it, and nothing said
+        so."""
+        by_id = {p['id']: p for p in home_pages()}
+        by_id.update({p['id']: p for p in landing_pages()})
         cand = str(user.get('landing_page') or '').strip()
         if cand not in by_id:
             glp = sorted(
@@ -188,7 +194,7 @@ class _AuthMixin:
                 key=lambda x: str(x[0]).lower())
             cand = glp[0][1] if glp else ''
         if cand not in by_id:
-            cand = str(getattr(self, '_landing_page', '') or '').strip()
+            cand = str(getattr(self, '_LANDING_PAGE', '') or '').strip()
         entry = by_id.get(cand) or by_id.get('admin')
         return (entry.get('url') if entry else '/') or '/'
 

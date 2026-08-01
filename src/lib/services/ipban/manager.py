@@ -31,9 +31,9 @@ class _IpBanMixin:
     # ── runtime settings (overridden by saved config / env at startup) ──────────
     _IPBAN_ENABLED = _cfg_default('web_admin|ipban_enabled')
     _IPBAN_AUTH_THRESHOLD = _cfg_default('web_admin|ipban_auth_threshold')
-    _IPBAN_AUTH_WINDOW = _cfg_default('web_admin|ipban_auth_window_secs')
+    _IPBAN_AUTH_WINDOW_SECS = _cfg_default('web_admin|ipban_auth_window_secs')
     _IPBAN_AUTHZ_THRESHOLD = _cfg_default('web_admin|ipban_authz_threshold')
-    _IPBAN_AUTHZ_WINDOW = _cfg_default('web_admin|ipban_authz_window_secs')
+    _IPBAN_AUTHZ_WINDOW_SECS = _cfg_default('web_admin|ipban_authz_window_secs')
     _IPBAN_DURATIONS = _cfg_default('web_admin|ipban_durations')
     _IPBAN_PERMANENT_AFTER = _cfg_default('web_admin|ipban_permanent_after')
     _IPBAN_WHITELIST = _cfg_default('web_admin|ipban_whitelist')
@@ -67,7 +67,7 @@ class _IpBanMixin:
             return
         reg.register(id='web', label_key='ipban_svc_web',
                      supports=self._WEB_BLOCK_ACTIONS, default='page',
-                     endpoints=[{'port': int(getattr(self, '_WEB_PORT', 0) or 0),
+                     endpoints=[{'port': int(getattr(self, '_PORT', 0) or 0),
                                  'proto': 'tcp', 'kind': 'http'}])
 
     def _apply_ipban_config(self, wa_cfg: dict) -> None:
@@ -94,9 +94,9 @@ class _IpBanMixin:
         mgr.configure(
             enabled=self._IPBAN_ENABLED,
             auth_threshold=self._IPBAN_AUTH_THRESHOLD,
-            auth_window=self._IPBAN_AUTH_WINDOW,
+            auth_window=self._IPBAN_AUTH_WINDOW_SECS,
             authz_threshold=self._IPBAN_AUTHZ_THRESHOLD,
-            authz_window=self._IPBAN_AUTHZ_WINDOW,
+            authz_window=self._IPBAN_AUTHZ_WINDOW_SECS,
             durations=self._IPBAN_DURATIONS,
             permanent_after=self._IPBAN_PERMANENT_AFTER,
             whitelist=self._IPBAN_WHITELIST,

@@ -95,14 +95,22 @@ document.addEventListener('keydown', e => { if (e.key === 'Control' || e.key ===
 document.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') _modCtrlHeld = false; }, true);
 window.addEventListener('blur', () => { _modCtrlHeld = false; });
 
-// <option>s for a landing-page (home tab) select, from the HOME_PAGES registry.
+// <option>s for a landing-page select, from the HOME_PAGES registry.
 // withInherit adds a leading "(default)" empty option (per-user / per-group override).
 // inheritLabel overrides that option's text (e.g. to show where it inherits from).
+//
+// Labels arrive resolved: a module section names itself in the MODULE's lang file, which the
+// core catalog `t()` reads has never heard of — asking it printed the raw id ("m365") in a
+// menu of proper names. `_homePageLabel` keeps that single fallback in one place.
+function _homePageLabel(p) {
+    return (p && (p.label || (p.label_key && t(p.label_key)) || p.id)) || '';
+}
+
 function _homePageOptions(selected, withInherit, inheritLabel) {
     const inherit = withInherit
         ? `<option value=""${!selected ? ' selected' : ''}>${esc(inheritLabel || t('landing_inherit'))}</option>` : '';
     return inherit + (HOME_PAGES || []).map(p =>
-        `<option value="${escAttr(p.id)}"${selected === p.id ? ' selected' : ''}>${esc(t(p.label_key))}</option>`
+        `<option value="${escAttr(p.id)}"${selected === p.id ? ' selected' : ''}>${esc(_homePageLabel(p))}</option>`
     ).join('');
 }
 
@@ -123,7 +131,7 @@ function _landingInheritLabel(groupUids) {
         extra = t('landing_source_global');
     }
     const hp = (HOME_PAGES || []).find(p => p.id === srcId);
-    return `${t('landing_inherit')} · ${hp ? t(hp.label_key) : srcId} · ${extra}`;
+    return `${t('landing_inherit')} · ${hp ? _homePageLabel(hp) : srcId} · ${extra}`;
 }
 
 function _buildColChooser(cols, visibleSet, toggleFn, resetFn, minWidth = 160) {

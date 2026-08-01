@@ -47,7 +47,7 @@ sin uso en rutas. Ver el catálogo completo de permisos en [explica-seguridad.md
   (cookie de sesión + CSRF). Las superficies externas/estándar quedan fuera: `/scim/v2/*`
   (RFC 7643/7644), `/auth/<provider>/*` (callbacks de IdP, Teams). No existe `/api/v2`.
 - **CSRF:** double-submit token. `@app.before_request _csrf_protect`
-  ([app.py:604](../src/lib/web_admin/app.py#L604)) solo comprueba `POST/PUT/PATCH/DELETE`
+  ([app.py:605](../src/lib/web_admin/app.py#L605)) solo comprueba `POST/PUT/PATCH/DELETE`
   ([lib/security/csrf.py:21](../src/lib/security/csrf.py#L21)). El frontend adjunta
   `X-CSRF-Token` automáticamente en el wrapper de `fetch`
   ([core/_api.html:22](../src/lib/web_admin/templates/partials/core/_api.html#L22)).

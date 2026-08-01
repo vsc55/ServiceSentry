@@ -205,6 +205,9 @@ async function _daemonPersistInterval(secs) {
     if (window.configData) {
         if (!configData.monitoring) configData.monitoring = {};
         configData.monitoring.timer_check = secs;
+        // Saved through the scheduler's own route, so the config baseline is told too —
+        // otherwise the Config screen lights "unsaved changes" for a written value.
+        if (typeof _cfgAdoptSection === 'function') _cfgAdoptSection('monitoring');
     }
     // Sync the Status tab input (in case called from Restart)
     const inp = document.getElementById('daemonIntervalInput');

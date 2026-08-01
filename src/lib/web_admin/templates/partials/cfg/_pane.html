@@ -17,17 +17,28 @@
     <div class="ss-bleed-top">
         <div class="ss-toolbar ss-toolbar-attached ss-toolbar-plain">
             <h6 class="mb-0"><i class="bi bi-gear me-2"></i>{{ i18n.tab_config }}</h6>
+            {# "Only what this install changed" — a switch, not a button: it is a MODE that
+               stays on while you work, and a switch is the one control that shows its own
+               state without being pressed. It does not change how the panel is navigated;
+               it narrows what the index lists and what a section shows. #}
+            <div class="form-check form-switch d-flex align-items-center gap-2 mb-0 me-2"
+                 title="{{ i18n.cfg_changed_only }}">
+                <input class="form-check-input mt-0" type="checkbox" role="switch"
+                       id="chkCfgChangedOnly" onchange="toggleConfigChangedOnly()">
+                <label class="form-check-label small text-nowrap" for="chkCfgChangedOnly">
+                    {{ i18n.cfg_changed_only_short }}
+                </label>
+            </div>
             {# Collapsed by default: the filter is for finding one setting among many, not
-               something you need in view the rest of the time. The badge is not decoration —
-               a filter left on while the box is hidden would silently show a fraction of the
-               configuration with nothing on screen saying why. #}
+               something you need in view the rest of the time. Closing it clears the term (see
+               _wiring.html), which is why there is no longer a warning dot here: it existed for
+               the state where a hidden box was still filtering the panel, and that state can no
+               longer happen. A badge for an impossible state is one more thing to keep true. #}
             <button class="btn btn-sm btn-secondary" id="btnCfgSearchToggle"
                 data-bs-toggle="collapse" data-bs-target="#cfgSearchBox"
                 aria-expanded="false" aria-controls="cfgSearchBox"
                 title="{{ i18n.config_search_label }}">
                 <i class="bi bi-search"></i>
-                <span class="badge text-bg-warning ms-1 d-none" id="badgeCfgFilter"
-                    title="{{ i18n.config_search_label }}">●</span>
             </button>
             <button class="btn btn-sm btn-secondary" id="btnReloadConfig" onclick="reloadConfig()"
                 title="{{ i18n.reload_config_title }}">
@@ -60,5 +71,8 @@
             </div>
         </div>
     </div>
-    <div id="config-container" class="ss-vscroll ss-scroll-pad ss-scroll-fade"></div>
+    {# `cfg-sheet` is what makes a section read as a sheet of options instead of a card — the
+       frame, the chevron and the colour accent belonged to a screen that showed several at
+       once — and it is what pins the section header while the options scroll under it. #}
+    <div id="config-container" class="ss-vscroll ss-scroll-pad ss-scroll-fade cfg-sheet"></div>
 </div>

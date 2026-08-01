@@ -140,7 +140,7 @@ function _eventRulesBody() {
         const c = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
         return _evrSortDir === 'asc' ? c : -c;
     });
-    if (_evrPageSize === null) _evrPageSize = _defaultPageSize;
+    if (_evrPageSize === null) _evrPageSize = _tableRowsDefault;
     const view = _evrView();
     const lists = !!view.lists;
     const total = rows.length;

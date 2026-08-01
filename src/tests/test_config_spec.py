@@ -162,7 +162,7 @@ class TestDerivedRuleDicts:
         a = admin_only_fields()
         assert 'web_admin|secure_cookies' in a
         assert 'web_admin|public_status' in a
-        assert 'web_admin|lang' not in a
+        assert 'web_admin|default_lang' not in a
 
 
 class TestCoerceLang:
@@ -249,3 +249,94 @@ class TestOverlayAllEnv:
         assert out == {'global': {'log_level': 'off'}}
         out['global']['log_level'] = 'debug'      # out is a copy
         assert src['global']['log_level'] == 'off'
+
+
+class TestAMirroredAttributeIsDerivableFromItsOption:
+    """`attr` is the WebAdmin attribute a config option is mirrored on at runtime, and it was
+    written out by hand next to each option: thirty-seven `_UPPER_SNAKE`, eleven `_lower_snake`,
+    and ten that did not match their option at all (`_WEB_PORT` for `port`, `_LOGIN_RL_MAX` for
+    `login_ratelimit_max`).
+
+    Nothing said which to expect, so `_DEFAULT_PAGE_SIZE` outlived the rename of the option it
+    mirrors without anyone noticing — which is what was reported. One rule, and it is checkable:
+    the attribute is the option name upper-cased with a leading underscore.
+    """
+
+    def test_every_attribute_matches_its_option(self):
+        from lib.config.spec import CONFIG_FIELDS
+        wrong = [(f.path, f.attr) for f in CONFIG_FIELDS
+                 if f.attr and f.attr != '_' + f.path.split('|', 1)[1].upper()]
+        assert not wrong, 'attributes that do not follow from their option: ' + repr(wrong)
+
+    def test_no_option_is_mirrored_on_two_attributes(self):
+        """Four options had an UPPER class default AND a lower-case attribute the config
+        actually wrote to. Only one of the two was ever updated; the other sat there looking
+        authoritative and answering with the value the product shipped with."""
+        import io
+        import os
+        src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        app = io.open(os.path.join(src, 'lib', 'web_admin', 'app.py'), encoding='utf-8').read()
+        from lib.config.spec import CONFIG_FIELDS
+        for f in CONFIG_FIELDS:
+            if not f.attr:
+                continue
+            twin = '_' + f.path.split('|', 1)[1]        # the lower-case spelling
+            if twin == f.attr:
+                continue
+            assert f'\n    {twin} = ' not in app, f'{f.path}: {twin} shadows {f.attr}'
+
+
+class TestTheKeyFileHasOneName:
+    """`.flask_secret` signs Flask's session cookies AND derives the Fernet key every stored
+    secret is encrypted with — losing it is not "sign in again", it is every secret in the
+    database becoming unreadable.
+
+    Its name was spelled out in six places: the panel, the CLI and the four standalone
+    services. One spelling away from a process that derives a different key, decrypts nothing,
+    and reports the config as empty rather than as broken.
+    """
+
+    def test_only_the_registry_names_it(self):
+        import io
+        import os
+        src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        spelled = []
+        for base, dirs, files in os.walk(os.path.join(src, 'lib')):
+            dirs[:] = [d for d in dirs if d != '__pycache__']
+            for name in files:
+                if not name.endswith('.py'):
+                    continue
+                path = os.path.join(base, name)
+                if "'.flask_secret'" in io.open(path, encoding='utf-8').read():
+                    spelled.append(os.path.relpath(path, src))
+        assert spelled == [os.path.join('lib', 'config', '__init__.py')], spelled
+
+    def test_the_helper_and_the_panel_agree(self):
+        from lib.config import SECRET_KEY_FILENAME, secret_key_path
+        from lib.web_admin.app import WebAdmin
+        assert WebAdmin._SECRET_KEY_FILE == SECRET_KEY_FILENAME
+        assert secret_key_path('/x').endswith(SECRET_KEY_FILENAME)
+
+
+class TestNoDefaultIsWrittenTwice:
+    """A second copy of a default is a copy that gets to disagree: the panel offering one
+    number as the default while the server binds to another, with nothing on either side
+    saying which is the real one.
+
+    `DEFAULT_PORT = 8080` and `DEFAULT_HOST = '0.0.0.0'` sat on `WebAdmin` beside the registry
+    entries that already said exactly that.
+    """
+
+    def test_the_start_up_fallbacks_come_from_the_registry(self):
+        from lib.config.spec import cfg_default
+        from lib.web_admin.app import WebAdmin
+        assert WebAdmin.DEFAULT_PORT == cfg_default('web_admin|port')
+        assert WebAdmin.DEFAULT_HOST == cfg_default('web_admin|host')
+
+    def test_they_are_not_literals(self):
+        import io as _io
+        import os as _os
+        src = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        app = _io.open(_os.path.join(src, 'lib', 'web_admin', 'app.py'), encoding='utf-8').read()
+        for literal in ('DEFAULT_PORT = 8080', "DEFAULT_HOST = '0.0.0.0'"):
+            assert literal not in app, literal
