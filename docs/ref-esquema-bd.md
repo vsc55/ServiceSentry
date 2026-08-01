@@ -373,8 +373,15 @@ Sin índices.
 ### `msteams_channels` — destinos de canal Teams
 [lib/core/notify/msteams/store.py:27](../src/lib/core/notify/msteams/store.py#L27)
 
-Misma forma que `webhooks` (`uid` PK, `data` JSON con `webhook_url` cifrado, timestamps de
-auditoría). Sin índices.
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| data | TEXT | no | `'{}'` | JSON (`name`, `enabled`, `webhook_url` cifrado) |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Misma forma que `webhooks` — ambos son `JsonDocStore`. Sin índices.
 
 ### `msteams_bot_refs` — referencias de conversación de Bot Framework
 [lib/core/notify/msteams/bot_store.py:27](../src/lib/core/notify/msteams/bot_store.py#L27)

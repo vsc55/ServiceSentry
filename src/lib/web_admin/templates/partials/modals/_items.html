@@ -135,6 +135,33 @@
     </div>
 </div>
 
+{# Clone item modal — cloning used to happen on the click, which left two rows sharing a
+   name and no way to tell which was which. The name is now asked for BEFORE anything is
+   copied, so Cancel really means nothing happened. #}
+<div class="modal fade" id="cloneItemModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnCloneItemOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-copy me-1"></i>{{ i18n.clone_item }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2" id="cloneItemSource"></p>
+                <label class="form-label small" for="cloneItemInput">{{ i18n.clone_item_prompt }}</label>
+                <input type="text" class="form-control form-control-sm" id="cloneItemInput">
+                <div class="form-text text-danger d-none" id="cloneItemError"></div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnCloneItemOk" title="{{ i18n.create_copy }}">
+                    <i class="bi bi-copy me-1"></i>{{ i18n.create_copy }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Edit check name (label) modal — used by the Servers modal's title pencil #}
 <div class="modal fade" id="hostLabelModal" tabindex="-1"
      onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnHostLabelOk').click();}">

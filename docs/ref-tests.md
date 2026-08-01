@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4535 tests** (4534 recolectados; ~35 se saltan). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4819 tests** (4819 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2565,7 +2565,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 48. Syslog — Parser RFC 3164/5424
 
-**Archivo:** `tests/test_syslog_parser.py` — 14 tests
+**Archivo:** `tests/test_syslog_parser.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2583,6 +2583,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_trailing_newline_stripped` | Trailing newline stripped |
 | `test_empty` | Empty |
 | `test_names_tables` | Names tables |
+| `TestTheIndexedFieldsAreBounded::*` (×5) | `hostname` y `app` son columnas **indexadas**, o sea `VARCHAR(255)` en MySQL, y su contenido llega **de la red** sin acotar: un emisor con un hostname de 1000 caracteres provoca «Data too long for column» en un MySQL en modo estricto, y el escritor va en lotes de 500, así que un solo datagrama malformado podía llevarse el lote entero. SQLite lo guardaba tan tranquilo, que es por lo que no se veía en desarrollo. El tope es el del propio RFC 5424 §6.2 (HOSTNAME ≤ 255, APP-NAME ≤ 48), no un parche al ancho de columna, y se aplica en la función pública porque el parser tiene **cuatro** salidas |
 
 ## 49. Syslog — Listener UDP/TCP/TLS
 
@@ -4853,7 +4854,7 @@ directamente.
 
 ## 109. Config — la cabecera tiene que quedarse arriba toda la sección
 
-**Archivo:** `tests/test_wa_config_pane_layout.py` — 21 tests
+**Archivo:** `tests/test_wa_config_pane_layout.py` — 23 tests
 
 La barra (título, Reload, Save con su chincheta de cambios sin guardar) y el buscador son los
 controles que buscas **porque** has hecho scroll: encuentras un campo, lo cambias y le das a
@@ -5965,3 +5966,137 @@ divergen, y la divergencia es invisible — al segundo solo se le mira cuando al
 | `TestTheSearchAndTheIndexShareOneScreen::*` (×14) | Buscar alcanza **todas** las secciones (por eso las 34 tarjetas siguen en el DOM); vaciar la caja devuelve la pantalla al índice en vez de volcar las 34; y elegir una sección termina la búsqueda Y mientras se busca **el índice es la lista de resultados**: solo las secciones que han casado, cada una con cuántas de sus opciones —insignia de otro color, porque «ha casado aquí» y «se aparta de fábrica» son preguntas distintas—; un grupo vacío no sale, y una búsqueda sin resultados lo dice donde irían. Solo **un** pase decide qué filas se ven: el filtro de «solo lo modificado» se aparta mientras hay búsqueda, porque si no gana el último que corra. Y **«solo modificadas»** es un **interruptor** de la barra —un modo, no una búsqueda— que compone con el buscador dentro del **mismo** pase. Buscar reemplaza la navegación (la hoja pasa a ser lista de resultados); el modo **no**: se sigue navegando sección a sección desde el índice, y solo se estrecha lo que se lista —fuera del índice las secciones sin cambios, fuera de la sección las opciones de fábrica. Si la sección en la que estabas se queda sin nada, salta a la primera que tenga. Cerrar la caja de búsqueda **borra el término**: guardarla es cómo dices que has terminado, y un filtro corriendo desde un control que ya no está en pantalla deja el panel enseñando una fracción de sí mismo sin nada que lo explique —estado que antes se sobrellevaba con un punto de aviso en el botón, y que ahora no puede darse, así que el punto se fue con él. El filtro y el índice recorren la **misma** unidad (`_cfgCardNode`): recorrer `.cfg-card` dejaba fuera a Plantillas —dos cartas dentro de un wrapper, que es lo que el índice lista— y sobrevivía a todo filtro sin nada dentro. Y el orden del redibujado es **restaurar, filtrar, indexar**: restaurar después del filtro le devolvía la visibilidad a todo lo que el filtro acababa de ocultar. «Cambiada» se define **una vez** (`_cfgFieldIsChanged`, env-locked incluido): estaba escrita tres veces y coincidían de suerte. En una instalación de fábrica no casa nada, y eso lo dice en vez de dejar la pantalla en blanco. | | abrir una sección con la mitad de sus campos escondidos por un filtro cuya caja está plegada |
 | `TestASectionIsASheetNotACard::*` (×30) | Una sección es una **hoja**: sin marco, sin chevron, sin acento de color, y nada que recuerde un plegado que ya no puede ocurrir. La cabecera lleva título, contador y descripción; el contador lo calcula **el pase que dibuja el índice** (no la cabecera), filtra la hoja a lo modificado y deja pasar lo fijado por entorno; la descripción sale del layout (`desc_key`) y las 34 secciones tienen una; y **cada fila dice si es de fábrica, editada, o editada y sin guardar** —tres estados, no dos— —acento a la izquierda (inset shadow, no borde: un borde desplazaría la fila marcada) **más** el botón de restaurar, que se apaga cuando no hay nada que restaurar, porque un color por sí solo no es una señal. **Cuatro de los cinco selects escritos a mano ahora se declaran** (opciones, etiquetas por opción, default y `on_change` para el hermano que refrescar) y los dibuja el renderizador compartido: un control a mano se pierde en silencio lo que el compartido aprenda después, y estos cuatro se perdían el candado env/fichero —una opción fijada en `config.json` se veía editable y el guardado se descartaba sin decir nada. Y **el quinto también**: al renderizador le faltaba la palabra «lista de números» (`int_list`) —sabía listas de cadenas y arrays guardados como cadenas—, que es justo por lo que `page_sizes` estaba escrito a mano. Los recuentos de filas que ofrece el selector de una tabla se declaran **una sola vez, en el registro** (`web_admin|table_rows_options`) y llegan al panel por `CONFIG_REGISTRY_DEFAULTS` como cualquier otro default: estaban como literal en tres ficheros, y «una copia por lado» seguían siendo dos. Y el par se llama por lo que cuenta —`table_rows_default` / `table_rows_options`— porque «page size» se lee como algo del tamaño de la página y no nombra ni tablas ni registros. Una opción se llama por lo que **guarda**, no por cómo se almacena: `syslog|max_rows` era el mismo error que `page_size` —vocabulario de tabla para lo que un admin fija, que son **mensajes**— y pasa a `max_messages`; el store conserva `prune(max_rows=…)`, que ahí sí son filas. Y una etiqueta keyed solo por nombre pelado la hereda la siguiente sección que tenga ese campo, le encaje o no: `scim|token` heredaba «Token Bot» de Telegram, el `name` de un canal de Teams heredaba «Nombre de la BD», y cuatro proveedores compartían «Rol por defecto (nuevos elementos)», que no nombra ni a quién ni cuándo. Vaciar una opción de lista **significa su default**: al hacerla editable, vaciarla producía una lista vacía —lo único que podía producir— y el servidor la rechaza; y en su default la caja se dibuja vacía, que es lo que hace cierto el «bórralo para recuperar el de fábrica». Y **ninguna tabla lleva un default propio**: `_syslogPageSize = _tableRowsDefault || 50` se evaluaba en tiempo de parseo —antes de que la config cargara, así que la elección del admin no llegaba nunca— y el `|| 50` convertía el 0 («todas», una respuesta de verdad) en cincuenta. El núcleo no aprende el nombre de la función de nadie. Antes: cinco escribían su propio `<select>`/`<input>` y ninguna lo ponía —invisible al acento, a la cuenta, al filtro y al estado de su propio botón de restaurar, con la misma pinta que las demás—, y las dos de Auditoría escribían `configData` a espaldas de `updateField`. Y **una preferencia de UI también tiene default**: orden y tamaños de página no están en `spec.py` a propósito, así que mirar solo el registro las daba por editadas para siempre; a `audit_sort_dir` le faltaba en los dos mapas, y su botón de restaurar llamaba a una función que se salía sin hacer nada. Una fila que **no** es una opción del registro contesta igual vía `data-cfg-changed` —los servicios expuestos de fail2ban son registros con su propio endpoint: motivo para comportarse distinto en el **cable**, no en la pantalla— con su botón de volver al default y contados en los mismos totales. **Devolver un valor a su sitio deshace lo pendiente**: el conjunto de rutas pendientes ahora *mengua* además de crecer —una ruta que se queda dentro tras deshacer el cambio hace que el guardado escriba un valor que el servidor ya tenía—, y la línea base «tal como se cargó» recibe las claves que el render **siembra** (solo las que le faltan, nunca un valor que ya tiene): se tomaba antes de sembrar, así que desde el primer render difería en decenas de claves que nadie había tocado y el botón de guardar, una vez encendido, no podía apagarse. Y una opción que el servidor **nunca envió** —muchas solo se leen como `cfg.x || <default>` y no se guardan nunca— tiene a dónde volver: lo que usaría el servidor en ese caso es su default, comparar contra `undefined` no puede casar con nada que se pueda teclear; y al escribirla la clave existe en un lado y no en el otro, así que se copia también a la línea base, **solo** donde los dos valores ya coinciden. Un registro guardado por **su propio endpoint** (webhooks, canales de Teams, intervalo del planificador) es estado guardado, no pendiente: se sincronizaba solo la copia en memoria, así que crear un webhook encendía «cambios sin guardar» de algo ya escrito —y Guardar no enviaba nada, porque envía `_dirtyFields`, donde estos no entran nunca. Las marcas y los contadores se recalculan **al editar y al guardar** (`_cfgRefreshMarks`), sin re-renderizar ni re-filtrar: los campos conservan su DOM, así que foco, cursor y lo medio escrito sobreviven, y las filas no se mueven bajo las manos de quien está escribiendo. El tooltip se actualiza por la instancia de Bootstrap, no por `title`: Bootstrap se lo lleva a su almacén al inicializar y no vuelve a mirarlo. Una opción **en blanco no es una opción editada** —blanco es cómo se guarda «sin definir», y sin definir **es** el default, que es justo lo que dice el placeholder gris—; `0` y `false` sí se comparan. Y la marca de env/file-locked la pone `renderField`, por donde pasan **todos** los renderizadores: antes la añadía solo `renderScalarFields`, así que la misma opción salía marcada en una tarjeta a medida y sin marcar en una genérica | reglas bajo `.cfg-sheet` | que el marco de fail2ban —que sí muestra varias tarjetas a la vez— se lleve por delante los estilos, y que dos sitios cuenten lo mismo |
 | `TestTheHeaderIsPinned::*` (×5) | **Una sola hoja**: no queda registro de formas, ni conmutador, ni CSS ni cadenas de las dos descartadas (se construyeron tres para compararlas con datos reales). Una cabecera fijada tiene que ser **opaca**, arrancar a ras de la barra de arriba y **no** pasarse de las filas que tapa: `.ss-scroll-fade` enmascara los 10 px de arriba —justo donde se pega—, la caja de scroll abre con padding ahí mismo, y estirarla para cubrir la canaleta de `.row` solo pintaba sobre el borde del panel. Esquinas: la **primera** sección en pantalla va pegada a la barra, así que arriba recta y abajo redondeada —es la línea bajo la que desaparece lo que scrollea—; las demás (buscando salen varias) redondean las cuatro, porque un bloque que no toca nada con un canto recto parece pegado a algo que no está. Lo marca el pase, no `:first-child`: las ocultas siguen en el DOM, así que la primera **hija** y la primera **visible** casi nunca son la misma. Quitar la máscara costó lo **otro** que hacía —decir que la barra está encima—, así que eso vuelve como sombra echada **por la barra**, no como desvanecido de lo que pase por debajo. Y la lista respira en los extremos y en ningún sitio más —entre filas el hairline **es** la separación | | tres maneras de dibujar las mismas filas, que es justo lo que esta pantalla se reconstruyó para dejar de hacer |
+
+---
+
+## 134. El orden del ciclo de petición es explícito
+
+**Archivo:** `tests/test_wa_request_hooks.py` — 11 tests
+
+Flask ejecuta los `before_request` en **orden de registro**. Hasta ahora ese orden era el orden
+de cinco decoradores en mitad de `_create_app` (372 líneas): cierto, crítico para la seguridad,
+y escrito en ningún sitio. Mover un bloque al ordenar el fichero habría cambiado quién protege
+qué, y **nada lo habría dicho** — la suite entera pasa igual con la puerta de fail2ban en tercer
+lugar.
+
+Al extraerlo a `mixins/hooks.py` aparecieron dos dependencias que nadie había escrito:
+
+* **CSRF va antes que la redirección FQDN.** Los dos pueden terminar la petición. Si la
+  redirección fuera primero, un POST llegado por el hostname equivocado se rebotaría a una URL
+  que pierde el cuerpo, y el token que sí traía no se miraría nunca.
+* **Las cachés se refrescan antes de que nada autorice.** Un rechazo CSRF se audita contra el
+  store de usuarios, y todo handler posterior autoriza contra roles y grupos.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestTheOrderIsDeclared::*` (×5 + 5 param.) | El orden es exactamente `_BEFORE_REQUEST`; la puerta de baneo va **primera** (una IP baneada no alcanza nada: ni un refresco de cachés, ni una redirección, ni el formulario de login); CSRF antes que la redirección FQDN; las cachés antes de que nada autorice; y cada nombre declarado existe de verdad | la tupla es lo que se edita, no el orden de las líneas | que un refactor mueva un handler y el orden nuevo se descubra en producción |
+| `TestTheyAreActuallyRegistered::*` (×2) | El registro **lee la tupla**, y en `_create_app` no queda ningún `@app.before_request`/`after`/`teardown` suelto | | que la tupla sea documentación y el orden real siga estando en otro sitio |
+
+---
+
+## 135. La doc del esquema describe las tablas que existen, y todas
+
+**Archivo:** `tests/test_docs_db_schema.py` — 8 tests
+
+`ref-esquema-bd.md` es el único sitio donde el esquema físico se explica en prosa: para qué es
+cada tabla, qué lleva cada columna y qué relaciones son referencias por UID en lugar de claves
+foráneas (el motor **nunca** emite `FOREIGN KEY`). Eso lo convierte en lo que alguien lee antes
+de tocar un store — y un documento de esquema que ha ido divergiendo es peor que ninguno,
+porque se lee con la confianza que solo da una respuesta escrita.
+
+No lo mantenía honesto nada. Las tablas coincidían a mano el día que se escribió; el siguiente
+`TableSpec` no habría hecho fallar nada por quedarse sin documentar.
+
+La comparación va en **los dos sentidos** a propósito. Una tabla que falta en la doc es la
+podredumbre obvia; una tabla documentada que ya no está en el código es la que sobrevive más
+tiempo, porque nadie busca un nombre que ya no existe.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestEveryTableIsAccountedFor::*` (×3) | Ninguna tabla sin documentar, ninguna documentada que ya no exista, y el número que anuncia la introducción es el real | 33 ↔ 33 | que un lector use el recuento para decidir si la lista parece completa, que es justo lo que un número caducado desbarata |
+| `TestEveryColumnIsAccountedFor::*` (×3) | Por tabla: ninguna columna sin documentar, ninguna documentada inexistente, y el **orden** coincide con la declaración | informa de **todas** las tablas que divergieron en un solo mensaje | que el orden mienta sobre qué cambio es barato: una columna que falta al **final** se añade en sitio, una que falta **en medio** obliga a reconstruir la tabla entera |
+| `TestTheGuardIsLookingAtSomething::*` (×2) | **Guard del guard**: si el parser AST o el del markdown dejaran de casar, el test pasaría sin comparar nada | ≥30 `TableSpec`, ninguna tabla con cero columnas | un guard que aprueba para siempre porque no mira nada |
+
+> Al escribirlo apareció la primera divergencia: `msteams_channels` se describía en prosa
+> («misma forma que `webhooks`») en vez de con su tabla de columnas. Era exacto, pero no
+> comprobable — y una afirmación así caduca sola el día que `webhooks` gane una columna.
+
+---
+
+## 136. Clonar un elemento: pedir el nombre antes, y que la auditoría diga de dónde sale
+
+**Archivo:** `tests/test_wa_modules_clone.py` — 25 tests
+
+Reportado sobre m365, cierto en todos los módulos: creas un elemento y guarda; lo clonas, le
+cambias el nombre, guardas, y el registro **se escribe** mientras la pantalla dice «Error al
+guardar», el botón Guardar sigue encendido y en auditoría no aparece ni el guardado ni el
+error. La peor forma que puede tomar un fallo: lo siguiente que hace el usuario es volver a
+guardar, o deshacer un cambio que ya estaba persistido.
+
+Eran dos defectos alineados:
+
+1. **El clon conservaba el `uid` del original.** `cloneItem` copiaba el elemento tal cual, y un
+   uid es identidad, no dato. El servidor solo genera uno cuando falta, así que la copia
+   llegaba diciendo ser el original. El re-keying lo repara (le da un uid nuevo al segundo),
+   pero la llegada se sigue registrando como duplicada — de modo que un clon rutinario
+   disparaba la alarma construida para detectar corrupción real.
+2. **Registrar ese duplicado rompía la petición.** `_diff_dicts` devuelve `[{field, old, new}]`
+   y la nota se añadía con `+` como si fuera texto: `TypeError`, lanzado **después** de que
+   `_save_modules` hubiera confirmado y **antes** de la línea de auditoría.
+
+Y el flujo tenía un problema propio: clonar ocurría **en el clic**, así que quedaban dos filas
+con el mismo nombre sin forma de distinguirlas y sin vuelta atrás (la copia ya existía; salir
+era Deshacer o Descartar). Ahora el nombre se pide **antes** de copiar nada, propuesto como
+`<nombre>_Copia1` contando hasta el primero libre, y Cancelar significa que no pasó nada.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestSavingACloneReportsWhatHappened::*` (×4) | Recorriendo la ruta real: un uid duplicado guarda y responde 200; los dos elementos sobreviven con uid propio; el guardado se audita con el duplicado anotado **en la misma entrada**; y un guardado normal sigue siendo una lista de cambios limpia | 200 + 2 elementos | que la nota sustituya a la lista en vez de sumarse: la UI de auditoría pinta `[{field, old, new}]` como tabla |
+| `TestTheUiStopsManufacturingDuplicates::*` (×3) | El clon limpia el uid, la limpieza baja a colecciones anidadas, y **no** toca `cred_uid`/`host_uid` | `_stripItemUids` recursivo, borrado por nombre exacto | desvincular en silencio la credencial y el host de cada clon — que es lo que haría un «borra todo lo que acabe en uid» |
+| `TestTheNameIsAskedForBeforeAnythingIsCopied::*` (×8) | El clic solo abre el modal (nada de copiar, `markDirty` ni toast); aceptar es lo que clona; un nombre vacío o repetido se rechaza **en el modal**; la propuesta cuenta desde la **base** (`web_Copia1` → `web_Copia2`, no `web_Copia1_Copia1`) y compara **nombres visibles**; el nombre tecleado va donde la lista lo lee; y la copia declara su origen | modal + `_itemTitleField` compartido | dos filas con el mismo nombre, un Cancelar que no cancela, y un nombre tecleado escrito donde nadie lo muestra |
+| `TestTheAuditSaysNewOrClonedAndFromWhat::*` (×10) | `__cloned_from__` se **toma** (no se lee) y nunca llega a almacenarse; un elemento nuevo se reporta como nuevo y un clon nombra su fuente; un elemento intacto no genera fila; el nombre sale del campo que **declara el módulo** (`label`, `ups_name`, `process`); y sobrevive a que el descubrimiento no esté disponible | filas `<mod>.<coll> · new item` / `· cloned item` | que la auditoría trate igual un elemento tecleado y uno copiado, que es justo la distinción que hace falta al comparar dos filas casi idénticas |
+
+> El endpoint sigue tolerando un uid duplicado aunque la UI ya no los fabrique: una config
+> importada o un fichero editado a mano pueden traer uno, y ahí la alarma vuelve a significar
+> lo que dice.
+>
+> Trampa que costó encontrar: en las colecciones sin campo de título declarado el nombre **es**
+> la clave… hasta que se guardan. El re-key convierte la clave en un uid y estampa la antigua
+> en `label`, que pasa a ser lo que muestra la lista. Decidir solo por el esquema escribía el
+> nombre tecleado en una clave que nadie pinta, y la copia se quedaba con el nombre del
+> original — exactamente lo que este cambio venía a evitar. Leer y escribir comparten
+> `_itemTitleField` para que no puedan divergir.
+
+---
+
+## 137. Un fallo no controlado deja rastro, y el rastro se encuentra desde la pantalla
+
+**Archivo:** `tests/test_wa_unhandled_errors.py` — 12 tests
+
+La pregunta que lo destapó, tras el fallo de §136: «¿por qué estos errores no se registran en
+auditoría o en consola? Solo sale "Error al guardar", que no da nada de info». No los
+registraba nada, en ninguno de los cuatro puntos donde algo podría haberlo hecho:
+
+* Flask respondía la excepción con su propio 500;
+* `after_request` **no** corre en ese camino, así que la línea de traza por endpoint — la que
+  registra todo 4xx/5xx con su motivo — tampoco saltaba;
+* la traza iba al logger de Flask, que este panel no engancha ni a su salida de debug ni a su
+  fichero de log: bajo servicio o contenedor, a ningún sitio donde alguien mire;
+* la auditoría no se escribía, porque no había código que la escribiera.
+
+Y el cliente descartaba lo poco que sobrevivía: un cuerpo HTML lanzaba dentro de `r.json()` y
+caía en el **mismo** `catch` que una conexión muerta, devolviendo el mismo `null` — así que el
+toast imprimía `r?.error` sobre un valor sin error que imprimir.
+
+El arreglo es **una referencia corta en tres sitios a la vez** — la línea de log, la entrada de
+auditoría y el mensaje en pantalla —, de modo que el usuario lee un código del toast y otra
+persona localiza el endpoint y la excepción. Lo que la respuesta **no** lleva es la traza: una
+página de error no es donde se publican los internos a quien alcance la URL.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestTheResponseSaysSomethingUsable::*` (×3) | Un fallo en `/api/` responde JSON (no una página HTML), el mensaje lleva referencia, y la traza **nunca** llega al cliente | `{error, ref}` + 500 | el apagón del lado cliente: un cuerpo no parseable no distingue un fallo de una red caída |
+| `TestTheCrashIsAudited::*` (×3) | Se escribe una entrada, dice ruta/método/excepción/mensaje, y la referencia impresa **localiza** esa entrada | `ref` en pantalla == `ref` en auditoría | la propiedad sobre la que descansa todo el diseño: un código que no lleva a ningún registro no sirve de nada |
+| `TestOrdinaryRejectionsAreNotTreatedAsCrashes::*` (×2) | `HTTPException` pasa intacta: un 404 no se audita y un `abort(403)` conserva su status | sin entradas nuevas | enterrar las entradas reales bajo el ruido de escáneres, y convertir «no puedes hacer esto» en «algo se rompió» |
+| `TestTheSuiteStillSeesItsTracebacks::*` (×1) | Bajo pytest la excepción **se sigue propagando** | `pytest.raises` | que registrar un handler para `Exception` convierta cada fallo de la suite en un 500 educado que ya no hace fallar nada |
+| `TestTheClientStopsDiscardingTheAnswer::*` (×3) | Los wrappers usan `_readJson` (no `r.json()` a pelo), cada fallo escribe en consola, y la rama no-JSON sigue produciendo `error` + status | ≥5 `console.error` | volver al «Error al guardar» sin nada detrás y sin nada que pegar en un reporte |

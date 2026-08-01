@@ -202,6 +202,46 @@ class TestTheSearchBoxIsCollapsed:
         assert 'border-bottom-left-radius' in m.group(1)
         assert 'border-bottom-right-radius' in m.group(1)
 
+    def test_the_rounded_bottom_is_visible_in_light_mode_too(self):
+        """Reported as "the light toolbar is missing its rounded bottom corners". It was not:
+        the radius is theme-independent, and both themes had it.
+
+        What differs is the only thing that can DRAW that curve. `.ss-bleed-top` removes the
+        side and top borders, so the bottom border is the whole shape — and the dark theme
+        redefines --bs-border-color to a value LIGHTER than the bar it sits on, while the
+        light theme inherits Bootstrap's #dee2e6 against a #e9ecef bar. Two greys a dozen
+        points apart render a corner nobody can see.
+
+        Guarded because the next person to read the CSS will find a radius that is already
+        correct and conclude there is nothing to fix — which is exactly what makes a contrast
+        bug like this come back.
+        """
+        m = re.search(r'\[data-bs-theme="light"\] \.ss-bleed-top > \* \{(.*?)\}', _css(), re.S)
+        assert m, 'the light theme no longer strengthens the pinned header border'
+        assert 'border-color' in m.group(1)
+        assert 'var(--bs-border-color)' not in m.group(1), \
+            'it points back at the theme default — the value the corner disappeared against'
+
+    def test_the_shadow_follows_the_rounded_corner(self):
+        """A box-shadow traces the border-radius of the element that DECLARES it. The shadow
+        is declared on the wrapper; the rounded bottom belongs to the child inside it. So the
+        corner looked rounded while its own shadow broke off square right beside it.
+
+        The wrapper draws nothing itself — no background, no border — so the radius exists
+        purely to shape the shadow, which is exactly the kind of line a later cleanup deletes
+        as dead. Hence this guard, and the comment beside it.
+        """
+        # The selector carries more than one rule (a margin reset elsewhere), so pick the one
+        # that actually casts the shadow rather than whichever comes first in the file.
+        blocks = [b for b in re.findall(r'\.cfg-main > \.ss-bleed-top \{(.*?)\}', _css(), re.S)
+                  if 'box-shadow' in b]
+        assert blocks, 'the pinned header no longer casts the shadow this guards'
+        body = blocks[0]
+        assert 'border-bottom-left-radius' in body and 'border-bottom-right-radius' in body, \
+            'the shadow is back to tracing a square corner under a rounded one'
+        assert 'border-radius-lg' in body, \
+            'the radius no longer matches the toolbar and the search box, which both use lg'
+
     def test_opening_it_puts_the_cursor_in_it(self):
         wiring = io.open(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
                                       'init', '_wiring.html'), encoding='utf-8-sig').read()

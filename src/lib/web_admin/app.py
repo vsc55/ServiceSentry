@@ -2,17 +2,12 @@
 # -*- coding: utf-8 -*-
 """Web administration server for ServiceSentry."""
 
-import functools
 import os
-import sys
 import threading
-import time
 import uuid
 from datetime import timedelta
-from urllib.parse import urlparse
 
-from flask import (Flask, flash, g, has_request_context, jsonify,
-                   redirect, request, session, url_for)
+from flask import Flask, has_request_context, jsonify, request, session
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -21,23 +16,8 @@ from lib.config import CONFIG_FILENAME, SECRET_KEY_FILENAME
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
 from lib.security import csrf as _csrf, secret_manager
-from lib.security.headers import apply_security_headers
-from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS, coerce_lang
-from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
-from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
-from .constants import landing_options
-from lib.config.spec import CFG_BY_PATH, normalize_url, registry_defaults
-from lib.config.layout import config_layout
-from lib.providers.entraid.declarations import (
-    DEFAULT_APP_NAME as _ENTRA_APP_DEFAULT,
-    OIDC_APP_NAME as _ENTRA_APP_OIDC,
-    SAML2_APP_NAME as _ENTRA_APP_SAML2,
-    SCIM_APP_NAME as _ENTRA_APP_SCIM,
-    EMAIL_APP_NAME as _ENTRA_APP_EMAIL,
-    TEAMS_APP_NAME as _ENTRA_APP_TEAMS)
-from lib.providers.ldap import auth as _ldap_auth
-from lib.providers.oidc import auth as _oidc_auth
-from lib.providers.saml import auth as _saml_auth
+from lib.i18n import DEFAULT_LANG, TRANSLATIONS, coerce_lang
+from lib.config.spec import CFG_BY_PATH, normalize_url
 
 def _cfg_default(path: str):
     """Default value of a config field, from the central registry.
@@ -47,7 +27,8 @@ def _cfg_default(path: str):
     default means editing only ``config_spec.CONFIG_FIELDS``.
     """
     return CFG_BY_PATH[path].default
-from .mixins import (_AuthMixin, _EmbedMixin, _FreshnessMixin, _ScannersMixin,
+from .mixins import (_AuthMixin, _ContextMixin, _EmbedMixin, _FreshnessMixin,
+                     _GuardsMixin, _HooksMixin, _ScannersMixin, _ServerMixin,
                      _ServicesMixin, _StoresMixin)
 # fail2ban host glue lives with its service package (lib.services.ipban), like the
 # syslog/events managers — inherited here because the request gate is host-level.
@@ -75,7 +56,8 @@ __all__ = ['WebAdmin']
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
                _IpBanMixin, _FreshnessMixin, _StoresMixin, _ConfigMixin,
-               _ScannersMixin, _EmbedMixin):
+               _ScannersMixin, _EmbedMixin, _ContextMixin, _ServerMixin,
+               _HooksMixin, _GuardsMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing
@@ -327,78 +309,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """Flask application instance (useful for testing)."""
         return self._app
 
-    # ------------------------------------------------------------------
-    # Permission decorators
-    # ------------------------------------------------------------------
-
-    def _perm_required(self, *perms):
-        """Return a decorator that requires ANY of the listed permissions."""
-        def decorator(f):
-            @functools.wraps(f)
-            def wrapper(*args, **kwargs):
-                if not self._check_session():
-                    if request.path.startswith('/api/'):
-                        return jsonify({'error': self._t('unauthorized')}), 401
-                    return redirect(url_for('login'))
-                if not any(p in self._get_session_permissions() for p in perms):
-                    return jsonify({'error': self._t('access_denied')}), 403
-                return f(*args, **kwargs)
-            return wrapper
-        return decorator
-
-    def _login_required(self, f):
-        """Decorator that redirects unauthenticated requests to ``/login``."""
-        @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            if not self._check_session():
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': self._t('unauthorized')}), 401
-                return redirect(url_for('login'))
-            return f(*args, **kwargs)
-        return wrapper
-
-    def _admin_required(self, f):
-        """Deprecated shim — prefer _perm_required(). Checks users_view."""
-        @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            if not self._check_session():
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': self._t('unauthorized')}), 401
-                return redirect(url_for('login'))
-            if 'users_view' not in self._get_session_permissions():
-                return jsonify({'error': self._t('access_denied')}), 403
-            return f(*args, **kwargs)
-        return wrapper
-
-    def _write_required(self, f):
-        """Deprecated shim — prefer _perm_required(). Checks modules_edit or config_edit."""
-        @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            if not self._check_session():
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': self._t('unauthorized')}), 401
-                return redirect(url_for('login'))
-            perms = self._get_session_permissions()
-            if not ('modules_edit' in perms or 'config_edit' in perms):
-                return jsonify({'error': self._t('read_only_access')}), 403
-            return f(*args, **kwargs)
-        return wrapper
-
-    @staticmethod
-    def _safe_referrer(fallback: str = 'login') -> str:
-        """Return the Referer URL only when it belongs to the same origin.
-
-        Prevents open-redirect attacks where an attacker-controlled
-        ``Referer`` header could redirect users to an external site.
-        """
-        ref = request.referrer
-        if ref:
-            parsed = urlparse(ref)
-            own = urlparse(request.host_url)
-            if parsed.scheme == own.scheme and parsed.netloc == own.netloc:
-                return ref
-        return url_for(fallback)
-
     def _t(self, key: str, *args: str) -> str:
         """Return the translated string for *key* in the session language.
 
@@ -569,272 +479,16 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 x_prefix=self._PROXY_COUNT,
             )
 
-        @app.before_request
-        def _ipban_gate():
-            # Internal fail2ban gate (must run first) — logic in _IpBanMixin.
-            return self._ipban_gate_response()
+        # Gate, trace, refresh, protect, redirect — and the order between them, which
+        # Flask takes from registration order and which is therefore load-bearing. Declared
+        # in _HooksMixin._BEFORE_REQUEST instead of being the order of five decorators here.
+        self._register_request_hooks(app)
 
-        @app.before_request
-        def _trace_request_start():
-            g._req_start = time.perf_counter()
-
-        @app.before_request
-        def _refresh_shared_caches():
-            # Roles, users and groups live in memory for the life of the process, so
-            # another writer against the same database — the CLI, or a second web replica
-            # — would be invisible to this one.
-            # Here, and only here: the reload replaces the dict wholesale, so it has to
-            # happen before a handler starts rather than in the middle of an edit.
-            #
-            # Static files authorise nothing and arrive by the dozen per page, so they do
-            # not get a probe — with the re-check set to 0 (every request) they would
-            # otherwise turn one page load into thirty queries.
-            if request.endpoint != 'static':
-                self._reload_roles_if_stale()
-                self._reload_users_if_stale()
-                self._reload_groups_if_stale()
-
-        # CSRF (double-submit): state-changing requests must echo the session token in
-        # the X-CSRF-Token header (JSON APIs) or csrf_token field (form posts). Exempt
-        # prefixes are DISCOVERED, not hardcoded: each route module declares its own via
-        # ``wa._register_csrf_exempt(...)`` in its register() (token-authenticated SCIM,
-        # inbound IdP callbacks, Teams SSO/bot — cross-site by design, protected instead by
-        # their own protocol/token). register_all() runs below, before any request, so the
-        # list is fully populated by the time _csrf_protect first reads it.
-
-        @app.before_request
-        def _csrf_protect():
-            # Enabled in production; OFF under pytest (TESTING) so the many mutating
-            # requests in the suite need no token plumbing — unless a test opts in by
-            # setting wa._csrf_enabled = True (see test_wa_csrf.py). An explicit
-            # attribute (True/False) always wins.
-            enabled = getattr(self, '_csrf_enabled', None)
-            if enabled is None:
-                enabled = not app.config.get('TESTING', False)
-            if not enabled:
-                return None
-            if not _csrf.needs_check(request.method, request.path, self._csrf_exempt_prefixes):
-                return None
-            if not _csrf.is_valid(request, session):
-                # A CSRF failure with NO session cookie is the classic "Secure cookie
-                # over plain HTTP" symptom (the browser drops a Secure cookie on http://)
-                # — surface it clearly so it isn't mistaken for a bad password.
-                # Only on /login (not every bot POST): a CSRF failure with no cookies +
-                # Secure cookies on is the "Secure cookie dropped over HTTP" footgun,
-                # which otherwise looks like a silent login loop.
-                if (request.path == '/login' and not request.cookies
-                        and app.config.get('SESSION_COOKIE_SECURE')):
-                    self._dbg(
-                        f"> CSRF >> /login received no session cookie over {request.scheme} "
-                        f"while SESSION_COOKIE_SECURE is on — the browser drops a Secure "
-                        f"cookie on HTTP. Use HTTPS, or disable force_https/secure_cookies "
-                        f"for HTTP access.", DebugLevel.warning)
-                self._audit('csrf_failed', session.get('username', ''), request.remote_addr,
-                            detail={'path': request.path, 'method': request.method})
-                self._ipban_offense('csrf_failed')
-                if request.path.startswith('/api/') or request.is_json:
-                    return jsonify({'error': self._t('csrf_invalid')}), 403
-                flash(self._t('csrf_invalid'), 'danger')
-                return redirect(url_for('login'))
-            return None
-
-        @app.after_request
-        def _trace_request_end(response):
-            # Security headers (defense-in-depth; policy in lib.security.headers).
-            # An admin-defined frame-ancestors allowlist (+ optional Teams hosts) opens
-            # framing to those origins so the Teams personal tab can embed the panel.
-            apply_security_headers(response, frame_ancestors=self._frame_ancestors_list or None)
-            # fail2ban: count a 401/403 as an offense for the client IP (logic in
-            # _IpBanMixin; skips gate blocks and requests that already counted).
-            self._ipban_capture(response)
-            # Dynamic API responses must never be browser-cached: a stale GET
-            # (e.g. /api/v1/users or /api/v1/me) would show an admin a user's
-            # pre-clear table layout even after a full page reload, and would
-            # break the keepalive live-sync of layout changes.
-            if request.path.startswith('/api/'):
-                response.headers['Cache-Control'] = 'no-store'
-            # Generic per-endpoint trace, for EVERY API, gated by log_level:
-            # GET/static at debug, mutations at info, 4xx/5xx at warning. Logs the
-            # endpoint, input KEYS (query + json body — never values, so no
-            # secrets), status, timing, reason and payload size.
-            path = request.path
-            if path.startswith('/static/') or not ObjectBase.debug.enabled:
-                return response
-            start = getattr(g, '_req_start', None)
-            ms = f"{(time.perf_counter() - start) * 1000:.0f}ms" if start else '?'
-            status = response.status_code
-            # Input shape (keys only — values may carry passwords/tokens/secrets).
-            inp = []
-            if request.args:
-                inp.append('args=' + ','.join(request.args.keys()))
-            if request.is_json:
-                _b = request.get_json(silent=True)
-                if isinstance(_b, dict) and _b:
-                    inp.append('body=' + ','.join(list(_b.keys())[:15]))
-            in_s = (' ' + ' '.join(inp)) if inp else ''
-            reason = ''
-            if status >= 400:
-                level = DebugLevel.warning
-                # Surface the rejection reason (the JSON 'error' message) so the
-                # *why* of every 4xx/5xx is traced uniformly, for any endpoint.
-                if response.is_json:
-                    try:
-                        body = response.get_json(silent=True)
-                        if isinstance(body, dict) and body.get('error'):
-                            reason = f": {body['error']}"
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-            elif request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
-                level = DebugLevel.info
-            else:
-                level = DebugLevel.debug
-            size = response.content_length
-            size_s = f" {size}B" if size is not None else ''
-            self._dbg(f"> HTTP >> {request.method} {path} [{request.endpoint}]{in_s} "
-                      f"-> {status}{reason} ({ms}){size_s}", level)
-            return response
-
-        @app.before_request
-        def _enforce_fqdn():
-            """Send a request that arrived on the wrong host to the public URL.
-
-            Opt-in (``web_admin|force_fqdn``) and only with a public URL configured.  Two
-            things it must never do, because both make the panel unreachable — including the
-            page that would let you turn it off:
-
-            * **redirect over a port difference.**  ``request.host`` carries the port,
-              ``public_url`` need not.  Comparing the raw strings made ``192.168.0.1:8080``
-              a "different host" from ``192.168.0.1`` and sent the browser to port 80, where
-              nothing is listening.  The setting is about the *hostname* you arrived on, so
-              a public URL that names no port accepts any port;
-            * **redirect to itself.**  If the target is the request we are answering, the
-              browser follows it forever (``ERR_TOO_MANY_REDIRECTS``).  Refusing is always
-              better than looping: the worst case is that the redirect does not happen.
-            """
-            if not self._FORCE_FQDN or not self._PUBLIC_URL:
-                return
-            want = self._PUBLIC_URL.strip().lower()      # host[:port], never a scheme
-            have = (request.host or '').strip().lower()
-            if ':' not in want:
-                have = have.split(':', 1)[0]
-            if have == want:
-                return
-            scheme = 'https' if self._FORCE_HTTPS else 'http'
-            target = f"{scheme}://{self._PUBLIC_URL}{request.path}"
-            if target == request.base_url:
-                return
-            qs = request.query_string.decode('utf-8')
-            if qs:
-                target += '?' + qs
-            return redirect(target, code=302)
-
+        # Everything the templates render with lives in _ContextMixin — `app` is passed
+        # because this runs while the app is still being built (self._app is not set yet).
         @app.context_processor
         def _inject_i18n():
-            lang = session.get('lang', self._DEFAULT_LANG)
-            dark_mode = session.get('dark_mode', self._DEFAULT_DARK_MODE)
-            trans = TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG])
-            _cfg = self._read_config_file(self._CONFIG_FILE) or {}
-            _ldap_cfg  = _cfg.get('ldap')  or {}
-            _oidc_cfg  = _cfg.get('oidc')  or {}
-            _saml2_cfg = _cfg.get('saml2') or {}
-            # Cache-buster for the stylesheet: its mtime, so an edited web_admin.css
-            # always reaches the browser (the dev watcher doesn't restart on .css,
-            # and the <link> is otherwise a plain, cacheable URL).
-            try:
-                asset_v = int(os.path.getmtime(os.path.join(app.static_folder, 'css', 'web_admin.css')))
-            except OSError:
-                asset_v = 0
-            return {
-                'asset_v': asset_v,
-                'lang': lang,
-                'default_lang': self._DEFAULT_LANG,
-                'dark_mode': dark_mode,
-                'i18n': trans,
-                'supported_langs': SUPPORTED_LANGS,
-                'current_session_token': session.get('session_id', ''),
-                'permissions_list': list(PERMISSIONS),
-                'permissions_groups': PERMISSION_GROUPS,
-                # Landing destinations for the three selects that offer them (config, user,
-                # group), labelled server-side: a module section names itself in the module's
-                # own lang file, so a frontend resolving `t(label_key)` had nothing to look up
-                # and printed the raw id. Core pages AND module sections, one entry per view.
-                'home_pages': landing_options(lang, self._DEFAULT_LANG),
-                # Notification routing matrix, registry-driven: rows = discovered event kinds
-                # (lib/core/notify/events.py), columns = registered channels (registry.py).
-                'notify_matrix_events': self._notify_matrix_events(),
-                'notify_channels': self._notify_channel_cols(),
-                'wa_builtin_roles': [BUILTIN_ROLE_UIDS[r] for r in ROLES if r in BUILTIN_ROLE_UIDS],
-                'wa_sensitive_fields': sorted(self._sensitive_fields),
-                'wa_remember_me_days': self._REMEMBER_ME_DAYS,
-                'wa_audit_max_entries': self._AUDIT_MAX_ENTRIES,
-                'wa_secure_cookies': self._SECURE_COOKIES,
-                'wa_pw_min_len': self._PW_MIN_LEN,
-                'wa_pw_max_len': self._PW_MAX_LEN,
-                'wa_pw_require_upper': self._PW_REQUIRE_UPPER,
-                'wa_pw_require_digit': self._PW_REQUIRE_DIGIT,
-                'wa_pw_require_symbol': self._PW_REQUIRE_SYMBOL,
-                'wa_public_status': self._PUBLIC_STATUS,
-                'wa_public_status_detail': self._PUBLIC_STATUS_DETAIL,
-                'wa_status_refresh_secs': self._STATUS_REFRESH_SECS,
-                'wa_status_lang': self._STATUS_LANG,
-                'wa_web_port': self._PORT,
-                'wa_env_locked_fields': sorted(self._env_locked),
-                'wa_file_locked_fields': sorted(getattr(self, '_file_locked', frozenset())),
-                'wa_proxy_count': self._PROXY_COUNT,
-                'wa_public_url': self._PUBLIC_URL,
-                'csrf_token': self._csrf_token(),
-                # Effective base URL (config override → else proxy-aware auto-detect),
-                # injected so the JS never re-derives it. See public_base_url().
-                'wa_base_url': self.public_base_url(),
-                'wa_force_https': self._FORCE_HTTPS,
-                'wa_force_fqdn':  self._FORCE_FQDN,
-                'wa_startup_id':  self._startup_id,
-                'wa_default_dark_mode': self._DEFAULT_DARK_MODE,
-                'config_registry_defaults': registry_defaults(),
-                'config_layout': config_layout(),
-                'ldap_enabled':       _ldap_auth.is_available()  and bool(_ldap_cfg.get('enabled')),
-                'ldap_button_label':  (_ldap_cfg.get('button_label')  or '').strip(),
-                'oidc_enabled':       _oidc_auth.is_available()  and bool(_oidc_cfg.get('enabled')),
-                'saml2_enabled':      _saml_auth.is_available() and bool(_saml2_cfg.get('enabled')),
-                'oidc_button_label':  (_oidc_cfg.get('button_label')  or '').strip(),
-                'saml2_button_label': (_saml2_cfg.get('button_label') or '').strip(),
-                'oidc_button_icon': (
-                    'bi-microsoft' if 'microsoftonline.com' in (_oidc_cfg.get('provider_url') or '').lower()
-                    else 'bi-google' if 'accounts.google.com' in (_oidc_cfg.get('provider_url') or '').lower()
-                    else 'bi-box-arrow-in-right'
-                ),
-                'saml2_button_icon': (
-                    'bi-microsoft' if any(kw in (_saml2_cfg.get('idp_sso_url') or '').lower()
-                                         for kw in ('microsoftonline.com', 'microsoft.com', 'azure'))
-                    else 'bi-shield-lock'
-                ),
-                'ldap_available':  _ldap_auth.is_available(),
-                'oidc_available':  _oidc_auth.is_available(),
-                'saml2_available': _saml_auth.is_available(),
-                # Default Entra ID app display names (single source: providers.entraid),
-                # injected into the JS wizards via core/_constants.html.
-                'entra_app_name_default': _ENTRA_APP_DEFAULT,
-                'entra_app_name_oidc':    _ENTRA_APP_OIDC,
-                'entra_app_name_saml2':   _ENTRA_APP_SAML2,
-                'entra_app_name_scim':    _ENTRA_APP_SCIM,
-                'entra_app_name_email':   _ENTRA_APP_EMAIL,
-                'entra_app_name_teams':   _ENTRA_APP_TEAMS,
-                'module_web_styles': self._module_web_styles,
-                'module_web_ui':     self._module_web_ui,
-                'module_web_modals': self._module_web_modals,
-            }
-
-        # The dev server is threaded=True (a new thread per request), so each
-        # request's per-thread DB connection would be abandoned when the thread
-        # ends — MySQL/MariaDB logs that as an 'aborted connection'. Close it
-        # cleanly at teardown (no-op for SQLite; no reuse lost since the thread is
-        # short-lived anyway).
-        @app.teardown_request
-        def _close_thread_db(_exc=None):  # noqa: ANN001
-            for _c in (getattr(self, '_db_connector', None),
-                       getattr(self, '_syslog_db_connector', None)):
-                if _c is not None:
-                    _c.close_thread_if_needed()
+            return self._template_context(app)
 
         self._register_routes(app)
         # Route modules declared their embed profiles (e.g. Teams) during registration, so
@@ -970,150 +624,3 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         """Register all routes — delegates to routes sub-package."""
         from .routes import register_all
         register_all(app, self)
-
-    # ------------------------------------------------------------------
-    # Server entry-point
-    # ------------------------------------------------------------------
-
-    def run(self, host: str | None = None, port: int | None = None,
-            debug: bool = False):
-        """Start the web administration server, binding one or more interfaces.
-
-        *host* may name several interfaces (comma/space separated); each is bound
-        independently.  Binding is **fail-soft per interface but fail-hard
-        overall**:
-
-        * if some — but not all — interfaces fail to bind, the failures are
-          logged as warnings and the server runs on those that succeeded;
-        * if **no** interface can be bound (e.g. the port is already in use), an
-          error is logged and the process exits non-zero — it never reports a
-          running server when nothing is actually listening.
-
-        Args:
-            host: Interface(s) to bind (default ``0.0.0.0``).  Accepts a list as
-                a comma/space separated string, e.g. ``"10.0.0.1, 10.0.0.2"``.
-            port: TCP port to listen on (default ``8080``).
-            debug: Enable the interactive debugger and verbose errors.
-        """
-        port = int(port or self.DEFAULT_PORT)
-        hosts = str(host or self.DEFAULT_HOST).replace(',', ' ').split() \
-            or [self.DEFAULT_HOST]
-
-        # No reloader: __init__ already bound the syslog ports and started the
-        # scheduler/event worker, so Werkzeug's reloader (which re-runs __init__ in
-        # a child) would double-bind. Dev reloads are handled by dev_watch.py.
-        self._app.debug = debug
-        wsgi_app = self._app
-        if debug:
-            from werkzeug.debug import DebuggedApplication  # noqa: PLC0415
-            wsgi_app = DebuggedApplication(self._app, evalex=True)
-
-        servers, failed = self._bind_web_servers(hosts, port, wsgi_app)
-
-        # Startup bind status goes to stdout/stderr directly (not the debug log,
-        # whose default level is 'off') so it is always visible — like main.py's
-        # startup banner.
-        for _h, exc in failed:
-            print('  ⚠  ' + self._t('web_bind_fail', _h, port, exc), file=sys.stderr)
-
-        if not servers:
-            # Nothing is listening: fail loudly and exit instead of leaving the
-            # daemon threads running and faking a started server.  os._exit (not
-            # sys.exit) because a plain SystemExit would block on the non-daemon
-            # threads some background services spawn (e.g. the scheduler's
-            # ThreadPoolExecutor) — the process would hang instead of closing.
-            print('  ✖  ' + self._t('web_bind_none', port), file=sys.stderr)
-            # On Windows a 10013 is often a reserved (winnat/Hyper-V/WSL/Docker)
-            # range, not a process: point the user straight at the cause + remedy.
-            from lib.system.windows import port_excluded  # noqa: PLC0415
-            rng = port_excluded(port)
-            if rng:
-                print('     ↳ ' + self._t('web_bind_reserved', port, rng[0], rng[1]),
-                      file=sys.stderr)
-            sys.stderr.flush()
-            sys.stdout.flush()
-            os._exit(1)
-
-        shown = set()
-        for _h, srv in servers:
-            # A wildcard bind (0.0.0.0 / ::) listens on every interface — list the
-            # concrete reachable addresses too, as Werkzeug's dev server used to.
-            for disp in self._display_hosts(_h):
-                if disp not in shown:
-                    shown.add(disp)
-                    print('  ' + self._t('web_listening', disp, port))
-        if failed:
-            print('  ' + self._t('web_bind_partial', len(servers), len(hosts), len(failed)))
-        print()   # blank line between the startup banner and the request logs
-
-        threads = []
-        for _h, srv in servers:
-            t = threading.Thread(target=srv.serve_forever,
-                                 name=f"web-{_h}:{port}", daemon=True)
-            t.start()
-            threads.append(t)
-
-        try:
-            while any(t.is_alive() for t in threads):
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            print('  ' + self._t('web_stop_requested'))
-        finally:
-            for _h, srv in servers:
-                try:
-                    srv.shutdown()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-    @staticmethod
-    def _display_hosts(host):
-        """Addresses to advertise for *host* in the startup banner.
-
-        A wildcard bind (``0.0.0.0`` / ``::``) actually listens on every
-        interface, so list the machine's concrete addresses too (like Werkzeug's
-        dev server did) — the literal wildcard first, then the resolved IPs."""
-        if host not in ('0.0.0.0', '::', '*', ''):
-            return [host]
-        out = [host or '0.0.0.0']
-        try:
-            import socket  # noqa: PLC0415
-            for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-                if ip not in out:
-                    out.append(ip)
-        except Exception:  # pylint: disable=broad-except
-            pass
-        return out
-
-    @staticmethod
-    def _bind_web_servers(hosts, port: int, wsgi_app):
-        """Try to bind *wsgi_app* on each host at *port*.
-
-        Returns ``(servers, failed)`` where ``servers`` is a list of
-        ``(host, werkzeug_server)`` successfully bound and ``failed`` a list of
-        ``(host, OSError)``.  Binding happens here (sockets are opened) but no
-        request is served yet — so the caller decides whether enough interfaces
-        came up before serving.  Kept separate (and side-effect-light) so the
-        bind policy is unit-testable without starting the server loop.
-        """
-        import contextlib  # noqa: PLC0415
-        import io  # noqa: PLC0415
-        from werkzeug.serving import make_server  # noqa: PLC0415
-        servers, failed = [], []
-        for _h in hosts:
-            try:
-                # Werkzeug prints the raw OS strerror to stderr on a bind failure
-                # (then sys.exit(1)).  Swallow that uncontrolled, OS-localised line
-                # so only our own i18n message is shown — the OSError detail still
-                # reaches it via the exception.
-                with contextlib.redirect_stderr(io.StringIO()):
-                    srv = make_server(_h, port, wsgi_app, threaded=True)
-                servers.append((_h, srv))
-            except OSError as exc:
-                failed.append((_h, exc))
-            except SystemExit as exc:
-                # make_server calls sys.exit(1) instead of propagating OSError;
-                # catch it so one unbindable interface doesn't abort the whole
-                # process, recovering the underlying OSError (its __context__).
-                cause = exc.__context__ if isinstance(exc.__context__, OSError) else None
-                failed.append((_h, cause or OSError(f'bind {_h}:{port} failed')))
-        return servers, failed

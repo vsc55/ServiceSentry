@@ -113,6 +113,9 @@ LANG = {
     'conn_lost_msg': 'Reintentando… se reanudará automáticamente al recuperar la conexión.',
     'invalid_json': 'JSON inválido',
     'save_file_error': 'No se pudo guardar el archivo',
+    # Acompañado siempre de una referencia corta: es lo que une el mensaje en pantalla con
+    # la entrada de auditoría y la línea del log, sin publicar la traza a quien llame la URL.
+    'internal_error': 'Error interno del servidor',
     'comma_separated': 'Separar con comas',
     # Web server startup / bind
     'banner_web': 'ServiceSentry · Panel Web',
@@ -602,6 +605,12 @@ LANG = {
     'rename_item_prompt': 'Introduce la nueva clave (ej: IP, dominio, nombre de servicio):',
     'clone_item':  'Clonar',
     'item_cloned': 'Clonado como',
+    'clone_item_prompt': 'Nombre de la copia:',
+    'clone_item_source': 'Clonando: {}',
+    # Sufijo de la copia propuesta: "<nombre>_Copia1", iterando hasta el primero libre.
+    'clone_copy_word': 'Copia',
+    'clone_name_required': 'Escribe un nombre para la copia',
+    'clone_name_exists': 'Ya existe un elemento con ese nombre',
     # Backend
     'invalid_role': 'Rol inválido',
     'invalid_role_options': 'Rol inválido (usar: {})',
@@ -1465,6 +1474,7 @@ LANG = {
         'login_failed':          'Auth: Inicio Fallido',
         'login_throttled':       'Auth: Inicio Limitado',
         'csrf_failed':           'Seguridad: CSRF Rechazado',
+        'internal_error':        'Sistema: Error Interno',
         'ip_banned':             'Seguridad: IP Baneada',
         'ip_ban_escalated':      'Seguridad: Baneo de IP Escalado',
         'ip_unbanned':           'Seguridad: IP Desbaneada',

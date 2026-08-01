@@ -113,6 +113,9 @@ LANG = {
     'conn_lost_msg': 'Retrying… it will resume automatically once the connection is back.',
     'invalid_json': 'Invalid JSON',
     'save_file_error': 'Could not save file',
+    # Always paired with a short reference: it is what ties the on-screen message to the
+    # audit entry and the log line, without publishing the traceback to whoever hit the URL.
+    'internal_error': 'Internal server error',
     'comma_separated': 'Comma separated',
     # Web server startup / bind
     'banner_web': 'ServiceSentry Web Admin',
@@ -598,6 +601,12 @@ LANG = {
     'rename_item_prompt': 'Enter new key (e.g. IP, domain, service name):',
     'clone_item':  'Clone',
     'item_cloned': 'Cloned as',
+    'clone_item_prompt': 'Name for the copy:',
+    'clone_item_source': 'Cloning: {}',
+    # Suffix of the proposed copy name: "<name>_Copy1", counting up to the first free one.
+    'clone_copy_word': 'Copy',
+    'clone_name_required': 'Enter a name for the copy',
+    'clone_name_exists': 'An item with that name already exists',
     # Backend
     'invalid_role': 'Invalid role',
     'invalid_role_options': 'Invalid role (use: {})',
@@ -1458,6 +1467,7 @@ LANG = {
         'login_failed':          'Auth: Login Failed',
         'login_throttled':       'Auth: Login Throttled',
         'csrf_failed':           'Security: CSRF Rejected',
+        'internal_error':        'System: Internal Error',
         'ip_banned':             'Security: IP Banned',
         'ip_ban_escalated':      'Security: IP Ban Escalated',
         'ip_unbanned':           'Security: IP Unbanned',

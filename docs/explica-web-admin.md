@@ -12,12 +12,24 @@ La lógica de `WebAdmin` está dividida en **mixins** (lógica de negocio) y **r
 ```
 lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios/providers viven fuera (abajo)
 ├── app.py                    # class WebAdmin (hereda mixins de mixins/ + lib/core/* + lib/services/*)
+│                             #   Solo composición: __init__ (orden de arranque) y _create_app
 ├── constants.py              # SOLO HOME_PAGES + home_page_ids (landing pages). RBAC → lib/core/permissions/; SYSTEM_USER e identidades integradas → lib/core/constants.py; i18n → lib.i18n
 ├── mixins/                   # Glue que NO es un dominio propio (ni store ni permisos):
 │   ├── auth.py               # _AuthMixin (login local: _authenticate)
+│   ├── context.py            # _ContextMixin — el diccionario con el que se renderiza CADA página
+│   ├── hooks.py              # _HooksMixin — qué corre alrededor de cada petición, en orden DECLARADO
+│   │                         #   (_BEFORE_REQUEST): Flask lo toma del orden de registro, así que
+│   │                         #   antes era el orden de cinco decoradores dentro de _create_app
+│   │                         #   + _hook_unhandled_error: una excepción no controlada deja UNA
+│   │                         #   referencia corta en log + auditoría (internal_error) + pantalla;
+│   │                         #   HTTPException pasa intacta y bajo pytest/debug se sigue relanzando
+│   ├── guards.py             # _GuardsMixin — quién puede llamar a una ruta y la FORMA del rechazo
+│   │                         #   (401 JSON a una API, redirección al login a un navegador)
+│   ├── server.py             # _ServerMixin — bind + arranque: fail-soft por interfaz, fail-hard en conjunto
 │   ├── services.py           # _ServicesMixin (descubre + controla los servicios embebidos)
 │   ├── stores.py             # _StoresMixin — construir los stores al arrancar (backend, conector, orden)
 │   ├── scanners.py           # _ScannersMixin — salud de servicios, caducidad de certificados y de secretos
+│   ├── freshness.py          # _FreshnessMixin — releer roles/usuarios/grupos cuando otro proceso escribe
 │   └── embed.py              # _EmbedMixin — frame-ancestors + SameSite de la cookie: dos decisiones que van juntas
 │   # _ConfigMixin NO está aquí: es pegamento del dominio config (core/config/routes.py llama a
 │   #   _read_config_file/_write_config/_apply_config_on_save) → lib/core/config/mixin.py
