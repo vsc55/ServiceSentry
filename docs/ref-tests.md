@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4819 tests** (4819 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4823 tests** (4823 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -5942,7 +5942,7 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 
 ## 133. Configuration — un índice lateral sobre un solo renderizador
 
-**Archivo:** `tests/test_wa_config_views.py` — 70 tests
+**Archivo:** `tests/test_wa_config_views.py` — 74 tests
 
 Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar
 un ajuste costaba abrir siete, y no decían nada de las seis que no estabas mirando. El índice

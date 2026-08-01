@@ -899,3 +899,55 @@ class TestTheHeaderIsPinned:
         css = _read(CSS)
         i = css.index('.cfg-sheet .cfg-card .cfg-fields {')
         assert 'padding: .55rem 0 .75rem' in css[i:css.index('}', i)]
+
+
+class TestAnOptionThatDoesNotApplyIsNotCounted:
+    """Reported from Database: on SQLite the section offers two options and the index said six.
+
+    The four missing ones were the host / port / user / password of a MySQL deployment — still
+    in the config, no longer applying to anything, and still being counted. The number then
+    sent the reader hunting for four settings that are not on the screen and would do nothing
+    if they were, which is the opposite of what "6 modified" is for.
+
+    Conditional options declare themselves with `.sw-field[data-sw-when]`, so the answer was
+    already in the DOM; nothing was asking it.
+    """
+
+    FIELD_RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                'core', '_field_render.html')
+
+    def test_the_one_definition_asks_whether_it_applies(self):
+        """Into `_cfgFieldIsChanged` rather than into the counter: it is the single definition
+        the count, the filter and the index all read, and putting it anywhere else would fix
+        the number while leaving the list it counts unchanged."""
+        body = _fn(_read(VIEWS), '_cfgFieldIsChanged')
+        assert '_cfgFieldApplies' in body, \
+            'the count is back to including options the current engine rules out'
+        assert body.index('_cfgFieldApplies') < body.index('data-cfg-changed'), \
+            'applicability is decided after the answer has already been given'
+
+    def test_it_reads_the_marker_and_never_computed_visibility(self):
+        """`offsetParent`/`getComputedStyle` would be the obvious way and would be catastrophic
+        here: every card but the section on screen is hidden at any moment, so it would zero
+        the count of every OTHER section — the whole index."""
+        body = _fn(_read(VIEWS), '_cfgFieldApplies')
+        assert 'sw-field' in body and 'display' in body
+        for wrong in ('offsetParent', 'getComputedStyle', 'checkVisibility'):
+            assert wrong not in body, \
+                f'{wrong} confuses "not applicable" with "not the section on screen"'
+
+    def test_it_walks_every_wrapper_not_just_the_nearest(self):
+        """Conditional wrappers nest — an option can be inside a group that is itself
+        conditional — and stopping at the first one would count a row inside a hidden group."""
+        body = _fn(_read(VIEWS), '_cfgFieldApplies')
+        assert 'for (' in body or 'while' in body, 'it stopped climbing past the first wrapper'
+
+    def test_changing_the_engine_recounts(self):
+        """The select fires `updateField(...);_refreshConditionalFields(...)` in that order, so
+        the refresh updateField triggers runs against the OLD visibility. Whatever depends on
+        which options apply has to be recomputed by the thing that changes them."""
+        body = _fn(_read(self.FIELD_RENDER), '_refreshConditionalFields')
+        assert '_cfgRefreshMarks' in body, \
+            'switching the database engine leaves the count one change behind'
+        assert 'config-container' in body, \
+            'it fires for module items too, whose panel has no index to keep in step'

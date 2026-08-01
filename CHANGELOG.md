@@ -8,6 +8,25 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.37] - 2026-08-01
+
+### Fixed
+- **The Configuration index counted options that do not apply.** Database showed "6 modified"
+  while offering two settings: on SQLite the host / port / name / user / password left behind
+  by a MySQL deployment are still in the config, no longer apply to anything, and were still
+  being counted. The number then sent the reader hunting for four settings that are not on the
+  screen and would do nothing if they were — the opposite of what a "modified" count is for.
+  Conditional options already declare themselves (`.sw-field[data-sw-when]`); nothing was
+  asking. The check goes into `_cfgFieldIsChanged`, the single definition the count, the
+  filter and the index all read, so all three agree by construction. It reads the marker and
+  never computed visibility: every card but the section on screen is hidden at any moment, so
+  `offsetParent` would have zeroed the count of every other section.
+- **Switching the database engine left the count one change behind.** The select fires
+  `updateField(...);_refreshConditionalFields(...)` in that order, so the refresh the first
+  call triggers ran against the old visibility. `_refreshConditionalFields` — the only thing
+  that changes which options apply — now recomputes the marks itself, scoped to the config
+  sheet so module items do not pay for it.
+
 ## [0.0.1+build.36] - 2026-08-01
 
 ### Fixed

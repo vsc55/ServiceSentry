@@ -91,6 +91,12 @@ function _cfgCardChangedCount(node) {
  *  one an admin cannot move back from this screen, which is the most worth showing.
  */
 function _cfgFieldIsChanged(w) {
+    // An option that does not APPLY has not been changed, whatever is stored under it.
+    // Database was the case that showed it: on SQLite the section offers two options and the
+    // index said six, because the host/port/user/password left behind by a MySQL deployment
+    // are still in the config and were still being counted. The number sent you looking for
+    // four settings that are not on the screen and would do nothing if they were.
+    if (!_cfgFieldApplies(w)) return false;
     // A row that is not a registry-backed option can still answer for itself — the exposed
     // services are records in their own store, saved through their own endpoint, and the
     // registry has nothing to compare them against. Saying so declaratively is what keeps
@@ -100,6 +106,24 @@ function _cfgFieldIsChanged(w) {
     if (!path) return false;      // buttons, lists — they belong to a section, not to an option
     const locked = w.matches('[data-env-locked]') || !!w.querySelector('[data-env-locked]');
     return locked || !_cfgIsDefault(path);
+}
+
+/** Does this option apply to how the panel is currently configured?
+ *
+ *  Conditional options live inside `.sw-field[data-sw-when]`, and `_refreshConditionalFields`
+ *  hides the ones whose controlling value rules them out — the database engine being the
+ *  clearest case: pick SQLite and the five network settings stop applying.
+ *
+ *  Asked of the `.sw-field` marker specifically, never of computed visibility. A card that is
+ *  simply not the section on screen is hidden too, and every card but one is in that state at
+ *  any moment — reading `offsetParent` here would zero the count of every section the index
+ *  lists, which is the whole index.
+ */
+function _cfgFieldApplies(w) {
+    for (let el = w.closest('.sw-field'); el; el = el.parentElement?.closest('.sw-field')) {
+        if (el.style.display === 'none') return false;
+    }
+    return true;
 }
 
 /** The node a layout card renders into: its own `.cfg-card`, or the element itself when the

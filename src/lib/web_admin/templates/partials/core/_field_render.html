@@ -1474,6 +1474,18 @@ function _refreshConditionalFields(itemPathStr) {
             } catch {}
         });
     });
+    // Whatever depends on WHICH options apply has to be recomputed after they change, and
+    // this is the only place that changes them. The config index counts and marks only the
+    // options that apply, and the select that switches them fires
+    // `updateField(...);_refreshConditionalFields(...)` in that order — so the refresh
+    // `updateField` already triggered ran against the OLD visibility, and switching the
+    // database engine left the count one change behind for ever.
+    // Scoped to the config sheet: this runs constantly for module items, and their panel has
+    // no index to keep in step.
+    if (typeof _cfgRefreshMarks === 'function'
+        && [...containers].some(el => el.closest('#config-container'))) {
+        _cfgRefreshMarks();
+    }
 }
 
 document.addEventListener('show.bs.collapse', function(e) {
