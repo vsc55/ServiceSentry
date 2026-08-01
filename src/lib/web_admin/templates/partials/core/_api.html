@@ -74,15 +74,46 @@ function _onSessionTerminated() {
     setTimeout(() => { location.href = '/login'; }, _rrMs);
 }
 
+/** Read a response body as JSON, and when it is NOT JSON say so instead of throwing.
+ *
+ *  Returns `{ok, data}`: `ok:false` carries a usable `data.error` built from the status and
+ *  the first line of whatever did arrive.
+ *
+ *  Every wrapper below used to call `r.json()` bare inside a try, so an error page — a 500
+ *  before the JSON handler existed, an nginx 502, a login redirect serving HTML — threw on
+ *  the parse and landed in the SAME `catch` as a dropped connection, returning the same
+ *  null. Status and body were both gone by the time a caller could look, which is why a
+ *  crashed save could only ever say "Error al guardar": the toast prints `r?.error`, and
+ *  null has no error to print.
+ *
+ *  The console line is the other half. A user reporting "it says failed" now has something
+ *  to paste, and it costs nothing when nothing is wrong. */
+async function _readJson(r, method, url) {
+    const body = await r.text();
+    try {
+        return { ok: true, data: JSON.parse(body) };
+    } catch (_) {
+        const head = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+        console.error(`[api] ${method} ${url} -> HTTP ${r.status} (non-JSON response)`, head);
+        return { ok: false, data: { error: `HTTP ${r.status}${head ? ': ' + head : ''}` } };
+    }
+}
+
 async function apiGet(url) {
     try {
         const r = await fetch(url);
         if (r.status === 401 || r.status === 302) { _onSessionTerminated(); return null; }
-        if (!r.ok) return null;
+        // Still null — callers do `if (!data) return;` and handing them an error object
+        // would put it on screen as data. Only the console line is new, so a failed load is
+        // at least traceable to a status instead of a section that silently stays empty.
+        if (!r.ok) { console.error(`[api] GET ${url} -> HTTP ${r.status}`); return null; }
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
         return await r.json();
-    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
+    } catch (e) {
+        console.error(`[api] GET ${url} failed before a response arrived`, e);
+        return null;                /* the fetch wrapper flags the connection-lost overlay */
+    }
 }
 // Silent GET for background polling: never toasts, never redirects, never
 // triggers session-termination — returns parsed JSON or null on any failure.
@@ -117,8 +148,13 @@ async function apiPut(url, data) {
             body: JSON.stringify(data)
         });
         if (r.status === 401) { _onSessionTerminated(); return null; }
-        return await r.json();
-    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
+        // Returned even when the body is not JSON: the shape is `{error}`, which is exactly
+        // what every caller already reads (`r && r.ok` fails, then it prints `r.error`).
+        return (await _readJson(r, 'PUT', url)).data;
+    } catch (e) {
+        console.error(`[api] PUT ${url} failed before a response arrived`, e);
+        return null;                /* the fetch wrapper flags the connection-lost overlay */
+    }
 }
 async function apiPost(url, data) {
     try {
@@ -128,13 +164,21 @@ async function apiPost(url, data) {
             body: JSON.stringify(data)
         });
         if (r.status === 401) { _onSessionTerminated(); return null; }
-        return { status: r.status, data: await r.json() };
-    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
+        // `{status, data}` holds either way — callers read `r.status` and `r.data.error`,
+        // and a non-JSON body now fills that `error` instead of erasing the whole response.
+        return { status: r.status, data: (await _readJson(r, 'POST', url)).data };
+    } catch (e) {
+        console.error(`[api] POST ${url} failed before a response arrived`, e);
+        return null;                /* the fetch wrapper flags the connection-lost overlay */
+    }
 }
 async function apiDelete(url) {
     try {
         const r = await fetch(url, { method: 'DELETE' });
         if (r.status === 401) { _onSessionTerminated(); return null; }
-        return { status: r.status, data: await r.json() };
-    } catch (e) { return null; }   /* the fetch wrapper flags the connection-lost overlay */
+        return { status: r.status, data: (await _readJson(r, 'DELETE', url)).data };
+    } catch (e) {
+        console.error(`[api] DELETE ${url} failed before a response arrived`, e);
+        return null;                /* the fetch wrapper flags the connection-lost overlay */
+    }
 }

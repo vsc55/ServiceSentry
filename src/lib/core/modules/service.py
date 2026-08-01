@@ -276,6 +276,109 @@ def rekey_items_by_uid(data: dict) -> None:
                 module_cfg[coll_name] = _rekey_collection(coll)
 
 
+# ── where an item came from ──────────────────────────────────────────────────────
+# The UI stamps this on a copy so the save can tell a clone from a hand-made item. By the
+# time the payload arrives the two are indistinguishable — same fields, a uid the server just
+# generated — and "where did this come from" is exactly what somebody asks of the audit when
+# two rows look alike. Taken (not read) at save time: it answers a question about the write,
+# it is not part of the configuration, and storing it would make it a fact about the item
+# for ever rather than about the moment it was created.
+_CLONE_MARK = '__cloned_from__'
+
+
+def take_clone_marks(data: dict) -> dict:
+    """``{(module, coll, key): source_key}`` for every marked item, removing the mark."""
+    marks: dict = {}
+    for module, module_cfg in (data or {}).items():
+        if not isinstance(module_cfg, dict):
+            continue
+        for coll_name in _ITEM_COLLECTIONS:
+            coll = module_cfg.get(coll_name)
+            if not isinstance(coll, dict):
+                continue
+            for key, item in coll.items():
+                if not isinstance(item, dict) or _CLONE_MARK not in item:
+                    continue
+                src = str(item.pop(_CLONE_MARK) or '').strip()
+                if src:
+                    marks[(module, coll_name, key)] = src
+    return marks
+
+
+def item_schemas(modules_dir: str | None) -> dict:
+    """The per-collection item schemas, keyed ``"module|collection"`` — or ``{}``.
+
+    Wrapped so the audit never depends on discovery succeeding: naming an item is a nicety,
+    and a module folder that fails to scan must not be the reason a save 500s. Same shape of
+    guard as :func:`strip_credential_fields`.
+    """
+    try:
+        from lib.modules.module_base import ModuleBase  # noqa: PLC0415
+        return ModuleBase.discover_schemas(modules_dir) or {}
+    except Exception:  # pylint: disable=broad-except
+        return {}
+
+
+def _item_title_field(schemas: dict, module: str, coll: str) -> str:
+    """The field holding an item's name, as the module's schema declares it.
+
+    Modules do declare it (``label`` for most, ``ups_name``, ``process``), and using the
+    declaration rather than guessing is what keeps this correct for the next module that
+    picks a different field. ``label`` is the fallback the rest of the UI already assumes.
+    """
+    sch = (schemas or {}).get(f'{module}|{coll}') or {}
+    return sch.get('__check_title_field__') or 'label'
+
+
+def _item_name(item, key: str, title_field: str) -> str:
+    """What to CALL an item in an audit entry: its name and its uid, never one alone.
+
+    The name is what the reader recognises; the uid is what survives a rename. An entry that
+    carried only the name would stop matching the item the first time it was renamed, and one
+    that carried only the uid would need a lookup to mean anything.
+    """
+    name = str((item or {}).get(title_field) or '').strip() if isinstance(item, dict) else ''
+    return f'{name} ({key})' if name and name != key else key
+
+
+def item_origin_rows(old_data: dict, data: dict, marks: dict, schemas=None) -> list:
+    """Audit rows naming every item that APPEARED in this save, and where it came from.
+
+    ``_diff_dicts`` already reports the new item's fields, but it reports them the same way
+    whether the item was typed from scratch or copied — the one distinction somebody chasing
+    a duplicate actually needs. These rows state it outright.
+    """
+    rows = []
+    for module, module_cfg in (data or {}).items():
+        if not isinstance(module_cfg, dict):
+            continue
+        for coll_name in _ITEM_COLLECTIONS:
+            coll = module_cfg.get(coll_name)
+            if not isinstance(coll, dict):
+                continue
+            old_coll = ((old_data or {}).get(module) or {}).get(coll_name)
+            old_coll = old_coll if isinstance(old_coll, dict) else {}
+            tf = _item_title_field(schemas, module, coll_name)
+            for key, item in coll.items():
+                if key in old_coll:
+                    continue
+                src = marks.get((module, coll_name, key))
+                where = f'{module}.{coll_name}'
+                if src:
+                    rows.append({
+                        'field': f'{where} · cloned item',
+                        'old': _item_name(old_coll.get(src), src, tf),
+                        'new': _item_name(item, key, tf),
+                    })
+                else:
+                    rows.append({
+                        'field': f'{where} · new item',
+                        'old': '',
+                        'new': _item_name(item, key, tf),
+                    })
+    return rows
+
+
 # ── credential / provisioning helpers ────────────────────────────────────────────
 def strip_credential_fields(data: dict, modules_dir: str) -> None:
     """For items that reference a credential (``cred_uid``), drop the module's inline

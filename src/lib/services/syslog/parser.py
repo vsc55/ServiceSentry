@@ -44,13 +44,38 @@ def _decode(data) -> str:
     return str(data)
 
 
+# RFC 5424 §6.2 caps HOSTNAME at 255 characters and APP-NAME at 48. Both are INDEXED columns
+# (idx_syslog_host_ts), which on MySQL makes them VARCHAR(255) — an index needs a bounded
+# type. Their content arrives over the network from anyone who can reach the listener, and
+# nothing between the socket and the INSERT bounded it: a sender emitting a 1000-character
+# hostname hits "Data too long for column" on a strict-mode MySQL, and writes are batched 500
+# at a time, so one malformed datagram could take the whole batch with it. SQLite would have
+# stored it happily, which is why this never showed up in development.
+#
+# Clamping here is not a workaround for the column width; it is the RFC's own limit, applied
+# where every other normalisation already happens.
+_MAX_HOSTNAME = 255
+_MAX_APP = 48
+
+
 def parse_message(data, source: str = '', received_at: str | None = None) -> dict:
     """Parse one syslog message into a normalised record.
 
     *data* is the raw datagram (bytes or str); *source* the sender IP.  Returns a
     dict with: facility/severity (ints + names), version, timestamp (sender's, when
     present), hostname, app, procid, msgid, message, source, received_at, raw.
+
+    The two RFC-bounded fields are clamped on the way out — here rather than inside
+    :func:`_parse`, which has four exits, so no parsing path can skip it.
     """
+    rec = _parse(data, source, received_at)
+    rec['hostname'] = rec['hostname'][:_MAX_HOSTNAME]
+    rec['app'] = rec['app'][:_MAX_APP]
+    return rec
+
+
+def _parse(data, source: str, received_at: str | None) -> dict:
+    """Parse into the record shape; :func:`parse_message` bounds the keyed fields."""
     raw = _decode(data).rstrip('\r\n\x00')
     received_at = received_at or _now_iso()
     rec = {

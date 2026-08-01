@@ -54,7 +54,7 @@ De menor a mayor prioridad — cada capa sobreescribe la anterior:
    string a enabled+nivel; `'off'`/`''`/`'none'`/`'false'` deshabilita. Valores aceptados:
    `off, debug, info, warning, error`.
 2. **CLI** `--log-level` / **env** `SS_LOG_LEVEL` — en el arranque web sobreescribe la config
-   ([main.py:180](../src/main.py#L180), [app.py:907](../src/lib/web_admin/app.py#L907)).
+   ([main.py:180](../src/main.py#L180), [app.py:560](../src/lib/web_admin/app.py#L560)).
 3. El **scheduler re-aplica** `global|log_level` en cada ciclo, de modo que un cambio en vivo
    surte efecto sin reiniciar ([manager.py:286](../src/lib/services/monitoring/manager.py#L286)).
 
@@ -68,12 +68,12 @@ El monitor **standalone** usa `'info'` por defecto si no hay nivel definido.
 
 Los mensajes de bind del servidor (host:puerto) se imprimen **directamente** a stdout/stderr,
 saltándose el log, "porque el nivel por defecto es `off`"
-([app.py:1038](../src/lib/web_admin/app.py#L1038)) — así siempre se ve dónde escucha el
+([mixins/server.py:90](../src/lib/web_admin/mixins/server.py#L90)) — así siempre se ve dónde escucha el
 servidor aunque el logging esté desactivado.
 
 > ⚠️ **`--verbose` / `SS_VERBOSE` NO cambian el nivel de log.** Solo activan el **debugger
 > interactivo de Flask** (`app.debug=True` + `DebuggedApplication`,
-> [main.py:201](../src/main.py#L201), [app.py:1002](../src/lib/web_admin/app.py#L1002)). Para
+> [main.py:201](../src/main.py#L201), [mixins/server.py:48](../src/lib/web_admin/mixins/server.py#L48)). Para
 > subir el detalle del log usar `--log-level` / `SS_LOG_LEVEL` / `global.log_level`.
 
 ---

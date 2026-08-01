@@ -8,6 +8,122 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.36] - 2026-08-01
+
+### Fixed
+- **Cloning an item stored it and reported failure.** Reported against m365, true of every
+  module: clone an item, rename it, save — the record IS written while the screen says "Error
+  al guardar", the Save button stays lit, and the audit shows neither the save nor the error.
+  Two defects lined up. The clone kept the original's `uid` (a deep copy of an item copies its
+  identity too), so it arrived claiming to be the original and tripped the duplicate-uid alarm
+  built to catch real corruption. And recording that duplicate crashed the request:
+  `_diff_dicts` returns `[{field, old, new}]` and the note was appended with `+` as if it were
+  a string — `TypeError`, raised AFTER the write had committed and BEFORE the audit line ran.
+  The clone now drops uids (recursively, and by exact name so `cred_uid`/`host_uid` references
+  survive), and the note is a row in the change list. The endpoint still tolerates a duplicate
+  uid, because an imported config or a hand-edited file can still carry one.
+- **"Modules saved" was audited even when nothing changed.** A PUT that stores what was
+  already there is a no-op, and an entry with nothing under it is worse than no entry at all:
+  the audit is read to answer "what changed and when", so a row that answers "nothing" costs a
+  click to find that out and invites the reading that a change was made and lost. Now the
+  entry is written only when there is something in it. (The duplicate-uid note counts as
+  content in its own right — it reports something that happened even when no field moved.)
+- **The pinned header's shadow broke off square at its rounded corner.** A `box-shadow`
+  traces the `border-radius` of the element that DECLARES it — and the shadow is declared on
+  the `.ss-bleed-top` wrapper while the rounded bottom belongs to the toolbar inside it, so
+  the shadow went on drawing the wrapper's square corner beside the child's curve. The
+  wrapper now carries the same radius; it draws nothing itself, so the value exists purely to
+  shape the shadow. One token covers both states, since `.ss-toolbar` and the search box's
+  `.rounded-bottom-3` both resolve to `--bs-border-radius-lg`.
+- **The Configuration toolbar looked square-bottomed in light mode.** Reported as a missing
+  border radius; it was never missing. `.ss-bleed-top` removes the pinned header's side and
+  top borders, so its bottom border is the only thing left to draw that curve — and the dark
+  theme redefines `--bs-border-color` to a value *lighter* than the bar it sits on, while the
+  light theme inherits Bootstrap's `#dee2e6` against a `#e9ecef` bar. Two greys a dozen points
+  apart render a corner nobody can see. The light theme now gives that one border enough
+  contrast to show the shape it already had.
+- **Cloning asks for the name before it copies anything.** It used to clone on the click,
+  which left two rows under the same label with no way to tell which was which — and no way
+  back, since the copy already existed and leaving meant Undo or Discard. A modal now proposes
+  `<name>_Copia1`, counting up to the first free one and restarting from the base name so
+  cloning `web_Copia1` offers `web_Copia2` rather than `web_Copia1_Copia1`. Blank and
+  already-taken names are refused in the modal, where they can be corrected. Cancel means
+  nothing happened. The typed name is written where the list READS it — through the same
+  helper, so the two cannot drift: most collections declare the field (`label`, `ups_name`,
+  `process`), and the ones keyed by the thing itself become field-named the moment the
+  server's re-key turns their key into a uid and stamps the old key into `label`.
+- **The audit now says whether an item was created or cloned, and from what.** `_diff_dicts`
+  reports a new item's fields the same way either way, which is exactly the distinction
+  somebody comparing two near-identical rows needs. The UI stamps `__cloned_from__` on a copy;
+  the save TAKES it — never stores it, since it is a fact about the moment the item was
+  created, not a property of the item — and turns it into a row naming both items by the field
+  their module declares as the name.
+- **The clone toast quoted the item's key instead of its name.** Once an item has been saved
+  its key IS its uid, so cloning announced "Cloned as:
+  `d19b5737-da04-4fa2-b2ab-6c6e11c3e913_copy`" — a string identifying nothing visible on
+  screen, about a copy the user is about to rename anyway. It now uses the collection's
+  declared title field, the same one the pencil button edits.
+- **An unhandled exception left no trace anywhere.** Asked directly: why is there nothing in
+  the audit or the console, just "Error al guardar"? Because nothing recorded it at any of the
+  four points that could have — no `errorhandler` was registered, `after_request` does not run
+  when a handler raises (so the per-endpoint trace line that logs every 4xx/5xx never fired),
+  the traceback went to Flask's logger which this panel wires into neither its debug output nor
+  its log file, and no code wrote an audit entry. The client then discarded what survived: an
+  HTML error body threw inside `r.json()` and landed in the same `catch` as a dropped
+  connection, returning the same `null` the toast had no error to read from. Now one short
+  reference appears in three places at once — the log line, an `internal_error` audit entry
+  naming the endpoint and the exception, and the message on screen — while the traceback stays
+  out of the response. `HTTPException` passes through untouched (a 404 is an answer, not a
+  fault), and under pytest/debug the exception is still raised, so a crash in the suite still
+  fails like one.
+- **A syslog hostname from the network could take a write batch with it.** `hostname` and
+  `app` are indexed columns, so on MySQL they are `VARCHAR(255)` — an index needs a bounded
+  type — and nothing between the socket and the INSERT bounded their content. A sender
+  emitting a 1000-character hostname hits "Data too long for column" on a strict-mode MySQL,
+  and the writer batches 500 rows at a time, so one malformed datagram could fail the batch.
+  SQLite stored it happily, which is why it never showed up in development. Clamped to the
+  RFC's own limits (5424 §6.2: HOSTNAME ≤ 255, APP-NAME ≤ 48), in the public parse function
+  rather than inside the parser, which has four exits.
+
+### Added
+- **A guard that keeps `ref-esquema-bd.md` describing the tables that exist, and all of them.**
+  It is the only place the physical schema is explained in prose, which makes it what somebody
+  reads before touching a store — and nothing kept it honest: the tables matched by hand on the
+  day it was written, and the next `TableSpec` would not have failed anything by going
+  undocumented. Both directions, because a documented table that no longer exists is the rot
+  that lasts longest: nobody greps for a name that is gone. Columns and their order too — order
+  is load-bearing for the reconcile, since a column missing from the end is added in place
+  while one missing from the middle rebuilds the table. It found the first drift immediately:
+  `msteams_channels` was described in prose ("same shape as `webhooks`") instead of with its
+  columns — accurate, but not checkable, and the kind of claim that expires by itself the day
+  `webhooks` gains a column.
+
+### Changed
+- **`app.py` is the class again, not the panel.** It had reached 1119 lines with a single
+  372-line method inside it; four things that had no business there moved out to
+  `lib/web_admin/mixins/`, each as a whole block rather than rewritten. What stayed is what the
+  file is for: `__init__` composing the object in an order its own comments explain, and
+  `_create_app` assembling the Flask app from the pieces. 1119 → 626 lines.
+- **The order of the request lifecycle is declared, not implied.** Flask runs `before_request`
+  handlers in registration order, so the panel's security order was the order of five
+  decorators in the middle of that 372-line method — true, load-bearing, and written down
+  nowhere. Moving a block while tidying would have changed who guards what, and every test
+  would still have passed with the fail2ban gate running third. `_HooksMixin._BEFORE_REQUEST`
+  is the order now, with the reason for each position beside it, and a guard that checks the
+  registration actually reads it rather than the tuple being documentation.
+  Writing it down surfaced two dependencies nobody had stated: CSRF is judged **before** the
+  FQDN redirect, or a state-changing request that arrived on the wrong hostname is bounced to a
+  URL that drops its body and its token is never looked at; and the shared caches refresh
+  **before** anything authorises, since a CSRF rejection is audited against the user store.
+- **The four route guards share one refusal.** They all began with the same "is there a
+  session?" check, written out four times — and the load-bearing part is not the check but the
+  ANSWER: an API caller gets 401 JSON, a browser gets the login page. Reply the wrong way and a
+  `fetch()` renders a login page into a table. Written once now, so four copies cannot drift
+  into three answers.
+- **The template context is one file.** Adding a constant for a template used to mean opening
+  the file that owns the request lifecycle. It also gained a seam worth having: "available" and
+  "enabled" are different questions about an auth provider, and the login page asks both.
+
 ## [0.0.1+build.35] - 2026-08-01
 
 ### Fixed

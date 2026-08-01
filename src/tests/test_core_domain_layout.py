@@ -50,7 +50,11 @@ WA_MIXINS = os.path.join(SRC, 'lib', 'web_admin', 'mixins')
 # `config` deliberately did NOT stay: lib/core/config/routes.py calls _read_config_file,
 # _write_config and _apply_config_on_save, so that mixin is the config domain's glue and lives
 # in lib/core/config/mixin.py like every other domain's. This guard is what caught it.
-NON_DOMAIN_MIXINS = {'auth', 'services', 'freshness', 'stores', 'scanners', 'embed'}
+# Glue that belongs to no domain. 'context' (what every template renders with) and
+# 'server' (binding the interfaces and serving) were carved out of app.py, where they sat
+# inside and beside the method that builds the Flask app.
+NON_DOMAIN_MIXINS = {'auth', 'services', 'freshness', 'stores', 'scanners', 'embed',
+                     'context', 'server', 'hooks', 'guards'}
 
 
 def _domains():

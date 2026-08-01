@@ -163,19 +163,146 @@ function _bulkDeleteItems(collPath, target) {
     });
 }
 
+/** Strip every `uid` from a copied item, at any depth, and return it.
+ *
+ *  Depth matters because an item can hold its own collection of items (snmp's per-server
+ *  `checks`), and those are keyed by uid on the server too — a clone that kept them would
+ *  collide once per nested check instead of once per item.
+ *
+ *  Only the exact name `uid` goes. `cred_uid` and `host_uid` are REFERENCES, not identity:
+ *  the copy should go on pointing at the same credential and the same host, which is why
+ *  this cannot be "delete anything ending in uid". No module schema declares a plain `uid`
+ *  field of its own, so the name is unambiguous. */
+function _stripItemUids(value) {
+    if (Array.isArray(value)) { value.forEach(_stripItemUids); return value; }
+    if (value && typeof value === 'object') {
+        delete value.uid;
+        for (const v of Object.values(value)) _stripItemUids(v);
+    }
+    return value;
+}
+
+/** What to CALL an item when talking to the user about it.
+ *
+ *  The dict key stopped being a name the moment items were re-keyed by uid, so anything that
+ *  quotes the key back at somebody is quoting an opaque string about a row they are looking
+ *  at under a different label. The collection's schema declares which field holds the title
+ *  (`__check_title_field__`, the same one the pencil button edits); `label` is the fallback
+ *  the rest of the UI already assumes, and the key is the last resort — correct for the
+ *  collections whose key IS the name. */
+function _itemDisplayName(parentPathStr, key, item) {
+    const tf = _itemTitleField(parentPathStr, item);
+    const name = tf && item && String(item[tf] || '').trim();
+    return name || key;
+}
+
+/** WHERE an item's name lives: the field holding it, or `null` when the name is the key.
+ *
+ *  One function, because reading a name and writing one must not disagree — a clone that
+ *  wrote the typed name somewhere other than where the list reads it would show the old name
+ *  on the new row, which is the exact confusion this whole change is about.
+ *
+ *  Most collections declare the field (`label` for most, `ups_name`, `process`). Where none
+ *  is declared the collection is keyed by the thing itself — a hostname, an IP — and the key
+ *  IS the name, EXCEPT once it has been saved: the server's re-key turns a human key into a
+ *  uid and stamps the old key into `label`, which is then what the list shows. So an item
+ *  already carrying a `label` is field-named whatever its schema says. */
+function _itemTitleField(parentPathStr, item) {
+    const sch = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || {};
+    if (sch['__check_title_field__']) return sch['__check_title_field__'];
+    return (item && typeof item === 'object' && 'label' in item) ? 'label' : null;
+}
+
+/** Propose "<base>_Copia1", counting up to the first name nothing else is using.
+ *
+ *  The count restarts from the BASE, so cloning "web_Copia1" proposes "web_Copia2" rather
+ *  than "web_Copia1_Copia1" — the suffix marks a copy, it is not part of the name.
+ *  Compared against the names on SCREEN, not the dict keys: a duplicate key is impossible
+ *  anyway, and it is two identical labels that leave the user unable to tell the rows apart. */
+function _proposeCloneName(parentPathStr, parent, sourceName) {
+    const word = t('clone_copy_word') || 'Copy';
+    const base = String(sourceName).replace(
+        new RegExp('_' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\d+$'), '');
+    const taken = new Set(Object.entries(parent).map(
+        ([k, v]) => _itemDisplayName(parentPathStr, k, v).toLowerCase()));
+    let n = 1;
+    while (taken.has(`${base}_${word}${n}`.toLowerCase())) n++;
+    return `${base}_${word}${n}`;
+}
+
+let _cloneItemCtx = null;
+
+/** Ask for the name BEFORE copying anything.
+ *
+ *  Cloning used to happen on the click, which left two rows under the same label with no way
+ *  to tell which was which — and no way to back out, since the copy already existed and the
+ *  only route back was Undo or Discard. Now Cancel means nothing happened. */
 function cloneItem(target, parentPathStr, key) {
-    const parts = parentPathStr.split('|');
     const data   = target === 'modules' ? modulesData : configData;
+    const parent = getPath(data, parentPathStr.split('|'));
+    if (!parent || !(key in parent)) return;
+
+    const sourceName = _itemDisplayName(parentPathStr, key, parent[key]);
+    _cloneItemCtx = { target, parentPathStr, key, sourceName };
+
+    const input = document.getElementById('cloneItemInput');
+    input.value = _proposeCloneName(parentPathStr, parent, sourceName);
+    document.getElementById('cloneItemSource').textContent =
+        tf('clone_item_source', sourceName);
+    const errEl = document.getElementById('cloneItemError');
+    errEl.classList.add('d-none');
+    errEl.textContent = '';
+
+    const modalEl = document.getElementById('cloneItemModal');
+    _setModalSaveButton('btnCloneItemOk', 'clone');
+    _focusNameOnCreate(modalEl, 'cloneItemInput', 'clone');
+    document.getElementById('btnCloneItemOk').onclick = _doCloneItem;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function _doCloneItem() {
+    if (!_cloneItemCtx) return;
+    const { target, parentPathStr, key } = _cloneItemCtx;
+    const data   = target === 'modules' ? modulesData : configData;
+    const parts  = parentPathStr.split('|');
     const parent = getPath(data, parts);
     if (!parent || !(key in parent)) return;
 
-    // Deep-copy the original item
-    const copy = JSON.parse(JSON.stringify(parent[key]));
+    const errEl = document.getElementById('cloneItemError');
+    const _fail = (msg) => { errEl.textContent = msg; errEl.classList.remove('d-none'); };
+    const name = (document.getElementById('cloneItemInput').value || '').trim();
+    if (!name) return _fail(t('clone_name_required'));
+    const clash = Object.entries(parent).some(
+        ([k, v]) => _itemDisplayName(parentPathStr, k, v).toLowerCase() === name.toLowerCase());
+    if (clash) return _fail(t('clone_name_exists'));
 
-    // Generate a unique key: try "<key>_copy", then "<key>_copy_2", etc.
-    const existingLower = new Set(Object.keys(parent).map(k => k.toLowerCase()));
-    let newKey = key + '_copy', n = 2;
-    while (existingLower.has(newKey.toLowerCase())) newKey = key + '_copy_' + n++;
+    // Deep-copy the original item, MINUS its identity. A uid names one item; a copy that
+    // keeps it is a second item claiming to be the first, and everything keyed by uid —
+    // check state, history, the store's own re-key — then has two answers for one question.
+    // The server hands any item without a uid a fresh one, so dropping it here is the whole
+    // fix; leaving it in made every clone arrive as a genuine duplicate and trip the
+    // corruption alarm that exists to catch real ones.
+    const copy = _stripItemUids(JSON.parse(JSON.stringify(parent[key])));
+
+    // Write the typed name where the list READS it — same helper, so the two cannot drift.
+    // With no name field the collection is keyed by the thing itself and the name IS the key;
+    // otherwise the key is a placeholder the server replaces with a uid on save.
+    const titleField = _itemTitleField(parentPathStr, copy);
+    let newKey;
+    if (!titleField) {
+        newKey = name;
+    } else {
+        copy[titleField] = name;
+        newKey = key + '_copy';
+        const takenKeys = new Set(Object.keys(parent).map(k => k.toLowerCase()));
+        let n = 2;
+        while (takenKeys.has(newKey.toLowerCase())) newKey = key + '_copy_' + n++;
+    }
+
+    // Tell the SERVER this is a copy and of what. The audit answers "where did this come
+    // from", and a clone is indistinguishable from a hand-made item by the time the payload
+    // arrives — same fields, new uid. Read and removed at save time, so it is never stored.
+    copy.__cloned_from__ = key;
 
     // Insert the clone immediately after the original, preserving order
     const entries = Object.entries(parent);
@@ -185,12 +312,17 @@ function cloneItem(target, parentPathStr, key) {
         parent[entries[i][0]] = entries[i][1];
         if (i === idx) parent[newKey] = copy;
     }
+    bootstrap.Modal.getInstance(document.getElementById('cloneItemModal'))?.hide();
+    _cloneItemCtx = null;
 
     markDirty(target);
     _autoExpandItemPath = parentPathStr + '|' + newKey;
     _pendingExpandMods.add(parts[0]);
     target === 'modules' ? _renderModulesSurface() : renderConfig();
-    showToast((t('item_cloned') || 'Cloned as') + ': ' + newKey);
+    // The NAME, not the key. Once an item has been saved its key IS its uid, so this said
+    // "Cloned as: d19b5737-da04-4fa2-b2ab-6c6e11c3e913_copy" — a string that identifies
+    // nothing the user can see on screen, about a copy they are about to rename anyway.
+    showToast((t('item_cloned') || 'Cloned as') + ': ' + _itemDisplayName(parentPathStr, newKey, copy));
 }
 
 function renameItem(target, parentPathStr, oldKey) {

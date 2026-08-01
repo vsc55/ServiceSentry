@@ -85,6 +85,19 @@ class TestAuditLog:
         assert isinstance(entry['detail'], list)
         assert any(c['field'] == 'ping.enabled' for c in entry['detail'])
 
+    def test_a_save_that_changed_nothing_is_not_audited(self, admin, client):
+        """Reported while chasing a phantom "Modules saved" entry: a PUT that stores what was
+        already there is a no-op, and an entry with nothing under it is worse than none. The
+        audit answers "what changed and when"; a row that answers "nothing" still costs a
+        click to discover that, and invites the reading that a change was made and lost."""
+        _login(client)
+        payload = {"ping": {"enabled": False, "threads": 5}}
+        client.put("/api/v1/modules", json=payload)
+        before = len([e for e in admin._audit_log if e['event'] == 'modules_saved'])
+        client.put("/api/v1/modules", json=payload)          # byte-for-byte the same
+        after = len([e for e in admin._audit_log if e['event'] == 'modules_saved'])
+        assert after == before, 'a no-op save wrote an audit entry with no changes in it'
+
     def test_config_save_audited(self, admin, client):
         """Saving config logs the specific field changes."""
         _login(client)

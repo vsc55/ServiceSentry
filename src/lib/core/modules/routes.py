@@ -103,6 +103,10 @@ def register(app, wa):
         # is the difference between finding its cause and guessing at it.
         dup_uids = modules_svc.duplicate_item_uids(data)
         modules_svc.rekey_items_by_uid(data)   # keep each item's dict key == its UID
+        # Taken AFTER the re-key, so a clone is recorded under the uid it will actually be
+        # stored with, and taken rather than read — the mark answers a question about this
+        # write, and persisting it would turn it into a permanent property of the item.
+        clone_marks = modules_svc.take_clone_marks(data)
         # Generic: provision/link a host for any item that declares one
         # (__provision_host__ in its schema) — so address modules (ping/web/
         # ssl_cert) can monitor that endpoint. Module-agnostic (discovery-driven).
@@ -115,9 +119,34 @@ def register(app, wa):
             )
             # The duplicate goes in the SAME entry as the change that carried it, because
             # that is the record someone will be reading when they ask where an item went.
+            # As a row in the change list, not text appended to it: `_diff_dicts` returns
+            # `[{field, old, new}]`, so concatenating a string raised TypeError — AFTER the
+            # save had already succeeded and BEFORE this audit line ran. The result was the
+            # worst shape a bug can take: the item stored, "save failed" on screen, the Save
+            # button still lit, and nothing in the audit to say either had happened.
             if dup_uids:
-                changes = (changes or '') + f'\nduplicate item uid(s): {", ".join(dup_uids)}'
-            wa._audit('modules_saved', detail=changes or '')
+                changes = list(changes or []) + [{
+                    'field': 'duplicate item uid(s)',
+                    'old': '', 'new': ', '.join(dup_uids),
+                }]
+            # Every item that APPEARED, and whether it was typed or copied. _diff_dicts
+            # reports the new item's fields either way, which is the one distinction somebody
+            # looking at two near-identical rows actually needs. Discovery supplies the field
+            # each module calls its name, so the entry reads as names rather than uids.
+            origins = modules_svc.item_origin_rows(
+                old_data, data, clone_marks,
+                modules_svc.item_schemas(getattr(wa, '_modules_dir', None)))
+            if origins:
+                changes = list(changes or []) + origins
+            # Only when something actually changed. A PUT that stores what was already there
+            # is a no-op, and an entry saying "Modules saved" with nothing under it is worse
+            # than no entry: the audit is read to answer "what changed and when", and a row
+            # that answers "nothing" still costs the reader a click to find that out — and
+            # invites the conclusion that a change was made and lost. The duplicate note
+            # counts as content in its own right: it says something happened even when no
+            # field moved.
+            if changes:
+                wa._audit('modules_saved', detail=changes)
             # A module or a cluster item that just disappeared leaves its scoped keys
             # behind. Module names, unlike UIDs, CAN come back — which is exactly why they
             # are purged: a stale module.<name>.edit would silently apply to whatever is

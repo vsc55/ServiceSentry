@@ -84,3 +84,48 @@ class TestRobustness:
     def test_names_tables(self):
         assert SEVERITIES[0] == 'emerg' and SEVERITIES[7] == 'debug'
         assert FACILITIES[0] == 'kern' and FACILITIES[23] == 'local7'
+
+
+class TestTheIndexedFieldsAreBounded:
+    """`hostname` and `app` are INDEXED columns, so on MySQL they are `VARCHAR(255)` — an
+    index needs a bounded type. Their content arrives over the network from anyone who can
+    reach the listener, and nothing between the socket and the INSERT bounded it.
+
+    A sender emitting a 1000-character hostname hits "Data too long for column" on a
+    strict-mode MySQL, and the writer batches 500 rows at a time, so one malformed datagram
+    could take the whole batch with it. SQLite stores it happily, which is why this never
+    showed up in development.
+
+    The clamp is the RFC's own limit (5424 §6.2: HOSTNAME ≤ 255, APP-NAME ≤ 48), not a
+    workaround for the column width — so it stays correct if the storage ever changes.
+    """
+
+    def test_a_huge_hostname_is_clamped_rfc3164(self):
+        r = parse_message('<13>Jan  1 00:00:00 ' + 'h' * 1000 + ' app: hola')
+        assert len(r['hostname']) == 255
+        assert r['message'] == 'hola', 'the message must survive the clamp intact'
+
+    def test_a_huge_hostname_is_clamped_rfc5424(self):
+        r = parse_message('<13>1 2026-01-01T00:00:00Z ' + 'H' * 900 + ' app - - hola')
+        assert len(r['hostname']) == 255
+
+    def test_a_huge_app_name_is_clamped(self):
+        """RFC 3164 bounds the tag by regex; 5424 takes any non-space run, so only this path
+        could deliver an oversized APP-NAME."""
+        r = parse_message('<13>1 2026-01-01T00:00:00Z host ' + 'A' * 200 + ' - - hola')
+        assert len(r['app']) == 48
+
+    def test_an_ordinary_message_is_untouched(self):
+        """The clamp must be invisible for every message that was already conformant."""
+        r = parse_message('<34>Oct 11 22:14:15 mymachine su[123]: fallo')
+        assert (r['hostname'], r['app'], r['procid']) == ('mymachine', 'su', '123')
+        assert r['message'] == 'fallo'
+
+    def test_every_parsing_path_goes_through_it(self):
+        """Four exits return a record — no PRI, PRI-but-unmatched, 3164 and 5424. The clamp
+        lives in the public function rather than inside the parser for exactly that reason;
+        this fails if someone moves it back in and misses an exit."""
+        for raw in ('plain text', '<13>' + 'x' * 400, '<13>Jan  1 00:00:00 ' + 'h' * 400 + ' a: m',
+                    '<13>1 2026-01-01T00:00:00Z ' + 'H' * 400 + ' a - - m'):
+            r = parse_message(raw)
+            assert len(r['hostname']) <= 255 and len(r['app']) <= 48, raw[:30]

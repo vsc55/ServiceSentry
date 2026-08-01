@@ -402,6 +402,15 @@
     border-top-left-radius: 0;
     border-top-right-radius: 0;
 }
+/* Once the sides and the top are gone, the BOTTOM border is the only thing left to draw that
+   rounded edge — the radius alone renders nothing you can see. The dark theme redefines
+   --bs-border-color to rgba(255,255,255,.09), LIGHTER than the bar it sits on, so the curve
+   reads; the light theme inherits Bootstrap's #dee2e6 against a #e9ecef bar — two greys a
+   dozen points apart — and the same rounded corner simply vanished. Reported as "the light
+   toolbar is missing its rounded bottom": it never was, it was invisible.
+   Scoped to the pinned header rather than to .ss-toolbar everywhere: this is the one place a
+   single border carries the whole shape. */
+[data-bs-theme="light"] .ss-bleed-top > * { border-color: rgba(0, 0, 0, .13); }
 /* .ss-scroll-fade : soften the top edge of a scroll box that sits under a pinned header.
    `overflow` cuts with a razor edge, so a row sliding under the header is sliced through
    the middle of an input — it reads as a rendering fault rather than as "there is more
@@ -1895,7 +1904,17 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    as a shadow cast BY the bar — the thing that is actually above — instead of as a fade
    applied to whatever happens to be under it. Above the header in the stack, so it lands on
    it rather than behind it. */
+/* The radius is on the WRAPPER even though the wrapper draws nothing — it has no background
+   and no border. A box-shadow follows the border-radius of the element that declares it, and
+   this shadow is declared here while the rounded bottom belongs to the child inside, so the
+   shadow was tracing the wrapper's square corner underneath the toolbar's curve: the corner
+   looked rounded and its shadow visibly broke off square beside it.
+   One value serves both states — `.ss-toolbar` rounds with --bs-border-radius-lg, and the
+   search box's `.rounded-bottom-3` is that same token — so whichever of the two forms the
+   bottom edge, the shadow matches it. */
 .cfg-main > .ss-bleed-top { position: relative; z-index: 11;
+                            border-bottom-left-radius: var(--bs-border-radius-lg);
+                            border-bottom-right-radius: var(--bs-border-radius-lg);
                             box-shadow: 0 .4rem .75rem -.2rem rgba(0,0,0,.7); }
 .cfg-sheet .cfg-sheet-head {
     position: sticky; top: 0; z-index: 10;

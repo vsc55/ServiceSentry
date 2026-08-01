@@ -19,6 +19,101 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Clonar un elemento lo guardaba y decía que había fallado — y el fallo no dejaba rastro
+
+**Fecha:** 2026-08-01 · **Área:** `lib/core/modules/routes.py` (`api_save_modules`),
+`partials/actions/_field_ops.html` (`cloneItem`), `lib/web_admin/mixins/hooks.py`
+(`_hook_unhandled_error`), `partials/core/_api.html`
+
+### Síntoma
+
+En el módulo m365 (cierto en todos): crear un elemento guarda bien. **Clonarlo**, cambiarle el
+nombre y guardar → el registro **se guarda**, pero sale «Error al guardar», el botón Guardar
+sigue marcando cambios pendientes, y en auditoría no aparece ni el guardado ni el error.
+
+### Diagnóstico
+
+Los tres síntomas juntos acotan el punto exacto: si el registro está escrito y la auditoría
+vacía, el fallo ocurre **entre** la escritura y la línea de auditoría — dos sentencias.
+
+Reproducido contra el endpoint real (no la UI) enviando lo que manda el navegador al clonar:
+copia profunda del elemento, clave nueva en el diccionario, **mismo `uid` dentro**.
+
+```text
+lib/core/modules/routes.py:119: in api_save_modules
+    changes = (changes or '') + f'\nduplicate item uid(s): {", ".join(dup_uids)}'
+E   TypeError: can only concatenate list (not "str") to list
+```
+
+### Causa raíz
+
+Dos defectos alineados:
+
+1. **[`_field_ops.html` → `cloneItem`](../src/lib/web_admin/templates/partials/actions/_field_ops.html)**
+   copiaba el elemento con `JSON.parse(JSON.stringify(...))`, **incluido su `uid`**. Un uid es
+   identidad, no dato; el servidor solo genera uno cuando falta
+   ([`service.py` → `ensure_item_uids`](../src/lib/core/modules/service.py)), así que la copia
+   llegaba diciendo ser el original. El re-keying lo repara dándole un uid nuevo, pero
+   `duplicate_item_uids` lo registra — correctamente: **había** llegado un duplicado.
+2. **[`routes.py:119`](../src/lib/core/modules/routes.py)** anotaba ese duplicado con `+` sobre
+   el resultado de `_diff_dicts`, que devuelve `list[dict]`, no `str`. `TypeError` **después**
+   de que `_save_modules` hubiera confirmado y **antes** de `wa._audit(...)`.
+
+Nada del camino de error hablaba, y ese es el defecto de fondo:
+
+- no había ningún `errorhandler` registrado → Flask respondía con su 500 HTML;
+- `after_request` **no** corre cuando una excepción sale del handler, así que la línea de traza
+  por endpoint (`_hook_trace_end`, que registra todo 4xx/5xx con su motivo) tampoco saltaba;
+- la traza iba al logger de Flask, que el panel **no** engancha a su salida de debug ni a su
+  fichero de log → bajo servicio o contenedor, a ningún sitio donde alguien mire;
+- en el cliente, [`apiPut`](../src/lib/web_admin/templates/partials/core/_api.html) hacía
+  `await r.json()` a pelo: el cuerpo HTML lanzaba en el parseo y caía en el **mismo** `catch`
+  que una conexión caída, devolviendo el mismo `null`. `saveModules` imprime `r?.error ||
+  t('save_error')` → «Error al guardar», sobre un valor que ya no tenía ni status ni cuerpo.
+
+### Solución
+
+1. `cloneItem` limpia el uid con `_stripItemUids(...)`, recursivo (un elemento puede contener su
+   propia colección de elementos, como los `checks` por servidor de snmp, también keyed por uid).
+   Borrado por **nombre exacto**: `cred_uid` y `host_uid` son *referencias*, y el clon debe
+   seguir apuntando a la misma credencial y al mismo host.
+2. La nota del duplicado pasa a ser una **fila más** de la lista de cambios
+   (`{field, old, new}`), que es lo que la UI de auditoría pinta como tabla.
+3. `_HooksMixin._hook_unhandled_error` (registrado en `_register_request_hooks`): devuelve las
+   `HTTPException` intactas (un 404 o un 403 son *respuestas*, no fallos), y para lo demás
+   genera **una referencia corta que aparece en tres sitios a la vez** — la línea de log, la
+   entrada de auditoría `internal_error` (ruta, método, endpoint, tipo y mensaje) y el mensaje
+   en pantalla. Bajo pytest/debug **sigue relanzando**, reproduciendo el `PROPAGATE_EXCEPTIONS`
+   de Flask: registrar un handler para `Exception` tiene precedencia sobre él, y no
+   reproducirlo habría convertido cada crash de la suite en un 500 educado.
+4. `_readJson(r, method, url)` en `_api.html`: `apiPut`/`apiPost`/`apiDelete` ya no parsean a
+   pelo. Un cuerpo no-JSON produce `{error: "HTTP 500: …"}` en vez de borrar la respuesta
+   entera, y cada fallo escribe una línea en consola.
+
+La traza **nunca** viaja en la respuesta: una página de error no es donde se publican los
+internos a quien alcance la URL, y la referencia es lo que hace que no haga falta.
+
+### Lección
+
+**Un fallo silencioso no es uno: son dos.** El defecto y la ausencia de rastro se arreglan por
+separado, y el segundo es el caro — porque hace que el primero solo se pueda diagnosticar
+reproduciéndolo.
+
+Tres patrones concretos:
+
+- **Un `TypeError` colocado entre «ya escrito» y «aún sin registrar» produce el peor estado
+  posible**: el usuario ve fallo sobre algo que sí ocurrió, y su reacción natural (guardar otra
+  vez, o deshacer) actúa sobre una premisa falsa. Cuando una operación tiene efecto y luego
+  registra, todo lo que va entre medias debe ser trivialmente incapaz de lanzar.
+- **Un `catch` que cubre dos causas distintas las vuelve indistinguibles.** Parsear un cuerpo
+  dentro del mismo `try` que la petición hace que un error del servidor y una red caída
+  devuelvan lo mismo. Sepáralos, aunque el resultado sea el mismo valor.
+- **Copiar un objeto no es clonar una entidad.** Toda copia profunda de algo que tiene identidad
+  debe decidir explícitamente qué campos son *identidad* (se descartan) y cuáles son
+  *referencias* (se conservan). Un `JSON.parse(JSON.stringify(x))` no decide nada.
+
+---
+
 ## Un test que solo podía fallar en la máquina de otro
 
 **Fecha:** 2026-07-28 · **Área:** `tests/test_wa_favicon.py`
