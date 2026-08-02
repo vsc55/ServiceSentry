@@ -8,6 +8,95 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.39] - 2026-08-02
+
+### Added
+- **The first tests that execute the panel's JavaScript.** Every other frontend test reads
+  the template as text: that fixes the structure of the markup and says nothing about whether
+  the code in it runs, so a `TypeError` on line one of the bundle leaves ~600 guards green
+  while the page is dead in the browser. The same blind spot as the page that 500'd because
+  nothing opened it, one layer out. Six Playwright tests now load every server-rendered page
+  in Chromium and **fail on any `console.error` or uncaught exception**, naming the page —
+  navigation is only how the JavaScript is made to run.
+- **A save driven the way a person drives it.** Open the user modal, fill it, press save, and
+  insist the row a person sees and the store agree afterwards. That path is where most of the
+  frontend lives, and it is the only place the CSRF token, the session cookie and the fetch
+  wrapper are exercised together: a token the wrapper stopped attaching would 403 every write
+  in the panel and no other test would notice.
+- Waiting is on the panel's **own** boot signal (the `#loading` overlay it removes in a
+  `finally`), never on `networkidle` — this is a monitoring panel, it polls health and
+  services forever, so the network is never idle and that wait can only ever time out. When
+  the boot never finishes, the collected browser errors are raised instead of the timeout:
+  reporting "timed out waiting for #loading" would send the reader hunting for a slow page
+  when the browser had already said `ReferenceError` and named the symbol.
+- Opt-in by construction: Playwright and its browser are optional, and the file skips itself
+  when either is missing, so a checkout without them still gets a green suite. Verified by
+  breaking a shared partial on purpose and confirming the failure names the cause.
+- **Stored payloads are proven not to execute, in the one place that can prove it.** The
+  browser tests store `onerror`/`onload` canaries — not `<script>`, which does not fire when
+  assigned through innerHTML and would pass on markup that is in fact vulnerable — as a display
+  name, a syslog line (the least trusted input in the product: whatever a device on the network
+  sent), an audit detail and a credential name, then open each list and assert nothing ran.
+  Each also asserts the payload is still *shown*: an escape that silently drops it would pass
+  the first check and be its own bug. Plus two properties only a browser settles — the session
+  cookie is unreadable from JavaScript (HttpOnly honoured, not just sent), and the panel refuses
+  to render inside an iframe (clickjacking, asked of the browser, not of the header).
+- **A security audit that runs against the real engines.** `tests/test_security_live.py` boots
+  the whole panel on MySQL, MariaDB and PostgreSQL and runs the attacks an auditor would:
+  injection payloads on every string field (a 500 would betray a concatenated query; a canary
+  table's survival proves no `DROP` was smuggled in — sharper on MySQL, which rejects quoting
+  SQLite forgives), and the access-control matrix (anonymous reads nothing, a viewer mutates
+  nothing, a `users_add` holder can neither mint an admin nor promote itself). Every attack
+  asserts the exact rejection code and the resulting state, and every role carries a positive
+  control so a silently-broken login cannot pass the audit vacuously. Confirmed to catch a real
+  regression by disabling the escalation guard and watching it fail. Opt-in, serial, live only.
+- **…and IDOR across the per-host scope.** Hosts are scoped per resource
+  (`server.{uid}.view/edit/delete`), so holding a permission on host A must not reach host B by
+  naming B's UID — the exact spot a scoped model breaks quietly, because the list endpoint
+  filters but every per-host endpoint has to run its own check, and secrets make a leaked host
+  carry its stored SSH credential. A user scoped to A only is refused read/edit/delete on B
+  (403, B untouched) with a positive control that it can still reach A. Confirmed to catch the
+  regression by making the per-host check pass unconditionally and watching it name the leak.
+- **SSO provisioning grew the two security tests it was missing.** A SAML2 assertion whose
+  username collides with a LOCAL account cannot hijack it (sync returns None, the account stays
+  local) — the guard was in place but untested, and LDAP/OIDC already pinned their equivalents;
+  a forged assertion for `admin` is the case that matters most. And a SCIM `default_role`
+  pointing at the admin role is downgraded to `none`, so a directory that provisions hundreds of
+  users cannot mint hundreds of admins. Both confirmed to catch their regression by disabling
+  the guard and watching the test name the escalation.
+
+### Security
+- **Dependency CVE audit (`pip-audit` over `requirements.lock`): 17 advisories across 7
+  packages, and the lock is bumped to clear them.** `pip-audit` over `requirements.lock` found
+  the 17; `pip-compile -P` then bumped exactly six, no transitive surprises, hashes regenerated:
+  **cryptography 46.0.6 → 48.0.1** (a two-major jump — a statically-linked OpenSSL advisory and
+  a non-contiguous-buffer overread; this is the library that derives the Fernet key for every
+  stored secret, so it led the list and was smoke-tested first: 104 tests across secret_manager,
+  boot, SSO and SSH pass on it), **joserfc 1.6.5 → 1.6.8** (forged HMAC tokens accepted when the
+  verification key is empty/None; reached through Authlib on the OIDC path), **urllib3 2.6.3 →
+  2.7.0** (sensitive headers kept across cross-origin redirects), **pyasn1 0.6.3 → 0.6.4**
+  (quadratic-time decode DoS on crafted ASN.1, on the SNMP/LDAP path), **idna → 3.15**, **click →
+  8.3.3**. A re-audit confirms **17 → 1**. The one that remains, **paramiko 4.0.0**
+  (PYSEC-2026-2858 — allows SHA-1 in `rsakey.py`, the SSH client), has no fixed release yet —
+  track upstream. `requirements.txt`'s `cryptography` floor is raised from `>=41.0` to `>=48.0.1`
+  too, so an install that bypasses the lock cannot pull a version with these CVEs; the five
+  transitive packages are not in `requirements.txt` (the lock is their only pin).
+- **The dev dependencies are pinned, like production already was.** `requirements.txt` uses
+  ranges on purpose — it declares intent, and `requirements.lock` (exact versions + hashes) is
+  what Docker, CI and `setup_env.ps1` actually install. `requirements-dev.txt` had no such
+  backstop: CI installs it as a second command on top of the lock, so pytest, xdist, flake8 and
+  the rest floated. A new major could break CI overnight with no repo change, and an unreviewed
+  release of any of them executes on a developer's machine and in CI the moment it lands. They
+  are now pinned to the versions the full suite passes on. Deliberately **without** hashes: CI
+  installs this file separately and a hashed one would force `--require-hashes` onto that whole
+  install — pinning stops silent drift, which is most of the exposure, and a hashed dev lock is
+  the next step if the transitive tree (execnet, greenlet, pyee…) needs covering too.
+- **Two VS Code launchers that run the full suite without xdist.** The existing `pytest`
+  launcher inherits `-n auto` from `pytest.ini`, and on some Windows boxes execnet aborts at
+  bootstrap with `OSError: [Errno 22]` before a single test runs. Added a serial one
+  (`-p no:xdist`, reliable but ~45 min, no progress until the end) and an `-n 2` one (far less
+  bootstrap-prone than `-n auto`, with visible progress). The original is left untouched.
+
 ## [0.0.1+build.38] - 2026-08-02
 
 ### Added

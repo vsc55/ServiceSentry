@@ -115,6 +115,24 @@ class TestScimUsers:
         client = self._c(admin, config_dir)
         assert client.post('/scim/v2/Users', headers=_AUTH, json={'active': True}).status_code == 400
 
+    def test_default_role_admin_is_downgraded_to_none(self, admin, config_dir):
+        """A misconfigured (or malicious) ``scim|default_role`` pointing at the admin role
+        must NOT let the IdP mass-provision administrators: every provisioned account lands on
+        ``none``. The guard is in ``ScimService._default_role_uid``; this pins it, because a
+        directory that provisions hundreds of users would otherwise mint hundreds of admins.
+
+        Set through the config the same way an operator would, then a plain SCIM create.
+        """
+        admin_uid = admin._role_name_to_uid('admin')
+        _scim_cfg(admin, config_dir, extra={'default_role': admin_uid})
+        client = admin.app.test_client()
+        r = client.post('/scim/v2/Users', headers=_AUTH,
+                        json={'userName': 'wouldbe-admin', 'active': True})
+        assert r.status_code == 201
+        role = admin._users['wouldbe-admin']['role']
+        assert role != admin_uid, 'SCIM provisioned an ADMIN via default_role'
+        assert admin._uid_to_role_name(role) == 'none'
+
     def test_update_audits_before_after(self, admin, config_dir):
         client = self._c(admin, config_dir)
         uid = client.post('/scim/v2/Users', headers=_AUTH,

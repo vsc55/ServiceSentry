@@ -167,6 +167,23 @@ class TestSaml2SyncUser:
         assert admin._uid_to_role_name(user['role']) == 'admin'
         assert user['display_name'] == 'Bob New'
 
+    def test_refuses_to_convert_a_local_account(self, admin, config_dir):
+        """Account-takeover: a SAML2 assertion whose username collides with an existing LOCAL
+        account must NOT hijack it — sync returns None, the account stays local. The guard
+        was in place (auth.py) but untested, and LDAP/OIDC already pin their equivalents; a
+        forged assertion for ``admin`` is the whole reason this one matters most."""
+        from lib.providers.saml import auth as saml_auth
+        _saml2_cfg(config_dir)
+        admin._users['carol'] = {
+            'uid': 'uid-carol', 'auth_source': 'local',
+            'role': admin._role_name_to_uid('admin'), 'groups': [], 'enabled': True,
+        }
+        result = saml_auth.sync_user(
+            admin, 'carol', _make_saml_attrs('carol', 'carol@evil.example', groups=['Admins']))
+        assert result is None
+        assert admin._users['carol']['auth_source'] == 'local'   # not converted to SSO
+        assert admin._uid_to_role_name(admin._users['carol']['role']) == 'admin'  # untouched
+
     def test_auto_create_false_blocks_new_user(self, admin, config_dir):
         from lib.providers.saml import auth as saml_auth
         _saml2_cfg(config_dir, extra={'auto_create_users': False})

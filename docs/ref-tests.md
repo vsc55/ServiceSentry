@@ -2858,7 +2858,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55. Panel Web — SAML2
 
-**Archivo:** `tests/test_providers_saml.py` — 24 tests
+**Archivo:** `tests/test_providers_saml.py` — 25 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3713,7 +3713,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
-**Archivo:** `tests/test_wa_scim.py` — 18 tests
+**Archivo:** `tests/test_wa_scim.py` — 19 tests
 
 > Las pruebas unitarias del servicio SCIM (autenticación Bearer, parseo de filtros, mapeo de campos de usuario) están en `tests/test_scim_service.py`, documentadas aparte en §85.
 
@@ -6336,3 +6336,68 @@ en un GET sin parámetros no hay entrada a la que culpar), que ninguna **lance**
 porque el manejador de errores puede convertir una plantilla rota en un 500 limpio y entonces se
 lee como «controlado» mientras la página sigue sin existir—, y que sin sesión redirijan en vez
 de reventar.
+
+## 142. Los únicos tests que ejecutan el JavaScript del panel
+
+**Archivo:** `tests/test_ui_playwright.py` — 13 tests (opt-in: se saltan sin Playwright)
+
+Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
+del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
+línea del bundle deja verdes ~600 guardas mientras la página está muerta en el navegador. Es el
+mismo punto ciego que la página que devolvía 500 porque nadie la abría, una capa más afuera.
+
+Así que la aserción no es «el botón está en el HTML» sino **«el navegador no se quejó»**: cada
+carga recoge `console.error` y las excepciones no capturadas, y cualquier entrada tumba el test
+nombrando la página. Navegar es sólo la forma de hacer que el JavaScript se ejecute.
+
+Dos decisiones que hacen que esto no sea frágil:
+
+- **La espera es la señal de arranque del propio panel** —el overlay `#loading` que elimina en
+  un `finally`—, nunca `networkidle`: esto es un panel de monitorización, sondea salud y
+  servicios mientras esté abierto, así que la red nunca está ociosa y esa espera sólo puede
+  acabar en timeout. Si el arranque no termina, se lanzan los errores recogidos **en lugar** del
+  timeout: decir «expiró esperando #loading» mandaría a buscar una página lenta cuando el
+  navegador ya había dicho `ReferenceError` y nombrado el símbolo.
+- **Se afirma sobre lo que ve una persona**, no sobre variables internas: `usersData` es un
+  `let` de ámbito de script y nunca una propiedad de `window`, así que buscarlo ahí habría sido
+  afirmar sobre el malentendido del propio test. Se espera la **fila** y luego se exige que el
+  store esté de acuerdo.
+
+Pocos y de carga a propósito: aquí no se cubre la interacción caso por caso —los otros ~4900
+tests hacen eso mucho más barato—. Existe para responder a la única pregunta que los demás no
+pueden: ¿esto arranca? Comprobado rompiendo a propósito un partial compartido y verificando que
+el fallo nombra la causa.
+
+## 143. Auditoría de seguridad contra motor real (inyección + control de acceso)
+
+**Archivo:** `tests/test_security_live.py` — 9 tests (3 × MySQL/MariaDB/PostgreSQL; opt-in)
+
+Las regresiones de seguridad se prueban sobre SQLite recorriendo las rutas. Esto repite los
+ataques contra los **motores reales** porque dos de los tres modos de fallo sólo aparecen en un
+servidor de verdad: una consulta parametrizada guarda `' OR '1'='1` como texto literal, una
+concatenada manda la comilla al motor y MySQL responde con error de sintaxis —un 500—, y SQLite
+perdona comillas que MySQL rechaza. Un 500 en cualquier campo de string es hallazgo, y la
+supervivencia de una **tabla-canario** a un `; DROP TABLE` apilado es la prueba de que no se
+coló ninguna sentencia.
+
+El segundo test es control de acceso y escalada —independiente del motor, pero verificado
+extremo a extremo sobre la base que usa una instalación—: sin sesión no se lee nada (401), un
+viewer no muta nada (403), y un `users_add` ni acuña un admin, ni mete una cuenta en el grupo
+Administrators, ni **se asciende a sí mismo** (403 en los tres). Cada ataque afirma el código
+exacto de rechazo **y** el estado (la cuenta puerta-trasera no existe, `adder1` sigue siendo
+adder), y cada rol lleva un **control positivo** —lo que sí puede hacer— para que un login que
+falle en silencio no haga pasar la auditoría en vacío, que es el fallo que este fichero evita.
+
+El tercero es **IDOR por host**. Los hosts tienen scoping por recurso (`server.{uid}.view/edit/
+delete`), así que tener permiso sobre el host A no debe alcanzar al B nombrando su UID. Es justo
+donde un modelo con scope se rompe en silencio: el listado filtra, pero **cada** endpoint por-host
+tiene que correr su propia comprobación, y uno que se la salte deja que cualquiera con un pie en
+un host recorra el resto por UID —con secretos dentro, un host filtrado arrastra su credencial
+SSH—. Un usuario con `server.{A}.view` y nada global intenta leer/editar/borrar B: 403 en los
+tres, B intacto, y control positivo de que **sí** ve A.
+
+Se salta sin `SS_TEST_<motor>_HOST` y corre en serie (`-n0`): arranca un panel real y usa bases
+scratch con nombres de tabla fijos. Como los demás en vivo, no borra ninguna tabla que no haya
+creado él (fotografía el esquema antes de arrancar). Comprobado que **detecta** regresiones reales
+desactivando cada guarda por turno: sin el de escalada falla nombrando «users_add minted an
+admin»; sin el de scoping por-host, «IDOR: read host B status with only server.A.view».

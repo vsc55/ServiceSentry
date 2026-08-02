@@ -1,10 +1,29 @@
 # ServiSesentry - Dependencias de desarrollo y testing
+#
+# PINNED, not ranges. Production ships from requirements.lock (exact versions + hashes);
+# this file used `>=` and therefore floated: a new major of pytest or xdist could break CI
+# overnight with no repo change, and an unreviewed release of any of these executes on a
+# developer's machine and in CI the moment it lands. The versions below are the ones the
+# full suite passes on.
+#
+# No hashes here, unlike the lock: CI installs this file as a SEPARATE pip command on top of
+# the lock, and a hashed file would force --require-hashes onto that whole install. Pinning
+# stops silent drift, which is most of the exposure; a hashed dev lock (pip-compile over this
+# file) is the next step if the transitive tree matters too — the indirect dependencies of
+# these packages (execnet, greenlet, pyee…) are still resolved freely.
+#
+# Bump deliberately: change the version here, run the full suite, commit both together.
 -r requirements.txt
-pytest>=7.0
-pytest-mock
-pytest-env
-pytest-xdist>=3.5.0
-flake8
+pytest==9.0.2
+pytest-mock==3.15.1
+pytest-env==1.6.0
+pytest-xdist==3.8.0
+flake8==7.3.0
+# Browser tests (tests/test_ui_playwright.py) - the ONLY ones that execute the panel's
+# JavaScript. Optional: they skip themselves when the package or the browser is absent, so
+# a checkout without it still gets a green suite. Needs a one-off browser download:
+#   python -m playwright install chromium
+playwright==1.62.0
 # Dev auto-reload server (dev_watch.py): file watching + .env.dev loading.
-watchfiles>=0.21
-python-dotenv>=1.0
+watchfiles==1.1.1
+python-dotenv==1.2.2
