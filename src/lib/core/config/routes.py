@@ -16,11 +16,14 @@ Routes registered by this file:
     GET    /api/v1/config/layout        config UI layout (sub-tabs -> cards)
     GET    /api/v1/config/schema        field-level UI metadata (min/max/opts)
     PUT    /api/v1/config               partial versioned save of edited fields
+    GET    /api/v1/config/db/targets/<op>  what a run will walk (tables, or nothing when
+                                        the engine cannot split the operation)
+    POST   /api/v1/config/db/<op>       database maintenance: optimize | compact
 """
 
 import uuid
 
-from flask import jsonify, session
+from flask import jsonify, request, session
 
 from lib.debug import DebugLevel
 from lib.config.spec import CFG_BY_PATH, admin_only_fields
@@ -28,6 +31,7 @@ from lib.config.layout import config_layout
 from lib.core.config import service as config_svc
 from lib.core.config.service import AdminOpError
 from lib.security import secret_manager
+from lib.util import fmt_bytes
 
 
 def register(app, wa):
@@ -214,3 +218,120 @@ def register(app, wa):
 
         wa._dbg("> Config PUT >> save_file_error: write failed", DebugLevel.error)
         return jsonify({'error': wa._t('save_file_error')}), 500
+
+    # --- API: database maintenance --------------------------------
+
+    # The two halves of maintenance, kept apart because they cost wildly different things:
+    # `optimize` refreshes the statistics the query planner reads and touches no storage;
+    # `compact` rewrites it to hand free space back to the filesystem and can hold the
+    # database for as long as that takes. Offering only the combined operation would mean the
+    # cheap, safe one could never be run on its own — which is the one worth running often.
+    _DB_OPS = {
+        'optimize': ('optimize', 'db_optimized'),
+        'compact':  ('compact',  'db_compacted'),
+    }
+
+    @app.route('/api/v1/config/db/targets/<op>', methods=['GET'])
+    @wa._perm_required('db_maintenance')
+    def api_db_targets(op):
+        """What the run will walk, in the order it will walk it.
+
+        The ENGINE decides the shape: a table per row where the statement works per table,
+        and nothing at all where it does not — SQLite's VACUUM is one indivisible rewrite of
+        the file, and reporting it as thirty-three tables would invent a granularity the
+        engine does not have, making every tick a claim about work that had not finished.
+        `divisible: false` is how the client knows to show a single row for the database
+        itself instead of a list.
+
+        Asked from the catalog rather than from the TableSpec declarations: what matters is
+        what the database actually contains — a module table created at runtime is as real as
+        a declared one, and a list that omitted it would tick to the end with work left.
+        """
+        if op not in _DB_OPS:
+            return jsonify({'error': wa._t('db_maintenance_unknown_op')}), 400
+        conn = getattr(wa, '_db_connector', None)
+        if conn is None:
+            return jsonify({'error': wa._t('db_not_available')}), 503
+        targets = conn.maintenance_targets(op)
+        return jsonify({'op': op, 'targets': targets, 'divisible': bool(targets)})
+
+    @app.route('/api/v1/config/db/<op>', methods=['POST'])
+    @wa._perm_required('db_maintenance')
+    def api_db_maintenance(op):
+        """Run one maintenance operation against the main database.
+
+        The operation is looked up in a fixed table rather than called by name off the
+        connector: `op` arrives from the URL, and `getattr(connector, op)` would turn this
+        endpoint into a way to invoke any method the connector has.
+        """
+        entry = _DB_OPS.get(op)
+        if not entry:
+            return jsonify({'error': wa._t('db_maintenance_unknown_op')}), 400
+        method, event = entry
+        conn = getattr(wa, '_db_connector', None)
+        if conn is None:
+            return jsonify({'error': wa._t('db_not_available')}), 503
+
+        # One table at a time, so the UI can show a tick that means THAT table finished
+        # rather than a bar that means time passed. Only `optimize` takes it: analyzing one
+        # table is cheap and independent, while a compaction is one rewrite of the whole
+        # store on two of the three engines.
+        body = request.get_json(silent=True) or {}
+        table = str(body.get('table') or '').strip()
+        if table:
+            # Checked against what THIS operation can actually be split into, never trusted.
+            # The name is interpolated into SQL (an identifier cannot be a bound parameter),
+            # so accepting whatever arrived would be an injection point — quoting is not an
+            # argument for skipping the check, it is the reason the check has to decide.
+            # Asking `maintenance_targets` rather than `list_tables` also refuses a per-table
+            # request for an operation the engine cannot divide: on SQLite a per-table
+            # "compact" would silently rewrite the WHOLE database once per table.
+            if table not in conn.maintenance_targets(op):
+                return jsonify({'error': wa._t('db_table_unknown')}), 400
+
+        size_before = None if table else config_svc.database_size(conn)
+        try:
+            getattr(conn, method)(table) if table else getattr(conn, method)()
+        except Exception as exc:  # pylint: disable=broad-except
+            wa._dbg(f'> DB >> {op} failed: {type(exc).__name__}: {exc}', DebugLevel.error)
+            wa._audit(event, detail={'ok': False, 'table': table, 'error': str(exc)[:500]})
+            return jsonify({'error': f'{wa._t("db_maintenance_failed")}: {exc}'}), 500
+        # A per-table step reports no sizes and writes no audit entry of its own: the run is
+        # ONE operator action, and one row per table would bury the record it belongs to.
+        # The client closes the run with a final call carrying no table.
+        if table:
+            return jsonify({'ok': True, 'operation': op, 'table': table})
+        size_after = config_svc.database_size(conn)
+
+        # Audited like any other operator action, and with the numbers: "compacted" without
+        # a before and after is a claim nobody can check, and the whole reason to run it is
+        # to find out whether there was anything to reclaim.
+        detail = {'ok': True, 'operation': op}
+        freed = None
+        if size_before is not None and size_after is not None:
+            freed = max(0, size_before - size_after)
+            detail.update({'bytes_before': size_before, 'bytes_after': size_after,
+                           'bytes_freed': freed})
+        # What each table reported. The per-table steps deliberately write no entry each, so
+        # without this the record of a thirty-three table run is the word "ok" — true, and
+        # useless to anyone asking WHICH table failed.
+        #
+        # It comes from the client because only the client watched the whole run; the server
+        # answers one table per request and keeps nothing between them. So it is treated as a
+        # claim and checked into shape: table names must be ones this operation could actually
+        # have walked, and the errors are truncated. What it cannot be is a way to write
+        # arbitrary text into the audit log.
+        detail.update(config_svc.summarize_run(
+            body.get('results'), conn.maintenance_targets(op),
+            getattr(wa, '_AUDIT_DETAIL_MAX_ITEMS',
+                    CFG_BY_PATH['web_admin|audit_detail_max_items'].default)))
+        wa._audit(event, detail=detail)
+        # Formatted HERE, by the formatter the rest of the panel already uses. The browser
+        # would need its own to render this, and a second implementation of "bytes as a
+        # human reads them" is a second answer to the same question: fmt_bytes scales in
+        # 1024s, so a JS version counting in 1000s would print a different size for the same
+        # number depending on which side of the wire formatted it.
+        return jsonify({'ok': True, 'operation': op,
+                        'bytes_before': size_before, 'bytes_after': size_after,
+                        'bytes_freed': freed,
+                        'freed_human': fmt_bytes(freed) if freed is not None else None})

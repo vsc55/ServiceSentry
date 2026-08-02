@@ -21,6 +21,9 @@ const SYSTEM_DEFAULT_LANG      = '{{ default_lang }}';
 const CURRENT_LANG             = '{{ lang }}';
 const WA_REMEMBER_ME_DAYS      = {{ wa_remember_me_days }};
 const WA_AUDIT_MAX_ENTRIES     = {{ wa_audit_max_entries }};
+const WA_AUDIT_DETAIL_MAX_ITEMS = {{ wa_audit_detail_max_items }};
+// Severity per audit event, declared in each package manifest (AUDIT_EVENTS).
+const AUDIT_SEVERITY = {{ audit_severity | tojson }};
 const WA_SECURE_COOKIES        = {{ wa_secure_cookies | tojson }};
 const WA_PW_MIN_LEN            = {{ wa_pw_min_len }};
 const WA_PW_MAX_LEN            = {{ wa_pw_max_len }};

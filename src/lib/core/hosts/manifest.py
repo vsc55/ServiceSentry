@@ -59,3 +59,19 @@ OVERVIEW_WIDGETS = [
                   {'key': 'modules', 'label_key': 'col_host_modules',  'sortable': True, 'cell': 'host_modules'},
               ]}},
 ]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'host_cloned', 'severity': 'success'},
+    {'key': 'host_created', 'severity': 'success'},
+    {'key': 'host_deleted', 'severity': 'danger'},
+    {'key': 'host_ssh_tested', 'severity': 'muted'},
+    {'key': 'host_test_check', 'severity': 'muted'},
+    {'key': 'host_tested', 'severity': 'muted'},
+    {'key': 'host_updated', 'severity': 'info'},
+    {'key': 'hosts_migrated', 'severity': 'info'},
+]

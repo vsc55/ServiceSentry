@@ -12,8 +12,6 @@ Two deliberate exclusions, both structural rather than convenience:
 * **Dynamic prefixes** — keys built by concatenation (``t('svc_' + key)``) are captured by
   the regex as a bare prefix ending in ``_``; the real key only exists at runtime, so
   there is nothing static to verify.
-* **``overview2.html``** — the standalone Alpine.js proof-of-concept page, explicitly out
-  of the i18n sweep (see CHANGELOG); it is not part of the shipped UI.
 """
 
 import glob
@@ -32,7 +30,7 @@ _PY_KEY = re.compile(
 # Frontend: t('key') / tf('key', …) — literal keys only
 _JS_KEY = re.compile(r"""\bt[f]?\(\s*['"]([a-z][a-z0-9_]{2,})['"]""")
 
-_EXCLUDED_FILES = ('overview2.html',)
+_EXCLUDED_FILES = ()      # (was: overview2.html, an Alpine proof-of-concept now removed)
 
 
 def _src_root() -> str:

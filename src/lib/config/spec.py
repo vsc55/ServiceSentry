@@ -103,6 +103,17 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # it explicitly. It said the same thing before and the card did not — an option nobody
         # could see, env-lockable and all.
         min=0, max=10000, env='SS_AUDIT_MAX_ENTRIES'),
+    Cfg('web_admin|audit_detail_max_items', int, 100, attr='_AUDIT_DETAIL_MAX_ITEMS',
+        # How many names a single audit entry lists per outcome before it says "and N more".
+        # The detail is stored as JSON in one row and painted whole when opened, and the
+        # number of tables is NOT bounded by anything — modules create their own at runtime
+        # (lib/db/module_tables.py). Without a ceiling, one maintenance run on a large
+        # install writes hundreds of names into one entry, and on a broken database hundreds
+        # of error strings with them: that stops being a record and starts being an obstacle
+        # to whoever is reading the log, exactly when reading it matters most.
+        # 0 turns the NAMES off and keeps the counts, for an operator who wants the entry
+        # small; the counts stay either way, since they are what says the run happened.
+        min=0, max=10000, env='SS_AUDIT_DETAIL_MAX_ITEMS'),
     Cfg('web_admin|pw_min_len', int, 8, attr='_PW_MIN_LEN',
         min=1, max=128, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_max_len', int, 128, attr='_PW_MAX_LEN',

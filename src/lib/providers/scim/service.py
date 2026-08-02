@@ -12,9 +12,10 @@ public base URL used to build ``meta.location``.
 from __future__ import annotations
 
 import hmac
-import uuid
 
-from lib.core.constants import BUILTIN_GROUP_UID_SET, BUILTIN_ROLE_UIDS, SYSTEM_USER
+from lib.core.constants import (BUILTIN_GROUP_UID_SET, BUILTIN_ROLE_UIDS,
+                                SYSTEM_USER, is_reserved_username)
+from lib.core.uids import new_uid
 
 USER_SCHEMA  = 'urn:ietf:params:scim:schemas:core:2.0:User'
 GROUP_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:Group'
@@ -286,11 +287,16 @@ class ScimService:
         username = (body.get('userName') or '').strip()
         if not username:
             return self.err(400, 'userName is required', 'invalidValue')
+        # A provisioned `system` or `anonymous` would own audit entries that read as the
+        # panel's own, or as an unauthenticated caller's. Refused as an invalid value rather
+        # than as a conflict: the name is not taken, it is not available at all.
+        if is_reserved_username(username):
+            return self.err(400, f'userName {username} is reserved', 'invalidValue')
         if username in self.wa._users:
             return self.err(409, f'User {username} already exists', 'uniqueness')
         email, name, active = scim_user_fields(body)
         user = {
-            'uid':            str(uuid.uuid4()),
+            'uid':            new_uid(),
             'auth_source':    'scim',
             'auth_source_id': body.get('externalId', '') or '',
             'display_name':   name,
@@ -428,7 +434,7 @@ class ScimService:
                 self._audit_change('scim_group_updated', {'name': name}, before, after)
             return self.group_to_scim(egid, eg), 201
 
-        gid = str(uuid.uuid4())
+        gid = new_uid()
         self.wa._groups[gid] = {'uid': gid, 'name': name, 'description': 'SCIM', 'enabled': True,
                                 'source': 'scim', 'external_id': ext_id, 'roles': []}
         self.wa._persist_groups()

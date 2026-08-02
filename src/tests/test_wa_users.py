@@ -622,3 +622,96 @@ class TestOwnLandingPreference:
         client.put("/api/v1/users/me/preferences", json={"landing_page": "status"})
         client.put("/api/v1/users/me/preferences", json={"landing_page": ""})  # back to inherit
         assert "landing_page" not in admin._users["admin"]
+
+
+class TestServiceAccountsCannotSignIn:
+    """A service account is ACTIVE — it owns hosts, it receives notifications, it appears in
+    the audit log — and it never signs in.
+
+    Deliberately NOT the same switch as ``enabled``: disabling an account to stop it logging
+    in also stops it being a valid owner and a valid recipient, which is not what "this
+    identity belongs to a script" means. The absent key means "signs in", so every account
+    written before this existed keeps working.
+    """
+
+    def _make(self, client, username='svc', login_enabled=False):
+        return client.post('/api/v1/users', json={
+            'username': username, 'password': 'testpass1', 'role': 'viewer',
+            'login_enabled': login_enabled})
+
+    def test_the_password_is_refused(self, admin, client):
+        _login(client)
+        self._make(client)
+        client.get('/logout')
+        with admin.app.test_client() as c2:
+            _login(c2, username='svc', password='testpass1')
+            assert not c2.get('/api/v1/me').get_json().get('logged_in', False)
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'login_failed')
+        assert entry['detail']['reason'] == 'login_disabled'
+
+    def test_the_account_is_still_active(self, admin, client):
+        """It is not a disabled account and must not read as one: still enabled, still a
+        member, still a recipient."""
+        _login(client)
+        self._make(client)
+        rec = client.get('/api/v1/users').get_json()['svc']
+        assert rec['enabled'] is True and rec['login_enabled'] is False
+
+    def test_an_ordinary_account_is_unchanged(self, admin, client):
+        """The absent key means "signs in" — an account written before this existed has no
+        such field and must keep working."""
+        _login(client)
+        client.post('/api/v1/users', json={'username': 'normal', 'password': 'testpass1',
+                                           'role': 'viewer'})
+        assert 'login_enabled' not in admin._users['normal']
+        assert client.get('/api/v1/users').get_json()['normal']['login_enabled'] is True
+
+    def test_taking_the_login_away_revokes_the_live_session(self, admin, client):
+        """Otherwise the session outlives the setting meant to end it — the same reason
+        disabling revokes."""
+        _login(client)
+        client.post('/api/v1/users', json={'username': 'later', 'password': 'testpass1',
+                                           'role': 'viewer'})
+        with admin.app.test_client() as c2:
+            _login(c2, username='later', password='testpass1')
+            assert c2.get('/api/v1/me').get_json().get('display_name') == 'later'
+            client.put('/api/v1/users/later', json={'login_enabled': False})
+            assert not c2.get('/api/v1/me').get_json().get('logged_in', False)
+
+    def test_it_is_audited_as_a_change(self, admin, client):
+        _login(client)
+        client.post('/api/v1/users', json={'username': 'aud', 'password': 'testpass1',
+                                           'role': 'viewer'})
+        client.put('/api/v1/users/aud', json={'login_enabled': False})
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'user_updated')
+        assert any(c['field'] == 'login_enabled' and c['new'] is False
+                   for c in entry['detail']['changes'])
+
+    def test_granting_it_back_removes_the_key(self, admin, client):
+        """Stored only when switched off, like ``enabled`` — so a normal account's record
+        looks the same as it did before the setting existed."""
+        _login(client)
+        self._make(client)
+        client.put('/api/v1/users/svc', json={'login_enabled': True})
+        assert 'login_enabled' not in admin._users['svc']
+
+    def test_you_cannot_take_away_your_own_sign_in(self, admin, client):
+        """It locks you out exactly as surely as disabling yourself, which is already
+        refused."""
+        _login(client)
+        r = client.put('/api/v1/users/admin', json={'login_enabled': False})
+        assert r.status_code == 400
+        assert 'login_enabled' not in admin._users['admin']
+
+    def test_the_refusal_is_indistinguishable_from_a_wrong_password(self, admin, client):
+        """Saying "this account cannot sign in" on the login page would confirm the account
+        exists. The exact reason stays in the audit log."""
+        _login(client)
+        self._make(client)
+        client.get('/logout')
+        with admin.app.test_client() as c2:
+            r = c2.post('/login', data={'username': 'svc', 'password': 'testpass1'},
+                        follow_redirects=True)
+            wrong = c2.post('/login', data={'username': 'svc', 'password': 'nope'},
+                            follow_redirects=True)
+            assert r.data == wrong.data

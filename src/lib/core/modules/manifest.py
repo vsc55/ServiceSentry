@@ -14,6 +14,20 @@ MODULE_PERMISSIONS = {
 }
 
 
+# Clearing the check state belongs with the other data wipes, not on the Status toolbar
+# it used to sit on: it empties a table exactly like the six beside it, and a destructive
+# action parked among the view controls of the screen it affects is the one pressed by
+# accident. Status keeps what OPERATES on monitoring: run checks now, filter, refresh.
+CONFIG_ACTIONS = [
+    {'section': 'maintenance', 'id': 'status_reset',
+     'label_key': 'status_reset', 'tooltip_key': 'status_reset_tt',
+     'desc_key': 'status_reset_desc', 'button_key': 'act_wipe',
+     'icon': 'bi-trash3', 'variant': 'danger', 'order': 60,
+     'group_label_key': 'cfg_actions_group_wipe', 'perm': 'checks_delete',
+     'fn': 'resetStatus'},
+]
+
+
 # ── Overview widgets this package contributes ────────────────────
 from .overview_widget import _modules_list_rows, incident_rows, modules_stat  # noqa: F401
 
@@ -63,4 +77,18 @@ OVERVIEW_WIDGETS = [
                   {'key': 'checks',  'label_key': 'col_checks',                       'cell': 'checks'},
                   {'key': 'items',   'label_key': 'overview_items', 'sortable': True, 'cell': 'num', 'align': 'muted'},
               ]}},
+]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'checks_run', 'severity': 'muted'},
+    {'key': 'modules_saved', 'severity': 'info'},
+    {'key': 'status_cleared', 'severity': 'danger'},
+    {'key': 'watchful_action', 'severity': 'muted'},
+    {'key': 'watchful_test', 'severity': 'muted'},
+    {'key': 'watchful_list_databases', 'severity': 'muted'},
 ]

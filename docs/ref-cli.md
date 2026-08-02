@@ -26,7 +26,7 @@ instancia en marcha, así que se pueden lanzar en caliente. Las opciones globale
 
 | Comando | Descripción |
 |---|---|
-| `user add <username> [-P PW] [--role R] [--display N] [--email E] [--group G]… [--disabled]` | Crear un usuario. `--password/-P` se pide de forma oculta si se omite. `--role` acepta `admin`/`editor`/`viewer`/`none` o un rol personalizado (por defecto `none`). `--group` es repetible (nombre o uid). |
+| `user add <username> [-P PW] [--role R] [--display N] [--email E] [--group G]… [--disabled] [--no-login]` | Crear un usuario. `--password/-P` se pide de forma oculta si se omite. `--role` acepta `admin`/`editor`/`viewer`/`none` o un rol personalizado (por defecto `none`). `--group` es repetible (nombre o uid). `--no-login` crea una **cuenta de servicio**: activa (posee cosas, recibe avisos) pero sin inicio de sesión por ninguna vía — ver [explica-seguridad.md](explica-seguridad.md#cuentas-de-servicio-login_enabled). |
 | `user enable <username>` | Activar un usuario |
 | `user disable <username>` | Desactivar un usuario (no puede desactivarse el último admin activo) |
 | `user passwd <username> [-P PW]` | Cambiar la contraseña (se pide oculta si se omite `-P`) |

@@ -8,6 +8,303 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.38] - 2026-08-02
+
+### Added
+- **The panel can now reclaim its own disk space.** Deleting a year of history freed nothing
+  an operator could see: the rows went, the file did not shrink, and the disk graph kept
+  climbing — the only way to fix it was a shell on the host. Maintenance now offers two
+  actions, kept apart because they cost wildly different things. **Optimize** refreshes the
+  statistics the query planner reads (`ANALYZE` + `PRAGMA optimize`, `ANALYZE TABLE`,
+  `ANALYZE`): cheap, safe, changes no row, no confirmation. **Compact** rewrites storage to
+  hand space back to the filesystem (`VACUUM`, `OPTIMIZE TABLE`, `VACUUM FULL`) and holds the
+  database while it does, so it asks first and says so. Offering only the combined operation
+  would have meant the safe one could never be run on its own.
+- **`db_maintenance`, a permission of its own, granted to no role by default.** Editing a
+  setting and freezing the database for the length of a rewrite are not the same authority,
+  and riding on `config_edit` would have handed the second to everyone who needed the first.
+- **The run shows its progress, unit by unit.** A single call that returns only when
+  everything is done says nothing while it works, and on a large database that silence is
+  indistinguishable from a hang. The dialog lists what it will walk *before* starting and
+  marks each unit as it comes back — so a tick means THAT unit finished rather than that time
+  passed, and a run that stalls shows exactly where. What the list is made of is the
+  **engine's** answer (`maintenance_targets(op)`), never inferred from the engine's name: a
+  row per table where the statement works per table, and a single row standing for the whole
+  database where it does not. Splitting SQLite's `VACUUM` into thirty-three ticks would invent
+  a granularity the engine does not have and make every tick a claim about work that had not
+  finished. Cancel means "stop after this unit", and the dialog cannot be dismissed mid-run:
+  closing the window would not stop the work, only stop you seeing it.
+- **A table name from the client is checked against the catalog before it reaches SQL.** An
+  identifier cannot be a bound parameter, so it is interpolated — accepting whatever arrived
+  would have been an injection point, and quoting is not a reason to skip the check but the
+  reason the check has to be what decides. Validating against `maintenance_targets(op)` rather
+  than the plain table list also refuses a per-table `compact` on an engine that cannot divide
+  it, where it would have rewritten the WHOLE database once per table.
+- **Per-unit steps write no audit entry each.** The run is one operator action; a row per
+  table would bury the entry it belongs to under thirty lines saying nothing. The closing
+  call — the one with no table — is what records it, and what measures what was reclaimed.
+- **The audit entry says what happened, not just that it did.** It was an event name and
+  `ok: true`: true, and useless — it recorded that something occurred rather than what, which
+  is the one question the person opening it has. A maintenance run now records how many
+  tables it walked, how many succeeded, and names the ones that failed with their error. The
+  summary comes from the browser (the server answers one table per request and keeps nothing
+  between them, so the client is the only witness to the run as a whole) and is therefore
+  treated as a claim: table names this operation could not have walked are dropped, errors
+  are truncated, and a long failure list is cut at twenty — an entry reproducing four hundred
+  error strings is not a record, it is a denial of service against whoever reads the log.
+- **Clearing the check state says how many rows it erased**, counted before the delete. The
+  gap between clearing four rows and four thousand is the whole question somebody has when
+  they find that entry a week later.
+- **The entry names the tables on BOTH sides, not just the failures.** With a clean run the
+  counts alone left the detail saying "33 of 33" — a question nobody asked. What the reader
+  wants is which tables the run covered.
+- **How long that list may get is a setting**, `web_admin|audit_detail_max_items` (default
+  100, `0` turns the names off, `SS_AUDIT_DETAIL_MAX_ITEMS`). It started as a hardcoded
+  constant, which is a guess about somebody else's install: the number of tables is not
+  bounded — modules create their own at runtime — so what counts as "too long to read" is the
+  operator's call. The ceiling exists at all because the detail is stored as JSON in one row
+  and painted whole when opened, and a run on a broken database would otherwise write hundreds
+  of error strings into a single entry, exactly when reading the log matters most. At `0` the
+  COUNTS are still recorded: they are what says the run happened and how it went, and an entry
+  without them would be indistinguishable from one that covered nothing.
+- **What an audit event MEANS is now declared by the package that writes it**, not guessed
+  from its name. `AUDIT_EVENTS` in each `manifest.py`, discovered exactly like `NOTIFY_EVENTS`
+  and `MODULE_PERMISSIONS` — 132 events across 20 packages, each with a severity.
+  The badge is the only thing a glance down two hundred log rows gives you, and it was decided
+  by a rule matching `deleted`/`revoked` plus five names written out by hand. Two things were
+  wrong and only the first was visible: **seven** destructive events and **fifteen** failures
+  rendered neutral grey — deleting ONE audit entry was red while emptying the WHOLE audit log
+  was grey, and among the neutral failures were three security signals (`csrf_failed`,
+  `scim_auth_failed`, `msteams_sso_failed`) plus `internal_error`, the entry written when the
+  panel itself crashed. And even with the word lists widened, the colour still depended on the
+  noun somebody chose: `purge_done` would have slipped through, `rule_failed` would have gone
+  red for a rule that merely reported "no match". The renderer now holds one mapping —
+  severity to CSS tone — and not a single condition on the event name.
+- **Guards make the next event impossible to forget**: every emitted event must declare a
+  severity, no declaration may outlive its event, and an unknown severity is dropped at the
+  door — it would reach the browser as a CSS class that does not exist and render the row with
+  NO badge, which reads as an event that carries no weight at all. The literal scan cannot see
+  an event emitted through a variable (`wa._audit(event, …)` — how `db_optimized` and
+  `db_compacted` slipped past), so it is crossed with the i18n catalog, which is complete
+  because every event needs a label to render.
+- **An audit entry always names who caused it.** A SCIM auth failure showed an empty USER
+  column — the only `username=''` in the codebase. Not `system` either: that means the panel
+  acted on its own (a service starting, a scheduled prune), and an intrusion attempt filed
+  under it reads as the panel doing this to itself, in the one filter these entries are most
+  often looked up by. A blank cell is no better — it reads as a missing value rather than as
+  "there was no identity to record". `ANONYMOUS_USER` now names the caller who never
+  identified themselves, and **both** audit identities are reserved usernames: an account able
+  to take either name would have its actions read as the panel's own or as an unauthenticated
+  caller's, and "who did this" would stop being answerable.
+- **The reserved names are now refused at all five doors, not one.** Only `create_user`
+  checked. Accounts also arrive from LDAP, OIDC and SAML2 — which provision on the fly at
+  first sign-in — and from SCIM, where the IdP creates them outright, and none of those looked
+  at the name. A directory with a user called `system` created a local `system` whose every
+  action then read as the panel's own: the log stays complete and stops being trustworthy,
+  which is the one failure an audit log cannot have. One shared check
+  (`is_reserved_username`) rather than five copies, protected the way the built-in roles and
+  groups are — declared once in `lib.core.constants`. SSO **rejects the sign-in** instead of
+  renaming (there is no safe account to let them into); SCIM answers `400 invalidValue` rather
+  than `409`, because the name is not taken — it is not available.
+- **`system` and `anonymous` are built-in USERS now, not bare strings.** Each has a stable UID
+  (`BUILTIN_USER_UIDS`) and a row in the users list marked with the `Built-in` padlock, exactly
+  like the `Administrators` group: the audit column that answers "who did this" was naming
+  something the rest of the system knew nothing about, so there was nothing to look up.
+  `RESERVED_USERNAMES` is **derived** from that map, so a third internal identity is one line
+  rather than two that can drift. They are **synthesized, never stored**: a database row is a
+  login surface — a password hash to set, a session to open, one CLI edit away from being a
+  real account — and these two must not be reachable that way. No password, no session, no
+  permissions (they carry the built-in `none` role because the shape demands one; `system` acts
+  with the panel's authority precisely because it never passes a permission check). Editing or
+  deleting one answers `403 user_builtin`, and they are kept out of the group-member and
+  role-assignment pickers and out of bulk selections. One exception, deliberate: an
+  installation that provisioned a `system` account *before* the name was reserved still sees
+  that real account and can delete it — hiding it behind a row marked "built-in, not editable"
+  would leave the admin unable to remove the very account that made the log ambiguous.
+- **Service accounts: an identity that is active but never signs in.** A new per-user
+  `login_enabled`, deliberately **not** the same switch as `enabled`: disabling an account to
+  stop it logging in also stops it being a valid owner and a valid notification recipient,
+  which is not what "this identity belongs to a script" means. Off means the password form,
+  LDAP, OIDC and SAML2 all refuse it — "never signs in" that only covered the password form
+  would be a setting that does not mean what it says. Turning it off **revokes the live
+  sessions** (a session would otherwise outlive the setting meant to end it), you cannot take
+  away your own sign-in (it locks you out exactly as surely as disabling yourself, which was
+  already refused), and the login page still shows the same generic failure as a wrong
+  password — saying "this account cannot sign in" would confirm the account exists, so the
+  real reason stays in the audit log. Stored only when switched OFF, so every account written
+  before this existed is untouched and keeps signing in. Available on the users API, in the
+  Edit-user modal, and as `ssentry user add --no-login`.
+- **The reserved names can no longer log in, whatever a row says.** The SSO doors refuse them
+  on *every* sign-in (the check sits in `sync_user`, not in the create path), but local
+  authentication went straight to the users table — so the legacy `system` account described
+  above would still have signed in with its old password. `system` in the audit log has to
+  mean the panel acted on its own; the moment a person can sign in under that name it means
+  nothing at all. The attempt is refused before any credential work, audited with
+  `reason: username_reserved`, and answered with the same generic message as any other failure
+  (naming the rule would confirm which accounts exist). The way out is to delete the account,
+  which Users still allows.
+- **Maintenance actions are audited as maintenance.** Deleting a history series from that
+  section logged "Histórico: Entrada Eliminada" — accurate about the domain and useless about
+  the act: the reader wants to know somebody went to Maintenance and wiped a table, not which
+  subsystem owns the rows. All nine now carry the `Mantenimiento:` / `Maintenance:` prefix.
+  It is a fact rather than a convention: each is reachable ONLY from that section now, and a
+  guard keeps events that are still triggered from their own tab (`audit_entry_deleted`,
+  `syslog_drops_cleared`) out of it — the prefix says where the operator was, so it may only
+  go on events that could only have happened there.
+- **Every audited event now has a label, and one that names its area.** Adding a prefix to
+  the maintenance events turned up **six** shipping as bare `snake_case` identifiers on the
+  audit screen (`ipban_history_cleared` among them) and **four** more with no area prefix at
+  all. A guard scans the `_audit*()` CALLS across `lib/` rather than a list — the list is the
+  thing that goes stale, since ~30 modules write events and the next one added will not think
+  to register itself anywhere. Without a prefix, filtering two hundred entries by eye means
+  reading every row.
+- **The result says what it actually reclaimed.** Both operations report the database size
+  before and after, and the toast names the difference. "Compacted" on its own is a claim
+  nobody can check, and whether there *was* anything to reclaim is most of the reason to run
+  it. A size the engine will not disclose (a managed PostgreSQL can refuse
+  `pg_database_size`) is reported as unknown, never as zero. The size is formatted
+  server-side by `fmt_bytes`, the formatter the rest of the panel already uses: a
+  browser-side one was written first and caught in review, and it would not merely have
+  duplicated the logic — `fmt_bytes` scales in 1024s and it counted in 1000s, so the same
+  number of bytes would have printed as two different sizes depending on which side of the
+  wire formatted it. A guard now fails the build if a second one reappears.
+- `BaseConnector` gained `compact()`, `optimize()` and `list_tables()`. `vacuum()` stays
+  exactly as it was and still means the routine post-delete reclaim History calls
+  automatically — on PostgreSQL that distinction is the whole point, since pointing it at
+  `VACUUM FULL` would let a background step take an ACCESS EXCLUSIVE lock on every table.
+
+### Removed
+- **The experimental `/overview2` page.** An Alpine.js proof-of-concept that had stopped
+  rendering at all: its template linked to `url_for('overview')`, an endpoint renamed to
+  `page_overview`, and a renamed endpoint does not degrade to a dead link — Jinja raises
+  `BuildError` and the whole page 500s. It had been that way on every engine, unnoticed,
+  because nothing opened it. Deleted rather than repaired: it duplicated a page the panel
+  already has.
+
+### Fixed
+- **Every page the panel serves is now opened by a test.** The blind spot the dead page
+  revealed was the real bug: the route index listed it, so it *looked* covered. The sweep now
+  comes from Flask's own `url_map` — every GET that takes no path parameters must not 5xx and
+  must not raise, logged in and logged out — so a page added later is covered without anyone
+  remembering the guard exists.
+- **Optimize and compact raised on PostgreSQL, always.** `VACUUM`/`ANALYZE` cannot run inside
+  a transaction block, which the connector knew — it turns autocommit on for them. What it did
+  not account for is that psycopg2 refuses the flip *while a transaction is open* ("set_session
+  cannot be used inside a transaction"), and one always is: the driver opens it on the first
+  read. So every maintenance call on PostgreSQL failed before running a single statement. The
+  transaction is now ended first — committed rather than rolled back, since what is open is the
+  read that preceded the request and discarding a caller's pending work to run maintenance
+  would be the worse surprise. Invisible to the existing suite, which verifies the MySQL and
+  PostgreSQL implementations by **reading the connector source**: the SQL was right, the driver
+  call around it was not.
+- **One failed freshness probe took down the whole PostgreSQL connection.** `table_stamp`
+  swallows its error on purpose — "a blip must not cost the caller its cache" — but on
+  PostgreSQL a failed statement aborts the entire transaction, so it also cost every *other*
+  store the shared connector: each later query answered "current transaction is aborted", far
+  away from the probe that caused it. It rolls back before giving up now. The tables that
+  trigger it are the ones with no `updated_at` (audit, sessions, check_state), where the probe
+  legitimately has no answer. Harmless on SQLite and MySQL, which is why it survived: it took
+  booting the real panel against a live PostgreSQL and walking every store to see it.
+- **MySQL could not create most of its own tables.** `TEXT NOT NULL DEFAULT ''` is a MySQL
+  syntax error, not a lost default — "BLOB, TEXT, GEOMETRY or JSON column can't have a default
+  value" — and **27 tables declare exactly that**, `users` among them. The SQLite suite cannot
+  see it and the live suite only built a handful of stores, so it sat there: of the ten live
+  MySQL tests, **nine failed**, every one on the same line. Defaults are now emitted as an
+  expression (`DEFAULT ('')`) where the engine requires it — MySQL 8.0.13+ and MariaDB 10.2+
+  both take that form, and nothing changes for SQLite or PostgreSQL.
+- **Every history graph came back empty on MySQL.** The bucketed query grouped by the bucket
+  index and selected it multiplied back into a timestamp; MySQL runs with `ONLY_FULL_GROUP_BY`
+  by default and refuses a select expression it cannot prove depends on the grouping one. The
+  query raised, the caller's `except` returned `[]`, and a chart with no points looks exactly
+  like a series with no data. It groups by the output column now — an exact 1:1 transform of
+  the bucket index, accepted by all three engines. With both fixes the live suite goes from
+  1/10 to 20/20 across MySQL **and** PostgreSQL.
+
+### Changed
+- **The built-in UIDs are one declaration, not three.** Roles, groups and users each had their
+  own map of the same idea, so "which UIDs are built in" had no single answer and nothing could
+  check that two of them did not collide. `BUILTIN_UIDS` now holds all three by kind and the
+  per-kind names (`BUILTIN_ROLE_UIDS`, `BUILTIN_GROUP_UIDS`, `BUILTIN_USER_UIDS`, `ROLES`) are
+  **derived views** — every caller keeps the name it already imports and **no value moved**.
+  What the single map buys beyond tidiness is the reverse lookup: `builtin_kind(uid)` answers
+  what a UID names, which is also what makes the no-collision rule testable instead of merely
+  intended. The convention the three maps had grown into is now written down and enforced: the
+  last block is a decade per kind — `…0000-…000f` roles, `…0010-…001f` groups, `…0020-…002f`
+  users — so a UID says its kind without a lookup and a new kind takes the next decade.
+- **`00000000-0000-4000-*` is reserved for them alone.** The prefix is declared once
+  (`BUILTIN_UID_PREFIX`) and every built-in UID is **composed** from it — that direction, and
+  not deriving the prefix back out of the values, is what makes it impossible to declare a
+  built-in outside the range rather than merely detectable; one edit moves all of them
+  together. The other end is `lib.core.uids.new_uid`, which re-draws if a `uuid4` lands in
+  that range — so "is this UID one of ours?" is answerable from the value, with no lookup and
+  no false positive possible.
+  Twelve leading zeros is not a realistic draw and this loop will not run twice in the
+  product's lifetime; it exists so the boundary is a guarantee rather than a probability,
+  which is the only kind of statement worth making about identity. The rule holds only while
+  every identity goes through it, and accounts are minted in **seven** places — the three
+  services plus LDAP, OIDC, SAML2 and SCIM — so a guard fails the build on a bare `uuid4()` in
+  any of them. Existing UIDs are untouched: this is a promise about new values, not a
+  validation rule.
+- **…and they moved: the kind now lives in the UUID's variant block** — `…-8001-…` users,
+  `…-8002-…` groups, `…-8003-…` roles. **This is a breaking change for any database written
+  before it, and it ships with no migration** (pre-release; the development databases were
+  rewritten by hand). Those values are identity: they sit in every user's role, in every
+  group→role link, in the group row itself, and — as plain text inside JSON — in the six
+  `*|default_role` config keys and in any `group:<uid>` notification recipient. An older
+  database does not fail loudly on the new code; it resolves to "unknown role" and everyone
+  lands on the fallback. Recreate it, or rewrite those five UUIDs before starting.
+- **Byte sizes now say which base they are in: `GiB`, not `GB`.** The ladder was always
+  binary — it divided by 1024 while printing "GB", the Windows convention — and the
+  ambiguity surfaced the moment somebody asked whether the two formatters counted the same
+  thing: a `1.0 GB` here is 1073741824 bytes, while the same three characters on a disk's
+  box mean 1000000000. **No value moved**; only the suffix names it. `to_bytes` still reads
+  the old spellings (`GB` → `GiB`) because a threshold an admin saved has to go on meaning
+  the same number of bytes, and it shares the ladder with `fmt_bytes` — if one scaled by
+  1024 and the other by 1000, a limit typed as "100 GiB" would read back as "107.4 GiB" and
+  drift every time it was looked at.
+- **Stored unit names are migrated on the way out of `/api/v1/modules`.** Not cosmetic: the
+  m365 threshold dropdowns now offer `MiB/GiB/TiB`, and a `<select>` whose value is absent
+  from its options displays the FIRST one — so opening an item and saving it without
+  touching anything would have rewritten a 100 GB limit as 100 MiB, a thousandfold change
+  made by looking at a page. Driven by the `_unit` field-name suffix, so a module that adds
+  a threshold later is covered without this having to know about it.
+- **Maintenance stopped presenting eight identical red buttons as one row.** Reclaiming space
+  and deleting data have opposite consequences and the section said they were the same kind of
+  act. It is now a card per action — icon, name, one line of what it does — under a heading
+  per group. Actions declare which group they belong to (`group_label_key`) and their
+  description (`desc_key`): declared data, not inferred from a handler name or a button
+  colour, which is what the next action added would have had to guess at. A section whose
+  actions declare no group keeps the single row it had.
+- **"Reset state" moved from the Status toolbar to Maintenance.** It empties a table exactly
+  like the wipes beside it, and a destructive action parked among a screen's view controls —
+  refresh, filter, run-now — is the one pressed by accident. `resetStatus()` still lives with
+  the Status code it refreshes; only the button moved, and it now checks that screen is
+  rendered before re-rendering it.
+- **Clearing the check state needs `checks_delete`, a new permission held by no built-in
+  role.** It used to ride on `checks_run`, which `editor` holds and which means "may operate
+  monitoring" — a fair pairing while the button sat next to "run now", and the wrong one once
+  it moved in beside the data wipes, where it left one destructive action an editor could fire
+  among eight that nobody can by default. Running a check and erasing what every check reported
+  are different acts. Changed on the endpoint, not just on the button.
+- **Every permission is now labelled and explained, and a guard keeps it that way.**
+  `db_maintenance` shipped with neither: a flag with no label renders in the roles matrix as
+  its raw name, and one with no hint is a checkbox granting something the admin has to guess
+  at. The guard walks all 66 flags in both languages, and in the other direction too — a label
+  for a permission that no longer exists is dead text that outlives every reader who could
+  have noticed it.
+- **The six wipes all say the same verb now, in both languages.** They read as three
+  different operations when one said "Borrar", another "Eliminar" and a third "Vaciar" —
+  a difference that implies a distinction which is not there, and costs the reader attention
+  working out that there is none, in the section where attention is worth most. English had
+  the same split between "Clear" and "Delete". A guard now fails the build if the verbs
+  diverge again, per language.
+- **A button inside a card only says the verb.** With the name and the description two lines
+  above it, "Eliminar todos los eventos de auditoría" was a caption repeating what had just
+  been said — the button is now "Borrar", "Vaciar". Declared as `button_key`, falling back to
+  the full `label_key`, because an action rendered as a bare row has no card around it and
+  there the button IS the only label. The database pair keeps its own names: "Optimizar" and
+  "Compactar" are already one verb, and shortening them would say less.
+
 ## [0.0.1+build.37] - 2026-08-01
 
 ### Fixed

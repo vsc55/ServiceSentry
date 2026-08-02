@@ -6,7 +6,7 @@
 # the counter after '+' is semver build metadata.  It MUST match the newest section heading
 # in CHANGELOG.md — tests/test_version_changelog.py fails the build when they drift, because
 # a version that lies about what is running is worse than no version at all.
-__version__ = '0.0.1+build.37'
+__version__ = '0.0.1+build.38'
 
 from lib.util.dict_files_path import DictFilesPath
 from lib.system.exe import Exec, ExecResult

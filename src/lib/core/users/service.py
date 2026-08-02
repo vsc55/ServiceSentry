@@ -13,14 +13,15 @@ and stay in the routes; the CLI runs as an operator and doesn't apply them.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from werkzeug.security import generate_password_hash
 
-from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER
+from lib.core.constants import (BUILTIN_ROLE_UIDS, BUILTIN_USER_UIDS, SYSTEM_USER,
+                                is_reserved_username)
 from lib.util.entity_audit import touch_entity, track_change
+from lib.core.uids import new_uid
 
 MAX_USERNAME_LEN = 64
 MAX_DISPLAY_NAME_LEN = 128
@@ -87,12 +88,62 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ── built-in identities ────────────────────────────────────────────────────────
+def builtin_user_record(username: str, *, display_name: str = '') -> dict:
+    """The synthesized record for one built-in identity (``system`` / ``anonymous``).
+
+    Same shape a real account has in ``GET /api/v1/users`` so the listing needs no special
+    case, plus ``builtin: True`` — the flag the roles and groups listings already use to
+    lock a row.  Deliberately **not** a database row: a row is a login surface (a password
+    hash to set, a session to open, a CLI edit away from being a real account), and these
+    two must never be reachable that way.  They are read-only by construction.
+
+    The role is the built-in ``none``: they hold no permissions.  ``system`` acts with the
+    panel's own authority precisely because it never passes through a permission check, and
+    showing it as an admin would claim a privilege that does not exist anywhere.
+    """
+    return {
+        'uid':          BUILTIN_USER_UIDS[username],
+        'builtin':      True,
+        'role':         BUILTIN_ROLE_UIDS['none'],
+        'display_name': display_name or username,
+        # '' is the INHERIT sentinel, not "no language": an empty ``lang`` is what makes the
+        # panel and the notifier fall back to the configured system language
+        # (``notifications|lang`` → ``web_admin|lang``), resolved at send time. Stamping the
+        # current system language here would freeze it at synthesis and go stale the day the
+        # admin changes it — and it would read as a preference these two never expressed.
+        'lang':         '',
+        'dark_mode':    None,
+        'groups':       [],
+        'enabled':      True,      # always in effect — they are not a disabled account
+        'email':        '',
+        'landing_page': '',
+        'auth_source':  'internal',
+        'created_at':   '',
+        'updated_at':   '',
+        'updated_by':   '',
+        'table_config': {},
+        'has_dashboard_layout': False,
+        'modal_config': {},
+    }
+
+
+def builtin_users(describe=None) -> dict:
+    """``{username: record}`` for every built-in identity.  *describe* is an optional
+    ``username -> str`` callable returning the localized display name (injected so this
+    stays Flask-free, like ``roles.service.build_roles_view``)."""
+    return {
+        name: builtin_user_record(name, display_name=describe(name) if describe else '')
+        for name in BUILTIN_USER_UIDS
+    }
+
+
 # ── operations ─────────────────────────────────────────────────────────────────
 def create_user(users: dict, *, username: str, password: str, policy: PasswordPolicy,
                 custom_roles: dict, groups: dict, role: str = 'none', display_name: str = '',
                 email: str = '', lang: str = '', landing_page: str = '', group_uids=(),
-                enabled: bool = True, actor: str = SYSTEM_USER, valid_langs=(),
-                valid_landing=()) -> str:
+                enabled: bool = True, login_enabled: bool = True, actor: str = SYSTEM_USER,
+                valid_langs=(), valid_landing=()) -> str:
     """Validate and add a new user to *users*. Returns the username. Mutates *users* in
     place (no persistence). Raises :class:`AdminOpError` on any violation."""
     username = (username or '').strip()
@@ -100,8 +151,11 @@ def create_user(users: dict, *, username: str, password: str, policy: PasswordPo
     email = (email or '').strip()
     if not username:
         raise AdminOpError('username_required')
-    if username.lower() == SYSTEM_USER:
-        raise AdminOpError('username_reserved', SYSTEM_USER)
+    # The audit identities are reserved: an account able to take one of those names would
+    # have its actions read as the panel's own, or as an unauthenticated caller's — and the
+    # audit log is the one place where "who did this" has to be unambiguous.
+    if is_reserved_username(username):
+        raise AdminOpError('username_reserved', username.lower())
     if len(username) > MAX_USERNAME_LEN:
         raise AdminOpError('name_too_long', MAX_USERNAME_LEN)
     if not password:
@@ -128,7 +182,7 @@ def create_user(users: dict, *, username: str, password: str, policy: PasswordPo
 
     ts = _now()
     rec = {
-        'uid': str(uuid.uuid4()), 'password_hash': generate_password_hash(password),
+        'uid': new_uid(), 'password_hash': generate_password_hash(password),
         'role': role_uid, 'display_name': display_name,
         'created_at': ts, 'updated_at': ts, 'updated_by': actor,
     }
@@ -142,6 +196,10 @@ def create_user(users: dict, *, username: str, password: str, policy: PasswordPo
         rec['groups'] = group_uids
     if not enabled:
         rec['enabled'] = False
+    # Stored only when switched off, like ``enabled``: the absent key means "logs in", which
+    # is what every account written before this existed meant.
+    if not login_enabled:
+        rec['login_enabled'] = False
     users[username] = rec
     return username
 
@@ -232,8 +290,10 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
                 actor: str = SYSTEM_USER) -> dict:
     """Apply an admin edit to an existing user from a request *data* dict — the data-side
     of ``PUT /api/v1/users/<username>``. Validates + mutates + audits each field and returns
-    ``{'changes': [...], 'password_reset': bool, 'disabled': bool}`` so the caller can audit
-    and run the session side-effects (revoke on password reset / disable).
+    ``{'changes': [...], 'password_reset': bool, 'disabled': bool, 'login_revoked': bool}`` so
+    the caller can audit and run the session side-effects (revoke on password reset, on
+    disable, and on turning an account into a no-login one — a live session would otherwise
+    outlive the setting that was meant to end it).
 
     The **requester-context** guards (role hierarchy, only-admin-grants-admin,
     reset-another's-password, can't-disable-self) need the session and stay with the caller,
@@ -244,6 +304,7 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
     changes: list[dict] = []
     password_reset = False
     disabled = False
+    login_revoked = False
 
     if 'role' in data:
         new_role_uid = resolve_role_uid(data['role'], custom_roles)
@@ -316,6 +377,19 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
             changes.append({'field': 'groups', 'old': old_groups_names, 'new': new_groups_names})
         user['groups'] = list(data['groups'])
 
+    if 'login_enabled' in data:
+        new_login = bool(data['login_enabled'])
+        old_login = user.get('login_enabled', True)
+        if old_login != new_login:
+            changes.append({'field': 'login_enabled', 'old': old_login, 'new': new_login})
+            # Absent means "logs in" — remove the key rather than storing True, so the record
+            # of an ordinary account looks the same as it did before this setting existed.
+            if new_login:
+                user.pop('login_enabled', None)
+            else:
+                user['login_enabled'] = False
+                login_revoked = True
+
     if 'enabled' in data:
         new_enabled = bool(data['enabled'])
         old_enabled = user.get('enabled', True)
@@ -348,4 +422,5 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
             changes.append({'field': 'modal_config', 'old': sorted(removed_m), 'new': 'cleared'})
 
     touch_entity(user, actor)
-    return {'changes': changes, 'password_reset': password_reset, 'disabled': disabled}
+    return {'changes': changes, 'password_reset': password_reset, 'disabled': disabled,
+            'login_revoked': login_revoked}

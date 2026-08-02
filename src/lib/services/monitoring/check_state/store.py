@@ -304,6 +304,20 @@ class CheckStateStore(BaseStore):
         except Exception:  # pylint: disable=broad-except
             return False
 
+    def count(self) -> int:
+        """How many rows the table holds; ``0`` if it cannot be read.
+
+        Asked before a wipe so the audit entry can say how much was erased. "State cleared"
+        with nothing under it is a record that a thing happened, not a record of what — and
+        the difference between clearing four rows and four thousand is the whole question
+        somebody has when they find that entry.
+        """
+        try:
+            row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
+            return int(row[0]) if row and row[0] is not None else 0
+        except Exception:  # pylint: disable=broad-except
+            return 0
+
     def clear(self) -> bool:
         """Forget all current state."""
         try:

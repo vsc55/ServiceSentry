@@ -375,7 +375,7 @@ ServiceSentry/
 │   │   └── web/
 │   └── tests/                           # Tests de core y web admin
 │       ├── conftest.py                  # Fixtures: config_dir, var_dir, admin, client
-│       ├── test_config_file.py
+│       ├── test_config_control.py
 │       ├── test_debug.py
 │       ├── test_dict_files_path.py
 │       ├── test_dict_return_check.py

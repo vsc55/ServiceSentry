@@ -773,7 +773,10 @@ class TestModule:
         from watchfuls.m365 import Watchful
         lst = Watchful.ITEM_SCHEMA['list']
         assert lst['client_secret']['sensitive'] is True
-        assert lst['site_free_unit']['options'] == ['MB', 'GB', 'TB']
+        # IEC labels: the ladder was always binary, only the suffix was wrong. No value
+        # moved when this was renamed — a threshold saved as '10 GB' still means the
+        # same 10737418240 bytes, it is just spelled honestly now.
+        assert lst['site_free_unit']['options'] == ['MiB', 'GiB', 'TiB']
         assert Watchful.ITEM_SCHEMA['__status_render__'][0]['value'] == 'used'
 
     def test_test_connection(self):
@@ -995,11 +998,16 @@ class TestStorageView:
                                                      'quota', 'share', 'full']
 
     def test_a_size_sorts_by_its_bytes_and_reads_as_a_size(self):
-        """"3.0 GB" has to sort as its bytes and the core must not learn what a byte is, so
-        the value travels as {v, s}: `v` sorts, `s` is read."""
+        """"3.0 GiB" has to sort as its bytes and the core must not learn what a byte is, so
+        the value travels as {v, s}: `v` sorts, `s` is read.
+
+        The suffix is IEC because the arithmetic always was: `GB` here divided by 1024 while
+        printing the decimal name, so the same number of bytes read as two different sizes
+        depending on who formatted it."""
         res = self._report(csv_sp=_detail((3 * GB, 10 * GB)))
         cell = res['rows'][0]['used']
-        assert cell['v'] == 3 * GB and cell['s'].endswith('GB')
+        assert cell['v'] == 3 * GB, 'the sortable value must stay the raw byte count'
+        assert cell['s'].endswith('GiB')
 
     def test_the_rows_are_the_breakdown_reshaped_not_measured_again(self):
         """One source, two layouts: the collapsible list and this table must never be able

@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_64_flags(self):
+    def test_permissions_tuple_has_66_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 64
+        assert len(PERMISSIONS) == 66
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -45,7 +45,8 @@ class TestPermissionsConstants:
             'servers_view', 'servers_add', 'servers_edit', 'servers_delete',
             'clusters_view', 'clusters_add', 'clusters_edit', 'clusters_delete',
             'credentials_view', 'credentials_add', 'credentials_edit', 'credentials_delete',
-            'config_view', 'config_edit', 'overview_view', 'overview_edit',
+            'config_view', 'config_edit', 'db_maintenance', 'checks_delete',
+            'overview_view', 'overview_edit',
             'overview_set_default', 'overview_reset_factory',
             'sessions_view', 'sessions_revoke',
             'checks_view', 'checks_run',
@@ -878,3 +879,40 @@ class TestGranularPermissions:
         _login(client, "modonly_user", "testpass")
         resp = client.put("/api/v1/config", json={"monitoring": {"timer_check": 60}})
         assert resp.status_code == 403
+
+
+class TestEveryPermissionIsExplainedToTheAdmin:
+    """A flag with no label renders as its raw name in the roles matrix, and one with no hint
+    is a checkbox that grants something the admin has to guess at.
+
+    Added after `db_maintenance` shipped with neither: nothing was checking, and the flag
+    reads fine in code — it is only on screen that it is a bare identifier next to a tick box
+    that hands out the ability to lock the database.
+    """
+
+    def _flags(self):
+        from lib.core.permissions import PERMISSIONS
+        return [p['flag'] if isinstance(p, dict) else p for p in PERMISSIONS]
+
+    def test_every_flag_has_a_label_in_both_languages(self):
+        from lib.i18n.lang import en_EN, es_ES
+        for name, table in (('es_ES', es_ES.LANG), ('en_EN', en_EN.LANG)):
+            labels = table['permission_labels']
+            missing = [f for f in self._flags() if not labels.get(f)]
+            assert not missing, f'{name} has no label for: {missing}'
+
+    def test_every_flag_says_what_it_grants(self):
+        from lib.i18n.lang import en_EN, es_ES
+        for name, table in (('es_ES', es_ES.LANG), ('en_EN', en_EN.LANG)):
+            hints = table['permission_hints']
+            missing = [f for f in self._flags() if not hints.get(f)]
+            assert not missing, f'{name} explains nothing about: {missing}'
+
+    def test_no_label_is_left_over(self):
+        """The other direction: a label for a flag that no longer exists is dead text that
+        outlives every reader who could have noticed, exactly like a stale table in a schema
+        document."""
+        from lib.i18n.lang import es_ES
+        known = set(self._flags())
+        stale = [k for k in es_ES.LANG['permission_labels'] if k not in known]
+        assert not stale, f'labels for permissions that do not exist: {stale}'

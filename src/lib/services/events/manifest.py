@@ -40,6 +40,7 @@ CONFIG_ACTIONS = [
     {'section': 'maintenance', 'id': 'events_clear_log',
      'label_key': 'event_log_clear', 'tooltip_key': 'event_log_clear_tt',
      'icon': 'bi-trash3', 'variant': 'danger', 'order': 40,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe', 'desc_key': 'event_log_clear_desc',
      'perm': 'events_notify_delete', 'fn': '_eventClearLog'},
 ]
 
@@ -68,3 +69,18 @@ EMBEDDED_SERVICE = {
 
 # Standalone launch (main.py --events) — see discover_standalone_services().
 STANDALONE = {'key': 'events', 'dest': 'events_mode', 'banner': 'banner_events', 'order': 30}
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'event_rule_created', 'severity': 'success'},
+    {'key': 'event_rule_deleted', 'severity': 'danger'},
+    {'key': 'event_rule_test', 'severity': 'muted'},
+    {'key': 'event_rule_updated', 'severity': 'info'},
+    {'key': 'events_worker_started', 'severity': 'success'},
+    {'key': 'events_worker_stopped', 'severity': 'warning'},
+    {'key': 'notification_log_cleared', 'severity': 'danger'},
+]

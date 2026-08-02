@@ -94,7 +94,8 @@ def cmd_user_add(ctx, args) -> int:
             ctx.users, username=args.username, password=password,
             policy=ctx.password_policy(), custom_roles=ctx.roles, groups=ctx.groups,
             role=args.role or 'none', display_name=args.display or '', email=args.email or '',
-            group_uids=gids, enabled=not args.disabled, actor='cli')
+            group_uids=gids, enabled=not args.disabled,
+            login_enabled=not getattr(args, 'no_login', False), actor='cli')
     except AdminOpError as e:
         return _err(_t(ctx, e.key, *e.args))
     ctx.persist_users()

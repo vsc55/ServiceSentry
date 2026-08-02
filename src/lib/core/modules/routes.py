@@ -54,6 +54,11 @@ def register(app, wa):
         """
         perms = wa._get_session_permissions()
         all_data = wa._load_modules()
+        # Units were relabelled (GB -> GiB) without any number changing. Migrated on the way
+        # out so a dropdown never shows a value it does not offer: a select whose value is
+        # absent from its options displays the first one, and saving the item would then turn
+        # a 100 GB threshold into 100 MiB.
+        modules_svc.normalize_unit_fields(all_data)
         if 'modules_view' in perms:
             return jsonify(secret_manager.mask_sensitive(all_data, wa._secret_keys))
         visible = modules_svc.visible_modules(all_data, perms)
@@ -176,13 +181,26 @@ def register(app, wa):
     checks_run_req = wa._perm_required('checks_run')
 
     @app.route('/api/v1/modules/status', methods=['DELETE'])
-    @checks_run_req
+    @wa._perm_required('checks_delete')
     def api_clear_status():
-        """Empty the current check-state table so monitoring starts clean."""
+        """Empty the current check-state table so monitoring starts clean.
+
+        Its own permission, held by no built-in role. It used to ride on ``checks_run``,
+        which `editor` holds and which means "may operate monitoring" — a fair pairing while
+        the button sat on the Status toolbar next to "run now", and the wrong one once it
+        moved in beside the data wipes: running a check and erasing what every check reported
+        are different acts, and the gate has to be on the endpoint rather than on the button,
+        which is only where it is offered.
+        """
         store = getattr(wa, '_check_state_store', None)
+        # Counted BEFORE the delete: afterwards there is nothing left to count, and "state
+        # cleared" on its own records that something happened rather than what. The gap
+        # between clearing four rows and four thousand is the entire question anyone has when
+        # they find this entry later.
+        rows = store.count() if store else 0
         ok = bool(store and store.clear())
-        wa._audit('status_cleared', detail={'ok': ok})
-        return jsonify({'ok': ok})
+        wa._audit('status_cleared', detail={'ok': ok, 'rows_deleted': rows if ok else 0})
+        return jsonify({'ok': ok, 'rows_deleted': rows if ok else 0})
 
     @app.route('/api/v1/modules/checks/run', methods=['POST'])
     @checks_run_req

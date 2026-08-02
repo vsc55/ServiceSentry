@@ -262,12 +262,36 @@ def diff_table(
 
 # ── DDL construction (parameterised by the connector) ───────────────────────
 
-def _column_ddl(col: Column, type_map: dict, quote, keyed: bool = False) -> str:
+# Native types that cannot carry a plain literal DEFAULT on MySQL/MariaDB.  A default on one
+# of these is only accepted as an *expression* — ``DEFAULT ('')`` — which MySQL 8.0.13+ and
+# MariaDB 10.2+ both take.  Every other engine accepts either form.
+_UNDEFAULTABLE_NATIVES = ('TEXT', 'BLOB', 'JSON', 'GEOMETRY')
+
+
+def default_clause(default: str, native: str, parens: bool = False) -> str:
+    """``DEFAULT x`` — parenthesised when the engine only accepts an expression there.
+
+    MySQL rejects ``TEXT NOT NULL DEFAULT ''`` outright ("BLOB, TEXT, GEOMETRY or JSON column
+    can't have a default value"), which is a CREATE TABLE that fails, not a column that
+    quietly loses its default.  Two dozen tables declare exactly that, so the whole MySQL
+    backend could not build its schema — the SQLite suite cannot see it, and the live suite
+    only exercised a handful of stores.
+    """
+    if parens and any(t in (native or '').upper() for t in _UNDEFAULTABLE_NATIVES):
+        return f'DEFAULT ({default})'
+    return f'DEFAULT {default}'
+
+
+def _column_ddl(col: Column, type_map: dict, quote, keyed: bool = False,
+                text_default_parens: bool = False) -> str:
     """Build a single column definition for CREATE TABLE.
 
     *keyed* marks a column that participates in a key/index: a TEXT column then
     uses the backend's ``TEXT_KEY`` type (a bounded VARCHAR on MySQL, which can't
-    index plain TEXT; plain TEXT elsewhere)."""
+    index plain TEXT; plain TEXT elsewhere).
+
+    *text_default_parens* is the connector's answer to "does a default on a TEXT column have
+    to be an expression here" (see :func:`default_clause`)."""
     if col.type.upper() == 'AUTOINCREMENT':
         return f'{quote(col.name)} {type_map["AUTOINCREMENT"]}'
     token = col.type.upper()
@@ -281,7 +305,7 @@ def _column_ddl(col: Column, type_map: dict, quote, keyed: bool = False) -> str:
     if not col.nullable:
         parts.append('NOT NULL')
     if col.default is not None:
-        parts.append(f'DEFAULT {col.default}')
+        parts.append(default_clause(col.default, native, text_default_parens))
     if col.unique:
         parts.append('UNIQUE')
     return ' '.join(parts)
@@ -301,11 +325,13 @@ def _colinfo_ddl(info: ColumnInfo, quote) -> str:
 def create_table_ddl(
     spec: TableSpec, type_map: dict, quote,
     *, name: str | None = None, extra_columns: list[ColumnInfo] | None = None,
+    text_default_parens: bool = False,
 ) -> str:
     """Build a full CREATE TABLE statement from *spec*.
 
     ``name`` overrides the table name (used for the temp table during rebuild).
     ``extra_columns`` are appended after the spec columns (preserved on rebuild).
+    ``text_default_parens`` comes from the connector — see :func:`default_clause`.
     """
     table = name or spec.name
     # Columns that take part in a key/index — their TEXT type must be indexable
@@ -317,7 +343,9 @@ def create_table_ddl(
         keyed.update(uc)
     for idx in spec.indexes:
         keyed.update(_index_key_cols(idx.columns))
-    defs = [_column_ddl(c, type_map, quote, keyed=(c.name in keyed)) for c in spec.columns]
+    defs = [_column_ddl(c, type_map, quote, keyed=(c.name in keyed),
+                        text_default_parens=text_default_parens)
+            for c in spec.columns]
     for info in (extra_columns or []):
         defs.append(_colinfo_ddl(info, quote))
     if spec.composite_pk:

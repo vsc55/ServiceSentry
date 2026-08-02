@@ -343,3 +343,18 @@ class TestAuditEventLabel:
         ev = admin._embedded_services['events']
         assert ev._audit_event_label('totally_unknown_xyz') == 'totally_unknown_xyz'
         assert ev._audit_event_label('') == ''
+
+
+class TestEventsAutostartEnv:
+    """`SS_EVENTS_AUTOSTART` must gate the embedded events worker (parity with syslog).
+
+    Lived in ``test_syslog_service.py`` because it was written alongside the syslog one it
+    mirrors — which is how a test ends up filed under the thing it was compared against
+    rather than the thing it tests."""
+
+    def test_embedded_events_autostart_honours_env(self, admin):
+        emb = admin._embedded_services['events']
+        with mock.patch.dict('os.environ', {'SS_EVENTS_AUTOSTART': '0'}):
+            assert emb._autostart() is False
+        with mock.patch.dict('os.environ', {'SS_EVENTS_AUTOSTART': '1'}):
+            assert emb._autostart() is True

@@ -57,6 +57,7 @@ CONFIG_ACTIONS = [
     {'section': 'maintenance', 'id': 'ipban_clear_history',
      'label_key': 'ipban_hist_clear', 'tooltip_key': 'ipban_hist_clear_tt',
      'icon': 'bi-trash3', 'variant': 'danger', 'order': 50,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe', 'desc_key': 'ipban_hist_clear_desc',
      'perm': 'ipban_history_delete', 'fn': '_ipbanHistClear'},
 ]
 
@@ -105,3 +106,20 @@ EMBEDDED_SERVICE = {
     'key': 'ipban', 'label_key': 'svc_ipban', 'icon': 'bi-slash-circle',
     'order': 45, 'controllable': True,
 }
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'ip_whitelist_added', 'severity': 'info'},
+    {'key': 'ip_whitelist_removed', 'severity': 'danger'},
+    {'key': 'ipban_history_cleared', 'severity': 'danger'},
+    {'key': 'ipban_service_action', 'severity': 'info'},
+    {'key': 'service_started', 'severity': 'success'},
+    {'key': 'ip_banned', 'severity': 'warning'},
+    {'key': 'ip_ban_escalated', 'severity': 'warning'},
+    {'key': 'ip_unbanned', 'severity': 'info'},
+    {'key': 'service_stopped', 'severity': 'warning'},
+]

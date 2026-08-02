@@ -167,7 +167,11 @@ class TestTheButtons:
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         render = io.open(os.path.join(base, 'lib', 'web_admin', 'templates', 'partials',
                                       'cfg', '_render.html'), encoding='utf-8-sig').read()
-        assert '${escAttr(a.fn)}(${jsStr(sec)})' in render, \
+        # Matched WITHOUT the closing paren on purpose: what this guards is that the section
+        # is passed at all, not how many arguments follow it. Pinning the exact call shape
+        # made it fail the day maintenance actions started receiving the button element too —
+        # a guard that breaks on an added argument is reporting the wrong thing.
+        assert '${escAttr(a.fn)}(${jsStr(sec)}' in render, \
             'config actions are called with no argument again — the shared handler would ' \
             'not know which section it was asked about'
 

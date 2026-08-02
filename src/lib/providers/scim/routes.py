@@ -37,6 +37,7 @@ Routes registered by this file:
 
 from flask import jsonify, request
 
+from lib.core.constants import ANONYMOUS_USER
 from lib.providers.scim import ScimService, ERR_SCHEMA
 from lib.security.ratelimit import RateLimiter
 
@@ -75,7 +76,7 @@ def register(app, wa):
         ip = request.remote_addr or '?'
         allowed, retry = wa._scim_ratelimit.hit(
             ip, max_hits=wa._SCIM_RATELIMIT_MAX, window_secs=wa._SCIM_RATELIMIT_WINDOW_SECS)
-        wa._audit('scim_auth_failed', username='', ip=ip,
+        wa._audit('scim_auth_failed', username=ANONYMOUS_USER, ip=ip,
                   detail={'path': request.path, 'blocked': not allowed})
         # Feed the internal fail2ban (explicit → also counts the 429 throttle case,
         # and suppresses the generic 401 capture so the ban reason is 'scim_auth_failed').

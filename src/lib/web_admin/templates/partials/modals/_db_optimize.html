@@ -1,0 +1,43 @@
+{# ================================================================
+   Database maintenance — the run, unit by unit, with its progress.
+
+   One dialog for both operations. A single call that returns only when everything is done
+   says nothing while it works, and on a large install that silence is indistinguishable
+   from a hang.
+
+   What the list is made of is the ENGINE's answer, not this template's: a row per table
+   where the statement works per table, and one row standing for the whole database where it
+   does not (SQLite's VACUUM is a single indivisible rewrite). Same dialog either way — the
+   alternative was a progress list on two engines and a bare spinner on the third.
+   ================================================================ #}
+<div class="modal fade" id="dbOptimizeModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi me-1" id="dbOptIcon"></i><span id="dbOptTitle"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" id="btnDbOptClose"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2" id="dbOptDesc"></p>
+                {# The lock warning, shown only for the operation that locks. Hidden rather
+                   than absent so the two operations share one dialog and one code path. #}
+                <div class="alert alert-warning py-2 px-2 small d-none" id="dbOptWarn">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i><span id="dbOptWarnText"></span>
+                </div>
+                <div class="progress mb-2" style="height:.4rem">
+                    <div class="progress-bar" id="dbOptBar" style="width:0%"></div>
+                </div>
+                <div class="small text-muted mb-2" id="dbOptCount"></div>
+                <div class="ss-vscroll" id="dbOptList" style="max-height:16rem"></div>
+            </div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" id="btnDbOptCancel"
+                        title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
+                <button class="btn btn-sm btn-primary" id="btnDbOptRun">
+                    <i class="bi bi-play-fill me-1"></i><span id="dbOptRunLabel"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

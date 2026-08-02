@@ -103,7 +103,22 @@ def table_stamp(db, table: str, *, sql_name: str | None = None):
             (table,),
         )
     except Exception:  # pylint: disable=broad-except
-        return None      # a blip must not cost the caller its cache
+        # A blip must not cost the caller its cache — and must not cost everyone else the
+        # CONNECTION. On PostgreSQL a failed statement aborts the whole transaction, so
+        # swallowing the error here left the shared connector unusable: every later query
+        # from every other store answered "current transaction is aborted", far from the
+        # probe that caused it. Harmless on SQLite/MySQL, invisible until a live PostgreSQL
+        # boot walked every store.
+        #
+        # The tables that hit this are the ones with no ``updated_at`` (audit, sessions,
+        # check_state): asking for it is how a caller finds out the probe has no answer for
+        # that table, which is a supported outcome — see the docstring. It just has to be a
+        # cheap "no" rather than a poisoned connection.
+        try:
+            db.rollback()
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return None
     if row is None:
         return None
     return (row[0] or 0, row[1], row[2] or '')

@@ -14,3 +14,13 @@ GROUP_SOURCES = [
      'lookup_url': '/api/v1/auth/ldap/group_lookup', 'lookup_key': 'dn',
      'picker_id': 'ldapGroupPicker', 'hint_key': 'grm_pick_hint'},
 ]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'ldap_groups', 'severity': 'info'},
+    {'key': 'ldap_test', 'severity': 'muted'},
+]

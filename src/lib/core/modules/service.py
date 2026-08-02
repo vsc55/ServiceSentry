@@ -276,6 +276,37 @@ def rekey_items_by_uid(data: dict) -> None:
                 module_cfg[coll_name] = _rekey_collection(coll)
 
 
+# ── unit spellings ───────────────────────────────────────────────────────────────
+def normalize_unit_fields(data: dict) -> None:
+    """Rewrite every ``*_unit`` value in place to the spelling the schemas offer now.
+
+    The size ladder was always binary; only its labels were wrong, so ``GB`` became ``GiB``
+    and the numbers did not move. Stored config still says ``GB`` though, and that is not a
+    cosmetic difference by the time it reaches the browser: the dropdown now offers
+    ``MiB/GiB/TiB``, a select whose value is not among its options shows the FIRST one, and
+    saving without touching anything would silently rewrite a 100 GB threshold as 100 MiB —
+    a thousandfold change to a limit the admin set, made by opening a page.
+
+    So the value is migrated on the way out and persists the next time the item is saved.
+    Driven by the field-name suffix rather than a list of module fields, because the modules
+    that will add a threshold later are not knowable from here.
+    """
+    from lib.util.tools import normalize_unit  # noqa: PLC0415
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for key, val in node.items():
+                if isinstance(val, str) and str(key).endswith('_unit'):
+                    node[key] = normalize_unit(val)
+                else:
+                    _walk(val)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(data or {})
+
+
 # ── where an item came from ──────────────────────────────────────────────────────
 # The UI stamps this on a copy so the save can tell a clone from a hand-made item. By the
 # time the payload arrives the two are indistinguishable — same fields, a uid the server just

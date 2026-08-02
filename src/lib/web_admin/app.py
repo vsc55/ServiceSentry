@@ -82,6 +82,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     # via _cfg_default(); editing a default means editing only that registry.
     _PORT = DEFAULT_PORT
     _AUDIT_MAX_ENTRIES = _cfg_default('web_admin|audit_max_entries')
+    _AUDIT_DETAIL_MAX_ITEMS = _cfg_default('web_admin|audit_detail_max_items')
     _REMEMBER_ME_DAYS = _cfg_default('web_admin|remember_me_days')
     _TABLE_ROWS_DEFAULT = _cfg_default('web_admin|table_rows_default')
     _PUBLIC_STATUS_DETAIL = _cfg_default('web_admin|public_status_detail')  # guests see per-item detail on /status

@@ -13,7 +13,6 @@ don't hold) — that needs the session and stays in the route.
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 
 from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES, SYSTEM_USER
@@ -21,6 +20,7 @@ from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, filter_valid_permissi
 from lib.core.groups.service import MAX_GROUP_DESC_LEN
 from lib.core.users.service import AdminOpError
 from lib.util.entity_audit import touch_entity, track_change
+from lib.core.uids import new_uid
 
 MAX_ROLE_LABEL_LEN = 128
 
@@ -112,7 +112,7 @@ def create_role(custom_roles: dict, *, name: str, description: str = '', permiss
     if role_name_taken(name, custom_roles, builtin_role_names):
         raise AdminOpError('role_already_exists', name)
 
-    role_uid = str(uuid.uuid4())
+    role_uid = new_uid()
     ts       = _now()
     custom_roles[role_uid] = {
         'uid':         role_uid,

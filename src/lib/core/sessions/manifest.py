@@ -42,3 +42,16 @@ OVERVIEW_WIDGETS = [
                   {'key': 'last_seen', 'label_key': 'col_last_seen', 'sortable': True, 'cell': 'date'},
               ]}},
 ]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'session_all_revoked', 'severity': 'danger'},
+    {'key': 'session_expired', 'severity': 'muted'},
+    {'key': 'session_ip_changed', 'severity': 'warning'},
+    {'key': 'session_revoked', 'severity': 'danger'},
+    {'key': 'session_user_revoked', 'severity': 'danger'},
+]

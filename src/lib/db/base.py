@@ -22,7 +22,7 @@ from contextlib import contextmanager
 
 from .schema import (
     ColumnInfo, IndexInfo, SchemaDiff, TableSpec,
-    create_index_ddl, create_table_ddl, diff_table,
+    create_index_ddl, create_table_ddl, default_clause, diff_table,
 )
 
 _log = logging.getLogger(__name__)
@@ -63,6 +63,10 @@ class BaseConnector(ABC):
     # TEXT fine, so this defaults to TEXT; MySQL/MariaDB can't index TEXT without a
     # prefix length, so it overrides this to a bounded VARCHAR.
     DDL_TEXT_KEY:      str = 'TEXT'
+    # Does a DEFAULT on a TEXT/BLOB/JSON column have to be written as an expression here?
+    # MySQL/MariaDB reject the literal form outright — the CREATE TABLE fails — so they
+    # override this to True and the default is emitted as ``DEFAULT ('')``.
+    DDL_TEXT_DEFAULT_PARENS: bool = False
 
     # Server-based engines (MySQL/PostgreSQL) keep a per-thread network connection;
     # a short-lived thread (a check-pool worker) that abandons it logs a server-side
@@ -241,7 +245,9 @@ class BaseConnector(ABC):
         """
         q = self.quote_ident
         if not self.table_exists(spec.name):
-            self.execute_ddl(create_table_ddl(spec, self._type_map, q))
+            self.execute_ddl(create_table_ddl(
+                spec, self._type_map, q,
+                text_default_parens=self.DDL_TEXT_DEFAULT_PARENS))
             for idx in spec.indexes:
                 self.execute_ddl(create_index_ddl(
                     idx.name, spec.name, idx.columns, idx.unique, q))
@@ -315,7 +321,7 @@ class BaseConnector(ABC):
         if not col.nullable and col.default is not None:
             parts.append('NOT NULL')
         if col.default is not None:
-            parts.append(f'DEFAULT {col.default}')
+            parts.append(default_clause(col.default, native, self.DDL_TEXT_DEFAULT_PARENS))
         return ' '.join(parts)
 
     def _drop_index(self, name: str, table: str) -> None:
@@ -380,7 +386,8 @@ class BaseConnector(ABC):
         tmp, extras, collist, select_list, has_common = self._rebuild_copy_plan(spec, actual_cols)
         with self.transaction():
             self.execute(create_table_ddl(
-                spec, self._type_map, q, name=tmp, extra_columns=extras))
+                spec, self._type_map, q, name=tmp, extra_columns=extras,
+                text_default_parens=self.DDL_TEXT_DEFAULT_PARENS))
             if has_common:
                 self.execute(
                     f'INSERT INTO {q(tmp)} ({collist}) '
@@ -412,8 +419,61 @@ class BaseConnector(ABC):
     # ── Maintenance ──────────────────────────────────────────────────────────
 
     def vacuum(self) -> None:
-        """Reclaim unused disk space.  Default: no-op (e.g. MySQL handles
-        this automatically; override in connectors that support it)."""
+        """Routine space reclaim, safe to run after a bulk delete.  Default: no-op.
+
+        NOT the same as :meth:`compact`, and deliberately still its own method: this one is
+        called automatically after History prunes rows, so it has to stay cheap enough to run
+        unattended. On PostgreSQL that difference is the whole point — plain ``VACUUM`` marks
+        space reusable while holding no exclusive lock, and ``VACUUM FULL`` rewrites the table
+        under a lock that blocks every reader. Pointing both at the stronger one would make an
+        automatic background step capable of freezing the panel.
+        """
+
+    def compact(self) -> None:
+        """Rewrite storage to hand free space back to the filesystem.  Default: no-op.
+
+        The expensive half of maintenance, and the reason it is offered as its own action
+        rather than folded into :meth:`optimize`: it can hold the database for as long as the
+        rewrite takes, which on a large install is not a moment.
+        """
+
+    def optimize(self, table: str | None = None) -> None:
+        """Refresh the query planner's statistics.  Default: no-op.
+
+        Kept SEPARATE from :meth:`vacuum` because the two differ in what they cost, and a
+        user choosing between them is choosing exactly that: this reads the data and updates
+        the numbers the planner uses to pick an index, and is cheap and safe to run at any
+        time; ``vacuum`` rewrites storage and can lock the database for as long as that takes.
+        Merging them would mean the safe operation could never be offered on its own.
+
+        *table* narrows it to one table so the UI can report real progress: a tick appears
+        because THAT table finished, not because a timer said so. All three engines can
+        analyze a single table, which is what makes an honest progress list possible at all.
+        """
+
+    def maintenance_targets(self, op: str) -> list[str]:
+        """The units *op* can advance through one at a time.  Empty = it cannot be split.
+
+        The progress list is built from this, so the dialog looks the same on every engine
+        and the ENGINE decides what the rows are: a table each where the statement works per
+        table, and a single row standing for the whole database where it does not. SQLite's
+        ``VACUUM`` is one indivisible rewrite of the file — reporting it as thirty-three
+        tables would be inventing a granularity the engine does not have, and each tick would
+        be a lie about what had finished.
+
+        Default: nothing is divisible, which is the safe answer for a connector that has not
+        thought about it.
+        """
+        return []
+
+    def list_tables(self) -> list[str]:
+        """Every table in the current database/schema.  Default: empty.
+
+        Needed because not every engine has a database-wide maintenance statement — MySQL
+        names its tables one by one — and asking the catalog is what keeps the list true
+        rather than a hardcoded copy of it that a new store would silently fall out of.
+        """
+        return []
 
     def checkpoint(self) -> None:
         """Flush the write-ahead log (SQLite WAL only).

@@ -145,7 +145,7 @@ class TestTheImportCycleStaysOpen:
             PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
             discover_permissions, is_module_perm,
         )
-        assert len(PERMISSIONS) == 64 and len(PERMISSION_GROUPS) == 17
+        assert len(PERMISSIONS) == 66 and len(PERMISSION_GROUPS) == 17
         assert BUILTIN_ROLE_PERMISSIONS['admin'] == frozenset(PERMISSIONS)
         assert discover_permissions() and is_module_perm('module.ping.view')
 
@@ -243,6 +243,39 @@ class TestBuiltInIdentitiesHaveOneHome:
         from lib.core.constants import (                             # noqa: PLC0415
             BUILTIN_GROUP_UIDS, BUILTIN_GROUP_UID_SET)
         assert BUILTIN_GROUP_UID_SET == frozenset(BUILTIN_GROUP_UIDS.values())
+
+    def test_all_three_kinds_come_from_one_map(self):
+        """Roles, groups and users were three separate literals of the same idea. They are
+        views over ``BUILTIN_UIDS`` now, so "which UIDs are built in" has one answer."""
+        from lib.core.constants import (                             # noqa: PLC0415
+            BUILTIN_GROUP_UIDS, BUILTIN_ROLE_UIDS, BUILTIN_UIDS, BUILTIN_USER_UIDS)
+        assert set(BUILTIN_UIDS) == {'role', 'group', 'user'}
+        assert BUILTIN_ROLE_UIDS == BUILTIN_UIDS['role']
+        assert BUILTIN_GROUP_UIDS == BUILTIN_UIDS['group']
+        assert BUILTIN_USER_UIDS == BUILTIN_UIDS['user']
+
+    def test_no_two_built_ins_share_a_uid(self):
+        """A collision would make one entity resolve as another kind — silently."""
+        from lib.core.constants import BUILTIN_UIDS, BUILTIN_UID_KIND  # noqa: PLC0415
+        total = sum(len(uids) for uids in BUILTIN_UIDS.values())
+        assert len(BUILTIN_UID_KIND) == total
+
+    def test_the_variant_block_says_which_kind(self):
+        """The UUID's variant block carries the kind — ``…-8001-…`` users, ``…-8002-…``
+        groups, ``…-8003-…`` roles — so a UID names its kind without a lookup and a new kind
+        takes the next value. It stays ``8xxx`` because that first nibble is what makes a
+        UUID RFC-4122 variant 1; ``0001`` there would not be a valid UUID of this family.
+
+        The values themselves are NOT repeated here (see the one-home test above): the
+        convention is checked against what the module declares.
+        """
+        from lib.core.constants import BUILTIN_UIDS, builtin_kind    # noqa: PLC0415
+        block = {'user': '8001', 'group': '8002', 'role': '8003'}
+        for kind, uids in BUILTIN_UIDS.items():
+            for name, uid in uids.items():
+                assert uid.split('-')[3] == block[kind], f'{kind}/{name}'
+                assert builtin_kind(uid) == kind
+        assert builtin_kind('nope') is None and builtin_kind(None) is None
 
 
 class TestOneEscalationGuard:

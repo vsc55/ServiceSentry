@@ -54,6 +54,13 @@ MODULE_PERMISSIONS = {
     'permissions': (
         {'flag': 'checks_view', 'roles': ('editor', 'viewer')},  # view check results / status tab
         {'flag': 'checks_run',  'roles': ('editor',)},           # trigger module checks on demand
+        # Emptying the check-state table used to ride on `checks_run`, which reads as "may
+        # operate monitoring" and is held by `editor`. That pairing made sense while the
+        # button lived on the Status toolbar beside "run now"; among the data wipes in
+        # Maintenance it did not, and it left one destructive action in that section that an
+        # editor could fire while the other eight needed a delete permission nobody holds by
+        # default. Running a check and erasing what every check reported are different acts.
+        {'flag': 'checks_delete', 'roles': ()},                  # clear the check-state table
     ),
 }
 
@@ -83,3 +90,18 @@ EMBEDDED_SERVICE = {
 # Standalone launch (main.py --monitor): discover_standalone_services() maps the CLI
 # mode flag to ``service.run_standalone``; ``order`` resolves a tie if two were set.
 STANDALONE = {'key': 'monitoring', 'dest': 'monitor_mode', 'banner': 'banner_monitor', 'order': 10}
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'daemon_checks_run', 'severity': 'muted'},
+    {'key': 'daemon_config_changed', 'severity': 'info'},
+    {'key': 'daemon_error', 'severity': 'danger'},
+    {'key': 'daemon_started', 'severity': 'success'},
+    {'key': 'daemon_stopped', 'severity': 'warning'},
+    {'key': 'module_check_error', 'severity': 'danger'},
+    {'key': 'module_check_timeout', 'severity': 'danger'},
+]

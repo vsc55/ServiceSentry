@@ -12,12 +12,12 @@ operations are in :mod:`lib.core.users.service`.
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 
 from lib.core.constants import BUILTIN_GROUP_UID_SET, SYSTEM_USER
 from lib.core.users.service import AdminOpError, resolve_role_uid
 from lib.util.entity_audit import touch_entity, track_change
+from lib.core.uids import new_uid
 
 MAX_GROUP_LABEL_LEN = 128
 MAX_GROUP_DESC_LEN = 512
@@ -54,7 +54,7 @@ def create_group(groups: dict, *, name: str, description: str = '', roles=(),
     if any((g.get('name') or '').lower() == name.lower() for g in groups.values()):
         raise AdminOpError('group_already_exists', name)
 
-    group_uid = str(uuid.uuid4())
+    group_uid = new_uid()
     ts = _now()
     groups[group_uid] = {
         'uid': group_uid, 'name': name, 'description': description,
