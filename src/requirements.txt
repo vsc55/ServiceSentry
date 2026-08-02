@@ -23,7 +23,7 @@ werkzeug>=3.0
 # Imported directly (app.py: ChoiceLoader/FileSystemLoader); comes via Flask too.
 jinja2>=3.0
 pythonping>=1.1.4
-cryptography>=41.0
+cryptography>=48.0.1   # floor raised from 41.0: <48 has CVEs (buffer overread + static OpenSSL); the lock ships 48.0.1
 dnspython>=2.3
 # Optional: LDAP/Active Directory authentication
 ldap3>=2.9

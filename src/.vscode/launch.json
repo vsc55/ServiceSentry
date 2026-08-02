@@ -65,6 +65,45 @@
             "justMyCode": false
         },
         {
+            // Suite completa SIN xdist. El launcher de arriba hereda `-n auto` de pytest.ini,
+            // y en algunas máquinas Windows execnet cae en el arranque con
+            // "OSError: [Errno 22] Invalid argument" ANTES de ejecutar un solo test. `-p
+            // no:xdist` desactiva el plugin: fiable, pero en serie (~45 min, sin progreso
+            // hasta el final porque la salida se bufferiza).
+            "name": "🐢 Python: pytest (serie, sin xdist)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.venv/Scripts/pytest.exe",
+            "args": [
+                "-c", "${workspaceFolder}/pytest.ini",
+                "-p", "no:xdist",
+                "-o", "addopts=-ra --tb=short",
+                "tests",
+                "watchfuls"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            // Suite completa con 2 workers en vez de `-n auto`. Muchísimo menos propensa al
+            // Errno 22 del arranque de xdist (menos procesos que crear), y con progreso
+            // visible. ~20 min. El punto intermedio entre el `-n auto` original y la serie.
+            "name": "🐇 Python: pytest (-n 2)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.venv/Scripts/pytest.exe",
+            "args": [
+                "-c", "${workspaceFolder}/pytest.ini",
+                "-o", "addopts=-ra --tb=short -n 2",
+                "tests",
+                "watchfuls"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "🐍 Python: Archivo actual",
             "type": "debugpy",
             "request": "launch",
