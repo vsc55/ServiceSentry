@@ -207,12 +207,68 @@ class PostgreSQLConnector(BaseConnector):
         VACUUM cannot run inside a transaction block, so autocommit is toggled on for
         the call and restored afterwards.
         """
+        self._outside_transaction('VACUUM ANALYZE')
+
+    def maintenance_targets(self, op: str) -> list[str]:
+        """Both statements take an optional table here, so both can report per-table progress.
+
+        It matters more for VACUUM FULL than for ANALYZE: the lock is held per table rather
+        than across the whole run, so naming them one at a time also shortens how long any
+        single table is unavailable.
+        """
+        return self.list_tables()
+
+    def compact(self, table: str | None = None) -> None:
+        """``VACUUM FULL`` — the only form that returns space to the filesystem.
+
+        Plain ``VACUUM`` marks space reusable INSIDE the file; the file itself never shrinks.
+        So this is the one an admin means by "compact", and it is also the one that takes an
+        ACCESS EXCLUSIVE lock on every table it rewrites — readers included. That is why it is
+        an explicit action behind a warning and never the automatic post-delete step.
+        """
+        self._outside_transaction(
+            f'VACUUM FULL {self.quote_ident(table)}' if table else 'VACUUM FULL')
+
+    def optimize(self, table: str | None = None) -> None:
+        """``ANALYZE`` — refresh planner statistics without touching storage."""
+        self._outside_transaction(
+            f'ANALYZE {self.quote_ident(table)}' if table else 'ANALYZE')
+
+    def list_tables(self) -> list[str]:
+        rows = self.fetchall(
+            "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() "
+            "ORDER BY tablename")
+        return [r[0] for r in rows]
+
+    def _outside_transaction(self, sql: str) -> None:
+        """Run *sql* with autocommit on, restoring it afterwards.
+
+        VACUUM and ANALYZE cannot run inside a transaction block, and this connector keeps one
+        open. Shared so the three maintenance statements cannot drift on the one detail that
+        makes them work at all.
+
+        Turning autocommit on is not enough by itself: psycopg2 refuses the flip while a
+        transaction is open ("set_session cannot be used inside a transaction"), and one is
+        always open — the driver starts it on the first read. So the transaction is ended
+        first. **Committed, not rolled back**: what is open here is the read that preceded the
+        request, and throwing away a caller's pending work in order to run maintenance would
+        be a worse surprise than keeping it. Maintenance is an explicit admin action, never
+        something that fires mid-write.
+
+        Every maintenance call on PostgreSQL raised without this — proven only by running it
+        against a real server, since the statement itself is valid and the failure lives in
+        the driver.
+        """
         conn = self._conn()
+        try:
+            conn.commit()          # no-op when nothing is open
+        except Exception:          # pylint: disable=broad-except
+            pass
         old_autocommit = conn.autocommit
         conn.autocommit = True
         try:
             with conn.cursor() as cur:
-                cur.execute('VACUUM ANALYZE')
+                cur.execute(sql)
         finally:
             conn.autocommit = old_autocommit
 

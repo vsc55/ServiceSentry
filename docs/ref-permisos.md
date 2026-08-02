@@ -9,8 +9,8 @@
 >   [explica-web-admin.md](explica-web-admin.md).
 > - Los **endpoints** de roles/grupos/usuarios están en [ref-api.md](ref-api.md).
 
-El sistema usa **64 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
-código) tiene exactamente esos 64 flags.
+El sistema usa **66 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
+código) tiene exactamente esos 66 flags.
 
 ---
 
@@ -18,7 +18,7 @@ código) tiene exactamente esos 64 flags.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (64 flags) |
+| `admin` | Todos los permisos (66 flags) |
 | `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
 | `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`, `credentials_view` (sin `config_view`, que expone secretos sin enmascarar) |
 
@@ -29,7 +29,7 @@ código) tiene exactamente esos 64 flags.
 
 ## Roles personalizados
 
-Se crean desde **Acceso → Roles** asignando cualquier combinación de los 64 permisos. Se
+Se crean desde **Acceso → Roles** asignando cualquier combinación de los 66 permisos. Se
 persisten en la tabla `roles`.
 
 Sus permisos se editan en **un** sitio: la sub-sección **Acceso → Permisos**, que pone todos los
@@ -52,7 +52,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 
 ---
 
-## Catálogo de permisos (64 flags)
+## Catálogo de permisos (66 flags)
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -79,6 +79,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de credenciales reutilizables: identidades SSH y registros de aplicación de Entra ID (`azure_app`, `m365_app`), tokens de API (Proxmox, NUT, HTTP, datastore). Sección propia dentro de System |
 | **Config** | `config_view` | Leer configuración sin poder editarla |
 | | `config_edit` | Guardar cambios en configuración |
+| | `db_maintenance` | Optimizar y compactar la base de datos (Config › Mantenimiento). Flag propio y **sin rol por defecto**: compactar deja la base de datos bloqueada mientras se reescribe, y editar un ajuste no es la misma autoridad que congelar el panel |
 | **Overview** | `overview_view` | Ver el dashboard de resumen |
 | | `overview_edit` | Editar el layout propio |
 | | `overview_set_default` | Fijar el layout como default global |
@@ -87,6 +88,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `sessions_revoke` | Revocar sesiones |
 | **Checks** | `checks_view` | Ver resultados de checks y la pestaña Status |
 | | `checks_run` | Lanzar comprobaciones bajo demanda |
+| | `checks_delete` | Vaciar la tabla de estado de los checks (Config › Mantenimiento). **Sin rol por defecto**: antes iba con `checks_run` —que tiene `editor`— y eso dejaba una acción destructiva al alcance de un rol pensado para *operar* la monitorización, no para borrar lo que reportó |
 | **Historial** | `history_view` | Ver gráficas y series del historial |
 | | `history_delete` | Borrar datos del historial |
 | **Syslog** | `syslog_view` | Ver mensajes syslog y descartes |
@@ -129,7 +131,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
   son identidad, la nombran users/groups/roles/resolución/SCIM/CLI, y no las posee ningún dominio.
 - `ROLES` — las claves de rol integrado, mayor privilegio primero. **Derivada** de
   `BUILTIN_ROLE_UIDS`, no escrita otra vez.
-- `PERMISSIONS` — tupla con los 64 flags.
+- `PERMISSIONS` — tupla con los 66 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de
   roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` de los roles integrados.

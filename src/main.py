@@ -476,6 +476,8 @@ def args_init() -> argparse.Namespace:
     _p.add_argument('--group', action='append', metavar='GROUP',
                     help='add to a group by name/uid (repeatable)')
     _p.add_argument('--disabled', action='store_true', help='create the account disabled')
+    _p.add_argument('--no-login', action='store_true',
+                    help='service account: active, but nobody can sign in as it')
     for _act, _hlp in (('enable', 'enable a user'), ('disable', 'disable a user')):
         up.add_parser(_act, help=_hlp).add_argument('username')
     _p = up.add_parser('passwd', help="change a user's password")

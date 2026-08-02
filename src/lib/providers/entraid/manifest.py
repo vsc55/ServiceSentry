@@ -62,3 +62,31 @@ GROUP_SOURCES = [
     {**_ENTRA_GROUPS, 'section': 'oidc',  'picker_id': 'oidcGroupPicker'},
     {**_ENTRA_GROUPS, 'section': 'saml2', 'picker_id': 'saml2GroupPicker'},
 ]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'entra_app_permissions_ensured', 'severity': 'success'},
+    {'key': 'entra_app_permissions_failed', 'severity': 'danger'},
+    {'key': 'entra_app_provision_failed', 'severity': 'danger'},
+    {'key': 'entra_app_provisioned', 'severity': 'success'},
+    {'key': 'entra_azure_rbac_assigned', 'severity': 'success'},
+    {'key': 'entra_azure_rbac_failed', 'severity': 'danger'},
+    {'key': 'entra_cred_secret_rotated', 'severity': 'warning'},
+    {'key': 'entra_expose_api_failed', 'severity': 'danger'},
+    {'key': 'entra_groups', 'severity': 'info'},
+    {'key': 'entra_oidc_secret_rotated', 'severity': 'warning'},
+    {'key': 'entra_saml2_app_provision_failed', 'severity': 'danger'},
+    {'key': 'entra_saml2_app_provisioned', 'severity': 'success'},
+    {'key': 'entra_saml2_graph_secret', 'severity': 'warning'},
+    {'key': 'entra_scim_app_provision_failed', 'severity': 'danger'},
+    {'key': 'entra_scim_app_provisioned', 'severity': 'success'},
+    {'key': 'entra_scim_resync', 'severity': 'info'},
+    {'key': 'entra_scim_resync_failed', 'severity': 'danger'},
+    {'key': 'entra_wizard_error', 'severity': 'danger'},
+    {'key': 'msteams_sso_failed', 'severity': 'danger'},
+    {'key': 'msteams_sso_login', 'severity': 'success'},
+]

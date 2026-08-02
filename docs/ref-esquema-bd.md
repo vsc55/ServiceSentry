@@ -695,7 +695,7 @@ default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraint
 
 Crear-copiar-borrar-renombrar en una transacción (SQLite/PostgreSQL, DDL transaccional).
 `COALESCE(col, default)` rellena columnas recién NOT NULL. MySQL lo sobreescribe
-([mysql.py:96](../src/lib/db/mysql.py#L96)) porque su DDL auto-commitea: construye la tabla
+([mysql.py:100](../src/lib/db/mysql.py#L100)) porque su DDL auto-commitea: construye la tabla
 de reemplazo y hace un `RENAME TABLE` atómico.
 
 ### Mapa de tipos por motor — `_type_map` ([base.py:222](../src/lib/db/base.py#L222))
@@ -725,6 +725,70 @@ parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR
   completo contra MySQL/PostgreSQL reales (opt-in por variables de entorno).
 
 ---
+
+## Mantenimiento: optimizar y compactar
+
+Borrar filas **no** devuelve espacio al disco. El motor marca las páginas como reutilizables
+dentro del fichero, pero el fichero no encoge: se borra un año de histórico y la gráfica de
+disco sigue igual. Recuperarlo es una operación aparte, y el panel la ofrece en
+**Configuración › Mantenimiento** (`POST /api/v1/config/db/<op>`, permiso `db_maintenance`).
+
+Son **dos** acciones porque cuestan cosas muy distintas:
+
+| Acción | Qué hace | Coste | Motor |
+|---|---|---|---|
+| `optimize` | Actualiza las estadísticas que el planificador usa para elegir índice. No toca el almacenamiento ni borra nada | Barato y seguro; sin confirmación | SQLite `ANALYZE` + `PRAGMA optimize` · MySQL `ANALYZE TABLE` · PostgreSQL `ANALYZE` |
+| `compact` | Reescribe el almacenamiento y devuelve el espacio libre al sistema de ficheros | **Retiene la base de datos** mientras dura; pide confirmación con aviso | SQLite `VACUUM` · MySQL `OPTIMIZE TABLE` (reconstruye en InnoDB) · PostgreSQL `VACUUM FULL` |
+
+Van separadas a propósito: si solo existiera la operación combinada, la barata y segura —la
+que interesa poder lanzar a menudo— nunca se podría ejecutar sola.
+
+**La ejecución avanza de una en una y lo enseña.** Una sola llamada que solo vuelve cuando ha
+terminado todo no dice nada mientras trabaja, y en una base de datos grande ese silencio no se
+distingue de un cuelgue. El modal lista las unidades **antes** de empezar y marca cada una al
+volver, así que un tick significa que *esa* unidad terminó —no que ha pasado tiempo— y una
+ejecución que se atasca enseña exactamente dónde.
+
+De qué se compone la lista lo decide el **motor**, vía `maintenance_targets(op)`:
+
+| Motor | `optimize` | `compact` |
+|---|---|---|
+| SQLite | una fila por tabla (`ANALYZE <tabla>`) | **una sola fila**: toda la base de datos (`VACUUM` es indivisible) |
+| MySQL | una fila por tabla | una fila por tabla |
+| PostgreSQL | una fila por tabla | una fila por tabla (además acorta cuánto tiempo está bloqueada cada una) |
+
+Nunca se deduce del nombre del motor: `divisible: false` es lo que lo dice. Partir el `VACUUM`
+de SQLite en 33 filas inventaría una granularidad que el motor no tiene, y cada tick sería una
+afirmación falsa sobre trabajo que no había terminado.
+
+El nombre de tabla que llega del cliente se **valida contra `maintenance_targets(op)`** antes
+de interpolarse en SQL —un identificador no puede ser parámetro ligado, así que aceptarlo tal
+cual sería un punto de inyección—, y de paso eso rechaza un `compact` por tabla en un motor que
+no lo divide: en SQLite reescribiría la base **entera** una vez por tabla.
+
+Los pasos por unidad **no** escriben entrada de auditoría cada uno: la ejecución es *una* acción
+de operador, y una fila por tabla enterraría el registro al que pertenece. La llamada de cierre
+—la que no lleva tabla— es la que audita y la que mide lo recuperado.
+
+**`vacuum()` no es `compact()`.** El conector conserva `vacuum()` como la recuperación
+**rutinaria** posterior a un borrado masivo, que `HistoryStore` llama sola tras podar filas.
+En PostgreSQL esa distinción es todo el asunto: `VACUUM` a secas marca espacio reutilizable
+sin bloquear a nadie, mientras que `VACUUM FULL` reescribe bajo un `ACCESS EXCLUSIVE` que
+bloquea incluso a los lectores. Apuntar ambos a la forma fuerte convertiría un paso automático
+de segundo plano en algo capaz de congelar el panel.
+
+**MySQL no tiene forma global.** Nombra sus tablas una a una (`list_tables()` desde
+`information_schema`, filtrando a `BASE TABLE` para no pasarle una vista a `OPTIMIZE`), y se
+ejecuta **una sentencia por tabla**: una sola lista separada por comas falla entera en cuanto
+una tabla la rechaza, y un mantenimiento que se detiene a medias deja al administrador sin
+saber hasta dónde llegó.
+
+**El resultado dice cuánto liberó.** Se mide el tamaño antes y después
+(`lib/core/config/service.py::database_size`) y se registra en auditoría junto a la operación.
+En SQLite se cuentan también `-wal` y `-shm`: contar solo el fichero principal reportaría como
+recuperación una caída que simplemente se mudó al WAL. Si el motor no quiere dar el dato —una
+PostgreSQL gestionada puede negar `pg_database_size` a un no-superusuario— se reporta como
+**desconocido**, nunca como cero, que se leería como «no liberó nada».
 
 ## Ver también
 

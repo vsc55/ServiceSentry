@@ -19,6 +19,7 @@ CONFIG_ACTIONS = [
     {'section': 'maintenance', 'id': 'audit_clear_all',
      'label_key': 'audit_clear_all', 'tooltip_key': 'audit_clear_all_tt',
      'icon': 'bi-trash3', 'variant': 'danger', 'order': 30,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe', 'desc_key': 'audit_clear_all_desc',
      'perm': 'audit_delete', 'fn': 'confirmClearAudit'},
 ]
 
@@ -50,4 +51,34 @@ OVERVIEW_WIDGETS = [
                   {'key': 'event', 'label_key': 'col_event', 'sortable': True, 'cell': 'event_badge'},
                   {'key': 'user',  'label_key': 'col_user',  'sortable': True, 'cell': 'code'},
               ]}},
+]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    # The audit domain's own two.
+    {'key': 'audit_cleared', 'severity': 'danger'},
+    {'key': 'audit_entry_deleted', 'severity': 'danger'},
+
+    # And the web layer's, which has no manifest of its own: `lib.web_admin` is not one of
+    # the discovery roots (they are the domains, services and providers), and the events are
+    # written by the request lifecycle rather than by any one domain — a login, a rejected
+    # CSRF token, a crash inside a handler. They live with the audit domain because "what an
+    # audit event means" is what this package is for. Everything else that used to sit here
+    # went home: notify, permissions, scim, oidc and saml each declare their own now.
+    {'key': 'login_ok', 'severity': 'success'},
+    {'key': 'login_failed', 'severity': 'danger'},
+    {'key': 'login_throttled', 'severity': 'warning'},
+    {'key': 'logout', 'severity': 'warning'},
+    {'key': 'csrf_failed', 'severity': 'danger'},
+    {'key': 'internal_error', 'severity': 'danger'},
+    {'key': 'language_changed', 'severity': 'muted'},
+    # Written by the config panel when it rotates the Entra secret from the web UI; the
+    # provider declares the rest of its events itself.
+    # Raised from lib/util when any store fails to persist — no package owns it.
+    {'key': 'file_write_error', 'severity': 'danger'},
+    # A background service coming up, reported from lib/services/__init__.py.
 ]

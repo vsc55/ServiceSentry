@@ -37,6 +37,10 @@ class MySQLConnector(BaseConnector):
     # TEXT column that is a key/index gets a bounded VARCHAR instead (utf8mb4
     # VARCHAR(255) = 1020 bytes, within InnoDB's index-prefix limit).
     DDL_TEXT_KEY      = 'VARCHAR(255)'
+    # MySQL/MariaDB reject ``TEXT NOT NULL DEFAULT ''`` — a default on a TEXT/BLOB/JSON
+    # column is only accepted as an expression (``DEFAULT ('')``, MySQL 8.0.13+ /
+    # MariaDB 10.2+). Without this every table declaring one fails to CREATE.
+    DDL_TEXT_DEFAULT_PARENS = True
 
     def __init__(self, config: dict) -> None:
         if not _HAS_PYMYSQL:
@@ -106,7 +110,8 @@ class MySQLConnector(BaseConnector):
         bak = f'__ssbak_{spec.name}'
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(tmp)}')
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
-        self.execute(create_table_ddl(spec, self._type_map, q, name=tmp, extra_columns=extras))
+        self.execute(create_table_ddl(spec, self._type_map, q, name=tmp, extra_columns=extras,
+                                      text_default_parens=self.DDL_TEXT_DEFAULT_PARENS))
         if has_common:
             self.execute(f'INSERT INTO {q(tmp)} ({collist}) '
                          f'SELECT {select_list} FROM {q(spec.name)}')
@@ -240,6 +245,68 @@ class MySQLConnector(BaseConnector):
 
     def rollback(self) -> None:
         self._conn().rollback()
+
+    # ── Maintenance ───────────────────────────────────────────────────────────
+
+    def list_tables(self) -> list[str]:
+        """The base tables of the connected database, from the catalog.
+
+        Filtered to BASE TABLE so a view is never handed to OPTIMIZE, which does not accept
+        one and would fail the whole statement rather than skip it.
+        """
+        rows = self.fetchall(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' "
+            "ORDER BY table_name")
+        return [r[0] for r in rows]
+
+    def maintenance_targets(self, op: str) -> list[str]:
+        """Both statements are per-table here — MySQL has no database-wide form of either."""
+        return self.list_tables()
+
+    def compact(self, table: str | None = None) -> None:
+        """``OPTIMIZE TABLE`` — one table, or every table. MySQL has no database-wide form.
+
+        On InnoDB this is a full table rebuild (``ALTER TABLE … FORCE`` plus an analyze),
+        which is what actually returns space, and it is why this is the expensive action.
+        Tables are named one statement at a time rather than in a single comma-separated
+        list: one unsupported engine among them fails the entire statement, and a maintenance
+        action that stops halfway through leaves the admin with no idea which tables it got to.
+        """
+        self._per_table('OPTIMIZE TABLE', [table] if table else None)
+
+    def optimize(self, table: str | None = None) -> None:
+        """``ANALYZE TABLE`` — statistics only, no rebuild. One table, or all of them."""
+        self._per_table('ANALYZE TABLE', [table] if table else None)
+
+    def _per_table(self, statement: str, tables=None) -> None:
+        """Run *statement* against each table, skipping the ones that refuse it.
+
+        These return a RESULT SET rather than raising on a table that does not support them,
+        so the cursor has to be drained; leaving rows unread poisons the connection for the
+        next query with "Commands out of sync".
+
+        *tables* narrows it to a given list; ``None`` means every table in the database.
+        """
+        conn = self._conn()
+        for table in (tables if tables is not None else self.list_tables()):
+            sql = f'{statement} {self.quote_ident(table)}'
+            self._trace_sql(sql)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                    cur.fetchall()
+            except Exception as exc:  # pylint: disable=broad-except
+                self._dbg_maintenance(table, statement, exc)
+        conn.commit()
+
+    @staticmethod
+    def _dbg_maintenance(table: str, statement: str, exc: Exception) -> None:
+        """One table refusing maintenance is not a failed maintenance run — say so and move
+        on, rather than aborting the other thirty because of it."""
+        import sys  # noqa: PLC0415
+        print(f'> DB >> {statement} skipped {table}: {type(exc).__name__}: {exc}',
+              file=sys.stderr)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 

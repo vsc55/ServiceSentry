@@ -39,6 +39,7 @@ CONFIG_ACTIONS = [
     {'section': 'maintenance', 'id': 'syslog_clear',
      'label_key': 'syslog_clear_all', 'tooltip_key': 'syslog_clear_all_tt',
      'icon': 'bi-trash3', 'variant': 'danger', 'order': 30,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe', 'desc_key': 'syslog_clear_all_desc',
      'perm': 'syslog_delete', 'fn': '_syslogClear'},
 ]
 
@@ -81,3 +82,15 @@ EMBEDDED_SERVICE = {
 
 # Standalone launch (main.py --syslog) — see discover_standalone_services().
 STANDALONE = {'key': 'syslog', 'dest': 'syslog_mode', 'banner': 'banner_syslog', 'order': 20}
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'syslog_cleared', 'severity': 'danger'},
+    {'key': 'syslog_drops_cleared', 'severity': 'danger'},
+    {'key': 'syslog_started', 'severity': 'success'},
+    {'key': 'syslog_stopped', 'severity': 'warning'},
+]

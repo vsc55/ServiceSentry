@@ -140,6 +140,14 @@ def register(app, wa) -> None:
                       detail={'reason': 'account_disabled'})
             return redirect(url_for('login'))
 
+        # A no-login (service) account stays a no-login account through the IdP — otherwise
+        # the setting would mean "cannot use the password form", which is not what it says.
+        if not user.get('login_enabled', True):
+            flash(wa._t('login_disabled'), 'danger')
+            wa._audit('login_failed', username, request.remote_addr,
+                      detail={'reason': 'login_disabled'})
+            return redirect(url_for('login'))
+
         wa._establish_session(username, user)
         wa._audit('login_ok', username, request.remote_addr,
                   detail={'auth_source': 'saml2'})

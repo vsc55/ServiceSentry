@@ -16,7 +16,7 @@ Routes registered by this file:
 from flask import jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER
+from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER, is_reserved_username
 from lib.core.users import service as users_svc
 from lib.i18n import SUPPORTED_LANGS
 from lib.web_admin.constants import home_page_ids
@@ -61,6 +61,17 @@ def register(app, wa):
         valid = set(BUILTIN_ROLE_UIDS.values()) | set(wa._custom_roles.keys())
         return uid if uid in valid else none_uid
 
+    def _refuse_builtin(username: str):
+        """Refuse an edit/delete aimed at a built-in identity, or ``None`` to carry on.
+
+        Only when no real account holds the name: an account provisioned before the name
+        was reserved is an ordinary row, and deleting it is exactly what an admin who finds
+        it needs to do.  Mirrors ``role_builtin`` / ``group_builtin``.
+        """
+        if username not in wa._users and is_reserved_username(username):
+            return jsonify({'error': wa._t('user_builtin')}), 403
+        return None
+
     def _groups_display(uid_or_name_list: list) -> list:
         """Return group UIDs — filter out any that no longer exist in _groups."""
         return [g for g in uid_or_name_list if g in wa._groups]
@@ -70,10 +81,16 @@ def register(app, wa):
     @app.route('/api/v1/users', methods=['GET'])
     @users_view_req
     def api_get_users():
-        """Return all users (without password hashes)."""
+        """Return all users (without password hashes), plus the built-in identities.
+
+        ``system`` and ``anonymous`` are listed alongside the real accounts because the
+        audit log names them and a reader has to be able to look them up — see
+        :func:`users_svc.builtin_users`.  They are synthesized, never rows.
+        """
         safe = {}
         for uname, udata in wa._users.items():
             safe[uname] = {
+                'builtin':     False,
                 'uid':         udata.get('uid', ''),
                 'role':        _role_to_uid(udata.get('role', 'viewer')),
                 'display_name': udata.get('display_name', uname),
@@ -81,6 +98,7 @@ def register(app, wa):
                 'dark_mode':   udata.get('dark_mode'),
                 'groups':      _groups_display(udata.get('groups', [])),
                 'enabled':     udata.get('enabled', True),
+                'login_enabled': udata.get('login_enabled', True),
                 'email':       udata.get('email', ''),
                 'landing_page': udata.get('landing_page', ''),
                 'auth_source': udata.get('auth_source', 'local'),
@@ -94,6 +112,14 @@ def register(app, wa):
                 'has_dashboard_layout': bool(udata.get('dashboard_layout')),
                 'modal_config': udata.get('modal_config') if isinstance(udata.get('modal_config'), dict) else {},
             }
+        # A real account is never shadowed by the built-in of the same name. New ones can no
+        # longer take these names, but an installation that provisioned a `system` account
+        # before that guard existed still has it — and hiding it behind a row marked
+        # "built-in, not editable" would leave the admin unable to see or delete the very
+        # account that made the log ambiguous.
+        for uname, rec in users_svc.builtin_users(
+                describe=lambda n: wa._t('builtin_user_' + n)).items():
+            safe.setdefault(uname, rec)
         return jsonify(safe)
 
     @app.route('/api/v1/users', methods=['POST'])
@@ -125,6 +151,7 @@ def register(app, wa):
                 email=data.get('email', ''), lang=data.get('lang', ''),
                 landing_page=data.get('landing_page', ''), group_uids=groups_raw,
                 enabled=bool(data.get('enabled', True)),
+                login_enabled=bool(data.get('login_enabled', True)),
                 actor=session.get('username', SYSTEM_USER),
                 valid_langs=SUPPORTED_LANGS, valid_landing=home_page_ids())
         except users_svc.AdminOpError as e:
@@ -146,6 +173,8 @@ def register(app, wa):
         The requester-context guards (role hierarchy, only-admin-grants-admin,
         reset-another's-password, can't-disable-self) live here — they need the session;
         the data validation + mutation + audit run in :func:`users_svc.update_user`."""
+        if err := _refuse_builtin(username):
+            return err
         if username not in wa._users:
             return jsonify({'error': wa._t('user_not_found')}), 404
         data, err = wa._require_json()
@@ -180,6 +209,10 @@ def register(app, wa):
         if ('enabled' in data and not bool(data['enabled'])
                 and username == session.get('username')):
             return jsonify({'error': wa._t('cannot_disable_self')}), 400
+        # …and the same for taking your own login away, which locks you out just as surely.
+        if ('login_enabled' in data and not bool(data['login_enabled'])
+                and username == session.get('username')):
+            return jsonify({'error': wa._t('cannot_disable_own_login')}), 400
         try:
             result = users_svc.update_user(
                 wa._users, username, data, policy=wa._pw_policy(),
@@ -195,7 +228,9 @@ def register(app, wa):
             return jsonify({'error': wa._t(e.key, *e.args)}), 400
         changes = result['changes']
         wa._persist_users()
-        if result['disabled']:
+        # A live session would otherwise outlive the very setting meant to end it — the same
+        # reason disabling revokes.
+        if result['disabled'] or result['login_revoked']:
             wa._revoke_user_sessions(username)
         if changes:
             wa._audit('user_updated', detail={'username': username, 'changes': changes})
@@ -219,6 +254,8 @@ def register(app, wa):
     @users_delete_req
     def api_delete_user(username: str):
         """Delete a user account."""
+        if err := _refuse_builtin(username):
+            return err
         if username not in wa._users:
             return jsonify({'error': wa._t('user_not_found')}), 404
         if username == session.get('username'):

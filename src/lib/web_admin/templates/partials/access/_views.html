@@ -74,9 +74,12 @@ function _accEffective(username) {
     };
 }
 
-/** Who holds a role directly. */
+/** Who holds a role directly. Built-in identities are excluded: their record carries the
+ *  'none' role because the shape requires one, not because they hold it — they never pass
+ *  through a permission check at all. */
 function _accUsersOfRole(role) {
-    return Object.keys(usersData || {}).filter(u => (usersData[u].role || 'viewer') === role);
+    return Object.keys(usersData || {})
+        .filter(u => !usersData[u].builtin && (usersData[u].role || 'viewer') === role);
 }
 /** Which groups grant a role, and whether each one actually applies (a disabled group is
  *  listed — it IS configured that way — but marked, because it grants nothing today). */

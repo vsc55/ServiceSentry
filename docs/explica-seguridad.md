@@ -473,7 +473,7 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 
 ## Control de Acceso Basado en Roles (RBAC)
 
-> El **catálogo completo** de permisos (64 flags), roles integrados, roles personalizados y
+> El **catálogo completo** de permisos (66 flags), roles integrados, roles personalizados y
 > grupos es la fuente única en **[ref-permisos.md](ref-permisos.md)**. Esta sección cubre solo
 > las **propiedades de seguridad** del RBAC.
 
@@ -548,7 +548,7 @@ Un no-admin con los permisos `users_edit`, `roles_edit`, `groups_edit`, `config_
 
 ### Tests de RBAC y escalada de privilegios
 
-Los tests de regresión de seguridad están centralizados en `src/tests/test_security_regression.py`. Cada clase cubre un fix específico — si un refactor futuro rompe alguno, la propiedad de seguridad correspondiente está comprometida.
+Los tests de regresión de seguridad están centralizados en `src/tests/test_security_regressions.py`. Cada clase cubre un fix específico — si un refactor futuro rompe alguno, la propiedad de seguridad correspondiente está comprometida.
 
 **Tests generales de RBAC** (`test_wa_roles.py`, `test_wa_users.py`):
 
@@ -563,7 +563,7 @@ Los tests de regresión de seguridad están centralizados en `src/tests/test_sec
 | `test_cannot_delete_self` | Admin → 400 al intentar eliminar su propia cuenta |
 | `test_cannot_remove_last_admin` | Degradar al único admin → 400 |
 
-**Tests de regresión de seguridad** (`test_security_regression.py`):
+**Tests de regresión de seguridad** (`test_security_regressions.py`):
 
 | Clase | Fix que protege | Qué verifica |
 |-------|----------------|-------------|
@@ -941,6 +941,80 @@ de "configuración actualizada".
 ## Registro de Auditoría
 
 Todos los eventos relevantes para la seguridad quedan registrados en la tabla `audit` de la base de datos con marca de tiempo, usuario, IP y detalle de los cambios a nivel de campo.
+
+### Quién aparece en la columna «usuario»
+
+Además de las cuentas reales, hay **dos identidades reservadas** (`lib/core/constants.py`):
+
+| Identidad | Qué significa |
+|---|---|
+| `system` | El panel actuó **por su cuenta**: un servicio arrancando, una poda programada, una migración |
+| `anonymous` | Lo provocó **alguien que nunca llegó a identificarse**: un cliente SCIM con un token inválido, y cualquier cosa rechazada antes de que exista una identidad |
+
+Las dos están **bloqueadas como nombre de cuenta**, y no solo en la API de usuarios: las cuentas
+entran por cinco puertas —la API, LDAP, OIDC, SAML2 y SCIM, y las cuatro últimas aprovisionan
+solas—, así que la comprobación (`is_reserved_username`) se aplica en todas. Un directorio con
+un usuario llamado `system` creaba antes un `system` local cuyas acciones se leían como las del
+propio panel: el registro seguía completo y dejaba de ser fiable, que es el único modo de fallo
+que un log de auditoría no puede permitirse.
+
+En SSO se **rechaza el inicio de sesión** en vez de renombrar la cuenta (no hay cuenta segura a
+la que dejar entrar); en SCIM se responde `400 invalidValue` y no `409`, porque el nombre no
+está ocupado — no está disponible.
+
+Es el mismo trato que reciben los roles y grupos integrados: declarados una vez en
+`lib/core/constants.py` y protegidos por una comprobación compartida.
+
+**Son usuarios integrados, no cadenas sueltas.** Las dos tienen UID estable
+(`BUILTIN_USER_UIDS`) y aparecen en la lista de usuarios marcadas con el candado
+`Integrado`, igual que el grupo `Administrators`: quien encuentra `system` en la auditoría
+puede buscarlo en Usuarios en vez de toparse con un nombre que el resto del sistema no
+conoce. `RESERVED_USERNAMES` se **deriva** de ese mapa, así que añadir una tercera identidad
+es una línea, no dos que puedan divergir.
+
+Se **sintetizan, nunca se guardan como fila**: una fila es superficie de login (un hash que
+poner, una sesión que abrir, una edición de CLI de distancia de ser una cuenta real). No
+tienen contraseña, ni sesión, ni rol —figuran con el rol integrado `none` porque el formato
+lo exige; `system` actúa con la autoridad del panel precisamente porque nunca pasa por una
+comprobación de permisos—. Editarlas o borrarlas se rechaza con `403 user_builtin`.
+
+Una salvedad: si una instalación aprovisionó una cuenta `system` **antes** de que el nombre
+quedara reservado, esa cuenta real se sigue mostrando tal cual (y se puede borrar). Ocultarla
+tras una fila «integrada, no editable» dejaría al administrador sin ver —ni eliminar— justo
+la cuenta que volvió ambiguo el registro. Lo que **sí** se le quita es el inicio de sesión:
+`resolve_login` rechaza los nombres reservados antes de tocar credenciales, así que ni la
+autenticación local ni el respaldo de LDAP la dejan entrar (SSO ya la rechazaba en cada
+`sync_user`). Se audita con `reason: username_reserved` y en pantalla sale el mensaje genérico
+de siempre —nombrar la regla confirmaría qué cuentas existen—. La salida es borrarla.
+
+Los tres tipos de identidad integrada —roles, grupos y usuarios— se declaran en un único
+`BUILTIN_UIDS`, y el **bloque de variante** del UUID lleva el tipo: `…-8001-…` usuarios,
+`…-8002-…` grupos, `…-8003-…` roles (sigue empezando por `8` porque ese dígito es lo que hace
+que un UUID sea variante 1 de RFC 4122). `builtin_kind(uid)` responde qué nombra un UID, que es
+también lo que hace comprobable que dos integrados no compartan valor.
+
+Esos valores **son** identidad: viven en el `role` de cada usuario, en cada enlace grupo→rol, en
+la propia fila del grupo y —como texto dentro de JSON— en las seis claves `*|default_role` y en
+cualquier destinatario `group:<uid>`. Cambiar uno otra vez no es editar una constante, es una
+reescritura de todo lo que lo contiene: no falla de forma ruidosa, simplemente resuelve a «rol
+desconocido» y todo el mundo cae en el rol por defecto. El producto **no lleva migración** (fase
+previa a publicación; las bases de datos de desarrollo se reescribieron a mano).
+
+### Cuentas de servicio (`login_enabled`)
+
+Una cuenta puede estar **activa y no iniciar sesión nunca**: posee hosts, recibe notificaciones y
+aparece en auditoría, pero nadie entra con ella. Es un interruptor aparte de `enabled` a
+propósito: desactivar una cuenta para que no entre también la invalida como propietaria y como
+destinataria, que no es lo que significa «esta identidad es de un script».
+
+Desactivado, lo rechazan **todas** las puertas —formulario, LDAP, OIDC y SAML2—; un «no inicia
+sesión» que solo cubriera el formulario sería un ajuste que no dice la verdad. Quitarlo **revoca
+las sesiones vivas** (si no, la sesión sobrevive al ajuste que debía terminarla), no puedes
+quitártelo a ti mismo, y en pantalla sale el mismo fallo genérico que una contraseña incorrecta
+—decir «esta cuenta no puede iniciar sesión» confirmaría que existe—, con el motivo real
+(`login_disabled`) solo en el registro. Se guarda únicamente cuando está desactivado, así que
+toda cuenta anterior a este ajuste sigue igual. Disponible en la API, en el modal de usuario y
+como `ssentry user add --no-login`.
 
 | Evento | Cuándo se genera |
 |--------|-----------------|

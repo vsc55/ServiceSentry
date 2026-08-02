@@ -60,6 +60,10 @@ let _usersCurrentPage = [];
 // Row/card action buttons (shared by the table's actions column and the card view).
 function _usersRowActions(uname, ctx) {
     const u = usersData[uname];
+    // Built-in identities (system / anonymous) are internal: nothing about them can be
+    // edited, cloned, reset or deleted, so the row carries no actions at all — unlike a
+    // built-in role or group, where the name is still editable.
+    if (u.builtin) return '';
     const isSelf = (uname === currentUser.username);
     const isLocalUser = ((u.auth_source || 'local') === 'local');
     return [
@@ -85,8 +89,10 @@ function _usersCardsBody(unames, ctx) {
         const roleLabel = (rolesData[role] && rolesData[role].name) || ROLE_LABELS[rolesData[role]?.key || role] || role;
         const sc = ctx.sessionCounts[uname] || 0;
         const badges = [
+            u.builtin ? `<i class="bi bi-lock-fill text-muted ss-fs-2" title="${escAttr(t('user_builtin_badge'))}"></i>` : '',
             isSelf ? `<span class="badge text-bg-info fw-normal ss-fs-1">${t('you_badge')}</span>` : '',
             (u.auth_source && u.auth_source !== 'local' && _sso[u.auth_source]) ? `<span class="badge text-bg-secondary fw-normal ss-fs-1">${_sso[u.auth_source]}</span>` : '',
+            (!u.builtin && u.login_enabled === false) ? `<span class="badge text-bg-dark fw-normal ss-fs-1" title="${escAttr(t('login_enabled_hint'))}"><i class="bi bi-door-closed me-1"></i>${t('no_login_badge')}</span>` : '',
             u.enabled === false ? `<span class="badge bg-secondary fw-normal ss-fs-1">${t('status_disabled')}</span>` : '',
         ].join('');
         const chips = [
@@ -97,7 +103,7 @@ function _usersCardsBody(unames, ctx) {
         return _entityCard({
             icon: 'bi-person-fill', accent: 'linear-gradient(90deg,#f59e0b,#fbbf24)',
             selected: _selectedUsers.has(uname),
-            toggle: ctx.showActions ? `_usersToggleOne(${jsStr(uname)}, this.checked)` : '',
+            toggle: (ctx.showActions && !u.builtin) ? `_usersToggleOne(${jsStr(uname)}, this.checked)` : '',
             title: `<code class="fw-semibold ss-fs-4">${esc(uname)}</code>`, badges,
             subtitle: esc(u.display_name || uname), chips,
             actions: ctx.showActions ? _usersRowActions(uname, ctx) : '',
@@ -148,6 +154,9 @@ createListTable({
         return { sessionCounts, canEdit, canDelete, canClone, showActions: canEdit || canDelete || canClone };
     },
     selectable: ctx => ctx.showActions,
+    // Nothing a bulk action does applies to a built-in identity — keep it out of the
+    // selection rather than letting it be picked and then silently skipped.
+    selectableRow: uname => !usersData[uname]?.builtin,
     actionsVisible: ctx => ctx.showActions,
     sortValue: (uname, sortKey, ctx) => {
         switch (sortKey) {
@@ -172,7 +181,14 @@ createListTable({
                 const authBadge = _ssoLabels[u.auth_source || 'local']
                     ? ` <span class="badge text-bg-secondary fw-normal ms-1 ss-fs-1">${_ssoLabels[u.auth_source || 'local']}</span>` : '';
                 const disabledBadge = u.enabled !== false ? '' : ` <span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${t('status_disabled')}</span>`;
-                return `<td class="text-nowrap"><code>${esc(uname)}</code>${isSelf?`<span class="badge text-bg-info fw-normal ms-1 ss-fs-1">${t('you_badge')}</span>`:''}${authBadge}${disabledBadge}</td>`;
+                const builtinBadge = u.builtin
+                    ? ` <i class="bi bi-lock-fill text-muted ms-1" style="font-size:.8em" title="${escAttr(t('user_builtin_badge'))}"></i>` : '';
+                // A service account is ACTIVE — it just never signs in. Shown separately from
+                // "disabled" for that reason: reading one as the other is the whole confusion
+                // the setting exists to avoid.
+                const noLoginBadge = (!u.builtin && u.login_enabled === false)
+                    ? ` <span class="badge text-bg-dark fw-normal ms-1 ss-fs-1" title="${escAttr(t('login_enabled_hint'))}"><i class="bi bi-door-closed me-1"></i>${t('no_login_badge')}</span>` : '';
+                return `<td class="text-nowrap"><code>${esc(uname)}</code>${builtinBadge}${isSelf?`<span class="badge text-bg-info fw-normal ms-1 ss-fs-1">${t('you_badge')}</span>`:''}${authBadge}${noLoginBadge}${disabledBadge}</td>`;
             }
             case 'display_name': return `<td class="text-muted small">${esc(u.display_name || uname)}</td>`;
             case 'role': {
@@ -307,6 +323,7 @@ async function deleteUser(username) {
 async function _bulkEnableUsers(enabled) {
     await _bulkSetEnabled(_selectedUsers, enabled, {
         data: usersData,
+        filter: uname => !usersData[uname]?.builtin,
         path: uname => '/api/v1/users/' + encodeURIComponent(uname),
         buildBody: (u, enabled, uname) => (!enabled && uname === currentUser.username) ? null
             : { role: u.role || 'none', display_name: u.display_name || '', lang: u.lang || '',
@@ -316,7 +333,7 @@ async function _bulkEnableUsers(enabled) {
 }
 async function _bulkDeleteUsers() {
     await _bulkDelete(_selectedUsers, {
-        filter: n => n !== currentUser.username,
+        filter: n => n !== currentUser.username && !usersData[n]?.builtin,
         path: uname => '/api/v1/users/' + encodeURIComponent(uname),
         onDeleted: uname => {
             for (const gd of Object.values(groupsData)) {

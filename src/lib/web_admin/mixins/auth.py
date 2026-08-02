@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from flask import request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from lib.core.constants import is_reserved_username
 from lib.debug import DebugLevel
 from lib.i18n import SUPPORTED_LANGS
 from ..constants import home_pages, landing_pages
@@ -57,8 +58,8 @@ class _AuthMixin:
     def _authenticate(self, username: str, password: str) -> tuple[dict | None, str | None]:
         """Return ``(user, None)`` on success or ``(None, reason)`` on failure.
 
-        Reasons: ``'user_not_found'``, ``'account_disabled'``,
-        ``'account_locked'``, ``'invalid_credentials'``.
+        Reasons: ``'user_not_found'``, ``'account_disabled'``, ``'account_locked'``,
+        ``'login_disabled'``, ``'invalid_credentials'``.
 
         Every failure path runs exactly one ``check_password_hash`` (against the real
         hash or :meth:`_timing_decoy_hash`) so unknown / wrong-password / disabled /
@@ -71,6 +72,15 @@ class _AuthMixin:
         if not user.get('enabled', True):
             check_password_hash(user.get('password_hash') or self._timing_decoy_hash(), password)
             return None, 'account_disabled'
+        # A service account: enabled — it owns things, it receives notifications, it appears
+        # in the audit log — but it never signs in. Separate from ``enabled`` because
+        # disabling an account to stop it logging in also stops it being a valid recipient
+        # and a valid owner, which is not what "this identity is for a script" means. Hashes
+        # anyway: skipping the check here would make a no-login account detectable by how
+        # fast it is refused.
+        if not user.get('login_enabled', True):
+            check_password_hash(user.get('password_hash') or self._timing_decoy_hash(), password)
+            return None, 'login_disabled'
 
         # Check active lockout
         locked_until_str = user.get('_locked_until')
@@ -126,6 +136,17 @@ class _AuthMixin:
         locked/disabled/wrong-password; the exact reason is only in the audit log.
         """
         from lib.providers.ldap import auth as ldap_auth  # noqa: PLC0415
+        # The built-in identities never authenticate — whatever any row says. The SSO paths
+        # already refuse them in ``sync_user`` (which runs on every sign-in, not just the
+        # first), so this closes the local door: an installation that provisioned a `system`
+        # account before the name was reserved still HAS that row, password hash included,
+        # and it would log in. `system` in the audit log has to mean the panel acted on its
+        # own; the moment a person can sign in under that name it means nothing at all. The
+        # account stays visible and deletable in Users — that is the way out of it.
+        if is_reserved_username(username):
+            self._dbg(f"> Auth >> reserved username {username!r} cannot log in",
+                      DebugLevel.warning)
+            return LoginResult(None, '', username, 'invalid_credentials', 'username_reserved')
         cfg = self._read_config_file(self._CONFIG_FILE) or {}
         ldap_cfg = cfg.get('ldap') or {}
         ldap_conn_error = False
@@ -146,6 +167,12 @@ class _AuthMixin:
                     if not user.get('enabled', True):
                         return LoginResult(None, '', canonical, 'account_disabled',
                                            'account_disabled')
+                    # "This identity never signs in" has to hold whoever vouches for the
+                    # password — the directory included, since that is exactly where a
+                    # service account's credentials tend to live.
+                    if not user.get('login_enabled', True):
+                        return LoginResult(None, '', canonical, 'invalid_credentials',
+                                           'login_disabled')
                     return LoginResult(user, 'ldap', canonical, '', '')
                 # No LDAP match.
                 if not existing:
@@ -165,7 +192,7 @@ class _AuthMixin:
         user, reason = self._authenticate(username, password)
         if user:
             return LoginResult(user, user.get('auth_source') or 'local', username, '', '')
-        if reason in ('account_locked', 'account_disabled'):
+        if reason in ('account_locked', 'account_disabled', 'login_disabled'):
             flash_key = 'invalid_credentials'          # generic message (anti-enumeration)
         elif ldap_conn_error:
             flash_key = 'ldap_connection_error'        # local also failed → surface the LDAP error

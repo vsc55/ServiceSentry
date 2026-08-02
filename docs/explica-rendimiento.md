@@ -103,11 +103,11 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
 
 ### Frontend
 
-- **Sin paso de build / sin bundler**: Bootstrap 5 + JS vanilla (+ Alpine.js y CodeMirror
+- **Sin paso de build / sin bundler**: Bootstrap 5 + JS vanilla (+ CodeMirror
   vendorizados). El JS se ensambla server-side como un único bundle inline vía
   `partials/_js_sections.html`.
 - **Cache-busting por mtime**: CSS/JS se enlazan con `?v=<asset_v>` calculado por `stat` del
-  fichero ([mixins/context.py:45](../src/lib/web_admin/mixins/context.py#L45)), de modo que un fichero editado
+  fichero ([mixins/context.py:46](../src/lib/web_admin/mixins/context.py#L46)), de modo que un fichero editado
   siempre llega al navegador sin invalidación manual.
 - **Polling ligero + overlay de conexión perdida**: el cliente sondea endpoints ligeros
   (`/api/v1/health`, `/api/v1/config/versions`, estado) y muestra un overlay si el servidor no
@@ -135,7 +135,7 @@ insertar, el store poda las filas más antiguas por encima del tope:
 - **`history`** y **`syslog`** (mensajes) **no** llevan un tope fijo de filas: crecen según la
   retención configurada. Revisar la retención en [ref-configuracion.md](ref-configuracion.md).
 - **`MAX_CONTENT_LENGTH = 8 MiB`** limita el tamaño de request entrante
-  ([app.py:559](../src/lib/web_admin/app.py#L559)).
+  ([app.py:472](../src/lib/web_admin/app.py#L472)).
 
 ---
 

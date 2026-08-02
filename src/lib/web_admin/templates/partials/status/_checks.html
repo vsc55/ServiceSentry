@@ -103,10 +103,10 @@ async function renderStatus() {
             </ul>
           </div>
 
-          <div class="vr mx-1 d-none d-sm-block"></div>
-          <button class="btn btn-sm btn-warning" onclick="resetStatus()" title="${escAttr(t('status_reset_tt'))}">
-            <i class="bi bi-arrow-counterclockwise me-1"></i>${t('status_reset')}
-          </button>
+          <!-- "Reset state" moved to Config > Maintenance with the other data wipes: it
+               empties a table, and a destructive action among this bar's view controls
+               (refresh, filter, run-now) is the one pressed by accident. resetStatus()
+               still lives in this file, beside the screen it refreshes. -->
           <span id="checksSpinner" class="d-none text-muted small">
             <span class="spinner-border spinner-border-sm me-1"></span>${t('checks_running')}
           </span>` : '';
@@ -449,12 +449,15 @@ async function runSelectedChecks() {
 
 // Empty the current check-state table (status.json equivalent) so monitoring
 // starts from a clean slate.  Destructive → confirm first.
+/** Empty the check-state table. Invoked from Config > Maintenance, where the button lives
+ *  with the other data wipes — so the Status screen it used to sit on may not be rendered at
+ *  all when this runs, and re-rendering it would throw on a container that is not there. */
 function resetStatus() {
     showConfirmModal(t('status_reset_confirm'), async () => {
         const r = await apiDelete('/api/v1/modules/status');
         if (r && r.status === 200 && r.data && r.data.ok) {
             showToast(t('status_reset_done'), 'success');
-            renderStatus();
+            if (document.getElementById('status-container')) renderStatus();
         } else {
             showToast(t('status_reset_error') || t('error'), 'danger');
         }

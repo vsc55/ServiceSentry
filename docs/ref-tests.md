@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4823 tests** (4823 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~4913 tests** (4913 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -149,9 +149,14 @@
 
 ## 1. Core — Configuración
 
-**Archivo:** `tests/test_config_file.py`
+**Archivo:** `tests/test_config_control.py`
 
-### `TestConfigStore` — Almacenamiento de archivos JSON
+### `TestFileConfigStore` — Almacenamiento de archivos JSON
+
+> Se llamaba `TestConfigStore`, igual que la clase de la §36, que prueba **otro** `ConfigStore`
+> —el de BD, en `lib.core.config.store`—. Un fallo notificado como `TestConfigStore::test_…` no
+> decía cuál de los dos se había roto. Ahora cada una lleva su respaldo en el nombre:
+> `TestFileConfigStore` y `TestDbConfigStore`.
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -447,11 +452,18 @@ la barra de Status, así que su formato es conducta, no cosmética.
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| Formato base | `fmt_bytes(0)` → `"0 B"`, `(512)` → `"512 B"` (los bytes no llevan decimales), `(1024³)` → `"1.0 GB"`, `(1.5 GB)` → `"1.5 GB"` | Unidad y decimales correctos | Si aparecen decimales en bytes o cambia el espaciado |
-| Escala la escalera completa | `PB`, `EB`, `ZB`, `YB` — no se detiene en PB | `2.0 EB` | Si degenera en `2048.0 PB`: un formateador que topa no dice "es enorme", imprime un número ilegible |
-| Más allá de YB | Renderiza en la última unidad en vez de colgarse | Termina en `" YB"` | Si lanza o entra en bucle |
-| Alcanza tan lejos como `bytes2human` | Compara ambas letra a letra de KB a YB | Misma unidad en las dos | **Impide que una consolidación futura pierda alcance** frente a la función que sustituye |
+| Formato base | `fmt_bytes(0)` → `"0 B"`, `(512)` → `"512 B"` (los bytes no llevan decimales), `(1024³)` → `"1.0 GiB"`, `(1.5 GiB)` → `"1.5 GiB"` | Unidad y decimales correctos | Si aparecen decimales en bytes o cambia el espaciado |
+| Escala la escalera completa | `PiB`, `EiB`, `ZiB`, `YiB` — no se detiene en PiB | `2.0 EiB` | Si degenera en `2048.0 PiB`: un formateador que topa no dice "es enorme", imprime un número ilegible |
+| Más allá de YiB | Renderiza en la última unidad en vez de colgarse | Termina en `" YiB"` | Si lanza o entra en bucle |
+| Alcanza tan lejos como `bytes2human` | Compara ambas letra a letra de KiB a YiB | Misma unidad en las dos | **Impide que una consolidación futura pierda alcance** frente a la función que sustituye |
 | Un valor no numérico | `None` / `"abc"` → `"0 B"` | No lanza | Un mensaje de monitorización debe renderizar aunque la API respondiera algo raro |
+
+> **La etiqueta dice qué base es.** La escala siempre fue binaria, pero imprimía `GB`
+> mientras dividía por 1024 — la convención de Windows, y ambigua de verdad: esos mismos dos
+> caracteres significan 1000000000 en la caja de un disco. Ahora emite IEC (`GiB`). Los
+> valores **no se movieron**; sólo el sufijo los nombra. `to_bytes` sigue aceptando las
+> grafías antiguas (`GB` → `GiB`) porque un umbral guardado tiene que seguir significando lo
+> mismo, y `normalize_unit()` las traduce donde se muestran.
 
 ### `TestToBytes`
 
@@ -459,10 +471,10 @@ Inversa de `fmt_bytes` para umbrales configurados (el admin escribe un número y
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| Cada unidad | `to_bytes(2, "GB")`, `(1, "TB")`, `(4, "MB")` | Bytes exactos | Si una unidad se escala mal |
-| Unidad insensible a mayúsculas | `to_bytes(1, "gb")` == `1024³` | Igual que `"GB"` | Si el desplegable y el código discrepan en el caso |
+| Cada unidad | `to_bytes(2, "GiB")`, `(1, "TiB")`, `(4, "MiB")` | Bytes exactos | Si una unidad se escala mal |
+| Unidad insensible a mayúsculas | `to_bytes(1, "gb")` == `1024³` | Igual que `"GiB"` | Si el desplegable y el código discrepan en el caso |
 | Valor en blanco | `""` / `None` → 0 | 0 | Si lanza |
-| Unidad desconocida se lee como GB | `to_bytes(1, "parsecs")` == `1024³` | Cae a GB | Rechazarla dejaría el umbral en 0, **desactivando en silencio la alerta que debía disparar** |
+| Unidad desconocida se lee como GiB | `to_bytes(1, "parsecs")` == `1024³` | Cae a GiB | Rechazarla dejaría el umbral en 0, **desactivando en silencio la alerta que debía disparar** |
 
 ---
 
@@ -1005,6 +1017,89 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 **Archivos:** `tests/test_wa_ui.py` — `TestI18n`, `TestDarkMode`, `TestConfigDarkMode`, `TestUIReorganisation` · `tests/test_wa_telegram.py` — `TestTelegramTest` · `tests/test_wa_audit.py` — `TestAuditLog` · `tests/test_wa_security.py` — `TestSecurityInjection`
 
+> **`TestEverySeverityIsDeclaredNotGuessed` (en `test_wa_audit.py`)** — la insignia es lo único
+> que da un vistazo sobre doscientas filas de log, y se **deducía del NOMBRE** del evento: una
+> regla que casaba `deleted`/`revoked` más un puñado de nombres escritos a mano. Dos cosas
+> fallaban, y solo la primera se veía: **siete** eventos destructivos y **quince** fallos salían
+> en gris (entre ellos tres señales de seguridad y `internal_error`, la entrada que se escribe
+> cuando el panel se cae); y aun ensanchando las listas de palabras, el color seguía dependiendo
+> del sustantivo que alguien eligiera — `purge_done` habría pasado desapercibido y `rule_failed`
+> se habría pintado en rojo para una regla que solo informaba de «sin coincidencias».
+>
+> Ahora la severidad se **declara** junto al código que emite el evento (`manifest.py ::
+> AUDIT_EVENTS`, mismo descubrimiento que `NOTIFY_EVENTS` y `MODULE_PERMISSIONS`), y el
+> renderizador no contiene una sola condición sobre el nombre: solo traduce severidad → tono.
+> Los guards exigen que **todo** evento emitido declare la suya, que no sobre ninguna
+> declaración, y que solo se acepten severidades conocidas — una desconocida llegaría al
+> navegador como una clase CSS inexistente y la fila se pintaría **sin insignia**, que es peor
+> que el color equivocado porque se lee como un evento sin importancia.
+>
+> El escaneo lee literales, así que no ve un evento emitido a través de una variable
+> (`wa._audit(event, …)` en el endpoint de mantenimiento — por ahí se colaron `db_optimized` y
+> `db_compacted`). El catálogo i18n es la segunda lista, y esa sí está completa: todo evento
+> necesita etiqueta para pintarse. Cruzar ambas cierra el punto ciego sin pedirle a nadie que
+> lo recuerde.
+
+> **`TestTheReservedNamesCannotBecomeAccounts` (en `test_builtin_identities.py`)** — `system` y
+> `anonymous` son las dos identidades que reserva el log, y se protegen **como los roles y
+> grupos integrados**: declaradas una vez en `lib.core.constants` y rechazadas por una
+> comprobación compartida, no reimplementada en cada llamante. Importaba porque las cuentas
+> entran por **cinco** puertas y solo la primera comprobaba: la API de usuarios, LDAP, OIDC y
+> SAML2 (que aprovisionan al primer inicio de sesión) y SCIM (donde el IdP crea la cuenta
+> directamente). Un directorio con un usuario llamado `system` creaba un `system` local cuyas
+> acciones pasaban a leerse como las del propio panel — el log sigue completo y deja de ser
+> fiable, que es el modo de fallo que un registro de auditoría no puede permitirse. En SSO se
+> **rechaza el inicio de sesión** (no hay cuenta segura a la que dejarles entrar) y en SCIM es
+> un `400 invalidValue`, no un `409`: el nombre no está ocupado, no está disponible.
+
+> **`TestTheBuiltInIdentitiesAreFirstClass` (en `test_builtin_identities.py`)** — `system` y `anonymous`
+> son **usuarios integrados**: nombre, UID estable (`BUILTIN_USER_UIDS`) y fila en la lista de
+> usuarios, igual que el grupo `Administrators`. Antes eran cadenas sueltas, así que la columna
+> que responde «quién hizo esto» apuntaba a algo que el resto del sistema no conocía y no había
+> nada que consultar. Se **sintetizan, nunca se guardan como fila**: una fila es superficie de
+> login —un hash que poner, una sesión que abrir, una edición de CLI de distancia de ser una
+> cuenta real— y estas dos no pueden ser alcanzables por ahí. No tienen contraseña ni permisos
+> (figuran con el rol `none`), y editarlas o borrarlas responde `403 user_builtin`. El caso
+> límite que cubre el último test: una instalación que aprovisionó `system` **antes** de que el
+> nombre quedara reservado sigue viendo esa cuenta real y puede borrarla — taparla con una fila
+> «integrada, no editable» dejaría al administrador sin poder eliminar justo la cuenta que
+> volvió ambiguo el registro. Los UUID no se repiten en el test: pegar una copia hace que el
+> test se apruebe a sí mismo mientras el producto usa otro valor (lo vigila
+> `test_core_domain_layout.py`). Dos comprobaciones más, por lo que se leía como descuido y no
+> lo era: `lang` vale `''` porque ese es el centinela de **heredar** —lo que hace que panel y
+> notificaciones usen el idioma configurado del sistema *en el momento de enviar*, en vez de
+> congelar el de hoy—, y esa cuenta `system` heredada **no puede iniciar sesión** aunque
+> conserve su hash: `resolve_login` rechaza los nombres reservados antes de tocar credenciales
+> (SSO ya lo hacía en cada `sync_user`; faltaba la puerta local).
+
+> **`TestServiceAccountsCannotSignIn` (en `test_wa_users.py`)** — una cuenta de servicio está
+> **activa** y no inicia sesión nunca. Interruptor aparte de `enabled` a propósito: desactivar
+> una cuenta para que no entre también la invalida como propietaria y destinataria. Los tests
+> fijan las cuatro decisiones que la hacen honesta: la rechazan todas las puertas (no solo el
+> formulario), quitarla **revoca las sesiones vivas**, no puedes quitártela a ti mismo, y la
+> respuesta en pantalla es **byte a byte** la de una contraseña incorrecta —decir «esta cuenta no
+> puede iniciar sesión» confirmaría que existe—. Uno de ellos comprueba que una cuenta normal no
+> guarda el campo: lo escrito antes de que esto existiera tiene que seguir funcionando igual.
+
+> **`TestAnEntryAlwaysNamesWhoCausedIt` (en `test_wa_audit.py`)** — un fallo de autenticación
+> SCIM salía con la columna USUARIO **vacía**. Ni vacío ni `system`: `system` significa que el
+> panel actuó por su cuenta (un servicio arrancando, una poda programada), y un intento de
+> intrusión archivado ahí se lee como que el panel se lo hizo a sí mismo — justo en el filtro
+> por el que más se buscan esas entradas. Y un hueco se lee como «falta el dato», no como «no
+> había identidad que registrar». Ahora existe `ANONYMOUS_USER`, y **los dos** nombres son
+> usuarios reservados: una cuenta que pudiera llamarse así haría que sus acciones se leyeran
+> como las del panel o como las de un llamante sin autenticar, y «quién hizo esto» dejaría de
+> tener respuesta.
+
+> **`TestEveryAuditedEventHasAName` (en `test_wa_audit.py`)** — un evento sin etiqueta se pinta
+> en la pantalla de auditoría **con su identificador crudo**. Al añadir prefijo a los eventos de
+> mantenimiento aparecieron **seis** publicados así (`ipban_history_cleared` entre ellos) y
+> **cuatro** más sin prefijo de área. Se escanean las *llamadas* a `_audit*()` en todo `lib/`, no
+> una lista: la lista es justo lo que se queda obsoleta, porque los eventos los escriben ~30
+> módulos y el siguiente que se añada no pensará en registrarse en ningún sitio. Comprueba que
+> cada evento tiene etiqueta en ambos idiomas y que la etiqueta **nombra su área** — sin prefijo,
+> filtrar doscientas entradas a ojo es leerlas todas.
+
 ### `TestI18n`
 
 | Test | Qué comprueba | OK | Error |
@@ -1290,15 +1385,29 @@ Verifica que los errores HTTP devuelven la plantilla `error.html` (o JSON para `
 **Archivos:** `tests/test_wa_roles.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions` · `tests/test_wa_groups.py` — grupos de usuarios
 
 
+### `TestEveryPermissionIsExplainedToTheAdmin`
+
+Un flag sin etiqueta se pinta en la matriz de roles **con su nombre crudo**, y uno sin
+descripción es una casilla que concede algo que el administrador tiene que adivinar. Añadido
+después de que `db_maintenance` se publicara sin ninguna de las dos: nada lo comprobaba, y en
+código el flag se lee bien — solo en pantalla es un identificador pelado junto a una casilla
+que reparte la capacidad de bloquear la base de datos.
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_every_flag_has_a_label_in_both_languages` | Cada flag de `PERMISSIONS` tiene entrada en `permission_labels` | es_ES y en_EN completos | un permiso que se muestra como `db_maintenance` |
+| `test_every_flag_says_what_it_grants` | Y en `permission_hints` | 66/66 | una casilla sin explicación de qué concede |
+| `test_no_label_is_left_over` | **El otro sentido**: ninguna etiqueta para un flag que ya no existe | sin sobrantes | texto muerto que sobrevive a todo lector que pudiera notarlo, igual que una tabla obsoleta en un documento de esquema |
+
 ### `TestPermissionsConstants`
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_permissions_tuple_has_15_flags` | `len(PERMISSIONS) == 15` | 15 elementos | Otro número |
+| `test_permissions_tuple_has_66_flags` | `len(PERMISSIONS) == 66` | 66 elementos | Otro número |
 | `test_permissions_are_unique` | Sin duplicados en `PERMISSIONS` | `set` sin colisiones | Si hay repetidos |
-| `test_permissions_expected_flags` | El conjunto exacto de 15 flags | Coincide con el set esperado | Si falta o sobra alguno |
+| `test_permissions_expected_flags` | El conjunto exacto de 66 flags | Coincide con el set esperado | Si falta o sobra alguno |
 | `test_permission_groups_structure` | `PERMISSION_GROUPS` es lista de 2-tuplas | Lista con pares `(key, [perms])` | Si la estructura difiere |
-| `test_permission_groups_cover_all_permissions` | Todos los 15 flags están en algún grupo | Unión de grupos == PERMISSIONS | Si alguno no está cubierto |
+| `test_permission_groups_cover_all_permissions` | Todos los flags están en algún grupo | Unión de grupos == PERMISSIONS | Si alguno no está cubierto |
 | `test_permission_groups_no_duplicates` | Ningún flag aparece en más de un grupo | Sin duplicados entre grupos | Si hay solapamiento |
 | `test_permission_groups_keys` | Los 7 group keys están presentes | `perm_group_users` … `perm_group_checks` | Si falta alguna clave |
 | `test_admin_has_all_permissions` | Role `admin` tiene los 15 permisos | `frozenset == set(PERMISSIONS)` | Si falta alguno |
@@ -2287,7 +2396,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 36. Core — Almacén de config en BD
 
-**Archivo:** `tests/test_config_store.py` — 9 tests
+**Archivo:** `tests/test_config_store.py` — 9 tests · clase `TestDbConfigStore`
+(el `ConfigStore` de `lib.core.config.store`; su homónimo de fichero está en la §1, `test_config_control.py`)
 
 | Test | Qué comprueba |
 |---|---|
@@ -2528,7 +2638,15 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 47. Seguridad — Regresión
 
-**Archivo:** `tests/test_security_regression.py` — 30 tests
+**Archivo:** `tests/test_security_regressions.py` — 39 tests
+
+> Eran **dos** ficheros, `test_security_regression.py` y `test_security_regressions.py`
+> —singular y plural, los dos «un test por arreglo de seguridad»—. Nadie que viera un fallo en
+> CI podía decir cuál era cuál, así que ahora es uno solo y lo que distingue cada mitad es su
+> **origen**: los arreglos encontrados de uno en uno (la tabla de abajo) y la clase
+> `TestBugAudit202607`, fechada porque la fecha es justamente lo que la identifica. Un hallazgo
+> de la próxima auditoría entra en una clase propia, no bajo un encabezado que ya no dice
+> cuándo se buscó.
 
 | Test | Qué comprueba |
 |---|---|
@@ -2995,7 +3113,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 61. Panel Web — Gestor de eventos
 
-**Archivo:** `tests/test_wa_events.py` — 27 tests
+**Archivo:** `tests/test_wa_events.py` — 28 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3136,8 +3254,8 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
-| `test_fmt_bytes` | Formateo humano de bytes (`_fmt_bytes`) | `0 B`, `1.0 GB`, `1.5 GB` | formato distinto |
-| `test_to_bytes` | Conversión unidad→bytes (`_to_bytes`), vacío = 0 | valores correctos GB/TB | conversión errónea |
+| `test_fmt_bytes` | Formateo humano de bytes (`_fmt_bytes`) | `0 B`, `1.0 GiB`, `1.5 GiB` | formato distinto |
+| `test_to_bytes` | Conversión unidad→bytes (`_to_bytes`), vacío = 0 | valores correctos GiB/TiB | conversión errónea |
 | `test_csv_max` | Máximo de una columna de un CSV (`_csv_max`), vacío = 0 | devuelve 3000 | valor incorrecto |
 | `test_ok_under_thresholds` | Uso bajo umbrales de % y espacio libre | site OK, `used=50.0`, `alert=90` publicado | fallo indebido |
 | `test_over_percentage_warns` | Uso por encima del % configurado | site en fallo, `warning`, `used=95.0` | no avisa |
@@ -3652,12 +3770,36 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ---
 
-## 81. Seguridad (regresiones) y Portabilidad multi-motor
+## 81. Portabilidad multi-motor
 
-**Archivos:** `tests/test_security_regressions.py`, `tests/test_db_portability.py`, `tests/test_db_portability_live.py`
+**Archivos:** `tests/test_db_portability.py`, `tests/test_db_portability_live.py`
 
-### `test_security_regressions.py` — regresiones de la auditoría de seguridad
-Cada test blinda un arreglo para que no vuelva a colarse: lectura anónima del endpoint de widgets del Overview (exige sesión), escalada de privilegios por rol/grupo (`_role_grantable`/`_groups_grantable` — un no-admin no puede asignar admin ni por rol, ni por rol *custom* superior, ni por pertenencia al grupo Administrators), cifrado de `graph_secret`, mapeo grupo→rol LDAP exacto (no por subcadena; casa DN completo o CN), toma de cuenta SSO (no convierte cuenta local), y `parse_manual_ban` con duración negativa.
+> Tres motores, no dos: **MySQL**, **MariaDB** y **PostgreSQL** tienen cada uno su ranura
+> (`SS_TEST_MYSQL_*`, `SS_TEST_MARIADB_*`, `SS_TEST_PG_*`). MariaDB no viaja de gratis con
+> MySQL aunque compartan driver y etiqueta de dialecto: divergen justo donde esta suite sirve
+> de algo —la regla del `DEFAULT` sobre `TEXT` se cumple en MySQL 8.0.13+ y en MariaDB 10.2+
+> por motivos distintos—.
+>
+> También ejecuta el **mantenimiento de verdad** (`optimize`/`compact`/`database_size`), que la
+> suite de mantenimiento sólo comprueba **leyendo el fuente** del conector porque MySQL y
+> PostgreSQL necesitan servidor. Ahí el SQL era correcto y lo que fallaba era la llamada al
+> driver alrededor: psycopg2 rechaza activar `autocommit` con una transacción abierta, así que
+> **toda** operación de mantenimiento reventaba en PostgreSQL antes de ejecutar una sola
+> sentencia.
+>
+> `test_db_portability_live.py` arranca además el **panel real** contra el motor en vivo
+> (`SS_DB_*`, la misma vía que un despliegue Docker), recorre cada método de lectura de cada
+> store por introspección y cada ruta GET sin parámetros del `url_map`. Los stores construidos
+> a mano de los otros tests no ven lo que sí ve esto: los dos fallos de MySQL —una columna
+> `TEXT` no admite `DEFAULT` literal, y `ONLY_FULL_GROUP_BY` rechaza el agrupado del histórico—
+> y el de PostgreSQL, donde una sonda de frescura fallida abortaba la transacción y dejaba la
+> conexión compartida inservible para todos los demás stores.
+
+> Las regresiones de la auditoría 2026-07 que antes se documentaban aquí viven ahora en la
+> §47, dentro del fichero único de regresiones de seguridad (clase `TestBugAudit202607`):
+> blindan la lectura anónima del endpoint de widgets del Overview, la escalada por rol/grupo
+> (`_role_grantable`/`_groups_grantable`), el cifrado de `graph_secret`, el mapeo grupo→rol
+> LDAP exacto, la toma de cuenta SSO y `parse_manual_ban` con duración negativa.
 
 ### `test_db_portability.py` — portabilidad SQL (offline)
 Un conector-stub que **graba el SQL** con `KIND='mysql'` verifica que el SQL crudo de los stores **cita los identificadores reservados** (`key`/`virtual`/tabla `groups`/`user`) con `quote_ident`, y que `quote_ident` es dialect-aware (backticks MySQL / comillas SQLite+PG). Caza cualquier futura reservada sin comillas sin necesidad de un motor real.
@@ -4291,7 +4433,7 @@ ramifica por proveedor.
 | `TestGroupSourceDescriptors::*` (4) | Toda sección con directorio declara descriptor, lleva lo que el renderizador necesita, el layout lo entrega al panel, y una sección sin directorio no declara ninguno |
 | `TestGroupSourceEndpointsGuarded::test_requires_authentication` | Los endpoints detrás de los botones nunca son alcanzables sin sesión |
 
-**Archivo:** `tests/test_config_actions.py` — 18 tests
+**Archivo:** `tests/test_config_actions.py` — 32 tests
 
 Un paquete puede aportar acciones a una sección de configuración describiéndose a sí mismo.
 
@@ -4559,7 +4701,7 @@ que nadie recuerda haber dado— es la que importa.
 
 ## 102. Cachés compartidas — frescura entre procesos
 
-**Archivo:** `tests/test_cache_freshness.py` — 18 tests
+**Archivo:** `tests/test_cache_freshness.py` — 20 tests
 
 Roles, usuarios y grupos se leen de la BD **una vez**, al arrancar, y cada petición responde
 desde esos diccionarios. Eso asume un único escritor, y era falso por partida doble: el **CLI**
@@ -6100,3 +6242,97 @@ página de error no es donde se publican los internos a quien alcance la URL.
 | `TestOrdinaryRejectionsAreNotTreatedAsCrashes::*` (×2) | `HTTPException` pasa intacta: un 404 no se audita y un `abort(403)` conserva su status | sin entradas nuevas | enterrar las entradas reales bajo el ruido de escáneres, y convertir «no puedes hacer esto» en «algo se rompió» |
 | `TestTheSuiteStillSeesItsTracebacks::*` (×1) | Bajo pytest la excepción **se sigue propagando** | `pytest.raises` | que registrar un handler para `Exception` convierta cada fallo de la suite en un 500 educado que ya no hace fallar nada |
 | `TestTheClientStopsDiscardingTheAnswer::*` (×3) | Los wrappers usan `_readJson` (no `r.json()` a pelo), cada fallo escribe en consola, y la rama no-JSON sigue produciendo `error` + status | ≥5 `console.error` | volver al «Error al guardar» sin nada detrás y sin nada que pegar en un reporte |
+
+---
+
+## 138. Optimizar y compactar: las dos mitades del mantenimiento, y por qué van separadas
+
+**Archivo:** `tests/test_db_maintenance.py` — 41 tests
+
+Borrar un año de histórico no libera nada que el operador pueda ver: las filas se van, el
+fichero no encoge y la gráfica de disco sigue subiendo. Recuperar ese espacio era una
+operación que el panel no ofrecía, así que la única vía era una shell en el host.
+
+Son **dos acciones** porque cuestan cosas radicalmente distintas. `optimize` lee los datos y
+actualiza las estadísticas que el planificador usa para elegir índice: barato, seguro y digno
+de ejecutarse a menudo. `compact` reescribe el almacenamiento para devolver espacio al sistema
+de ficheros, y retiene la base de datos mientras lo hace — `VACUUM FULL` bloquea todas las
+tablas en PostgreSQL, `OPTIMIZE TABLE` reconstruye en InnoDB. Ofrecer solo la operación
+combinada significaría que la segura nunca se puede ejecutar sola, que es justo la que
+interesa tener a mano.
+
+Los motores no se ponen de acuerdo en nada de esto, y por eso se prueba **a través del
+conector**: SQLite tiene una sola reescritura que ambos nombres significan, PostgreSQL tiene
+dos sentencias genuinamente distintas, y MySQL no tiene forma global y debe nombrar cada tabla.
+
+| Test | Qué comprueba | Verde | Qué evita |
+|---|---|---|---|
+| `TestCompactReclaimsSpace::*` (×4) | Que borrar filas **por sí solo no libera nada** (la premisa; sin ella el resto no probaría nada), que compactar sí lo devuelve, que los datos sobreviven y que la conexión sigue viva después | 638 KB → 8 KB | una compactación que parece funcionar porque el borrado ya había encogido el fichero |
+| `TestOptimizeIsTheCheapHalf::*` (×3) | Deja los datos intactos, **construye `sqlite_stat1`** (única salida observable de ANALYZE) y **no** reescribe el fichero | tabla de estadísticas creada | que `optimize` sea un no-op silencioso, y que compactar de tapadillo convierta en mentira el aviso del otro botón |
+| `TestEveryEngineAnswersBothCalls::*` (×4) | El contrato existe en la clase base, los tres conectores lo implementan, el `vacuum` **automático** de PostgreSQL no es el que bloquea, y MySQL nombra sus tablas de una en una drenando el cursor | 3 motores | que un paso en segundo plano tome un ACCESS EXCLUSIVE y congele el panel; y el «commands out of sync» de dejar un result set sin leer |
+| `TestSizeReportingIsHonest::*` (×2) | Desconocido es `None`, nunca `0`, y el tamaño incluye WAL y `-shm` | — | que «liberado: 0 B» se lea como un fallo cuando el motor simplemente no quiso decirlo, y que una caída que solo se mudó al WAL se reporte como espacio recuperado |
+| `TestTheEndpointIsGuarded::*` (×5) | Exige `db_maintenance` (no `config_edit`), la operación se **busca en una tabla** en vez de llamarse por nombre, una desconocida se rechaza, y ambas se auditan con las cifras | 200 + entrada de auditoría | que `getattr(conn, op)()` convierta el endpoint en una vía para invocar cualquier método del conector |
+
+| `TestOptimizeReportsRealProgress::*` (×9) | Cada motor puede analizar **una** tabla (la premisa: sin eso no hay progreso honesto que informar); la lista sale del **catálogo** y no de los `TableSpec` (una tabla de módulo creada en runtime es tan real como una declarada); el nombre de tabla se valida contra `maintenance_targets(op)` antes de interpolarse en SQL; compactar por tabla se rechaza donde el motor no lo divide; un paso por tabla **no** audita y la llamada de cierre sí; el diálogo no se puede cerrar a media ejecución y el tick sigue a la respuesta, no a un reloj | 33 tablas, 400 a `config; DROP TABLE` | una barra que avanza con el tiempo en vez de con el trabajo; un identificador —que no puede ser parámetro ligado— aceptado tal cual; y en SQLite, un `compact` por tabla que reescribiría la base entera una vez por tabla |
+| `TestTheAuditEntrySaysWhatHappened::*` (×6) | La ejecución registra cuántas tablas recorrió, cuántas fueron bien y **nombra las que fallaron** con su error; el resumen llega del navegador y se trata como **afirmación** (nombres que la operación no pudo recorrer se descartan, los errores se truncan, la lista se corta a 20); borrar el estado dice **cuántas filas** eliminó; y los tres eventos llevan prefijo | `Mantenimiento: …` | una entrada que dice `ok: true` y nada más — cierto, y justo lo que no responde a quien la abre; y que el log se convierta en un sitio donde escribir texto arbitrario |
+| `TestThereIsOneByteFormatter::*` (×3) | El servidor manda el tamaño **ya formateado**, ninguna plantilla define un segundo formateador, y el toast pinta lo que llegó | `fmt_bytes` (1024) | que el panel muestre dos tamaños distintos para el mismo número según qué lado del cable lo formateó |
+
+> **Un diálogo para las dos operaciones, y el motor decide sus filas.** `optimize` va tabla a tabla en los tres motores; `compact` también en MySQL y PostgreSQL, pero en SQLite el `VACUUM` es una reescritura indivisible y la lista es **una sola fila** que representa toda la base de datos. Nunca se deduce del nombre del motor: lo dice `divisible`.
+>
+> `db_maintenance` es un flag propio y **sin rol por defecto**. Compactar deja la base de datos
+> bloqueada mientras se reescribe, y editar un ajuste no es la misma autoridad que congelar el
+> panel: los roles que necesitan lo primero no deben adquirir lo segundo de regalo.
+
+## 139. El espacio de nombres `00000000-0000-4000-*` es solo de las identidades integradas
+
+**Archivo:** `tests/test_core_uids.py` — 5 tests
+
+Los roles, grupos y usuarios integrados viven todos bajo ese prefijo, con el bloque de variante
+diciendo de qué tipo son (`…-8001-…` usuarios, `…-8002-…` grupos, `…-8003-…` roles). Reservarlo
+es lo que hace que «¿este UID es de los nuestros?» se responda **mirando el valor**, sin consulta
+y sin falso positivo posible.
+
+Que un `uuid4` caiga ahí no es un suceso realista —doce ceros a la izquierda—, pero *«casi
+siempre cierto»* no es una propiedad sobre la que construir identidad: la excepción sería
+justamente la fila que nadie pensaría en comprobar. Así que `new_uid()` **vuelve a tirar** en vez
+de retocar el valor: parchear un dígito repartiría un UID derivado de una tirada descartada, y
+«total, es aleatorio» es como acaban dos siendo iguales.
+
+La reserva se **deriva** de `BUILTIN_UIDS`, no se escribe otra vez, y el último test recorre los
+**siete** sitios donde nace un UID de identidad —los tres servicios más LDAP, OIDC, SAML2 y
+SCIM—: un `uuid.uuid4()` pelado en cualquiera devuelve la garantía a «casi siempre», y el que lo
+reintroduzca será un camino de aprovisionamiento, porque son los que nadie recuerda que también
+crean cuentas.
+
+## 140. Las dos identidades bajo las que escribe el propio panel
+
+**Archivo:** `tests/test_builtin_identities.py` — 13 tests
+
+`system` y `anonymous` se protegen **como los roles y grupos integrados** —declaradas una vez
+en `lib.core.constants` y rechazadas por una comprobación compartida— y son **usuarios** en
+todo lo que le importa a quien lee la auditoría: nombre, UID estable y fila en la lista de
+usuarios. En nada de lo que le importa a un login: sin contraseña, sin sesión, sin permisos.
+
+Fichero aparte de `test_wa_audit.py` porque el sujeto son **las identidades**, no el registro,
+aunque el registro sea el motivo de que existan: allí está lo que las hizo necesarias, aquí lo
+que **son**. Las dos clases se detallan en las fichas de la sección de auditoría.
+
+## 141. Todas las páginas que sirve el panel tienen que renderizar
+
+**Archivo:** `tests/test_wa_routes_render.py` — 4 tests
+
+Encontrado a base de tropezar: una página experimental devolvía **500 en todos los motores**
+porque su plantilla enlazaba a `url_for('overview')` y ese endpoint se había renombrado. Un
+endpoint renombrado **no produce un enlace roto**: Jinja lanza `BuildError` y la página entera
+se convierte en un error 500. Nada apuntaba a ello — ningún test abría la página, y el índice
+de rutas la listaba como existente, que lo era. (Esa página ya se ha eliminado; lo que cierra
+este fichero es el punto ciego que destapó.)
+
+El barrido se saca del propio `url_map` de Flask, no de una lista que alguien mantenga: una
+página añadida mañana queda cubierta sin que nadie recuerde este fichero, que es la única forma
+de que un guarda así siga siendo cierto. Se comprueban tres cosas distintas a propósito: que
+ninguna ruta responda 5xx (un 4xx **es** una respuesta; un 5xx es el servidor sin poder darla, y
+en un GET sin parámetros no hay entrada a la que culpar), que ninguna **lance** —separado,
+porque el manejador de errores puede convertir una plantilla rota en un 500 limpio y entonces se
+lee como «controlado» mientras la página sigue sin existir—, y que sin sesión redirijan en vez
+de reventar.

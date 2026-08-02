@@ -34,10 +34,21 @@ that field has a value (e.g. no "rotate secret" until an app is registered).
 rendered at all — destructive actions declare the same flag their API endpoint enforces
 (e.g. ``history_delete``). It is a UI gate on top of, never instead of, the server check.
 
-``group_label_key`` (optional) names the caption of the actions row. When every visible
-action of a section shares the same one, the panel uses it (e.g. "Entra ID" instead of a
-generic "Actions"), so the row says WHOSE actions these are; when actions from different
-packages share a section, it falls back to the generic label.
+``group_label_key`` (optional) names the group an action belongs to, and the caption shown
+above it (e.g. "Entra ID", so the row says WHOSE actions these are). Actions sharing a key
+are rendered together; a section whose actions declare different keys shows one group each,
+in declaration order, and anything without a key falls back to the generic label.
+
+``desc_key`` (optional) is one line saying what the action DOES, shown beside its label. A
+button caption has room for a verb and a noun, which is enough to identify an action you
+already know and not enough to tell you what it will do to your data — and Maintenance is a
+section where being wrong about that is expensive.
+
+``button_key`` (optional) is what the BUTTON says, when the surrounding card already carries
+the name and the description. "Eliminar todos los eventos de auditoría" is the right title
+and a terrible button: the card has said all of that, so the button only has to name the verb
+("Borrar", "Vaciar"). Falls back to ``label_key``, which is what the single-row layout needs
+and what an action with nothing around it should keep saying.
 
 Variants are SOLID Bootstrap names (``primary``/``secondary``/``warning``…) — outline
 variants are not used in this UI.
@@ -49,7 +60,8 @@ from __future__ import annotations
 _PKG_ROOTS = ('lib.providers', 'lib.services', 'lib.core')
 
 _ALLOWED = ('section', 'id', 'label_key', 'tooltip_key', 'icon', 'variant',
-            'order', 'fn', 'show_when', 'group_label_key', 'perm')
+            'order', 'fn', 'show_when', 'group_label_key', 'desc_key', 'button_key',
+            'perm')
 
 
 def _normalize(raw) -> dict | None:

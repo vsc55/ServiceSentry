@@ -9,9 +9,10 @@ raise ``LdapUnavailableError``.
 
 import json
 import ssl
-import uuid
 
 from lib.config.spec import cfg_default, cfg_get
+from lib.core.constants import is_reserved_username
+from lib.core.uids import new_uid
 from lib.debug import DebugLevel
 from lib.providers.ldap.entry import attr_value, attr_values
 
@@ -249,6 +250,14 @@ def sync_user(wa, username: str, attrs: dict) -> "dict | None":
     from group mapping (called on every login).
     Returns the user dict.
     """
+    # An LDAP user called `system` or `anonymous` would create a local account whose actions
+    # read as the panel's own, or as an unauthenticated caller's. The audit log answers "who
+    # did this", so the name is refused rather than provisioned and puzzled over later.
+    if is_reserved_username(username):
+        wa._dbg("> Auth/LDAP >> reserved username " + repr(username) + "; rejecting",
+                DebugLevel.warning)
+        return None
+
     cfg            = _get_config(wa)
     group_role_map = _get_group_role_map(cfg)
     role_name      = _map_role(attrs.get('groups', []), group_role_map)
@@ -259,7 +268,7 @@ def sync_user(wa, username: str, attrs: dict) -> "dict | None":
     existing = wa._users.get(username)
     if existing is None:
         user = {
-            'uid':            str(uuid.uuid4()),
+            'uid':            new_uid(),
             'auth_source':    'ldap',
             'auth_source_id': attrs.get('dn', ''),
             'display_name':   attrs.get('display_name', ''),

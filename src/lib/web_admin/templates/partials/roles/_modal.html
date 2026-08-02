@@ -86,7 +86,8 @@ function cloneRoleModal(uid)    { openRoleModal(uid, 'clone'); }
 function _populateRoleUsersGrid(roleUid, searchFilterUsers) {
     _buildItemsGrid('rmUsersGrid', usersData, {
         q: document.getElementById('rmUserSearch')?.value || '',
-        match: (uname, ud, q) => !q || uname.toLowerCase().includes(q),
+        // Built-in identities can't be given a role — keep them out of the picker.
+        match: (uname, ud, q) => !ud.builtin && (!q || uname.toLowerCase().includes(q)),
         render: (uname, ud) => {
             const id = 'rmuser_' + uname;
             const checked = roleUid && ud.role === roleUid;

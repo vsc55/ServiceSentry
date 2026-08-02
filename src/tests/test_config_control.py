@@ -17,7 +17,13 @@ from lib.config.config_store import ConfigStore
 from lib.config.config_type_return import ConfigTypeReturn
 
 
-class TestConfigStore:
+class TestFileConfigStore:
+    """``lib.config.config_control.ConfigStore`` — the FILE-backed one.
+
+    Named for its backing store because there is a second class with the same name in
+    ``lib.core.config.store`` (the DB-backed one, tested in ``test_config_store.py``): a
+    failure reported as ``TestConfigStore::test_...`` said nothing about which of the two
+    had broken."""
 
     def test_is_exist_file_none(self):
         cs = ConfigStore(None)

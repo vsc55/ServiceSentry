@@ -263,15 +263,23 @@ class HistoryStore(BaseStore):
                 # FLOOR before the cast so the bucket index truncates identically on all
                 # engines (PostgreSQL's CAST(double AS int) rounds; SQLite/MySQL truncate) —
                 # operand is always ≥ 0 (ts ≥ from_ts), so FLOOR == truncate.
+                # GROUP BY the OUTPUT COLUMN, not a repeat of the inner expression: MySQL runs
+                # with ONLY_FULL_GROUP_BY by default and rejects a select expression it cannot
+                # prove is functionally dependent on the grouping one — the bucket index is
+                # grouped, but the select multiplies it back into a timestamp, and MySQL will
+                # not follow that. The result was every history graph coming back EMPTY on
+                # MySQL (the query raises, and the caller's except returns []). Grouping by the
+                # alias is exact — ``bts`` is a 1:1 transform of the bucket index — and all
+                # three engines accept an output name there.
                 rows = self._db.fetchall(
                     f'''SELECT
                         CAST(FLOOR((ts - ?) / ?) AS {_int}) * ? + ? AS bts,
                         CAST(ROUND(AVG(status)) AS {_int}),
                         MAX(data)
                     FROM {_T} WHERE {where}
-                    GROUP BY CAST(FLOOR((ts - ?) / ?) AS {_int})
+                    GROUP BY bts
                     ORDER BY bts''',
-                    (from_ts, bucket, bucket, from_ts) + w_args + (from_ts, bucket),
+                    (from_ts, bucket, bucket, from_ts) + w_args,
                 )
 
             return [

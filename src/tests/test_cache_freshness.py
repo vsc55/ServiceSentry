@@ -84,6 +84,34 @@ class TestTheProbe:
         not act on it. Returning zeros here would look exactly like an emptied table."""
         assert table_stamp(_Boom(), 'roles') is None
 
+    def test_the_failed_probe_rolls_back_before_giving_up(self):
+        """Swallowing the error is right; leaving the CONNECTION broken is not.
+
+        On PostgreSQL a failed statement aborts the whole transaction, so a probe that
+        returned ``None`` without rolling back left the shared connector unusable: every
+        later query from every other store answered "current transaction is aborted", far
+        from the probe that caused it. Found by booting the real panel against a live
+        PostgreSQL and walking every store — the tables with no ``updated_at`` (audit,
+        sessions, check_state) hit it on the first read.
+        """
+        rolled = []
+
+        class _BoomTracking(_Boom):
+            def rollback(self):
+                rolled.append(True)
+
+        assert table_stamp(_BoomTracking(), 'roles') is None
+        assert rolled, 'the probe failed and left the transaction open'
+
+    def test_a_connector_without_rollback_still_answers(self):
+        """The rollback is best-effort: a probe must not turn "no answer" into a crash
+        because the connector could not be cleaned up either."""
+        class _NoRollback(_Boom):
+            def rollback(self):
+                raise RuntimeError('no rollback here')
+
+        assert table_stamp(_NoRollback(), 'roles') is None
+
 
 class TestReloadingOnChange:
 

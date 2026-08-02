@@ -8,10 +8,11 @@ If not installed, ``is_available()`` returns False and the SAML2 routes
 """
 
 import json
-import uuid
 from urllib.parse import urlparse
 
 from lib.config.spec import cfg_default, cfg_get
+from lib.core.constants import is_reserved_username
+from lib.core.uids import new_uid
 from lib.debug import DebugLevel
 
 _HAS_SAML2 = False
@@ -157,6 +158,15 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
         wa._dbg("> Auth/SAML2 >> no username resolved; rejecting", DebugLevel.warning)
         return None
 
+    # An IdP user called `system` or `anonymous` would create a local account whose actions
+    # read as the panel's own, or as an unauthenticated caller's. The audit log answers "who
+    # did this", so the name is refused at the door rather than provisioned and then puzzled
+    # over. Rejecting the sign-in is the point: there is no safe account to let them into.
+    if is_reserved_username(username):
+        wa._dbg("> Auth/SAML2 >> reserved username " + repr(username) + "; rejecting", DebugLevel.warning)
+        return None
+
+
     role_name = _map_role(groups, group_role_map)
     _dr = cfg.get('default_role', '')
     default_role_uid = _dr if wa._is_uid(_dr) else (wa._role_name_to_uid(_dr or 'none') or wa._role_name_to_uid('none'))
@@ -169,7 +179,7 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
                     DebugLevel.info)
             return None
         user = {
-            'uid':            str(uuid.uuid4()),
+            'uid':            new_uid(),
             'auth_source':    'saml2',
             'auth_source_id': name_id,
             'display_name':   display_name,

@@ -12,7 +12,8 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     groups           /api/v1/groups*
     sessions         /api/v1/sessions*
     audit            /api/v1/audit*
-    config           /api/v1/config*            (+ /config/versions, /config/layout, /config/schema)
+    config           /api/v1/config*            (+ /config/versions, /config/layout, /config/schema,
+                                                   /config/db/<op> — optimize | compact)
     credentials      /api/v1/credentials*
     history          /api/v1/history*
     hosts            /api/v1/hosts*             (perm group 'servers')
@@ -44,7 +45,6 @@ registered; every listed file's own header lists its exact per-endpoint routes.
                                                 declared in HOME_PAGES — /overview, /history,
                                                 /syslog. They all serve the SAME single-page
                                                 shell: the URL only selects the active pane.)
-    overview2        /overview2                 (experimental Alpine.js Overview — real widgets + data)
     ui               /lang/<code> (navigation), /favicon.ico (site-root icon, public),
                      /api/v1/me, /api/v1/health
     status           /status                    (public status page, no auth)
@@ -90,7 +90,6 @@ from lib.services.ipban.routes import register as _ipbans
 from .util import register as _util
 from .ui import register as _ui
 from .pages import register as _pages
-from .overview2 import register as _overview2   # experimental Alpine Overview (/overview2)
 from lib.providers.entraid.sso_routes import register as _msteams_sso   # Teams personal-tab SSO
 from .status import register as _status
 from .errors import register as _errors
@@ -101,7 +100,6 @@ def register_all(app, wa):
     _auth(app, wa)
     _ui(app, wa)
     _pages(app, wa)
-    _overview2(app, wa)
     _msteams_sso(app, wa)
     _status(app, wa)
     _errors(app, wa)

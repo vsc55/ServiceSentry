@@ -18,9 +18,21 @@ CONFIG_ACTIONS = [
     {'section': 'maintenance', 'id': 'history_clear_series',
      'label_key': 'history_clear_series', 'tooltip_key': 'history_clear_series_tt',
      'icon': 'bi-trash3', 'variant': 'warning', 'order': 10,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe', 'desc_key': 'history_clear_series_desc',
      'perm': 'history_delete', 'fn': 'showHistoryClearSeriesModal'},
     {'section': 'maintenance', 'id': 'history_clear_all',
      'label_key': 'history_clear_all', 'tooltip_key': 'history_clear_all_tt',
      'icon': 'bi-trash3', 'variant': 'danger', 'order': 20,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe', 'desc_key': 'history_clear_all_desc',
      'perm': 'history_delete', 'fn': '_historyClearAll'},
+]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'history_all_deleted', 'severity': 'danger'},
+    {'key': 'history_deleted', 'severity': 'danger'},
 ]

@@ -179,20 +179,29 @@ function clearAuditFilters() {
     renderAuditTable();
 }
 
+// Declared severity → the Bootstrap tone that paints it. The only mapping left here, because
+// this is the only part that is about CSS; what an event means is the emitting package's to
+// say (manifest.py :: AUDIT_EVENTS, folded into AUDIT_SEVERITY by lib/core/audit/events.py).
+//
+// It used to be worked out from the event NAME — a rule matching `deleted`/`revoked` plus a
+// handful of names written out by hand. That left seven destructive events and fifteen
+// failures rendering neutral grey, including three security signals and the entry written
+// when the panel itself crashed; and even with the word lists widened, the colour still
+// depended on the noun somebody chose when naming the event. `purge_done` would have slipped
+// through; `rule_failed` would have gone red for a rule that merely reported "no match".
+const _AUDIT_TONE = {
+    danger:  'text-bg-danger',
+    warning: 'text-bg-warning',
+    success: 'text-bg-success',
+    info:    'text-bg-info',
+    muted:   'text-bg-secondary',
+};
+
 function _auditEventBadge(event) {
-    let cls = 'text-bg-secondary';
-    if (event === 'login_failed') cls = 'text-bg-danger';
-    else if (event === 'login_ok') cls = 'text-bg-success';
-    else if (event === 'logout') cls = 'text-bg-warning';
-    else if (event.includes('deleted') || event.includes('revoked')) cls = 'text-bg-danger';
-    else if (event.includes('created')) cls = 'text-bg-success';
-    else if (event === 'password_reset') cls = 'text-bg-warning';
-    else if (event.includes('saved') || event.includes('updated') || event.includes('changed')) cls = 'text-bg-info';
-    else if (event === 'daemon_started') cls = 'text-bg-success';
-    else if (event === 'daemon_stopped') cls = 'text-bg-warning';
-    else if (event === 'daemon_error' || event === 'daemon_checks_run'
-          || event === 'module_check_error' || event === 'module_check_timeout'
-          || event === 'file_write_error') cls = 'text-bg-danger';
+    // An undeclared event is neutral rather than guessed at. It cannot happen — a guard fails
+    // the build when an emitted event has no declaration — and if it ever does, a grey badge
+    // on a known-unknown beats a red one inferred from a substring.
+    const cls = _AUDIT_TONE[AUDIT_SEVERITY[event]] || 'text-bg-secondary';
     return `<span class="badge ${cls}">${esc(AUDIT_EVENTS[event] || event)}</span>`;
 }
 

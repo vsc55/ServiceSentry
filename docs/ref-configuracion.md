@@ -126,6 +126,7 @@ solo-lectura/arranque.
         "secure_cookies": false,
         "remember_me_days": 30,
         "audit_max_entries": 500,
+        "audit_detail_max_items": 100,
         "pw_min_len": 8,
         "pw_max_len": 128,
         "pw_require_upper": true,
@@ -327,6 +328,7 @@ Detalle de mecanismos, requisitos y seguridad en [explica-notificaciones.md](exp
 | `web_admin.secure_cookies` | bool | `false` | Marcar la cookie de sesión como `Secure` (solo HTTPS). **Recomendado** cuando el acceso es solo por HTTPS (incl. tras proxy TLS como NPM/nginx): el flag no se deduce del esquema de la petición, hay que activarlo aquí (o `force_https`). Con `Secure` activo se pierde el acceso por HTTP/IP en LAN. Ver [explica-seguridad.md → cookies](explica-seguridad.md#cabeceras-de-seguridad-http-y-cookies). |
 | `web_admin.remember_me_days` | int | `30` | Duración de sesiones persistentes ("Recuérdame") en días (1–365) |
 | `web_admin.audit_max_entries` | int | `500` | Número máximo de entradas en el registro de auditoría (10–10000) |
+| `web_admin.audit_detail_max_items` | int | `100` | Cuántos nombres lista **una entrada** de auditoría por resultado antes de resumir el resto como «y N más». El detalle se guarda como JSON en una fila y se pinta entero al abrirlo, y el número de tablas **no está acotado** (los módulos crean las suyas en marcha). `0` = no listar nombres (los recuentos se mantienen). Env: `SS_AUDIT_DETAIL_MAX_ITEMS` |
 | `web_admin.pw_min_len` | int | `8` | Longitud mínima de contraseña (1–128) |
 | `web_admin.pw_max_len` | int | `128` | Longitud máxima de contraseña (8–256) |
 | `web_admin.pw_require_upper` | bool | `true` | Exigir al menos una letra mayúscula y una minúscula en la contraseña |

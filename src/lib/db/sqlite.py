@@ -174,6 +174,52 @@ class SQLiteConnector(BaseConnector):
         conn.close()
         self._local.conn = None
 
+    def compact(self) -> None:
+        """``VACUUM`` — which for SQLite is exactly what :meth:`vacuum` already does.
+
+        Delegating rather than repeating the statement: on SQLite there is one rewrite and
+        both names mean it. The two stay separate methods because on PostgreSQL they are
+        genuinely different operations with very different costs, and a caller should not have
+        to know which engine it is talking to in order to ask for the right one.
+        """
+        self.vacuum()
+
+    def optimize(self, table: str | None = None) -> None:
+        """``ANALYZE`` then ``PRAGMA optimize`` — statistics, without rewriting the file.
+
+        Both, and in this order, because they do different halves of the job: ANALYZE builds
+        the ``sqlite_stat1`` numbers the planner reads, and ``PRAGMA optimize`` is SQLite's own
+        "do whatever is worth doing now" hook, which needs those numbers to exist before it can
+        judge anything worth doing.
+
+        With a *table*, only that table is analyzed and the PRAGMA is skipped: it is a
+        whole-database hook, and running it once per table would repeat the same
+        whole-database work for every row of a progress list.
+        """
+        conn = self._conn()
+        if table:
+            conn.execute(f'ANALYZE {self.quote_ident(table)}')
+            conn.commit()
+            return
+        conn.execute('ANALYZE')
+        conn.execute('PRAGMA optimize')
+        conn.commit()
+
+    def maintenance_targets(self, op: str) -> list[str]:
+        """Analyze goes table by table; VACUUM does not go anywhere — it rewrites the file.
+
+        There is no per-table form of it, so the progress list gets one row standing for the
+        whole database. Splitting it into thirty-three ticks would report progress that the
+        engine is not making.
+        """
+        return self.list_tables() if op == 'optimize' else []
+
+    def list_tables(self) -> list[str]:
+        rows = self.fetchall(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        return [r[0] for r in rows]
+
     def checkpoint(self) -> None:
         self._conn().execute('PRAGMA wal_checkpoint(PASSIVE)')
 

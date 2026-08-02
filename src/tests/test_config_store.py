@@ -11,7 +11,9 @@ def _store():
     return ConfigStore(db), db
 
 
-class TestConfigStore:
+class TestDbConfigStore:
+    """``lib.core.config.store.ConfigStore`` — the DB-backed one (see
+    ``test_config_control.py`` for its file-backed namesake)."""
 
     def test_is_empty(self):
         s, _ = _store()

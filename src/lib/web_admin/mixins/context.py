@@ -22,6 +22,7 @@ from flask import session
 
 from lib.config.layout import config_layout
 from lib.config.spec import registry_defaults
+from lib.core.audit.events import audit_severity as _audit_severity
 from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
 from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
 from lib.i18n import DEFAULT_LANG, SUPPORTED_LANGS, TRANSLATIONS
@@ -124,6 +125,11 @@ class _ContextMixin:
             'wa_sensitive_fields': sorted(self._sensitive_fields),
             'wa_remember_me_days': self._REMEMBER_ME_DAYS,
             'wa_audit_max_entries': self._AUDIT_MAX_ENTRIES,
+            'wa_audit_detail_max_items': self._AUDIT_DETAIL_MAX_ITEMS,
+            # What each audit event MEANS, declared by the package that writes it
+            # (manifest.py :: AUDIT_EVENTS). The badge used to be guessed from the event
+            # NAME, which made the colour depend on the noun somebody picked.
+            'audit_severity': _audit_severity(),
             'wa_secure_cookies': self._SECURE_COOKIES,
             'wa_pw_min_len': self._PW_MIN_LEN,
             'wa_pw_max_len': self._PW_MAX_LEN,

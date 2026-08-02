@@ -1,0 +1,161 @@
+{# ================================================================
+   Database maintenance — the two actions Config → Maintenance offers
+   beside the data wipes.
+
+   They are declared as data (lib/core/config/manifest.py :: CONFIG_ACTIONS) and this
+   ships the JS they name, the same contract every package-contributed action follows.
+
+   Kept apart from the wipes on purpose: these two reclaim and re-measure, they never
+   delete a record. A row of identical red buttons said otherwise.
+   ================================================================ #}
+
+// ── The run, unit by unit ──────────────────────────────────────────────────────
+// One dialog for both operations. What the list is made of is the ENGINE's answer: a row per
+// table where the statement works per table, and one row for the whole database where it does
+// not. `divisible: false` is what says which — never guessed from the engine name here.
+let _dbOptUnits = [];        // table names, or [null] for an indivisible operation
+let _dbOptOp = 'optimize';
+let _dbOptRunning = false;
+let _dbOptAbort = false;
+
+const _DB_OPS_UI = {
+    optimize: { icon: 'bi-speedometer2', title: 'db_optimize', desc: 'db_optimize_desc',
+                warn: null,              done: 'db_optimize_done' },
+    compact:  { icon: 'bi-file-zip',     title: 'db_compact',  desc: 'db_compact_desc',
+                warn: 'db_compact_warn', done: 'db_compact_done' },
+};
+
+/** Open the run dialog with what it will walk, listed before anything starts.
+ *
+ *  For `optimize` this is not a confirmation — it changes no row and needs none; it is the
+ *  progress list itself. For `compact` it IS also the confirmation, which is why the lock
+ *  warning is shown here and the run does not begin until the button is pressed.
+ */
+async function _dbRunDialog(op) {
+    const ui = _DB_OPS_UI[op];
+    _dbOptOp = op;
+    _dbOptUnits = [];
+    _dbOptAbort = false;
+
+    document.getElementById('dbOptIcon').className = `bi ${ui.icon} me-1`;
+    document.getElementById('dbOptTitle').textContent = t(ui.title);
+    document.getElementById('dbOptDesc').textContent = t(ui.desc);
+    document.getElementById('dbOptRunLabel').textContent = t(ui.title);
+    const warnEl = document.getElementById('dbOptWarn');
+    warnEl.classList.toggle('d-none', !ui.warn);
+    if (ui.warn) document.getElementById('dbOptWarnText').textContent = t(ui.warn);
+
+    const listEl = document.getElementById('dbOptList');
+    listEl.innerHTML = `<div class="text-muted small">
+        <span class="spinner-border spinner-border-sm me-1"></span>${esc(t('loading'))}</div>`;
+    _dbOptSetRunning(false);
+    document.getElementById('btnDbOptRun').disabled = false;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dbOptimizeModal')).show();
+
+    const data = await apiGet('/api/v1/config/db/targets/' + encodeURIComponent(op));
+    if (!data) {
+        listEl.innerHTML = `<div class="text-danger small">${esc(t('db_not_available'))}</div>`;
+        document.getElementById('btnDbOptRun').disabled = true;
+        return;
+    }
+    // `null` is a real unit: the run posts no table and the server does the whole database.
+    _dbOptUnits = data.divisible ? data.targets : [null];
+    listEl.innerHTML = _dbOptUnits.map((name, i) => `
+        <div class="db-opt-row" id="dbopt-${i}">
+            <i class="bi bi-circle db-opt-icon text-muted"></i>
+            <span class="${name ? 'font-monospace ss-fs-2' : 'small fst-italic'}">${
+                esc(name || t('db_whole_database'))}</span>
+        </div>`).join('');
+    _dbOptProgress(0);
+}
+
+function _dbOptimize() { _dbRunDialog('optimize'); }
+function _dbCompact()  { _dbRunDialog('compact'); }
+
+function _dbOptProgress(done) {
+    const total = _dbOptUnits.length;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    document.getElementById('dbOptBar').style.width = pct + '%';
+    document.getElementById('dbOptCount').textContent = tf('db_opt_progress', done, total);
+}
+
+/** While it runs, Cancel means "stop after this table" and the dialog cannot be dismissed by
+ *  clicking away (`data-bs-backdrop="static"`): closing the window would not stop the work,
+ *  it would only stop you seeing it. */
+function _dbOptSetRunning(running) {
+    _dbOptRunning = running;
+    document.getElementById('btnDbOptRun').disabled = running;
+    document.getElementById('btnDbOptClose').disabled = running;
+    const cancel = document.getElementById('btnDbOptCancel');
+    cancel.textContent = running ? t('stop') : t('close');
+    cancel.removeAttribute('data-bs-dismiss');
+    cancel.onclick = running
+        ? () => { _dbOptAbort = true; cancel.disabled = true; }
+        : () => bootstrap.Modal.getInstance(document.getElementById('dbOptimizeModal'))?.hide();
+    cancel.disabled = false;
+}
+
+// Bound here rather than with an inline onclick: the button lives in the modal partial, and
+// the two would have to be edited together every time the handler's shape changed.
+document.addEventListener('DOMContentLoaded', () => {
+    const run = document.getElementById('btnDbOptRun');
+    if (run) run.onclick = _dbOptimizeRun;
+});
+
+async function _dbOptimizeRun() {
+    if (_dbOptRunning || !_dbOptUnits.length) return;
+    const op = _dbOptOp;
+    const url = '/api/v1/config/db/' + encodeURIComponent(op);
+    _dbOptSetRunning(true);
+    let done = 0, failed = 0, freed = null;
+    // What each unit reported, sent with the closing call. The per-unit steps write no audit
+    // entry each — that would bury the record under thirty lines saying nothing — so without
+    // this the log of a thirty-three table run is the word "ok", which is true and tells
+    // nobody WHICH table failed. The server treats it as a claim and checks it into shape.
+    const results = [];
+    for (let i = 0; i < _dbOptUnits.length; i++) {
+        if (_dbOptAbort) break;
+        const unit = _dbOptUnits[i];
+        const row = document.getElementById('dbopt-' + i);
+        const icon = row.querySelector('.db-opt-icon');
+        icon.className = 'bi bi-arrow-repeat db-opt-icon text-primary db-opt-spin';
+        // Follow the run. The list is taller than its box, so without this the ticks march
+        // past the bottom edge and the one table you want to watch — the one in progress —
+        // is the only one off screen. `nearest` scrolls the list box and not the page, and
+        // does nothing while the active row is already visible, so it never fights a user
+        // who has scrolled back to read a row.
+        row.scrollIntoView({ block: 'nearest' });
+        const r = await apiPost(url, unit ? { table: unit } : {});
+        const ok = r && r.data && r.data.ok;
+        // The tick is the point: it appears because THIS unit came back, so a run that
+        // stalls shows you exactly where it stalled.
+        icon.className = ok ? 'bi bi-check-circle-fill db-opt-icon text-success'
+                            : 'bi bi-x-circle-fill db-opt-icon text-danger';
+        if (!ok) {
+            failed += 1;
+            row.title = (r && r.data && r.data.error) || t('db_maintenance_failed');
+        } else if (!unit && r.data.bytes_freed != null) {
+            freed = r.data;                       // the indivisible run already reported it
+        }
+        if (unit) results.push({ table: unit, ok: !!ok, error: ok ? '' : (row.title || '') });
+        _dbOptProgress(++done);
+    }
+    // A closing call with no table, only when the run WAS split: the per-table steps
+    // deliberately write no audit entry each, so this is what records the run as the single
+    // operator action it was — and what measures what the whole of it reclaimed.
+    if (!_dbOptAbort && _dbOptUnits[0] !== null) {
+        const r = await apiPost(url, { results });
+        if (r && r.data && r.data.ok) freed = r.data;
+    }
+    _dbOptSetRunning(false);
+    if (_dbOptAbort) { showToast(t('db_opt_stopped'), 'warning'); return; }
+    if (failed) { showToast(tf('db_opt_done_errors', failed), 'warning'); return; }
+    const done_msg = t(_DB_OPS_UI[op].done);
+    if (freed && freed.bytes_freed > 0) {
+        showToast(`${done_msg}. ${tf('db_freed', freed.freed_human)}`, 'success');
+    } else if (freed && freed.bytes_freed === 0) {
+        showToast(`${done_msg}. ${t('db_freed_none')}`, 'success');
+    } else {
+        showToast(done_msg, 'success');
+    }
+}

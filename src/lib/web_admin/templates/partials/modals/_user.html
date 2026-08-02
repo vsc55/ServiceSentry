@@ -102,6 +102,15 @@
                                 <label class="form-check-label small fw-semibold" for="umEnabled">{{ i18n.user_enabled }}</label>
                             </div>
                         </div>
+                        {# Separate from "enabled": a service account stays active — it owns
+                           things and receives notifications — it just never signs in. #}
+                        <div class="mb-2 flex-shrink-0" id="umLoginEnabledGroup">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="umLoginEnabled" checked>
+                                <label class="form-check-label small fw-semibold" for="umLoginEnabled">{{ i18n.login_enabled_label }}</label>
+                            </div>
+                            <div class="form-text ss-fs-2">{{ i18n.login_enabled_hint }}</div>
+                        </div>
                         <div class="d-flex flex-column flex-grow-1" id="umSessionsGroup" style="display:none">
                             <label class="form-label small fw-semibold flex-shrink-0">
                                 <i class="bi bi-plug me-1"></i>{{ i18n.active_sessions }}

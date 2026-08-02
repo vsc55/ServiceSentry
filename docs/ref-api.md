@@ -15,7 +15,7 @@ Para el detalle funcional de cada subsistema ver [explica-web-admin.md](explica-
 **No hay Blueprints de Flask.** Cada ruta es un `@app.route(...)` declarado dentro de una
 función `register(app, wa)` a nivel de módulo. El registro está centralizado:
 
-- [lib/web_admin/routes/__init__.py:100](../src/lib/web_admin/routes/__init__.py#L100) —
+- [lib/web_admin/routes/__init__.py:101](../src/lib/web_admin/routes/__init__.py#L101) —
   `register_all(app, wa)` importa el símbolo `register` de cada `routes.py` de dominio /
   servicio / provider y los invoca en secuencia. Su docstring es el índice autoritativo de
   toda la superficie de URLs.
@@ -33,7 +33,7 @@ dependencia de Flask, y hacen `jsonify`. Ejemplos: `lib/core/users/routes.py` �
 
 | Decorador | Efecto | Fuente |
 |---|---|---|
-| `wa._perm_required(*perms)` | Requiere **cualquiera** de los permisos listados | [app.py:332](../src/lib/web_admin/app.py#L332) |
+| `wa._perm_required(*perms)` | Requiere **cualquiera** de los permisos listados | [mixins/guards.py:39](../src/lib/web_admin/mixins/guards.py#L39) |
 | `wa._login_required` | Solo sesión, sin permiso concreto | [app.py:347](../src/lib/web_admin/app.py#L347) |
 
 Ambos llaman a `self._check_session()`. Una request `/api/*` sin autenticar recibe **401
@@ -47,7 +47,7 @@ sin uso en rutas. Ver el catálogo completo de permisos en [explica-seguridad.md
   (cookie de sesión + CSRF). Las superficies externas/estándar quedan fuera: `/scim/v2/*`
   (RFC 7643/7644), `/auth/<provider>/*` (callbacks de IdP, Teams). No existe `/api/v2`.
 - **CSRF:** double-submit token. `@app.before_request _csrf_protect`
-  ([app.py:605](../src/lib/web_admin/app.py#L605)) solo comprueba `POST/PUT/PATCH/DELETE`
+  ([mixins/hooks.py:82](../src/lib/web_admin/mixins/hooks.py#L82)) solo comprueba `POST/PUT/PATCH/DELETE`
   ([lib/security/csrf.py:21](../src/lib/security/csrf.py#L21)). El frontend adjunta
   `X-CSRF-Token` automáticamente en el wrapper de `fetch`
   ([core/_api.html:22](../src/lib/web_admin/templates/partials/core/_api.html#L22)).
@@ -194,7 +194,6 @@ alimenta a fail2ban:
 | GET | `/` | público→redirect | Anónimo→`/login`, si no landing page | pages.py:36 |
 | GET | `/admin` | sesión | Dashboard de administración | pages.py:76 |
 | GET | `/overview` | sesión | Dashboard Overview | pages.py:82 |
-| GET | `/overview2` | sesión | Overview experimental (Alpine) | overview2.py:39 |
 | GET | `/status` | público\* | Estado público; invitados solo si `public_status=True` | status.py:84 |
 | GET | `/lang/<code>` | público (GET) | Cambia idioma UI y lo persiste | ui.py:22 |
 | GET | `/api/v1/me` | sesión | Usuario actual + lista efectiva de `permissions` | ui.py:42 |
@@ -210,17 +209,30 @@ alimenta a fail2ban:
 | GET | `/api/v1/config/layout` | `config_view`\|`config_edit` | Layout de la UI de config (tabs→cards) |
 | GET | `/api/v1/config/schema` | `config_view`\|`config_edit` | Metadatos UI a nivel de campo |
 | PUT | `/api/v1/config` | `config_edit` | Guardado parcial versionado |
+| GET | `/api/v1/config/db/targets/<op>` | `db_maintenance` | Las unidades que recorrerá la ejecución, en orden. Responde `{op, targets, divisible}`: el **motor** decide la forma — una tabla por fila donde la sentencia va por tabla, y `divisible: false` donde no (el `VACUUM` de SQLite es una reescritura indivisible, y partirla en 33 filas inventaría una granularidad que el motor no tiene). Sale del **catálogo**, no de los `TableSpec`: una tabla de módulo creada en runtime es tan real como una declarada |
+| POST | `/api/v1/config/db/<op>` | `db_maintenance` | Mantenimiento de la BD principal: `optimize` (estadísticas del planificador; barato y seguro) o `compact` (reescribe y devuelve espacio al disco; **bloquea** la BD mientras dura). `<op>` se busca en una tabla fija, no se llama por nombre sobre el conector. Cuerpo opcional `{table}` para avanzar de una en una: se **valida contra `maintenance_targets(op)`** antes de interpolarse en SQL (un identificador no puede ser parámetro ligado), y eso también rechaza un `compact` por tabla en un motor que no lo divide. Un paso por tabla responde `{ok, operation, table}` y **no** audita; la llamada de cierre —sin `table`— responde `{ok, operation, bytes_before, bytes_after, bytes_freed, freed_human}` y registra la ejecución como la única acción de operador que fue. Los tamaños son `null` si el motor no los da: desconocido, nunca cero |
 
 ## Usuarios — [lib/core/users/routes.py](../src/lib/core/users/routes.py)
 
 | Método | Ruta | Permiso | Propósito |
 |---|---|---|---|
-| GET | `/api/v1/users` | `users_view` | Todos los usuarios, sin hashes |
+| GET | `/api/v1/users` | `users_view` | Todos los usuarios, sin hashes, + las identidades integradas |
 | POST | `/api/v1/users` | `users_add` | Crear usuario |
 | PUT | `/api/v1/users/<username>` | `users_edit` | Actualizar (rol/nombre/contraseña/grupos) |
 | DELETE | `/api/v1/users/<username>` | `users_delete` | Borrar usuario |
 | PUT | `/api/v1/users/me/preferences` | sesión | Preferencias propias (lang/dark/landing/table_config/layout) |
 | PUT | `/api/v1/users/me/password` | sesión | Cambiar contraseña propia (requiere `current_password`) |
+
+Cada registro lleva `login_enabled`: `false` es una **cuenta de servicio** —activa, propietaria y
+destinataria de avisos, pero sin inicio de sesión por ninguna vía (formulario, LDAP, OIDC o
+SAML2)—. Se acepta en `POST` y `PUT`; quitarlo revoca las sesiones vivas de esa cuenta y no puedes
+quitártelo a ti mismo (`400 cannot_disable_own_login`).
+
+Cada registro lleva `builtin`. Es `true` solo para las dos identidades bajo las que escribe el
+propio panel —`system` y `anonymous`—, que se **sintetizan** en la respuesta (no son filas) para
+que quien las vea en auditoría pueda consultarlas: UID estable, rol `none`, `auth_source:
+"internal"`, sin contraseña ni sesión. `PUT`/`DELETE` sobre ellas responden `403 user_builtin`.
+Ver [explica-seguridad.md](explica-seguridad.md#quién-aparece-en-la-columna-usuario).
 
 ## Roles — [lib/core/roles/routes.py](../src/lib/core/roles/routes.py)
 

@@ -61,7 +61,9 @@ function _gmPopulateRoles(searchVal) {
 function _gmPopulateMembers(searchVal) {
     _buildItemsGrid('groupMembersGrid', usersData, {
         q: searchVal,
-        match: (uname, ud, q) => !q || uname.toLowerCase().includes(q) || (ud.display_name || '').toLowerCase().includes(q),
+        // Built-in identities are never group members: they hold no role and no membership.
+        match: (uname, ud, q) => !ud.builtin
+            && (!q || uname.toLowerCase().includes(q) || (ud.display_name || '').toLowerCase().includes(q)),
         render: (uname, ud) => {
             const display = ud.display_name || '';
             const id = 'gmember_' + uname;

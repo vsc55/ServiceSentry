@@ -25,3 +25,14 @@ OVERVIEW_WIDGETS = [
      'view': {'kind': 'stat', 'icon': 'bi-shield-fill-check', 'label_key': 'overview_roles',
               'accent': 'violet', 'data_url': '/api/v1/overview/widget/roles'}},
 ]
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'role_created', 'severity': 'success'},
+    {'key': 'role_deleted', 'severity': 'danger'},
+    {'key': 'role_updated', 'severity': 'info'},
+]

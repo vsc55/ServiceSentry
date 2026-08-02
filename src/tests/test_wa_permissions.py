@@ -58,7 +58,11 @@ ENDPOINTS = [
     ("DELETE", "/api/v1/groups/_nouid_",     frozenset({"groups_delete"}), None),
     # Checks / status
     ("GET",    "/api/v1/modules/status",     frozenset({"checks_view", "checks_run"}), None),
-    ("DELETE", "/api/v1/modules/status",     frozenset({"checks_run"}),   None),
+    # checks_delete, not checks_run: `editor` holds checks_run, and this empties the table
+    # every check reports into. Running a check and erasing what all of them reported are
+    # different acts — the pairing made sense while the button sat on the Status toolbar
+    # beside "run now", and stopped making sense when it moved in with the data wipes.
+    ("DELETE", "/api/v1/modules/status",     frozenset({"checks_delete"}), None),
     ("POST",   "/api/v1/modules/checks/run", frozenset({"checks_run"}),   {"modules": "all"}),
     # Overview
     ("GET",    "/api/v1/modules/overview",   frozenset({"overview_view"}), None),

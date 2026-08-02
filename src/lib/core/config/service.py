@@ -393,3 +393,109 @@ def build_config_schema() -> dict:
         schema[_pem] = {**schema.get(_pem, {}),
                         'textarea': True, 'rows': 6, 'placeholder': _ph}
     return schema
+
+
+def database_size(conn) -> int | None:
+    """Bytes the database currently occupies, or ``None`` when the engine will not say.
+
+    Asked before and after a maintenance run so the result can state what it reclaimed.
+    "Compacted" on its own is a claim nobody can check, and finding out whether there WAS
+    anything to reclaim is most of the reason to run it.
+
+    Each engine is asked its own way, and ``None`` is a real answer rather than a failure:
+    a managed PostgreSQL can refuse ``pg_database_size`` to a non-superuser, and the action
+    still succeeded — it just cannot report a number. Callers must treat it as unknown, never
+    as zero, which would read as "freed nothing".
+    """
+    kind = getattr(conn, 'KIND', '')
+    try:
+        if kind == 'sqlite':
+            path = getattr(conn, '_path', '')
+            if not path or path == ':memory:':
+                return None
+            import os  # noqa: PLC0415
+            # The WAL and shared-memory files are part of what the database occupies on disk;
+            # counting only the main file would report a drop that merely moved into the WAL.
+            total = 0
+            for suffix in ('', '-wal', '-shm'):
+                try:
+                    total += os.path.getsize(path + suffix)
+                except OSError:
+                    pass
+            return total or None
+        if kind == 'mysql':
+            row = conn.fetchone(
+                'SELECT COALESCE(SUM(data_length + index_length), 0) '
+                'FROM information_schema.tables WHERE table_schema = DATABASE()')
+            return int(row[0]) if row and row[0] is not None else None
+        if kind == 'postgresql':
+            row = conn.fetchone('SELECT pg_database_size(current_database())')
+            return int(row[0]) if row and row[0] is not None else None
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return None
+
+
+def summarize_run(results, known_tables, max_listed: int = 100) -> dict:
+    """Fold a per-table run into what is worth keeping: the counts, and the names on each side.
+
+    *results* is what the browser watched — ``[{table, ok, error}]``. The server answers one
+    table per request and keeps nothing between them, so the client is the only witness to
+    the run as a whole. That makes this a CLAIM, not a measurement, and it is checked into
+    shape rather than stored as it arrived:
+
+    * a table name that this operation could not have walked is dropped — the audit log is
+      not a place anyone gets to write arbitrary strings into;
+    * errors are truncated, and each list stops at *max_listed*.
+
+    Both sides are named, not just the failures: "33 of 33" answers a question nobody asked,
+    and on a clean run the counts alone left the entry with nothing in it to read. What the
+    reader wants is WHICH tables the run covered.
+
+    ``max_listed=0`` turns the NAMES off and keeps the counts — for an operator who wants the
+    entry to stay small. The counts are never dropped: they are the part that says the run
+    happened and how it went, and an entry without them would record nothing at all.
+
+    *max_listed* is a PARAMETER rather than a constant so the caller can hand it the
+    configured value (``web_admin|audit_detail_max_items``) — this module is Flask-free and
+    reads no config of its own. The default only matters to a caller that passes nothing.
+
+    Returns ``{}`` for a run that reported nothing, so the entry keeps the shape it had
+    before per-table progress existed.
+    """
+    try:
+        cap = max(0, int(max_listed))
+    except (TypeError, ValueError):
+        cap = 100
+    if not isinstance(results, list) or not results:
+        return {}
+    allowed = set(known_tables or ())
+    ok_tables, failed = [], []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        table = str(item.get('table') or '').strip()
+        if table not in allowed:
+            continue
+        if item.get('ok'):
+            ok_tables.append(table)
+        else:
+            failed.append({'table': table, 'error': str(item.get('error') or '')[:200]})
+    if not ok_tables and not failed:
+        return {}
+    out = {'tables_total': len(ok_tables) + len(failed),
+           'tables_ok': len(ok_tables), 'tables_failed': len(failed)}
+    # The names, not only the counts. "33 of 33" answers a question nobody asked; the entry
+    # exists so that somebody can see WHICH tables the run covered and which it did not —
+    # and with zero failures the counts alone left the detail showing nothing at all.
+    # cap == 0 → the names are off; the counts above stay, because they are what says the run
+    # happened and how it went.
+    if ok_tables and cap:
+        out['ok_tables'] = ok_tables[:cap]
+        if len(ok_tables) > cap:
+            out['ok_truncated'] = len(ok_tables) - cap
+    if failed and cap:
+        out['failed'] = failed[:cap]
+        if len(failed) > cap:
+            out['failed_truncated'] = len(failed) - cap
+    return out

@@ -18,7 +18,12 @@
 
 function _usrViewAccess(unames, ctx) {
     if (!unames.length) return '';
-    const rows = unames.map(u => ({ u, eff: _accEffective(u) }));
+    // Built-in identities are listed in the table and the cards — they are part of the system
+    // and the audit log names them — but not here: this view answers "what can this account
+    // do", and they hold nothing. Two permanent rows reading "None / — / —" would pad the
+    // count chips of an access review with entries that can never be an answer.
+    const rows = unames.filter(u => !usersData[u]?.builtin)
+                       .map(u => ({ u, eff: _accEffective(u) }));
     const viaGroups = rows.filter(r => r.eff.extra.length).length;
     const admins = rows.filter(r => r.eff.adminDirect || r.eff.adminViaGroup).length;
     const hiddenAdmins = rows.filter(r => !r.eff.adminDirect && r.eff.adminViaGroup).length;

@@ -35,7 +35,7 @@ def build_csp(frame_ancestors=None) -> str:
     return f"{_CSP_HEAD}{fa}; {_CSP_TAIL}"
 
 
-_CSP = build_csp()   # default (framing blocked) — module constant; imported by overview2
+_CSP = build_csp()   # default (framing blocked) — module constant
 
 SECURITY_HEADERS: dict[str, str] = {
     'X-Content-Type-Options': 'nosniff',
@@ -55,7 +55,7 @@ def apply_security_headers(response, *, frame_ancestors=None):
     *frame_ancestors* is a non-empty list, the app may be iframed by those origins:
     the default CSP's ``frame-ancestors`` is opened to them and ``X-Frame-Options``
     (which cannot express an allowlist and would still block) is dropped.  A route
-    that set its own CSP (e.g. /overview2) is left untouched."""
+    that set its own CSP is left untouched."""
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
     if frame_ancestors and response.headers.get('Content-Security-Policy') == _CSP:
