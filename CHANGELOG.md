@@ -65,6 +65,36 @@ All notable changes to **ServiceSentry** are documented in this file.
   users cannot mint hundreds of admins. Both confirmed to catch their regression by disabling
   the guard and watching the test name the escalation.
 
+### Changed
+- **CI installs the Playwright browser, so the browser tests actually run there.** `pip install
+  -r requirements-dev.txt` installs the Playwright *package*, not the *browser*: Chromium is a
+  ~100 MB binary Playwright keeps in its own cache and fetches only with `playwright install`.
+  Without it `test_ui_playwright.py` skips itself — which on CI meant the 13 JavaScript-executing
+  tests silently covered nothing (build.39's CI run showed them SKIPPED). The `tests.yml`
+  workflow now runs `playwright install --with-deps chromium` before the suite (`--with-deps`
+  pulls the OS libraries Chromium needs on ubuntu-latest), so those tests become part of the CI
+  gate rather than a local-only check.
+
+### Fixed
+- **Documentation caught up with the last two builds.** A doc that describes what does not
+  exist is worse than none — it sends the reader looking for the wrong thing. Fixed: the
+  live-engine env-var table in `ref-tests.md` §81 still showed **two** slots (MySQL/MariaDB as
+  one) after the code split MariaDB into its own `SS_TEST_MARIADB_*`; §142 named the browser
+  tests but never said `pip` cannot fetch the browser (`playwright install chromium` is a
+  separate ~100 MB download); the dev guide claimed **"más de 2700 tests"** (now ~5000) and
+  "~62 ficheros" (now ~160), and did not mention the three opt-in families a fresh checkout
+  skips silently; and `explica-seguridad.md` tied mechanisms to their tests but did not know
+  about `test_security_live.py` (injection / access-control / IDOR on real engines) or the
+  browser XSS/HttpOnly/clickjacking checks. No new claims — only aligning the prose with the
+  code and tests that already shipped.
+- **A flask-import probe stopped failing under full parallel load.** `test_the_probe_detects_flask`
+  spawns a subprocess that imports `lib.web_admin.app` (a positive control for "does this drag in
+  Flask") with a 120 s cap. The import takes ~3 s in isolation, but under a full `-n auto` run
+  every core is already saturated by xdist workers and the extra subprocess can be starved past
+  120 s — turning contention into a false timeout failure (seen once locally at 4912 passed / 1
+  failed; CI, less contended, stayed green). The cap is a hang-guard, not a speed check, so it is
+  raised to 600 s: still catches a genuine hang, tolerates the load a hang never would.
+
 ### Security
 - **Dependency CVE audit (`pip-audit` over `requirements.lock`): 17 advisories across 7
   packages, and the lock is bumped to clear them.** `pip-audit` over `requirements.lock` found

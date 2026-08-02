@@ -3809,10 +3809,12 @@ Corre los stores contra **MySQL/MariaDB** y/o **PostgreSQL** reales (los motores
 
 Variables (una por conexión; si falta el `*_HOST`, ese motor se salta):
 
-| MySQL/MariaDB | PostgreSQL |
-|---|---|
-| `SS_TEST_MYSQL_HOST` (+ `_PORT`=3306) | `SS_TEST_PG_HOST` (+ `_PORT`=5432) |
-| `SS_TEST_MYSQL_USER` / `_PASSWORD` / `_DB` | `SS_TEST_PG_USER` / `_PASSWORD` / `_DB` |
+| MySQL | MariaDB | PostgreSQL |
+|---|---|---|
+| `SS_TEST_MYSQL_HOST` (+ `_PORT`=3306) | `SS_TEST_MARIADB_HOST` (+ `_PORT`=3306) | `SS_TEST_PG_HOST` (+ `_PORT`=5432) |
+| `SS_TEST_MYSQL_USER` / `_PASSWORD` / `_DB` | `SS_TEST_MARIADB_USER` / `_PASSWORD` / `_DB` | `SS_TEST_PG_USER` / `_PASSWORD` / `_DB` |
+
+MariaDB tiene ranura propia porque **no es MySQL**: comparten driver pero divergen justo donde estos tests sirven de algo (la regla del `DEFAULT` sobre `TEXT` se cumple en ambos por motivos distintos). El mismo `.env.test` cubre también `tests/test_security_live.py` (auditoría de inyección/acceso/IDOR contra los tres motores — ver §143).
 
 Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` — **no se versiona**, contiene credenciales) con esas variables. `src/conftest.py` lo **carga automáticamente** para toda la suite (no hace falta `source`): basta con que el fichero exista. Las variables ya presentes en el entorno real tienen prioridad (CI / export inline mandan sobre el fichero).
 
@@ -6367,6 +6369,19 @@ Pocos y de carga a propósito: aquí no se cubre la interacción caso por caso �
 tests hacen eso mucho más barato—. Existe para responder a la única pregunta que los demás no
 pueden: ¿esto arranca? Comprobado rompiendo a propósito un partial compartido y verificando que
 el fallo nombra la causa.
+
+**Cómo hacerlos correr.** El paquete Playwright lo instala `requirements-dev.txt`, pero el
+navegador es un binario aparte (Playwright lo guarda en su propia caché) — sin él, estos tests
+se saltan con «no chromium available». Por eso `pip install` no basta:
+
+```bash
+python -m playwright install chromium     # una vez: descarga el navegador (~100 MB)
+python -m pytest tests/test_ui_playwright.py -n0
+```
+
+En CI, `tests.yml` corre `playwright install --with-deps chromium` antes de la suite (el
+`--with-deps` añade las librerías de sistema que Chromium necesita en ubuntu-latest), así que
+allí **sí** cuentan como parte de la validación, no como salto.
 
 ## 143. Auditoría de seguridad contra motor real (inyección + control de acceso)
 

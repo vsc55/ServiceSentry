@@ -50,7 +50,7 @@ En modo desarrollo (cuando `src` está en la ruta), los archivos de configuraci�
 
 ## Tests
 
-El proyecto tiene **más de 2700 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
+El proyecto tiene **casi 5000 tests** usando `pytest`, con ejecución paralela automática via `pytest-xdist`.
 
 ### Ejecutar todos los tests
 
@@ -73,6 +73,24 @@ python -m pytest watchfuls/ping/tests/ -v
 python -m pytest tests/ watchfuls/ --cov=lib --cov=watchfuls --cov-report=term-missing
 ```
 
+### Familias de tests opt-in (se saltan solas por defecto)
+
+Tres grupos necesitan algo extra y, si no lo tienen, **se saltan sin fallar** — así el build sigue verde en cualquier máquina. Para que corran de verdad:
+
+```bash
+# 1) Tests de navegador (ejecutan el JavaScript del panel en Chromium).
+#    El paquete lo instala requirements-dev.txt; el NAVEGADOR es un binario aparte:
+python -m playwright install chromium
+python -m pytest tests/test_ui_playwright.py -n0
+
+# 2) Tests contra motores reales (portabilidad + auditoría de seguridad).
+#    Necesitan MySQL / MariaDB / PostgreSQL y correr en SERIE (-n0):
+#    define SS_TEST_{MYSQL,MARIADB,PG}_* (lo cómodo: src/tests/.env.test, gitignored).
+python -m pytest tests/test_db_portability_live.py tests/test_security_live.py -n0
+```
+
+Ver [ref-tests.md](ref-tests.md) §81 (portabilidad), §142 (navegador) y §143 (seguridad en vivo).
+
 ### Organización de tests
 
 Los tests están junto a cada módulo:
@@ -80,7 +98,7 @@ Los tests están junto a cada módulo:
 ```
 src/
 ├── conftest.py                          # Fixtures compartidos: admin, client, _login()
-├── tests/                               # Tests de core y web admin (~62 ficheros)
+├── tests/                               # Tests de core y web admin (~160 ficheros)
 │   ├── conftest.py                      # Fixtures de web_admin (config_dir, var_dir, admin, client)
 │   ├── # Core: test_config*.py, test_debug.py, test_exe.py, test_mem.py,
 │   ├── #       test_thermal.py, test_tools.py, test_parse_helpers.py,

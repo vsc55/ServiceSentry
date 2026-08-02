@@ -27,6 +27,14 @@ jobs:
           pip install -r src/requirements.lock
           pip install -r src/requirements-dev.txt
 
+      - name: Install Playwright browser
+        working-directory: src
+        # The browser tests (test_ui_playwright.py) skip themselves without a browser binary,
+        # so without this step they silently covered nothing on CI. Install Chromium plus the
+        # OS libraries it needs on ubuntu-latest (--with-deps runs the apt install). Uses the
+        # playwright pinned in requirements-dev.txt, so the browser matches the tested version.
+        run: python -m playwright install --with-deps chromium
+
       - name: Run tests
         working-directory: src
         # -n auto uses the pytest-xdist installed above (otherwise it is dead weight);
