@@ -220,7 +220,13 @@ class TestAModalThatSaves:
         # and never a property of `window`, so reaching for it would assert on the test's own
         # misunderstanding. What a person sees is the row, and what is true is the store —
         # this waits for the first and then insists the second agrees.
-        page.wait_for_selector('#userModal.show', state='hidden', timeout=10_000)
+        #
+        # NOT gated on the modal closing: `saveUserModal()` fires immediately after the modal
+        # opens, and under CI's parallel load Bootstrap can still be mid opening-transition, so
+        # its `.hide()` on save gets dropped and the modal lingers — a `state='hidden'` wait
+        # then times out on a save that in fact succeeded (POST → 201, user in the store). The
+        # persistence this test names is proven by the row and the store; the sibling CSRF test
+        # already runs this exact flow without the modal-close wait, and reliably.
         page.wait_for_selector('#users-container:has-text("browseruser")', timeout=10_000)
         assert 'browseruser' in admin._users, 'the list showed a user the store never got'
         assert not page.console_problems.problems, page.console_problems.problems

@@ -94,6 +94,13 @@ All notable changes to **ServiceSentry** are documented in this file.
   120 s — turning contention into a false timeout failure (seen once locally at 4912 passed / 1
   failed; CI, less contended, stayed green). The cap is a hang-guard, not a speed check, so it is
   raised to 600 s: still catches a genuine hang, tolerates the load a hang never would.
+- **The modal-save browser test stopped gating on a Bootstrap animation.** Once CI actually
+  ran the browser tests (with Chromium installed), `test_creating_a_user_through_the_modal_persists_it`
+  flaked: `saveUserModal()` fires right after the modal opens, and under CI's parallel load
+  Bootstrap can still be mid opening-transition, so its `.hide()` on save is dropped and the
+  modal lingers — a `state='hidden'` wait then times out on a save that in fact succeeded (POST
+  → 201, user in the store). The wait is removed; persistence is proven by the rendered row and
+  the store, exactly as the sibling CSRF test already does it reliably.
 
 ### Security
 - **Dependency CVE audit (`pip-audit` over `requirements.lock`): 17 advisories across 7
