@@ -89,11 +89,13 @@ All notable changes to **ServiceSentry** are documented in this file.
   code and tests that already shipped.
 - **A flask-import probe stopped failing under full parallel load.** `test_the_probe_detects_flask`
   spawns a subprocess that imports `lib.web_admin.app` (a positive control for "does this drag in
-  Flask") with a 120 s cap. The import takes ~3 s in isolation, but under a full `-n auto` run
-  every core is already saturated by xdist workers and the extra subprocess can be starved past
-  120 s — turning contention into a false timeout failure (seen once locally at 4912 passed / 1
-  failed; CI, less contended, stayed green). The cap is a hang-guard, not a speed check, so it is
-  raised to 600 s: still catches a genuine hang, tolerates the load a hang never would.
+  Flask"). The import takes ~3 s in isolation, but under a full `-n auto` run every core is taken
+  by xdist workers and the extra process can be starved so badly the import barely runs — a
+  bumped 600 s cap still expired on a loaded Windows box (green on CI and `-n0`). Raising the
+  timeout does not fix starvation, so a timeout is now read by context: under xdist it means "the
+  machine was too busy to run the probe" and **skips** (the property is parallelism-independent
+  and still checked on every `-n0` run and on CI); under `-n0` there is nothing to contend with,
+  so a timeout is a genuine hang and stays a failure.
 - **The modal-save browser test stopped gating on a Bootstrap animation.** Once CI actually
   ran the browser tests (with Chromium installed), `test_creating_a_user_through_the_modal_persists_it`
   flaked: `saveUserModal()` fires right after the modal opens, and under CI's parallel load
