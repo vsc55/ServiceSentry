@@ -722,7 +722,7 @@ flowchart TB
 - **Añadir un IdP nuevo** (Okta, etc.) = soltar un provider con su `manifest.py` + su
   `web/_groups_ui.html`. **Cero cambios en `web_admin`**.
 
-> Cubierto por `tests/test_wa_group_sources.py`, que además vigila que no reaparezcan las ramas
+> Cubierto por `tests/integration/test_wa_group_sources.py`, que además vigila que no reaparezcan las ramas
 > `sec === '…'` ni los ids de botón antiguos.
 
 ---

@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""HTTP security response headers (lib.security.headers) applied to responses."""
+
+import pytest
+
+try:
+    from lib.web_admin import WebAdmin  # noqa: F401
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
+
+
+class TestSecurityHeaders:
+    def test_headers_present_on_response(self, client):
+        r = client.get('/login')
+        h = r.headers
+        assert h.get('X-Content-Type-Options') == 'nosniff'
+        assert h.get('X-Frame-Options') == 'DENY'
+        assert h.get('Referrer-Policy') == 'strict-origin-when-cross-origin'
+        assert 'camera=()' in h.get('Permissions-Policy', '')
+        csp = h.get('Content-Security-Policy', '')
+        assert "frame-ancestors 'none'" in csp and "default-src 'self'" in csp
+
+    def test_setdefault_does_not_override_proxy(self):
+        # apply_security_headers must not clobber a header already set upstream.
+        from lib.security.headers import apply_security_headers
+
+        class _Resp:
+            def __init__(self):
+                self.headers = {'X-Frame-Options': 'SAMEORIGIN'}
+        r = apply_security_headers(_Resp())
+        assert r.headers['X-Frame-Options'] == 'SAMEORIGIN'      # preserved
+        assert r.headers['X-Content-Type-Options'] == 'nosniff'  # added
+
+
+
+
+class TestDiscoveryMechanism:
+    """The GENERIC discovery machinery (core). Which specific prefixes/origins each provider
+    declares is asserted in that provider's own test file."""
+
+    def test_register_csrf_exempt_dedup(self, admin):
+        saved = admin._csrf_exempt_prefixes
+        try:
+            admin._register_csrf_exempt('/zz-test/', '/zz-test/', '')
+            assert '/zz-test/' in admin._csrf_exempt_prefixes
+            assert admin._csrf_exempt_prefixes.count('/zz-test/') == 1   # deduped, empties dropped
+        finally:
+            admin._csrf_exempt_prefixes = saved
+
+    def test_register_embed_origins_gated_by_flag(self, admin):
+        saved_p, saved_fa = admin._embed_profiles, admin._frame_ancestors_list
+        try:
+            admin._zz_flag = False
+            admin._register_embed_origins('_zz_flag', 'https://embed.example.com')
+            admin._recompute_frame_ancestors()
+            assert 'https://embed.example.com' not in admin._frame_ancestors_list  # flag off
+            admin._zz_flag = True
+            admin._recompute_frame_ancestors()
+            assert 'https://embed.example.com' in admin._frame_ancestors_list       # flag on
+        finally:
+            admin._embed_profiles, admin._frame_ancestors_list = saved_p, saved_fa
+
+    def test_embed_cookie_policy_is_generic(self, admin):
+        # SameSite=None; Secure iff the app is embeddable cross-site — driven by the effective
+        # frame-ancestors allowlist, NOT any integration-specific flag. The policy also needs
+        # an HTTPS intent (a Secure cookie is dropped over http://, which locked people out of
+        # the panel entirely — see test_wa_cookie_lockout.py); here that is simply satisfied,
+        # so this stays a test about genericity.
+        class _App:
+            def __init__(self):
+                self.config = {}
+        app, saved = _App(), admin._frame_ancestors_list
+        saved_https = admin._FORCE_HTTPS
+        try:
+            admin._FORCE_HTTPS = True
+            admin._frame_ancestors_list = ['https://embed.example.com']
+            admin._apply_embed_cookie_policy(app)
+            assert app.config['SESSION_COOKIE_SAMESITE'] == 'None'
+            assert app.config['SESSION_COOKIE_SECURE'] is True
+            admin._frame_ancestors_list = []
+            admin._apply_embed_cookie_policy(app)
+            assert app.config['SESSION_COOKIE_SAMESITE'] == 'Lax'
+        finally:
+            admin._frame_ancestors_list, admin._FORCE_HTTPS = saved, saved_https
+
+

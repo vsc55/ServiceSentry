@@ -721,7 +721,7 @@ parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR
 - **Backfill a nivel de store**, no en el motor: users/groups/roles rellenan columnas de
   auditoría vacías tras el reconcile; los secretos se cifran a nivel de valor con Fernet
   dentro de columnas JSON.
-- El arnés de portabilidad en vivo (`tests/test_db_portability_live.py`) valida el ciclo
+- El arnés de portabilidad en vivo (`tests/e2e/test_db_portability_live.py`) valida el ciclo
   completo contra MySQL/PostgreSQL reales (opt-in por variables de entorno).
 
 ---

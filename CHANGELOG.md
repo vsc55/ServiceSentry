@@ -8,6 +8,42 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.40] - 2026-08-03
+
+### Changed
+- **The test suite is now sorted into `unit/`, `integration/`, `e2e/` and `meta/`.** The ~160
+  files used to sit in one flat `tests/` directory with no way to run just the fast ones or
+  just the ones that touch the app. Every file is now under the folder that names what it
+  needs: `unit/` runs in isolation (no app, no DB, no HTTP), `integration/` drives the Flask
+  app through `test_client`, `e2e/` is the live-engine and Playwright work, and `meta/` holds
+  the structural guards that read the repo's own source, docs and git. `pytest tests/unit` is
+  now a real, fast feedback loop.
+- **The 54 files that mixed categories were split, one file per category.** A file that held
+  both isolated unit tests and app-driven ones became `tests/unit/<name>.py` and
+  `tests/integration/<name>.py`; the classification is by test class (a class stays whole,
+  goes to the home its methods mostly need) so shared setup is never torn apart. Placement was
+  computed, not guessed: an AST pass resolves each test's fixtures and helpers — through
+  `conftest.py` — to decide what it actually touches.
+- **`docs/ref-tests.md` follows the files, and opens by explaining the layout.** A new
+  "Organización de directorios" section documents what each folder requires and where a new
+  test belongs; every `**Archivo:**` entry and inline path names the new location, split
+  entries carry one line per category with its own count, and the inventory guard
+  (`test_docs_tests_inventory.py`) confirms every file on disk is still documented and every
+  documented path still exists.
+- **The prose docs point at the new paths too.** The `caso-*` and `explica-*` guides plus
+  `ref-esquema-bd.md` and `ref-watchful-emit.md` referenced ~20 test files by their old flat path; each now names the
+  real location (a moved file's folder, or the split half that holds the class the prose
+  cites — e.g. `test_wa_ui.py::TestPaneDisplayRules` → `tests/unit/`). The `tests/` directory
+  trees in `explica-arquitectura.md` and `caso-desarrollo.md` now show the four folders instead
+  of a flat list; the co-located module-test trees under `watchfuls/` were left as they were.
+
+### Fixed
+- **Test path anchors no longer break when a file moves a directory deeper.** ~60 files located
+  the source tree with `dirname(dirname(__file__))`, which silently pointed one level short
+  once the file lived in a sub-folder. They now anchor on the `tests/` segment itself
+  (`abspath(__file__).split(os.sep + 'tests' + os.sep)[0]`), so a file reads the same repo
+  paths from any depth — including the aliased-`os` and repo-root variants the first pass missed.
+
 ## [0.0.1+build.39] - 2026-08-02
 
 ### Added

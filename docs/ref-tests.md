@@ -8,6 +8,25 @@
 
 ---
 
+## Organización de directorios
+
+La suite transversal del panel vive bajo `src/tests/`, repartida en cuatro carpetas **según lo que cada test necesita** (no por tema). Correr solo una carpeta es un bucle de feedback válido — p. ej. `pytest tests/unit` es rápido porque nada arranca la app ni la BD.
+
+| Carpeta | Qué necesita | Ejemplos |
+|---|---|---|
+| `tests/unit/` | **Nada externo**: función/clase aislada, sin app, sin BD, sin HTTP. | `test_monitor.py`, `test_hosts_store.py`, `test_secret_manager.py` |
+| `tests/integration/` | Arranca **Flask** vía `test_client`/`_login` (o stores con BD). | `test_wa_users.py`, `test_wa_config.py`, `test_wa_roles.py` |
+| `tests/e2e/` | Recursos **vivos**: motores de BD reales (`SS_TEST_*`) y navegador Playwright. | `test_ui_playwright.py`, `test_db_portability_live.py`, `test_security_live.py` |
+| `tests/meta/` | Lee la **estructura del propio repo**: fuente, docs, plantillas, git (no prueba conducta en runtime). | `test_docs_tests_inventory.py`, `test_changelog_frozen.py`, `test_routes_documented.py`, los `*_views.py` |
+
+Un fichero que mezclaba categorías se partió **por clase** en un fichero por carpeta (misma base, distinta carpeta): p. ej. `test_credentials.py` → `tests/unit/test_credentials.py` + `tests/integration/test_credentials.py`. Una clase de test nunca se divide: va entera al hogar que más necesitan sus métodos.
+
+**Los tests de los módulos NO están aquí.** Cada watchful lleva los suyos co-localizados con su código en `src/watchfuls/<módulo>/tests/test_<módulo>.py` (unit con mocks) — el módulo es un plugin autocontenido y viaja con sus tests. `src/pytest.ini` recoge ambos árboles (`testpaths = tests watchfuls`).
+
+**Para tests nuevos:** colócalo por lo que toca (prioridad e2e > integration > meta > unit); `conftest.py` de `tests/` se hereda en las subcarpetas (las fixtures como `_login` funcionan igual); usa imports **absolutos** entre módulos de test (`from tests.<carpeta>.<mod> import …`); y para localizar la raíz `src/` usa `os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]` (no `dirname(dirname(__file__))`, que apunta corto según la profundidad).
+
+---
+
 ## Índice
 
 1. [Core — Configuración](#1-core--configuración)
@@ -149,7 +168,7 @@
 
 ## 1. Core — Configuración
 
-**Archivo:** `tests/test_config_control.py`
+**Archivo:** `tests/unit/test_config_control.py`
 
 ### `TestFileConfigStore` — Almacenamiento de archivos JSON
 
@@ -245,7 +264,7 @@
 
 ## 2. Core — Debug
 
-**Archivo:** `tests/test_debug.py`
+**Archivo:** `tests/unit/test_debug.py`
 
 ### `TestDebug` — Sistema de depuración
 
@@ -271,7 +290,7 @@
 
 ## 3. Core — Utilidades de datos
 
-**Archivo:** `tests/test_dict_files_path.py` y `tests/test_dict_return_check.py`
+**Archivo:** `tests/unit/test_dict_files_path.py` y `tests/unit/test_dict_return_check.py`
 
 ### `TestDictFilesPath` — Registro de rutas de archivos
 
@@ -323,7 +342,7 @@
 
 ## 4. Core — Ejecución de comandos (Exec)
 
-**Archivo:** `tests/test_exe.py`
+**Archivo:** `tests/unit/test_exe.py`
 
 ### Clases: `TestExecResult`, `TestExecConfig`, `TestEnumLocationExec`, `TestExecInit`, `TestExecProperties`, `TestExecSetRemote`, `TestExecEmptyResult`, `TestExecLocal`, `TestExecStaticMethod`, `TestExecStart`
 
@@ -358,7 +377,7 @@
 
 ## 5. Core — Memoria del sistema
 
-**Archivo:** `tests/test_mem.py`
+**Archivo:** `tests/unit/test_mem.py`
 
 ### `TestMemInfo`, `TestMemRam`, `TestMemSwap`
 
@@ -381,7 +400,7 @@
 
 ## 6. Core — Sensores térmicos
 
-**Archivo:** `tests/test_thermal.py`
+**Archivo:** `tests/unit/test_thermal.py`
 
 ### `TestThermalNodeInit`, `TestThermalNodePaths`, `TestThermalNodeType`, `TestThermalNodeTemp`, etc.
 
@@ -407,7 +426,7 @@
 
 ## 7. Core — Helpers de parseo
 
-**Archivo:** `tests/test_parse_helpers.py`
+**Archivo:** `tests/unit/test_parse_helpers.py`
 
 ### `TestParseConfInt`, `TestParseConfFloat`, `TestParseConfStr`
 
@@ -434,7 +453,7 @@
 
 ## 8. Core — Herramientas generales
 
-**Archivo:** `tests/test_tools.py`
+**Archivo:** `tests/unit/test_tools.py` `tests/meta/test_tools.py`
 
 ### `TestBytes2Human`
 
@@ -480,7 +499,7 @@ Inversa de `fmt_bytes` para umbrales configurados (el admin escribe un número y
 
 ## 8b. Core — Reconciliación de esquema de BD
 
-**Archivo:** `tests/test_db_schema.py`
+**Archivo:** `tests/unit/test_db_schema.py`
 
 Tests del motor de reconciliación declarativa de esquema (`lib/db/schema.py` +
 `BaseConnector.reconcile_table`). Se ejecutan sobre SQLite (motor por defecto);
@@ -507,7 +526,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 
 ## 9. Monitor — Descubrimiento y ejecución de módulos
 
-**Archivo:** `tests/test_monitor.py`
+**Archivo:** `tests/unit/test_monitor.py`
 
 ### `TestGetEnabledModules` — Descubrimiento de módulos
 
@@ -600,7 +619,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 
 ## 10. Integridad de módulos Watchful
 
-**Archivo:** `tests/test_watchfuls_integrity.py`  
+**Archivo:** `tests/unit/test_watchfuls_integrity.py`  
 > Estos tests se ejecutan (parametrizados) sobre **todos los módulos reales** descubiertos en `watchfuls/` — actualmente 19: `cpu`, `datastore`, `dns`, `filesystemusage`, `hddtemp`, `keepalived`, `m365`, `ntp`, `ping`, `process`, `proxmox`, `raid`, `ram_swap`, `service_status`, `snmp`, `ssl_cert`, `temperature`, `ups`, `web`. La lista (`_MODULE_NAMES`) se autodescubre, así que un módulo nuevo entra en la parametrización sin tocar los tests.
 
 ### `TestRealModuleDiscovery` — Descubrimiento en producción
@@ -696,7 +715,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 ## 11. Panel Web — Inicialización y autenticación
 
-**Archivos:** `tests/test_wa_init.py` — `TestWebAdminInit` · `tests/test_wa_auth.py` — `TestAuthentication`, `TestRememberMe`, `TestAccountLockout`
+**Archivos:** `tests/integration/test_wa_init.py` — `TestWebAdminInit` · `tests/integration/test_wa_auth.py` — `TestAuthentication`, `TestRememberMe`, `TestAccountLockout`
 
 ### `TestWebAdminInit`
 
@@ -736,7 +755,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 ## 12. Panel Web — API módulos y configuración
 
-**Archivos:** `tests/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/test_wa_config.py` — `TestApiConfigAuth`, `TestApiConfigGet`, `TestApiConfigPutBasic`, `TestApiConfigPutSecureCookies`, `TestApiConfigPutRememberMeDays`, `TestApiConfigPutAuditMaxEntries`, `TestApiConfigPutLang`, `TestApiConfigPutDarkMode`, `TestApiConfigPutWebAdminKey`, `TestApiConfigPutInjection`, **`TestApiConfigSchema`**, **`TestApiConfigPutDefaultPageSize`**, **`TestApiConfigPutPageSizes`**, **`TestApiConfigPutProxyCount`**
+**Archivos:** `tests/integration/test_wa_modules.py` `tests/unit/test_wa_modules.py` — `TestApiModules`, `TestApiStatus`, `TestApiOverview`, `TestModuleItemSchemas`, `TestConfigEdgeCases` · `tests/integration/test_wa_config.py` — `TestApiConfigAuth`, `TestApiConfigGet`, `TestApiConfigPutBasic`, `TestApiConfigPutSecureCookies`, `TestApiConfigPutRememberMeDays`, `TestApiConfigPutAuditMaxEntries`, `TestApiConfigPutLang`, `TestApiConfigPutDarkMode`, `TestApiConfigPutWebAdminKey`, `TestApiConfigPutInjection`, **`TestApiConfigSchema`**, **`TestApiConfigPutDefaultPageSize`**, **`TestApiConfigPutPageSizes`**, **`TestApiConfigPutProxyCount`**
 
 ### `TestApiModules`
 
@@ -878,7 +897,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 ## 13. Panel Web — API estado y ejecución de checks
 
-**Archivos:** `tests/test_wa_modules.py` — `TestApiStatus`, `TestApiOverview` · `tests/test_wa_checks.py` — `TestApiRunChecks`
+**Archivos:** `tests/integration/test_wa_modules.py` — `TestApiStatus`, `TestApiOverview` · `tests/integration/test_wa_checks.py` — `TestApiRunChecks`
 
 ### `TestApiStatus`
 
@@ -936,7 +955,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 ## 14. Panel Web — Usuarios, roles y sesiones
 
-**Archivos:** `tests/test_wa_users.py` — `TestApiUsers`, `TestChangeOwnPassword` · `tests/test_wa_sessions.py` — `TestSessionRegistry` · `tests/test_wa_auth.py` — `TestRememberMe`
+**Archivos:** `tests/integration/test_wa_users.py` — `TestApiUsers`, `TestChangeOwnPassword` · `tests/integration/test_wa_sessions.py` `tests/unit/test_wa_sessions.py` — `TestSessionRegistry` · `tests/integration/test_wa_auth.py` — `TestRememberMe`
 
 ### `TestApiUsers`
 
@@ -1015,7 +1034,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 ## 15. Panel Web — i18n, UI y seguridad
 
-**Archivos:** `tests/test_wa_ui.py` — `TestI18n`, `TestDarkMode`, `TestConfigDarkMode`, `TestUIReorganisation` · `tests/test_wa_telegram.py` — `TestTelegramTest` · `tests/test_wa_audit.py` — `TestAuditLog` · `tests/test_wa_security.py` — `TestSecurityInjection`
+**Archivos:** `tests/integration/test_wa_ui.py` `tests/unit/test_wa_ui.py` — `TestI18n`, `TestDarkMode`, `TestConfigDarkMode`, `TestUIReorganisation` · `tests/integration/test_wa_telegram.py` — `TestTelegramTest` · `tests/integration/test_wa_audit.py` `tests/unit/test_wa_audit.py` — `TestAuditLog` · `tests/integration/test_wa_security.py` — `TestSecurityInjection`
 
 > **`TestEverySeverityIsDeclaredNotGuessed` (en `test_wa_audit.py`)** — la insignia es lo único
 > que da un vistazo sobre doscientas filas de log, y se **deducía del NOMBRE** del evento: una
@@ -1266,7 +1285,7 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 
 ## 15b. Panel Web — Política de contraseñas
 
-**Archivo:** `tests/test_wa_password_policy.py`
+**Archivo:** `tests/integration/test_wa_password_policy.py`
 
 Cubre la función `_validate_password` (unidad) y la aplicación de la política vía la API HTTP.
 
@@ -1313,7 +1332,7 @@ Cubre la función `_validate_password` (unidad) y la aplicación de la política
 
 ## 15c. Panel Web — Página de estado pública
 
-**Archivo:** `tests/test_wa_status.py` — clases `TestPublicStatusPage` y `TestStatusPageLanguage`
+**Archivo:** `tests/integration/test_wa_status.py` `tests/unit/test_wa_status.py` — clases `TestPublicStatusPage` y `TestStatusPageLanguage`
 
 Verifica el comportamiento de la ruta `/status` (acceso público vs. autenticado, contenido de la página, configuración e idioma).
 
@@ -1360,7 +1379,7 @@ Valida la prioridad de 3 niveles para el idioma de `/status`: sesión de usuario
 
 ## 15d. Panel Web — Páginas de error HTTP
 
-**Archivo:** `tests/test_wa_errors.py` — clase `TestErrorPages`
+**Archivo:** `tests/integration/test_wa_errors.py` — clase `TestErrorPages`
 
 Verifica que los errores HTTP devuelven la plantilla `error.html` (o JSON para `/api/*`) con el código, título y descripción correctos.
 
@@ -1382,7 +1401,7 @@ Verifica que los errores HTTP devuelven la plantilla `error.html` (o JSON para `
 ## 16. Panel Web — Permisos granulares y roles personalizados
 
 
-**Archivos:** `tests/test_wa_roles.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions` · `tests/test_wa_groups.py` — grupos de usuarios
+**Archivos:** `tests/integration/test_wa_roles.py` `tests/unit/test_wa_roles.py` — `TestPermissionsConstants`, `TestCustomRoles`, `TestGranularPermissions` · `tests/integration/test_wa_groups.py` — grupos de usuarios
 
 
 ### `TestEveryPermissionIsExplainedToTheAdmin`
@@ -1500,7 +1519,7 @@ que reparte la capacidad de bloquear la base de datos.
 
 ## 16b. Panel Web — Helpers JSON y validación de payloads
 
-**Archivo:** `tests/test_wa_json_helpers.py`
+**Archivo:** `tests/integration/test_wa_json_helpers.py`
 
 Verifica que todos los endpoints JSON del web admin se comportan correctamente ante payloads malformados o extremos. Complementa las pruebas de seguridad de `test_wa_security.py`.
 
@@ -1519,7 +1538,7 @@ Verifica que todos los endpoints JSON del web admin se comportan correctamente a
 
 ## 16c. Panel Web — Endpoint de acciones de watchfuls
 
-**Archivo:** `tests/test_wa_watchfuls.py`
+**Archivo:** `tests/integration/test_wa_watchfuls.py` `tests/unit/test_wa_watchfuls.py`
 
 Verifica el endpoint `GET|POST /api/v1/modules/watchfuls/<module>/<action>` — autenticación, validación de entrada, despacho a classmethods y seguridad de importación.
 
@@ -1617,7 +1636,7 @@ Verifica el endpoint `GET|POST /api/v1/modules/watchfuls/<module>/<action>` — 
 
 ## 16d. Panel Web — Matriz de permisos por endpoint
 
-**Archivo:** `tests/test_wa_permissions.py`
+**Archivo:** `tests/integration/test_wa_permissions.py` `tests/unit/test_wa_permissions.py`
 
 Cobertura de la matriz de acceso completa: para cada endpoint protegido por permiso se comprueba el acceso de los 4 roles integrados (`admin` / `editor` / `viewer` / `none`). Las expectativas se derivan de `BUILTIN_ROLE_PERMISSIONS`/`BUILTIN_ROLE_UIDS` (`lib/web_admin/constants`), con semántica *any-of* sobre el/los permiso(s) requerido(s) por endpoint. La tabla recorre rutas `/api/v1/*` de usuarios, roles, grupos, checks/estado, overview, config, sesiones, audit, history y hosts (servidores).
 
@@ -2023,7 +2042,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 26. Seguridad: secret\_manager
 
-**Archivo:** `tests/test_secret_manager.py`
+**Archivo:** `tests/unit/test_secret_manager.py`
 
 ### `TestFernetFromSecretFile` — Generación de clave Fernet
 
@@ -2320,7 +2339,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 33. Core — CLI y variables de entorno
 
-**Archivo:** `tests/test_cli_env.py` — 6 tests
+**Archivo:** `tests/unit/test_cli_env.py` — 6 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2333,7 +2352,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 34. Core — Resolución de configuración
 
-**Archivo:** `tests/test_config_resolve.py` — 13 tests
+**Archivo:** `tests/unit/test_config_resolve.py` — 13 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2353,7 +2372,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 35. Core — Registro central de config (spec)
 
-**Archivo:** `tests/test_config_spec.py` — 50 tests
+**Archivo:** `tests/unit/test_config_spec.py` — 39 tests
+**Archivo:** `tests/meta/test_config_spec.py` — 2 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2396,7 +2416,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 36. Core — Almacén de config en BD
 
-**Archivo:** `tests/test_config_store.py` — 9 tests · clase `TestDbConfigStore`
+**Archivo:** `tests/unit/test_config_store.py` — 9 tests · clase `TestDbConfigStore`
 (el `ConfigStore` de `lib.core.config.store`; su homónimo de fichero está en la §1, `test_config_control.py`)
 
 | Test | Qué comprueba |
@@ -2413,7 +2433,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 37. BD — Tablas declaradas por módulos
 
-**Archivo:** `tests/test_db_module_tables.py` — 15 tests
+**Archivo:** `tests/unit/test_db_module_tables.py` — 15 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2435,7 +2455,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 38. BD — ModulesStore
 
-**Archivo:** `tests/test_modules_store.py` — 17 tests
+**Archivo:** `tests/unit/test_modules_store.py` — 17 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2459,7 +2479,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 39. BD — HostsStore
 
-**Archivo:** `tests/test_hosts_store.py` — 20 tests
+**Archivo:** `tests/unit/test_hosts_store.py` — 20 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2486,7 +2506,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 40. BD — CredentialsStore
 
-**Archivo:** `tests/test_credentials.py` — 37 tests
+**Archivo:** `tests/unit/test_credentials.py` — 22 tests
+**Archivo:** `tests/integration/test_credentials.py` — 15 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2530,7 +2551,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 41. Core — Cliente SSH
 
-**Archivo:** `tests/test_ssh_client.py` — 15 tests
+**Archivo:** `tests/unit/test_ssh_client.py` — 15 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2552,7 +2573,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 42. Hosts — Ejecución local/SSH
 
-**Archivo:** `tests/test_hosts_exec.py` — 11 tests
+**Archivo:** `tests/unit/test_hosts_exec.py` — 11 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2570,7 +2591,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 43. Hosts — Perfiles de protocolo
 
-**Archivo:** `tests/test_hosts_profiles.py` — 12 tests
+**Archivo:** `tests/unit/test_hosts_profiles.py` — 12 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2586,7 +2607,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/test_hosts_config_resolution.py` — 26 tests
+**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 26 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2613,7 +2634,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 45. Hosts — Sonda de check único
 
-**Archivo:** `tests/test_hosts_probe.py` — 4 tests
+**Archivo:** `tests/unit/test_hosts_probe.py` — 4 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2624,7 +2645,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 46. Hosts — Asistente de migración
 
-**Archivo:** `tests/test_hosts_migrate.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_migrate.py` — 7 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2638,7 +2659,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 47. Seguridad — Regresión
 
-**Archivo:** `tests/test_security_regressions.py` — 39 tests
+**Archivo:** `tests/integration/test_security_regressions.py` — 35 tests
+**Archivo:** `tests/unit/test_security_regressions.py` — 4 tests
 
 > Eran **dos** ficheros, `test_security_regression.py` y `test_security_regressions.py`
 > —singular y plural, los dos «un test por arreglo de seguridad»—. Nadie que viera un fallo en
@@ -2683,7 +2705,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 48. Syslog — Parser RFC 3164/5424
 
-**Archivo:** `tests/test_syslog_parser.py` — 19 tests
+**Archivo:** `tests/unit/test_syslog_parser.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2705,7 +2727,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 49. Syslog — Listener UDP/TCP/TLS
 
-**Archivo:** `tests/test_syslog_server.py` — 13 tests
+**Archivo:** `tests/unit/test_syslog_server.py` — 13 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2743,7 +2765,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 50. Syslog — SyslogStore
 
-**Archivo:** `tests/test_syslog_store.py` — 18 tests
+**Archivo:** `tests/unit/test_syslog_store.py` — 18 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2766,7 +2788,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 51. Syslog — Servicio independiente
 
-**Archivo:** `tests/test_syslog_service.py` — 26 tests
+**Archivo:** `tests/integration/test_syslog_service.py` — 19 tests
+**Archivo:** `tests/unit/test_syslog_service.py` — 6 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2792,7 +2815,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 52. Panel Web — Comprobación de rol admin
 
-**Archivo:** `tests/test_wa_admin_check.py` — 4 tests
+**Archivo:** `tests/integration/test_wa_admin_check.py` — 4 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2803,7 +2826,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 53. Panel Web — LDAP
 
-**Archivo:** `tests/test_providers_ldap.py` — 22 tests
+**Archivo:** `tests/integration/test_providers_ldap.py` — 17 tests
+**Archivo:** `tests/unit/test_providers_ldap.py` — 5 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2831,7 +2855,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 54. Panel Web — OIDC/SSO
 
-**Archivo:** `tests/test_providers_oidc.py` — 22 tests
+**Archivo:** `tests/integration/test_providers_oidc.py` — 16 tests
+**Archivo:** `tests/unit/test_providers_oidc.py` — 6 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2858,7 +2883,8 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55. Panel Web — SAML2
 
-**Archivo:** `tests/test_providers_saml.py` — 25 tests
+**Archivo:** `tests/integration/test_providers_saml.py` — 19 tests
+**Archivo:** `tests/unit/test_providers_saml.py` — 6 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2887,7 +2913,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 55b. Capa Microsoft compartida (Entra ID + ARM)
 
-**Archivo:** `tests/test_providers_graph_api.py` — 31 tests
+**Archivo:** `tests/unit/test_providers_graph_api.py` — 31 tests
 
 Esta capa transporta **a la vez** los watchfuls `m365` y `azure`, así que un fallo aquí es un fallo
 en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests no la cubriría nadie.
@@ -2927,7 +2953,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 56. Panel Web — Servidores (hosts)
 
-**Archivo:** `tests/test_wa_hosts.py` — 52 tests
+**Archivo:** `tests/integration/test_wa_hosts.py` — 52 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2986,7 +3012,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 57. Panel Web — Historial
 
-**Archivo:** `tests/test_wa_history.py` — 2 tests
+**Archivo:** `tests/integration/test_wa_history.py` — 2 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2995,7 +3021,8 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 58. Panel Web — Webhooks
 
-**Archivo:** `tests/test_wa_webhook.py` — 35 tests
+**Archivo:** `tests/integration/test_wa_webhook.py` — 19 tests
+**Archivo:** `tests/unit/test_wa_webhook.py` — 16 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3034,7 +3061,8 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 59. Panel Web — Plantillas de notificación
 
-**Archivo:** `tests/test_wa_notif_templates.py` — 47 tests
+**Archivo:** `tests/integration/test_wa_notif_templates.py` — 36 tests
+**Archivo:** `tests/unit/test_wa_notif_templates.py` — 11 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3088,7 +3116,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 60. Panel Web — Syslog
 
-**Archivo:** `tests/test_wa_syslog.py` — 18 tests
+**Archivo:** `tests/integration/test_wa_syslog.py` — 18 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3113,7 +3141,8 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 61. Panel Web — Gestor de eventos
 
-**Archivo:** `tests/test_wa_events.py` — 28 tests
+**Archivo:** `tests/integration/test_wa_events.py` — 27 tests
+**Archivo:** `tests/unit/test_wa_events.py` — 1 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3137,7 +3166,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 62. Panel Web — Servicios
 
-**Archivo:** `tests/test_wa_services.py` — 23 tests
+**Archivo:** `tests/integration/test_wa_services.py` — 23 tests
 
 ### `TestServicesStatus`
 
@@ -3498,7 +3527,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 68. Servicios — Cola de comandos (ServiceCommandsStore)
 
-**Archivo:** `tests/test_service_commands_store.py` — 6 tests
+**Archivo:** `tests/unit/test_service_commands_store.py` — 6 tests
 
 ### `TestServiceCommandsStore`
 
@@ -3515,7 +3544,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 69. Servicios — Registro de heartbeat / estado (ServiceInstancesStore)
 
-**Archivo:** `tests/test_service_instances_store.py` — 6 tests
+**Archivo:** `tests/unit/test_service_instances_store.py` — 6 tests
 
 ### `TestServiceInstancesStore`
 
@@ -3532,7 +3561,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 70. Servicios — Lease de líder único HA (ServiceLeaderStore)
 
-**Archivo:** `tests/test_service_leader_store.py` — 8 tests
+**Archivo:** `tests/unit/test_service_leader_store.py` — 8 tests
 
 ### `TestServiceLeaderStore`
 
@@ -3551,7 +3580,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 71. Panel Web — API de comandos de servicio
 
-**Archivo:** `tests/test_wa_service_commands.py` — 6 tests
+**Archivo:** `tests/integration/test_wa_service_commands.py` — 6 tests
 
 ### `TestServiceCommands`
 
@@ -3568,7 +3597,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 72. Servicios — Listener HTTP de control (ControlServer)
 
-**Archivo:** `tests/test_control_server.py` — 9 tests
+**Archivo:** `tests/unit/test_control_server.py` — 9 tests
 
 ### `TestControlServer`
 
@@ -3593,7 +3622,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 73. Servicios — Helpers de heartbeat (db_summary / app_version)
 
-**Archivo:** `tests/test_heartbeat_helpers.py` — 6 tests
+**Archivo:** `tests/unit/test_heartbeat_helpers.py` — 6 tests
 
 ### `TestDbSummary`
 
@@ -3615,7 +3644,8 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 74. Panel Web — Layout de la config UI (registry-driven)
 
-**Archivo:** `tests/test_config_layout.py` — 9 tests
+**Archivo:** `tests/unit/test_config_layout.py` — 7 tests
+**Archivo:** `tests/integration/test_config_layout.py` — 2 tests
 
 ### `TestLayoutCoherence` — Coherencia layout ↔ registro
 
@@ -3640,7 +3670,8 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 75. Providers — Provisioning de apps Entra ID (Graph)
 
-**Archivo:** `tests/test_entraid_provision.py` — 26 tests
+**Archivo:** `tests/unit/test_entraid_provision.py` — 20 tests
+**Archivo:** `tests/integration/test_entraid_provision.py` — 6 tests
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -3658,7 +3689,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 76. Hosts — Primitivas de resolución (lib/hosts/resolve.py)
 
-**Archivo:** `tests/test_hosts_resolve.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_resolve.py` — 7 tests
 
 ### `TestHostProfileSpecs` — Normalización de specs de perfil
 
@@ -3681,7 +3712,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 77. Hosts — Hook de hosts aprovisionados
 
-**Archivo:** `tests/test_provisioned_hosts.py` — 7 tests
+**Archivo:** `tests/unit/test_provisioned_hosts.py` — 7 tests
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -3697,7 +3728,8 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 78. Panel Web — Política de bind del servidor web
 
-**Archivo:** `tests/test_wa_server.py` — 7 tests
+**Archivo:** `tests/integration/test_wa_server.py` — 4 tests
+**Archivo:** `tests/unit/test_wa_server.py` — 3 tests
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -3713,9 +3745,9 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
-**Archivo:** `tests/test_wa_scim.py` — 19 tests
+**Archivo:** `tests/integration/test_wa_scim.py` — 19 tests
 
-> Las pruebas unitarias del servicio SCIM (autenticación Bearer, parseo de filtros, mapeo de campos de usuario) están en `tests/test_scim_service.py`, documentadas aparte en §85.
+> Las pruebas unitarias del servicio SCIM (autenticación Bearer, parseo de filtros, mapeo de campos de usuario) están en `tests/unit/test_scim_service.py`, documentadas aparte en §85.
 
 ### `TestScimAuth`
 
@@ -3748,7 +3780,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 80. Panel Web — Utilidades genéricas (`/api/v1/util/*`)
 
-**Archivo:** `tests/test_wa_util.py` — 8 tests
+**Archivo:** `tests/integration/test_wa_util.py` — 8 tests
 
 ### `TestUtilToken` — `GET /api/v1/util/token`
 
@@ -3772,7 +3804,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 81. Portabilidad multi-motor
 
-**Archivos:** `tests/test_db_portability.py`, `tests/test_db_portability_live.py`
+**Archivos:** `tests/unit/test_db_portability.py`, `tests/e2e/test_db_portability_live.py`
 
 > Tres motores, no dos: **MySQL**, **MariaDB** y **PostgreSQL** tienen cada uno su ranura
 > (`SS_TEST_MYSQL_*`, `SS_TEST_MARIADB_*`, `SS_TEST_PG_*`). MariaDB no viaja de gratis con
@@ -3814,13 +3846,13 @@ Variables (una por conexión; si falta el `*_HOST`, ese motor se salta):
 | `SS_TEST_MYSQL_HOST` (+ `_PORT`=3306) | `SS_TEST_MARIADB_HOST` (+ `_PORT`=3306) | `SS_TEST_PG_HOST` (+ `_PORT`=5432) |
 | `SS_TEST_MYSQL_USER` / `_PASSWORD` / `_DB` | `SS_TEST_MARIADB_USER` / `_PASSWORD` / `_DB` | `SS_TEST_PG_USER` / `_PASSWORD` / `_DB` |
 
-MariaDB tiene ranura propia porque **no es MySQL**: comparten driver pero divergen justo donde estos tests sirven de algo (la regla del `DEFAULT` sobre `TEXT` se cumple en ambos por motivos distintos). El mismo `.env.test` cubre también `tests/test_security_live.py` (auditoría de inyección/acceso/IDOR contra los tres motores — ver §143).
+MariaDB tiene ranura propia porque **no es MySQL**: comparten driver pero divergen justo donde estos tests sirven de algo (la regla del `DEFAULT` sobre `TEXT` se cumple en ambos por motivos distintos). El mismo `.env.test` cubre también `tests/e2e/test_security_live.py` (auditoría de inyección/acceso/IDOR contra los tres motores — ver §143).
 
 Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` — **no se versiona**, contiene credenciales) con esas variables. `src/conftest.py` lo **carga automáticamente** para toda la suite (no hace falta `source`): basta con que el fichero exista. Las variables ya presentes en el entorno real tienen prioridad (CI / export inline mandan sobre el fichero).
 
 ```bash
 # desde src/ — el .env.test se auto-carga; solo hay que ejecutarlo en serie:
-.venv/Scripts/python -m pytest -n0 -q tests/test_db_portability_live.py
+.venv/Scripts/python -m pytest -n0 -q tests/e2e/test_db_portability_live.py
 ```
 
 > Ejecútalo con **`-n0`** (serie): usan nombres de tabla fijos, así que en paralelo colisionarían. Por eso, bajo `-n auto` (suite completa) estos tests se **saltan** automáticamente (aunque el `.env.test` esté cargado) con el aviso *"live DB tests must run serially - use -n0"*.
@@ -3831,7 +3863,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 82. Servicios — IP-ban (jail, store, integración)
 
-**Archivo:** `tests/test_wa_ipban.py`
+**Archivo:** `tests/integration/test_wa_ipban.py` `tests/unit/test_wa_ipban.py`
 
 ### `TestIpBanShared` — Estado compartido entre procesos
 
@@ -3901,7 +3933,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 83. CLI — Servicios de usuarios/grupos y comandos
 
-**Archivo:** `tests/test_cli.py`
+**Archivo:** `tests/unit/test_cli.py`
 
 ### `TestUsersService`
 
@@ -3935,7 +3967,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 84. Monitor — Notificador multi-canal (routing y formato)
 
-**Archivo:** `tests/test_monitor_notifier.py`
+**Archivo:** `tests/unit/test_monitor_notifier.py`
 
 ### `TestRouting`
 
@@ -3982,7 +4014,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 85. Servicios — SCIM (helpers unitarios)
 
-**Archivo:** `tests/test_scim_service.py`
+**Archivo:** `tests/unit/test_scim_service.py`
 
 ### `TestBearerTokenOk`
 
@@ -4015,7 +4047,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 86. Panel Web — Protección CSRF
 
-**Archivo:** `tests/test_wa_csrf.py`
+**Archivo:** `tests/integration/test_wa_csrf.py`
 
 ### `TestCsrf`
 
@@ -4032,7 +4064,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 87. Panel Web — Cabeceras de seguridad y módulo CSRF
 
-**Archivo:** `tests/test_wa_headers.py`
+**Archivo:** `tests/integration/test_wa_headers.py` `tests/unit/test_wa_headers.py`
 
 ### `TestSecurityHeaders`
 
@@ -4052,7 +4084,7 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 88. Core — Estampado de entidades (audit)
 
-**Archivo:** `tests/test_entity_audit.py`
+**Archivo:** `tests/unit/test_entity_audit.py`
 
 ### `TestTouchEntity`
 
@@ -4064,7 +4096,8 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 
 ## 88b. Watchfuls — Patrones de publicación de resultados
 
-**Archivo:** `tests/test_watchful_emit_patterns.py` — 5 tests
+**Archivo:** `tests/meta/test_watchful_emit_patterns.py` — 3 tests
+**Archivo:** `tests/unit/test_watchful_emit_patterns.py` — 2 tests
 
 Un watchful publica cada resultado por una de dos vías (ver `docs/ref-watchful-emit.md`): la
 **automática** (`dict_return.set` y notifica el monitor) o la **manual** (`ModuleBase._emit`).
@@ -4081,7 +4114,7 @@ Este guard nació de tres fallos reales encontrados a la vez.
 
 ## 88c. Meta — Versión y CHANGELOG
 
-**Archivo:** `tests/test_version_changelog.py` — 9 tests
+**Archivo:** `tests/meta/test_version_changelog.py` — 9 tests
 
 Cada commit publica un build (`0.0.1+build.N`) cuya sección del CHANGELOG contiene **solo** lo
 que cambió en ese commit. Ese número vive en **dos** sitios —`lib.__version__` (lo que imprime
@@ -4106,7 +4139,7 @@ desincroniza si nadie lo comprueba**.
 
 ## 88c-bis. Meta — Secciones publicadas del CHANGELOG
 
-**Archivo:** `tests/test_changelog_frozen.py` — 6 tests
+**Archivo:** `tests/meta/test_changelog_frozen.py` — 6 tests
 
 Cada commit publica un build cuya sección contiene **solo lo que ese commit cambió**. Nada
 vigilaba la segunda mitad de esa regla: tras commitear `build.2` es fácil —y pasó— seguir
@@ -4139,7 +4172,7 @@ idéntica** en el árbol de trabajo. Un commit nuevo añade su sección encima y
 
 ## 88d. Meta — Enlaces con número de línea
 
-**Archivo:** `tests/test_docs_line_links.py` — 6 tests
+**Archivo:** `tests/meta/test_docs_line_links.py` — 6 tests
 
 Los documentos enlazan al código con ancla de línea — la forma `[fichero:N](ruta#LN)`. Son los
 enlaces más útiles de la referencia y lo más frágil que hay en ella: **cualquier edición por
@@ -4165,7 +4198,7 @@ enterarse, es justo el caso que motiva el guard.
 
 ## 89. Meta — Este documento
 
-**Archivo:** `tests/test_docs_tests_inventory.py` — 9 tests
+**Archivo:** `tests/meta/test_docs_tests_inventory.py` — 9 tests
 
 Este documento es el mapa de la suite, y hasta ahora **no lo vigilaba nadie** — a diferencia del
 índice de rutas, que sí tiene `test_routes_documented.py` rompiendo el build. Resultado: cuando se
@@ -4200,7 +4233,7 @@ Las comprobaciones son mecánicas a propósito: un fichero está nombrado en el 
 Vigilancias que corren en el propio ServiceSentry, no sobre lo monitorizado: certificados y secretos
 que caducan, salud de los servicios internos, y quién manda cuando hay varias réplicas.
 
-**Archivo:** `tests/test_cert_scan.py` — 11 tests
+**Archivo:** `tests/unit/test_cert_scan.py` — 11 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4212,7 +4245,7 @@ que caducan, salud de los servicios internos, y quién manda cuando hay varias r
 | `TestScanner::test_recovery_rearms` | Renovar el certificado rearma el aviso para la próxima vez |
 | `TestScanner::test_unreachable_leaves_state` | Un host inalcanzable **no** borra el estado: perder visibilidad no es lo mismo que estar sano |
 
-**Archivo:** `tests/test_secret_scan.py` — 15 tests
+**Archivo:** `tests/unit/test_secret_scan.py` — 15 tests
 
 El secreto de la app Entra caduca, y cuando lo hace el SSO deja de funcionar sin avisar.
 
@@ -4232,7 +4265,7 @@ El secreto de la app Entra caduca, y cuando lo hace el SSO deja de funcionar sin
 | `TestRotation::test_empty_secret_from_graph_is_treated_as_failure` | Un secreto vacío devuelto por Graph es un fallo, no un éxito |
 | `TestRotation::test_rotation_works_with_notify_off` | Rotar y avisar son independientes |
 
-**Archivo:** `tests/test_service_health.py` — 9 tests
+**Archivo:** `tests/unit/test_service_health.py` — 9 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4245,7 +4278,8 @@ El secreto de la app Entra caduca, y cuando lo hace el SSO deja de funcionar sin
 | `TestTransitions::test_idle_clears_state_and_never_alerts` | *Idle* limpia estado y calla |
 | `TestTransitions::test_non_leader_updates_state_but_does_not_emit` | Una réplica no líder **sí** actualiza el estado (para que la UI esté al día) pero no notifica |
 
-**Archivo:** `tests/test_scheduler_lifecycle.py` — 6 tests
+**Archivo:** `tests/integration/test_scheduler_lifecycle.py` — 3 tests
+**Archivo:** `tests/unit/test_scheduler_lifecycle.py` — 2 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4255,7 +4289,7 @@ El secreto de la app Entra caduca, y cuando lo hace el SSO deja de funcionar sin
 | `TestSchedulerNotify::test_start_stop_are_discovered_matrix_events` | Arranque/parada son eventos descubiertos, no claves cableadas |
 | `TestSchedulerNotify::test_lifecycle_dispatches_a_translated_body` | El cuerpo sale traducido |
 
-**Archivo:** `tests/test_ha_failover.py` — 5 tests
+**Archivo:** `tests/unit/test_ha_failover.py` — 5 tests
 
 Failover end-to-end con varias réplicas compartiendo el store de liderazgo.
 
@@ -4271,7 +4305,7 @@ Failover end-to-end con varias réplicas compartiendo el store de liderazgo.
 
 ## 91. Notificaciones — registro de eventos, idioma, destinatarios y overrides
 
-**Archivo:** `tests/test_notify_events.py` — 9 tests
+**Archivo:** `tests/unit/test_notify_events.py` — 9 tests
 
 El registro de eventos notificables es la **única** fuente de verdad de la matriz de enrutado.
 
@@ -4286,7 +4320,7 @@ El registro de eventos notificables es la **única** fuente de verdad de la matr
 | `TestMatrixIsFullyDynamic::test_no_static_matrix_keys_in_spec` | **Ninguna clave de matriz escrita a mano en `spec.py`** — si aparece una, hay dos fuentes de verdad |
 | `TestMatrixIsFullyDynamic::test_builtin_kinds_come_from_the_registry` | Los kinds vienen del registro |
 
-**Archivo:** `tests/test_notify_i18n.py` — 10 tests
+**Archivo:** `tests/unit/test_notify_i18n.py` — 10 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4294,7 +4328,8 @@ El registro de eventos notificables es la **única** fuente de verdad de la matr
 | `TestNotifyLang::*` (3) | Precedencia: idioma de **notificaciones** sobre el del panel; si no hay, el del panel; vacío si ninguno |
 | `TestBodyTemplates::*` (3) | Cuerpos de auth/login, scheduler/ipban y servicio/certificado, rellenados posicionalmente |
 
-**Archivo:** `tests/test_notify_recipients.py` — 10 tests
+**Archivo:** `tests/integration/test_notify_recipients.py` — 9 tests
+**Archivo:** `tests/unit/test_notify_recipients.py` — 1 tests
 
 Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>`).
 
@@ -4309,7 +4344,7 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 | `TestSuggestEndpoint::*` (2) | El endpoint de sugerencias lista usuarios y grupos, y exige permiso de edición de config |
 | `TestDispatchNoFallback::test_empty_explicit_list_does_not_fall_back_to_raw_tokens` | **Una lista resuelta vacía NO cae a los tokens crudos** — el fallback podría mandar correo a una dirección que el resolutor descartó a propósito |
 
-**Archivo:** `tests/test_notify_router.py` — 7 tests
+**Archivo:** `tests/unit/test_notify_router.py` — 7 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4320,7 +4355,7 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 | `test_dispatch_channels_override_ignores_matrix` | Una regla con canales explícitos manda sobre la matriz |
 | `test_run_dispatch_accepts_the_router_as_surface` | El router sirve de superficie: **independiente de web_admin/Flask**, que es lo que permite usarlo desde los workers standalone |
 
-**Archivo:** `tests/test_notify_text_overrides.py` — 9 tests
+**Archivo:** `tests/unit/test_notify_text_overrides.py` — 9 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4331,7 +4366,8 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
 
-**Archivo:** `tests/test_module_pages.py` — 39 tests
+**Archivo:** `tests/unit/test_module_pages.py` — 20 tests
+**Archivo:** `tests/integration/test_module_pages.py` — 9 tests
 
 Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo **`/module/<id>`**, en su propio espacio de nombres: así una sección futura del core no puede chocar con ella ni al revés. Las **vistas** de esa sección (varias disposiciones bajo un desplegable) están en [§131](#131-una-sección-de-módulo-puede-tener-más-de-una-vista).
 
@@ -4350,7 +4386,8 @@ Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo 
 | `TestServed::*` (6) | Ruta enrutada, exige sesión, el shell trae su pane y su entrada de sidebar, el fragmento `web/_ui.html` se inyecta, el endpoint de datos responde, y **un módulo sin página da 404** — eso es lo que impide que sea un "ejecuta cualquier hook" |
 | `TestLiveRefreshWithoutAForm::*` (5) | El refresco en vivo conoce solo la CLAVE del ítem: basta con ella, lo que envía el llamante manda, una clave sin prefijo también se encuentra, y un fallo de lectura de config no es fatal |
 
-**Archivo:** `tests/test_wa_standalone_pages.py` — 37 tests
+**Archivo:** `tests/integration/test_wa_standalone_pages.py` — 17 tests
+**Archivo:** `tests/unit/test_wa_standalone_pages.py` — 3 tests
 
 Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el mismo shell SPA**.
 
@@ -4365,7 +4402,7 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 | `TestSidebarSections::*` (3) | Secciones gateadas por permiso, botones de pestaña SPA en toda URL, y el cliente abre el pane que toca según la URL (recarga, deep link, atrás/adelante) |
 | `TestFrontendWiring::*` (3) | La página declara su punto de entrada de render, el panel conserva los placeholders, y el panel no es una standalone |
 
-**Archivo:** `tests/test_wa_account_page.py` — 9 tests
+**Archivo:** `tests/integration/test_wa_account_page.py` — 9 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4375,7 +4412,7 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 | `TestOpensLikeTheOtherPages::test_user_menu_opens_it_spa_on_every_url` | Se abre igual desde cualquier URL |
 | `TestDarkModeMovedToUserMenu::*` (2) | El control de modo oscuro ya no está ni en la página ni en el panel |
 
-**Archivo:** `tests/test_wa_partials_convention.py` — 15 tests
+**Archivo:** `tests/meta/test_wa_partials_convention.py` — 15 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4391,7 +4428,8 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 
 ## 93. Panel Web — Microsoft Teams
 
-**Archivo:** `tests/test_wa_msteams.py` — 21 tests
+**Archivo:** `tests/integration/test_wa_msteams.py` — 12 tests
+**Archivo:** `tests/unit/test_wa_msteams.py` — 9 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4404,7 +4442,7 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 | `TestMatrixConfig::test_msteams_matrix_key_saves` | La clave de matriz se guarda |
 | `test_msteams_bot_csrf_exempt_declared` | El endpoint del bot declara su exención de CSRF **explícitamente** (lo llama Microsoft, no un navegador) |
 
-**Archivo:** `tests/test_wa_msteams_sso.py` — 13 tests
+**Archivo:** `tests/integration/test_wa_msteams_sso.py` — 13 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4421,7 +4459,8 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 
 ## 94. Panel Web — orígenes de grupos, acciones de configuración y rate limit
 
-**Archivo:** `tests/test_wa_group_sources.py` — 13 tests
+**Archivo:** `tests/integration/test_wa_group_sources.py` — 6 tests
+**Archivo:** `tests/unit/test_wa_group_sources.py` — 4 tests
 
 Cada sección de autenticación que sabe leer grupos del directorio declara sus hooks; el panel **no**
 ramifica por proveedor.
@@ -4435,7 +4474,8 @@ ramifica por proveedor.
 | `TestGroupSourceDescriptors::*` (4) | Toda sección con directorio declara descriptor, lleva lo que el renderizador necesita, el layout lo entrega al panel, y una sección sin directorio no declara ninguno |
 | `TestGroupSourceEndpointsGuarded::test_requires_authentication` | Los endpoints detrás de los botones nunca son alcanzables sin sesión |
 
-**Archivo:** `tests/test_config_actions.py` — 32 tests
+**Archivo:** `tests/unit/test_config_actions.py` — 30 tests
+**Archivo:** `tests/meta/test_config_actions.py` — 2 tests
 
 Un paquete puede aportar acciones a una sección de configuración describiéndose a sí mismo.
 
@@ -4451,7 +4491,7 @@ Un paquete puede aportar acciones a una sección de configuración describiéndo
 | `TestGroupLabel::*` (3) | La fila de acciones se titula por paquete cuando todas vienen del mismo, y esa clave es traducible y sobrevive a la normalización |
 | `TestI18nKeysExist::test_declared_label_keys_are_translatable` | Ninguna etiqueta declarada se queda sin traducir |
 
-**Archivo:** `tests/test_ratelimit.py` — 9 tests
+**Archivo:** `tests/unit/test_ratelimit.py` — 9 tests
 
 Limitador de ventana deslizante en proceso (`lib.security.ratelimit`), con reloj inyectado.
 
@@ -4469,7 +4509,7 @@ Limitador de ventana deslizante en proceso (`lib.security.ratelimit`), con reloj
 
 ## 95. Overview — recuento de checks y filtros de severidad
 
-**Archivo:** `tests/test_overview_checks_widget.py` — 28 tests
+**Archivo:** `tests/unit/test_overview_checks_widget.py` — 28 tests
 
 Los avisos se cuentan **aparte** de los errores duros: mezclarlos convierte un umbral rozado en una
 caída.
@@ -4489,7 +4529,7 @@ caída.
 Tests que no comprueban conducta sino que **la documentación y las traducciones no se queden atrás**.
 Ver también §88b y §89.
 
-**Archivo:** `tests/test_routes_documented.py` — 3 tests
+**Archivo:** `tests/meta/test_routes_documented.py` — 3 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4497,7 +4537,8 @@ Ver también §88b y §89.
 | `TestPerModuleHeaders::test_headers_use_the_real_parameter_names` | Una cabecera con `<ip>` para una ruta declarada `<path:ip>` se lee bien pero deja de casar — así empezó la deriva |
 | `TestSurfaceIndex::test_every_route_falls_under_an_indexed_prefix` | El índice lista **prefijos**: un dominio nuevo tiene que aparecer, un endpoint dentro de uno conocido no |
 
-**Archivo:** `tests/test_i18n_keys_exist.py` — 10 tests
+**Archivo:** `tests/unit/test_i18n_keys_exist.py` — 4 tests
+**Archivo:** `tests/meta/test_i18n_keys_exist.py` — 3 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4511,7 +4552,7 @@ Ver también §88b y §89.
 
 ## 97. Watchfuls — severidad de avisos y RAID mdstat
 
-**Archivo:** `tests/test_warning_severity.py` — 21 tests
+**Archivo:** `tests/unit/test_warning_severity.py` — 21 tests
 
 Un sensor que roza un umbral enruta como `warn`, no como `down`. Ver `docs/ref-watchful-emit.md`.
 
@@ -4542,7 +4583,8 @@ Lector de `/proc/mdstat`, local y por SSH.
 
 ## 98. Entra ID — paso de RBAC de Azure del asistente
 
-**Archivo:** `tests/test_entraid_azure_rbac.py` — 47 tests
+**Archivo:** `tests/unit/test_entraid_azure_rbac.py` — 38 tests
+**Archivo:** `tests/integration/test_entraid_azure_rbac.py` — 8 tests
 
 Acceder a Azure **no** es un permiso de aplicación de Entra: hace falta una asignación de rol RBAC
 sobre la suscripción, contra otra audiencia. Por eso es un paso propio del asistente.
@@ -4575,7 +4617,9 @@ Ver `lib/providers/azure/rbac.py`.
 
 ## 99. Panel Web — sección Permisos (Acceso › Permisos)
 
-**Archivo:** `tests/test_wa_permissions_section.py` — 28 tests
+**Archivo:** `tests/meta/test_wa_permissions_section.py` — 18 tests
+**Archivo:** `tests/integration/test_wa_permissions_section.py` — 7 tests
+**Archivo:** `tests/unit/test_wa_permissions_section.py` — 2 tests
 
 Asignar permisos a roles en una página entera, en vez de un rol cada vez dentro del modal. Dos
 maquetas sobre los mismos datos —matriz permisos × roles y dos paneles (lista de roles | permisos
@@ -4628,7 +4672,8 @@ se incluye da un panel vacío sin error en ninguna parte.
 
 ## 100. Meta — Cada dominio del core guarda su propio código
 
-**Archivo:** `tests/test_core_domain_layout.py` — 28 tests (+9 skips)
+**Archivo:** `tests/unit/test_core_domain_layout.py` — 19 tests
+**Archivo:** `tests/meta/test_core_domain_layout.py` — 1 tests (+9 skips)
 
 `lib/core/__init__.py` enuncia la regla: un paquete de dominio agrupa su `store`, su `mixin`,
 sus `routes` y su `manifest` *«instead of spreading those across lib/stores,
@@ -4670,7 +4715,8 @@ ordenada:
 
 ## 101. Permisos — poda de claves por instancia
 
-**Archivo:** `tests/test_scoped_permission_pruning.py` — 12 tests
+**Archivo:** `tests/integration/test_scoped_permission_pruning.py` — 6 tests
+**Archivo:** `tests/unit/test_scoped_permission_pruning.py` — 6 tests
 
 `server.<uid>.edit`, `module.<name>.view` y `cluster.<uid>.delete` acotan un flag global a
 **una** cosa. Esa cosa vive en otra tabla (o en la configuración de módulos) y nada unía las dos:
@@ -4703,7 +4749,7 @@ que nadie recuerda haber dado— es la que importa.
 
 ## 102. Cachés compartidas — frescura entre procesos
 
-**Archivo:** `tests/test_cache_freshness.py` — 20 tests
+**Archivo:** `tests/integration/test_cache_freshness.py` — 20 tests
 
 Roles, usuarios y grupos se leen de la BD **una vez**, al arrancar, y cada petición responde
 desde esos diccionarios. Eso asume un único escritor, y era falso por partida doble: el **CLI**
@@ -4741,7 +4787,8 @@ se relee cuando la respuesta se mueve.
 
 ## 103. Escrituras diferenciales — dos escritores sobre una BD
 
-**Archivo:** `tests/test_entity_sync.py` — 10 tests
+**Archivo:** `tests/unit/test_entity_sync.py` — 6 tests
+**Archivo:** `tests/integration/test_entity_sync.py` — 4 tests
 
 Roles, usuarios y grupos se guardaban con `DELETE FROM <tabla>` + reinsertar todo lo que había
 en memoria. Correcto mientras un proceso sea dueño de la BD, y destructivo en cuanto son dos:
@@ -4768,7 +4815,8 @@ que este proceso **tenía** y ya no tiene. Una fila que apareció mientras edit�
 
 ## 104. Stores — la base compartida y el formato de fecha único
 
-**Archivo:** `tests/test_store_base.py` — 32 tests
+**Archivo:** `tests/unit/test_store_base.py` — 9 tests
+**Archivo:** `tests/integration/test_store_base.py` — 2 tests
 
 Cada dominio es dueño de su store —columnas, joins, payloads JSON, cómo una fila se
 convierte en dict— y nada de eso se comparte. Lo que **sí** se compartía y aun así estaba
@@ -4807,7 +4855,7 @@ Dos de estos tests existen por fallos reales, no por pulcritud:
 
 ## 105. Config — un mapeo Grupo→Rol nuevo tiene que sobrevivir al Guardar
 
-**Archivo:** `tests/test_cfg_group_role_map.py` — 20 tests
+**Archivo:** `tests/meta/test_cfg_group_role_map.py` — 20 tests
 
 El síntoma reportado era un guardado que **mentía**: añadir una fila en Configuration ›
 Authentication › SSO (OIDC), pulsar Guardar y recargar dejaba el mapeo nuevo sin rastro,
@@ -4856,7 +4904,9 @@ ruta de `_dirtyFields` pero no movía la foto, así que las dos discrepaban para
 
 ## 106. Entra ID — comprobar permisos de las secciones SSO
 
-**Archivo:** `tests/test_entraid_sso_check_perms.py` — 17 tests
+**Archivo:** `tests/integration/test_entraid_sso_check_perms.py` — 7 tests
+**Archivo:** `tests/unit/test_entraid_sso_check_perms.py` — 5 tests
+**Archivo:** `tests/meta/test_entraid_sso_check_perms.py` — 3 tests
 
 El editor de credenciales ya sabía preguntar si la app de un módulo tiene los permisos de
 Graph que necesita. Las apps de SSO no, y son donde más duele: **el consentimiento es la
@@ -4889,7 +4939,8 @@ consentido nunca llega a ese claim, que es justo la distinción que se quiere ha
 
 ## 107. Entra ID — rotar el secreto de la app de una credencial
 
-**Archivo:** `tests/test_entraid_cred_secret_rotate.py` — 23 tests
+**Archivo:** `tests/integration/test_entraid_cred_secret_rotate.py` — 10 tests
+**Archivo:** `tests/unit/test_entraid_cred_secret_rotate.py` — 9 tests
 
 La sección SSO OIDC ya sabía hacerlo; una credencial de módulo no, y la única forma de
 sustituir un secreto a punto de caducar era **volver a registrar la app** — lo que acuña un
@@ -4932,7 +4983,7 @@ que se pueden distinguir; el mensaje explica el que no.
 
 ## 108. Entra ID — la conversación device-code, escrita una vez
 
-**Archivo:** `tests/test_entraid_device_flow.py` — 43 tests
+**Archivo:** `tests/unit/test_entraid_device_flow.py` — 43 tests
 
 Seis botones registran o reparan una app de Entra —SAML2, SCIM, el secreto de OIDC, el de
 una credencial, el asistente genérico de módulos— y todos mantienen **el mismo intercambio**:
@@ -4998,7 +5049,7 @@ directamente.
 
 ## 109. Config — la cabecera tiene que quedarse arriba toda la sección
 
-**Archivo:** `tests/test_wa_config_pane_layout.py` — 23 tests
+**Archivo:** `tests/unit/test_wa_config_pane_layout.py` — 23 tests
 
 La barra (título, Reload, Save con su chincheta de cambios sin guardar) y el buscador son los
 controles que buscas **porque** has hecho scroll: encuentras un campo, lo cambias y le das a
@@ -5045,7 +5096,7 @@ puede irse — no hay scroll debajo de ella que se la lleve.
 
 ## 110. Un ajuste no puede dejarte fuera del panel
 
-**Archivo:** `tests/test_wa_cookie_lockout.py` — 13 tests
+**Archivo:** `tests/integration/test_wa_cookie_lockout.py` — 13 tests
 
 Dos ajustes podían hacerlo, y los dos fallaban igual: un rebote infinito entre `/login` y `/`.
 El login **funcionaba** —credenciales correctas, sesión creada— y el navegador llegaba a la
@@ -5091,7 +5142,8 @@ justo donde ya estabas.
 
 ## 111. El icono del sitio existe y pedirlo no da 404
 
-**Archivo:** `tests/test_wa_favicon.py` — 11 tests
+**Archivo:** `tests/unit/test_wa_favicon.py` — 8 tests
+**Archivo:** `tests/integration/test_wa_favicon.py` — 3 tests
 
 No había favicon, así que cada visita dejaba un `GET /favicon.ico 404` — inofensivo en sí, y
 ruido en el log de acceso de todos los despliegues para siempre. Los navegadores piden ese
@@ -5128,7 +5180,7 @@ enseña de verdad una pestaña— un check reescalado se convierte en una mancha
 
 ## 112. El breadcrumb nombra el camino completo hasta la sección
 
-**Archivo:** `tests/test_wa_breadcrumb.py` — 10 tests
+**Archivo:** `tests/meta/test_wa_breadcrumb.py` — 10 tests
 
 Leía el ítem activo del sidebar y su sub-ítem y ahí paraba, así que una sección anidada dos
 niveles se anunciaba como «Infrastructure / Servers» y una anidada un nivel como «Services» a
@@ -5160,7 +5212,7 @@ La regla tiene dos mitades y la segunda importa igual:
 
 ## 113. «Conexión perdida» tiene que significar que se perdió la conexión
 
-**Archivo:** `tests/test_wa_conn_overlay.py` — 11 tests
+**Archivo:** `tests/meta/test_wa_conn_overlay.py` — 11 tests
 
 El overlay tapa el panel entero, así que uno falso no es un fallo cosmético: interrumpe lo que
 estuvieras haciendo para decirte algo que no es cierto, y se queda hasta que la siguiente
@@ -5199,7 +5251,8 @@ Dos cambios, y el primero es el que importa:
 
 ## 114. El menú de órdenes por servicio: qué ofrece, qué destruye y que se parezca al resto
 
-**Archivo:** `tests/test_wa_services_commands.py` — 18 tests
+**Archivo:** `tests/unit/test_wa_services_commands.py` — 14 tests
+**Archivo:** `tests/integration/test_wa_services_commands.py` — 4 tests
 
 Tres cosas, y la tercera es la que importa de verdad.
 
@@ -5260,7 +5313,8 @@ es el mismo cambio que quitaría el mapa hardcodeado.
 
 ## 115. Modules — cuatro layouts, no cuatro renderizadores
 
-**Archivo:** `tests/test_wa_modules_views.py` — 19 tests
+**Archivo:** `tests/meta/test_wa_modules_views.py` — 15 tests
+**Archivo:** `tests/unit/test_wa_modules_views.py` — 4 tests
 
 La sección tenía uno: una rejilla de tarjetas, cada una desplegando su configuración dentro de
 una celda de 420 px. Ese layout **ya admitía** que la celda se quedaba corta: llevaba un botón
@@ -5313,7 +5367,7 @@ la lista luego se negaría a configurar. Ahora ambos preguntan a `_modAvailabili
 
 ## 116. Status — cuatro layouts que tienen que coincidir en qué está fallando
 
-**Archivo:** `tests/test_wa_status_views.py` — 32 tests
+**Archivo:** `tests/meta/test_wa_status_views.py` — 32 tests
 
 El **Resumen** estuvo a punto de no tener nombre propio: al mover la barra de totales a una
 cabecera que dibujan las cuatro vistas, se quedó siendo la rejilla de tarjetas en otro orden —
@@ -5392,7 +5446,7 @@ página que se auto-refresca, un redibujado que pide datos además compite con s
 
 ## 117. Marcado que no hace lo que sugiere el nombre de la clase
 
-**Archivo:** `tests/test_wa_css_traps.py` — 9 tests
+**Archivo:** `tests/meta/test_wa_css_traps.py` — 9 tests
 
 Tres trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
 
@@ -5447,7 +5501,7 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
-**Archivo:** `tests/test_wa_module_page_views.py` — 45 tests
+**Archivo:** `tests/unit/test_wa_module_page_views.py` — 45 tests
 
 Un módulo aporta una sección de primer nivel declarando `__page__` y contestando con una
 forma fija: secciones de filas, cada fila con estado, mensaje y lo que la comprobación haya
@@ -5500,7 +5554,7 @@ porque una ausencia muda obliga a salir de la página para averiguar por qué.
 
 ## 119. Ejecutar un check una vez — la proyección es el contrato
 
-**Archivo:** `tests/test_module_check_runner.py` — 11 tests
+**Archivo:** `tests/unit/test_module_check_runner.py` — 11 tests
 
 Dos funciones necesitan exactamente lo mismo: el botón **probar** de Servers y el **refresco
 en vivo** de una página de módulo. Las dos quieren el `check()` **real** del módulo —una sonda
@@ -5538,7 +5592,7 @@ la respuesta). Verificado quitando `severity`: falla nombrándolo.
 
 ## 120. Credentials es una sección, no una sub-pestaña de Infrastructure
 
-**Archivo:** `tests/test_wa_credentials_section.py` — 11 tests
+**Archivo:** `tests/unit/test_wa_credentials_section.py` — 11 tests
 
 Credentials llegó a Infrastructure cuando el catálogo eran **identidades SSH reutilizables**, y
 el comentario que justificaba la mudanza decía exactamente eso. Dejó de ser verdad: la mitad
@@ -5577,7 +5631,8 @@ nada, así que la sección simplemente no se abre y no hay error que seguir.
 
 ## 121. Un widget de módulo, añadido varias veces y configurado por instancia
 
-**Archivo:** `tests/test_overview_module_widget_instances.py` — 20 tests
+**Archivo:** `tests/unit/test_overview_module_widget_instances.py` — 17 tests
+**Archivo:** `tests/meta/test_overview_module_widget_instances.py` — 3 tests
 
 Una sola tarjeta no puede contestar «cómo va Microsoft 365»: esa pregunta son varias —cuánto
 almacenamiento queda, cuánto del directorio registró MFA, cuánto margen hay de licencias— y
@@ -5618,7 +5673,7 @@ cajas correctas enseñando lo que no era** — el scope y el filtro se perdían 
 
 ## 122. Services — cuatro vistas, y la que pivota sobre la instancia
 
-**Archivo:** `tests/test_wa_services_views.py` — 22 tests
+**Archivo:** `tests/unit/test_wa_services_views.py` — 22 tests
 
 Services es una superficie de **control**, así que sus vistas se diferencian en qué ponen en
 posición de sujeto. La rejilla de tarjetas pone el servicio, y eso está bien hasta que hay
@@ -5661,7 +5716,8 @@ pulsarlo, y eso no es un fallo de estilo.
 
 ## 123. Credentials — cuatro vistas, y la que pregunta quién las usa
 
-**Archivo:** `tests/test_wa_credentials_views.py` — 30 tests
+**Archivo:** `tests/unit/test_wa_credentials_views.py` — 27 tests
+**Archivo:** `tests/meta/test_wa_credentials_views.py` — 3 tests
 
 La tabla contesta «qué tengo» y nada más. Encima de los mismos datos hay dos preguntas que no
 puede contestar:
@@ -5711,7 +5767,7 @@ guard que no es cosmético es `test_no_view_builds_its_own_action_buttons`: los 
 
 ## 124. Audit — cuatro vistas, y dos de ellas no son listas
 
-**Archivo:** `tests/test_wa_audit_views.py` — 29 tests
+**Archivo:** `tests/unit/test_wa_audit_views.py` — 29 tests
 
 La tabla lee el registro línea a línea: es la forma correcta para «qué pasó a las 14:32» y la
 equivocada para cualquier pregunta sobre el registro **entero**. Dos de ésas merecen vista
@@ -5763,7 +5819,7 @@ de borrar: `audit_delete` se convierte en control en un solo sitio.
 
 ## 125. Events — dos cosas distintas, cuatro vistas cada una
 
-**Archivo:** `tests/test_wa_events_views.py` — 30 tests
+**Archivo:** `tests/unit/test_wa_events_views.py` — 30 tests
 
 La sección guarda dos cosas y cada una tiene su registro:
 
@@ -5815,7 +5871,7 @@ entrega y los botones — `events_*` se vuelve control en un solo sitio.
 
 ## 126. Servers — cuatro vistas, y dos que hablan de la flota
 
-**Archivo:** `tests/test_wa_servers_views.py` — 24 tests
+**Archivo:** `tests/unit/test_wa_servers_views.py` — 24 tests
 
 Servers es la única lista donde las filas no son el asunto: lo que quieres de ella es un
 estado de la flota, y una tabla te lo da de host en host. Tres cosas que deja fuera:
@@ -5859,7 +5915,7 @@ sería una vista que olvidó que el caso granular existe.
 
 ## 127. Syslog — tres vistas sobre la misma página del servidor
 
-**Archivo:** `tests/test_wa_syslog_views.py` — 19 tests
+**Archivo:** `tests/unit/test_wa_syslog_views.py` — 19 tests
 
 Es la única sección cuyas filas llegan ya filtradas, ordenadas y paginadas **por el
 servidor**: lo que hay en pantalla es una página de una consulta, no un trozo de algo que
@@ -5900,7 +5956,7 @@ fundan en uno es peor fallo que dos parecidos que no se junten.
 
 ## 128. History — la gráfica, y el inventario de series del que nunca habla
 
-**Archivo:** `tests/test_wa_history_views.py` — 21 tests
+**Archivo:** `tests/unit/test_wa_history_views.py` — 21 tests
 
 La sección es una gráfica con una lista de series al lado, y la gráfica es el asunto: una
 serie cada vez, o varias superpuestas. La barra lateral es **navegación** —nombres y un punto
@@ -5938,7 +5994,7 @@ vuelve a la gráfica con esa serie seleccionada — que es lo que ibas a hacer d
 
 ## 129. Access — cuatro tablas sobre un solo grafo
 
-**Archivo:** `tests/test_wa_access_views.py` — 28 tests
+**Archivo:** `tests/unit/test_wa_access_views.py` — 28 tests
 
 Un usuario tiene un rol directo, pertenece a grupos, y un grupo concede roles. Cada tabla
 enseña su fila y la arista que sale de ella, así que **la composición no estaba escrita en
@@ -5984,7 +6040,7 @@ algo que no existe y entierra lo que sí.
 
 ## 130. Clusters y fail2ban — las dos últimas superficies de tabla
 
-**Archivo:** `tests/test_wa_clusters_ipban_views.py` — 29 tests
+**Archivo:** `tests/unit/test_wa_clusters_ipban_views.py` — 29 tests
 
 **Los clústeres existen por redundancia**: un check atado a varios hosts para que una máquina
 caída no se lleve el check con ella. La tabla los lista y cuenta miembros, lo que se lee bien y
@@ -6037,7 +6093,8 @@ que en silencio significara «6 en esta página» sería peor que no contar.
 
 ## 131. Una sección de módulo puede tener más de una VISTA
 
-**Archivo:** `tests/test_module_page_views.py` — 48 tests
+**Archivo:** `tests/unit/test_module_page_views.py` — 46 tests
+**Archivo:** `tests/meta/test_module_page_views.py` — 2 tests
 
 La disposición de filas contesta «está todo bien»; una tabla de quién ocupa qué contesta «dónde
 se está yendo». Son dos preguntas sobre un mismo subsistema, y el error que estos tests vigilan es
@@ -6062,7 +6119,8 @@ declara sus vistas y todas comparten menos un sub-path.
 
 ## 132. Un campo numérico tiene que poder vaciarse
 
-**Archivo:** `tests/test_wa_number_fields.py` — 30 tests
+**Archivo:** `tests/unit/test_wa_number_fields.py` — 20 tests
+**Archivo:** `tests/meta/test_wa_number_fields.py` — 10 tests
 
 En una caja numérica se esconden tres estados: un valor, «usa el heredado» y «apagado». El
 esquema los distingue —`inherit_blank` guarda null al vaciar, `zero_as_blank` guarda 0— y el
@@ -6086,7 +6144,8 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 
 ## 133. Configuration — un índice lateral sobre un solo renderizador
 
-**Archivo:** `tests/test_wa_config_views.py` — 74 tests
+**Archivo:** `tests/unit/test_wa_config_views.py` — 71 tests
+**Archivo:** `tests/meta/test_wa_config_views.py` — 3 tests
 
 Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar
 un ajuste costaba abrir siete, y no decían nada de las seis que no estabas mirando. El índice
@@ -6115,7 +6174,8 @@ divergen, y la divergencia es invisible — al segundo solo se le mira cuando al
 
 ## 134. El orden del ciclo de petición es explícito
 
-**Archivo:** `tests/test_wa_request_hooks.py` — 11 tests
+**Archivo:** `tests/unit/test_wa_request_hooks.py` — 5 tests
+**Archivo:** `tests/meta/test_wa_request_hooks.py` — 2 tests
 
 Flask ejecuta los `before_request` en **orden de registro**. Hasta ahora ese orden era el orden
 de cinco decoradores en mitad de `_create_app` (372 líneas): cierto, crítico para la seguridad,
@@ -6140,7 +6200,7 @@ Al extraerlo a `mixins/hooks.py` aparecieron dos dependencias que nadie había e
 
 ## 135. La doc del esquema describe las tablas que existen, y todas
 
-**Archivo:** `tests/test_docs_db_schema.py` — 8 tests
+**Archivo:** `tests/meta/test_docs_db_schema.py` — 8 tests
 
 `ref-esquema-bd.md` es el único sitio donde el esquema físico se explica en prosa: para qué es
 cada tabla, qué lleva cada columna y qué relaciones son referencias por UID en lugar de claves
@@ -6169,7 +6229,8 @@ tiempo, porque nadie busca un nombre que ya no existe.
 
 ## 136. Clonar un elemento: pedir el nombre antes, y que la auditoría diga de dónde sale
 
-**Archivo:** `tests/test_wa_modules_clone.py` — 25 tests
+**Archivo:** `tests/unit/test_wa_modules_clone.py` — 21 tests
+**Archivo:** `tests/integration/test_wa_modules_clone.py` — 4 tests
 
 Reportado sobre m365, cierto en todos los módulos: creas un elemento y guarda; lo clonas, le
 cambias el nombre, guardas, y el registro **se escribe** mientras la pantalla dice «Error al
@@ -6215,7 +6276,8 @@ era Deshacer o Descartar). Ahora el nombre se pide **antes** de copiar nada, pro
 
 ## 137. Un fallo no controlado deja rastro, y el rastro se encuentra desde la pantalla
 
-**Archivo:** `tests/test_wa_unhandled_errors.py` — 12 tests
+**Archivo:** `tests/integration/test_wa_unhandled_errors.py` — 9 tests
+**Archivo:** `tests/unit/test_wa_unhandled_errors.py` — 3 tests
 
 La pregunta que lo destapó, tras el fallo de §136: «¿por qué estos errores no se registran en
 auditoría o en consola? Solo sale "Error al guardar", que no da nada de info». No los
@@ -6249,7 +6311,8 @@ página de error no es donde se publican los internos a quien alcance la URL.
 
 ## 138. Optimizar y compactar: las dos mitades del mantenimiento, y por qué van separadas
 
-**Archivo:** `tests/test_db_maintenance.py` — 41 tests
+**Archivo:** `tests/unit/test_db_maintenance.py` — 23 tests
+**Archivo:** `tests/integration/test_db_maintenance.py` — 14 tests
 
 Borrar un año de histórico no libera nada que el operador pueda ver: las filas se van, el
 fichero no encoge y la gráfica de disco sigue subiendo. Recuperar ese espacio era una
@@ -6287,7 +6350,7 @@ dos sentencias genuinamente distintas, y MySQL no tiene forma global y debe nomb
 
 ## 139. El espacio de nombres `00000000-0000-4000-*` es solo de las identidades integradas
 
-**Archivo:** `tests/test_core_uids.py` — 5 tests
+**Archivo:** `tests/unit/test_core_uids.py` — 5 tests
 
 Los roles, grupos y usuarios integrados viven todos bajo ese prefijo, con el bloque de variante
 diciendo de qué tipo son (`…-8001-…` usuarios, `…-8002-…` grupos, `…-8003-…` roles). Reservarlo
@@ -6308,7 +6371,8 @@ crean cuentas.
 
 ## 140. Las dos identidades bajo las que escribe el propio panel
 
-**Archivo:** `tests/test_builtin_identities.py` — 13 tests
+**Archivo:** `tests/integration/test_builtin_identities.py` — 9 tests
+**Archivo:** `tests/unit/test_builtin_identities.py` — 4 tests
 
 `system` y `anonymous` se protegen **como los roles y grupos integrados** —declaradas una vez
 en `lib.core.constants` y rechazadas por una comprobación compartida— y son **usuarios** en
@@ -6321,7 +6385,7 @@ que **son**. Las dos clases se detallan en las fichas de la sección de auditor�
 
 ## 141. Todas las páginas que sirve el panel tienen que renderizar
 
-**Archivo:** `tests/test_wa_routes_render.py` — 4 tests
+**Archivo:** `tests/integration/test_wa_routes_render.py` — 4 tests
 
 Encontrado a base de tropezar: una página experimental devolvía **500 en todos los motores**
 porque su plantilla enlazaba a `url_for('overview')` y ese endpoint se había renombrado. Un
@@ -6341,7 +6405,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/test_ui_playwright.py` — 13 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 13 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6376,7 +6440,7 @@ se saltan con «no chromium available». Por eso `pip install` no basta:
 
 ```bash
 python -m playwright install chromium     # una vez: descarga el navegador (~100 MB)
-python -m pytest tests/test_ui_playwright.py -n0
+python -m pytest tests/e2e/test_ui_playwright.py -n0
 ```
 
 En CI, `tests.yml` corre `playwright install --with-deps chromium` antes de la suite (el
@@ -6385,7 +6449,7 @@ allí **sí** cuentan como parte de la validación, no como salto.
 
 ## 143. Auditoría de seguridad contra motor real (inyección + control de acceso)
 
-**Archivo:** `tests/test_security_live.py` — 9 tests (3 × MySQL/MariaDB/PostgreSQL; opt-in)
+**Archivo:** `tests/e2e/test_security_live.py` — 9 tests (3 × MySQL/MariaDB/PostgreSQL; opt-in)
 
 Las regresiones de seguridad se prueban sobre SQLite recorriendo las rutas. Esto repite los
 ataques contra los **motores reales** porque dos de los tres modos de fallo sólo aparecen en un
