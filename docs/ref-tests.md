@@ -31,7 +31,7 @@ La suite puede correr en una instalación **sin el panel web** (los tres servici
 |---|---|---|
 | **no** importa Flask (ni directa ni transitivamente) | **sin guarda** | los tests se saltan para nada: pérdida silenciosa de cobertura |
 | importa Flask **a nivel de módulo** | `try/except ImportError` + `pytestmark = skipif(not _HAS_FLASK)` | un `ImportError` al importar el módulo **no se salta: aborta la colección** y no corre *nada* de la suite |
-| solo **un test** lo necesita | import **dentro** de ese test (+ `pytest.skip` si falla) | gatearías el fichero entero por un solo caso |
+| solo **un test** lo necesita | `pytest.importorskip` **dentro** de ese test (ver abajo) | gatearías el fichero entero por un solo caso |
 
 ```python
 try:
@@ -45,7 +45,16 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 Ojo con lo **transitivo**: `lib.core.audit.mixin` importa `flask` (lee `request`/`session` cuando hay contexto web), así que heredar de `_AuditMixin` obliga a la guarda aunque en el fichero no aparezca la palabra «flask». Leyendo el código no se ve — **compruébalo ejecutando**: un plugin de pytest que inserte en `sys.meta_path` un bloqueador de `import flask` y correr con `-p`. Es como se detectaron los casos que el análisis estático daba por buenos.
 
-**Hueco conocido (medido, no estimado).** Sin Flask, `pytest tests/unit tests/meta` da **2558 pasan / 9 fallan** (3 fallos + 6 errores) en 6 ficheros: `test_db_maintenance` (4), `test_config_spec` (en `unit/` y en `meta/`), `test_core_domain_layout`, `test_wa_modules_clone` y `test_module_page_views`. Todos importan Flask de forma perezosa dentro del caso y nunca tuvieron guarda; estaban invisibles mientras la colección abortaba. La colección sí está sana: **4217 recolectados**.
+**La suite entera pasa sin Flask:** `pytest tests/ watchfuls/` → **3326 pasan, 1654 saltan, 0 fallos**. Si rompes esto, lo has roto de verdad: es una garantía verificable, no una intención.
+
+Dos piezas la sostienen, y conviene reutilizarlas en vez de inventar otra cosa:
+
+- La fixture `admin` de `conftest.py` **salta explícitamente** si no hay Flask. Antes reventaba con un `NameError: name 'WebAdmin' is not defined` (el import va en `try/except`, así que el nombre ni existía). Como consecuencia, **cualquier test que pida `admin`/`client` ya salta solo**: no necesitas repetir el guard en tu fichero.
+- Para un import perezoso dentro de un test, usa **`pytest.importorskip`** en lugar de un `import` a pelo:
+
+```python
+WebAdmin = pytest.importorskip('lib.web_admin.app').WebAdmin
+```
 
 **Helpers compartidos:** las guardas de estructura usan `_read`, `_fn` y `_strip_comments` de **`tests/helpers.py`** (impórtalos, no los copies — llegó a haber 21 copias idénticas de `_read`). Es un módulo normal, no `conftest.py`, porque son funciones, no fixtures; y no se llama `test_*.py`, así que pytest no lo recoge. Las *fixtures* compartidas siguen en `tests/conftest.py`.
 

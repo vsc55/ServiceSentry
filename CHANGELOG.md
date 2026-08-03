@@ -8,6 +8,26 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.42] - 2026-08-03
+
+### Fixed
+- **The whole suite now passes with no Flask installed: 3326 pass, 1654 skip, nothing fails.**
+  build.41 closed the collection abort and left nine real failures documented as a known gap;
+  this closes them, so the Flask-less run is a guarantee that can be re-checked rather than a
+  caveat in a document. Two fixes cover all nine:
+  - **`conftest.py`'s `admin` fixture skips instead of exploding.** Six of the nine died on
+    `NameError: name 'WebAdmin' is not defined` — the import sits in a `try/except`, so
+    without Flask the name never existed and every test requesting `admin`/`client` blew up
+    with a message naming the symptom, not the cause. One explicit skip in the fixture fixes
+    all of them at the source, and means no file has to repeat the guard just to use it.
+  - **`pytest.importorskip` for the three lazy imports.** `test_config_spec` (both halves) and
+    `test_core_domain_layout` import the panel *inside* the test — the case no import scan can
+    see. They now skip cleanly instead of failing.
+
+  Nothing regressed with Flask present, which is what the `conftest.py` change had to be
+  checked against since every integration test goes through that fixture: integration 1482,
+  unit+meta 2655, module tests 763 — the same numbers as before.
+
 ## [0.0.1+build.41] - 2026-08-03
 
 ### Fixed

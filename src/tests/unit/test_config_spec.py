@@ -281,7 +281,8 @@ class TestNoDefaultIsWrittenTwice:
 
     def test_the_start_up_fallbacks_come_from_the_registry(self):
         from lib.config.spec import cfg_default
-        from lib.web_admin.app import WebAdmin
+        # importorskip: el panel arrastra Flask, que puede no estar en una instalación slim.
+        WebAdmin = pytest.importorskip('lib.web_admin.app').WebAdmin
         assert WebAdmin.DEFAULT_PORT == cfg_default('web_admin|port')
         assert WebAdmin.DEFAULT_HOST == cfg_default('web_admin|host')
 

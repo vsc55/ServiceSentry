@@ -26,6 +26,8 @@ and templates); the rest of the original ``test_core_domain_layout.py`` lives in
 import io
 import os
 
+import pytest
+
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE = os.path.join(SRC, 'lib', 'core')
@@ -78,7 +80,8 @@ class TestOneEscalationGuard:
 
     def test_the_guard_is_defined_once(self):
         import inspect                                               # noqa: PLC0415
-        from lib.core.permissions import mixin                       # noqa: PLC0415
+        # importorskip: el mixin arrastra Flask, que puede no estar en una instalación slim.
+        mixin = pytest.importorskip('lib.core.permissions.mixin')
         assert hasattr(mixin._PermissionsMixin, '_perms_grantable')
         src = _read(os.path.join(SRC, 'lib', 'core', 'roles', 'routes.py'))
         assert 'def _check_perms_escalation' not in src, \
