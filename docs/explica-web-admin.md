@@ -189,7 +189,7 @@ De ahí hacia abajo hay **dos clases genéricas**, nunca reglas por id:
 > (`.tab-content > .tab-pane { display: none }`, especificidad 0-1-0). Cualquier regla **por id**
 > que toque `display` (1-0-0) la secuestra y deja ese panel dibujado debajo de los demás. Las
 > reglas de layout de un panel se cualifican con `.active`; lo verifica
-> `tests/test_wa_ui.py::TestPaneDisplayRules`. La ficha completa está en
+> `tests/unit/test_wa_ui.py::TestPaneDisplayRules`. La ficha completa está en
 > [caso-diagnostico.md](caso-diagnostico.md).
 
 ### Full-bleed

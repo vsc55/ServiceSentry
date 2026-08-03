@@ -116,7 +116,7 @@ Tres patrones concretos:
 
 ## Un test que solo podía fallar en la máquina de otro
 
-**Fecha:** 2026-07-28 · **Área:** `tests/test_wa_favicon.py`
+**Fecha:** 2026-07-28 · **Área:** `tests/unit/test_wa_favicon.py`
 (`TestTheBinaryIsReproducible`), `tools/make_favicon.py`
 
 **Síntoma** — GitHub Actions en rojo con
@@ -224,7 +224,7 @@ natural; en `probe.py` se queda `ProbeHostsStore`, que sí es de hosts, **sin re
 runner: un import de conveniencia lo dejaría pareciendo código de hosts y el siguiente lo
 volvería a buscar ahí. La lista blanca dejó de ser una lista a mano: `RESULT_FIELDS` se
 compara contra lo que escribe `ReturnModuleCheck.set()` y un campo nuevo del contrato tiene
-que estar proyectado o excluido a propósito. Fijado por `tests/test_module_check_runner.py`
+que estar proyectado o excluido a propósito. Fijado por `tests/unit/test_module_check_runner.py`
 (11 tests), verificado fallando sin el arreglo.
 
 **Lección** — **una proyección con lista blanca de campos caduca en silencio.** Copiar un
@@ -276,7 +276,7 @@ de no hacer nada. De paso se arregló `force_fqdn`, que comparaba `request.host`
 puerto— contra una URL pública que puede no llevarlo: `192.168.0.1:8080` se leía como host
 distinto de `192.168.0.1` y redirigía al puerto 80. Ahora una URL pública sin puerto acepta
 cualquier puerto, con puerto lo exige, la comparación ignora mayúsculas y nunca se redirige a
-la propia petición que se está contestando. Cubierto por `tests/test_wa_cookie_lockout.py`,
+la propia petición que se está contestando. Cubierto por `tests/integration/test_wa_cookie_lockout.py`,
 verificado fallando contra el código original.
 
 **Lección** — **un ajuste de seguridad que no puede aplicarse no debe aplicarse a medias.** Los
@@ -317,7 +317,7 @@ sin nadie que lo guardara. Ningún error en ningún lado, en ninguna de las dos 
 **Solución** — apuntar el mapeo antes de que el handler pueda bifurcarse, y apuntar en
 `oninput` (cada pulsación) en vez de solo en `change`. La búsqueda de nombre sigue esperando,
 pero solo decora la columna de nombre, que es otro campo. Cubierto por
-`tests/test_cfg_group_role_map.py`.
+`tests/meta/test_cfg_group_role_map.py`.
 
 **Segunda mitad — el botón se quedaba encendido después de guardar bien.** Con el mapeo ya
 persistiendo, *Save Configuration* volvía a marcarse como «cambios pendientes» justo tras el
@@ -438,7 +438,7 @@ campo de nivel superior. Y `proxmox` tenía una variante peor: suprimía la noti
 monitor (`send_msg=False`) **y** no enviaba ninguna a mano, así que una excepción no
 controlada ponía el check en rojo sin avisar a nadie.
 
-**Solución** — `name=` en los 11 sitios, y `tests/test_watchful_emit_patterns.py` lo
+**Solución** — `name=` en los 11 sitios, y `tests/meta/test_watchful_emit_patterns.py` lo
 vigila (incluido el caso `other_data['name']`, que parece bien y no lo está).
 
 **Lección** — las **ramas de error** son las que menos se prueban y las que más importan
@@ -473,7 +473,7 @@ contener la gráfica y la lista de series, y empujaba todo lo demás fuera del v
 los márgenes full-bleed sin cualificar (son inocuos con el panel oculto). Además `.ss-main`
 pasó a hacer scroll de su propio desbordamiento, para que ningún contenido alto vuelva a
 hacer scroll del documento entero y despegue la barra lateral. Test de regresión en
-`tests/test_wa_ui.py::TestPaneDisplayRules`, que recorre el CSS y falla ante cualquier
+`tests/unit/test_wa_ui.py::TestPaneDisplayRules`, que recorre el CSS y falla ante cualquier
 `#tab-*` sin cualificar que fije `display`.
 
 **Lección** — en un SPA donde Bootstrap decide la visibilidad por clase, **cualquier regla
@@ -588,7 +588,7 @@ al import. La rama autenticada no estaba cubierta.
 `return redirect(wa._landing_url(user))`, eliminando el import diferido. Se corrigió
 también el único test que importaba el símbolo antiguo (`test_wa_config.py`) y se
 añadió la regresión que faltaba: `test_root_logged_in_redirects_to_landing`
-(`tests/test_wa_auth.py`), verificada fallando con el bug y pasando con el fix.
+(`tests/integration/test_wa_auth.py`), verificada fallando con el bug y pasando con el fix.
 
 **Lección** — un **import diferido dentro de una función** esquiva tanto el arranque
 como cualquier chequeo estático de imports; su única red de seguridad es un test que

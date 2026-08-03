@@ -8,6 +8,118 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.42] - 2026-08-03
+
+### Fixed
+- **The whole suite now passes with no Flask installed: 3326 pass, 1654 skip, nothing fails.**
+  build.41 closed the collection abort and left nine real failures documented as a known gap;
+  this closes them, so the Flask-less run is a guarantee that can be re-checked rather than a
+  caveat in a document. Two fixes cover all nine:
+  - **`conftest.py`'s `admin` fixture skips instead of exploding.** Six of the nine died on
+    `NameError: name 'WebAdmin' is not defined` — the import sits in a `try/except`, so
+    without Flask the name never existed and every test requesting `admin`/`client` blew up
+    with a message naming the symptom, not the cause. One explicit skip in the fixture fixes
+    all of them at the source, and means no file has to repeat the guard just to use it.
+  - **`pytest.importorskip` for the three lazy imports.** `test_config_spec` (both halves) and
+    `test_core_domain_layout` import the panel *inside* the test — the case no import scan can
+    see. They now skip cleanly instead of failing.
+
+  Nothing regressed with Flask present, which is what the `conftest.py` change had to be
+  checked against since every integration test goes through that fixture: integration 1482,
+  unit+meta 2655, module tests 763 — the same numbers as before.
+
+## [0.0.1+build.41] - 2026-08-03
+
+### Fixed
+- **`tests/unit` is runnable without Flask again: 231 tests stop skipping there.** Flask is a
+  hard dependency (`flask>=3.0`), so in a normal install these tests always ran — this is
+  about the slimmed case the code deliberately supports: the three standalone services import
+  cleanly with no Flask, `conftest.py` guards its `WebAdmin` import, and every web test
+  carries `skipif(not _HAS_FLASK)`. The by-class split copied that module-level gate into
+  halves that no longer touch the app, so in that environment they skipped for nothing:
+  `test_entity_sync` gated 6 tests of `diff_entities`/`snapshot`, `test_providers_ldap` 5 of
+  pure `map_role` logic. Of the 27 candidates the gate is gone from the 26 that proved they do
+  not need it, and stays on the one that does — `test_wa_sessions` imports Flask inside its
+  cases, which no amount of reading the imports would have shown. Proved, not assumed: re-run
+  under a harness that blocks `import flask` outright — 231 passed, and the static analysis
+  alone had been wrong about four of them.
+- **A Flask-less run no longer dies at collection, so the suite runs at all there.** Six files
+  — both halves of `test_wa_request_hooks`, `test_scheduler_lifecycle` and `test_wa_server` —
+  imported the web stack at module level with no guard (`test_scheduler_lifecycle` pulls it
+  transitively through `lib.core.audit.mixin`, which imports `flask` for `request`/`session`).
+  Without Flask, `pytest tests/` aborted with *Interrupted: 3 errors during collection* and
+  ran **nothing**; it now collects all 4217 and runs 2558 of unit+meta. Pre-existing: it
+  predates the reorganisation. `test_wa_server` keeps its two pure tests alive there — only
+  the third needs `WebAdmin`, and only for a class constant, so that import moved inside it.
+  Nine tests across six files still fail there (individual cases that import Flask lazily and
+  never had a guard); they were invisible while collection aborted, and are left as a measured
+  known gap rather than papered over.
+- **The dead scaffolding the splitter copied into both halves is gone.** Splitting by class
+  duplicated every module preamble, so each half carried the other's machinery: 60 helper and
+  fixture definitions that nothing in that file called (`_ldap_cfg`, `_make_wa`,
+  `saml2_admin_client`…) and 286 unused imports, across 72 files. Beyond the noise it was
+  actively misleading — `grep -l test_client tests/unit/` matched 13 files that never touch
+  the app, so the folders read as impure to anyone (or any tool) scanning them.
+- **The last cross-file test import is gone.** `test_wa_account_page` reached `_login` through
+  `test_wa_standalone_pages`, which only re-exported it from `conftest`; it now imports the
+  source directly. A test module is no longer part of another's public surface.
+
+### Changed
+- **One copy of the structural-guard helpers, in `tests/helpers.py`.** `_read` existed 27
+  times in the suite (21 byte-identical), `_fn` 21 times (18 identical), `_strip_comments` 16
+  times: fixing one fixed one of twenty, silently. The identical copies — 45 definitions
+  across 24 files — now import a single canonical version; the variants that genuinely differ
+  (a `_read` that joins a module-specific directory, a `_strip_comments` that also strips HTML
+  comments) were left alone rather than flattened into a wrong shared default. Note this
+  duplication mostly predates the reorganisation: the split inherited it and added a few
+  copies. It is a plain module, not `conftest.py` — these are functions to import, not
+  fixtures — and it is not named `test_*.py`, so pytest does not collect it.
+- **Each half of a split file says which half it is.** Both halves inherited the original's
+  module docstring verbatim, so both claimed to cover the whole subject. All 110 now end with
+  the category they hold and where the rest of the original lives.
+- **`docs/ref-tests.md` states the `_HAS_FLASK` rule in both directions**, because getting it
+  wrong hurts either way and the convention was only ever half-written down: no guard when the
+  file does not import Flask (otherwise tests skip for nothing), a guard when it does at module
+  level (otherwise collection aborts and nothing runs), a local import when a single test needs
+  it. It also warns about the transitive case (`_AuditMixin`), documents `tests/helpers.py`, and
+  records the ten-test gap rather than leaving it folklore.
+
+## [0.0.1+build.40] - 2026-08-03
+
+### Changed
+- **The test suite is now sorted into `unit/`, `integration/`, `e2e/` and `meta/`.** The ~160
+  files used to sit in one flat `tests/` directory with no way to run just the fast ones or
+  just the ones that touch the app. Every file is now under the folder that names what it
+  needs: `unit/` runs in isolation (no app, no DB, no HTTP), `integration/` drives the Flask
+  app through `test_client`, `e2e/` is the live-engine and Playwright work, and `meta/` holds
+  the structural guards that read the repo's own source, docs and git. `pytest tests/unit` is
+  now a real, fast feedback loop.
+- **The 54 files that mixed categories were split, one file per category.** A file that held
+  both isolated unit tests and app-driven ones became `tests/unit/<name>.py` and
+  `tests/integration/<name>.py`; the classification is by test class (a class stays whole,
+  goes to the home its methods mostly need) so shared setup is never torn apart. Placement was
+  computed, not guessed: an AST pass resolves each test's fixtures and helpers — through
+  `conftest.py` — to decide what it actually touches.
+- **`docs/ref-tests.md` follows the files, and opens by explaining the layout.** A new
+  "Organización de directorios" section documents what each folder requires and where a new
+  test belongs; every `**Archivo:**` entry and inline path names the new location, split
+  entries carry one line per category with its own count, and the inventory guard
+  (`test_docs_tests_inventory.py`) confirms every file on disk is still documented and every
+  documented path still exists.
+- **The prose docs point at the new paths too.** The `caso-*` and `explica-*` guides plus
+  `ref-esquema-bd.md` and `ref-watchful-emit.md` referenced ~20 test files by their old flat path; each now names the
+  real location (a moved file's folder, or the split half that holds the class the prose
+  cites — e.g. `test_wa_ui.py::TestPaneDisplayRules` → `tests/unit/`). The `tests/` directory
+  trees in `explica-arquitectura.md` and `caso-desarrollo.md` now show the four folders instead
+  of a flat list; the co-located module-test trees under `watchfuls/` were left as they were.
+
+### Fixed
+- **Test path anchors no longer break when a file moves a directory deeper.** ~60 files located
+  the source tree with `dirname(dirname(__file__))`, which silently pointed one level short
+  once the file lived in a sub-folder. They now anchor on the `tests/` segment itself
+  (`abspath(__file__).split(os.sep + 'tests' + os.sep)[0]`), so a file reads the same repo
+  paths from any depth — including the aliased-`os` and repo-root variants the first pass missed.
+
 ## [0.0.1+build.39] - 2026-08-02
 
 ### Added
