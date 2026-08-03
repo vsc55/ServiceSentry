@@ -22,7 +22,10 @@ credential listing masks every secret and viewer already reached that endpoint
 through ``servers_view``, so withholding it only hid the tab. Recorded in each
 domain's manifest and in ``docs/ref-permisos.md``; this file used to claim viewer
 held *every* ``*_view``, which reads like a bug the first time you meet it.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_permissions.py`` lives in ``tests/unit/test_wa_permissions.py``."""
 import uuid
 
 import pytest

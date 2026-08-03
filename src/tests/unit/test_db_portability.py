@@ -8,7 +8,6 @@ reserved-word identifiers — so a future bare `key`/`virtual`/`groups`/`user` i
 import contextlib
 import re
 
-import pytest
 
 
 class _RecConn:

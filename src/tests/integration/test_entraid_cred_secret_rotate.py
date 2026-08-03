@@ -15,7 +15,11 @@ Two properties carry the weight:
 * the response says ``rotated``, so the wizard reports a rotation instead of "app created
   and credential filled", which would misdescribe the one operation whose whole point is
   that the app did not change.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_entraid_cred_secret_rotate.py`` lives in
+``tests/unit/test_entraid_cred_secret_rotate.py``."""
 
 import pytest
 
@@ -27,13 +31,6 @@ except ImportError:
 
 from tests.conftest import _login
 
-
-def _partial(*parts) -> str:
-    import io as _io                                            # noqa: PLC0415
-    import os as _os                                            # noqa: PLC0415
-    base = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
-    return _io.open(_os.path.join(base, 'lib', 'web_admin', 'templates', 'partials', *parts),
-                    encoding='utf-8-sig').read()
 
 START = '/api/v1/auth/entraid/cred/secret/device-code'
 POLL = '/api/v1/auth/entraid/cred/secret/device-poll'

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the generic watchful action endpoint: GET|POST /api/v1/modules/watchfuls/<module>/<action>."""
+"""Tests for the generic watchful action endpoint: GET|POST /api/v1/modules/watchfuls/<module>/<action>.
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_watchfuls.py`` lives in ``tests/integration/test_wa_watchfuls.py``."""
 
 import os
 import pathlib
-from unittest.mock import patch
 
 import pytest
 

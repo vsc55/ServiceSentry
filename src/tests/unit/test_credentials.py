@@ -3,11 +3,12 @@
 """Tests for the reusable-credentials feature: the CredentialsStore (CRUD +
 encryption at rest), the apply_credential overlay, cred_uid resolution in
 ModuleBase.resolve_host (inline check and via a host's ssh profile), and the
-/api/v1/credentials API (masking, CRUD)."""
+/api/v1/credentials API (masking, CRUD).
 
-from unittest.mock import patch
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_credentials.py`` lives in ``tests/integration/test_credentials.py``."""
 
-import pytest
+
 
 from conftest import create_mock_monitor
 
@@ -238,16 +239,7 @@ class TestCredentialSchemas:
 
 
 # ── API ──────────────────────────────────────────────────────────────────────
-try:
-    from lib.web_admin import WebAdmin  # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
 
-if _HAS_FLASK:
-    from tests.conftest import _login
-
-_flask = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 _API_CRED = {'name': 'api-cred', 'ctype': 'ssh',
              'data': {'ssh_user': 'root', 'ssh_password': 'p@ss'}}

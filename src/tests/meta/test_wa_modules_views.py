@@ -22,7 +22,11 @@ this file exists to hold, and most of what follows is one form of it:
 The other half is about the things a layout change quietly breaks: the view-only permission,
 the deep-link that auto-expands a freshly added item, and a module whose dependencies are
 missing — which must not be offered an editor whose fields cannot take effect.
-"""
+
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_wa_modules_views.py`` lives in
+``tests/unit/test_wa_modules_views.py``."""
 
 import io
 import os

@@ -3,15 +3,14 @@
 """Unit tests for the central config registry (lib.config.spec) and the small
 schema-aware helpers added around it: cfg_default, cfg_get, cfg_validate,
 normalize_url, frontend_schema, the derived rule dicts, coerce_lang and
-track_change."""
+track_change.
 
-import pytest
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_config_spec.py`` lives in
+``tests/unit/test_config_spec.py``."""
 
-from lib.config.spec import (
-    CONFIG_FIELDS, CFG_BY_PATH,
-    cfg_default, cfg_get, cfg_validate, normalize_url, frontend_schema,
-    int_rules, bool_rules, json_dict_fields, env_field_specs, admin_only_fields,
-)
+
+from lib.config.spec import cfg_validate, normalize_url, frontend_schema, int_rules, json_dict_fields, env_field_specs
 
 
 

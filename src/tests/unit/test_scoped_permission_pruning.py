@@ -14,18 +14,14 @@ Module names are the case worth pinning: a name CAN come back. A stale ``module.
 would silently apply to whatever is called ``ping`` next, so removing a module purges its
 keys rather than keeping them in case it returns. That direction — a grant nobody
 remembers granting — is the one that matters.
-"""
 
-import pytest
 
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_scoped_permission_pruning.py`` lives in
+``tests/integration/test_scoped_permission_pruning.py``."""
+
 
 from lib.core.permissions import service as perms_svc
-from tests.conftest import _login
 
 
 class TestTheRuleItself:

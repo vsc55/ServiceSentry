@@ -22,17 +22,13 @@ credential listing masks every secret and viewer already reached that endpoint
 through ``servers_view``, so withholding it only hid the tab. Recorded in each
 domain's manifest and in ``docs/ref-permisos.md``; this file used to claim viewer
 held *every* ``*_view``, which reads like a bug the first time you meet it.
-"""
-import uuid
 
-import pytest
-from werkzeug.security import generate_password_hash
 
-from tests.conftest import _HAS_FLASK, _login
-from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
-from lib.core.constants import BUILTIN_ROLE_UIDS
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_permissions.py`` lives in ``tests/integration/test_wa_permissions.py``."""
 
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
+
+
 
 ROLES = ("admin", "editor", "viewer", "none")
 
@@ -88,52 +84,6 @@ ENDPOINTS = [
     ("PUT",    "/api/v1/hosts/__HOST__",     frozenset({"servers_edit"}), {"name": "permtest_h2"}),
     ("DELETE", "/api/v1/hosts/_nouid_",      frozenset({"servers_delete"}), None),
 ]
-
-
-def _id(ep):
-    return f"{ep[0]}:{ep[1]}"
-
-
-@pytest.fixture()
-def role_clients(admin):
-    """Return ``{role: logged-in test client}`` for every built-in role.
-
-    The default ``admin`` user already exists (admin/secret); the editor/viewer/
-    none users are created in-memory and persisted to the DB store.
-    """
-    _hash = generate_password_hash("secret", method="pbkdf2:sha256")  # fast for tests
-    for role in ("editor", "viewer", "none"):
-        admin._users[role] = {
-            "uid": str(uuid.uuid4()),
-            "password_hash": _hash,
-            "role": BUILTIN_ROLE_UIDS[role],
-            "display_name": role,
-        }
-    admin._persist_users()
-    clients = {}
-    for role in ROLES:
-        c = admin.app.test_client()
-        _login(c, "admin" if role == "admin" else role, "secret")
-        clients[role] = c
-    return clients
-
-
-@pytest.fixture()
-def host_uid(admin):
-    """Create a host so endpoints that resolve a host before checking the
-    permission (PUT /hosts/<uid>) actually reach the gate."""
-    return admin._hosts_store.create(
-        {"name": "permtest_seed", "address": "10.0.0.1", "kind": "remote"},
-        actor="admin",
-    )
-
-
-def _request(client, method, path, body, host_uid):
-    return client.open(path.replace("__HOST__", host_uid), method=method, json=body)
-
-
-
-
 
 
 def test_matrix_covers_all_crud_actions():

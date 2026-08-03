@@ -5,16 +5,25 @@
 Binding is fail-soft per interface but fail-hard overall: partial failures keep
 serving on the reachable addresses, a total failure aborts the process instead
 of faking a started server.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_server.py`` lives in ``tests/unit/test_wa_server.py``."""
 
 import os
 import socket
-import sys
 
 import pytest
 
-from lib.web_admin import WebAdmin
-from lib.system.windows import parse_excluded_ranges, port_excluded
+# Tests de integración: sin Flask no pueden correr. Con guarda saltan limpio (como el resto de
+# integration/); sin ella tumbaban la colección entera de la suite.
+try:
+    from lib.web_admin import WebAdmin
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 # Sample `netsh interface ipv4 show excludedportrange protocol=tcp` output
 # (Spanish locale, with headers, dashes and a managed-exclusion '*' marker).

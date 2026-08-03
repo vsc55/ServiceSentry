@@ -23,9 +23,11 @@ could tell which was which, so they are one file with the origin of each half na
     D — a non-admin with users_add cannot create an admin account (create lacked the guard
         that update already had).
     L — parse_manual_ban rejects a negative duration (it became a silent permanent ban).
-"""
 
-import os
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_security_regressions.py`` lives in ``tests/unit/test_security_regressions.py``."""
+
 
 import pytest
 from werkzeug.security import generate_password_hash

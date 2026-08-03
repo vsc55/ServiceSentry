@@ -24,25 +24,18 @@ Two separate defects lined up to produce it:
 So the guards come in pairs. The endpoint must survive a duplicate uid whatever put it there —
 an imported config or a hand-edited file can still carry one — and the UI must stop
 manufacturing them.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_modules_clone.py`` lives in ``tests/integration/test_wa_modules_clone.py``."""
 
 import io
-import json
 import os
-import re
+from tests.helpers import _fn
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 FIELD_OPS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
                          'actions', '_field_ops.html')
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
-
-
 
 
 class TestTheUiStopsManufacturingDuplicates:

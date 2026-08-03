@@ -17,22 +17,23 @@ measurements are a fraction worth drawing and hands the numbers over already div
 core divides nothing and knows no metric names. What the core decides is where it goes and
 what colour it is — and the colour comes from the entry's own state, so a card the module
 called a warning cannot carry a green ring.
-"""
+
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_overview_module_widget_instances.py`` lives in
+``tests/unit/test_overview_module_widget_instances.py``."""
 
 import io
 import json
 import os
 import re
 import sys
+from tests.helpers import _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 OV = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'overview')
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
 
 
 def _schema(mod: str) -> dict:

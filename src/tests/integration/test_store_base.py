@@ -20,11 +20,12 @@ Two of these tests exist because of real failures rather than tidiness:
 * two timestamp formats coexisted (``…Z`` in the stores, ``…+00:00`` from ``touch_entity``)
   and for the same second the second sorts *below* the first, so ordering by the stored
   string stopped being ordering by time exactly when two writers met.
-"""
 
-import io
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_store_base.py`` lives in ``tests/unit/test_store_base.py``."""
+
 import os
-import re
 
 import pytest
 
@@ -34,22 +35,11 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from lib.db.store_base import BaseStore, EncryptedPayloadMixin
-from lib.util.entity_audit import touch_entity, utc_now_iso
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE_STORES = [
     'audit', 'credentials', 'groups', 'history', 'hosts', 'roles', 'sessions', 'users',
 ]
-
-
-def _store_src(domain):
-    return io.open(os.path.join(SRC, 'lib', 'core', domain, 'store.py'),
-                   encoding='utf-8-sig').read()
-
-
-
-
 
 
 @pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')

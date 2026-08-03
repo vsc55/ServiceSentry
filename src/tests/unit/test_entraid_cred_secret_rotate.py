@@ -15,17 +15,13 @@ Two properties carry the weight:
 * the response says ``rotated``, so the wizard reports a rotation instead of "app created
   and credential filled", which would misdescribe the one operation whose whole point is
   that the app did not change.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_entraid_cred_secret_rotate.py`` lives in
+``tests/integration/test_entraid_cred_secret_rotate.py``."""
 
 import pytest
-
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from tests.conftest import _login
 
 
 def _partial(*parts) -> str:
@@ -96,8 +92,6 @@ class TestTheModulesOfferIt:
         assert act['label_i18n'].get('en_EN') and act['label_i18n'].get('es_ES')
 
 
-
-
 class TestAFreshSecretIsNotUsableYet:
     """Rotating and immediately checking the app answered ``AADSTS7000215`` — the code
     Entra uses for a WRONG secret, returned here for a perfectly correct one that has not
@@ -146,6 +140,5 @@ class TestAFreshSecretIsNotUsableYet:
         with pytest.raises(RuntimeError):
             auth.app_token_retrying('t', 'c', 's', attempts=2, delay=0)
         assert len(calls) == 2
-
 
 

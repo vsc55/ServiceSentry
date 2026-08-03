@@ -2,23 +2,16 @@
 # -*- coding: utf-8 -*-
 """Tests for the Microsoft Teams notification module (msteams): card builders,
 channel sender, channel CRUD + test routes, user-delivery test, routing matrix,
-and the Bot Framework inbound endpoint gating."""
+and the Bot Framework inbound endpoint gating.
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_msteams.py`` lives in ``tests/integration/test_wa_msteams.py``."""
 
 import unittest.mock
 
 import pytest
 
-try:
-    from lib.web_admin import WebAdmin  # noqa: F401
-    from lib.core.notify.msteams import notify as ms_notify, cards, bot_inbound
-    from lib.core.notify.msteams import channel as msteams_channel
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from tests.conftest import _login
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
+from lib.core.notify.msteams import notify as ms_notify, cards, bot_inbound
 
 
 # ──────────────────────────── card builders ────────────────────────────────

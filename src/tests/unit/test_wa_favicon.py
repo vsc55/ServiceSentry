@@ -15,22 +15,18 @@ Two properties are worth pinning beyond "the file is there":
 * **the binary has a source.** ``tools/make_favicon.py`` renders it from the shape, so the
   committed ``.ico`` is reproducible rather than an artefact nobody can regenerate or change.
   The check below re-runs the generator and compares bytes.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_favicon.py`` lives in ``tests/integration/test_wa_favicon.py``."""
 
 import io
 import os
 import sys
 
-import pytest
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 IMG = os.path.join(SRC, 'lib', 'web_admin', 'static', 'img')
-
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
 
 
 class TestTheFilesExist:

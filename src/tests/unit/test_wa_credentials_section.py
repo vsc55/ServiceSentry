@@ -24,9 +24,9 @@ tests. What they defend is that the section exists at the top level, that nothin
 points at the retired sub-tab, and that its permission gate did not come along for the ride.
 """
 
-import io
 import os
 import re
+from tests.helpers import _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
@@ -37,10 +37,6 @@ SRV_PANE = os.path.join(TPL, 'partials', 'servers', '_pane.html')
 FEATURES = os.path.join(TPL, 'partials', 'init', '_table_features.html')
 WIRING = os.path.join(TPL, 'partials', 'init', '_wiring.html')
 MANIFEST = os.path.join(SRC, 'lib', 'core', 'credentials', 'manifest.py')
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
 
 
 def _strip_comments(src: str) -> str:

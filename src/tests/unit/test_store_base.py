@@ -20,7 +20,10 @@ Two of these tests exist because of real failures rather than tidiness:
 * two timestamp formats coexisted (``…Z`` in the stores, ``…+00:00`` from ``touch_entity``)
   and for the same second the second sorts *below* the first, so ordering by the stored
   string stopped being ordering by time exactly when two writers met.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_store_base.py`` lives in ``tests/integration/test_store_base.py``."""
 
 import io
 import os
@@ -28,11 +31,6 @@ import re
 
 import pytest
 
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
 
 from lib.db.store_base import BaseStore, EncryptedPayloadMixin
 from lib.util.entity_audit import touch_entity, utc_now_iso

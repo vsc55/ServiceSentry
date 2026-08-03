@@ -8,7 +8,10 @@ down nowhere. Moving a block while tidying the file would have changed who guard
 nothing would have said so: every test still passes when the fail2ban gate runs third.
 
 These guards make the order a thing you have to mean to change.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_request_hooks.py`` lives in ``tests/meta/test_wa_request_hooks.py``."""
 
 import os
 import sys
@@ -19,7 +22,17 @@ SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from lib.web_admin.app import WebAdmin  # noqa: E402
+# Los 5 tests leen `WebAdmin._BEFORE_REQUEST`, así que necesitan la clase — y eso arrastra
+# Flask. Sin guarda, una instalación sin panel web se caía al colectar en vez de saltarlos.
+try:
+    from lib.web_admin.app import WebAdmin  # noqa: E402
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 
 EXPECTED = (

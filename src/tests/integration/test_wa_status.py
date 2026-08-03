@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the /status public status page and language priority logic."""
+"""Tests for the /status public status page and language priority logic.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_status.py`` lives in ``tests/unit/test_wa_status.py``."""
 
 import os
 

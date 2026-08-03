@@ -12,25 +12,10 @@ Deliberately asserted at the rendered-page level: the JS is concatenated into th
 (from web_admin partials today, from ``<provider>/web/*_ui.html`` after the move), so this
 survives the relocation and checks the thing that actually matters — that the section still
 gets a working fetch/pick/lookup wiring.
-"""
-
-import pytest
-
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from tests.conftest import _login
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
-def _admin_html(client) -> bytes:
-    _login(client)
-    return client.get('/admin').data
-
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_group_sources.py`` lives in ``tests/integration/test_wa_group_sources.py``."""
 
 
 

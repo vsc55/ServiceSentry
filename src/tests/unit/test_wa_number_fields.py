@@ -14,27 +14,19 @@ placeholder it did nothing at all.
 
 That is the failure mode worth a guard: not a wrong pixel, but schema vocabulary that looks
 meaningful and is inert.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_number_fields.py`` lives in ``tests/meta/test_wa_number_fields.py``."""
 
 import io
 import json
 import os
-import re
+from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
                       '_field_render.html')
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 def _schemas():

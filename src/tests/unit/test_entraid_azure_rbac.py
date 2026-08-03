@@ -9,7 +9,11 @@ exists — sign in once for Graph, redeem the same consent for ARM via the refre
 then assign the role to the app's service principal.
 
 These tests pin the contract without touching Microsoft: the HTTP calls are patched.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_entraid_azure_rbac.py`` lives in
+``tests/integration/test_entraid_azure_rbac.py``."""
 
 from unittest.mock import patch
 

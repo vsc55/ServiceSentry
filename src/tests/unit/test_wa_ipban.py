@@ -1,22 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Internal fail2ban: IpBanManager unit tests + WebAdmin/store integration."""
+"""Internal fail2ban: IpBanManager unit tests + WebAdmin/store integration.
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_ipban.py`` lives in ``tests/integration/test_wa_ipban.py``."""
 
 import time
 
 from lib.services.ipban.jail import IpBanManager
-from tests.conftest import _login
-
-
-def _mgr_on(store, **cfg):
-    m = IpBanManager(store=store)
-    base = dict(enabled=True, auth_threshold=5, auth_window=600,
-                authz_threshold=30, authz_window=600, durations=[900])
-    base.update(cfg)
-    m.configure(**base)
-    return m
-
-
 
 
 # ──────────────────────────────────────────────────────────────────────────────

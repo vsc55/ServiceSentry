@@ -16,7 +16,11 @@ appeared in notifications under two different names depending on how it failed â
 example.com" normally, "ns1" when it raised.
 
 Mechanical on purpose: an argument is either there or it is not.
-"""
+
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_watchful_emit_patterns.py`` lives in
+``tests/unit/test_watchful_emit_patterns.py``."""
 
 import ast
 import io

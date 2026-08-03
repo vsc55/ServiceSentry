@@ -17,7 +17,10 @@ They also pin the two invariants that make the layout work rather than merely lo
 * "what counts as a permission" must have exactly one definition. It had two, written out
   identically, so a new kind of per-instance key would have had to be remembered in both —
   and the half that was forgotten would silently DROP those keys rather than fail.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_core_domain_layout.py`` lives in ``tests/meta/test_core_domain_layout.py``."""
 
 import io
 import os

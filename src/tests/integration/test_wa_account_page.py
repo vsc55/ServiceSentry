@@ -9,7 +9,7 @@ Dark mode is NOT here — it is the quick toggle in the user menu. The old
 ``accountSettingsModal`` is gone everywhere.
 """
 
-from tests.integration.test_wa_standalone_pages import _login
+from tests.conftest import _login
 
 
 class TestRoute:

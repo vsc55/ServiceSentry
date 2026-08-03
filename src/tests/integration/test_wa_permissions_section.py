@@ -18,11 +18,13 @@ A section whose partial is not included renders an empty pane with no error anyw
 This is the ONLY place permissions are assigned: the role modal's Permissions tab is
 gone, and the modal must not send the field any more — two editors over one field is how
 one screen silently undoes what the other saved.
-"""
 
-import io
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_permissions_section.py`` lives in ``tests/unit/test_wa_permissions_section.py``,
+``tests/meta/test_wa_permissions_section.py``."""
+
 import os
-import re
 
 import pytest
 
@@ -36,11 +38,6 @@ from tests.conftest import _login
 
 REPO = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 PARTIALS = os.path.join(REPO, 'lib', 'web_admin', 'templates', 'partials')
-
-
-def _read(*parts) -> str:
-    # utf-8-sig: some templates carry a BOM, and a stray ﻿ would break a literal match.
-    return io.open(os.path.join(PARTIALS, *parts), encoding='utf-8-sig').read()
 
 
 # ────────────────────────── The API contract ───────────────────────

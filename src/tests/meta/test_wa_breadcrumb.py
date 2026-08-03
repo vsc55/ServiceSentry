@@ -20,18 +20,14 @@ the panel's UI tests: what is pinned is that the group is read from whichever gr
 contains the active item, and that a section outside every group gets no prefix.
 """
 
-import io
 import os
 import re
+from tests.helpers import _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
 WIRING = os.path.join(TPL, 'partials', 'init', '_sidebar.html')
 MARKUP = os.path.join(TPL, 'partials', '_sidebar.html')
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
 
 
 def _fn(src: str, name: str) -> str:

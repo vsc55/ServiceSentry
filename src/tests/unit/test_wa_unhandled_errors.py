@@ -21,46 +21,21 @@ The fix is one reference code appearing in three places at once — the log line
 entry, and the message on screen — so a user can read a short code off a toast and somebody
 else can find the endpoint and the exception. What the response must NOT carry is the
 traceback: an error page is not where internals get published to whoever can reach the URL.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_unhandled_errors.py`` lives in
+``tests/integration/test_wa_unhandled_errors.py``."""
 
 import io
 import os
 import re
 
-import pytest
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 API = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_api.html')
 
 _REF = re.compile(r'ref: ([0-9a-f]{8})')
-
-
-@pytest.fixture
-def crashing(admin, client):
-    """Register a route that raises, with propagation off — production's setting.
-
-    Under pytest Flask propagates exceptions (TESTING), which the handler reproduces
-    deliberately so a crash in the suite still shows its traceback. Turning it off here is
-    what lets this test see the response a browser would get.
-    """
-    app = client.application
-    prev = app.config.get('PROPAGATE_EXCEPTIONS')
-    app.config['PROPAGATE_EXCEPTIONS'] = False
-
-    @app.route('/api/v1/__boom__', methods=['GET'])
-    def _boom():                                       # noqa: ANN202
-        raise RuntimeError('the thing that went wrong')
-
-    yield client
-    app.config['PROPAGATE_EXCEPTIONS'] = prev
-
-
-
-
-
-
-
-
 
 
 class TestTheClientStopsDiscardingTheAnswer:

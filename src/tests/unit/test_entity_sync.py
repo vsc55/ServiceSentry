@@ -14,19 +14,14 @@ to somebody else.
 
 The scenarios below are two stores over one database, which is exactly what a second
 replica — or the CLI next to a running panel — is.
-"""
 
-import pytest
 
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_entity_sync.py`` lives in ``tests/integration/test_entity_sync.py``."""
+
+
 
 from lib.core.entity_sync import diff_entities, snapshot
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 
 class TestTheDiff:

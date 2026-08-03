@@ -1,96 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for SAML2 SSO authentication integration."""
+"""Tests for SAML2 SSO authentication integration.
 
-import json
-from unittest.mock import MagicMock, patch
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_providers_saml.py`` lives in ``tests/integration/test_providers_saml.py``."""
 
-import pytest
 
-try:
-    from lib.web_admin import WebAdmin
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _saml2_cfg(config_dir, extra=None):
-    import os
-    cfg_path = os.path.join(config_dir, 'config.json')
-    try:
-        with open(cfg_path, encoding='utf-8') as f:
-            cfg = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        cfg = {}
-    cfg['saml2'] = {
-        'enabled': True,
-        'idp_entity_id': 'https://idp.example.com',
-        'idp_sso_url': 'https://idp.example.com/saml2/sso',
-        'idp_cert': 'MIIC...',
-        'sp_entity_id': 'https://myapp.example.com',
-        'sp_acs_url': 'https://myapp.example.com/auth/saml2/acs',
-        'sp_cert': '',
-        'sp_key': '',
-        'username_attr': 'uid',
-        'email_attr': 'email',
-        'name_attr': 'displayName',
-        'groups_attr': 'groups',
-        'group_role_map': '{"Admins": "admin"}',
-        'auto_create_users': True,
-        **(extra or {}),
-    }
-    with open(cfg_path, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f)
-
-
-def _make_saml_attrs(uid='jane', email='jane@example.com',
-                     display_name='Jane SAML', groups=None):
-    """Return a SAML attribute dict as onelogin-python-saml would produce."""
-    return {
-        'uid':          [uid],
-        'email':        [email],
-        'displayName':  [display_name],
-        'groups':       groups or [],
-    }
-
-
-def _mock_auth(name_id='jane', attrs=None, errors=None, authenticated=True):
-    """Return a pre-configured mock for OneLogin_Saml2_Auth."""
-    m = MagicMock()
-    m.get_errors.return_value = errors or []
-    m.is_authenticated.return_value = authenticated
-    m.get_nameid.return_value = name_id
-    m.get_attributes.return_value = attrs if attrs is not None else _make_saml_attrs(name_id)
-    m.login.return_value = 'https://idp.example.com/saml2/sso?SAMLRequest=abc'
-    # Replay/InResponseTo plumbing (must be JSON-serialisable for the session).
-    m.get_last_request_id.return_value = 'req-id-123'
-    m.get_last_assertion_id.return_value = None      # None → skip the one-time cache
-    return m
-
-
 # ── Fixture ───────────────────────────────────────────────────────────────────
-
-@pytest.fixture()
-def saml2_admin_client(config_dir, var_dir):
-    """WebAdmin + test client with SAML2 routes registered (python3-saml mocked)."""
-    import lib.providers.saml.auth as saml_mod
-
-    with patch.object(saml_mod, '_HAS_SAML2', True):
-        wa = WebAdmin(config_dir, 'admin', 'secret', var_dir,
-                      pw_require_upper=False, pw_require_digit=False)
-        wa.app.config['TESTING'] = True
-        client = wa.app.test_client()
-        # Simulate a prior SP-initiated /auth/saml2/login: the ACS now requires a
-        # session-bound request id (rejects unsolicited responses). Consumed (pop) per
-        # ACS request; the unsolicited-rejection test clears it explicitly.
-        with client.session_transaction() as _s:
-            _s['_saml_req_id'] = 'req-id-123'
-        yield wa, client
-
 
 # ── is_available ──────────────────────────────────────────────────────────────
 
@@ -131,8 +51,6 @@ class TestSaml2MapRole:
 # ── sync_user ─────────────────────────────────────────────────────────────────
 
 
-
 # ── Login integration ─────────────────────────────────────────────────────────
-
 
 

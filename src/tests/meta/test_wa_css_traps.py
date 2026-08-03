@@ -34,9 +34,9 @@ The checks are deliberately narrow and mechanical — the vocabulary that is ban
 class that replaced it — not "does this look right", which no test can answer.
 """
 
-import io
 import os
 import re
+from tests.helpers import _read
 
 TPL = os.path.join(os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0],
                    'lib', 'web_admin', 'templates')
@@ -60,10 +60,6 @@ def _templates():
         for f in files:
             if f.endswith('.html'):
                 yield os.path.join(root, f)
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
 
 
 def _code(path: str) -> str:

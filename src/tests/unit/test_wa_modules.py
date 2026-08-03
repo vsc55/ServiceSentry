@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for module routes: /api/modules, /api/status, /api/overview."""
+"""Tests for module routes: /api/modules, /api/status, /api/overview.
 
-import os
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_modules.py`` lives in ``tests/integration/test_wa_modules.py``."""
+
 
 import pytest
 
@@ -15,7 +17,7 @@ except ImportError:
 from lib.modules import ModuleBase
 from watchfuls.web import Watchful as WebWatchful
 
-from tests.conftest import _login, _SAMPLE_MODULES
+from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 

@@ -10,7 +10,6 @@ dir) so nothing here depends on any real watchful.
 """
 
 import json
-import os
 
 import pytest
 

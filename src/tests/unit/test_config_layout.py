@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""The config UI layout (lib.config.layout) must stay coherent with the registry."""
+"""The config UI layout (lib.config.layout) must stay coherent with the registry.
 
-import pytest
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_config_layout.py`` lives in ``tests/integration/test_config_layout.py``."""
+
 
 from lib.config.layout import config_layout, TABS, CARDS
-
-try:
-    from lib.web_admin import WebAdmin  # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
 
 
 class TestLayoutCoherence:

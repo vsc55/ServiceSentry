@@ -23,9 +23,9 @@ channel vocabulary, the delivery verdict, and the action buttons — `events_*` 
 control in exactly one place.
 """
 
-import io
 import os
 import re
+from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
@@ -36,23 +36,6 @@ MODAL = os.path.join(EV, '_modal.html')
 V_RULES = os.path.join(EV, '_views_rules.html')
 V_LOG = os.path.join(EV, '_views_log.html')
 UTILS = os.path.join(TPL, 'partials', 'core', '_utils.html')
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
-def _strip_comments(js: str) -> str:
-    js = re.sub(r'\{#.*?#\}', '', js, flags=re.S)
-    js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
-    return re.sub(r'^\s*//.*$', '', js, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 def _registry(src: str, name: str) -> str:

@@ -17,9 +17,9 @@ view. A view that assembled its own buttons would be a view free to offer Stop t
 may not press it, and that is not a styling bug.
 """
 
-import io
 import os
 import re
+from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 SVC = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'services')
@@ -32,23 +32,12 @@ VIEW_FILES = {
 }
 
 
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
 def _strip_comments(js: str) -> str:
     """Code only. A guard that reads the prose trips over the comment explaining the rule it
     is checking, and every file here carries one."""
     js = re.sub(r'\{#.*?#\}', '', js, flags=re.S)
     js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
     return re.sub(r'^\s*//.*$', '', js, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 class TestTheScanItself:

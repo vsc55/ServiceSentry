@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for server-side session registry and management."""
+"""Tests for server-side session registry and management.
 
-import uuid
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_sessions.py`` lives in ``tests/integration/test_wa_sessions.py``."""
+
 
 import pytest
 
+# Estos tests importan Flask dentro de los casos (registro de sesiones del panel), asi que
+# siguen dependiendo de el aunque vivan en unit/.
 try:
-    from lib.web_admin import WebAdmin
+    from lib.web_admin import WebAdmin  # noqa: F401
     _HAS_FLASK = True
 except ImportError:
     _HAS_FLASK = False
 
-from werkzeug.security import generate_password_hash
-
-from tests.conftest import _login
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 
 # ──────────────────────────── Session registry ─────────────────────
-
 
 
 class TestAnUnwritableSecretKeyIsNotSilent:

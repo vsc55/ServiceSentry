@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the permissions system, custom roles and granular permission enforcement."""
+"""Tests for the permissions system, custom roles and granular permission enforcement.
 
-import json
-import os
-import unittest.mock
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_roles.py`` lives in ``tests/integration/test_wa_roles.py``."""
+
 
 import pytest
 
@@ -276,21 +276,6 @@ class TestPermissionsConstants:
 
 
 # ─────────────────────── Helpers for UID-based role API ───────────────
-
-def _role_uid_in(roles_data: dict, key_or_name: str) -> str | None:
-    """Return the UID for a role identified by builtin key or display name."""
-    for uid, rd in roles_data.items():
-        if rd.get('key') == key_or_name or rd.get('name') == key_or_name:
-            return uid
-    return None
-
-def _create_role_uid(client, name: str, permissions=None, **kwargs) -> str | None:
-    """POST a new role and return its UID (or None on failure)."""
-    resp = client.post("/api/v1/roles", json={"name": name, "permissions": permissions or [], **kwargs})
-    if resp.status_code == 201:
-        return resp.get_json().get("uid")
-    return None
-
 
 # ──────────────────────────── Custom roles ─────────────────────────
 

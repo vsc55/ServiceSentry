@@ -14,7 +14,10 @@ to somebody else.
 
 The scenarios below are two stores over one database, which is exactly what a second
 replica — or the CLI next to a running panel — is.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_entity_sync.py`` lives in ``tests/unit/test_entity_sync.py``."""
 
 import pytest
 
@@ -24,7 +27,7 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from lib.core.entity_sync import diff_entities, snapshot
+from lib.core.entity_sync import diff_entities
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 

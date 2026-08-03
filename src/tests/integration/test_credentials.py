@@ -3,39 +3,19 @@
 """Tests for the reusable-credentials feature: the CredentialsStore (CRUD +
 encryption at rest), the apply_credential overlay, cred_uid resolution in
 ModuleBase.resolve_host (inline check and via a host's ssh profile), and the
-/api/v1/credentials API (masking, CRUD)."""
+/api/v1/credentials API (masking, CRUD).
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_credentials.py`` lives in ``tests/unit/test_credentials.py``."""
 
 from unittest.mock import patch
 
 import pytest
 
-from conftest import create_mock_monitor
 
-from lib.db import get_connector
-from lib.core.credentials.store import CredentialsStore, apply_credential
-from lib.modules.discovery.credential_schemas import credential_schemas, credential_secret_fields
 
-import watchfuls.process as process
 
 _SECRET_KEYS = frozenset({'ssh_password', 'ssh_key_string', 'password', 'token'})
-
-
-def _fernet():
-    from cryptography.fernet import Fernet
-    return Fernet(Fernet.generate_key())
-
-
-def _store(fernet=None):
-    db = get_connector(None, default_sqlite_path=':memory:')
-    return CredentialsStore(db, fernet=fernet, secret_keys=_SECRET_KEYS), db
-
-
-def _cred(name='deploy'):
-    return {
-        'name': name, 'ctype': 'ssh', 'description': 'shared deploy key',
-        'data': {'ssh_user': 'deploy', 'ssh_auth_method': 'password',
-                 'ssh_password': 's3cr3t'},
-    }
 
 
 # ── Store ──────────────────────────────────────────────────────────────────

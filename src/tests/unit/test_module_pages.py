@@ -6,7 +6,10 @@ A watchful may claim a section of its own beside Overview / History / Syslog. Th
 must stay module-agnostic: it reads generic keys, merges them into the page registry and
 renders a pane + a sidebar entry; the module supplies the label, the data hook and (if it
 wants) the renderer. These tests pin that contract.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_module_pages.py`` lives in ``tests/integration/test_module_pages.py``."""
 
 import pytest
 
@@ -18,7 +21,6 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from tests.conftest import _login
 
 
 class TestNormalize:

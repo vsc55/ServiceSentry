@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""The config UI layout (lib.config.layout) must stay coherent with the registry."""
+"""The config UI layout (lib.config.layout) must stay coherent with the registry.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_config_layout.py`` lives in ``tests/unit/test_config_layout.py``."""
 
 import pytest
 
-from lib.config.layout import config_layout, TABS, CARDS
 
 try:
     from lib.web_admin import WebAdmin  # noqa: F401

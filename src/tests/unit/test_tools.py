@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests para lib/util/tools.py — bytes2human, fmt_bytes/to_bytes y la regla de que hay
-UN solo formateador de tamaños en el proyecto."""
+UN solo formateador de tamaños en el proyecto.
 
-import glob
-import io
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_tools.py`` lives in ``tests/meta/test_tools.py``."""
+
 import os
 
 from lib.util.tools import bytes2human

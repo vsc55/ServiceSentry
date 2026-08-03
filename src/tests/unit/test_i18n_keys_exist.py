@@ -12,11 +12,11 @@ Two deliberate exclusions, both structural rather than convenience:
 * **Dynamic prefixes** — keys built by concatenation (``t('svc_' + key)``) are captured by
   the regex as a bare prefix ending in ``_``; the real key only exists at runtime, so
   there is nothing static to verify.
-"""
 
-import glob
-import io
-import os
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_i18n_keys_exist.py`` lives in ``tests/meta/test_i18n_keys_exist.py``."""
+
 import re
 
 import pytest
@@ -31,11 +31,6 @@ _PY_KEY = re.compile(
 _JS_KEY = re.compile(r"""\bt[f]?\(\s*['"]([a-z][a-z0-9_]{2,})['"]""")
 
 _EXCLUDED_FILES = ()      # (was: overview2.html, an Alpine proof-of-concept now removed)
-
-
-def _src_root() -> str:
-    """The ``src`` directory (this file lives in ``src/tests``)."""
-    return os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 
 
 def _flat(d: dict, prefix: str = '') -> dict:
@@ -58,28 +53,6 @@ def _known_keys(lang_mod) -> set:
     return set(flat) | {k.split('.')[-1] for k in flat}
 
 
-def _referenced_keys() -> dict:
-    """``{key: [files]}`` for every statically-resolvable key referenced in the tree."""
-    root = _src_root()
-    found: dict = {}
-    targets = [(p, _PY_KEY) for p in glob.glob(f'{root}/lib/**/*.py', recursive=True)]
-    targets += [(p, _PY_KEY) for p in glob.glob(f'{root}/watchfuls/**/*.py', recursive=True)]
-    targets += [(p, _JS_KEY) for p in glob.glob(f'{root}/lib/**/*.html', recursive=True)]
-    targets += [(p, _JS_KEY) for p in glob.glob(f'{root}/watchfuls/**/*.html', recursive=True)]
-    for path, pat in targets:
-        if '.venv' in path or os.path.basename(path) in _EXCLUDED_FILES:
-            continue
-        text = io.open(path, encoding='utf-8', errors='replace').read()
-        for m in pat.finditer(text):
-            key = m.group(1)
-            if key.endswith('_'):
-                continue                     # dynamic prefix (t('svc_' + x)) — not static
-            found.setdefault(key, []).append(os.path.relpath(path, root))
-    return found
-
-
-
-
 def test_language_files_are_in_parity():
     """en_EN and es_ES must define exactly the same keys."""
     en, es = set(_flat(en_EN.LANG)), set(_flat(es_ES.LANG))
@@ -91,32 +64,6 @@ def test_the_regression_that_motivated_this():
     """``insufficient_permissions`` is returned by 6 route modules on 403."""
     for mod in (en_EN, es_ES):
         assert 'insufficient_permissions' in _known_keys(mod)
-
-
-
-
-def _duplicate_keys(path):
-    """Keys assigned twice inside the same dict literal → [(key, first_line, second_line,
-    same_value)]. Python keeps the LAST one silently, so the first is dead."""
-    import ast
-    tree = ast.parse(io.open(path, encoding='utf-8-sig').read())
-    out = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Dict):
-            continue
-        seen = {}
-        for k, v in zip(node.keys, node.values):
-            if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
-                continue
-            try:
-                val = ast.literal_eval(v)
-            except Exception:                      # noqa: BLE001  (non-literal value)
-                val = object()
-            if k.value in seen:
-                prev_line, prev_val = seen[k.value]
-                out.append((k.value, prev_line, k.lineno, prev_val == val))
-            seen[k.value] = (k.lineno, val)
-    return out
 
 
 

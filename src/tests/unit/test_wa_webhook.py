@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the Webhook notification module and webhook API routes."""
+"""Tests for the Webhook notification module and webhook API routes.
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_webhook.py`` lives in ``tests/integration/test_wa_webhook.py``."""
 
 import hashlib
 import hmac
 import json
 import unittest.mock
 
-import pytest
 
-try:
-    from lib.web_admin import WebAdmin
-    from lib.core.notify.webhook import notify as webhook_notify
-    from lib.core.notify.webhook import channel as webhook_channel
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
+from lib.core.notify.webhook import notify as webhook_notify
 
-from tests.conftest import _login
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 _ENABLED_CFG = {
     'enabled': True,
@@ -172,7 +165,6 @@ class TestWebhookDispatch:
 
 
 # ──────────────────── /api/v1/notify/webhook/test endpoint ─────────────────
-
 
 
 # ──────────────────────── Webhook CRUD routes ──────────────────────────────

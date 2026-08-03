@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the Webhook notification module and webhook API routes."""
+"""Tests for the Webhook notification module and webhook API routes.
 
-import hashlib
-import hmac
-import json
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_webhook.py`` lives in ``tests/unit/test_wa_webhook.py``."""
+
 import unittest.mock
 
 import pytest

@@ -8,20 +8,14 @@ Covers:
   - GET /api/v1/notify/templates
   - PUT /api/v1/notify/templates/<lang>
   - DELETE /api/v1/notify/templates/<lang>
-"""
 
-import pytest
 
-try:
-    from lib.core.notify.email import templates as email_templates
-    from lib.web_admin import WebAdmin
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_notif_templates.py`` lives in
+``tests/integration/test_wa_notif_templates.py``."""
 
-from tests.conftest import _login
 
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
+from lib.core.notify.email import templates as email_templates
 
 
 # ────────────────────── email_templates unit tests ──────────────────────────
@@ -103,11 +97,7 @@ class TestRenderWithStrings:
 # ──────────────────── API integration tests ─────────────────────────────────
 
 
-
-
-
 # ──────────────────── Preview API tests ─────────────────────────────────────
-
 
 
 # ──────────────── Test email applies saved customisations ───────────────────

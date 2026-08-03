@@ -8,7 +8,10 @@ Covers:
   - GET /api/v1/notify/templates
   - PUT /api/v1/notify/templates/<lang>
   - DELETE /api/v1/notify/templates/<lang>
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_notif_templates.py`` lives in ``tests/unit/test_wa_notif_templates.py``."""
 
 import pytest
 

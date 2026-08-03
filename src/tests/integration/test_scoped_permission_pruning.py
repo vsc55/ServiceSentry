@@ -14,7 +14,11 @@ Module names are the case worth pinning: a name CAN come back. A stale ``module.
 would silently apply to whatever is called ``ping`` next, so removing a module purges its
 keys rather than keeping them in case it returns. That direction — a grant nobody
 remembers granting — is the one that matters.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_scoped_permission_pruning.py`` lives in
+``tests/unit/test_scoped_permission_pruning.py``."""
 
 import pytest
 

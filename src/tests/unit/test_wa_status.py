@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the /status public status page and language priority logic."""
+"""Tests for the /status public status page and language priority logic.
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_status.py`` lives in ``tests/integration/test_wa_status.py``."""
 
 import os
 
@@ -13,7 +16,6 @@ except ImportError:
     _HAS_FLASK = False
 
 
-from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask not available")
 
@@ -27,28 +29,6 @@ _ADMIN_PASS = "secret"
 _WATCHFULS_DIR = os.path.join(
     os.path.dirname(__file__), '..', 'watchfuls'
 )
-
-
-def _make_wa(config_dir, var_dir, *,
-             public_status: bool = True,
-             default_lang: str = 'en_EN',
-             status_lang: str = '',
-             modules_dir: str | None = None):
-    """Create a WebAdmin instance with custom lang / status settings."""
-    wa = WebAdmin(
-        config_dir,
-        "admin",
-        _ADMIN_PASS,
-        var_dir,
-        public_status=public_status,
-        default_lang=default_lang,
-        status_lang=status_lang,
-        modules_dir=modules_dir,
-        pw_require_upper=False,
-        pw_require_digit=False,
-    )
-    wa.app.config["TESTING"] = True
-    return wa
 
 
 # ---------------------------------------------------------------------------

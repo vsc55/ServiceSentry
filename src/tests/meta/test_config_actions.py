@@ -5,9 +5,12 @@
 A provider declares its buttons as DATA (``CONFIG_ACTIONS``) and web_admin renders them
 generically, so no package-specific glue lives in the panel. These tests pin the contract:
 the descriptors are discovered, normalised, ordered, and surfaced on the config layout.
-"""
 
-from lib.config.config_actions import _normalize, actions_for, discover_config_actions
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_config_actions.py`` lives in
+``tests/unit/test_config_actions.py``."""
+
 from lib.config.layout import config_layout
 
 

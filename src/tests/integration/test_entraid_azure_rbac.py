@@ -9,15 +9,14 @@ exists — sign in once for Graph, redeem the same consent for ARM via the refre
 then assign the role to the app's service principal.
 
 These tests pin the contract without touching Microsoft: the HTTP calls are patched.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_entraid_azure_rbac.py`` lives in ``tests/unit/test_entraid_azure_rbac.py``."""
 
 from unittest.mock import patch
 
-import pytest
 
-from lib.providers.entraid import auth, provisioning
-from lib.providers.entraid.declarations import (entraid_provision_extras,
-                                                normalize_entraid_provision)
 
 
 class _Resp:

@@ -4,7 +4,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from lib.system.exe import EnumLocationExec, Exec, ExecConfig, ExecResult
 

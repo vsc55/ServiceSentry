@@ -12,7 +12,10 @@ Deliberately asserted at the rendered-page level: the JS is concatenated into th
 (from web_admin partials today, from ``<provider>/web/*_ui.html`` after the move), so this
 survives the relocation and checks the thing that actually matters — that the section still
 gets a working fetch/pick/lookup wiring.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_group_sources.py`` lives in ``tests/unit/test_wa_group_sources.py``."""
 
 import pytest
 

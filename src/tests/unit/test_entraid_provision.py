@@ -5,7 +5,11 @@
 It creates an app-only Entra ID app holding the given Microsoft Graph *application*
 permission names (resolved to role ids from the Graph service principal), a
 client secret and admin consent. Microsoft Graph HTTP calls are faked.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_entraid_provision.py`` lives in
+``tests/integration/test_entraid_provision.py``."""
 
 import re
 from unittest.mock import patch

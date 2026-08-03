@@ -19,7 +19,11 @@ question:
   the identity that is really used — SAML2's own app, never OIDC's;
 * the required list is declared server-side, next to the id the registration grants, so
   the check cannot end up asking for something the register button never provisioned.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_entraid_sso_check_perms.py`` lives in ``tests/unit/test_entraid_sso_check_perms.py``,
+``tests/meta/test_entraid_sso_check_perms.py``."""
 
 import pytest
 
@@ -29,7 +33,6 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from lib.providers.entraid.client import GROUP_READ_ALL, SSO_APP_ROLES
 from tests.conftest import _login
 
 ROUTE = '/api/v1/auth/entraid/sso/check-permissions'

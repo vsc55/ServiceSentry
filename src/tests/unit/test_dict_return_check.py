@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests para la clase ReturnModuleCheck."""
 
-import pytest
 from lib.modules.dict_return_check import ReturnModuleCheck
 
 
