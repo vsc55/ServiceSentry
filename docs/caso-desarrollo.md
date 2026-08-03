@@ -81,12 +81,12 @@ Tres grupos necesitan algo extra y, si no lo tienen, **se saltan sin fallar** �
 # 1) Tests de navegador (ejecutan el JavaScript del panel en Chromium).
 #    El paquete lo instala requirements-dev.txt; el NAVEGADOR es un binario aparte:
 python -m playwright install chromium
-python -m pytest tests/test_ui_playwright.py -n0
+python -m pytest tests/e2e/test_ui_playwright.py -n0
 
 # 2) Tests contra motores reales (portabilidad + auditoría de seguridad).
 #    Necesitan MySQL / MariaDB / PostgreSQL y correr en SERIE (-n0):
 #    define SS_TEST_{MYSQL,MARIADB,PG}_* (lo cómodo: src/tests/.env.test, gitignored).
-python -m pytest tests/test_db_portability_live.py tests/test_security_live.py -n0
+python -m pytest tests/e2e/test_db_portability_live.py tests/e2e/test_security_live.py -n0
 ```
 
 Ver [ref-tests.md](ref-tests.md) §81 (portabilidad), §142 (navegador) y §143 (seguridad en vivo).
@@ -99,23 +99,12 @@ Los tests están junto a cada módulo:
 src/
 ├── conftest.py                          # Fixtures compartidos: admin, client, _login()
 ├── tests/                               # Tests de core y web admin (~160 ficheros)
-│   ├── conftest.py                      # Fixtures de web_admin (config_dir, var_dir, admin, client)
-│   ├── # Core: test_config*.py, test_debug.py, test_exe.py, test_mem.py,
-│   ├── #       test_thermal.py, test_tools.py, test_parse_helpers.py,
-│   ├── #       test_secret_manager.py, test_ssh_client.py
-│   ├── # BD/esquema: test_db_schema.py, test_db_module_tables.py,
-│   ├── #            test_modules_store.py, test_hosts_store.py, test_credentials.py
-│   ├── # Hosts: test_hosts_exec.py, test_hosts_migrate.py, test_hosts_probe.py,
-│   ├── #        test_hosts_profiles.py, test_hosts_config_resolution.py, test_hosts_resolve.py
-│   ├── # Monitor: test_monitor.py, test_watchfuls_integrity.py
-│   ├── # Syslog: test_syslog_parser.py, test_syslog_server.py,
-│   ├── #         test_syslog_service.py, test_syslog_store.py
-│   ├── # Panel web (test_wa_*.py): init, auth, users, roles, groups, sessions,
-│   ├── #   config, modules, checks, status, audit, security, permissions,
-│   ├── #   ldap, oidc, saml2, history, hosts, webhook, notif_templates,
-│   ├── #   password_policy, errors, ui, telegram, watchfuls,
-│   ├── #   syslog, events, services
-│   └── # (ver docs/ref-tests.md para el inventario completo por test)
+│   ├── conftest.py                      # Fixtures compartidas (config_dir, var_dir, admin, client); se hereda en las subcarpetas
+│   ├── unit/                            # Aislado (sin app/BD/HTTP): core, hosts, stores, syslog parser, monitor, secretos…
+│   ├── integration/                     # Flask vía test_client/_login: test_wa_*.py (users, roles, config, security, hosts, sso…)
+│   ├── e2e/                             # Recursos vivos: test_ui_playwright, test_db_portability_live, test_security_live
+│   ├── meta/                            # Estructura del repo: test_docs_*, changelog/versión, *_views, partials_convention
+│   └── # (ver docs/ref-tests.md → «Organización de directorios» para el criterio e inventario completo)
 └── watchfuls/
     ├── ping/tests/test_ping.py
     ├── datastore/tests/test_datastore.py

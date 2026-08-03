@@ -116,7 +116,7 @@ Fíjate en la disociación deliberada: la **alerta** del desenlace se envía con
 La alerta cuenta la novedad; el registro conserva el incidente. Si el ciclo se guardara como OK
 limpio, un servicio que se muere cada noche parecería perfectamente sano.
 
-`tests/test_watchful_emit_patterns.py` falla si aparece un segundo sitio así. No lo prohíbe:
+`tests/meta/test_watchful_emit_patterns.py` falla si aparece un segundo sitio así. No lo prohíbe:
 obliga a justificarlo.
 
 ---
@@ -177,7 +177,7 @@ por ciclo (B).** Y pon `name=` siempre, en los dos.
 
 ## Qué lo vigila
 
-`tests/test_watchful_emit_patterns.py`:
+`tests/meta/test_watchful_emit_patterns.py`:
 
 | Test | Impide |
 |---|---|
@@ -185,4 +185,4 @@ por ciclo (B).** Y pon `name=` siempre, en los dos.
 | `test_other_data_name_is_not_mistaken_for_the_real_one` | La confusión `other_data['name']` |
 | `test_manual_emit_is_the_exception_not_the_rule` | Una deriva silenciosa hacia el emparejamiento a mano |
 
-Y `tests/test_warning_severity.py` cubre que la severidad llega a **las dos** salidas.
+Y `tests/unit/test_warning_severity.py` cubre que la severidad llega a **las dos** salidas.
