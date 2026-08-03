@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the permissions system, custom roles and granular permission enforcement."""
+"""Tests for the permissions system, custom roles and granular permission enforcement.
 
-import json
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_roles.py`` lives in ``tests/unit/test_wa_roles.py``."""
+
 import os
 import unittest.mock
 
@@ -26,13 +28,6 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
 # ─────────────────────── Helpers for UID-based role API ───────────────
-
-def _role_uid_in(roles_data: dict, key_or_name: str) -> str | None:
-    """Return the UID for a role identified by builtin key or display name."""
-    for uid, rd in roles_data.items():
-        if rd.get('key') == key_or_name or rd.get('name') == key_or_name:
-            return uid
-    return None
 
 def _create_role_uid(client, name: str, permissions=None, **kwargs) -> str | None:
     """POST a new role and return its UID (or None on failure)."""

@@ -5,7 +5,10 @@
 It creates an app-only Entra ID app holding the given Microsoft Graph *application*
 permission names (resolved to role ids from the Graph service principal), a
 client secret and admin consent. Microsoft Graph HTTP calls are faked.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_entraid_provision.py`` lives in ``tests/unit/test_entraid_provision.py``."""
 
 import re
 from unittest.mock import patch
@@ -199,21 +202,6 @@ class _FakeEnsure:
     def patch(self, url, **kw):
         self.patches.append((url, kw.get('json')))
         return _Resp({})
-
-
-def _ensure(fake, roles):
-    from lib.providers.entraid.app_permissions import ensure_app_permissions
-    with patch('lib.providers.entraid.app_permissions._req', fake),          patch('lib.providers.entraid.provisioning._req', fake):   # resource_sp lives there
-        return ensure_app_permissions('admin-tok', 'contoso', 'cid-1',
-                                      [{'resource': _GRAPH_ID, 'roles': roles}])
-
-
-
-
-
-
-
-
 
 
 class _RefusingEnsure(_FakeEnsure):

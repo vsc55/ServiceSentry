@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Recipient token resolution (email | user:<uid> | group:<uid>) + suggest endpoint."""
+"""Recipient token resolution (email | user:<uid> | group:<uid>) + suggest endpoint.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_notify_recipients.py`` lives in ``tests/unit/test_notify_recipients.py``."""
 
 from tests.conftest import _login
 

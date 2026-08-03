@@ -23,7 +23,33 @@ Un fichero que mezclaba categorías se partió **por clase** en un fichero por c
 
 **Los tests de los módulos NO están aquí.** Cada watchful lleva los suyos co-localizados con su código en `src/watchfuls/<módulo>/tests/test_<módulo>.py` (unit con mocks) — el módulo es un plugin autocontenido y viaja con sus tests. `src/pytest.ini` recoge ambos árboles (`testpaths = tests watchfuls`).
 
-**Para tests nuevos:** colócalo por lo que toca (prioridad e2e > integration > meta > unit); `conftest.py` de `tests/` se hereda en las subcarpetas (las fixtures como `_login` funcionan igual); usa imports **absolutos** entre módulos de test (`from tests.<carpeta>.<mod> import …`); y para localizar la raíz `src/` usa `os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]` (no `dirname(dirname(__file__))`, que apunta corto según la profundidad).
+### La guarda `_HAS_FLASK`: exactamente donde haga falta
+
+La suite puede correr en una instalación **sin el panel web** (los tres servicios standalone importan limpios sin Flask; `conftest.py` protege su import de `WebAdmin`). Flask es dependencia dura del `requirements.txt`, así que esto no afecta al día a día: importa para una imagen slim de contenedor. La regla es simétrica y equivocarse duele en las dos direcciones:
+
+| Tu fichero… | Qué hacer | Si te equivocas |
+|---|---|---|
+| **no** importa Flask (ni directa ni transitivamente) | **sin guarda** | los tests se saltan para nada: pérdida silenciosa de cobertura |
+| importa Flask **a nivel de módulo** | `try/except ImportError` + `pytestmark = skipif(not _HAS_FLASK)` | un `ImportError` al importar el módulo **no se salta: aborta la colección** y no corre *nada* de la suite |
+| solo **un test** lo necesita | import **dentro** de ese test (+ `pytest.skip` si falla) | gatearías el fichero entero por un solo caso |
+
+```python
+try:
+    from lib.web_admin import WebAdmin
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
+```
+
+Ojo con lo **transitivo**: `lib.core.audit.mixin` importa `flask` (lee `request`/`session` cuando hay contexto web), así que heredar de `_AuditMixin` obliga a la guarda aunque en el fichero no aparezca la palabra «flask». Leyendo el código no se ve — **compruébalo ejecutando**: un plugin de pytest que inserte en `sys.meta_path` un bloqueador de `import flask` y correr con `-p`. Es como se detectaron los casos que el análisis estático daba por buenos.
+
+**Hueco conocido (medido, no estimado).** Sin Flask, `pytest tests/unit tests/meta` da **2558 pasan / 9 fallan** (3 fallos + 6 errores) en 6 ficheros: `test_db_maintenance` (4), `test_config_spec` (en `unit/` y en `meta/`), `test_core_domain_layout`, `test_wa_modules_clone` y `test_module_page_views`. Todos importan Flask de forma perezosa dentro del caso y nunca tuvieron guarda; estaban invisibles mientras la colección abortaba. La colección sí está sana: **4217 recolectados**.
+
+**Helpers compartidos:** las guardas de estructura usan `_read`, `_fn` y `_strip_comments` de **`tests/helpers.py`** (impórtalos, no los copies — llegó a haber 21 copias idénticas de `_read`). Es un módulo normal, no `conftest.py`, porque son funciones, no fixtures; y no se llama `test_*.py`, así que pytest no lo recoge. Las *fixtures* compartidas siguen en `tests/conftest.py`.
+
+**Para tests nuevos:** colócalo por lo que toca (prioridad e2e > integration > meta > unit); `conftest.py` de `tests/` se hereda en las subcarpetas (las fixtures como `_login` funcionan igual); usa imports **absolutos** entre módulos de test (`from tests.<carpeta>.<mod> import …`) y, mejor aún, no importes de otro módulo de test: si un helper hace falta en dos sitios, va a `tests/conftest.py` o `tests/helpers.py`. Para localizar la raíz `src/` usa `os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]` (no `dirname(dirname(__file__))`, que apunta corto según la profundidad).
 
 ---
 

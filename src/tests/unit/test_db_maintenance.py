@@ -16,7 +16,10 @@ safe one could never be run on its own, which is the one you actually want on a 
 The engines disagree about all of it, which is the point of testing through the connector:
 SQLite has one rewrite that both names mean, PostgreSQL has two genuinely different
 statements, and MySQL has no database-wide form at all and must name each table.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_db_maintenance.py`` lives in ``tests/integration/test_db_maintenance.py``."""
 
 import io
 import os

@@ -22,7 +22,10 @@ this file exists to hold, and most of what follows is one form of it:
 The other half is about the things a layout change quietly breaks: the view-only permission,
 the deep-link that auto-expands a freshly added item, and a module whose dependencies are
 missing — which must not be offered an editor whose fields cannot take effect.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_modules_views.py`` lives in ``tests/meta/test_wa_modules_views.py``."""
 
 import io
 import os
@@ -44,15 +47,6 @@ def _read(name: str) -> str:
 
 def _core() -> str:
     return _read('_views.html')
-
-
-def _registry() -> list:
-    m = re.search(r'const MOD_VIEWS = \[(.*?)\];', _core(), re.S)
-    assert m, 'the view registry is gone'
-    return re.findall(r"\{\s*id:\s*'([^']+)'.*?label_key:\s*'([^']+)'.*?render:\s*'([^']+)'",
-                      m.group(1), re.S)
-
-
 
 
 class TestAViewIsChromeOnly:

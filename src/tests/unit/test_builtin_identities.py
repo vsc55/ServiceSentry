@@ -10,21 +10,12 @@ sense that matters to a login: no password, no session, no permissions.
 Filed apart from ``test_wa_audit.py`` because the subject is the identities themselves, not
 the audit log — even though the log is what they exist for. What made them necessary is
 recorded there; what they ARE is here.
-"""
 
-import pytest
 
-try:
-    from lib.web_admin import WebAdmin           # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_builtin_identities.py`` lives in
+``tests/integration/test_builtin_identities.py``."""
 
-from werkzeug.security import generate_password_hash
-
-from tests.conftest import _login
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
 class TestTheReservedNamesCannotBecomeAccounts:

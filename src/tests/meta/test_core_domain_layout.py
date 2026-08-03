@@ -17,15 +17,15 @@ They also pin the two invariants that make the layout work rather than merely lo
 * "what counts as a permission" must have exactly one definition. It had two, written out
   identically, so a new kind of per-instance key would have had to be remembered in both —
   and the half that was forgotten would silently DROP those keys rather than fail.
-"""
+
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_core_domain_layout.py`` lives in
+``tests/unit/test_core_domain_layout.py``."""
 
 import io
 import os
-import re
-import subprocess
-import sys
 
-import pytest
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE = os.path.join(SRC, 'lib', 'core')
@@ -55,12 +55,6 @@ WA_MIXINS = os.path.join(SRC, 'lib', 'web_admin', 'mixins')
 # inside and beside the method that builds the Flask app.
 NON_DOMAIN_MIXINS = {'auth', 'services', 'freshness', 'stores', 'scanners', 'embed',
                      'context', 'server', 'hooks', 'guards'}
-
-
-def _domains():
-    """Core domain packages — a directory under lib/core with an __init__.py."""
-    return sorted(d for d in os.listdir(CORE)
-                  if os.path.isfile(os.path.join(CORE, d, '__init__.py')))
 
 
 def _read(path):

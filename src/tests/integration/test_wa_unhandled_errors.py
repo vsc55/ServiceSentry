@@ -21,9 +21,11 @@ The fix is one reference code appearing in three places at once — the log line
 entry, and the message on screen — so a user can read a short code off a toast and somebody
 else can find the endpoint and the exception. What the response must NOT carry is the
 traceback: an error page is not where internals get published to whoever can reach the URL.
-"""
 
-import io
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_unhandled_errors.py`` lives in ``tests/unit/test_wa_unhandled_errors.py``."""
+
 import os
 import re
 

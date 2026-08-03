@@ -15,11 +15,12 @@ in that service's ``_apply_command``. Two declarations of one fact, and they hav
 drifted — syslog accepts ``clear_status`` as an alias of ``prune`` and the panel never offers
 it. That direction is harmless; the other one is not: an entry the backend rejects is a menu
 item that fails every time it is pressed. The check below is that direction only, deliberately.
-"""
 
-import io
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_services_commands.py`` lives in ``tests/unit/test_wa_services_commands.py``."""
+
 import os
-import re
 
 import pytest
 
@@ -34,36 +35,6 @@ from tests.conftest import _login
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'services',
                       '_render.html')
-
-
-def _render() -> str:
-    return io.open(RENDER, encoding='utf-8-sig').read()
-
-
-def _declared() -> dict:
-    """``{service: [command, …]}`` as the renderer declares it."""
-    m = re.search(r'const _SVC_COMMANDS = \{(.*?)\};', _render(), re.S)
-    assert m, 'the per-service command map is gone'
-    return {k: re.findall(r"'([^']+)'", v)
-            for k, v in re.findall(r'(\w+)\s*:\s*\[([^\]]*)\]', m.group(1))}
-
-
-def _fn(src: str, name: str) -> str:
-    """The body of a top-level JS function in the renderer."""
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
-
-
-def _icons() -> dict:
-    m = re.search(r'const _SVC_CMD_ICON = \{(.*?)\};', _render(), re.S)
-    assert m, 'the per-command icon map is gone'
-    return dict(re.findall(r"(\w+)\s*:\s*'([^']+)'", m.group(1)))
-
-
-
-
 
 
 @pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')

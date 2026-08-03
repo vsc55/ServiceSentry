@@ -18,21 +18,17 @@ A section whose partial is not included renders an empty pane with no error anyw
 This is the ONLY place permissions are assigned: the role modal's Permissions tab is
 gone, and the modal must not send the field any more — two editors over one field is how
 one screen silently undoes what the other saved.
-"""
+
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_wa_permissions_section.py`` lives in
+``tests/unit/test_wa_permissions_section.py``,
+``tests/integration/test_wa_permissions_section.py``."""
 
 import io
 import os
 import re
 
-import pytest
-
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from tests.conftest import _login
 
 REPO = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 PARTIALS = os.path.join(REPO, 'lib', 'web_admin', 'templates', 'partials')
@@ -46,9 +42,7 @@ def _read(*parts) -> str:
 # ────────────────────────── The API contract ───────────────────────
 
 
-
 # ────────────────────────── The section's wiring ───────────────────
-
 
 
 class TestTheWiringItself:

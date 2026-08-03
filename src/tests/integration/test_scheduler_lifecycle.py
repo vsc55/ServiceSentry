@@ -8,14 +8,27 @@ log and never notifies":
     context is active, to 'system' otherwise (no more admin + system pair).
   * the scheduler forwards its lifecycle change to the notification router as a
     discovered ``scheduler_started`` / ``scheduler_stopped`` event.
-"""
 
-import flask
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_scheduler_lifecycle.py`` lives in ``tests/unit/test_scheduler_lifecycle.py``."""
+
 import pytest
 
-from lib.core.audit.mixin import _AuditMixin
 from lib.core.notify import events as notify_events
-from lib.services.monitoring.manager import _MonitoringMixin
+
+# Tests de integración: sin Flask no pueden correr. Con guarda saltan limpio, que es lo que
+# hacen los otros 54 ficheros de integration/; sin ella tumbaban la colección de la suite.
+try:
+    import flask
+    from lib.core.audit.mixin import _AuditMixin
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+    flask = None
+    _AuditMixin = object
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 
 class _FakeAudit(_AuditMixin):

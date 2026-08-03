@@ -19,26 +19,15 @@ question:
   the identity that is really used — SAML2's own app, never OIDC's;
 * the required list is declared server-side, next to the id the registration grants, so
   the check cannot end up asking for something the register button never provisioned.
-"""
 
-import pytest
 
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_entraid_sso_check_perms.py`` lives in
+``tests/unit/test_entraid_sso_check_perms.py``,
+``tests/integration/test_entraid_sso_check_perms.py``."""
 
-from lib.providers.entraid.client import GROUP_READ_ALL, SSO_APP_ROLES
-from tests.conftest import _login
 
 ROUTE = '/api/v1/auth/entraid/sso/check-permissions'
-
-
-
-
-
-
 
 
 class TestTheModalIsShared:

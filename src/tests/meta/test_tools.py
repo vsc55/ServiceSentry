@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests para lib/util/tools.py — bytes2human, fmt_bytes/to_bytes y la regla de que hay
-UN solo formateador de tamaños en el proyecto."""
+UN solo formateador de tamaños en el proyecto.
 
-import glob
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_tools.py`` lives in
+``tests/unit/test_tools.py``."""
+
 import io
 import os
 
-from lib.util.tools import bytes2human
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 

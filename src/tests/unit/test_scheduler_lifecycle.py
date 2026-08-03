@@ -8,14 +8,28 @@ log and never notifies":
     context is active, to 'system' otherwise (no more admin + system pair).
   * the scheduler forwards its lifecycle change to the notification router as a
     discovered ``scheduler_started`` / ``scheduler_stopped`` event.
-"""
 
-import flask
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_scheduler_lifecycle.py`` lives in
+``tests/integration/test_scheduler_lifecycle.py``."""
+
 import pytest
 
-from lib.core.audit.mixin import _AuditMixin
 from lib.core.notify import events as notify_events
 from lib.services.monitoring.manager import _MonitoringMixin
+
+# `_AuditMixin` importa Flask (lee request/session cuando hay contexto web), y aquí hace falta
+# a nivel de módulo porque `_FakeAudit` hereda de él. Sin guarda, una instalación sin panel
+# web no se saltaba estos tests: se caía al colectar y no ejecutaba NADA de la suite.
+try:
+    from lib.core.audit.mixin import _AuditMixin
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+    _AuditMixin = object
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 
 class _FakeAudit(_AuditMixin):

@@ -28,6 +28,7 @@ clears the state completely.
 import io
 import os
 import re
+from tests.helpers import _fn
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 POLL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_polling.html')
@@ -36,13 +37,6 @@ API = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_a
 
 def _poll() -> str:
     return io.open(POLL, encoding='utf-8-sig').read()
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 class TestTheScanItself:

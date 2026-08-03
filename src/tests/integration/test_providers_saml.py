@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for SAML2 SSO authentication integration."""
+"""Tests for SAML2 SSO authentication integration.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_providers_saml.py`` lives in ``tests/unit/test_providers_saml.py``."""
 
 import json
 from unittest.mock import MagicMock, patch

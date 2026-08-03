@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Internal fail2ban: IpBanManager unit tests + WebAdmin/store integration."""
+"""Internal fail2ban: IpBanManager unit tests + WebAdmin/store integration.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_ipban.py`` lives in ``tests/unit/test_wa_ipban.py``."""
 
 import time
 

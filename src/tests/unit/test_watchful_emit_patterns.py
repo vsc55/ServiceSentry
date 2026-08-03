@@ -16,7 +16,11 @@ appeared in notifications under two different names depending on how it failed â
 example.com" normally, "ns1" when it raised.
 
 Mechanical on purpose: an argument is either there or it is not.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_watchful_emit_patterns.py`` lives in
+``tests/meta/test_watchful_emit_patterns.py``."""
 
 import ast
 import io
@@ -39,13 +43,6 @@ def _set_calls():
                     and isinstance(n.func.value, ast.Attribute)
                     and n.func.value.attr == 'dict_return'):
                 yield str(p.relative_to(SRC)).replace(os.sep, '/'), n.lineno, n
-
-
-def _is_manual(node) -> bool:
-    """Pattern B: send_msg passed (4th positional or by keyword) to suppress the
-    monitor's own notification."""
-    kw = {k.arg for k in node.keywords}
-    return len(node.args) >= 4 or 'send_msg' in kw
 
 
 class TestTheScanItself:

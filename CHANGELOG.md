@@ -8,6 +8,62 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.41] - 2026-08-03
+
+### Fixed
+- **`tests/unit` is runnable without Flask again: 231 tests stop skipping there.** Flask is a
+  hard dependency (`flask>=3.0`), so in a normal install these tests always ran — this is
+  about the slimmed case the code deliberately supports: the three standalone services import
+  cleanly with no Flask, `conftest.py` guards its `WebAdmin` import, and every web test
+  carries `skipif(not _HAS_FLASK)`. The by-class split copied that module-level gate into
+  halves that no longer touch the app, so in that environment they skipped for nothing:
+  `test_entity_sync` gated 6 tests of `diff_entities`/`snapshot`, `test_providers_ldap` 5 of
+  pure `map_role` logic. Of the 27 candidates the gate is gone from the 26 that proved they do
+  not need it, and stays on the one that does — `test_wa_sessions` imports Flask inside its
+  cases, which no amount of reading the imports would have shown. Proved, not assumed: re-run
+  under a harness that blocks `import flask` outright — 231 passed, and the static analysis
+  alone had been wrong about four of them.
+- **A Flask-less run no longer dies at collection, so the suite runs at all there.** Six files
+  — both halves of `test_wa_request_hooks`, `test_scheduler_lifecycle` and `test_wa_server` —
+  imported the web stack at module level with no guard (`test_scheduler_lifecycle` pulls it
+  transitively through `lib.core.audit.mixin`, which imports `flask` for `request`/`session`).
+  Without Flask, `pytest tests/` aborted with *Interrupted: 3 errors during collection* and
+  ran **nothing**; it now collects all 4217 and runs 2558 of unit+meta. Pre-existing: it
+  predates the reorganisation. `test_wa_server` keeps its two pure tests alive there — only
+  the third needs `WebAdmin`, and only for a class constant, so that import moved inside it.
+  Nine tests across six files still fail there (individual cases that import Flask lazily and
+  never had a guard); they were invisible while collection aborted, and are left as a measured
+  known gap rather than papered over.
+- **The dead scaffolding the splitter copied into both halves is gone.** Splitting by class
+  duplicated every module preamble, so each half carried the other's machinery: 60 helper and
+  fixture definitions that nothing in that file called (`_ldap_cfg`, `_make_wa`,
+  `saml2_admin_client`…) and 286 unused imports, across 72 files. Beyond the noise it was
+  actively misleading — `grep -l test_client tests/unit/` matched 13 files that never touch
+  the app, so the folders read as impure to anyone (or any tool) scanning them.
+- **The last cross-file test import is gone.** `test_wa_account_page` reached `_login` through
+  `test_wa_standalone_pages`, which only re-exported it from `conftest`; it now imports the
+  source directly. A test module is no longer part of another's public surface.
+
+### Changed
+- **One copy of the structural-guard helpers, in `tests/helpers.py`.** `_read` existed 27
+  times in the suite (21 byte-identical), `_fn` 21 times (18 identical), `_strip_comments` 16
+  times: fixing one fixed one of twenty, silently. The identical copies — 45 definitions
+  across 24 files — now import a single canonical version; the variants that genuinely differ
+  (a `_read` that joins a module-specific directory, a `_strip_comments` that also strips HTML
+  comments) were left alone rather than flattened into a wrong shared default. Note this
+  duplication mostly predates the reorganisation: the split inherited it and added a few
+  copies. It is a plain module, not `conftest.py` — these are functions to import, not
+  fixtures — and it is not named `test_*.py`, so pytest does not collect it.
+- **Each half of a split file says which half it is.** Both halves inherited the original's
+  module docstring verbatim, so both claimed to cover the whole subject. All 110 now end with
+  the category they hold and where the rest of the original lives.
+- **`docs/ref-tests.md` states the `_HAS_FLASK` rule in both directions**, because getting it
+  wrong hurts either way and the convention was only ever half-written down: no guard when the
+  file does not import Flask (otherwise tests skip for nothing), a guard when it does at module
+  level (otherwise collection aborts and nothing runs), a local import when a single test needs
+  it. It also warns about the transitive case (`_AuditMixin`), documents `tests/helpers.py`, and
+  records the ten-test gap rather than leaving it folklore.
+
 ## [0.0.1+build.40] - 2026-08-03
 
 ### Changed

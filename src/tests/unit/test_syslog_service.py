@@ -5,10 +5,11 @@
 The service shares the database and config with the rest of the app, so the
 ``admin`` fixture is reused to lay down the config dir, secret key and DB; the
 service is then built against the same directories and exercised on its own.
-"""
 
-import socket
-import time
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_syslog_service.py`` lives in ``tests/integration/test_syslog_service.py``."""
+
 from unittest import mock
 
 import pytest
@@ -21,21 +22,6 @@ except ImportError:
     _HAS_FLASK = False
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
-
-
-def _free_port(proto: str = 'tcp') -> int:
-    """A free port for *proto* (``'tcp'`` or ``'udp'``).
-
-    Probe with the SAME socket type the caller will bind: the two port spaces are
-    independent, so a number free for TCP can already be taken for UDP. Asking the wrong
-    one is what made these tests fail under a full parallel run and pass on their own.
-    """
-    kind = socket.SOCK_DGRAM if proto == 'udp' else socket.SOCK_STREAM
-    s = socket.socket(socket.AF_INET, kind)
-    s.bind(('127.0.0.1', 0))
-    p = s.getsockname()[1]
-    s.close()
-    return p
 
 
 @pytest.fixture()

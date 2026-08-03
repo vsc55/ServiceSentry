@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """Tests for the Microsoft Teams notification module (msteams): card builders,
 channel sender, channel CRUD + test routes, user-delivery test, routing matrix,
-and the Bot Framework inbound endpoint gating."""
+and the Bot Framework inbound endpoint gating.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_msteams.py`` lives in ``tests/unit/test_wa_msteams.py``."""
 
 import unittest.mock
 

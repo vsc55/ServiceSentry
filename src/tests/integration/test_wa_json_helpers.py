@@ -15,7 +15,6 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 

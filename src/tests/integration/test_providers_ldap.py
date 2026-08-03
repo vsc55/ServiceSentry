@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for LDAP authentication integration."""
+"""Tests for LDAP authentication integration.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_providers_ldap.py`` lives in ``tests/unit/test_providers_ldap.py``."""
 
 from unittest.mock import MagicMock, patch
 

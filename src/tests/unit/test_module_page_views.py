@@ -17,12 +17,16 @@ start disagreeing.
 Everything here is generic: the core reads `slug/icon/label/kind/action` and never learns
 what a view of a module MEANS. The labels come from the module's own lang file, the same
 rule the section title follows.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_module_page_views.py`` lives in ``tests/meta/test_module_page_views.py``."""
 
 import io
 import json
 import os
 import re
+from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core')
@@ -31,22 +35,11 @@ SB_INIT = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'init',
 TABLE = os.path.join(CORE, '_module_table.html')
 
 
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
 def _code(src: str) -> str:
     """Code only — jinja, block and line comments stripped."""
     src = re.sub(r'\{#.*?#\}', '', src, flags=re.S)
     src = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
     return re.sub(r'^\s*//.*$', '', src, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 def _spec(**over):

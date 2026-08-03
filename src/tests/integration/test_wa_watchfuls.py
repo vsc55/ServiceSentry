@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the generic watchful action endpoint: GET|POST /api/v1/modules/watchfuls/<module>/<action>."""
+"""Tests for the generic watchful action endpoint: GET|POST /api/v1/modules/watchfuls/<module>/<action>.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_watchfuls.py`` lives in ``tests/unit/test_wa_watchfuls.py``."""
 
 import os
 import pathlib

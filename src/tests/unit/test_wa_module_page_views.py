@@ -25,6 +25,7 @@ decision about presentation.
 import io
 import os
 import re
+from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core')
@@ -32,22 +33,11 @@ PAGE = os.path.join(CORE, '_module_page.html')
 VIEWS = os.path.join(CORE, '_module_page_views.html')
 
 
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
 def _strip_comments(js: str) -> str:
     """Code only. A guard that searches the prose too trips over the comment explaining the
     very rule it is checking — which is exactly how this one first failed elsewhere."""
     js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
     return re.sub(r'^\s*//.*$', '', js, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 def _registry() -> list:

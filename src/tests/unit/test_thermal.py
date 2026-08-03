@@ -3,7 +3,7 @@
 """Tests for lib/system/linux/thermal_info_collection.py — ThermalNode and ThermalInfoCollection."""
 
 import os
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import mock_open, patch
 
 import pytest
 

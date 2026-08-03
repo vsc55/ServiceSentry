@@ -23,76 +23,17 @@ could tell which was which, so they are one file with the origin of each half na
     D — a non-admin with users_add cannot create an admin account (create lacked the guard
         that update already had).
     L — parse_manual_ban rejects a negative duration (it became a silent permanent ban).
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_security_regressions.py`` lives in
+``tests/integration/test_security_regressions.py``."""
 
 import os
 
-import pytest
-from werkzeug.security import generate_password_hash
-
-try:
-    from lib.web_admin import WebAdmin
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from tests.conftest import _login
-from lib.services.ipban.jail import parse_manual_ban
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _make_wa(config_dir, var_dir, extra_users: dict | None = None):
-    """WebAdmin with admin 'boss', editor 'dev', viewer 'guest', plus extra_users."""
-    import uuid as _uuid
-    from lib.core.constants import BUILTIN_ROLE_UIDS
-    wa = WebAdmin(config_dir, "boss", "Bosspass1", var_dir=var_dir)
-    wa.app.config["TESTING"] = True
-    for uname, role_key, pw, dn in [
-        ("dev",   "editor", "Devpass1",   "Dev"),
-        ("guest", "viewer", "Guestpass1", "Guest"),
-    ]:
-        wa._users[uname] = {
-            'uid':           str(_uuid.uuid4()),
-            'password_hash': generate_password_hash(pw),
-            'role':          BUILTIN_ROLE_UIDS[role_key],
-            'display_name':  dn,
-        }
-    if extra_users:
-        for uname, d in extra_users.items():
-            role_raw = d.get('role', 'viewer')
-            role_uid = BUILTIN_ROLE_UIDS.get(role_raw) or wa._role_name_to_uid(role_raw) or role_raw
-            wa._users[uname] = {
-                'uid':           d.get('uid') or str(_uuid.uuid4()),
-                'password_hash': d.get('password_hash', ''),
-                'role':          role_uid,
-                'display_name':  d.get('display_name', uname),
-            }
-    wa._persist_users()
-    return wa
-
-
-def _login_as(wa, username: str, password: str):
-    c = wa.app.test_client()
-    c.post("/login", data={"username": username, "password": password})
-    return c
-
-
-def _user_with_perm(admin, name: str, perms: list, password: str = "Testpass1"):
-    """Create an in-memory user with a custom role holding exactly *perms*."""
-    role = f"_sec_{name}"
-    admin._custom_roles[role] = {"label": role, "permissions": perms}
-    admin._users[name] = {
-        "password_hash": generate_password_hash(password),
-        "role": role,
-        "display_name": name,
-    }
-    c = admin.app.test_client()
-    c.post("/login", data={"username": name, "password": password})
-    return c
-
 
 # ── Fix #1 · Path traversal in SNMP MIB file operations ──────────────────────
 
@@ -175,32 +116,18 @@ class TestPathTraversalSnmpMib:
 # ── Fix #2 (complete) · Non-admin cannot delete an admin account ──────────────
 
 
-
 # ── Fix #3 · Role escalation via custom role creation/editing ─────────────────
-
 
 
 # ── Fix #4 · Group admin-role protection ──────────────────────────────────────
 
 
-
 # ── Fix #5 · Config sensitive sections require admin ─────────────────────────
-
 
 
 # ── Fix #6 · Security-relevant web_admin fields require admin ────────────────
 
 
-
 # ── Fix #7 · LDAP empty-password unauthenticated bind ────────────────────────
-
-
-
-def _mk_role_user(client, role_name, perms, username):
-    """As admin: create a custom role with *perms* and a user holding it."""
-    client.post("/api/v1/roles",
-                json={"name": role_name, "label": role_name, "permissions": perms})
-    client.post("/api/v1/users",
-                json={"username": username, "password": "testpass1", "role": role_name})
 
 

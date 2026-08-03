@@ -1,25 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the audit log — recording, persistence and API access."""
+"""Tests for the audit log — recording, persistence and API access.
 
-import pytest
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_audit.py`` lives in ``tests/integration/test_wa_audit.py``."""
 
-try:
-    from lib.web_admin import WebAdmin
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from werkzeug.security import generate_password_hash
-
-from tests.conftest import _login
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
 
 # ──────────────────────────── Audit log ────────────────────────────
-
-
 
 
 class TestEveryAuditedEventHasAName:

@@ -6,11 +6,13 @@ A watchful may claim a section of its own beside Overview / History / Syslog. Th
 must stay module-agnostic: it reads generic keys, merges them into the page registry and
 renders a pane + a sidebar entry; the module supplies the label, the data hook and (if it
 wants) the renderer. These tests pin that contract.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_module_pages.py`` lives in ``tests/unit/test_module_pages.py``."""
 
 import pytest
 
-from lib.modules.discovery.pages import _page_spec, module_pages_catalog
 
 try:
     from lib.web_admin import WebAdmin          # noqa: F401

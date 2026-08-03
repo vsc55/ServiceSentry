@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests para la clase DictFilesPath."""
 
-import pytest
 from lib.util.dict_files_path import DictFilesPath
 
 

@@ -16,15 +16,16 @@ safe one could never be run on its own, which is the one you actually want on a 
 The engines disagree about all of it, which is the point of testing through the connector:
 SQLite has one rewrite that both names mean, PostgreSQL has two genuinely different
 statements, and MySQL has no database-wide form at all and must name each table.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_db_maintenance.py`` lives in ``tests/unit/test_db_maintenance.py``."""
 
 import io
 import os
 
 import pytest
 
-from lib.core.config.service import database_size
-from lib.db.base import BaseConnector
 from lib.db.sqlite import SQLiteConnector
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]

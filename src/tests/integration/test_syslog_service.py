@@ -5,7 +5,10 @@
 The service shares the database and config with the rest of the app, so the
 ``admin`` fixture is reused to lay down the config dir, secret key and DB; the
 service is then built against the same directories and exercised on its own.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_syslog_service.py`` lives in ``tests/unit/test_syslog_service.py``."""
 
 import socket
 import time

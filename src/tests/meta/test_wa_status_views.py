@@ -27,6 +27,7 @@ auto-refreshes, a redraw that fetches also races its own timer.
 import io
 import os
 import re
+from tests.helpers import _fn
 
 ST = os.path.join(os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0],
                   'lib', 'web_admin', 'templates', 'partials', 'status')
@@ -52,13 +53,6 @@ def _strip_comments(js: str) -> str:
     very rule it is checking — which is exactly how this one first failed."""
     js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
     return re.sub(r'^\s*//.*$', '', js, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 def _registry() -> list:

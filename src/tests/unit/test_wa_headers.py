@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HTTP security response headers (lib.security.headers) applied to responses."""
+"""HTTP security response headers (lib.security.headers) applied to responses.
 
-import pytest
-
-try:
-    from lib.web_admin import WebAdmin  # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
-
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_headers.py`` lives in ``tests/integration/test_wa_headers.py``."""
 
 
 
@@ -48,8 +40,6 @@ class TestFrameAncestors:
         from lib.security.headers import build_csp
         csp = build_csp(['https://embed.example.com', 'https://*.example.org'])
         assert "frame-ancestors 'self' https://embed.example.com https://*.example.org" in csp
-
-
 
 
 class TestCsrfModule:

@@ -5,16 +5,20 @@
 Binding is fail-soft per interface but fail-hard overall: partial failures keep
 serving on the reachable addresses, a total failure aborts the process instead
 of faking a started server.
-"""
 
-import os
-import socket
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_server.py`` lives in ``tests/integration/test_wa_server.py``."""
+
 import sys
 
 import pytest
 
-from lib.web_admin import WebAdmin
 from lib.system.windows import parse_excluded_ranges, port_excluded
+
+# `WebAdmin` se importa dentro del único test que lo usa (y solo por una constante de clase):
+# a nivel de módulo arrastraría Flask y tumbaría la colección entera en una instalación sin
+# panel web, llevándose por delante los dos tests puros de este fichero.
 
 # Sample `netsh interface ipv4 show excludedportrange protocol=tcp` output
 # (Spanish locale, with headers, dashes and a managed-exclusion '*' marker).
@@ -35,20 +39,6 @@ Puerto de inicio    Puerto final
 # binding to it raises OSError (EADDRNOTAVAIL) on every platform.  More reliable
 # than an in-use port, which SO_REUSEADDR may let us re-bind on Windows.
 _UNBINDABLE = '203.0.113.250'
-
-
-def _free_port() -> int:
-    s = socket.socket()
-    s.bind(('127.0.0.1', 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
-
-
-
-
 
 
 # ── Windows reserved-port-range diagnostics ──────────────────────────────────
@@ -74,6 +64,10 @@ def test_default_port_windows_reserved_state_is_visible():
     are dynamic — when the default (8080) lands in one, binding fails and run()
     aborts with a hint.  Skip (don't fail) since it's an environmental state, not
     a code defect — the diagnostic message is what matters."""
+    try:                    # arrastra Flask: aquí dentro, no a nivel de módulo (tumbaría la
+        from lib.web_admin import WebAdmin          # colección y con ella los tests puros)
+    except ImportError:
+        pytest.skip('Flask is not installed')
     rng = port_excluded(WebAdmin.DEFAULT_PORT)
     if rng:
         pytest.skip(f"default port {WebAdmin.DEFAULT_PORT} is currently reserved by "

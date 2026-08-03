@@ -11,7 +11,10 @@ the navbar builds its buttons from the same data. These tests pin that contract:
 * the navbar exposes them permission-gated;
 * the History deep link (``/history?module=&key=``) survives — the "see this check's
   history" jump from Infrastructure depends on it.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_standalone_pages.py`` lives in ``tests/unit/test_wa_standalone_pages.py``."""
 
 import pytest
 

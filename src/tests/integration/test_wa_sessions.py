@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for server-side session registry and management."""
+"""Tests for server-side session registry and management.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_sessions.py`` lives in ``tests/unit/test_wa_sessions.py``."""
 
 import uuid
 

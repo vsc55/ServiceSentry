@@ -21,9 +21,9 @@ All three new views are summaries: every filtered row, no pagination. A count of
 silently meant "6 on this page" would be worse than no count at all.
 """
 
-import io
 import os
 import re
+from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
@@ -39,23 +39,6 @@ IPB_NET = os.path.join(P, 'ipban', '_view_networks.html')
 IPB_IPS = os.path.join(P, 'ipban', '_view_ips.html')
 IPB_WL = os.path.join(P, 'ipban', '_whitelist.html')
 IPB_REACH = os.path.join(P, 'ipban', '_view_reach.html')
-
-
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
-def _strip_comments(js: str) -> str:
-    js = re.sub(r'\{#.*?#\}', '', js, flags=re.S)
-    js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
-    return re.sub(r'^\s*//.*$', '', js, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 class TestTheScanItself:

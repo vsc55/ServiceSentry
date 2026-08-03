@@ -6,7 +6,6 @@ Covers CRUD, name uniqueness, profile preservation, and — importantly — that
 secret values inside the profiles are encrypted at rest and decrypted on read.
 """
 
-import pytest
 
 from lib.db import get_connector
 from lib.core.hosts.store import HostsStore

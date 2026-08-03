@@ -22,9 +22,9 @@ What must not differ between views is what an ENTRY is, and the part of that whi
 cosmetic is the delete button: `audit_delete` becomes a control in exactly one place.
 """
 
-import io
 import os
 import re
+from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
@@ -39,23 +39,12 @@ VIEW_FILES = {
 }
 
 
-def _read(path: str) -> str:
-    return io.open(path, encoding='utf-8-sig').read()
-
-
 def _strip_comments(js: str) -> str:
     """Code only. A guard that reads the prose trips over the comment explaining the rule it
     is checking, and every file here carries one."""
     js = re.sub(r'\{#.*?#\}', '', js, flags=re.S)
     js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
     return re.sub(r'^\s*//.*$', '', js, flags=re.M)
-
-
-def _fn(src: str, name: str) -> str:
-    m = re.search(r'^(?:async )?function ' + re.escape(name) + r'\([^)]*\)\s*\{(.*?)^\}',
-                  src, re.S | re.M)
-    assert m, f'{name} is gone — this guard needs updating with whatever replaced it'
-    return m.group(1)
 
 
 class TestTheScanItself:

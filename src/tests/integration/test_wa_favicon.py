@@ -15,11 +15,13 @@ Two properties are worth pinning beyond "the file is there":
 * **the binary has a source.** ``tools/make_favicon.py`` renders it from the shape, so the
   committed ``.ico`` is reproducible rather than an artefact nobody can regenerate or change.
   The check below re-runs the generator and compares bytes.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_favicon.py`` lives in ``tests/unit/test_wa_favicon.py``."""
 
 import io
 import os
-import sys
 
 import pytest
 
@@ -31,43 +33,6 @@ try:
     _HAS_FLASK = True
 except ImportError:
     _HAS_FLASK = False
-
-
-
-
-def _ico_images(data: bytes) -> list[tuple]:
-    """(width, height, IHDR, decompressed pixels) for every PNG inside an .ico.
-
-    The pixels, not the compressed stream. ``zlib.compress`` is not a stable function of its
-    input across implementations: this repo's CI runs stock zlib while a developer machine may
-    ship zlib-ng, and the two emit different — equally valid — DEFLATE for identical scanlines.
-    Comparing the raw bytes therefore fails on a difference the generator did not make and
-    nobody can act on, which is exactly what happened.
-    """
-    import struct                                         # noqa: PLC0415
-    import zlib                                           # noqa: PLC0415
-    out = []
-    count = struct.unpack('<H', data[4:6])[0]
-    for i in range(count):
-        entry = data[6 + 16 * i:6 + 16 * (i + 1)]
-        size, offset = struct.unpack('<II', entry[8:16])
-        png = data[offset:offset + size]
-        assert png.startswith(bytes([0x89]) + b'PNG' + bytes([0x0d, 0x0a, 0x1a, 0x0a])), (
-            'entry is not PNG-in-ICO')
-        ihdr = png[16:16 + 13]                            # w, h, depth, colour, …
-        w, h = struct.unpack('>II', ihdr[:8])
-        idat = b''
-        pos = 8
-        while pos < len(png):                             # IDAT may be split across chunks
-            ln = struct.unpack('>I', png[pos:pos + 4])[0]
-            tag = png[pos + 4:pos + 8]
-            if tag == b'IDAT':
-                idat += png[pos + 8:pos + 8 + ln]
-            pos += 12 + ln
-        out.append((w, h, ihdr, zlib.decompress(idat)))
-    return out
-
-
 
 
 

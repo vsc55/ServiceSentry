@@ -11,7 +11,11 @@ the navbar builds its buttons from the same data. These tests pin that contract:
 * the navbar exposes them permission-gated;
 * the History deep link (``/history?module=&key=``) survives — the "see this check's
   history" jump from Infrastructure depends on it.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_standalone_pages.py`` lives in
+``tests/integration/test_wa_standalone_pages.py``."""
 
 import pytest
 
@@ -21,7 +25,6 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 

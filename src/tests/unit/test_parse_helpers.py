@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """Tests para los helpers estáticos _parse_conf_* de ModuleBase."""
 
-import pytest
 from lib.modules.module_base import ModuleBase
 
 

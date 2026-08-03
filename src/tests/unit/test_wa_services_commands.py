@@ -15,21 +15,16 @@ in that service's ``_apply_command``. Two declarations of one fact, and they hav
 drifted — syslog accepts ``clear_status`` as an alias of ``prune`` and the panel never offers
 it. That direction is harmless; the other one is not: an entry the backend rejects is a menu
 item that fails every time it is pressed. The check below is that direction only, deliberately.
-"""
+
+
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_wa_services_commands.py`` lives in
+``tests/integration/test_wa_services_commands.py``."""
 
 import io
 import os
 import re
 
-import pytest
-
-try:
-    from lib.web_admin import WebAdmin          # noqa: F401
-    _HAS_FLASK = True
-except ImportError:
-    _HAS_FLASK = False
-
-from tests.conftest import _login
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'services',
@@ -136,8 +131,6 @@ class TestTheMenuOnlyOffersWhatTheServiceAccepts:
                       encoding='utf-8-sig').read()
         assert re.search(r'^    def _apply_command\(', emb, re.M), \
             'ipban has no worker loop, so its hook belongs on the twin itself'
-
-
 
 
 class TestTheDestructiveOnesAskFirst:

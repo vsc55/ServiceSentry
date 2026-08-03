@@ -12,7 +12,11 @@ Two deliberate exclusions, both structural rather than convenience:
 * **Dynamic prefixes** — keys built by concatenation (``t('svc_' + key)``) are captured by
   the regex as a bare prefix ending in ``_``; the real key only exists at runtime, so
   there is nothing static to verify.
-"""
+
+
+Split by category: this file holds the structural guards (they read the repo's own source, docs
+and templates); the rest of the original ``test_i18n_keys_exist.py`` lives in
+``tests/unit/test_i18n_keys_exist.py``."""
 
 import glob
 import io

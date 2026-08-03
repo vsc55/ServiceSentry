@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for module routes: /api/modules, /api/status, /api/overview."""
+"""Tests for module routes: /api/modules, /api/status, /api/overview.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_modules.py`` lives in ``tests/unit/test_wa_modules.py``."""
 
 import os
 
@@ -12,7 +15,6 @@ try:
 except ImportError:
     _HAS_FLASK = False
 
-from lib.modules import ModuleBase
 from watchfuls.web import Watchful as WebWatchful
 
 from tests.conftest import _login, _SAMPLE_MODULES

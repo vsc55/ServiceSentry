@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for UI routes: /, /api/v1/me, /api/v1/health, /lang/<code>."""
+"""Tests for UI routes: /, /api/v1/me, /api/v1/health, /lang/<code>.
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_wa_ui.py`` lives in ``tests/unit/test_wa_ui.py``."""
 
 import pytest
 

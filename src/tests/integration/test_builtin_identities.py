@@ -10,7 +10,10 @@ sense that matters to a login: no password, no session, no permissions.
 Filed apart from ``test_wa_audit.py`` because the subject is the identities themselves, not
 the audit log — even though the log is what they exist for. What made them necessary is
 recorded there; what they ARE is here.
-"""
+
+
+Split by category: this file holds the tests that drive the Flask app; the rest of the original
+``test_builtin_identities.py`` lives in ``tests/unit/test_builtin_identities.py``."""
 
 import pytest
 

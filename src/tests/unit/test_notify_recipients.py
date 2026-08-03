@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Recipient token resolution (email | user:<uid> | group:<uid>) + suggest endpoint."""
+"""Recipient token resolution (email | user:<uid> | group:<uid>) + suggest endpoint.
 
-from tests.conftest import _login
-
-
-def _mk_group(client, name):
-    return (client.post('/api/v1/groups', json={'name': name}).get_json() or {}).get('uid', '')
-
-
-def _mk_user(admin, username, email, group_uids, enabled=True):
-    # uid defaults to the username in the store, so tokens are `user:<username>` here.
-    admin._users_store.upsert(username, {
-        'email': email, 'enabled': enabled, 'role': 'viewer', 'groups': list(group_uids),
-    })
-
-
-
+Split by category: this file holds the isolated tests (no app, no DB, no HTTP); the rest of the
+original ``test_notify_recipients.py`` lives in
+``tests/integration/test_notify_recipients.py``."""
 
 
 
