@@ -148,7 +148,7 @@ ObjectBase (lib/core/object_base.py)
 │   # (key/user/virtual/tabla groups); el atributo KIND ramifica lo específico de dialecto
 │   # (CONCAT vs ||, json_extract vs jsonb_extract_path_text, CAST INTEGER/SIGNED, last_insert_id);
 │   # rebuild de migración atómico en MySQL (RENAME) y transaccional en SQLite/PG.
-│   # Verificado contra MySQL/MariaDB + PostgreSQL reales (tests/test_db_portability*.py).
+│   # Verificado contra MySQL/MariaDB + PostgreSQL reales (tests/e2e/test_db_portability_live.py).
 ├── Stores (reciben un BaseConnector inyectado)
 │   # Stores de dominios de núcleo movidos a su módulo (lib/core/<d>/store.py):
 │   ├── UsersStore      (lib/core/users/store.py)     → tablas users, users_groups
@@ -363,7 +363,7 @@ ServiceSentry/
 │   │   │   ├── info.json                # Metadatos (icono, descripción)
 │   │   │   ├── lang/en_EN.json          # Etiquetas en inglés
 │   │   │   ├── lang/es_ES.json          # Etiquetas en español
-│   │   │   └── tests/test_filesystemusage.py
+│   │   │   └── watchfuls/filesystemusage/tests/test_filesystemusage.py
 │   │   ├── datastore/                   # 🌐 Multiplataforma (conectores BD)
 │   │   ├── hddtemp/                     # (misma estructura)
 │   │   ├── ping/
@@ -373,29 +373,31 @@ ServiceSentry/
 │   │   ├── snmp/                        # 🌐 SNMPv1/v2c/v3 + gestión/compilación de MIBs
 │   │   ├── temperature/
 │   │   └── web/
-│   └── tests/                           # Tests de core y web admin
-│       ├── conftest.py                  # Fixtures: config_dir, var_dir, admin, client
-│       ├── test_config_control.py
-│       ├── test_debug.py
-│       ├── test_dict_files_path.py
-│       ├── test_dict_return_check.py
-│       ├── test_exe.py
-│       ├── test_mem.py
-│       ├── test_parse_helpers.py
-│       ├── test_thermal.py
-│       ├── test_tools.py
-│       ├── test_wa_init.py
-│       ├── test_wa_users.py
-│       ├── test_wa_roles.py
-│       ├── test_wa_groups.py
-│       ├── test_wa_config.py
-│       ├── test_wa_modules.py
-│       ├── test_wa_sessions.py
-│       ├── test_wa_audit.py
-│       ├── test_wa_security.py
-│       ├── test_wa_telegram.py
-│       ├── test_wa_ui.py
-│       └── test_wa_json_helpers.py
+│   └── tests/                           # Tests de core y web admin (repartidos por lo que tocan)
+│       ├── conftest.py                  # Fixtures compartidas (config_dir, var_dir, admin, client); se hereda en las subcarpetas
+│       ├── unit/                        # Aislado: sin app, sin BD, sin HTTP
+│       │   ├── test_monitor.py
+│       │   ├── test_thermal.py
+│       │   ├── test_hosts_store.py
+│       │   ├── test_secret_manager.py
+│       │   └── …                        # (test_config_control, test_exe, test_parse_helpers, …)
+│       ├── integration/                 # Arranca Flask vía test_client/_login
+│       │   ├── test_wa_users.py
+│       │   ├── test_wa_config.py
+│       │   ├── test_wa_groups.py
+│       │   ├── test_wa_security.py
+│       │   └── …                        # (test_wa_hosts, test_wa_auth, test_wa_scim, …)
+│       ├── e2e/                         # Recursos vivos: motores de BD reales + navegador Playwright
+│       │   ├── test_ui_playwright.py
+│       │   ├── test_db_portability_live.py
+│       │   └── test_security_live.py
+│       └── meta/                        # Leen la estructura del propio repo (fuente/docs/plantillas/git)
+│           ├── test_docs_tests_inventory.py
+│           ├── test_changelog_frozen.py
+│           ├── test_routes_documented.py
+│           └── …                        # (los *_views.py, test_wa_partials_convention, …)
+│       # Un fichero que mezclaba categorías se partió por clase en un fichero por carpeta
+│       # (misma base): p. ej. test_credentials.py → unit/ + integration/. Ver ref-tests.md.
 ├── data/                                # Datos en modo desarrollo (config_dir == var_dir)
 │   ├── config.json                     # Capa de solo-lectura + arranque: sección `database`, credenciales de primer arranque, overrides bloqueados y datos de feature (webhooks/overview/plantillas)
 │   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks, config de módulos/ítems Y la configuración editable: tabla `config`)
@@ -819,7 +821,7 @@ propósito y nombres parecidos (`_modPrettyName` frente a `modulePrettyName`) qu
 contestan igual. Se detecta a máquina: para cada símbolo definido en una sección, contar desde
 cuántas **otras** secciones se referencia.
 
-Todo esto lo verifica `tests/test_wa_partials_convention.py`: nombres, un solo `_render` por
+Todo esto lo verifica `tests/meta/test_wa_partials_convention.py`: nombres, un solo `_render` por
 carpeta, sin `_table`, sin partials huérfanos, sin dobles inclusiones y un tope de líneas
 para los shells.
 

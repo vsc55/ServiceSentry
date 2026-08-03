@@ -1653,7 +1653,7 @@ class Watchful(ModuleBase):
 - [ ] Marcar `severity='warning'` en los avisos de umbral blando (en `dict_return.set(..., severity=…)` y/o `send_message(..., severity=…)`) para enrutarlos como kind `warn` (ámbar) en vez de `down`
 - [ ] Usar `check_status()` + `send_message()` para las notificaciones
 - [ ] Habilitar el módulo en su configuración (UI / `config_modules`) con `enabled: true`
-- [ ] Crear `tests/test_mi_modulo.py` con tests unitarios
+- [ ] Crear `watchfuls/mi_modulo/tests/test_mi_modulo.py` con tests unitarios (co-localizados con el módulo)
 - [ ] Ejecutar `pytest tests/ watchfuls/ -q` y verificar que todo pasa
 
 **UI avanzada (opcional, según las necesidades del módulo)**

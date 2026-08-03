@@ -1,4 +1,4 @@
-﻿# Seguridad del Panel Web
+# Seguridad del Panel Web
 
 Referencia completa de los mecanismos de seguridad implementados en la interfaz web de administración (`lib/web_admin`) y los tests que los verifican.
 
@@ -548,9 +548,9 @@ Un no-admin con los permisos `users_edit`, `roles_edit`, `groups_edit`, `config_
 
 ### Tests de RBAC y escalada de privilegios
 
-Los tests de regresión de seguridad están centralizados en `src/tests/test_security_regressions.py`. Cada clase cubre un fix específico — si un refactor futuro rompe alguno, la propiedad de seguridad correspondiente está comprometida.
+Los tests de regresión de seguridad están centralizados en `src/tests/integration/test_security_regressions.py`. Cada clase cubre un fix específico — si un refactor futuro rompe alguno, la propiedad de seguridad correspondiente está comprometida.
 
-Además, `src/tests/test_security_live.py` **arranca el panel real contra MySQL, MariaDB y PostgreSQL** y repite los ataques de un auditor: inyección SQL en cada campo de string (un 500 delataría una consulta concatenada; una tabla-canario que sobrevive prueba que ningún `DROP` se coló), la matriz de control de acceso (anónimo no lee nada, un viewer no muta nada, un `users_add` ni acuña admin ni se auto-asciende) y el **IDOR por host** (un permiso sobre el host A no alcanza al B por su UID). Es opt-in (`SS_TEST_*_HOST`) y cada guarda está comprobado desactivándolo y viendo fallar el test — ver [ref-tests.md](ref-tests.md) §143. En navegador, `test_ui_playwright.py` verifica que un payload almacenado **no se ejecuta** al pintarse (canarios `onerror`/`onload`, no `<script>`), que la cookie de sesión no es legible desde JavaScript y que el panel no se deja meter en un iframe.
+Además, `src/tests/e2e/test_security_live.py` **arranca el panel real contra MySQL, MariaDB y PostgreSQL** y repite los ataques de un auditor: inyección SQL en cada campo de string (un 500 delataría una consulta concatenada; una tabla-canario que sobrevive prueba que ningún `DROP` se coló), la matriz de control de acceso (anónimo no lee nada, un viewer no muta nada, un `users_add` ni acuña admin ni se auto-asciende) y el **IDOR por host** (un permiso sobre el host A no alcanza al B por su UID). Es opt-in (`SS_TEST_*_HOST`) y cada guarda está comprobado desactivándolo y viendo fallar el test — ver [ref-tests.md](ref-tests.md) §143. En navegador, `test_ui_playwright.py` verifica que un payload almacenado **no se ejecuta** al pintarse (canarios `onerror`/`onload`, no `<script>`), que la cookie de sesión no es legible desde JavaScript y que el panel no se deja meter en un iframe.
 
 **Tests generales de RBAC** (`test_wa_roles.py`, `test_wa_users.py`):
 

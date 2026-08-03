@@ -135,7 +135,14 @@ def _seed_editable_config(wa, config_dir):
 
 @pytest.fixture()
 def admin(config_dir, var_dir):
-    """WebAdmin instance with testing config (users are stored in the DB)."""
+    """WebAdmin instance with testing config (users are stored in the DB).
+
+    Sin Flask, ``WebAdmin`` ni siquiera existe (el import de arriba va en try/except), y
+    pedir esta fixture reventaba con un ``NameError`` críptico. Un skip explícito dice la
+    verdad y ahorra tener que repetir el guard en cada fichero que la use.
+    """
+    if not _HAS_FLASK:
+        pytest.skip('Flask is not installed')
     wa = WebAdmin(config_dir, "admin", "secret", var_dir,
                   pw_require_upper=False, pw_require_digit=False)
     wa._csrf_enabled = False   # CSRF is exercised by dedicated tests; off elsewhere
