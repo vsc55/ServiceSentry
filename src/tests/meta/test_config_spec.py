@@ -10,6 +10,8 @@ and templates); the rest of the original ``test_config_spec.py`` lives in
 ``tests/unit/test_config_spec.py``."""
 
 
+import pytest
+
 from lib.config.spec import cfg_validate, normalize_url, frontend_schema, int_rules, json_dict_fields, env_field_specs
 
 
@@ -62,7 +64,8 @@ class TestTheKeyFileHasOneName:
 
     def test_the_helper_and_the_panel_agree(self):
         from lib.config import SECRET_KEY_FILENAME, secret_key_path
-        from lib.web_admin.app import WebAdmin
+        # importorskip: el panel arrastra Flask, que puede no estar en una instalación slim.
+        WebAdmin = pytest.importorskip('lib.web_admin.app').WebAdmin
         assert WebAdmin._SECRET_KEY_FILE == SECRET_KEY_FILENAME
         assert secret_key_path('/x').endswith(SECRET_KEY_FILENAME)
 
