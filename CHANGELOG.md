@@ -8,6 +8,30 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.48] - 2026-08-04
+
+### Changed
+- **Nothing is published until the suite and the install check pass.** The image build stood
+  on its own, and — worse — `tests.yml` and `install-tests.yml` fired on the same single
+  literal tag, so a merge to `main` ran **no tests at all** unless someone remembered to move
+  it by hand. Both are now reusable (`workflow_call`) and the Docker workflow is the pipeline
+  that calls them: the suite gates everything, then the image build and the install matrix run
+  side by side. They are siblings rather than a chain because both only need the suite green,
+  and serialising them would add the matrix to every publish for nothing.
+- **A `vX.Y.Z` tag now publishes a GitHub Release, with that version's CHANGELOG as its body.**
+  `test` deliberately stops one job earlier: it is the manual build tag, it moves, and a
+  release per push of it would point at a tag that no longer means that commit.
+  - The notes are read straight out of `CHANGELOG.md` by
+    `.github/scripts/changelog-section.sh` (five lines of awk). It matches the heading
+    literally rather than as a regex, because the dots in a version are wildcards and
+    `1.2.3` would otherwise also match a heading for `1x2x3`.
+  - A tag whose version has no CHANGELOG section **fails beside the tests**, seconds in, while
+    the fix is still "add the heading and re-tag" — rather than after an image has been
+    published under a version whose release cannot be completed. That guard is the point:
+    an empty release body cannot be un-published, only edited.
+  - The release job holds the only `contents: write` in the workflow and uses the preinstalled
+    `gh`, so no third-party action runs where the write permission lives.
+
 ## [0.0.1+build.47] - 2026-08-04
 
 ### Fixed

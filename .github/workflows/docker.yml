@@ -26,7 +26,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Gate 1: the suite. Nothing is built or published until this passes ──────────────
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  # ── Gate 2: installing on a clean machine, the half pytest cannot see ───────────────
+  # A sibling of the image build, not a step before it: both only need the suite to be
+  # green, and serialising them would add its matrix to every publish for nothing.
+  install:
+    needs: tests
+    uses: ./.github/workflows/install-tests.yml
+
+  # ── Gate 3 (version tags only): the release notes have to EXIST ─────────────────────
+  # Runs beside the tests rather than after them so a `v1.2.3` with no CHANGELOG section
+  # fails in seconds — while the fix is still "add the heading and re-tag", instead of
+  # after an image has already been published under that version.
+  changelog:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tagged version has a CHANGELOG section
+        run: .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > /dev/null
+
   build:
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,3 +102,39 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Version tags only: publish the GitHub Release ───────────────────────────────────
+  # `test` stops one job earlier, on purpose: it is the manual build tag, it moves, and a
+  # Release per push of it would be noise pointing at a tag that no longer means that commit.
+  release:
+    # Everything green, not just the image: a release says "this is fit to install", and the
+    # install matrix is the only job that checks that claim.
+    needs: [build, install, changelog]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # the only job that writes to the repo
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Take the notes from the CHANGELOG
+        # Already validated by the `changelog` job; re-read here rather than passed between
+        # jobs, because a multi-line job output is more plumbing than re-running one script.
+        run: |
+          .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > release-notes.md
+          {
+            echo
+            echo '---'
+            echo "Container image: \`ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME#v}\`"
+          } >> release-notes.md
+
+      - name: Publish the release
+        # gh is preinstalled on the runner: no third-party action in the job that holds the
+        # only write permission in this workflow.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag
