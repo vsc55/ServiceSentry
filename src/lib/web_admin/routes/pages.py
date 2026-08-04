@@ -84,6 +84,12 @@ def register(app, wa):
             # `label` is resolved here so the template needs one key for both kinds of
             # page: a core page translates its nav_label_key, a module page carries its
             # own label_i18n (its translated pretty_name).
+            # Every page is rendered, module or not: its pane has to EXIST for the section to
+            # be reachable, and whether a module section is offered changes while the panel is
+            # open (adding or enabling a module must show it without a reload). So the shell
+            # ships them all and the client decides — `module` travels on the spec, the
+            # sidebar puts it on the entry as data-nav-module, and syncModuleSections() is
+            # what hides or reveals it.
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
                                'views': _view_specs(p, _lang),
                                'label': (wa._t(p['standalone']['nav_label_key'])

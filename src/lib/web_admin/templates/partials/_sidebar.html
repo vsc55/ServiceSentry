@@ -75,8 +75,13 @@
                sections' panes don't exist, so they stay real links. The <li> carries the
                permission gate (applyRoleRestrictions reveals it). #}
             {% for p in standalone_specs %}
+            {# data-nav-module: a module section is offered only while its module is
+               configured and on, and that changes while the panel is open — so the entry
+               ships hidden like every other and syncModuleSections() decides. Core pages
+               carry no module and are governed by the permission alone. #}
             <li class="nav-item{% if p.views %} ss-sb-has-sub{% endif %}"
                 id="nav-page-{{ p.id }}-li" data-nav-perm="{{ p.perm }}"
+                {% if p.module %}data-nav-module="{{ p.module }}"{% endif %}
                 style="display:none" role="presentation">
                 {% if p.views %}
                 {# A section with more than one view: the item opens the section AND a flyout

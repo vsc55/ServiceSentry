@@ -60,7 +60,13 @@ class TestServed:
         resp = client.get('/module/m365')
         assert resp.status_code in (301, 302) and '/login' in resp.headers.get('Location', '')
 
-    def test_the_shell_carries_its_pane_and_sidebar_entry(self, client):
+    def test_the_shell_carries_its_pane_and_sidebar_entry(self, admin, client):
+        # The module has to BE there: a page rides on its module, and the sample config
+        # ships only ping. Adding it is what this test was implicitly relying on before
+        # the nav started asking.
+        cfg = admin._load_modules()
+        cfg['m365'] = {'enabled': True}
+        admin._save_modules(cfg)
         _login(client)
         html = client.get('/admin').data.decode('utf-8', 'replace')
         assert 'id="tab-m365"' in html and 'id="m365-container"' in html
@@ -96,3 +102,37 @@ class TestServed:
         assert client.get('/api/v1/modules/page/Bad-Name').status_code == 400
 
 
+
+
+@pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
+class TestTheNavEntryCarriesItsModule:
+    """A module section is offered only while its module is configured and on.
+
+    That decision cannot be made once, server-side, and baked into the HTML: adding or
+    enabling a module has to light its section up there and then, and a section whose pane
+    was never rendered could not be shown at all without a reload — the very reload the
+    panel exists to avoid. So the shell ships every pane and every entry, each module entry
+    tagged with the module it rides on, and the client decides (``syncModuleSections``).
+
+    What is pinned here is the tag: without it the client has nothing to key off, and the
+    sidebar goes back to offering modules that were never added. The visible behaviour is
+    a browser question and is asked in ``tests/e2e/test_ui_playwright.py``.
+    """
+
+    def test_a_module_entry_names_its_module(self, client):
+        _login(client)
+        html = client.get('/admin').data.decode('utf-8', 'replace')
+        assert 'data-nav-module="azure"' in html,             'the nav entry does not say which module it rides on — nothing can hide it'
+
+    def test_a_core_section_carries_no_module(self, client):
+        """Overview/History/Syslog must never depend on a module being configured."""
+        _login(client)
+        html = client.get('/admin').data.decode('utf-8', 'replace')
+        nav = html.split('id="nav-page-overview-li"')[1][:400]
+        assert 'data-nav-module' not in nav,             'a core section is tagged with a module and would vanish with it'
+
+    def test_the_pane_is_rendered_even_when_the_module_is_absent(self, client):
+        """It has to exist to be reachable the moment the module is switched on."""
+        _login(client)
+        html = client.get('/admin').data.decode('utf-8', 'replace')
+        assert 'id="tab-azure"' in html

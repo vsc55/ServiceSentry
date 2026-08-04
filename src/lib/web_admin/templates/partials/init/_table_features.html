@@ -100,6 +100,36 @@ function _attachColFeatures(tableId, getOrder, setOrder, saveOrder, render, save
 }
 
 // ────────────────────────────── Permission-based UI ──────────────────
+// ── Module sections in the sidebar ────────────────────────────────────────────
+// A module page can only ever show what the monitor last collected for that module, so a
+// section for one that was never added is an empty page advertising a feature that is not
+// there. The shell renders every module's pane (it has to exist to be reachable), and these
+// two decide whether the sidebar offers it.
+//
+// Mirrors `modules/service.py::module_is_active`, asymmetry included: a CONFIGURED module
+// with no `enabled` key is on (the registry defaults it true), while an ABSENT one is not
+// "on by default" — it simply has not been added, which is the same line the Modules tab
+// draws when it lists the configured modules and nothing else.
+function _moduleIsActive(mod) {
+    for (const k of [mod, 'watchfuls.' + mod]) {
+        const e = modulesData[k];
+        if (e !== undefined) return !(e && typeof e === 'object' && e.enabled === false);
+    }
+    return false;
+}
+
+// Re-run whenever modulesData changes: adding or enabling a module has to light its section
+// up there and then. Requiring F5 for that is the same reload the whole panel exists to
+// avoid, and it reads as the save not having worked.
+function syncModuleSections() {
+    const perms = new Set((typeof currentUser !== 'undefined' && currentUser.permissions) || []);
+    document.querySelectorAll('[data-nav-module]').forEach(li => {
+        const need = li.getAttribute('data-nav-perm');
+        const mod  = li.getAttribute('data-nav-module');
+        li.style.display = ((!need || perms.has(need)) && _moduleIsActive(mod)) ? '' : 'none';
+    });
+}
+
  function applyRoleRestrictions() {
 const perms = new Set(currentUser.permissions || []);
 const hasAnyUser    = ['users_view','users_add','users_edit','users_delete'].some(p => perms.has(p));
@@ -194,7 +224,10 @@ if (statusLi) statusLi.style.display = hasChecks ? '' : 'none';
 // reveals only the ones the user may open. Adding a page needs no change here.
 document.querySelectorAll('[data-nav-perm]').forEach(a => {
     const need = a.getAttribute('data-nav-perm');
-    a.style.display = (!need || perms.has(need)) ? '' : 'none';
+    const mod  = a.getAttribute('data-nav-module');
+    // A module section also has to have its module (see syncModuleSections below).
+    a.style.display = ((!need || perms.has(need)) && (!mod || _moduleIsActive(mod)))
+        ? '' : 'none';
 });
 // fail2ban tab (operational: banned IPs / watchlist / history / services / whitelist)
 const hasAnyIpban = ['ipban_ban_view', 'ipban_ban_add', 'ipban_ban_edit', 'ipban_ban_delete',

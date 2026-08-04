@@ -8,6 +8,32 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.45] - 2026-08-04
+
+### Fixed
+- **The sidebar no longer offers modules that are not there.** *Azure* and *Microsoft 365* sat
+  in the navigation of a panel whose Modules tab listed only `ping`, because the nav was built
+  from the pages **discovered on disk**: every module shipping a `__page__` appeared, added or
+  not. Clicking one reached a section that could only ever be empty — its data is the monitor's
+  last results for a module that never ran — and an empty section does not read as "not
+  installed", it reads as a feature that exists and is broken. The nav now asks the
+  configuration, using the rule the Modules tab already draws: configured, and not switched
+  off, means it exists.
+  - The asymmetry is worth stating because it inverts easily: a **configured** module with no
+    `enabled` key is ON (the registry declares `default: True`), but an **absent** one is not
+    on by default — it simply has not been added.
+  - **The decision belongs to the client, and that is the whole design.** Filtering it in the
+    render worked on load and then failed the moment it mattered: adding or enabling a module
+    left its section missing **until F5**, because an entry that was never painted cannot be
+    revealed without a reload — the reload the panel exists to avoid, and which reads as the
+    save not having worked. So the shell ships every pane and every entry, each module entry
+    tagged `data-nav-module`, and `syncModuleSections()` decides; it runs on load, after saving
+    modules and after reverting them.
+  - Pinned on both sides: the integration test fixes the tag (without it the client has nothing
+    to key off), and the browser tests fix the behaviour — hidden when the module was never
+    added, visible immediately once it is, gone again when switched off, with the core sections
+    proven untouched by any of it.
+
 ## [0.0.1+build.44] - 2026-08-04
 
 ### Fixed

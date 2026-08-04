@@ -437,3 +437,55 @@ class TestSavingOneCheckDoesNotSwitchOnEveryModule:
         """The guard above must not be satisfied by writing nothing at all."""
         written = self._apply(page, True)
         assert written, 'a check the user enabled was not persisted'
+
+
+class TestTheSidebarFollowsTheModules:
+    """Which module sections the sidebar offers, asked of the browser.
+
+    Two halves of one rule, and the second is the one that bites: a module that was never
+    added must not be offered (its section could only ever be empty), and a module that is
+    added must be offered *immediately* — the panel is a SPA, so needing F5 to see the
+    section reads as the save not having worked.
+
+    Only a browser can answer either: the shell renders every pane and entry, and what
+    decides visibility is `syncModuleSections()` running against `modulesData`.
+    """
+
+    def _visible(self, page, mod):
+        return page.evaluate("""(mod) => {
+            const li = document.querySelector(`[data-nav-module="${mod}"]`);
+            return !!li && li.style.display !== 'none';
+        }""", mod)
+
+    def test_a_module_that_was_never_added_is_not_offered(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        assert not self._visible(page, 'azure'), \
+            'the sidebar offers Azure, which the Modules tab does not even list'
+
+    def test_enabling_one_shows_its_section_without_a_reload(self, page):
+        """The bug this class exists for: it appeared only after F5."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        assert not self._visible(page, 'azure')          # precondition, not decoration
+        page.evaluate("""() => {
+            modulesData['azure'] = { enabled: true };
+            syncModuleSections();
+        }""")
+        assert self._visible(page, 'azure'), \
+            'the section stayed hidden after the module was added — F5 should not be the fix'
+
+    def test_switching_it_off_takes_the_section_away_again(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("""() => {
+            modulesData['azure'] = { enabled: false };
+            syncModuleSections();
+        }""")
+        assert not self._visible(page, 'azure')
+
+    def test_a_core_section_is_untouched_by_all_of_it(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        assert page.evaluate(
+            "() => document.getElementById('nav-page-overview-li').style.display !== 'none'")

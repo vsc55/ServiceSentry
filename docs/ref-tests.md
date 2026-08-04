@@ -4402,7 +4402,7 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 ## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
 
 **Archivo:** `tests/unit/test_module_pages.py` — 20 tests
-**Archivo:** `tests/integration/test_module_pages.py` — 9 tests
+**Archivo:** `tests/integration/test_module_pages.py` — 12 tests
 
 Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo **`/module/<id>`**, en su propio espacio de nombres: así una sección futura del core no puede chocar con ella ni al revés. Las **vistas** de esa sección (varias disposiciones bajo un desplegable) están en [§131](#131-una-sección-de-módulo-puede-tener-más-de-una-vista).
 
@@ -4420,6 +4420,28 @@ Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo 
 | `TestRegistryMerge::*` (2) | La página entra en el registro de landing sin tocar las del core |
 | `TestServed::*` (6) | Ruta enrutada, exige sesión, el shell trae su pane y su entrada de sidebar, el fragmento `web/_ui.html` se inyecta, el endpoint de datos responde, y **un módulo sin página da 404** — eso es lo que impide que sea un "ejecuta cualquier hook" |
 | `TestLiveRefreshWithoutAForm::*` (5) | El refresco en vivo conoce solo la CLAVE del ítem: basta con ella, lo que envía el llamante manda, una clave sin prefijo también se encuentra, y un fallo de lectura de config no es fatal |
+| `TestTheNavEntryCarriesItsModule::*` (3) | Cada entrada de módulo dice de qué módulo depende; las del core, de ninguno; el pane se pinta siempre |
+
+**El menú lateral pregunta por la configuración, no por el disco.** El nav se construía con las
+páginas **descubiertas en disco**, así que todo módulo que declara `__page__` aparecía —
+*Azure* y *Microsoft 365* en el lateral de un panel cuya pestaña Módulos listaba solo `ping`—.
+Al pulsarlas se llegaba a una sección que solo podía estar vacía: sus datos son los últimos
+resultados del monitor para un módulo que nunca corrió. Y una sección vacía no se lee como «no
+instalado», se lee como una función que existe y está rota.
+
+El criterio es el que ya aplicaba la pestaña Módulos: **configurado (y no apagado) = existe**.
+Ojo a la asimetría, que es fácil de invertir: un módulo **configurado** sin clave `enabled` está
+**encendido** (el registro lo declara `default: True`), pero uno **ausente** no está «encendido
+por defecto» — sencillamente no se ha añadido.
+
+**Por qué la decisión es del cliente y no del servidor.** El primer intento filtraba en el
+render: funcionaba al cargar, pero al añadir o activar un módulo la sección no aparecía **hasta
+pulsar F5** —y una entrada que nunca se pintó no se puede mostrar sin recargar, justo la recarga
+que el panel entero existe para evitar—. Así que el shell manda **todos** los panes y todas las
+entradas, cada una etiquetada con `data-nav-module`, y `syncModuleSections()` decide; se vuelve
+a llamar al cargar, al guardar módulos y al revertir. Lo que fija el test de integración es la
+**etiqueta** (sin ella el cliente no tiene de qué tirar); la conducta visible es cosa del
+navegador y se pregunta en [§142](#142-los-únicos-tests-que-ejecutan-el-javascript-del-panel).
 
 **Archivo:** `tests/integration/test_wa_standalone_pages.py` — 17 tests
 **Archivo:** `tests/unit/test_wa_standalone_pages.py` — 3 tests
@@ -6440,7 +6462,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 15 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 19 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6468,6 +6490,14 @@ Pocos y de carga a propósito: aquí no se cubre la interacción caso por caso �
 tests hacen eso mucho más barato—. Existe para responder a la única pregunta que los demás no
 pueden: ¿esto arranca? Comprobado rompiendo a propósito un partial compartido y verificando que
 el fallo nombra la causa.
+
+**`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
+Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe
+ofrecerse, y uno que se acaba de añadir debe ofrecerse **al instante**. El primer intento
+filtraba en el servidor y obligaba a **F5** — que en un SPA se lee como que el guardado no
+funcionó. Solo el navegador puede responder a esto: el shell pinta todos los panes y entradas, y
+quien decide es `syncModuleSections()` contra `modulesData`. El test que importa parte de la
+precondición (oculto), añade el módulo y exige verlo **sin recargar**.
 
 **`TestSavingOneCheckDoesNotSwitchOnEveryModule`** — la excepción a lo anterior, y por un motivo:
 el bug vivía justo donde ninguna guarda de texto podía verlo. Añadir un check de ping a un

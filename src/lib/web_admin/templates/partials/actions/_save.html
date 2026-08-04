@@ -42,6 +42,8 @@ async function saveModules() {
         showToast(t('modules_saved'));
         clearDirty('modules');
         _savedModulesData = deepClone(modulesData);
+        // A module just added or switched on gets its section now, not after a reload.
+        syncModuleSections();
     } else showToast(r?.error || t('save_error'), 'danger');
 }
 function revertModules() {
@@ -50,6 +52,7 @@ function revertModules() {
         modulesData = deepClone(_savedModulesData);
         clearDirty('modules');
         _renderModulesSurface();
+        syncModuleSections();     // reverting can take a module away again
         showToast(t('modules_reverted'));
     });
 }
