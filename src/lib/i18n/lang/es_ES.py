@@ -417,6 +417,13 @@ LANG = {
     'dashboard_set_default_done': 'Disposición predeterminada guardada',
     'dashboard_fullscreen':    'Pantalla completa',
     'dashboard_fullscreen_tt': 'Pantalla de estado a pantalla completa — oculta todos los controles para un panel 24/7',
+    'dashboard_wakelock_insecure': 'La pantalla puede apagarse o bloquearse: mantenerla '
+                                   'encendida requiere HTTPS (o abrir el panel en localhost).',
+    'dashboard_wakelock_fallback': 'Manteniendo la pantalla encendida por reproducción '
+                                   'multimedia: sin HTTPS no hay forma fiable, así que en '
+                                   'algunos navegadores aún podría apagarse.',
+    'dashboard_wakelock_failed': 'El sistema no permitió mantener la pantalla encendida '
+                                 '(¿ahorro de energía?). Puede apagarse o bloquearse.',
     'dashboard_exit_fullscreen': 'Salir de pantalla completa',
     'dashboard_add_widget': 'Añadir Widget',
     'dashboard_all_visible': 'Todos los Widgets Visibles',

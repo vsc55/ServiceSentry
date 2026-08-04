@@ -6515,3 +6515,55 @@ scratch con nombres de tabla fijos. Como los demás en vivo, no borra ninguna ta
 creado él (fotografía el esquema antes de arrancar). Comprobado que **detecta** regresiones reales
 desactivando cada guarda por turno: sin el de escalada falla nombrando «users_add minted an
 admin»; sin el de scoping por-host, «IDOR: read host B status with only server.A.view».
+
+---
+
+## 144. Una pantalla mural que se duerme no es una pantalla mural
+
+**Archivo:** `tests/meta/test_wa_kiosk_wakelock.py` — 20 tests
+
+El modo pantalla completa del Overview existe para dejarlo puesto en un monitor. Esa promesa la
+rompe el sistema operativo, no el panel: diez minutos sin teclado y la pantalla se atenúa, entra
+el salvapantallas, se bloquea la sesión — y lo que se cayó a las 3 de la mañana no estuvo
+visible para nadie. El modo kiosco toma ahora un **wake lock de pantalla** mientras está activo.
+
+Lo que fijan estas guardas es la parte fácil de equivocar e imposible de ver mirando:
+
+- **el lock se vuelve a pedir al recuperar visibilidad.** El navegador lo suelta por su cuenta
+  cuando la página deja de estar visible (otra pestaña, minimizar) y **no** lo recupera. Sin el
+  manejador de `visibilitychange` la pantalla se mantiene despierta justo hasta el primer cambio
+  de pestaña y luego deja de hacerlo en silencio — el peor fallo posible, porque el modo sigue
+  *pareciendo* activo. Se comprueba además que solo re-pide si sigue en kiosco, y que lo hace
+  callado (si no, cada cambio de pestaña lanzaría un aviso);
+- **salir lo suelta**, por las dos salidas: el botón y salir de pantalla completa con Esc. Un
+  panel que nadie mira no debe tener el equipo despierto;
+- **nunca falla en silencio.** La API Wake Lock exige contexto seguro, y un panel autoalojado se
+  abre casi siempre por `http://` en la LAN, donde `navigator.wakeLock` ni existe. Callarse ahí
+  dejaría a alguien convencido de que su pantalla está fijada mientras se apaga cada noche, así
+  que ese caso avisa (y el rechazo por ahorro de energía, también).
+
+| Test | Impide |
+|---|---|
+| `TestKioskHoldsTheScreenAwake::test_entering_kiosk_takes_the_lock` | Entrar en kiosco sin pedir el lock |
+| `TestKioskHoldsTheScreenAwake::test_leaving_kiosk_releases_it` | Dejar el equipo despierto al salir |
+| `TestKioskHoldsTheScreenAwake::test_escaping_fullscreen_releases_it_too` | Que Esc quite el estilo pero no el lock |
+| `TestTheLockSurvivesBeingHidden::test_visibility_change_re_acquires` | Que la pantalla se duerma tras el primer cambio de pestaña |
+| `TestTheLockSurvivesBeingHidden::test_the_re_acquire_does_not_nag` | Un aviso en cada cambio de pestaña |
+| `TestItNeverFailsSilently::test_an_unavailable_api_warns` | Fallar callado sobre `http://` |
+| `TestTheFallbackForPlainHttp::test_the_api_is_still_preferred` | Que el apaño se use habiendo API buena |
+| `TestTheFallbackForPlainHttp::test_the_clip_keeps_producing_frames` | Un canvas estático: el stream se para y la pantalla se duerme igual |
+| `TestTheFallbackForPlainHttp::test_it_is_rendered_not_hidden` | Ocultarlo con `display:none` y que deje de contar como reproducción |
+| `TestTheFallbackForPlainHttp::test_stopping_releases_the_camera_stream_and_timer` | Dejar vídeo, pista y temporizador vivos tras salir |
+
+**El plan B sobre `http://`.** Sin contexto seguro `navigator.wakeLock` no existe, así que entra
+una alternativa: un clip mudo de 2×2 px reproduciéndose en bucle en una esquina. Los navegadores
+mantienen la pantalla encendida mientras hay reproducción — es lo que impide que se atenúe en una
+videollamada. Los fotogramas salen de un canvas, no de un blob en base64 pegado en la plantilla:
+mismo truco que NoSleep.js, pero legible y auditable.
+
+Es **mejor esfuerzo por construcción** (se apoya en una conducta del navegador, no en un
+contrato), así que va en segundo lugar y se anuncia con un aviso propio en vez de dar por hecho
+que funciona. Dos detalles de los que depende, y que por eso están fijados: el elemento tiene que
+**renderizarse** (con `display:none` deja de contar como reproducción — de ahí la clase genérica
+`.ss-nosleep`, 2 px en una esquina) y los fotogramas tienen que **seguir fluyendo** (un canvas
+estático deja de emitirlos y el stream se estanca).
