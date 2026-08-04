@@ -168,6 +168,31 @@ flowchart TB
     au -->|"no"| stop["Arranca parado · iniciable a mano<br/>(Servicios: «Start»)"]
 ```
 
+## La imagen publicada
+
+CI construye y publica la imagen en **GitHub Container Registry**, así que no hace falta
+construirla para probar el panel:
+
+```bash
+docker pull ghcr.io/vsc55/servicesentry:latest
+```
+
+| Etiqueta | Qué es | Cuándo se mueve |
+|---|---|---|
+| `latest` | la punta de `main` | en cada merge a `main` |
+| `1.2.3` / `1.2` | una versión concreta | al etiquetar `v1.2.3` |
+| `test` | build manual | al mover el tag `test` |
+| `sha-<commit>` | ese commit exacto | **nunca** — es la única inmutable |
+
+Para fijar un despliegue usa `sha-<commit>`: el resto de etiquetas apuntan a otra imagen con
+el tiempo, que es justo lo que no quieres cuando estás reproduciendo un fallo.
+
+Las *pull requests* **construyen la imagen pero no la publican**: sirve para saber que el
+`Dockerfile` sigue compilando sin dejar que una PR de un fork escriba en el registro.
+
+Se publica solo para **linux/amd64**. En ARM (Raspberry Pi, VPS ARM, Apple Silicon) hay que
+construirla: los `docker compose` de abajo lo hacen solos, porque llevan `build:`.
+
 ## Inicio rápido
 
 ```bash
@@ -184,13 +209,21 @@ docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 # (construye desde el Dockerfile; login admin/admin; plano de control activado)
 docker compose -f docker/docker-compose.microservices-test.yml up --build
 
-# Pruebas de HA: 2 réplicas de worker/events/syslog → ver Líder/En espera y failover
-docker compose -f docker/docker-compose.ha-test.yml up --build
-#   (o escala en caliente: … up --build --scale worker=3 --scale events=2 --scale syslog=3)
+# Pruebas de HA: 2 réplicas de worker/events/syslog → ver Líder/En espera y failover.
+# Usa la IMAGEN PUBLICADA por CI (`:test`), así que esto también prueba lo que la gente
+# se descarga, no solo que el Dockerfile compile.
+docker compose -f docker/docker-compose.ha-test.yml up -d --pull always
+#   (o escala en caliente: … --scale worker=3 --scale events=2 --scale syslog=3)
+
+# La misma pila construida desde tu copia de trabajo (para probar cambios tuyos: el tag
+# `test` publicado no sabe nada de ellos). Es un override, no otra pila:
+docker compose -f docker/docker-compose.ha-test.yml \
+               -f docker/docker-compose.ha-test-build.yml up -d --build
 
 # Atajo para ambas pilas (proyectos aislados, sigue los logs desde el arranque):
 ./docker/make_test.sh          # pila de test (microservicios, MariaDB)
-./docker/make_test.sh ha       # pila de HA (2 réplicas → Líder/En espera)
+./docker/make_test.sh ha       # pila de HA sobre la imagen publicada
+./docker/make_test.sh ha-build # pila de HA construida en local
 #   Añade el comando tras `ha`: make_test.sh ha logs | ps | down | clean | rebuild
 ```
 

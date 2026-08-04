@@ -1,8 +1,29 @@
 name: Docker
 
+# The image is published from here, so what triggers it IS the release policy:
+#
+#   main            → :latest, the image a plain `docker pull` gets
+#   tag v1.2.3      → :1.2.3 and :1.2, for pinning a version
+#   tag test        → :test, the manual escape hatch this workflow started as
+#   pull request    → BUILT but never pushed: proof the Dockerfile still builds, and the
+#                     one case where a fork could otherwise reach the registry
+#   manual dispatch → the same, on demand
+#
+# Everything gets :sha-<commit> as well, which is the only tag that never moves — the one
+# to use when "it worked yesterday" needs to be pinned down.
 on:
   push:
-    tags: ["test"]
+    branches: [main]
+    tags: ["v*", "test"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Pushing twice in a minute should not race two publishes onto the same tag: the older run
+# is cancelled, so :latest is whatever the newest commit produced and not a coin toss.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -38,6 +59,9 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            # Named on purpose rather than through type=ref,event=tag: that would also stamp
+            # a v-prefixed duplicate of every semver tag. `test` is the only literal one.
+            type=raw,value=test,enable=${{ github.ref == 'refs/tags/test' }}
             type=sha
 
       - name: Build and push
@@ -45,6 +69,10 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile
+          # amd64 only, deliberately: arm64 has to be emulated through QEMU on a GitHub
+          # runner and the pip layer makes that minutes instead of the ~30 s this takes.
+          # Adding linux/arm64 here is the whole change if that trade stops being worth it.
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

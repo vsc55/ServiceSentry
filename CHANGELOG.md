@@ -8,6 +8,34 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.46] - 2026-08-04
+
+### Changed
+- **The container is published on its own now.** The workflow already built and pushed to
+  GHCR correctly; what was missing was ever being asked to. It fired on one literal tag named
+  `test`, so every image came from moving that tag by hand and the tagging rules it already
+  carried — `latest`, semver, per-branch — described releases that could not happen. The
+  triggers now say the policy out loud: `main` publishes `:latest`, a `v1.2.3` tag publishes
+  `:1.2.3` and `:1.2`, the `test` tag still works as the manual escape hatch, and every build
+  also gets `:sha-<commit>` — the only tag that never moves, and so the one to pin a
+  deployment to.
+  - Pull requests **build without publishing**. That keeps a broken `Dockerfile` from reaching
+    `main` unnoticed, and is the one case where a fork could otherwise write to the registry.
+  - `linux/amd64` only, deliberately: arm64 has to be emulated through QEMU on a GitHub
+    runner, and the pip layer turns a ~30 s build into minutes. Adding the platform is a
+    one-line change if that trade stops paying.
+  - Concurrent pushes cancel the older run, so `:latest` is whatever the newest commit built
+    rather than whichever job happened to finish last.
+- **The HA test stack runs the published image.** `docker-compose.ha-test.yml` pulled its
+  image from a local build, which proves the `Dockerfile` compiles and says nothing about the
+  artefact people actually pull; it now runs `ghcr.io/vsc55/servicesentry:test` with
+  `pull_policy: always` (that tag moves, and a stale local copy would quietly test the
+  previous build). Building from the working copy — what you want while changing code — moved
+  to `docker-compose.ha-test-build.yml`, an **override** rather than a second copy: the two
+  differ in five lines out of 180, and two files that must stay identical except for those
+  five is how they stop being identical. `make_test.sh ha` and `make_test.sh ha-build` pick
+  between them.
+
 ## [0.0.1+build.45] - 2026-08-04
 
 ### Fixed
