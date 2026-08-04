@@ -19,6 +19,54 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Añadir un check a un servidor activaba seis módulos que nadie tocó
+
+**Fecha:** 2026-08-04 · **Área:** `lib/web_admin/templates/partials/servers/_save.html`
+(`_applyHostChecks`), `lib/modules/discovery/schemas.py`
+
+**Síntoma** — reportado con los pasos exactos, que es lo que permitió aislarlo rápido: activar
+solo el módulo `ping`, crear un servidor, comprobar que en Módulos seguía habiendo únicamente
+`ping`, ir al servidor, activar `ping` en la sección *monitoring* y guardar. Al volver a
+Módulos aparecían **activados** `cpu`, `hddtemp`, `ntp`, `raid`, `ram_swap` y `snmp`, todos
+**sin un solo ítem**; solo `ping` tenía el suyo.
+
+**Diagnóstico** — la lista de módulos era la pista. `module_host_multiple()` los clasifica, y
+los de **un solo check** son exactamente `cpu hddtemp keepalived ntp ping proxmox raid ram_swap
+snmp`: el conjunto reportado más `ping` (activado a propósito). Ni un solo módulo multi-check
+apareció, así que el sospechoso era el hueco *placeholder* que la sección monitoring crea solo
+para los de un check (`if (!multiple && !items.length) items.push({_key: null, enabled: false})`).
+Confirmado ejecutando la función real en el navegador con el estado que produce un modal, sin
+tocar el flujo completo: devolvía `['cpu']` para un módulo que el test nunca activó.
+
+**Causa raíz** — dos hechos inofensivos por separado. `_applyHostChecks` reservaba la entrada
+del módulo **antes** de decidir si había algo que escribir:
+
+```js
+modulesData[mk] = modulesData[mk] || {};          // ← reserva
+modulesData[mk][coll] = modulesData[mk][coll] || {};
+...
+if (!it._key && !it.enabled) continue;            // ← y solo aquí descarta el hueco vacío
+```
+
+…y un módulo que se queda como `{}` **cuenta como activado**: `schemas.py` declara
+`'enabled': {'default': True}`, así que la ausencia de la clave no significa «apagado» sino lo
+contrario. Guardar el único check real ponía `changed = true` y el `PUT /api/v1/modules` enviaba
+el objeto entero, persistiendo de paso las entradas vacías de los demás.
+
+**Solución** — creación perezosa: `col` empieza en `null` y la entrada del módulo se materializa
+en la primera escritura de verdad (`_col()`), ya pasado el `continue`. El bucle de borrado
+comprueba `col` porque ahora puede no existir. Fijado con un test de navegador que alimenta la
+función con el estado de un modal real y exige que un módulo intacto no aparezca — con control
+positivo, para que no se pueda satisfacer no escribiendo nada.
+
+**Lección** — cuando la ausencia de un valor significa «activado», crear un contenedor vacío
+**es** una decisión del usuario aunque no lo parezca. Reservar estructura «por si acaso» es
+gratis solo cuando el vacío y el no-existir significan lo mismo; aquí no lo significaban. Y el
+patrón «guardar una parte reenvía el objeto entero» convierte cualquier resto en memoria en un
+cambio persistido: si el envío es total, la construcción tiene que ser exacta.
+
+---
+
 ## Clonar un elemento lo guardaba y decía que había fallado — y el fallo no dejaba rastro
 
 **Fecha:** 2026-08-01 · **Área:** `lib/core/modules/routes.py` (`api_save_modules`),

@@ -418,9 +418,20 @@ function _applyHostChecks(uid) {
         const labelTpl = sch['__discovery_label_template__'];
         const mk = (modulesData[mod] !== undefined) ? mod
                  : (modulesData['watchfuls.' + mod] !== undefined ? 'watchfuls.' + mod : mod);
-        modulesData[mk] = modulesData[mk] || {};
-        modulesData[mk][coll] = modulesData[mk][coll] || {};
-        const col = modulesData[mk][coll];
+        // Created only when there is really something to write. Every single-check module
+        // brings an empty placeholder slot here even when the user never touched it, and a
+        // module left behind as `{}` reads as ENABLED (`enabled` defaults to true), so
+        // reserving the entry up front is what used to switch on cpu, hddtemp, ntp, raid,
+        // ram_swap and snmp — itemless — the first time a server saved one ping check.
+        let col = (modulesData[mk] || {})[coll] || null;
+        const _col = () => {
+            if (!col) {
+                modulesData[mk] = modulesData[mk] || {};
+                modulesData[mk][coll] = modulesData[mk][coll] || {};
+                col = modulesData[mk][coll];
+            }
+            return col;
+        };
         const keptKeys = new Set();
         for (const it of st.items) {
             // A brand-new check left disabled is not created (e.g. an untouched
@@ -434,17 +445,18 @@ function _applyHostChecks(uid) {
                 const lbl = _discoveryLabel(sch, _hostDraft.name || '', svcVal, '', '', it.fields);
                 if (lbl) it.fields[labelField] = lbl;
             }
+            const _c = _col();          // first real write is what creates the module entry
             let key = it._key;
             if (!key) {
                 // An opaque UUID when the schema asks for it; otherwise base the key
                 // on the check's identifying field (service name) — not the host name.
                 const idVal = keyField && String(it.fields[keyField] || '').trim();
-                key = uidKey ? _genUuid() : _uniqueItemKey(col, idVal || _hostDraft.name || uid);
-                col[key] = {};
+                key = uidKey ? _genUuid() : _uniqueItemKey(_c, idVal || _hostDraft.name || uid);
+                _c[key] = {};
                 it._key = key;
             }
             keptKeys.add(key);
-            const item = (col[key] && typeof col[key] === 'object') ? col[key] : (col[key] = {});
+            const item = (_c[key] && typeof _c[key] === 'object') ? _c[key] : (_c[key] = {});
             item.host_uid = uid;
             item.enabled = !!it.enabled;
             // Referenced credential (e.g. web_auth); the server strips the inline
@@ -464,9 +476,10 @@ function _applyHostChecks(uid) {
             }
             changed = true;
         }
-        // Delete checks that were bound to this host but the user removed.
+        // Delete checks that were bound to this host but the user removed. `col` stays null
+        // when the module has no stored collection, and then there is nothing to delete.
         for (const oldKey of st._existingKeys) {
-            if (!keptKeys.has(oldKey) && oldKey in col) {
+            if (col && !keptKeys.has(oldKey) && oldKey in col) {
                 delete col[oldKey];
                 changed = true;
             }
