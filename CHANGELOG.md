@@ -8,6 +8,27 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.44] - 2026-08-04
+
+### Fixed
+- **Adding one check to a server no longer switches on six modules nobody touched.** Enable
+  `ping`, create a server, bind `ping` to it in the monitoring section, save — and the Modules
+  tab came back with `cpu`, `hddtemp`, `ntp`, `raid`, `ram_swap` and `snmp` enabled, every one
+  of them without a single item. Exactly the single-check host modules, which is what pointed
+  at the cause: that section renders an empty placeholder slot for each of them even when the
+  user never touches it, and `_applyHostChecks` reserved `modulesData[module][collection]`
+  *before* discarding that slot. A module left behind as `{}` does not read as "off" — the
+  registry declares `'enabled': {'default': True}`, so an absent key means **on** — and since
+  saving the one real check PUTs the whole object, the empty entries were persisted with it.
+  The entry is now created lazily, on the first write that actually happens.
+  - Pinned by a browser test rather than a template scan, because the defect lived where no
+    text guard could see it: the real function is fed the state a real modal produces and its
+    effect on `modulesData` is read back. With a positive control — a module the user *did*
+    enable must still be written — so the guard cannot be satisfied by writing nothing.
+  - Written up in `docs/caso-diagnostico.md`: when the absence of a value means "enabled",
+    creating an empty container *is* a decision, and "save one part, PUT the whole object"
+    turns any in-memory leftover into a persisted change.
+
 ## [0.0.1+build.43] - 2026-08-04
 
 ### Added

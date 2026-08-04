@@ -6440,7 +6440,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 13 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 15 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6468,6 +6468,20 @@ Pocos y de carga a propósito: aquí no se cubre la interacción caso por caso �
 tests hacen eso mucho más barato—. Existe para responder a la única pregunta que los demás no
 pueden: ¿esto arranca? Comprobado rompiendo a propósito un partial compartido y verificando que
 el fallo nombra la causa.
+
+**`TestSavingOneCheckDoesNotSwitchOnEveryModule`** — la excepción a lo anterior, y por un motivo:
+el bug vivía justo donde ninguna guarda de texto podía verlo. Añadir un check de ping a un
+servidor activaba cpu, hddtemp, ntp, raid, ram_swap y snmp, todos sin ítems. La sección
+monitoring pinta un hueco por módulo enlazable a host, y los de un solo check traen un hueco
+vacío aunque no los toques; `_applyHostChecks` creaba `modulesData[módulo][colección]` **antes**
+de descartar ese hueco, y un módulo que se queda en `{}` cuenta como **activado** (`enabled`
+tiene `default: True` en `schemas.py`). Al guardar el único check de verdad, el PUT se llevaba
+todo lo demás por delante.
+
+Se le pregunta al navegador porque ahí es donde está el fallo: se alimenta la función con el
+estado que produce un modal real y se lee su efecto sobre `modulesData`. Con control positivo —
+un módulo que el usuario **sí** activa tiene que seguir escribiéndose—, para que la guarda no se
+pueda satisfacer no escribiendo nada.
 
 **Cómo hacerlos correr.** El paquete Playwright lo instala `requirements-dev.txt`, pero el
 navegador es un binario aparte (Playwright lo guarda en su propia caché) — sin él, estos tests
