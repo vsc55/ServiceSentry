@@ -411,6 +411,13 @@ LANG = {
     'dashboard_set_default_done': 'Default layout saved',
     'dashboard_fullscreen':    'Fullscreen',
     'dashboard_fullscreen_tt': 'Fullscreen status display — hides all controls for a 24/7 wall screen',
+    'dashboard_wakelock_insecure': 'The screen may sleep or lock: keeping it awake needs '
+                                   'HTTPS (or opening the panel on localhost).',
+    'dashboard_wakelock_fallback': 'Keeping the screen awake through media playback: without '
+                                   'HTTPS the reliable way is unavailable, so it may still '
+                                   'sleep on some browsers.',
+    'dashboard_wakelock_failed': 'The system refused to keep the screen awake (power saving?). '
+                                 'It may sleep or lock.',
     'dashboard_exit_fullscreen': 'Exit fullscreen',
     'dashboard_add_widget': 'Add Widget',
     'dashboard_all_visible': 'All Widgets Visible',
