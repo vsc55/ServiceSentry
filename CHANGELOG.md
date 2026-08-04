@@ -8,6 +8,45 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.47] - 2026-08-04
+
+### Fixed
+- **The secret key can be pinned with `SS_SECRET_KEY`, which multi-pod deployments needed to
+  work at all.** That key signs session cookies *and* derives the Fernet key every stored
+  secret is encrypted with, so every process sharing a database must hold the same one — and
+  it was the single setting with no `SS_*` to supply it. It lived only in `.flask_secret`
+  inside the config directory.
+  - On one host the compose files get away with it: all four services mount the same `config`
+    volume. Lose that volume (`down -v`, a recreated volume) and every stored secret in the
+    database becomes unreadable, with nothing reporting an error.
+  - The Helm chart was never affected: it already ships the key as a Secret mounted into
+    every pod as `.flask_secret`, kept stable across upgrades. The **hand-written manifests**
+    in `caso-kubernetes.md` were the gap — they wire `envFrom` and mount nothing, so anyone
+    following that page by hand got a pod-local key: a credential saved by `web` could not be
+    decrypted by `worker`, and restarting a pod made everything encrypted before it
+    unrecoverable. Confirmed before changing anything — with `SS_SECRET_KEY` exported it was
+    ignored outright, and two instances with their own config dir raised `InvalidToken`
+    reading each other's data.
+  - The environment wins over the file, the file stays the fallback so existing installs are
+    untouched, and the value is **not** written to disk — it is supplied per process, and
+    persisting a copy would leave a second source of truth to drift from it.
+  - A malformed value **stops the process** instead of falling back. The fallback would
+    encrypt with a key the operator never chose and say nothing; the discovery comes months
+    later, when a replica cannot read a secret or a restart makes the data unreadable.
+  - `docs/caso-kubernetes.md` now carries it in the Secret (required for the hand-written
+    manifests, not for the chart), and `env.example` plus `ref-configuracion.md` explain when
+    it is needed and that losing it loses every stored secret.
+
+### Changed
+- **`env.example` stops shipping a password that works.** It set `SS_PASSWORD=admin`, which is
+  the kind of value that survives into production precisely because nothing ever complains
+  about it; it now reads `change-me`. Each secret also carries the command that generates a
+  good one (`openssl rand -base64 24`, `-hex 32`, `token_hex(32)`) instead of only being
+  labelled REQUIRED, and a header states which values must be set before anyone can reach the
+  panel. The database passwords stay **empty** on purpose — an empty one stops the stack, and
+  a deployment that refuses to boot is safer than one running on a password anybody can guess;
+  `change-me` is used only where the alternative is not starting at all, which is the admin
+  login.
 ## [0.0.1+build.46] - 2026-08-04
 
 ### Changed

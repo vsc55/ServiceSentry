@@ -63,6 +63,17 @@ stringData:
   # Token compartido del poke de control (mismo valor en todos los pods).
   # Genéralo con:  openssl rand -hex 32
   SS_CONTROL_TOKEN: replace-with-a-long-random-token
+  # OBLIGATORIO si despliegas con ESTOS manifiestos a mano. Firma las sesiones y **deriva la
+  # clave Fernet con la que se cifra cada secreto guardado** (credenciales SSH, tokens…).
+  # Estos Deployments solo usan `envFrom` y no montan nada, así que sin esta variable cada
+  # pod se genera la suya: lo que cifra `web` no lo descifra `worker`, y al reiniciar un pod
+  # lo cifrado antes queda irrecuperable. Mismo valor en TODOS los pods.
+  #   Genérala con:  python -c "import secrets; print(secrets.token_hex(32))"
+  #   (64 caracteres hex; un valor mal formado detiene el arranque a propósito)
+  # Guárdala fuera del clúster: perderla es perder todos los secretos almacenados.
+  # (Con el Helm chart NO hace falta: monta la clave compartida como fichero y la conserva
+  #  entre upgrades — ver `secretKey` en su values.yaml.)
+  SS_SECRET_KEY: replace-with-64-hex-characters
 ---
 apiVersion: v1
 kind: ConfigMap

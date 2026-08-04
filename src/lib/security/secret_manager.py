@@ -50,17 +50,26 @@ ENCRYPT_KEYS: frozenset[str] = frozenset({
 def fernet_from_secret_file(path: str):
     """Return a ``Fernet`` instance derived from the hex secret at *path*.
 
-    The first 32 bytes of the decoded hex string are used as the raw key
-    material, matching the existing ``.flask_secret`` format (64 hex chars
-    = 32 bytes = 256 bits).
+    ``SS_SECRET_KEY`` wins when set: it is how every process sharing a database is given
+    the SAME key (a pod per role has no shared volume to keep the file in). The file stays
+    the fallback, so an existing install is untouched.
 
-    Returns ``None`` if the file is missing, unreadable, or the
-    ``cryptography`` package is not installed.
+    The first 32 bytes of the decoded hex string are used as the raw key material,
+    matching the existing ``.flask_secret`` format (64 hex chars = 32 bytes = 256 bits).
+
+    Returns ``None`` if the file is missing, unreadable, or the ``cryptography`` package is
+    not installed — but a MALFORMED ``SS_SECRET_KEY`` raises instead of falling back: the
+    fallback would encrypt with a key the operator did not choose and never say so.
     """
+    # Imported here, not at module scope: lib.config.manager imports THIS module, so a
+    # top-level import would close the cycle.
+    from lib.config import secret_key_from_env       # noqa: PLC0415
+    hex_secret = secret_key_from_env()          # raises on a set-but-malformed value
     try:
         from cryptography.fernet import Fernet
-        with open(path, encoding='utf-8') as fh:
-            hex_secret = fh.read().strip()
+        if not hex_secret:
+            with open(path, encoding='utf-8') as fh:
+                hex_secret = fh.read().strip()
         raw = binascii.unhexlify(hex_secret)[:32]
         return Fernet(base64.urlsafe_b64encode(raw))
     except Exception:
