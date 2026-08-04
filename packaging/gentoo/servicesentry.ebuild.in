@@ -1,0 +1,78 @@
+# Copyright 2026 Javier Pastor
+# Distributed under the terms of the GNU General Public License v3
+
+# Template — packaging/build.sh substitutes @VERSION@ and writes the real ebuild into the
+# overlay tarball attached to the release. Gentoo installs from an ebuild, so that file IS
+# the deliverable; `emerge` is what consumes it:
+#
+#   mkdir -p /var/db/repos/servicesentry
+#   tar xzf servicesentry-@VERSION@-gentoo-overlay.tar.gz -C /var/db/repos/servicesentry
+#   # add it to /etc/portage/repos.conf, then:
+#   emerge app-admin/servicesentry
+
+EAPI=8
+
+DESCRIPTION="Self-hosted monitoring panel with a web admin, scheduler and syslog receiver"
+HOMEPAGE="https://github.com/vsc55/ServiceSentry"
+SRC_URI="https://github.com/vsc55/ServiceSentry/archive/refs/tags/v@VERSION@.tar.gz -> ${P}.tar.gz"
+S="${WORKDIR}/ServiceSentry-@VERSION@"
+
+LICENSE="GPL-3"
+SLOT="0"
+KEYWORDS="~amd64 ~arm64"
+
+# Only the interpreter and what it takes to build a wheel with no binary for this platform.
+# The 41 pinned libraries are installed into a venv by pkg_postinst, from the lock this
+# package ships — same reason as the deb/rpm: mapping them to Portage atoms would either
+# lose the pins or name packages that do not exist.
+RDEPEND="
+	dev-lang/python:3
+	dev-python/pip
+"
+DEPEND="${RDEPEND}"
+
+src_install() {
+	insinto /opt/ServiSesentry
+	doins -r src/.
+	fperms -R 0755 /opt/ServiSesentry
+
+	# OpenRC, which is what a Gentoo box runs by default.
+	doinitd init/openrc/init.d/ServiSesentry
+	doinitd init/openrc/init.d/ServiSesentry-web
+	doconfd init/openrc/conf.d/ServiSesentry
+	doconfd init/openrc/conf.d/ServiSesentry-web
+
+	keepdir /etc/ServiSesentry
+	keepdir /var/lib/ServiSesentry
+	fperms 0750 /etc/ServiSesentry /var/lib/ServiSesentry
+
+	dodoc README.md CHANGELOG.md
+}
+
+pkg_postinst() {
+	local venv="/opt/ServiSesentry/venv"
+
+	einfo "Creating the Python environment in ${venv} (this takes a few minutes)…"
+	python3 -m venv "${venv}" || die "could not create the venv"
+	"${venv}"/bin/python -m pip install --upgrade pip >/dev/null || die
+	"${venv}"/bin/python -m pip install --no-cache-dir \
+		-r /opt/ServiSesentry/requirements.lock \
+		|| die "could not install the Python dependencies (network? proxy?)"
+
+	# The conf.d files ship the system interpreter; point them at the venv one.
+	local f
+	for f in /etc/conf.d/ServiSesentry /etc/conf.d/ServiSesentry-web; do
+		[[ -f ${f} ]] && sed -i "s|^SS_PYTHON=.*|SS_PYTHON=\"${venv}/bin/python\"|" "${f}"
+	done
+
+	elog "Start it with:"
+	elog "    rc-update add ServiSesentry-web default && rc-service ServiSesentry-web start"
+	elog "    rc-update add ServiSesentry default     && rc-service ServiSesentry start"
+}
+
+pkg_postrm() {
+	# Built by pkg_postinst, so it is ours to remove; config and data are left alone.
+	if [[ -z ${REPLACING_VERSIONS} ]]; then
+		rm -rf /opt/ServiSesentry/venv
+	fi
+}

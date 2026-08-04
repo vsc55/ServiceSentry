@@ -37,6 +37,55 @@ docker compose -f docker/docker-compose.microservices-traefik.yml up -d
 
 ---
 
+## Paquetes (`.deb`, `.rpm`, ebuild de Gentoo)
+
+Cada **versión final** (`vX.Y.Z`) publica sus paquetes adjuntos a la
+[release de GitHub](https://github.com/vsc55/ServiceSentry/releases). El tag `test` **no**
+genera paquetes a propósito: es un tag de build que se mueve, y un `.deb` que dice ser una
+versión que mañana será otra cosa es peor que no tenerlo.
+
+```bash
+# Debian / Ubuntu
+sudo apt install ./servicesentry_1.2.3_all.deb
+
+# Fedora / RHEL
+sudo dnf install ./servicesentry-1.2.3.noarch.rpm
+
+# Gentoo — emerge instala desde un ebuild, así que lo que se publica es el overlay
+sudo mkdir -p /var/db/repos/servicesentry
+sudo tar xzf servicesentry-1.2.3-gentoo-overlay.tar.gz -C /var/db/repos/servicesentry
+# añade el repo a /etc/portage/repos.conf y luego:
+sudo emerge app-admin/servicesentry
+```
+
+**El paquete instala la aplicación; las dependencias se resuelven al instalar.** El
+postinstall crea un entorno virtual en `/opt/ServiSesentry/venv` y hace `pip install` desde
+el `requirements.lock` que viaja dentro. Consecuencias que conviene conocer:
+
+- hace falta **red** durante la instalación, y tarda unos minutos;
+- se instalan las **versiones exactas** del lock, iguales en toda distro — que es justo lo
+  que se pierde si el paquete dependiera de los `python3-*` de cada sistema (varios no
+  existen, y los que existen traen otra versión);
+- si falla, el mensaje dice el comando exacto para reintentarlo. La app queda instalada pero
+  **no arranca** hasta que ese paso termine bien.
+
+Tras instalar:
+
+```bash
+sudo systemctl enable --now ServiSesentry-web   # panel (puerto 8080)
+sudo systemctl enable --now ServiSesentry       # planificador de monitorización
+```
+
+Al desinstalar se borra el venv (lo creó el postinstall), pero **`/etc/ServiSesentry` y
+`/var/lib/ServiSesentry` se conservan**: configuración y base de datos sobreviven, que es lo
+que hace seguro reinstalar.
+
+> CI instala cada paquete en su distro (Debian 12, Ubuntu 24.04, Fedora 41) y comprueba que
+> el venv resultante importa de verdad `flask`, `cryptography` y `paramiko` — construir un
+> paquete demuestra que se generó, no que funcione. Si esa verificación falla, no hay release.
+
+---
+
 ## Instalación automática (`install.sh`)
 
 `install.sh` detecta si el sistema usa systemd u OpenRC e instala

@@ -1,0 +1,77 @@
+# nfpm — one definition, both packages (.deb and .rpm).
+#
+#   nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+#   nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+#
+# Chosen over fpm because it is a single static binary with no Ruby to install first, and
+# over hand-written debian/ + .spec trees because those are two descriptions of one layout
+# that then drift apart.
+#
+# What is NOT in here: the 41 pinned Python dependencies. They are installed into a venv by
+# the postinstall script, from the requirements.lock this package ships. Declaring them as
+# distro packages would mean mapping 41 names per distro — several of which do not exist,
+# and most of which are a different version than the lock pins — so the package would either
+# lie about what it runs or refuse to install.
+name: servicesentry
+arch: all                 # the app is pure Python; the venv is built on the target machine
+platform: linux
+version: ${SS_VERSION}    # set by the workflow from the tag (v1.2.3 → 1.2.3)
+section: net
+priority: optional
+maintainer: Javier Pastor <vsc55@cerebelum.net>
+description: |
+  Self-hosted monitoring panel with a web admin, a scheduler and a syslog receiver.
+  Checks hosts and services, keeps history, and notifies through several channels.
+vendor: ServiceSentry
+homepage: https://github.com/vsc55/ServiceSentry
+license: GPL-3.0-or-later
+
+# The interpreter and the means to make a venv — nothing else. No compiler and no dev
+# headers: the pinned wheels have manylinux binaries for the platforms this targets, and
+# dragging gcc onto every machine that installs a monitoring panel to cover the case where
+# one does not is the wrong default. If a wheel really is missing, the postinstall says so
+# and names the command to re-run.
+depends:
+  - python3
+overrides:
+  deb:
+    depends:
+      - python3
+      - python3-venv       # Debian ships venv separately; without it the postinstall cannot run
+  rpm:
+    depends:
+      - python3
+      - python3-pip
+
+contents:
+  # The application, staged by build.sh: the same tree the Docker image runs, minus a
+  # developer's local .venv, the __pycache__ dirs and the test suite — none of which a
+  # machine that only runs the panel has any use for.
+  - src: ../dist/staging/app
+    dst: /opt/ServiSesentry
+    file_info:
+      mode: 0755
+
+  # systemd units, rewritten at build time to run the venv's interpreter instead of the
+  # system one (see packaging/build.sh) — one source of truth in init/, no runtime edit of
+  # a packaged file.
+  - src: ../dist/staging/systemd/ServiSesentry.service
+    dst: /lib/systemd/system/ServiSesentry.service
+  - src: ../dist/staging/systemd/ServiSesentry-web.service
+    dst: /lib/systemd/system/ServiSesentry-web.service
+
+  # Config and data live outside the package's file list on purpose: they are created by
+  # the postinstall and must survive an uninstall.
+  - dst: /etc/ServiSesentry
+    type: dir
+    file_info:
+      mode: 0750
+  - dst: /var/lib/ServiSesentry
+    type: dir
+    file_info:
+      mode: 0750
+
+scripts:
+  postinstall: ./scripts/postinstall.sh
+  preremove: ./scripts/preremove.sh
+  postremove: ./scripts/postremove.sh

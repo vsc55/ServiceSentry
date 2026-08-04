@@ -8,6 +8,61 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.49] - 2026-08-04
+
+### Added
+- **A version tag now ships `.deb`, `.rpm` and a Gentoo overlay, attached to its release.**
+  Only for `vX.Y.Z`: `test` is a build tag that moves, and a package claiming to be a version
+  it will not be tomorrow is worse than no package. One `nfpm` definition produces both the
+  deb and the rpm — two hand-written trees (`debian/` and a `.spec`) are two descriptions of
+  one layout that drift apart. Gentoo installs from an ebuild rather than a built package, so
+  what ships there is the ebuild, generated from a template into an overlay tarball.
+  - **The package carries the application; the dependencies are resolved on the machine.**
+    The postinstall builds a venv in `/opt/ServiSesentry/venv` and installs the 41 pinned
+    packages from the `requirements.lock` it ships. A venv is bound to the exact python that
+    made it, so one built on the CI runner would break on any distro carrying a different
+    3.x; and declaring the pins as distro packages would mean mapping 41 names per distro,
+    several of which do not exist and most of which are a different version. The cost is
+    stated rather than hidden: it needs network and takes a few minutes, and a failure names
+    the command to re-run.
+  - **No compiler is pulled in.** The pinned wheels have manylinux binaries for the targets;
+    dragging `gcc` and dev headers onto every machine that installs a monitoring panel, to
+    cover the case where one does not, is the wrong default.
+  - **CI installs what it built.** Each package goes into its own distro container (Debian 12,
+    Ubuntu 24.04, Fedora 41) and the resulting venv has to actually import `flask`,
+    `cryptography` and `paramiko` — building a package proves it was produced, not that it
+    works, and the postinstall is exactly the step that fails on a distro nobody tried. The
+    release does not happen if that fails.
+  - The systemd units are rewritten at **build** time to run the venv's interpreter, from the
+    single copy in `init/` — not duplicated into `packaging/`, and not `sed`-ed in the
+    postinstall, which would leave a packaged file that no longer matches what the package
+    says it installed (`rpm --verify` flags exactly that).
+  - Uninstalling removes the venv, because the postinstall created it; `/etc/ServiSesentry`
+    and `/var/lib/ServiSesentry` are left alone, which is what makes reinstalling safe.
+
+### Changed
+- **`:latest` now means the newest release, not the newest commit.** It followed `main`, so
+  `docker pull` with no tag — what most people run — handed out whatever merged last: no
+  release notes, no packages, nothing claiming it was fit to install. It is now published by
+  a `vX.Y.Z` tag, and the tip of `main` moved to **`:edge`**, a name that says what it is.
+  (`:main`, which `type=ref,event=branch` produced, is gone: this workflow only builds branch
+  pushes for `main`, so it was a second name for the same image.) Until the first version tag
+  exists there is no `:latest` in the registry — `docs/caso-docker.md` says so rather than
+  leaving someone to discover it from a failing pull.
+- **The `test` tag also builds and installs the packages, without publishing them.** Finding
+  out that packaging is broken while tagging a release is too late; `test` is the rehearsal.
+  The `.deb`, `.rpm` and ebuild are built and put through the same install matrix, and stay
+  as run artefacts instead of being attached anywhere. They are versioned after what the
+  application reports (`__version__`), not after the tag: a `servicesentry-test.rpm` would
+  mean something different every week.
+- **The `test` tag no longer queues behind the suite.** It exists to get an image in front of
+  someone quickly and claims nothing about the tests, so its build now starts *beside* them
+  instead of waiting ~13 minutes for a claim it is not making. Everything else — `:latest`, a
+  version tag — does make that claim and still waits. The build moved into a reusable workflow
+  called twice (`build-fast`, `build-gated`) rather than being duplicated: `needs` cannot be
+  made conditional, and `if: always() && …` would still *wait* for the tests before starting,
+  which is the waiting this removes.
+
 ## [0.0.1+build.48] - 2026-08-04
 
 ### Changed

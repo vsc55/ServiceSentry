@@ -177,12 +177,21 @@ construirla para probar el panel:
 docker pull ghcr.io/vsc55/servicesentry:latest
 ```
 
+> **Todavía no hay ninguna versión `vX.Y.Z` publicada**, así que `:latest` aún no existe en el
+> registro. Hasta la primera release, usa `:edge` (la punta de `main`) o un `:sha-<commit>`.
+
 | Etiqueta | Qué es | Cuándo se mueve |
 |---|---|---|
-| `latest` | la punta de `main` | en cada merge a `main` |
+| `latest` | la **última versión publicada** | al etiquetar `v1.2.3` |
 | `1.2.3` / `1.2` | una versión concreta | al etiquetar `v1.2.3` |
+| `edge` | la punta de `main` | en cada merge a `main` |
 | `test` | build manual | al mover el tag `test` |
 | `sha-<commit>` | ese commit exacto | **nunca** — es la única inmutable |
+
+**`latest` es la última release, no el último commit.** `docker pull` sin etiqueta es lo que
+ejecuta casi todo el mundo, y debe entregar lo que ha pasado los tests, los paquetes y la
+verificación de instalación — no lo que se mergeó hace un rato. Para seguir la punta de
+desarrollo, `edge`.
 
 Para fijar un despliegue usa `sha-<commit>`: el resto de etiquetas apuntan a otra imagen con
 el tiempo, que es justo lo que no quieres cuando estás reproduciendo un fallo.
