@@ -395,3 +395,45 @@ class TestThePanelRefusesToBeFramed:
             catch (e) { return false; }   // cross-origin throw = also blocked
         }""")
         assert not framed, 'the panel rendered inside an iframe — clickjacking is possible'
+
+
+class TestSavingOneCheckDoesNotSwitchOnEveryModule:
+    """Adding a ping check to a server used to enable cpu, hddtemp, ntp, raid, ram_swap and
+    snmp — every single-check host module — each with no items at all.
+
+    The monitoring section of the host modal renders one slot per host-bindable module, and a
+    single-check module gets an empty placeholder slot even when the user never touches it.
+    ``_applyHostChecks`` created ``modulesData[module][collection]`` up front and only then
+    skipped the placeholder, leaving the module behind as ``{}`` — and a module whose
+    ``enabled`` key is absent reads as ENABLED (``schemas.py`` declares ``default: True``).
+    Saving the one check the user did add then PUT the whole object, persisting the lot.
+
+    Asked of the browser because that is where the bug lives: the function is fed the state a
+    real modal produces and its effect on ``modulesData`` is read back.
+    """
+
+    def _apply(self, page, cpu_enabled):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        return page.evaluate("""(cpuEnabled) => {
+            modulesData = { 'watchfuls.ping': { enabled: true, list: {} } };
+            _hostDraft  = { name: 'srv-1' };
+            const slot = (enabled) => ({ collection: 'list', fieldsMeta: [], multiple: false,
+                                         _existingKeys: [],
+                                         items: [{ _key: null, enabled, fields: {} }] });
+            _hostChecks = { ping: slot(true), cpu: slot(cpuEnabled) };
+            _hostChecks.ping.items[0].fields = { address: '10.0.0.9' };
+            _applyHostChecks('host-uid-1');
+            return Object.keys(modulesData).filter(k => /(^|\.)cpu$/.test(k));
+        }""", cpu_enabled)
+
+    def test_an_untouched_module_is_left_alone(self, page):
+        leaked = self._apply(page, False)
+        assert not leaked, (
+            f'saving one ping check created module config for {leaked} — with no `enabled` '
+            'key that reads as enabled, which is how six modules switched themselves on')
+
+    def test_a_module_the_user_did_enable_is_still_written(self, page):
+        """The guard above must not be satisfied by writing nothing at all."""
+        written = self._apply(page, True)
+        assert written, 'a check the user enabled was not persisted'
