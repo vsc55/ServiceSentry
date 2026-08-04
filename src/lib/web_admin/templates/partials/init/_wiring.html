@@ -257,6 +257,7 @@ try {
     groupsData = await apiGet('/api/v1/groups') || {};
     modulesData = await apiGet('/api/v1/modules') || {};
     applyModuleDefaults();
+    syncModuleSections();   // which module sections the sidebar offers depends on this data
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
     if ((currentUser.permissions || []).some(p =>
