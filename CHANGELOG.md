@@ -8,6 +8,31 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.43] - 2026-08-04
+
+### Added
+- **Fullscreen Overview keeps the screen awake.** Kiosk mode exists to be left on a monitor,
+  and the operating system was quietly undoing that: ten minutes idle and the display dims,
+  the screensaver starts, the session locks — so whatever went down at 3 a.m. was on screen
+  for nobody. Entering fullscreen now takes a screen wake lock and leaving releases it, by
+  either exit (the button or Esc out of fullscreen), so a panel nobody is watching stops
+  holding the machine awake.
+  - **Re-taken when the page becomes visible again.** The browser drops the lock on its own
+    whenever the page is hidden and never takes it back, so without this the display stays
+    awake exactly until the first tab switch and then stops — while the mode still looks
+    enabled. The re-acquire is silent and only fires if kiosk mode is still on.
+  - **It still works over plain `http://`.** The Wake Lock API needs a secure context, and a
+    self-hosted panel is usually reached by IP on a LAN, where `navigator.wakeLock` does not
+    even exist — which would have made the feature useless exactly where it is wanted. The
+    fallback is media playback: a muted 2×2 clip looping in a corner, since browsers hold the
+    display on while media plays (the reason a video call never dims the screen). Its frames
+    come from a canvas rather than a base64 blob pasted into the template — the NoSleep.js
+    trick, but readable. It is best-effort by construction, so it stays the second choice and
+    announces itself rather than claiming a guarantee it cannot give.
+  - **Nothing fails silently.** If neither route works the panel says so and names the fix
+    (HTTPS, or localhost); a lock refused by power saving warns too. The alternative was
+    letting someone believe their wall screen was pinned awake while it slept every night.
+
 ## [0.0.1+build.42] - 2026-08-03
 
 ### Fixed

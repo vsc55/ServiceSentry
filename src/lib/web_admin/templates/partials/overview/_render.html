@@ -67,8 +67,10 @@ function _dwToggleKiosk() {
         const el = document.documentElement;
         const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
         if (req) { try { req.call(el); } catch (_) {} }
+        _kioskWakeLockOn();
     } else {
         document.body.classList.remove('ss-kiosk');
+        _kioskWakeLockOff();
         if (document.fullscreenElement || document.webkitFullscreenElement) {
             const ex = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
             if (ex) { try { ex.call(document); } catch (_) {} }
@@ -76,15 +78,116 @@ function _dwToggleKiosk() {
     }
 }
 
+// ── Keep the display awake while the wall screen is up ────────────
+// A 24/7 status display is pointless if the machine dims the screen or the screensaver —
+// and with it the lock screen — kicks in after ten minutes. The Screen Wake Lock API asks
+// the OS to hold the display on for as long as this page is visible.
+//
+// Two things that decide whether it works:
+//   * it needs a SECURE CONTEXT. Over plain http:// on a LAN — how a self-hosted panel is
+//     usually reached — `navigator.wakeLock` is simply undefined, so say it out loud rather
+//     than let the screen sleep on a wall display someone believed was pinned awake;
+//   * the browser releases the lock by itself whenever the page stops being visible
+//     (another tab, minimised) and never takes it back — hence the re-acquire below.
+let _kioskWakeLock = null;
+
+async function _kioskWakeLockOn(quiet) {
+    if (_kioskWakeLock) return true;
+    if (navigator.wakeLock) {
+        try {
+            _kioskWakeLock = await navigator.wakeLock.request('screen');
+            // Fires on the browser's own release too, so the handle never claims a lock we lost.
+            _kioskWakeLock.addEventListener('release', () => { _kioskWakeLock = null; });
+            return true;
+        } catch (_) {                   // refused, e.g. battery saver on a laptop
+            if (!quiet) showToast(t('dashboard_wakelock_failed'), 'warning', 8000);
+            return false;
+        }
+    }
+    // No secure context: fall back to media playback (below).
+    if (_kioskNoSleepOn()) {
+        if (!quiet) showToast(t('dashboard_wakelock_fallback'), 'warning', 8000);
+        return true;
+    }
+    if (!quiet) showToast(t('dashboard_wakelock_insecure'), 'warning', 8000);
+    return false;
+}
+
+function _kioskWakeLockOff() {
+    _kioskNoSleepOff();
+    if (!_kioskWakeLock) return;
+    try { _kioskWakeLock.release(); } catch (_) {}
+    _kioskWakeLock = null;
+}
+
+// ── Fallback for plain http://, where the Wake Lock API does not exist ────────
+// Browsers hold the display on while media is playing — it is what stops a video call from
+// dimming the screen — so a muted 1 fps clip playing in a corner buys the same effect
+// without a secure context. The frames come from a 2×2 canvas rather than a base64 blob
+// pasted into this template: same trick as NoSleep.js, but readable.
+//
+// Best-effort by construction: it leans on browser behaviour, not on a contract, so it is
+// the second choice and announces itself. Two details it does depend on: the element must
+// actually render (a `display:none` video is not "playing" for this purpose — hence the
+// 2px .ss-nosleep corner) and frames must keep flowing (a static canvas stops producing
+// them, and a stalled stream stops counting).
+let _kioskNoSleep = null;
+
+function _kioskNoSleepOn() {
+    if (_kioskNoSleep) {                    // already up: just make sure it is still playing
+        _kioskNoSleep.v.play().catch(() => {});
+        return true;
+    }
+    try {
+        const c = document.createElement('canvas');
+        c.width = c.height = 2;
+        const ctx = c.getContext('2d');
+        const stream = c.captureStream(1);
+        const v = document.createElement('video');
+        v.muted = true; v.loop = true; v.playsInline = true;
+        v.setAttribute('aria-hidden', 'true');
+        v.className = 'ss-nosleep';
+        v.srcObject = stream;
+        document.body.appendChild(v);
+        const tick = setInterval(() => {    // one changed pixel a second keeps frames coming
+            ctx.fillStyle = ctx.fillStyle === '#000000' ? '#000001' : '#000000';
+            ctx.fillRect(0, 0, 2, 2);
+        }, 1000);
+        v.play().catch(() => {});
+        _kioskNoSleep = { v, stream, tick };
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function _kioskNoSleepOff() {
+    if (!_kioskNoSleep) return;
+    clearInterval(_kioskNoSleep.tick);
+    try { _kioskNoSleep.v.pause(); } catch (_) {}
+    try { _kioskNoSleep.stream.getTracks().forEach(tr => tr.stop()); } catch (_) {}
+    _kioskNoSleep.v.remove();
+    _kioskNoSleep = null;
+}
+
 // Leaving fullscreen (e.g. pressing Esc) must also drop kiosk styling.
 if (!window._kioskFsHooked) {
     window._kioskFsHooked = true;
     const _onFsChange = () => {
-        if (!document.fullscreenElement && !document.webkitFullscreenElement)
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
             document.body.classList.remove('ss-kiosk');
+            _kioskWakeLockOff();
+        }
     };
     document.addEventListener('fullscreenchange', _onFsChange);
     document.addEventListener('webkitfullscreenchange', _onFsChange);
+    // Re-take the lock when the page becomes visible again: the browser dropped it while
+    // hidden, so without this the wall screen starts sleeping after the first tab switch.
+    // Quiet on purpose — the warning was already shown when kiosk mode started.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && document.body.classList.contains('ss-kiosk'))
+            _kioskWakeLockOn(true);
+    });
 }
 
 function setOverviewAutoRefresh(seconds) {

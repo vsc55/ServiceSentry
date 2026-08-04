@@ -1379,6 +1379,19 @@ body.ss-kiosk #kioskExit {
 }
 body.ss-kiosk #kioskExit:hover { opacity: 1; }
 
+/* Keep-awake fallback for kiosk mode without HTTPS: a muted clip whose playback is what
+   holds the display on. It has to RENDER to count — `display:none` or `visibility:hidden`
+   would stop the browser treating it as playing — so it is parked 2px in a corner instead
+   of hidden. Reusable on purpose: any surface needing the same trick asks for .ss-nosleep. */
+.ss-nosleep {
+    position: fixed;
+    right: 0; bottom: 0;
+    width: 2px; height: 2px;
+    opacity: .01;
+    pointer-events: none;
+    z-index: -1;
+}
+
 /* Spacer widget — invisible filler; only its toolbar shows in edit mode */
 .dw-spacer .dw-toolbar { display: none; }
 .dashboard-edit .dw-spacer .dw-toolbar { display: flex; }
