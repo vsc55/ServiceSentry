@@ -1,0 +1,33 @@
+# HA test stack — build locally instead of pulling the published image.
+#
+# An OVERRIDE, not a second copy of the stack: it differs from ha-test.yml in five lines,
+# and two 180-line files that must be kept identical except for those five is how they end
+# up not being identical. Everything — services, replicas, DB, volumes — stays defined once,
+# in ha-test.yml.
+#
+#   docker compose -f docker/docker-compose.ha-test.yml \
+#                  -f docker/docker-compose.ha-test-build.yml up -d --build
+#
+# or simply: ./docker/make_test.sh ha-build
+#
+# Use this while changing the code (the published `test` tag knows nothing about your
+# working copy). Use the base file alone to exercise what CI actually published.
+
+x-app-build: &app-build
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: servicesentry:test
+  # Overrides the base file's `always`: there is nothing to pull for an image built here,
+  # and asking would fail on a registry that has never heard of servicesentry:test.
+  pull_policy: build
+
+services:
+  web:
+    <<: *app-build
+  worker:
+    <<: *app-build
+  events:
+    <<: *app-build
+  syslog:
+    <<: *app-build

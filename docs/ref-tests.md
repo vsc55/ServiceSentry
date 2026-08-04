@@ -6611,3 +6611,40 @@ que funciona. Dos detalles de los que depende, y que por eso están fijados: el 
 **renderizarse** (con `display:none` deja de contar como reproducción — de ahí la clase genérica
 `.ss-nosleep`, 2 px en una esquina) y los fotogramas tienen que **seguir fluyendo** (un canvas
 estático deja de emitirlos y el stream se estanca).
+
+---
+
+## 145. La clave secreta tenía que poder fijarse por entorno, no solo por fichero
+
+**Archivo:** `tests/unit/test_secret_key_env.py` — 15 tests
+
+Esa clave firma las sesiones **y deriva la clave Fernet con la que se cifra cada secreto
+guardado**, así que **todo proceso que hable con la misma BD tiene que llevar la misma**.
+Vivía en un único sitio —`.flask_secret` dentro de `config_dir`— y no tenía ninguna `SS_*`
+con la que fijarla, siendo justo el ajuste que más la necesita:
+
+- en un solo host los `docker compose` se libran, porque los cuatro servicios montan el mismo
+  volumen `config`. Quítalo (`down -v`) y **todos los secretos de la BD quedan ilegibles**, sin
+  que nada dé error;
+- el **chart de Helm nunca estuvo afectado**: ya monta la clave compartida como fichero en
+  todos los pods. Los que fallaban eran los **manifiestos a mano** de `caso-kubernetes.md`, que
+  usan `envFrom` y no montan nada: quien siguiera esa página a mano tenía una clave por pod, así
+  que una credencial guardada por `web` no la podía descifrar el `worker`, y al reiniciar un pod
+  lo cifrado antes quedaba irrecuperable.
+
+Comprobado antes de tocar nada: con `SS_SECRET_KEY` definida se ignoraba por completo, y dos
+instancias con `config_dir` propio daban `InvalidToken` al leer lo del otro.
+
+| Test | Impide |
+|---|---|
+| `TestReadingTheEnvironment::test_a_malformed_key_is_refused` | Aceptar un valor mal formado y cifrar con otra clave en silencio |
+| `TestReadingTheEnvironment::test_surrounding_whitespace_is_tolerated` | Que un salto de línea pegado desde un Secret la invalide |
+| `TestTheFernetKeyFollowsIt::test_the_environment_wins_over_the_file` | Que el fichero gane a lo que fijó el operador |
+| `TestTheFernetKeyFollowsIt::test_two_instances_sharing_the_env_key_read_each_other` | **El bug**: pods que no pueden leerse entre sí |
+| `TestTheFernetKeyFollowsIt::test_without_it_they_cannot` | Control negativo: sin la variable el fallo sigue ahí |
+| `TestTheSessionKey::test_it_is_not_written_to_disk` | Persistir una copia y crear una segunda fuente de verdad |
+| `TestTheFernetKeyFollowsIt::test_the_file_still_works_when_the_env_is_unset` | Que una instalación existente necesite la variable para seguir leyendo lo suyo |
+
+El valor mal formado **detiene el arranque** a propósito: la alternativa —caer al fichero— cifra
+con una clave que el operador no eligió y no lo dice; el descubrimiento llega meses después,
+cuando otra réplica no puede leer un secreto.

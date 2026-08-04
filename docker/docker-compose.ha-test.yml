@@ -34,11 +34,16 @@ x-db-env: &db-env
   SS_DB_USER: servicesentry
   SS_DB_PASSWORD: testpass
 
+# The image CI publishes, not one built here: this stack is also how the published
+# artefact gets exercised, and a locally built image would prove the Dockerfile compiles
+# while saying nothing about what people actually pull.
+#   published (default) : docker compose -f docker/docker-compose.ha-test.yml up -d
+#   local build         : add -f docker/docker-compose.ha-test-build.yml
+# `pull_policy: always` on purpose — the `test` tag MOVES, and a stale local copy of it
+# would quietly test the previous build.
 x-app-build: &app-build
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-  image: servicesentry:test
+  image: ghcr.io/vsc55/servicesentry:test
+  pull_policy: always
 
 x-app-env: &app-env
   TZ: Europe/Madrid

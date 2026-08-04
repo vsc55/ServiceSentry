@@ -1,8 +1,14 @@
 name: Install tests
 
+# Called by Docker (.github/workflows/docker.yml) once the suite passes: installing the app
+# on a clean Debian/Ubuntu — and then updating it in place — is the half a pytest run cannot
+# see, and it gates the release the same way the tests do.
+#
+# `workflow_call` only, for the same reason as tests.yml: keeping its own push trigger would
+# run the whole matrix twice for one commit. `workflow_dispatch` stays for running it by hand.
 on:
-  push:
-    tags: ["test"]
+  workflow_call:
+  workflow_dispatch:
 
 jobs:
   install:

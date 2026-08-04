@@ -2,7 +2,8 @@
 # ServiceSentry — local test stack helper. Two stacks (isolated projects/volumes):
 #   • test (default) — one worker/syslog/events each (microservices-test.yml)
 #   • ha             — 2 replicas of worker/events/syslog to see leader/standby
-#                      + failover (ha-test.yml)
+#                      + failover, on the image CI published (ha-test.yml)
+#   • ha-build       — the same stack, built from the working copy instead
 #
 # Prefix any command with `ha` to target the HA stack:
 #   ./docker/make_test.sh            # test: build + start, then follow logs
@@ -24,12 +25,23 @@ cd "$ROOT"
 # declares its own `name:` (ss-test / ss-test-ha), so the raw `docker compose`
 # commands and this script share the same isolated project — no `-p` needed here.
 STACK="test"
-if [ "${1:-}" = "ha" ]; then STACK="ha"; shift; fi
-if [ "$STACK" = "ha" ]; then
-  FILE="docker/docker-compose.ha-test.yml"
-else
-  FILE="docker/docker-compose.microservices-test.yml"
-fi
+case "${1:-}" in
+  ha)       STACK="ha";       shift ;;
+  ha-build) STACK="ha-build"; shift ;;
+esac
+# The HA stack is two flavours over ONE definition: `ha` runs the image CI published (so the
+# published artefact is what gets exercised, not just the Dockerfile), and `ha-build` adds an
+# override that builds from the working copy — which is what you want while changing code,
+# since the published `test` tag knows nothing about it.
+case "$STACK" in
+  ha)       FILES=("docker/docker-compose.ha-test.yml") ;;
+  ha-build) FILES=("docker/docker-compose.ha-test.yml"
+                   "docker/docker-compose.ha-test-build.yml") ;;
+  *)        FILES=("docker/docker-compose.microservices-test.yml") ;;
+esac
+# `--build` only where something can be built: the published-image stack has no build
+# section to act on and wants a fresh pull instead (the `test` tag moves).
+if [ "$STACK" = "ha" ]; then UP_FLAGS=(--pull always); else UP_FLAGS=(--build); fi
 
 # Prefer Docker Compose v2 (`docker compose`), fall back to v1 (`docker-compose`).
 if docker compose version >/dev/null 2>&1; then
@@ -40,7 +52,7 @@ else
   echo "ERROR: Docker Compose not found (need 'docker compose' or 'docker-compose')." >&2
   exit 1
 fi
-DC+=(-f "$FILE")
+for _f in "${FILES[@]}"; do DC+=(-f "$_f"); done
 
 info() {
   cat <<EOF
@@ -49,7 +61,7 @@ ServiceSentry ${STACK^^} stack is up.
   Panel   : http://localhost:8080   (login: admin / admin)
   Control : SS_CONTROL_TOKEN=test-control-token (poke enabled between containers)
 EOF
-  if [ "$STACK" = "ha" ]; then
+  if [ "$STACK" = "ha" ] || [ "$STACK" = "ha-build" ]; then
     cat <<EOF
   HA      : 2 replicas of worker/events/syslog -> Services tab shows Leader/Standby.
             Prove failover: docker kill <worker Leader> -> a standby takes over in ~30s.
@@ -66,18 +78,18 @@ EOF
 EOF
 }
 
-usage="Usage: $0 [ha] [up|start|logs|ps|down|clean|rebuild]"
+usage="Usage: $0 [ha|ha-build] [up|start|logs|ps|down|clean|rebuild]"
 
 case "${1:-up}" in
   up)
     # Build + start detached, then follow logs FROM THE START (so you don't miss
     # the build/startup output). Ctrl+C only detaches the logs; the stack stays up.
-    "${DC[@]}" up --build -d
+    "${DC[@]}" up "${UP_FLAGS[@]}" -d
     info
     echo "── Following logs (Ctrl+C detaches; the stack keeps running) ──────────"
     "${DC[@]}" logs -f
     ;;
-  start)   "${DC[@]}" up --build -d && info ;;
+  start)   "${DC[@]}" up "${UP_FLAGS[@]}" -d && info ;;
   logs)
     if [ -z "$("${DC[@]}" ps -aq)" ]; then
       echo "No containers for the '$STACK' stack yet. Start it first:" >&2
@@ -88,6 +100,6 @@ case "${1:-up}" in
   ps)      "${DC[@]}" ps -a ;;
   down)    "${DC[@]}" down ;;
   clean)   "${DC[@]}" down -v --remove-orphans ;;
-  rebuild) "${DC[@]}" up --build -d --force-recreate && info ;;
+  rebuild) "${DC[@]}" up "${UP_FLAGS[@]}" -d --force-recreate && info ;;
   *) echo "$usage" >&2; exit 1 ;;
 esac

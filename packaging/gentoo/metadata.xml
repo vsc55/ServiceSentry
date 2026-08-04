@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>vsc55@cerebelum.net</email>
+		<name>Javier Pastor</name>
+	</maintainer>
+	<longdescription lang="en">
+		ServiceSentry is a self-hosted monitoring panel: a web admin, a scheduler that
+		runs checks against hosts and services, a syslog receiver and a notification
+		pipeline. Services can run embedded in one process or as dedicated ones.
+	</longdescription>
+	<upstream>
+		<bugs-to>https://github.com/vsc55/ServiceSentry/issues</bugs-to>
+		<remote-id type="github">vsc55/ServiceSentry</remote-id>
+	</upstream>
+</pkgmetadata>

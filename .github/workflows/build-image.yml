@@ -1,0 +1,77 @@
+name: Build image
+
+# The image build, on its own so it can be called with two different gates without being
+# written twice:
+#
+#   tag `test`  → started AT THE SAME TIME as the suite. That tag exists to get an image in
+#                 front of someone quickly; making it wait ~13 minutes for tests it is not
+#                 claiming to have passed only costs time.
+#   everything  → after the suite. `:latest` and a version tag DO claim it, so they wait.
+#
+# See docker.yml, which calls it once as `build-fast` and once as `build-gated`.
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # The semver patterns only apply to real version tags (v1.2.3). Without the
+          # enable guard they try to parse the `test` build tag as a version and log
+          # "test is not a valid semver" once per pattern.
+          #
+          # They also give the image its name WITHOUT the leading v — semver parses the tag,
+          # so `v1.2.3` publishes `:1.2.3` and `:1.2`. That is why `type=ref,event=tag` is
+          # deliberately absent: it would stamp a `v1.2.3` duplicate beside them.
+          tags: |
+            # :latest is the newest RELEASE, not the newest commit. `docker pull` with no tag
+            # is what most people run, and it should hand them the thing that went through
+            # the tests, the packages and the install matrix — not whatever merged last.
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            # The tip of main, under a name that says so. Replaces the `:main` that
+            # type=ref,event=branch produced: this workflow only builds branch pushes for
+            # main, so that pattern was a second name for exactly this image.
+            type=raw,value=edge,enable={{is_default_branch}}
+            type=ref,event=pr
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            # Named on purpose rather than through type=ref,event=tag, for the reason above.
+            # `test` is the only literal tag.
+            type=raw,value=test,enable=${{ github.ref == 'refs/tags/test' }}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          # amd64 only, deliberately: arm64 has to be emulated through QEMU on a GitHub
+          # runner and the pip layer makes that minutes instead of the ~30 s this takes.
+          # Adding linux/arm64 here is the whole change if that trade stops being worth it.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

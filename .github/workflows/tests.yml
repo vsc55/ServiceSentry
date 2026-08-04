@@ -1,8 +1,15 @@
 name: Tests
 
+# Called by Docker (.github/workflows/docker.yml) as the first job of the pipeline: nothing
+# is built or published until this passes. It used to fire on one literal tag named `test`,
+# which meant a merge to main ran no tests at all unless someone remembered to move it.
+#
+# `workflow_call` only — a second set of triggers here would run the whole suite twice for
+# the same commit, once on its own and once through the caller. `workflow_dispatch` stays so
+# it can still be run by hand from the Actions tab.
 on:
-  push:
-    tags: ["test"]
+  workflow_call:
+  workflow_dispatch:
 
 jobs:
   test:

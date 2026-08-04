@@ -8,6 +8,152 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.49] - 2026-08-04
+
+### Added
+- **A version tag now ships `.deb`, `.rpm` and a Gentoo overlay, attached to its release.**
+  Only for `vX.Y.Z`: `test` is a build tag that moves, and a package claiming to be a version
+  it will not be tomorrow is worse than no package. One `nfpm` definition produces both the
+  deb and the rpm — two hand-written trees (`debian/` and a `.spec`) are two descriptions of
+  one layout that drift apart. Gentoo installs from an ebuild rather than a built package, so
+  what ships there is the ebuild, generated from a template into an overlay tarball.
+  - **The package carries the application; the dependencies are resolved on the machine.**
+    The postinstall builds a venv in `/opt/ServiSesentry/venv` and installs the 41 pinned
+    packages from the `requirements.lock` it ships. A venv is bound to the exact python that
+    made it, so one built on the CI runner would break on any distro carrying a different
+    3.x; and declaring the pins as distro packages would mean mapping 41 names per distro,
+    several of which do not exist and most of which are a different version. The cost is
+    stated rather than hidden: it needs network and takes a few minutes, and a failure names
+    the command to re-run.
+  - **No compiler is pulled in.** The pinned wheels have manylinux binaries for the targets;
+    dragging `gcc` and dev headers onto every machine that installs a monitoring panel, to
+    cover the case where one does not, is the wrong default.
+  - **CI installs what it built.** Each package goes into its own distro container (Debian 12,
+    Ubuntu 24.04, Fedora 41) and the resulting venv has to actually import `flask`,
+    `cryptography` and `paramiko` — building a package proves it was produced, not that it
+    works, and the postinstall is exactly the step that fails on a distro nobody tried. The
+    release does not happen if that fails.
+  - The systemd units are rewritten at **build** time to run the venv's interpreter, from the
+    single copy in `init/` — not duplicated into `packaging/`, and not `sed`-ed in the
+    postinstall, which would leave a packaged file that no longer matches what the package
+    says it installed (`rpm --verify` flags exactly that).
+  - Uninstalling removes the venv, because the postinstall created it; `/etc/ServiSesentry`
+    and `/var/lib/ServiSesentry` are left alone, which is what makes reinstalling safe.
+
+### Changed
+- **`:latest` now means the newest release, not the newest commit.** It followed `main`, so
+  `docker pull` with no tag — what most people run — handed out whatever merged last: no
+  release notes, no packages, nothing claiming it was fit to install. It is now published by
+  a `vX.Y.Z` tag, and the tip of `main` moved to **`:edge`**, a name that says what it is.
+  (`:main`, which `type=ref,event=branch` produced, is gone: this workflow only builds branch
+  pushes for `main`, so it was a second name for the same image.) Until the first version tag
+  exists there is no `:latest` in the registry — `docs/caso-docker.md` says so rather than
+  leaving someone to discover it from a failing pull.
+- **The `test` tag also builds and installs the packages, without publishing them.** Finding
+  out that packaging is broken while tagging a release is too late; `test` is the rehearsal.
+  The `.deb`, `.rpm` and ebuild are built and put through the same install matrix, and stay
+  as run artefacts instead of being attached anywhere. They are versioned after what the
+  application reports (`__version__`), not after the tag: a `servicesentry-test.rpm` would
+  mean something different every week.
+- **The `test` tag no longer queues behind the suite.** It exists to get an image in front of
+  someone quickly and claims nothing about the tests, so its build now starts *beside* them
+  instead of waiting ~13 minutes for a claim it is not making. Everything else — `:latest`, a
+  version tag — does make that claim and still waits. The build moved into a reusable workflow
+  called twice (`build-fast`, `build-gated`) rather than being duplicated: `needs` cannot be
+  made conditional, and `if: always() && …` would still *wait* for the tests before starting,
+  which is the waiting this removes.
+
+## [0.0.1+build.48] - 2026-08-04
+
+### Changed
+- **Nothing is published until the suite and the install check pass.** The image build stood
+  on its own, and — worse — `tests.yml` and `install-tests.yml` fired on the same single
+  literal tag, so a merge to `main` ran **no tests at all** unless someone remembered to move
+  it by hand. Both are now reusable (`workflow_call`) and the Docker workflow is the pipeline
+  that calls them: the suite gates everything, then the image build and the install matrix run
+  side by side. They are siblings rather than a chain because both only need the suite green,
+  and serialising them would add the matrix to every publish for nothing.
+- **A `vX.Y.Z` tag now publishes a GitHub Release, with that version's CHANGELOG as its body.**
+  `test` deliberately stops one job earlier: it is the manual build tag, it moves, and a
+  release per push of it would point at a tag that no longer means that commit.
+  - The notes are read straight out of `CHANGELOG.md` by
+    `.github/scripts/changelog-section.sh` (five lines of awk). It matches the heading
+    literally rather than as a regex, because the dots in a version are wildcards and
+    `1.2.3` would otherwise also match a heading for `1x2x3`.
+  - A tag whose version has no CHANGELOG section **fails beside the tests**, seconds in, while
+    the fix is still "add the heading and re-tag" — rather than after an image has been
+    published under a version whose release cannot be completed. That guard is the point:
+    an empty release body cannot be un-published, only edited.
+  - The release job holds the only `contents: write` in the workflow and uses the preinstalled
+    `gh`, so no third-party action runs where the write permission lives.
+
+## [0.0.1+build.47] - 2026-08-04
+
+### Fixed
+- **The secret key can be pinned with `SS_SECRET_KEY`, which multi-pod deployments needed to
+  work at all.** That key signs session cookies *and* derives the Fernet key every stored
+  secret is encrypted with, so every process sharing a database must hold the same one — and
+  it was the single setting with no `SS_*` to supply it. It lived only in `.flask_secret`
+  inside the config directory.
+  - On one host the compose files get away with it: all four services mount the same `config`
+    volume. Lose that volume (`down -v`, a recreated volume) and every stored secret in the
+    database becomes unreadable, with nothing reporting an error.
+  - The Helm chart was never affected: it already ships the key as a Secret mounted into
+    every pod as `.flask_secret`, kept stable across upgrades. The **hand-written manifests**
+    in `caso-kubernetes.md` were the gap — they wire `envFrom` and mount nothing, so anyone
+    following that page by hand got a pod-local key: a credential saved by `web` could not be
+    decrypted by `worker`, and restarting a pod made everything encrypted before it
+    unrecoverable. Confirmed before changing anything — with `SS_SECRET_KEY` exported it was
+    ignored outright, and two instances with their own config dir raised `InvalidToken`
+    reading each other's data.
+  - The environment wins over the file, the file stays the fallback so existing installs are
+    untouched, and the value is **not** written to disk — it is supplied per process, and
+    persisting a copy would leave a second source of truth to drift from it.
+  - A malformed value **stops the process** instead of falling back. The fallback would
+    encrypt with a key the operator never chose and say nothing; the discovery comes months
+    later, when a replica cannot read a secret or a restart makes the data unreadable.
+  - `docs/caso-kubernetes.md` now carries it in the Secret (required for the hand-written
+    manifests, not for the chart), and `env.example` plus `ref-configuracion.md` explain when
+    it is needed and that losing it loses every stored secret.
+
+### Changed
+- **`env.example` stops shipping a password that works.** It set `SS_PASSWORD=admin`, which is
+  the kind of value that survives into production precisely because nothing ever complains
+  about it; it now reads `change-me`. Each secret also carries the command that generates a
+  good one (`openssl rand -base64 24`, `-hex 32`, `token_hex(32)`) instead of only being
+  labelled REQUIRED, and a header states which values must be set before anyone can reach the
+  panel. The database passwords stay **empty** on purpose — an empty one stops the stack, and
+  a deployment that refuses to boot is safer than one running on a password anybody can guess;
+  `change-me` is used only where the alternative is not starting at all, which is the admin
+  login.
+## [0.0.1+build.46] - 2026-08-04
+
+### Changed
+- **The container is published on its own now.** The workflow already built and pushed to
+  GHCR correctly; what was missing was ever being asked to. It fired on one literal tag named
+  `test`, so every image came from moving that tag by hand and the tagging rules it already
+  carried — `latest`, semver, per-branch — described releases that could not happen. The
+  triggers now say the policy out loud: `main` publishes `:latest`, a `v1.2.3` tag publishes
+  `:1.2.3` and `:1.2`, the `test` tag still works as the manual escape hatch, and every build
+  also gets `:sha-<commit>` — the only tag that never moves, and so the one to pin a
+  deployment to.
+  - Pull requests **build without publishing**. That keeps a broken `Dockerfile` from reaching
+    `main` unnoticed, and is the one case where a fork could otherwise write to the registry.
+  - `linux/amd64` only, deliberately: arm64 has to be emulated through QEMU on a GitHub
+    runner, and the pip layer turns a ~30 s build into minutes. Adding the platform is a
+    one-line change if that trade stops paying.
+  - Concurrent pushes cancel the older run, so `:latest` is whatever the newest commit built
+    rather than whichever job happened to finish last.
+- **The HA test stack runs the published image.** `docker-compose.ha-test.yml` pulled its
+  image from a local build, which proves the `Dockerfile` compiles and says nothing about the
+  artefact people actually pull; it now runs `ghcr.io/vsc55/servicesentry:test` with
+  `pull_policy: always` (that tag moves, and a stale local copy would quietly test the
+  previous build). Building from the working copy — what you want while changing code — moved
+  to `docker-compose.ha-test-build.yml`, an **override** rather than a second copy: the two
+  differ in five lines out of 180, and two files that must stay identical except for those
+  five is how they stop being identical. `make_test.sh ha` and `make_test.sh ha-build` pick
+  between them.
+
 ## [0.0.1+build.45] - 2026-08-04
 
 ### Fixed

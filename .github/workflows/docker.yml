@@ -1,52 +1,211 @@
 name: Docker
 
+# The image is published from here, so what triggers it IS the release policy:
+#
+#   main            → :edge, the tip. NOT :latest — see below
+#   tag v1.2.3      → :1.2.3, :1.2 (no leading v — semver parses the tag) AND :latest, plus
+#                     the .deb/.rpm/Gentoo packages and a GitHub Release. `docker pull` with
+#                     no tag hands people a release, not whatever merged last
+#   tag test        → :test, plus the .deb/.rpm/ebuild BUILT AND INSTALLED but not published
+#                     — the rehearsal for a release. Its image build starts BESIDE the suite
+#                     rather than after it: that tag claims nothing, it exists to get an
+#                     image out fast
+#   pull request    → BUILT but never pushed: proof the Dockerfile still builds, and the
+#                     one case where a fork could otherwise reach the registry
+#   manual dispatch → the same, on demand
+#
+# Everything gets :sha-<commit> as well, which is the only tag that never moves — the one
+# to use when "it worked yesterday" needs to be pinned down.
 on:
   push:
-    tags: ["test"]
+    branches: [main]
+    tags: ["v*", "test"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Pushing twice in a minute should not race two publishes onto the same tag: the older run
+# is cancelled, so :latest is whatever the newest commit produced and not a coin toss.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  # ── Gate 1: the suite. Nothing is built or published until this passes ──────────────
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  # ── Gate 2: installing on a clean machine, the half pytest cannot see ───────────────
+  # A sibling of the image build, not a step before it: both only need the suite to be
+  # green, and serialising them would add its matrix to every publish for nothing.
+  install:
+    needs: tests
+    uses: ./.github/workflows/install-tests.yml
+
+  # ── Gate 3 (version tags only): the release notes have to EXIST ─────────────────────
+  # Runs beside the tests rather than after them so a `v1.2.3` with no CHANGELOG section
+  # fails in seconds — while the fix is still "add the heading and re-tag", instead of
+  # after an image has already been published under that version.
+  changelog:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tagged version has a CHANGELOG section
+        run: .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > /dev/null
+
+  # ── The image, gated two different ways ─────────────────────────────────────────────
+  # `test` exists to put an image in front of someone quickly and claims nothing about the
+  # suite, so it starts BESIDE the tests instead of queueing behind ~13 minutes of them.
+  # Everything else — :latest, a version — does make that claim, so it waits.
+  #
+  # Two calls of one reusable workflow rather than one job with a conditional `needs`:
+  # `needs` cannot be made conditional, and `if: always() && ...` would still WAIT for the
+  # tests before starting, which is exactly the waiting this avoids.
+  # `permissions` has to be granted HERE, on the calling job: a called workflow cannot ask
+  # for more than its caller was given, and this one defaults to `packages: read`. Declaring
+  # `packages: write` inside build-image.yml alone fails the whole file as invalid.
+  build-fast:
+    if: github.ref == 'refs/tags/test'
     permissions:
       contents: read
       packages: write
+    uses: ./.github/workflows/build-image.yml
 
+  build-gated:
+    if: github.ref != 'refs/tags/test'
+    needs: tests
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-image.yml
+
+  # ── The distribution packages ───────────────────────────────────────────────────────
+  # Built for BOTH tags. On `v*` they are attached to the Release; on `test` they are built
+  # and thrown away — finding out that packaging is broken while tagging a release is too
+  # late, and this is the rehearsal. They stay as run artefacts either way, so a `test` build
+  # can still be downloaded and poked at.
+  #
+  # Deliberately NOT `needs: changelog`: that gate is skipped on `test`, and a skipped
+  # dependency skips the job that waits for it. The release is what needs the notes, and it
+  # asks for them itself.
+  packages:
+    needs: tests
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - uses: docker/setup-buildx-action@v4
+      - name: Decide the version to build
+        id: ver
+        # `test` is not a version, so the packages take the one the application reports.
+        # Naming a package after the moving tag would produce a servicesentry-test.rpm that
+        # means something different every week.
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "test" ]; then
+            value="$(sed -n "s/^__version__ = '\(.*\)'/\1/p" src/lib/__init__.py)"
+            [ -n "${value}" ] || { echo "could not read __version__" >&2; exit 1; }
+          else
+            value="${GITHUB_REF_NAME#v}"
+          fi
+          echo "value=${value}" >> "$GITHUB_OUTPUT"
+          echo "Building packages as ${value}"
 
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install nfpm
+        run: |
+          curl -sSfL -o /tmp/nfpm.deb \
+            https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_amd64.deb
+          sudo dpkg -i /tmp/nfpm.deb
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          # The semver patterns only apply to real version tags (v1.2.3). Without the
-          # enable guard they try to parse the `test` build tag as a version and log
-          # "test is not a valid semver" once per pattern.
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=sha
+      - name: Build deb + rpm + Gentoo overlay
+        run: packaging/build.sh "${{ steps.ver.outputs.value }}"
 
-      - name: Build and push
-        uses: docker/build-push-action@v7
+      - name: Upload for the release job
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          file: docker/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*-gentoo-overlay.tar.gz
+          if-no-files-found: error
+
+  # ── Do the packages actually install? ───────────────────────────────────────────────
+  # Building a package proves it was produced, not that it works: the postinstall builds a
+  # venv from the lock, and that is exactly the step that fails on a distro nobody tried.
+  # So each package is installed in its own distro container and the app is asked to run.
+  packages-install:
+    needs: packages
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: debian, image: "debian:12",  kind: deb }
+          - { name: ubuntu, image: "ubuntu:24.04", kind: deb }
+          - { name: fedora, image: "fedora:41",  kind: rpm }
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: packages, path: dist }
+
+      - name: Install it the way a user would
+        run: |
+          set -eux
+          if [ "${{ matrix.kind }}" = "deb" ]; then
+            apt-get update
+            apt-get install -y ./dist/*.deb
+          else
+            dnf install -y ./dist/*.rpm
+          fi
+
+      - name: The installed app runs from its own venv
+        run: |
+          set -eux
+          test -x /opt/ServiSesentry/venv/bin/python
+          # Importing the package is what proves the venv actually satisfies the lock —
+          # a venv that exists but is missing flask would pass a file-existence check.
+          /opt/ServiSesentry/venv/bin/python -c "import flask, cryptography, paramiko"
+          grep -q '/opt/ServiSesentry/venv/bin/python' /lib/systemd/system/ServiSesentry-web.service
+
+  # ── Version tags only: publish the GitHub Release ───────────────────────────────────
+  # `test` stops one job earlier, on purpose: it is the manual build tag, it moves, and a
+  # Release per push of it would be noise pointing at a tag that no longer means that commit.
+  release:
+    # Everything green, not just the image: a release says "this is fit to install", and the
+    # install matrix and the package matrix are the only jobs that check that claim.
+    needs: [build-gated, install, changelog, packages-install]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # the only job that writes to the repo
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bring in the packages
+        uses: actions/download-artifact@v4
+        with: { name: packages, path: dist }
+
+      - name: Take the notes from the CHANGELOG
+        # Already validated by the `changelog` job; re-read here rather than passed between
+        # jobs, because a multi-line job output is more plumbing than re-running one script.
+        run: |
+          .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > release-notes.md
+          {
+            echo
+            echo '---'
+            echo "Container image: \`ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME#v}\`"
+          } >> release-notes.md
+
+      - name: Publish the release
+        # gh is preinstalled on the runner: no third-party action in the job that holds the
+        # only write permission in this workflow.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            dist/*.deb dist/*.rpm dist/*-gentoo-overlay.tar.gz

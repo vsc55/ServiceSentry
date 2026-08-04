@@ -31,7 +31,18 @@ class _SessionsMixin:
         return os.path.join(self._config_dir, self._SECRET_KEY_FILE)
 
     def _load_or_create_secret_key(self) -> str:
-        """Load the Flask secret key from disk, or generate a new one."""
+        """The Flask secret key: from the environment, else from disk, else newly minted.
+
+        ``SS_SECRET_KEY`` wins and is NOT written to disk — it is supplied per process (a
+        Kubernetes Secret, a compose ``.env``), and persisting a copy would leave a second
+        source of truth to drift from it. A malformed value raises rather than falling
+        back: starting on a different key than the operator pinned is how stored secrets
+        become unreadable without anything having reported an error.
+        """
+        from lib.config import secret_key_from_env       # noqa: PLC0415
+        env_key = secret_key_from_env()
+        if env_key:
+            return env_key
         path = self._secret_key_path
         if os.path.isfile(path):
             try:
