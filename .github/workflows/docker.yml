@@ -52,7 +52,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: The tagged version has a CHANGELOG section
-        run: .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > /dev/null
+        # `bash …` rather than executing it directly: the exec bit is a file mode, and a
+        # repo edited from Windows commits these as 0644 without anyone noticing until
+        # the runner answers "Permission denied". The mode is set too — this is the belt.
+        run: bash .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > /dev/null
 
   # ── The image, gated two different ways ─────────────────────────────────────────────
   # `test` exists to put an image in front of someone quickly and claims nothing about the
@@ -118,7 +121,7 @@ jobs:
           sudo dpkg -i /tmp/nfpm.deb
 
       - name: Build deb + rpm + Gentoo overlay
-        run: packaging/build.sh "${{ steps.ver.outputs.value }}"
+        run: bash packaging/build.sh "${{ steps.ver.outputs.value }}"
 
       - name: Upload for the release job
         uses: actions/upload-artifact@v4
@@ -191,7 +194,7 @@ jobs:
         # Already validated by the `changelog` job; re-read here rather than passed between
         # jobs, because a multi-line job output is more plumbing than re-running one script.
         run: |
-          .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > release-notes.md
+          bash .github/scripts/changelog-section.sh "${GITHUB_REF_NAME}" > release-notes.md
           {
             echo
             echo '---'

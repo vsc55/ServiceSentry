@@ -8,6 +8,21 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.50] - 2026-08-05
+
+### Fixed
+- **The packaging scripts were committed without their executable bit**, so the runner
+  answered `Permission denied` and the `packages` job died at build. `chmod +x` on a Windows
+  checkout changes nothing git records (`core.filemode` is off there), and nothing warns
+  until CI refuses to run the file. All five `.sh` are now mode 0755 in the index.
+  - The same bug was waiting in `.github/scripts/changelog-section.sh`, called from two
+    places but only on a `v*` tag — so it had never run, and would have taken out the first
+    release at the step that publishes its notes.
+  - The workflow also calls them as `bash <script>` now. Belt and braces on purpose, because
+    the two failures are different: the mode is what the packaged maintainer scripts need
+    (a package manager runs those itself, so `bash` cannot help there), and the explicit
+    interpreter is what survives the next file committed from a Windows checkout.
+
 ## [0.0.1+build.49] - 2026-08-04
 
 ### Added
