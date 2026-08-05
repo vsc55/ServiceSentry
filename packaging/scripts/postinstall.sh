@@ -21,6 +21,20 @@ if [ ! -f "${LOCK}" ]; then
     exit 1
 fi
 
+# The lock is generated on a current Python, and pip runs in --require-hashes mode because
+# the lock carries hashes: there, a transitive dependency that an old interpreter turns on
+# via an environment marker is a hard error rather than something pip can resolve. Debian 12
+# (3.11.2) hits exactly that — redis pulls async-timeout below 3.11.3, and the lock has no
+# entry for it. Checked here so the failure names the cause instead of surfacing 200 lines
+# down as an unrelated-looking hash complaint.
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11, 3) else 1)'; then
+    echo "ServiceSentry: this needs Python 3.11.3 or newer; $(python3 -V 2>&1) is installed." >&2
+    echo "  Older interpreters enable dependencies the pinned lock does not carry, and the" >&2
+    echo "  install would fail part-way. Debian 12 and older are affected; Debian 13," >&2
+    echo "  Ubuntu 24.04 and current Fedora are not." >&2
+    exit 1
+fi
+
 python3 -m venv "${VENV}"
 "${VENV}/bin/python" -m pip install --upgrade pip >/dev/null
 
@@ -29,7 +43,9 @@ python3 -m venv "${VENV}"
 if ! "${VENV}/bin/python" -m pip install --no-cache-dir -r "${LOCK}"; then
     echo "ServiceSentry: could not install the Python dependencies." >&2
     echo "  The application is installed at ${APP_DIR} but will NOT start until this works." >&2
-    echo "  Fix the network/proxy and re-run:  ${VENV}/bin/python -m pip install -r ${LOCK}" >&2
+    echo "  Read the pip output above for the reason — usually no network, a proxy, or a" >&2
+    echo "  platform with no wheel for one of the pinned packages. Then re-run:" >&2
+    echo "    ${VENV}/bin/python -m pip install -r ${LOCK}" >&2
     exit 1
 fi
 

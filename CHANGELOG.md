@@ -8,6 +8,29 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.51] - 2026-08-05
+
+### Fixed
+- **The `.deb` failed to configure on Debian 12, and the error blamed the network.** The
+  postinstall's `pip install` died with *"In --require-hashes mode, all requirements must have
+  their versions pinned"* — nothing to do with connectivity. The lock is generated on Python
+  3.14 and its hashes put pip in `--require-hashes` mode; Debian 12 ships 3.11.2, where
+  `redis` turns on `async-timeout` through the marker `python_full_version<"3.11.3"` — a
+  dependency the lock has no entry for, and in that mode an unpinned requirement is fatal.
+  - The postinstall now checks the interpreter **before** creating the venv and refuses with
+    the actual reason and the affected distros, instead of failing 200 lines into pip output.
+  - Its generic failure message stopped asserting the cause. It said "fix the network/proxy",
+    which is what sent this one looking in the wrong place; it now points at the pip output
+    and lists the usual reasons without picking one.
+  - Documented in `caso-despliegue.md`: the packages need Python ≥ 3.11.3, Debian 12 and older
+    are out, and Docker or `install.sh` is the route on those.
+
+### Changed
+- **The package install matrix tracks current distros**: Debian 13 instead of 12 (which is
+  below the interpreter floor above), and `fedora:latest` instead of a pinned release —
+  pinning one means testing an EOL distro within a year, which is worse than a moving target
+  for a check that only asks "does this install".
+
 ## [0.0.1+build.50] - 2026-08-05
 
 ### Fixed

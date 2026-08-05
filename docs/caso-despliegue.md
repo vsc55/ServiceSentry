@@ -69,6 +69,13 @@ el `requirements.lock` que viaja dentro. Consecuencias que conviene conocer:
 - si falla, el mensaje dice el comando exacto para reintentarlo. La app queda instalada pero
   **no arranca** hasta que ese paso termine bien.
 
+**Requiere Python 3.11.3 o superior**, y el postinstall lo comprueba antes de nada. El motivo
+no es la app sino el lock: sus hashes ponen a pip en modo `--require-hashes`, donde una
+dependencia transitiva que un intérprete viejo **activa por marcador** —`redis` pide
+`async-timeout` por debajo de 3.11.3— es un error duro, porque el lock no la lleva. Distros
+afectadas: **Debian 12 y anteriores** (traen 3.11.2). Debian 13, Ubuntu 24.04 y Fedora actual
+están por encima del corte. En un sistema antiguo, usa Docker o `install.sh`.
+
 Tras instalar:
 
 ```bash

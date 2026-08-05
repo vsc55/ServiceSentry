@@ -145,9 +145,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: debian, image: "debian:12",  kind: deb }
+          # Debian 13 and not 12: oldstable ships Python 3.11.2, and the lock — generated
+          # on 3.14 — does not carry the dependencies that a marker below 3.11.3 turns on
+          # (redis wants async-timeout there). Its own hashes put pip in --require-hashes
+          # mode, where an unpinned transitive dependency is a hard error.
+          - { name: debian, image: "debian:13",  kind: deb }
           - { name: ubuntu, image: "ubuntu:24.04", kind: deb }
-          - { name: fedora, image: "fedora:41",  kind: rpm }
+          # `latest` on purpose: pinning a Fedora release means testing an EOL distro within
+          # a year, which is worse than a moving target for an "does it install" check.
+          - { name: fedora, image: "fedora:latest", kind: rpm }
     container: ${{ matrix.image }}
     steps:
       - uses: actions/download-artifact@v4
