@@ -1122,3 +1122,60 @@ Hay dos rutas de ejecución remota, con políticas de host distintas:
 
 - La clase `Exec` (`lib/system/exe.py`) usa `paramiko.RejectPolicy`: los hosts que no estén en `~/.ssh/known_hosts` son rechazados (no se aceptan hosts desconocidos).
 - La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/core/hosts/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.
+
+---
+
+## CVE de dependencias
+
+El repositorio pina sus dependencias con hashes en `src/requirements.lock`, así que el conjunto
+que se ejecuta es exactamente el auditado — y un espejo que responda con otro artefacto falla al
+instalar, no más tarde. La auditoría se pasa así:
+
+```bash
+cd src
+PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m pip_audit \
+    --requirement requirements.lock --format json
+```
+
+`--requirement` sobre el **lock** y no sobre el entorno instalado: es lo que se despliega
+(imagen Docker, `.deb`/`.rpm`, `install.sh`), no lo que tenga una máquina de desarrollo.
+
+### Estado (auditoría de 2026-08-05, 41 paquetes)
+
+**Sin vulnerabilidades conocidas.** La auditoría de ese día encontró 4 avisos en 2 paquetes y
+todos quedaron cerrados subiendo el lock entero a la última estable de cada dependencia
+(13 paquetes movidos, 4 de ellos de major, sin altas ni bajas transitivas):
+
+Los avisos van **tachados a propósito**: siguen aquí, no se borran al cerrarse. Un CVE
+desaparecido de la documentación no deja rastro de que existió, y lo que importa mañana no es
+solo que hoy no haya ninguno — es *cuáles* hubo, por qué vía llegaban y con qué versión se
+cerraron. Si un suelo de `requirements.txt` se baja algún día, esta tabla dice qué se reabre.
+
+| Paquete | Aviso cerrado | Qué era | Alcance real |
+|---|---|---|---|
+| `cryptography` 48.0.1 → **50.0.0** | ~~[CVE-2026-69248](https://github.com/advisories/GHSA-m2h6-j472-rp4c)~~ | Un CA intermedio restringido a `foo.example.com` aceptaba un SAN comodín `*.example.com`: se escapaba de las restricciones de nombres | **Alcanzaba** al módulo `ssl_cert`, que verifica cadenas de servidores ajenos |
+| `cryptography` | ~~[CVE-2026-69249](https://github.com/advisories/GHSA-jwv3-5hgf-82ww)~~ | Cadenas con auto-firmados duplicados provocaban explosión exponencial (>5 s por cadena): amplificación para DoS | **Alcanzaba**, misma vía |
+| `cryptography` | ~~[CVE-2026-69247](https://github.com/advisories/GHSA-g6cj-pr64-35w5)~~ | Oráculo de Bleichenbacher en `pkcs7_decrypt_*`, distinguible por respuesta y por tiempo | No: no se descifra `EnvelopedData` PKCS#7 de terceros |
+| `paramiko` 4.0.0 → **5.0.0** | ~~[CVE-2026-44405](https://github.com/advisories/GHSA-r374-rxx8-8654)~~ | `rsakey.py` admitía SHA-1 (cliente SSH) | Sí. Estuvo **sin arreglo publicado** hasta que salió la 5.0.0 |
+
+Los suelos de `requirements.txt` se subieron con ellos (`cryptography>=50.0.0`,
+`paramiko>=5.0.0`) y con el motivo escrito al lado: un suelo sin explicación se acaba bajando
+para "arreglar" un conflicto de resolución, que es exactamente cómo vuelve un CVE.
+
+### Cómo se sube el lock
+
+Se sube **solo** el paquete afectado, para que la auditoría no arrastre cambios que nadie ha
+revisado:
+
+```bash
+cd src
+.venv/Scripts/python.exe -m piptools compile --generate-hashes --strip-extras \
+    -P cryptography==50.0.0 -o requirements.lock requirements.txt
+```
+
+Después, **suite completa**: un salto de major en `cryptography` toca cifrado de secretos,
+sesiones y verificación de certificados a la vez.
+
+> Precedente útil: en build.39 esta misma auditoría encontró **17 avisos en 7 paquetes** y
+> `pip-compile -P` subió exactamente seis sin sorpresas transitivas. La lección no fue el número
+> sino el método — auditar el lock, subir por paquete, re-auditar y pasar la suite.

@@ -63,6 +63,7 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [ref-watchful-emit.md](ref-watchful-emit.md) | Cómo publica un resultado un watchful: patrón automático vs manual, cuándo aplica cada uno y los bugs que motivaron la regla |
 | [ref-tests.md](ref-tests.md) | Inventario completo de tests: qué comprueba cada test, condiciones de OK y error, organizado por grupos |
 | [caso-diagnostico.md](caso-diagnostico.md) | Bugs resueltos y trampas conocidas: causa raíz, solución y lección generalizable de fallos no evidentes que costaron aislar |
+| [ref-pendiente.md](ref-pendiente.md) | Lo aplazado **a propósito**, con el motivo: layouts por hacer, CVE abiertos, deferidos de auditoría y límites conocidos del empaquetado |
 
 ---
 

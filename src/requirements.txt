@@ -10,7 +10,7 @@
 #      (añade los hashes a las versiones ya reconciliadas)
 # No edites requirements.lock a mano salvo para esa reconciliación.
 requests>=2.28
-paramiko>=3.0
+paramiko>=5.0.0        # floor raised from 3.0: <5 allows SHA-1 in rsakey.py (CVE-2026-44405)
 PyMySQL>=1.0
 psycopg2-binary>=2.9
 pymssql>=2.2
@@ -23,7 +23,9 @@ werkzeug>=3.0
 # Imported directly (app.py: ChoiceLoader/FileSystemLoader); comes via Flask too.
 jinja2>=3.0
 pythonping>=1.1.4
-cryptography>=48.0.1   # floor raised from 41.0: <48 has CVEs (buffer overread + static OpenSSL); the lock ships 48.0.1
+cryptography>=50.0.0   # floor raised from 48.0.1: <50 lets a constrained CA be escaped with a
+                       # wildcard SAN and blows up on duplicated self-signed chains
+                       # (CVE-2026-69248 / -69249), both reachable through the ssl_cert module
 dnspython>=2.3
 # Optional: LDAP/Active Directory authentication
 ldap3>=2.9

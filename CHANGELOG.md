@@ -8,6 +8,29 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.52] - 2026-08-05
+
+### Security
+- **Every dependency moved to its latest stable, and the lock now audits clean.** `pip-audit`
+  over `requirements.lock` found **4 advisories in 2 packages**; there are now **none**.
+  Thirteen packages moved, four of them across a major, with **no transitive additions or
+  removals** — the resolution did not drag anything in behind the upgrade.
+  - **`cryptography` 48.0.1 → 50.0.0** clears three. Two of them were reachable here rather
+    than theoretical: a constrained intermediate CA could be escaped with a wildcard SAN
+    (CVE-2026-69248), and a chain carrying duplicated self-signed certificates blew up
+    exponentially (CVE-2026-69249) — both through certificate-chain verification, which is
+    exactly what the `ssl_cert` module does against servers nobody here controls. The third
+    (a Bleichenbacher oracle in `pkcs7_decrypt_*`) does not apply: no third-party
+    `EnvelopedData` is decrypted.
+  - **`paramiko` 4.0.0 → 5.0.0** clears CVE-2026-44405 (SHA-1 allowed in `rsakey.py`). That
+    one was documented in build.39 as *having no fixed release*; 5.0.0 is that release.
+  - The floors in `requirements.txt` went up with them (`cryptography>=50.0.0`,
+    `paramiko>=5.0.0`) **and carry the reason inline**. A floor with no explanation is one that
+    gets lowered to "fix" a resolver conflict, which is how a CVE comes back.
+  - `docs/explica-seguridad.md` gained a *CVE de dependencias* section: how the audit is run
+    (against the **lock**, because that is what ships — image, packages, `install.sh`), what
+    each advisory was, and which ones actually reached the panel.
+
 ## [0.0.1+build.51] - 2026-08-05
 
 ### Fixed
