@@ -317,6 +317,57 @@ def invalidate_cache() -> None:
 
 # ── Default MIB directory helpers ────────────────────────────────────────────
 
+# How many MIBs an IMPLICIT compile may take on — the one nobody asked for, that runs because
+# a discovery was clicked or because the module started.
+#
+# Parsing ASN.1 costs ~2.7 s per MIB on a normal box and it is 89% of the compile, so this is
+# not a setup cost that can be tuned away: the number of files is the number of seconds.  One
+# dropped into raw/ should still just work, which is what the automatic path was for.  A folder
+# import brings hundreds — 988 in the case this was found through — and at that size an implicit
+# compile is not a convenience, it is a panel that does not start for an hour with nothing on
+# screen to say why.
+#
+# Above the limit the files stay raw and the MIB manager compiles them when asked: that path
+# already exists, and it has a progress bar and a cancel button, which is what an hour of work
+# needs and an implicit one can never have.
+AUTO_COMPILE_LIMIT: int = 5
+
+
+def pending_raw_mibs(raw_dir: str, compiled_dir: str) -> list:
+    """Names of raw MIBs with no compiled module, or one older than the source.
+
+    Per FILE, where :func:`raw_dir_has_new_mibs` answers per DIRECTORY against the newest
+    compiled module of them all. That coarser answer is what made the automatic compile an
+    all-or-nothing job: one new file made the whole directory "new", and the compile that
+    followed walked every name in it.
+    """
+    if not raw_dir or not os.path.isdir(raw_dir):
+        return []
+    compiled_mtime: dict = {}
+    if compiled_dir and os.path.isdir(compiled_dir):
+        for fn in os.listdir(compiled_dir):
+            if fn.endswith('.py') and not fn.startswith('__'):
+                try:
+                    compiled_mtime[fn[:-3]] = os.path.getmtime(os.path.join(compiled_dir, fn))
+                except OSError:
+                    continue
+    out = []
+    for f in sorted(os.listdir(raw_dir)):
+        if f.startswith('.'):
+            continue
+        path = os.path.join(raw_dir, f)
+        if not os.path.isfile(path):
+            continue
+        stem = os.path.splitext(f)[0]
+        done = compiled_mtime.get(stem)
+        try:
+            if done is None or os.path.getmtime(path) > done:
+                out.append(stem)
+        except OSError:
+            continue
+    return out
+
+
 def raw_dir_has_new_mibs(raw_dir: str, compiled_dir: str) -> bool:
     """True only when a raw MIB file is newer than all compiled .py modules.
 

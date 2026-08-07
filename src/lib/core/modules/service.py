@@ -730,6 +730,43 @@ def _merge_host_conn(wa, module, config, host_ctx):
                 config[f] = ssh[f]    # ssh_* ← host SSH profile
 
 
+def apply_item_identities(wa, module, config):
+    """Resolve the bound host and the referenced credential for the ITEMS inside *config*.
+
+    The top-level pass beside this one answers for an action posted as one flat form. A
+    discovery scoped to a parent item is not that shape: the UI posts
+    ``{module scalars…, "<collection>": {"<key>": {…the item…}}}``, and the item is where
+    ``host_uid`` and ``cred_uid`` live. Resolving only the top level left the action looking at
+    an item with an empty address and no identity at all.
+
+    That is what "you launch OID discovery and get nothing back" was: the SNMP server took its
+    address from a bound host and its community from a credential, so the action saw
+    ``host: ''`` and skipped the server before sending a single packet — while the checks on
+    that same server ran fine, because the check path resolves per item (ModuleBase.resolve_host)
+    and this one did not.
+
+    Generic on purpose: every module whose discovery scopes to a parent item has the same
+    shape, and the alternative is each of them reaching into the credential store on its own.
+
+    Same precedence as the top-level pass, deliberately: the bound host only FILLS what the
+    item left blank (a per-check override is why that field stays editable), while the
+    credential is applied last and WINS. The two passes must not differ — an action that
+    authenticated one way when posted as a form and another when posted as an item is the
+    harder of the two bugs to see.
+    """
+    for coll_key, coll in list((config or {}).items()):
+        if coll_key.startswith('__') or not _is_item_collection(coll):
+            continue
+        for item in coll.values():
+            if not isinstance(item, dict):
+                continue
+            host_ctx = _resolve_host_ctx(wa, item)
+            if host_ctx is not None:
+                _merge_host_conn(wa, module, item, host_ctx)
+            # Last, so the credential wins over anything the host profile filled in.
+            _apply_cred_to_config(wa, item)
+
+
 def build_module_page(modules_dir: str, module: str, status_raw: dict,
                       modules_raw: dict, lang: str) -> dict:
     """Data for a module-contributed SECTION (``__page__``), from its
@@ -784,4 +821,38 @@ def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, 
                 out[mod_name] = fn(items, status, lang) or {}
         except Exception:  # pylint: disable=broad-except
             continue
+    return out
+
+
+def cap_audit_lists(detail: dict, max_items: int) -> dict:
+    """Bound every list a module put in its audit entry, in one place.
+
+    A module's ``audit_detail`` hook decides WHAT is worth recording; how much of it one
+    entry may hold is not its call.  The detail is stored as JSON in a single row and
+    painted whole when the entry is opened, and what a module lists is unbounded by
+    anything — the SNMP MIB import names every file it fetched, and a large repository has
+    hundreds.  Without a ceiling here every module would have to remember one, and they
+    would each pick a different number.
+
+    Honours ``web_admin|audit_detail_max_items``, the same setting the database-maintenance
+    entry uses, and says what it dropped: a list silently cut at N reads as a complete list
+    of N, which is worse than no list at all.  ``max_items=0`` drops the lists and keeps
+    everything else — the counts and the summary line are what say the action ran.
+
+    Returns a new dict; the caller's is untouched.
+    """
+    try:
+        cap = max(0, int(max_items))
+    except (TypeError, ValueError):
+        return dict(detail)
+    out = {}
+    for key, val in (detail or {}).items():
+        if not isinstance(val, list):
+            out[key] = val
+            continue
+        if not cap:
+            continue
+        out[key] = val[:cap]
+        if len(val) > cap:
+            out[f'{key}_truncated'] = len(val) - cap
     return out

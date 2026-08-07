@@ -30,6 +30,7 @@ import sys
 
 from flask import jsonify, request, session
 
+from lib.config.spec import CFG_BY_PATH
 from lib.security import secret_manager
 
 from lib.core.modules import service as modules_svc
@@ -356,6 +357,11 @@ def register(app, wa):
                     modules_svc._merge_host_conn(wa, module_name, config, host_ctx)
                 # A referenced credential supplies the identity — overlay it last so it wins.
                 modules_svc._apply_cred_to_config(wa, config)
+                # …and again for the items INSIDE the config. A discovery scoped to a parent
+                # item posts that item nested under its collection, which is where its
+                # `host_uid` and `cred_uid` live: resolving only the top level handed the
+                # action an item with no address and no identity.
+                modules_svc.apply_item_identities(wa, module_name, config)
                 result = method(config)
             else:
                 result = method()
@@ -368,6 +374,12 @@ def register(app, wa):
                 else:
                     _extra = {'ok': _res.get('ok', True), 'name': f'{module_name} / {action}'}
                 if _extra is not None:
+                    # The hook decides WHAT is worth recording; how much of it one entry
+                    # may hold is not the module's call, and leaving it to each of them is
+                    # how twenty modules end up with twenty different ceilings.
+                    _extra = modules_svc.cap_audit_lists(
+                        _extra, getattr(wa, '_AUDIT_DETAIL_MAX_ITEMS',
+                                        CFG_BY_PATH['web_admin|audit_detail_max_items'].default))
                     wa._audit('watchful_action', detail={
                         'module': module_name, 'action': action, **_extra,
                     })

@@ -9,6 +9,38 @@
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
     "__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]},
+    "__credential__": {
+        "type": "snmp_auth",
+        "fields": [
+            {"name": "version", "kind": "select", "default": "2c", "options": ["1", "2c", "3"]},
+
+            {"name": "community", "kind": "password", "secret": true,
+             "show_when": {"version": ["1", "2c"]}},
+
+            {"name": "snmpv3_level", "kind": "select", "default": "authPriv",
+             "options": ["noAuthNoPriv", "authNoPriv", "authPriv"],
+             "show_when": {"version": ["3"]}},
+            {"name": "snmpv3_username", "kind": "text",
+             "show_when": {"version": ["3"]}},
+
+            {"name": "snmpv3_auth_protocol", "kind": "select", "default": "SHA",
+             "options": ["MD5", "SHA", "SHA-224", "SHA-256", "SHA-384", "SHA-512"],
+             "show_when": {"version": ["3"], "snmpv3_level": ["authNoPriv", "authPriv"]}},
+            {"name": "snmpv3_auth_key", "kind": "password", "secret": true,
+             "show_when": {"version": ["3"], "snmpv3_level": ["authNoPriv", "authPriv"]}},
+
+            {"name": "snmpv3_priv_protocol", "kind": "select", "default": "AES-128",
+             "options": ["DES", "3DES", "AES-128", "AES-192", "AES-256"],
+             "show_when": {"version": ["3"], "snmpv3_level": ["authPriv"]}},
+            {"name": "snmpv3_priv_key", "kind": "password", "secret": true,
+             "show_when": {"version": ["3"], "snmpv3_level": ["authPriv"]}},
+
+            {"name": "snmpv3_context", "kind": "text",
+             "show_when": {"version": ["3"]}},
+            {"name": "snmpv3_engine_id", "kind": "text",
+             "show_when": {"version": ["3"]}}
+        ]
+    },
     "servers": {
         "__new_item_fields__": ["host", "community"],
         "__field_order__": ["enabled", "host", "port", "timeout", "retries", "version", "community", "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key", "snmpv3_auth_protocol", "snmpv3_priv_protocol", "checks"],

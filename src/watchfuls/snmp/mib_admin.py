@@ -228,6 +228,19 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
         req = urllib.request.Request(dl_url, headers={'User-Agent': 'ServiceSentry'})
         with urllib.request.urlopen(req, timeout=20) as r:
             content = r.read().decode('utf-8', errors='replace')
+        # An unchanged file is not rewritten. Whether a MIB needs compiling is decided by
+        # comparing its mtime against the compiled module, so rewriting identical bytes
+        # marks it stale and buys a re-parse — ~2.7 s of ASN.1 each, for a file that did
+        # not change. Re-importing a folder to pick up a handful of new MIBs invalidated
+        # every one already compiled from it, which is how a second import came to cost as
+        # much as the first.
+        try:
+            if os.path.isfile(dest):
+                with open(dest, encoding='utf-8') as fh:
+                    if fh.read() == content:
+                        return True
+        except OSError:
+            pass
         with open(dest, 'w', encoding='utf-8') as fh:
             fh.write(content)
         return True
@@ -366,10 +379,25 @@ class MibAdmin:
         # Only invoke pysmi when new/updated raw MIBs exist.  compile_raw_mibs()
         # initialises an HttpReader (→ DNS lookup for mibs.pysnmp.com) even for
         # already-compiled MIBs, which can block for 45+ seconds on slow networks.
-        if not _mib_resolver.raw_dir_has_new_mibs(raw_dir, compiled_dir):
+        #
+        # And only for the FEW that are waiting.  This runs at module startup, so
+        # compiling everything new meant that importing a vendor folder — hundreds of
+        # files, ~2.7 s of ASN.1 parsing each — bought a panel that does not come up for
+        # the best part of an hour, with nothing on screen to say what it is doing. Past
+        # the limit they stay raw until the MIB manager is told to compile them.
+        _pending = _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir)
+        if not _pending:
             compile_result = {'ok': True, 'compiled': False}
+        elif len(_pending) > _mib_resolver.AUTO_COMPILE_LIMIT:
+            compile_result = {'ok': True, 'compiled': False}
+            self._debug(
+                f'SNMP: {len(_pending)} raw MIB file(s) are not compiled — too many to do '
+                f'at startup, compile them from the MIB manager (raw={raw_dir})',
+                DebugLevel.info,
+            )
         else:
-            compile_result = _mib_resolver.compile_raw_mibs(raw_dir, compiled_dir)
+            compile_result = _mib_resolver.compile_raw_mibs(
+                raw_dir, compiled_dir, mibs_filter=_pending)
 
         if not compile_result.get('ok'):
             self._debug(
@@ -982,8 +1010,18 @@ class MibAdmin:
                 'total':        result.get('total', result.get('count', 0)),
                 'failed':       len(_failed),
                 # Keep the failed file names (capped) so the UI and the audit log
-                # can report *which* files failed, not just how many.
+                # can report *which* files failed, not just how many — and WHY, which
+                # is the question a name alone always leads to: "rejected" (the file
+                # did not look like a MIB) and an HTTP error are different problems
+                # with different answers, and re-running the import to find out costs
+                # another few hundred requests against a 60/h rate limit.
                 'failed_names': [str(f.get('name', '')) for f in _failed][:50],
+                'failed_detail': [{'name':  str(f.get('name', '')),
+                                   'error': str(f.get('error', ''))} for f in _failed][:50],
+                # …and the ones that WORKED. "81 ok" answers how many; after a partial
+                # import the question is which, and the alternative is listing the
+                # folder by hand and diffing it against what is on disk.
+                'imported_names': [str(n) for n in (result.get('imported') or [])][:200],
                 'truncated':    result.get('truncated', False),
                 'message':      result.get('message', ''),
                 'current':      None,
