@@ -8,6 +8,21 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.55] - 2026-08-06
+
+### Fixed
+- **Saving the modules form redraws it.** Switch a module off, press Save, and in the
+  list-and-detail view it stayed under *On* until the next reload — the save had worked, the
+  screen had not caught up, which is the worst of the two failures because it looks like the
+  save did not.
+  - `toggleModule` writes `enabled` and marks the form dirty, and stops there **on purpose**: a
+    row that jumps to another group under the cursor while you are still deciding is worse than
+    one that waits. Nothing else moved it, so the save was the moment it should have — and
+    that was the one thing the save did not do.
+  - Latent since long before the grouping: every view was drawing state that could be stale
+    after a save. Nothing showed it until a view started arranging modules *by* the thing being
+    saved. The fix is one call, because every view re-reads from `modulesData`.
+
 ## [0.0.1+build.54] - 2026-08-06
 
 ### Changed

@@ -101,3 +101,23 @@ class TestAViewIsChromeOnly:
 
 
 
+
+
+class TestSavingRedrawsWhatItChanged:
+    """A view may arrange modules BY the thing that was just saved."""
+
+    def test_saving_redraws_the_surface(self):
+        """Reported on the list-and-detail view: switch a module off, save, and it stayed in
+        the "on" group until the next reload.
+
+        `toggleModule` writes `enabled` and marks the form dirty, and stops there on purpose —
+        a row that jumps to another group under the cursor while you are still deciding is
+        worse than one that waits. So nothing had moved it, and the save was the moment it
+        should have."""
+        save = io.open(os.path.join(os.path.dirname(os.path.dirname(MOD)),
+                                    'partials', 'actions', '_save.html'),
+                       encoding='utf-8-sig').read()
+        body = re.search(r'async function saveModules\(.*?\n\}', save, re.S)
+        assert body, 'saveModules is gone — this guard needs updating'
+        assert '_renderModulesSurface()' in body.group(0), \
+            'a view that groups by state keeps showing the state before the save'

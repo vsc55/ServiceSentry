@@ -5371,7 +5371,7 @@ es el mismo cambio que quitaría el mapa hardcodeado.
 ## 115. Modules — cuatro layouts, no cuatro renderizadores
 
 **Archivo:** `tests/meta/test_wa_modules_views.py` — 15 tests
-**Archivo:** `tests/unit/test_wa_modules_views.py` — 4 tests
+**Archivo:** `tests/unit/test_wa_modules_views.py` — 5 tests
 
 La sección tenía uno: una rejilla de tarjetas, cada una desplegando su configuración dentro de
 una celda de 420 px. Ese layout **ya admitía** que la celda se quedaba corta: llevaba un botón

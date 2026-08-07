@@ -44,6 +44,13 @@ async function saveModules() {
         _savedModulesData = deepClone(modulesData);
         // A module just added or switched on gets its section now, not after a reload.
         syncModuleSections();
+        // …and the surface itself is redrawn, because a view can arrange modules BY the thing
+        // that was just saved. `toggleModule` only writes `enabled` and marks the form dirty —
+        // correct, since a row that jumps to another group under the cursor while you are
+        // still deciding is worse than one that waits — so nothing had moved it since. The
+        // list-and-detail view groups by state, and a module switched off sat in "on" until
+        // the next reload. Every view re-reads from `modulesData`, so this is one call.
+        _renderModulesSurface();
     } else showToast(r?.error || t('save_error'), 'danger');
 }
 function revertModules() {
