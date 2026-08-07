@@ -8,6 +8,36 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.56] - 2026-08-06
+
+### Changed
+- **A stopped module is visible at a glance in the table view.** Switching one off changed a
+  badge from green to grey and nothing else — one cell out of five, read only by whoever
+  happened to be looking at that column. The card views have always dimmed the whole card for
+  this; the table said it in a corner.
+  - The row now carries the state: **the whole row is tinted**, a bar runs down its leading
+    edge, and the module's name and id step back to the muted ink. Unavailable gets the same
+    treatment in warning, so the two states that are not "running" are told apart at the same
+    glance rather than by reading two badges.
+  - Off **darkens** in both themes rather than following one recipe: on the dark surface a
+    lighter row reads as selected, which is the opposite of what this says.
+  - The *Stopped* badge is inverted — foreground ink as the fill, the page colour as the text.
+    It was `text-bg-secondary`, a grey pill, and with the row now tinted grey the one cell that
+    states the answer had become the least visible thing in it. The contrast comes from the
+    inversion and not from a hue: red is this panel's word for something that broke, and a
+    module switched off deliberately did not break, while amber is already the answer beside it.
+  - The tint goes through `--bs-table-bg-type`, the variable `.table-striped` uses, which
+    Bootstrap resolves *after* `--bs-table-bg-state`. Painting the cells directly would have
+    won over the hover and left these rows dead under the cursor. The bar is a pseudo-element
+    for the same kind of reason: a border would shift that cell's text out of line with the
+    rows above and below, and the inset-shadow slot is where the tint is painted.
+  - The row is **not** dimmed wholesale. A table cannot do what the card grid does here: the
+    switch and the delete button are exactly as usable on a stopped module as on a running one,
+    and greying them says they are not. The badges and counts keep full strength too — they are
+    the row's answers, and a stepped-back answer is harder to read for no gain.
+  - `.ss-row-off` / `.ss-row-warn` are generic, not scoped to Modules: any table listing things
+    that can be off or unusable wants the same two marks.
+
 ## [0.0.1+build.55] - 2026-08-06
 
 ### Fixed

@@ -543,6 +543,49 @@
    the column titles ended up floating over the data with nothing separating them. The rule
    under it is what actually reads as "titles end here"; a background alone is too subtle at
    this size in either theme. */
+/* ── "Not running", as a badge you cannot miss ──────────────────────────────
+   `text-bg-secondary` is a grey pill, and the row it sits on is now tinted grey: the one cell
+   that states the answer was the least visible thing in the row. This inverts instead —
+   foreground ink as the fill, the page colour as the text — which is the loudest a chip gets
+   without borrowing a hue.
+   Neutral on purpose. Red is the panel's word for something that broke, and a module switched
+   off deliberately did not break; amber is already the answer beside it (unavailable). The
+   contrast comes from the inversion, not from an alarm colour that would be a lie. */
+.ss-badge-off { background: var(--bs-emphasis-color); color: var(--bs-body-bg); }
+
+/* ── A table row for something that is not running ──────────────────────────
+   A badge going green → grey is one cell of five, read only by whoever happens to be looking
+   at that column. The card views dim the whole card for this; a table cannot dim a row without
+   dimming its controls too — the switch and the delete button are exactly as usable as before,
+   and greying them says they are not. So the row keeps its controls at full strength and says
+   it two other ways: a bar down its leading edge, which is what the eye catches while
+   scanning, and the module's own text stepped back to the muted ink.
+   Generic, not scoped to Modules: any table listing things that can be off or unusable wants
+   the same two marks, and a second copy under a second name is how they stop matching. */
+.ss-row-off  { --_ss-row-accent: var(--bs-secondary-color);
+               --bs-table-bg-type: rgba(0, 0, 0, .045); }
+.ss-row-warn { --_ss-row-accent: var(--bs-warning);
+               --bs-table-bg-type: rgba(var(--bs-warning-rgb), .09); }
+/* Off is RECESSED, so it darkens in both themes rather than following one recipe: on the dark
+   surface a lighter row reads as selected, which is the opposite of what this says. */
+[data-bs-theme="dark"] .ss-row-off { --bs-table-bg-type: rgba(0, 0, 0, .30); }
+/* `--bs-table-bg-type` is the variable `.table-striped` tints with, and Bootstrap resolves it
+   AFTER `--bs-table-bg-state`, so hovering a row still lights it up as usual. Painting the
+   cells directly would have won over the hover and left these rows dead under the cursor. */
+.ss-row-off > td:first-child,
+.ss-row-warn > td:first-child { position: relative; }
+/* The bar is a pseudo-element, not a border or an inset shadow: a border would shift this
+   cell's text a few px out of line with the rows above and below it, and the shadow slot is
+   where Bootstrap paints the tint above — one of the two would have had to go. */
+.ss-row-off > td:first-child::before,
+.ss-row-warn > td:first-child::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: .25rem;
+    background: var(--_ss-row-accent);
+}
+/* The NAME and the id only. Not `> td`, which would take the badges and the counts down with
+   it — those are the row's answers, and a stepped-back answer is harder to read for no gain. */
+.ss-row-off > td:first-child .d-block { color: var(--bs-secondary-color); }
+
 .ss-thead        { background: var(--bs-secondary-bg); border-bottom: 2px solid var(--bs-border-color); }
 .ss-thead-sticky { position: sticky; top: 0; z-index: 1;
                    background: var(--bs-secondary-bg); border-bottom: 2px solid var(--bs-border-color); }

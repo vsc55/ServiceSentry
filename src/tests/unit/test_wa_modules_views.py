@@ -121,3 +121,39 @@ class TestSavingRedrawsWhatItChanged:
         assert body, 'saveModules is gone — this guard needs updating'
         assert '_renderModulesSurface()' in body.group(0), \
             'a view that groups by state keeps showing the state before the save'
+
+
+class TestAStoppedModuleIsVisibleAtAGlance:
+
+    def test_the_table_marks_the_row_not_only_the_badge(self):
+        """Reported as "it only changes the state to stopped": a badge going green → grey is
+        one cell of five, read by whoever happens to be looking at that column. The card views
+        dim the whole card; the table said it in a corner."""
+        src = _read('_view_table.html')
+        assert 'ss-row-off' in src and 'ss-row-warn' in src, 'the row carries no state'
+        row = re.search(r'return `<tr[^\n]*', src).group(0)
+        assert 'rowState' in row, 'the mark is computed but never reaches the row'
+
+    def test_the_row_keeps_its_controls_at_full_strength(self):
+        """A table cannot dim a row the way a card grid dims a card: the switch and the delete
+        button are exactly as usable on a stopped module as on a running one, and greying them
+        says they are not."""
+        css = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(MOD))),
+                                   'static', 'css', 'web_admin.css'),
+                      encoding='utf-8-sig').read()
+        for block in re.findall(r'\.ss-row-(?:off|warn)[^{}]*\{([^}]*)\}', css):
+            assert 'opacity' not in block, 'the row is dimmed wholesale, controls included'
+        assert '.ss-row-off > td:first-child .d-block' in css, \
+            'the muted ink is not confined to the name'
+
+    def test_the_tint_lets_the_hover_through(self):
+        """`--bs-table-bg-type` is the variable `.table-striped` tints with, and Bootstrap
+        resolves it AFTER `--bs-table-bg-state`. Painting the cells directly would have won
+        over the hover and left these rows dead under the cursor."""
+        css = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(MOD))),
+                                   'static', 'css', 'web_admin.css'),
+                      encoding='utf-8-sig').read()
+        i = css.index('.ss-row-off  {')
+        assert '--bs-table-bg-type' in css[i:css.index('}', i)]
+        assert '[data-bs-theme="dark"] .ss-row-off' in css, \
+            'one recipe for both themes: on the dark surface a lighter row reads as selected'

@@ -31,17 +31,26 @@ function _modViewTable(c, names) {
     </div>`;
 }
 
+/** One row. The state is carried by the ROW, not only by the badge in its state column.
+ *
+ *  A badge changing from green to grey is the whole signal a table can give if the row stays
+ *  the same, and it is a weak one: it is one cell of five, read only if you happen to be
+ *  looking at that column. The card views have always dimmed the whole card for this; the
+ *  table said it in a corner. `.ss-row-off` gives it the same weight here — a bar down the
+ *  edge of the row and its text stepped back — which is what makes "which of these did I turn
+ *  off?" answerable by scanning instead of by reading. */
 function _modRow(f) {
+    const rowState = f.unavailable ? ' ss-row-warn' : (f.on ? '' : ' ss-row-off');
     const state = f.unavailable
         ? `<span class="badge text-bg-warning">${esc(t('mod_state_unavailable') || 'Unavailable')}</span>`
         : (f.on ? `<span class="badge text-bg-success">${esc(t('svc_state_running') || 'On')}</span>`
-                : `<span class="badge text-bg-secondary">${esc(t('svc_state_stopped') || 'Off')}</span>`);
+                : `<span class="badge ss-badge-off">${esc(t('svc_state_stopped') || 'Off')}</span>`);
     // The count is worth colouring only when it is telling you something: "3/4" with one item
     // switched off is a state somebody chose and then forgot about.
     const items = !f.total ? '<span class="text-muted">—</span>'
         : `<span class="${f.active < f.total ? 'text-warning-emphasis fw-medium' : 'text-muted'}">${f.active}/${f.total}</span>`;
     const warn = _modWarnBadge(f) || '<span class="text-muted">—</span>';
-    return `<tr>
+    return `<tr class="${rowState.trim()}">
         <td><span class="d-flex align-items-center gap-2">
             ${_modAvatar(f, 26)}
             <span class="min-w-0">
