@@ -750,6 +750,62 @@ function roCopyRow(label, value, hint = '') {
     return `<div class="cfg-field-wrap mb-2">${_fieldRow(esc(label) + badge + info, inner, panel)}</div>`;
 }
 
+/** Put a section into "index down the side, one thing open beside it" and hand back the rail.
+ *
+ *  The layout is not achieved by rebuilding anything: the section's toolbar and its container
+ *  are MOVED into a column beside the rail. A copy would be a second set of the same inputs
+ *  and a second Save button, with only one of each being the one that works.
+ *
+ *  The rail is a sibling of that column, not a child of the body — level with the toolbar at
+ *  the top and down to the bottom of the pane. Inside the body it began where the body began
+ *  and ended where it ended, which is why Configuration's kept stopping short of the page
+ *  however its height was computed. The toolbar belongs to the DETAIL: reload, save and search
+ *  are about what is being edited, not about the index of what could be.
+ *
+ *  `on = false` undoes it, which is what a section with more than one layout needs — Modules
+ *  has four views and only one of them is this shape. Shared with Configuration because both
+ *  had to be exactly the same shell for the two screens to look like one panel; it was written
+ *  twice for a while and the copies had already started to differ.
+ *
+ *  Returns the <nav> to fill, or null when there is no shell (either torn down or no pane).
+ */
+function ssRailShell(container, on, label) {
+    const pane = container && container.closest('.tab-pane');
+    if (!pane) return null;
+    const shell = pane.querySelector(':scope > .ss-shell');
+    // Found by its marker, not by the class: `.ss-bleed-top` is toggled below, so looking for
+    // it would fail to find the bar exactly once — the call after the one that took it off.
+    // It sits inside the shell once this has run, and directly in the pane before and after.
+    const bar = pane.querySelector('[data-ss-pane-head]');
+    // Pinning the bar to the top edge is what the SHELL wants: it is the head of the detail
+    // column, with the open thing's header attached under it. A section drawing a grid or a
+    // table instead wants the free-standing bar it had — rounded, with air under it — so the
+    // bleed goes on and off with the shell rather than being baked into the markup.
+    if (bar) bar.classList.toggle('ss-bleed-top', !!on);
+    if (!on) {
+        if (shell) {
+            if (bar) pane.appendChild(bar);
+            pane.appendChild(container);
+            shell.remove();
+        }
+        return null;
+    }
+    if (shell) return shell.firstElementChild;
+    const built = document.createElement('div');
+    built.className = 'ss-shell';
+    const rail = document.createElement('nav');
+    rail.className = 'ss-rail';
+    rail.setAttribute('aria-label', label || '');
+    const main = document.createElement('div');
+    main.className = 'ss-main';
+    built.appendChild(rail);
+    built.appendChild(main);
+    pane.appendChild(built);
+    if (bar) main.appendChild(bar);
+    main.appendChild(container);
+    return rail;
+}
+
 function toggleCollapseFromHeader(event, collapseId) {
     // Ignore clicks from controls that must not toggle collapse.
     if (event.target.closest('[data-no-collapse="1"]')) return;

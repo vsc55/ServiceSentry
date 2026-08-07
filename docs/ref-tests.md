@@ -5106,7 +5106,7 @@ directamente.
 
 ## 109. Config — la cabecera tiene que quedarse arriba toda la sección
 
-**Archivo:** `tests/unit/test_wa_config_pane_layout.py` — 23 tests
+**Archivo:** `tests/unit/test_wa_config_pane_layout.py` — 24 tests
 
 La barra (título, Reload, Save con su chincheta de cambios sin guardar) y el buscador son los
 controles que buscas **porque** has hecho scroll: encuentras un campo, lo cambias y le das a
@@ -6201,7 +6201,7 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 
 ## 133. Configuration — un índice lateral sobre un solo renderizador
 
-**Archivo:** `tests/unit/test_wa_config_views.py` — 71 tests
+**Archivo:** `tests/unit/test_wa_config_views.py` — 73 tests
 **Archivo:** `tests/meta/test_wa_config_views.py` — 3 tests
 
 Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar

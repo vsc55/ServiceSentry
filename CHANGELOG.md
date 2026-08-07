@@ -8,6 +8,63 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.54] - 2026-08-06
+
+### Changed
+- **Modules' list-and-detail view now navigates by the same rail Configuration does.** Two
+  sections had the same shape — an index down the side, one thing open beside it — drawn two
+  different ways: Configuration had a grouped rail with counts, Modules a flat `list-group`
+  with a state dot. Now there is one rail.
+  - **The module tile shows in the list.** Every other view drew it — the table, the compact
+    cards, and this view's own detail header — so the one whose entire job is picking a module
+    from a list was the only place you could not recognise one by its icon.
+  - **Items are grouped by state** (on / off / unavailable), which answers "which of these is
+    off?" before anything is clicked. That retires the state dot: three colours of a 4px
+    circle said what three headings now say in words, and the row got its width back. An empty
+    state leaves no heading behind, and a filter that matches nothing says so in the rail
+    rather than emptying it silently.
+  - The count keeps its meaning and its colour — warning when a module has items switched off,
+    plain otherwise — but is drawn without `_modCountBadge`: that badge carries the per-module
+    id `_refreshModuleCount()` writes into, and the detail header beside the rail already
+    draws it. Two nodes with one id and the refresh updates whichever comes first.
+  - The rail's CSS moved from `.cfg-rail*` to **`.ss-rail*`**. Configuration is no longer its
+    only user, and a second copy under a second name is how two lists that should look
+    identical stop looking identical.
+  - A selected item paints itself a solid accent colour, where the tile's `.14`-alpha hue tint
+    all but disappears and its mid-tone glyph goes muddy. On that row the tile borrows the
+    row's own foreground instead: same shape, same place, no longer coloured against a
+    background it cannot be seen on.
+- **…and by the same shell, so the two screens are one panel.** Side by side the difference was
+  not the rail: Modules floated inside the content padding with a strip of page background all
+  round it, and its toolbar spanned the full width — over the index as well as over the module
+  being edited, when reload, save and *add module* are about the latter.
+  - The toolbar is now `.ss-bleed-top`, so it belongs to the top edge of the section instead of
+    floating inside its padding, and in the list-and-detail view it **moves into the detail
+    column**: the index runs the full height of the pane beside it rather than starting below
+    the bar.
+  - The shell builder is now **`ssRailShell()`** in `core/_utils.html`, and Configuration was
+    moved onto it. It had been written once for Configuration; a second copy for Modules is how
+    two screens that must look identical stop looking identical. It gained one thing
+    Configuration never needed — it can be taken back **down**, because Modules has four views
+    and only one is this shape.
+  - Which view wants it is declared in the view registry (`shell: true`), not tested for by
+    name in the renderer: the registry stays the one place a view is described.
+  - The open module's header is the same **`.ss-sheet-head`** a configuration section wears. It
+    was `.ss-thead` — a table-header grey against Configuration's card-header blue — and it ran
+    edge to edge where Configuration's sits inset with a rounded bottom. Both sit in the same
+    column, under the same toolbar, as the first thing below it, so a colour a shade off and a
+    width a gutter out was the whole difference between one panel and two screens that merely
+    resemble each other.
+  - **The pinned bar goes up and down with the shell.** Pinning it to the top edge is what the
+    shell wants — it is the head of the detail column, with the open module's header attached
+    under it, and a `.ss-toolbar`'s 1rem bottom margin there becomes a strip of page background
+    between the two: two bars with a crack down the middle rather than one head. Over a grid or
+    a table the same bar wants to be what it was, rounded and with air under it. Baking the
+    bleed into the markup gave the seam to one view and took the air from the other three, so
+    it follows the layout instead. Configuration always has the shell, so nothing there moves.
+  - `.cfg-shell` / `.cfg-main` / `.cfg-rail*` / `.cfg-sheet-head` were renamed **`.ss-*`** for
+    the same reason, and the guards that named them moved to where the behaviour now lives.
+
 ## [0.0.1+build.53] - 2026-08-06
 
 ### Changed

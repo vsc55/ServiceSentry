@@ -26,6 +26,7 @@ CFG = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'cfg')
 VIEWS = os.path.join(CFG, '_views.html')
 RENDER = os.path.join(CFG, '_render.html')
 PANE = os.path.join(CFG, '_pane.html')
+UTILS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_utils.html')
 CSS = os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')
 
 
@@ -137,12 +138,18 @@ class TestItSitsBesideTheSection:
         inside the body, under the toolbar, so it began where the body began and ended where it
         ended. It runs the full height of the pane now — and the toolbar sits over the DETAIL,
         because reload, save and search are about what is being edited, not about the index of
-        what could be."""
-        body = _fn(_read(VIEWS), '_cfgViewRail')
+        what could be.
+
+        The shell is built by `ssRailShell` in core/_utils.html, which is where the next three
+        guards look: Modules' list-and-detail view asks for the same one, and two copies of it
+        is how the two screens would stop looking like one panel."""
+        body = _fn(_read(UTILS), 'ssRailShell')
         assert "closest('.tab-pane')" in body
-        assert "'cfg-shell'" in body
+        assert "'ss-shell'" in body
+        assert 'ssRailShell(c, true' in _fn(_read(VIEWS), '_cfgViewRail'), \
+            'Configuration builds its own shell instead of the shared one'
         css = _read(CSS)
-        i = css.index('.cfg-shell {')
+        i = css.index('.ss-shell {')
         assert 'min-height: 0' in css[i:css.index('}', i)], \
             'without min-height:0 a flex child refuses to shrink and the column overflows'
 
@@ -150,17 +157,42 @@ class TestItSitsBesideTheSection:
         """The toolbar and the body are MOVED beside the index, not copied — a copy would be a
         second set of the same inputs and a second Save button, and only one of each would be
         the one that works."""
-        body = _fn(_read(VIEWS), '_cfgViewRail')
-        assert 'main.appendChild(c)' in body
-        for forbidden in ('innerHTML = c.innerHTML', 'cloneNode'):
+        body = _fn(_read(UTILS), 'ssRailShell')
+        assert 'main.appendChild(container)' in body
+        for forbidden in ('innerHTML =', 'cloneNode'):
             assert forbidden not in body, f'the detail is copied ({forbidden})'
 
     def test_the_shell_is_built_once(self):
         """`renderConfig` runs again on every reload and on every save. Building the column
         each time would leave a stack of them holding the same toolbar."""
-        body = _fn(_read(VIEWS), '_cfgViewRail')
-        assert "pane.querySelector(':scope > .cfg-shell')" in body
-        assert 'if (!shell) {' in body
+        body = _fn(_read(UTILS), 'ssRailShell')
+        assert "pane.querySelector(':scope > .ss-shell')" in body
+        assert 'if (shell) return shell.firstElementChild' in body
+
+    def test_the_shell_can_be_taken_back_down(self):
+        """Configuration never does — this IS the section. Modules has four views and only one
+        of them is this shape, so leaving the shell up would strand the toolbar inside a column
+        beside a rail that the next view no longer draws."""
+        body = _fn(_read(UTILS), 'ssRailShell')
+        assert 'if (!on) {' in body
+        assert 'shell.remove()' in body
+        assert 'pane.appendChild(container)' in body, 'the body is not put back'
+
+    def test_the_pinned_bar_goes_up_and_down_with_the_shell(self):
+        """Pinning the bar to the top edge is what the SHELL wants — it is the head of the
+        detail column. Over a grid or a table it is a free-standing bar again, rounded and with
+        air under it, which is what Modules' other three views lost when the bleed was baked
+        into the markup instead of following the layout.
+
+        Found by its marker and not by the class it toggles: looking for `.ss-bleed-top` would
+        fail to find the bar exactly once — on the call after the one that took it off."""
+        body = _fn(_read(UTILS), 'ssRailShell')
+        assert "querySelector('[data-ss-pane-head]')" in body
+        assert "classList.toggle('ss-bleed-top'" in body
+        for pane in ('cfg', 'modules'):
+            src = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                     pane, '_pane.html'))
+            assert 'data-ss-pane-head' in src, f'{pane} has no bar for the shell to move'
 
     def test_it_reaches_the_frame_on_every_side(self):
         """Reported twice from screenshots with the gaps painted red: page background down the
@@ -172,19 +204,19 @@ class TestItSitsBesideTheSection:
         paddings, and two cancellations put the bar .75rem above the header and a gutter past
         both sides."""
         css = _read(CSS)
-        i = css.index('.cfg-shell {')
+        i = css.index('.ss-shell {')
         block = css[i:css.index('}', i)]
         assert '-.75rem' in block, 'the container top padding still shows above it'
         assert 'var(--bs-gutter-x' in block, 'the container gutters still show beside it'
         assert '-1rem' in block, 'the container pb-3 still shows under it'
-        assert '.cfg-main > .ss-bleed-top { margin: 0; }' in css, \
+        assert '.ss-main > .ss-bleed-top { margin: 0; }' in css, \
             'the toolbar cancels the same padding a second time'
 
     def test_the_index_scrolls_on_its_own(self):
         """It is as tall as the configuration; an index that scrolls away with the detail stops
         being an index exactly when the detail gets long."""
         css = _read(CSS)
-        assert '.cfg-rail' in css and 'overflow-y: auto' in css
+        assert '.ss-rail' in css and 'overflow-y: auto' in css
 
 
 class TestItIsAPassNotARenderer:
@@ -801,7 +833,7 @@ class TestTheHeaderIsPinned:
         stretching the header to cover that gutter only made it paint over the pane's own edge,
         which looks like a mistake rather than like chrome."""
         css = _read(CSS)
-        i = css.index('.cfg-sheet .cfg-sheet-head {')
+        i = css.index('.ss-sheet-head {')
         block = css[i:css.index('}', i)]
         assert 'position: sticky' in block and 'top: 0' in block
         assert 'margin:' not in block, 'the header reaches past the rows, over the pane edge'
@@ -822,9 +854,9 @@ class TestTheHeaderIsPinned:
         Marked by the pass, not by `:first-child`: hidden sections stay in the DOM, so the first
         CHILD and the first one VISIBLE are rarely the same element."""
         css = _read(CSS)
-        i = css.index('.cfg-sheet .cfg-sheet-head {')
+        i = css.index('.ss-sheet-head {')
         assert 'border-radius: .375rem' in css[i:css.index('}', i)], 'the floating ones stay square'
-        assert '.cfg-sheet .cfg-card-first .cfg-sheet-head {' in css
+        assert '.cfg-sheet .cfg-card-first .ss-sheet-head,' in css
         rail = _fn(_read(VIEWS), '_cfgViewRail')
         assert "classList.add('cfg-card-first')" in rail
         assert "classList.remove('cfg-card-first')" in rail, 'the mark is never cleared'
@@ -838,7 +870,7 @@ class TestTheHeaderIsPinned:
         than as a fade applied to whatever happens to be beneath it, and above the header in
         the stack so it lands on the header instead of behind it."""
         css = _read(CSS)
-        i = css.index('.cfg-main > .ss-bleed-top { position: relative;')
+        i = css.index('.ss-main > .ss-bleed-top { position: relative;')
         block = css[i:css.index('}', i)]
         assert 'box-shadow' in block and 'z-index: 11' in block
 

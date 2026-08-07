@@ -17,8 +17,11 @@
 // `render` is looked up by NAME at call time rather than held as a reference: the view
 // files are separate partials concatenated after this one, so the functions do not exist
 // yet when this array is evaluated.
+// `shell: true` asks for the rail shell (`ssRailShell`) — the toolbar moves into a column
+// beside a full-height index. Declared HERE rather than tested for by name in `renderModules`,
+// so the switcher stays the one place a view is described.
 const MOD_VIEWS = [
-    { id: 'split',   label_key: 'mod_view_split',   icon: 'bi-layout-sidebar-inset', render: '_modViewSplit' },
+    { id: 'split',   label_key: 'mod_view_split',   icon: 'bi-layout-sidebar-inset', render: '_modViewSplit', shell: true },
     { id: 'table',   label_key: 'mod_view_table',   icon: 'bi-list-ul',              render: '_modViewTable' },
     { id: 'compact', label_key: 'mod_view_compact', icon: 'bi-grid',                 render: '_modViewCompact' },
     { id: 'cards',   label_key: 'mod_view_cards',   icon: 'bi-grid-3x2-gap',         render: '_modViewCards' },

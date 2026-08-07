@@ -397,6 +397,13 @@
    scrolling body disappears under, and rounding it is what says so. */
 .ss-bleed-top { margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) 0; }
 .ss-bleed-top > * { border-left: 0; border-right: 0; }
+/* A free-standing `.ss-toolbar` keeps a 1rem gap under it, because it floats above content
+   that has to breathe. Pinned to the top edge it is the opposite: the gap becomes a strip of
+   page background between the bar and the header below it, and reads as a seam — two bars
+   with a crack down the middle rather than one continuous head. Configuration got here first
+   and cancelled it through `.ss-toolbar-attached`, which is about the collapse hanging off its
+   bottom, not about this; stated here, it holds for any section that pins its bar. */
+.ss-bleed-top > .ss-toolbar { margin-bottom: 0; }
 .ss-bleed-top > :first-child {
     border-top: 0;
     border-top-left-radius: 0;
@@ -1444,6 +1451,15 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     background: var(--bs-secondary-bg);
     color: var(--bs-secondary-color);
 }
+/* A selected rail item paints itself a solid accent colour, and both tints above lose their
+   contrast on top of it: the .14-alpha hue tint all but vanishes and the mid-tone glyph goes
+   muddy.  On that row the tile borrows the row's own foreground instead — still a tile, still
+   the same shape and place, just no longer coloured against a background it cannot see. */
+.ss-rail-item.active .ss-mod-av,
+.ss-rail-item.active .ss-mod-av.off {
+    background: rgba(255, 255, 255, .22);
+    color: var(--bs-list-group-active-color, #fff);
+}
 
 .toast-container {
     z-index: 9999;
@@ -1817,12 +1833,12 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    The toolbar gives its own bleed up in here — .ss-bleed-top cancels the same paddings, and
    two cancellations put it .75rem above the header and a gutter past both sides. It starts
    flush because the column it lives in already does. */
-.cfg-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
+.ss-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
              margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
-.cfg-main > .ss-bleed-top { margin: 0; }
+.ss-main > .ss-bleed-top { margin: 0; }
 /* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
    the index's border and the first card rather than a strip of page background. */
-.cfg-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
+.ss-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
 
 /* ── Configuration — the detail is a SHEET, not a card ──────────────────────────────────
    The frame, the chevron and the colour accent were right when seven tabs showed several
@@ -1925,11 +1941,16 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    One value serves both states — `.ss-toolbar` rounds with --bs-border-radius-lg, and the
    search box's `.rounded-bottom-3` is that same token — so whichever of the two forms the
    bottom edge, the shadow matches it. */
-.cfg-main > .ss-bleed-top { position: relative; z-index: 11;
+.ss-main > .ss-bleed-top { position: relative; z-index: 11;
                             border-bottom-left-radius: var(--bs-border-radius-lg);
                             border-bottom-right-radius: var(--bs-border-radius-lg);
                             box-shadow: 0 .4rem .75rem -.2rem rgba(0,0,0,.7); }
-.cfg-sheet .cfg-sheet-head {
+/* The header of the thing on screen: what you are looking at, and the controls that act on it
+   as a whole.  Shared by Configuration's sections and by the module the list-and-detail view
+   has open — the two sit under the same toolbar, in the same column, and the header is the
+   first thing under it in both, so a different colour or a different width there is the whole
+   difference between one panel and two screens that resemble each other. */
+.ss-sheet-head {
     position: sticky; top: 0; z-index: 10;
     padding: .5rem;
     background: var(--ss-card-header-bg, var(--bs-secondary-bg));
@@ -1938,37 +1959,46 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
        that is not there. */
     border-radius: .375rem;
 }
-/* Except the first on screen, which IS attached to something: the toolbar. Square top, rounded
-   bottom — the same thing `.ss-bleed-top` says about the bar above it, that this is the line
-   the scrolling body disappears under, and rounding it is what says so. */
-.cfg-sheet .cfg-card-first .cfg-sheet-head {
+/* Except when it IS attached to something: the toolbar. Square top, rounded bottom — the same
+   thing `.ss-bleed-top` says about the bar above it, that this is the line the scrolling body
+   disappears under, and rounding it is what says so.
+   Configuration decides it per card (only the FIRST on screen touches the bar); a section with
+   one header always does, and says so with the class. */
+.cfg-sheet .cfg-card-first .ss-sheet-head,
+.ss-sheet-head.ss-sheet-head-attached {
     border-top-left-radius: 0;
     border-top-right-radius: 0;
 }
 .cfg-sheet .cfg-subhead { position: sticky; top: 3.4rem; z-index: 9;
                           padding: .25rem .5rem;
                           background: var(--ss-card-header-bg, var(--bs-secondary-bg)); }
-.cfg-main  { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
+.ss-main  { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
              min-height: 0; }
-.cfg-rail  { flex: 0 0 15.5rem; max-width: 15.5rem; min-height: 0; overflow-y: auto;
+/* ── The navigation rail ────────────────────────────────────────────────────
+   A grouped index down the side of a pane: a heading per group, one item per thing you can
+   open, a count on the right of both.  Named ss- rather than cfg- because Configuration is
+   no longer the only section that wants it — Modules' list-and-detail view is the same shape
+   and the same problem, and a second copy under a second name is how two lists that should
+   look identical stop looking identical. */
+.ss-rail  { flex: 0 0 15.5rem; max-width: 15.5rem; min-height: 0; overflow-y: auto;
              padding: .5rem .25rem .75rem .25rem;
              border-right: 1px solid var(--bs-border-color);
              background: var(--bs-tertiary-bg); scrollbar-width: thin; }
-.cfg-rail-group { margin-bottom: .6rem; }
-.cfg-rail-head { font-size: .72rem; font-weight: 600; text-transform: uppercase;
+.ss-rail-group { margin-bottom: .6rem; }
+.ss-rail-head { font-size: .72rem; font-weight: 600; text-transform: uppercase;
                  letter-spacing: .03em; color: var(--bs-secondary-color);
                  padding: .25rem .5rem; display: flex; align-items: center; gap: .25rem; }
-.cfg-rail-head .badge { margin-left: auto; }
-.cfg-rail-item { display: flex; align-items: center; gap: .35rem; width: 100%;
+.ss-rail-head .badge { margin-left: auto; }
+.ss-rail-item { display: flex; align-items: center; gap: .35rem; width: 100%;
                  border: 0; background: transparent; text-align: left;
                  font-size: .82rem; color: var(--bs-body-color);
                  padding: .3rem .5rem; border-radius: .375rem; }
-.cfg-rail-item:hover { background: var(--bs-secondary-bg); }
-.cfg-rail-item.active { background: var(--bs-primary); color: #fff; }
-.cfg-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
+.ss-rail-item:hover { background: var(--bs-secondary-bg); }
+.ss-rail-item.active { background: var(--bs-primary); color: #fff; }
+.ss-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
 @media (max-width: 991.98px) {
-    .cfg-shell { flex-direction: column; }
-    .cfg-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
+    .ss-shell { flex-direction: column; }
+    .ss-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
                 border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
 }
 

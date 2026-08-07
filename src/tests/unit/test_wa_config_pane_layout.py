@@ -92,6 +92,17 @@ class TestTheSeamBetweenHeaderAndBody:
             'the header card has a bottom margin again, so there is a gap of page '
             'background for scrolled rows to appear in')
 
+    def test_a_pinned_toolbar_drops_its_bottom_margin(self):
+        """The same seam, one level up and reported on Modules: a free-standing `.ss-toolbar`
+        keeps 1rem under it, and pinned to the top edge that gap becomes a strip of page
+        background between the bar and the header below — two bars with a crack down the
+        middle rather than one continuous head.
+
+        Stated on `.ss-bleed-top`, not left to each section: Configuration cancelled it through
+        `.ss-toolbar-attached`, which is about the collapse hanging off its bottom, so the next
+        section to pin its bar inherited the gap instead of the fix."""
+        assert '.ss-bleed-top > .ss-toolbar { margin-bottom: 0; }' in _css()
+
     def test_the_header_sits_on_the_edge_not_inside_the_padding(self):
         """It is the top of the section, not a card floating in it: full width, flush with
         the frame, square on top — and rounded only at the bottom, which is the line the
@@ -233,7 +244,7 @@ class TestTheSearchBoxIsCollapsed:
         """
         # The selector carries more than one rule (a margin reset elsewhere), so pick the one
         # that actually casts the shadow rather than whichever comes first in the file.
-        blocks = [b for b in re.findall(r'\.cfg-main > \.ss-bleed-top \{(.*?)\}', _css(), re.S)
+        blocks = [b for b in re.findall(r'.ss-main > \.ss-bleed-top \{(.*?)\}', _css(), re.S)
                   if 'box-shadow' in b]
         assert blocks, 'the pinned header no longer casts the shadow this guards'
         body = blocks[0]

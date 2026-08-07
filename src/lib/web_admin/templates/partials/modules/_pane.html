@@ -16,7 +16,16 @@
    list beside a scrolling detail pane; a section that grows with its content cannot do that.
 #}
 <div class="tab-pane fade ss-vfill" id="tab-modules">
-    <div class="ss-toolbar">
+    {# `data-ss-pane-head` is what `ssRailShell` moves into the detail column in the
+       list-and-detail view, so the index runs the full height of the pane beside the bar
+       instead of starting below it.
+
+       `.ss-bleed-top` comes and goes with that shell and is written here only for the first
+       paint: pinned to the top edge the bar is the head of the detail column, with the open
+       module's header attached under it — but the other three views draw a grid or a table, and
+       over those the bar wants to be what it was, a rounded card with air under it. #}
+    <div class="ss-bleed-top" data-ss-pane-head>
+    <div class="ss-toolbar ss-toolbar-plain">
         <h6 class="mb-0"><i class="bi bi-puzzle me-2"></i>{{ i18n.tab_modules }}</h6>
         <div class="input-group input-group-sm flex-nowrap" style="width:15rem;flex:0 0 auto">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
@@ -38,6 +47,7 @@
             <span class="badge text-bg-warning ms-1 d-none" id="badgeModulesDirty"
                 title="{{ i18n.unsaved_changes }}">●</span>
         </button>
+    </div>
     </div>
     <div id="modules-container" class="ss-vfill"></div>
 </div>

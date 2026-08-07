@@ -54,6 +54,7 @@ function renderModules() {
     const names = _modVisibleNames();
     if (!names.length) {
         disposeTooltips(c);
+        ssRailShell(c, false);   // no modules to index: the empty state gets the whole pane
         c.innerHTML = _modEmptyState();
         _modSyncExpandModal(_savedAutoExpand);
         return;
@@ -76,6 +77,10 @@ function renderModules() {
     const view = MOD_VIEWS.find(v => v.id === _modViewId()) || MOD_VIEWS[0];
     const draw = window[view.render];
     disposeTooltips(c);   // avoid stuck tooltips when the DOM is replaced
+    // Put the pane in the shape this view asked for BEFORE drawing: the view fills the rail
+    // this returns, and a view that did not ask for one gets the toolbar and the container
+    // handed back so it is not left inside a column beside an index nobody is drawing.
+    ssRailShell(c, !!view.shell, t('tab_modules'));
     (typeof draw === 'function' ? draw : _modViewCards)(c, names);
 
     // Restore expanded state after re-render

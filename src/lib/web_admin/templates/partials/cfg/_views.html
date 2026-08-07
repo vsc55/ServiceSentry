@@ -402,14 +402,14 @@ function _cfgViewRail(c) {
     for (const [tabId, list] of byTab) {
         const meta = tabMeta[tabId] || { label: tabId, icon: 'bi-dot' };
         const total = list.reduce((n, card) => n + count(_cfgCardNode(c, card)), 0);
-        html += `<div class="cfg-rail-group">
-            <div class="cfg-rail-head"><i class="bi ${escAttr(meta.icon)} me-1"></i>${esc(meta.label)}
+        html += `<div class="ss-rail-group">
+            <div class="ss-rail-head"><i class="bi ${escAttr(meta.icon)} me-1"></i>${esc(meta.label)}
             ${total ? `<span class="badge ${badge} ms-1" title="${escAttr(badgeTip)}">${total}</span>` : ''}</div>`;
         for (const card of list) {
             const n = count(_cfgCardNode(c, card));
             const title = (where['cfgcol_' + card.id] || {}).card || card.id;
             const active = !searching && card.id === _cfgRailCard;
-            html += `<button type="button" class="cfg-rail-item${active ? ' active' : ''}"
+            html += `<button type="button" class="ss-rail-item${active ? ' active' : ''}"
                     onclick="setConfigRailCard('${escAttr(card.id)}')" title="${escAttr(title)}">
                 <i class="bi ${escAttr(card.icon || 'bi-dot')} me-1"></i>
                 <span class="text-truncate">${esc(title)}</span>
@@ -423,36 +423,13 @@ function _cfgViewRail(c) {
     // "only what changed" on a stock install, matching nothing is the CORRECT answer and the
     // one most in need of saying out loud.
     if (filtering && !cards.length) {
-        html = `<div class="cfg-rail-group"><div class="cfg-rail-head text-truncate">
+        html = `<div class="ss-rail-group"><div class="ss-rail-head text-truncate">
             <i class="bi bi-search me-1"></i>${esc(t('cfg_search_no_section'))}</div></div>`;
     }
 
-    // The index sits BESIDE the section, not inside its body: level with the toolbar at the
-    // top and down to the bottom of the pane. Inside the body it began where the body began
-    // and ended where it ended, which is why it kept stopping short of the page however its
-    // height was computed. The toolbar belongs to the detail — reload, save and search are
-    // about what is being edited, not about the index of what could be.
-    //
-    // Nothing is rebuilt to achieve it: the toolbar and the container are MOVED into a column
-    // beside the rail. A copy would be a second set of the same inputs and a second Save
-    // button, with only one of each being the one that works.
-    const pane = c.closest('.tab-pane');
-    if (!pane) return;
-    let shell = pane.querySelector(':scope > .cfg-shell');
-    if (!shell) {
-        shell = document.createElement('div');
-        shell.className = 'cfg-shell';
-        const main = document.createElement('div');
-        main.className = 'cfg-main';
-        const bar = pane.querySelector(':scope > .ss-bleed-top');
-        shell.appendChild(document.createElement('nav'));      // rail slot, filled below
-        shell.appendChild(main);
-        pane.appendChild(shell);
-        if (bar) main.appendChild(bar);
-        main.appendChild(c);
-    }
-    const slot = shell.firstElementChild;
-    slot.className = 'cfg-rail';
-    slot.setAttribute('aria-label', t('tab_config') || 'Configuration');
-    slot.innerHTML = html;
+    // The index sits BESIDE the section, not inside its body — `ssRailShell` is what puts it
+    // there, and Modules' list-and-detail view asks it for the same shell. Configuration
+    // never takes it down: this IS the section, there is no other layout to go back to.
+    const slot = ssRailShell(c, true, t('tab_config') || 'Configuration');
+    if (slot) slot.innerHTML = html;
 }
