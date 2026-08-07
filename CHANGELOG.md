@@ -8,6 +8,19 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.53] - 2026-08-06
+
+### Changed
+- **The artifact actions move to v5, off deprecated Node 20.** Every run raised four warnings:
+  `upload-artifact@v4` and `download-artifact@v4` still declare Node 20, so the runner was
+  already forcing them onto Node 24. The warning is the notice period — when it ends, those
+  steps fail rather than degrade, and they are what carries the `.deb`/`.rpm` from `packages`
+  to `packages-install` and `release`. Every other action was already current.
+  - The three call sites name a single artifact with an explicit `path`, the one usage shape
+    v5 leaves untouched, so the bump is version-only.
+  - Node 24 needs glibc ≥ 2.28 to run inside a job `container:`, which the install matrix
+    (Debian 13, Ubuntu 24.04, Fedora) satisfies with room to spare.
+
 ## [0.0.1+build.52] - 2026-08-05
 
 ### Security
