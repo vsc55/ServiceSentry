@@ -1,0 +1,436 @@
+{# ================================================================
+   Backup — the list of copies, and the two modals that make and apply one.
+
+   The form is DRAWN FROM the catalogue the API sends (`parts`), never from a list written
+   here: a part added to lib/core/backup/service.py appears in this form on its own, and the
+   day it did not, the copy would quietly stop holding it while the screen said otherwise.
+
+   Restore and delete go through showConfirmModal, and the restore one says what it will
+   overwrite rather than asking "are you sure?" — the question a confirmation should answer is
+   what happens if I say yes.
+   ================================================================ #}
+
+let _backups = [];
+let _backupParts = [];
+
+async function renderBackups() {
+    const c = document.getElementById('backup-container');
+    if (!c) return;
+    c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3 text-center py-4">
+        <div class="spinner-border spinner-border-sm"></div></div>`;
+    const res = await apiGet('/api/v1/backups');
+    _backups     = (res && res.backups) || [];
+    _backupParts = (res && res.parts) || [];
+    const perms  = new Set(currentUser.permissions || []);
+    document.getElementById('btnNewBackup')?.classList.toggle('d-none', !perms.has('backup_create'));
+
+    if (!_backups.length) {
+        c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-archive ss-empty-icon"></i>
+                <span>${esc(t('backup_none'))}</span>
+            </div></div>`;
+        return;
+    }
+    c.innerHTML = `<div class="ss-vscroll">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead-sticky"><tr>
+                <th class="small py-2">${esc(t('backup_col_name'))}</th>
+                <th class="small py-2" style="width:11rem">${esc(t('col_time'))}</th>
+                <th class="small py-2" style="width:6rem">${esc(t('backup_col_size'))}</th>
+                <th class="small py-2">${esc(t('backup_col_contents'))}</th>
+                <th class="small py-2" style="width:9rem"></th>
+            </tr></thead>
+            <tbody>${_backups.map(_backupRow).join('')}</tbody>
+        </table></div>`;
+}
+
+/** One copy. The contents are badges rather than a count: "6 parts" answers a question
+ *  nobody asked, and which parts is the whole reason to keep several copies around. */
+function _backupRow(b) {
+    const perms = new Set(currentUser.permissions || []);
+    const when  = b.mtime ? new Date(b.mtime * 1000).toLocaleString() : '—';
+    const parts = (b.parts || []).map(p => {
+        const meta = _backupParts.find(x => x.id === p);
+        return `<span class="badge text-bg-secondary me-1">${esc(meta ? t(meta.label_key) : p)}</span>`;
+    }).join('');
+    // The one badge that is a warning, not a label: a copy taken without secrets restores
+    // credentials that authenticate against nothing, and finding that out at restore time is
+    // finding it out too late.
+    const secrets = b.secrets
+        ? `<span class="badge text-bg-success" title="${escAttr(t('backup_secrets_in_tt'))}">
+               <i class="bi bi-key me-1"></i>${esc(t('backup_secrets_in'))}</span>`
+        : `<span class="badge text-bg-warning" title="${escAttr(t('backup_secrets_out_tt'))}">
+               <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('backup_secrets_out'))}</span>`;
+    const rows = Object.values(b.tables || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+    return `<tr>
+        <td><span class="d-flex align-items-center gap-2">
+            <i class="bi bi-file-earmark-zip text-secondary"></i>
+            <span class="min-w-0">
+                <span class="d-block text-truncate" style="font-size:.85rem">${esc(b.name)}</span>
+                <code class="text-muted ss-fs-2">${esc(t('backup_n_rows').replace('{}', rows))}</code>
+            </span>
+        </span></td>
+        <td class="small text-muted">${esc(when)}</td>
+        <td class="small text-muted">${esc(b.size_h || '')}</td>
+        <td>${parts} ${secrets}</td>
+        <td class="text-end"><span class="d-inline-flex align-items-center gap-1">
+            ${perms.has('backup_download') ? `<a class="btn btn-sm btn-secondary py-0 px-1"
+                href="/api/v1/backups/${encodeURIComponent(b.name)}/download"
+                title="${escAttr(t('backup_download'))}"><i class="bi bi-download"></i></a>` : ''}
+            ${perms.has('backup_restore') ? `<button class="btn btn-sm btn-warning py-0 px-1" type="button"
+                onclick="openRestoreModal(${jsStr(b.name)})"
+                title="${escAttr(t('backup_restore'))}"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
+            ${perms.has('backup_delete') ? `<button class="btn btn-sm btn-danger py-0 px-1" type="button"
+                onclick="deleteBackup(${jsStr(b.name)})"
+                title="${escAttr(t('delete'))}"><i class="bi bi-trash3"></i></button>` : ''}
+        </span></td>
+    </tr>`;
+}
+
+/** The part checkboxes, from the catalogue the API sent.
+ *  A required part is ticked and disabled: a copy without it restores nothing, so offering to
+ *  leave it out is offering to make a copy that does not work. */
+function _backupPartChecks(prefix, parts, selected) {
+    return parts.map(p => {
+        const on = selected ? selected.includes(p.id) : p.default;
+        return `<div class="form-check">
+            <input class="form-check-input" type="checkbox" id="${prefix}_${escAttr(p.id)}"
+                   value="${escAttr(p.id)}" ${on || p.required ? 'checked' : ''}
+                   ${p.required ? 'disabled' : ''}>
+            <label class="form-check-label small" for="${prefix}_${escAttr(p.id)}">
+                ${esc(t(p.label_key))}
+                ${p.required ? `<span class="badge text-bg-secondary ms-1">${esc(t('backup_required'))}</span>` : ''}
+            </label>
+        </div>`;
+    }).join('');
+}
+
+function _checkedParts(prefix, parts) {
+    return parts.filter(p => {
+        const el = document.getElementById(`${prefix}_${p.id}`);
+        return p.required || (el && el.checked);
+    }).map(p => p.id);
+}
+
+/** Fill the section's own modal and show it.
+ *  `showConfirmModal` takes a line of TEXT — it sets `.textContent` on purpose, so a message
+ *  can never carry markup — and this needs a form; `showInfoModal` shows key/value pairs and
+ *  has no confirm button. Hence a modal of its own, in a template like every other one. */
+function _openBackupModal(title, bodyHtml, okLabel, okVariant, onOk, size) {
+    document.getElementById('backupModalTitle').textContent = title;
+    document.getElementById('backupModalBody').innerHTML = bodyHtml;
+    const ok = document.getElementById('backupModalOk');
+    ok.className = `btn btn-sm btn-${okVariant || 'primary'}`;
+    ok.textContent = okLabel;
+    // The picker needs room — a two-pane file browser in a 500px dialog is two
+    // columns of ellipsis. Set per opening, not once on the element, because the
+    // same modal also shows a short form.
+    const dlg = document.querySelector('#backupModal .modal-dialog');
+    if (dlg) dlg.classList.toggle('modal-lg', size === 'lg');
+    const el = document.getElementById('backupModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(el);
+    // Replaced, not added to: reopening the modal must not leave the previous handler behind
+    // to run the previous job as well.
+    ok.onclick = async () => { modal.hide(); await onOk(); };
+    modal.show();
+}
+
+function openBackupModal() {
+    const pad = n => String(n).padStart(2, '0');
+    const d = new Date();
+    const suggested = `copia-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+                    + `-${pad(d.getHours())}${pad(d.getMinutes())}`;
+    _openBackupModal(t('backup_create'), `
+        <div class="mb-3">
+            <label class="form-label small" for="backupName">${esc(t('backup_col_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="backupName"
+                   value="${escAttr(suggested)}">
+        </div>
+        <div class="mb-3">
+            <div class="small text-muted mb-1">${esc(t('backup_col_contents'))}</div>
+            ${_backupPartChecks('bkNew', _backupParts, null)}
+        </div>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="backupSecrets" checked>
+            <label class="form-check-label small" for="backupSecrets">${esc(t('backup_secrets'))}</label>
+        </div>
+        <div class="small text-muted mt-1">${esc(t('backup_secrets_hint'))}</div>`,
+        t('backup_create'), 'primary', _createBackup);
+}
+
+// apiGet hands back the BODY; apiPost and apiDelete hand back {status, data}. Reading
+// `res.ok` off the latter is reading a key that is never there, so a request that worked
+// reported failure — and a delete said "error" while the file was already gone.
+function _apiOk(res)  { return !!res && res.status >= 200 && res.status < 300; }
+function _apiErr(res) { return (res && res.data && res.data.error) || t('save_error'); }
+
+async function _createBackup() {
+    const name = (document.getElementById('backupName')?.value || '').trim();
+    const res  = await apiPost('/api/v1/backups', {
+        name,
+        parts: _checkedParts('bkNew', _backupParts),
+        secrets: !!document.getElementById('backupSecrets')?.checked,
+    });
+    if (_apiOk(res)) {
+        showToast(t('backup_created_ok'));
+        renderBackups();
+    } else showToast(_apiErr(res), 'danger');
+}
+
+/** Restoring says what it will overwrite, and offers to apply only part of it.
+ *  "Are you sure?" is not a question anybody can answer — what happens if I say yes is. */
+function openRestoreModal(name) {
+    const b = _backups.find(x => x.name === name);
+    if (!b) return;
+    const avail = _backupParts.filter(p => (b.parts || []).includes(p.id));
+    _openBackupModal(t('backup_restore'), `
+        <p class="mb-2">${esc(t('backup_restore_warn').replace('{}', name))}</p>
+        <div class="mb-2">
+            <div class="small text-muted mb-1">${esc(t('backup_restore_parts'))}</div>
+            ${_backupPartChecks('bkRes', avail.map(p => ({...p, required: false})), b.parts)}
+        </div>
+        ${b.secrets ? '' : `<div class="alert alert-warning py-2 px-3 small mb-0">
+            ${esc(t('backup_restore_nosecrets'))}</div>`}`,
+        t('backup_restore'), 'warning',
+        () => _restoreBackup(name, _checkedParts('bkRes', avail)));
+}
+
+async function _restoreBackup(name, parts) {
+    const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/restore`, {parts});
+    if (_apiOk(res)) {
+        const tables = (res.data || {}).tables || {};
+        const rows = Object.values(tables).reduce((n, v) => n + (Number(v) || 0), 0);
+        showToast(t('backup_restored_ok').replace('{}', rows));
+        // Everything on screen was read before the tables changed under it. Reloading is the
+        // honest answer: repainting one section would leave the other eleven showing the
+        // install as it was, with no way to tell which is which.
+        setTimeout(() => window.location.reload(), 1200);
+    } else showToast(_apiErr(res), 'danger');
+}
+
+function deleteBackup(name) {
+    showConfirmModal(t('backup_delete_confirm').replace('{}', name), async () => {
+        const res = await apiDelete(`/api/v1/backups/${encodeURIComponent(name)}`);
+        if (_apiOk(res)) {
+            showToast(t('backup_deleted_ok'));
+            renderBackups();
+        } else showToast(_apiErr(res), 'danger');
+    });
+}
+
+
+// ── The folder picker ────────────────────────────────────────────────────────
+// Registered against ONE config path rather than built into the field renderer: that file
+// draws two hundred fields and must not know that one of them is a folder.
+FIELD_PICKERS['web_admin|backup_dir'] = {
+    icon: 'bi-folder2-open',
+    title: 'backup_browse',
+    open: (pathStr, current) => _openDirPicker(pathStr, current),
+    // Filled in below. Empty until then rather than a guess: showing `<var_dir>/backups` as
+    // literal text would put a path on screen that may not be the one in use.
+    placeholder: '',
+};
+
+/** Ask the server where copies go, and let the empty box say so.
+ *
+ *  The setting's default is "" meaning `<var_dir>/backups`, and a blank box with a hint below
+ *  it leaves the operator to work out what that resolves to on THIS install. The server knows;
+ *  this asks once and repaints.
+ */
+async function _backupDirPlaceholder() {
+    const fp = FIELD_PICKERS['web_admin|backup_dir'];
+    if (!fp || fp.placeholder) return;
+    const res = await apiGet('/api/v1/backups/browse');
+    if (!res || !res.configured) return;
+    fp.placeholder = res.configured;
+    // Only if the section is on screen: repainting Configuration from under an admin who is
+    // typing into it would throw the edit away to add a placeholder.
+    const pane = document.getElementById('tab-config');
+    if (pane && pane.classList.contains('active')
+        && typeof renderConfig === 'function' && !_isDirty('config')) {
+        renderConfig();
+    }
+}
+
+let _dirPickPath = '';
+let _dirPickField = '';
+
+async function _openDirPicker(fieldPath, current) {
+    _dirPickField = fieldPath;
+    // The modal opens FIRST, empty, and fills when the answer arrives. Awaiting the fetch
+    // before showing it meant the button did nothing at all for as long as the server took —
+    // and a button that does nothing is a button somebody presses again.
+    _openBackupModal(t('backup_browse'), _dirPickBusy(current), t('backup_browse_use'),
+                     'primary', () => {});
+    await _dirPickLoad(current || '');
+}
+
+/** Draw the folder at *path* into the section's modal.
+ *  Directories only — the picker's job is to choose a folder, and every file name it showed
+ *  on the way would be information the screen did not need to do it. */
+/** What the modal shows while the server is listing a folder.
+ *  A spinner alone says "something is happening"; naming the folder says WHAT, which is the
+ *  difference between waiting and wondering whether the click registered. */
+function _dirPickBusy(path) {
+    return `<div class="text-center py-4">
+        <div class="spinner-border spinner-border-sm mb-2"></div>
+        <div class="small text-muted">${esc(t('backup_browse_scanning'))}</div>
+        ${path ? `<code class="d-block text-truncate small mt-1">${esc(path)}</code>` : ''}
+    </div>`;
+}
+
+async function _dirPickLoad(path) {
+    // Every step down the tree shows it too, not only the first: walking into a folder on a
+    // slow mount is exactly when the screen must not look frozen.
+    const pane0 = document.getElementById('dirPickMain');
+    const busy = pane0 || document.getElementById('backupModalBody');
+    if (busy) busy.innerHTML = _dirPickBusy(path);
+    const res = await apiGet('/api/v1/backups/browse?path=' + encodeURIComponent(path || ''));
+    if (!res) { showToast(t('save_error'), 'danger'); return; }
+    _dirPickPath = res.path || '';
+    // ── The left rail: where you can jump to ────────────────────────────────
+    // A rail and not a strip of buttons across the top: the roots are NAVIGATION, the same
+    // job the sidebar does for the panel, and a row of them above the list competed with the
+    // path for the one line that says where you are.
+    const jump = (path, icon, label) =>
+        `<button type="button" class="ss-rail-item"
+                 onclick="_dirPickLoad(${jsStr(path)})" title="${escAttr(path)}">
+            <i class="bi ${icon} me-1 flex-shrink-0"></i>
+            <span class="text-truncate min-w-0">${esc(label)}</span>
+        </button>`;
+    // The configured folder first, and set apart: it is the one place the operator is most
+    // likely to want back after wandering, and hunting for it among the drive letters is the
+    // walk they just did in reverse.
+    const cfgJump = res.configured
+        ? `<div class="ss-rail-group">
+               <div class="ss-rail-head">${esc(t('backup_browse_current'))}</div>
+               ${jump(res.configured, 'bi-archive', _dirPickLeaf(res.configured))}
+           </div>`
+        : '';
+    const rail = `<nav class="ss-rail" id="dirPickRail"
+        style="flex:0 0 13rem;max-width:13rem;min-width:0;
+               border-right:1px solid var(--bs-border-color)">
+        ${cfgJump}
+        <div class="ss-rail-group">
+            <div class="ss-rail-head">${esc(t('backup_browse_places'))}</div>
+            ${(res.roots || []).map(r => jump(r, 'bi-hdd', r)).join('')}
+        </div>
+    </nav>`;
+
+    const up = res.parent
+        ? `<button class="btn btn-sm btn-secondary flex-shrink-0" type="button"
+               onclick="_dirPickLoad(${jsStr(res.parent)})">
+               <i class="bi bi-arrow-90deg-up"></i></button>`
+        : '';
+    const rows = (res.dirs || []).map(d =>
+        `<button type="button" class="list-group-item list-group-item-action py-1"
+                 onclick="_dirPickLoad(${jsStr(d.path)})">
+            <i class="bi bi-folder2 me-2 text-secondary"></i>${esc(d.name)}</button>`).join('')
+        || `<div class="text-muted small py-3 text-center">${esc(t('backup_browse_empty'))}</div>`;
+    // Writability is stated EITHER WAY, not only when it is missing. "No warning" and "I did
+    // not check" look identical on screen, and this is the one property that decides whether
+    // the folder can hold a backup at all.
+    const note = !res.readable
+        ? `<span class="badge text-bg-danger flex-shrink-0">${esc(t('backup_browse_denied'))}</span>`
+        : (res.path
+            ? (res.writable
+                ? `<span class="badge text-bg-success flex-shrink-0"><i class="bi bi-pencil me-1"></i>${esc(t('backup_browse_rw'))}</span>`
+                : `<span class="badge text-bg-warning flex-shrink-0"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('backup_browse_ro'))}</span>`)
+            : '');
+    // Creating one is offered only where it can succeed: an input that always fails is worse
+    // than no input, because it looks like the folder is the problem.
+    const mk = res.readable && res.writable && res.path
+        ? `<div class="input-group input-group-sm mb-2">
+               <input type="text" class="form-control" id="dirPickNew"
+                      placeholder="${escAttr(t('backup_browse_new_ph'))}">
+               <button class="btn btn-secondary" type="button" onclick="_dirPickMake()">
+                   <i class="bi bi-folder-plus me-1"></i>${esc(t('backup_browse_new'))}</button>
+           </div>`
+        : '';
+    // One row for "where am I" and "can I write here", fixed height. Stacked, the badge came
+    // and went with the folder and the whole pane moved a line up and down with it.
+    const main = `
+        <div class="d-flex align-items-center gap-2 mb-2" style="min-height:2rem">
+            ${up}
+            <code class="text-truncate small flex-grow-1 mb-0">${esc(_dirPickPath || '—')}</code>
+            ${note}
+        </div>
+        ${mk}
+        <div class="list-group list-group-flush ss-vscroll flex-grow-1" style="min-height:0">${rows}</div>`;
+
+    // Already open? Then only the RIGHT pane changes. Rebuilding the whole body made the
+    // modal collapse to nothing and grow back on every click, because Bootstrap re-centres a
+    // dialog whose content it has just been handed — and the rail, which did not change, was
+    // being thrown away and rebuilt to show the same six drives.
+    const pane = document.getElementById('dirPickMain');
+    if (pane) {
+        pane.innerHTML = main;
+        _dirPickMarkRail();
+        return;
+    }
+
+    _dirPickPendingMark = true;
+    _openBackupModal(t('backup_browse'), `
+        <div class="d-flex gap-2" style="flex:1 1 auto;min-height:20rem">
+            ${rail}
+            <div class="flex-grow-1 min-w-0 ps-2 d-flex flex-column" id="dirPickMain">${main}</div>
+        </div>`,
+        t('backup_browse_use'), 'primary', () => {
+            // Written through `updateField`, the same call the box itself makes, so the value
+            // lands in `configData` and the form goes dirty — a picker that only painted the
+            // input would be a choice that Save never sees.
+            updateField('config', _dirPickField, _dirPickPath);
+            renderConfig();
+        }, 'lg');
+    if (_dirPickPendingMark) { _dirPickPendingMark = false; _dirPickMarkRail(); }
+}
+
+/** Light the rail entry the current folder is INSIDE, not the one it equals.
+ *
+ *  Exact matching lit `C:\` while you were at `C:\`, and went dark the moment you opened a
+ *  folder in it — losing the one thing the rail is for, which is saying where in the machine
+ *  you are.
+ *
+ *  The DEEPEST match wins, so standing in `/mnt/nas/backups` lights `/mnt` and not `/`, and
+ *  the configured folder beats the drive it lives on. Compared on a separator boundary: a path
+ *  is not inside `/var` because it starts with those four letters (`/variable`).
+ */
+function _dirPickMarkRail() {
+    const cur = String(_dirPickPath || '');
+    const items = Array.from(document.querySelectorAll('#dirPickRail .ss-rail-item'));
+    let best = null;
+    let bestLen = -1;
+    for (const el of items) {
+        const p = el.getAttribute('title') || '';
+        const stem = p.replace(/[\\/]+$/, '');
+        const inside = cur === p || cur === stem
+            || cur.startsWith(stem + '\\') || cur.startsWith(stem + '/')
+            || stem === '';                       // "/" contains everything
+        if (inside && stem.length > bestLen) { best = el; bestLen = stem.length; }
+    }
+    items.forEach(el => el.classList.toggle('active', el === best));
+}
+
+let _dirPickPendingMark = false;
+
+/** The last component of a path, for a rail label. A full path in an 11rem column is an
+ *  ellipsis with nothing readable left in front of it; the tooltip carries the whole thing. */
+function _dirPickLeaf(path) {
+    // Both separators: a Windows path has no forward slash in it, so a class holding
+    // only `/` split nothing and the rail showed the whole path where a name belongs.
+    const parts = String(path || '').replace(/[\/]+$/, '').split(/[\/]/);
+    return parts[parts.length - 1] || path;
+}
+
+/** Create a folder inside the one being shown, then walk into it.
+ *  Walking in is the point: the operator made it to put copies there, so leaving them looking
+ *  at the parent would be one more click to do what they already said. */
+async function _dirPickMake() {
+    const name = (document.getElementById('dirPickNew')?.value || '').trim();
+    if (!name) return;
+    const res = await apiPost('/api/v1/backups/mkdir', {parent: _dirPickPath, name});
+    if (_apiOk(res)) {
+        await _dirPickLoad((res.data || {}).path || _dirPickPath);
+    } else showToast(_apiErr(res), 'danger');
+}

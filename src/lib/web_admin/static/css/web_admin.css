@@ -897,6 +897,17 @@
     min-height: 0;
     overflow: auto;
 }
+/* A dialog whose body is a COLUMN, so a two-pane child can fill it and follow the resize.
+   `.modal-lg > .modal-content` is `resize: both` on purpose — these dialogs are meant to be
+   dragged bigger — and a child with a fixed height defeats that: the box grows and the content
+   stays put, leaving the empty half somebody reported. Only when large: the same modal also
+   shows a short form, which must keep its natural height. */
+#backupModal .modal-lg > .modal-content > .modal-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .modal-header { user-select: none; }   /* don't select header text while dragging */
 
 /* Event-rule modal: flex-fill body so the General "Description" textarea (and the

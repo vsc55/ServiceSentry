@@ -1,0 +1,27 @@
+{#
+   Backup section: the toolbar and the container the list renders into.
+
+   Same shell as every other list section — .ss-bleed-top + .ss-toolbar, so the bar belongs to
+   the top edge of the pane rather than floating inside its padding.
+
+   The "what goes in a copy" checkboxes are NOT written here: the parts come from
+   /api/v1/backups alongside the list, built from the one catalogue in
+   lib/core/backup/service.py. A second list in this file would be a second thing to keep in
+   step, and the first part added would prove it.
+#}
+<div class="tab-pane fade ss-vfill" id="tab-backup">
+    <div class="ss-bleed-top" data-ss-pane-head>
+    <div class="ss-toolbar ss-toolbar-plain">
+        <h6 class="mb-0"><i class="bi bi-archive me-2"></i>{{ i18n.tab_backup }}</h6>
+        <button class="btn btn-sm btn-secondary" id="btnReloadBackups" onclick="renderBackups()"
+                title="{{ i18n.reload }}">
+            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
+        </button>
+        <button class="btn btn-sm btn-success d-none" id="btnNewBackup" onclick="openBackupModal()"
+                title="{{ i18n.backup_create_tt }}">
+            <i class="bi bi-plus-lg me-1"></i>{{ i18n.backup_create }}
+        </button>
+    </div>
+    </div>
+    <div id="backup-container" class="ss-vfill"></div>
+</div>

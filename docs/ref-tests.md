@@ -6648,3 +6648,77 @@ instancias con `config_dir` propio daban `InvalidToken` al leer lo del otro.
 El valor mal formado **detiene el arranque** a propósito: la alternativa —caer al fichero— cifra
 con una clave que el operador no eligió y no lo dice; el descubrimiento llega meses después,
 cuando otra réplica no puede leer un secreto.
+
+---
+
+## 146. Copias de seguridad: hacer una, y volver a ponerla
+
+**Archivo:** `tests/unit/test_backup_service.py` — 24 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 16 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 23 tests
+**Archivo:** `tests/unit/test_wa_backup_ui.py` — 19 tests
+
+Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
+cuatro motores y la copia tiene que sobrevivir al salto: una instalación que creció en SQLite y se
+está levantando sobre MySQL es exactamente cuándo se pide una copia, y un `.db` responde a eso con
+nada. Filas fuera y filas dentro, por el conector en ambos sentidos.
+
+Los unitarios manejan un conector SQLite **de verdad**, no uno falso: toda la funcionalidad es
+"filas por el conector", así que un doble estaría probando al doble — y los dos fallos que importan
+(una columna que el esquema vivo ya no tiene, una fila que no volvió) solo existen contra algo que
+almacena de verdad.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatGoesIn::test_core_is_everything_nobody_else_claimed` | Regla invertida: una tabla nueva —incluidas las que crean los módulos en ejecución— entra por defecto en vez de omitirse en silencio |
+| `TestWhatGoesIn::test_a_required_part_goes_in_whether_asked_for_or_not` | Una copia sin `core` no restaura nada |
+| `TestWhatGoesIn::test_the_manifest_is_written_last` | Un archivo interrumpido no tiene manifiesto, así que se rechaza en vez de anunciar lo que no lleva |
+| `TestSecrets::test_excluded_nothing_encrypted_survives_at_any_depth` | El secreto está *dentro* de una columna JSON: una pasada por valores de columna lo enviaría diciendo que no lleva ninguno |
+| `TestSecrets::test_the_manifest_says_which_it_was` | Una copia sin secretos que parece completa es la trampa que evita el interruptor |
+| `TestPuttingItBack::test_a_table_is_replaced_not_merged` | Fusionar daría un tercer estado que no existió nunca |
+| `TestPuttingItBack::test_restoring_one_part_leaves_the_others_alone` | Restaurar solo los hosts no puede deshacer también los usuarios |
+| `TestPuttingItBack::test_a_column_the_schema_dropped_does_not_sink_the_restore` | La copia a la que se recurre es antigua: rechazarla por un esquema que avanzó la haría inútil justo cuando importa |
+| `TestPuttingItBack::test_a_newer_format_is_refused_not_half_applied` | Un formato futuro se rechaza entero |
+| `TestTheNameIsAFilename::*` (3) | El nombre se usa como fichero y viaja en la URL: lo que no encaja en el patrón no puede ser un nombre, y así `..` no entra en ninguna ruta |
+| `TestTheDriveListIsNotProbed::*` (4) | Sondear A–Z con `os.path.exists` tardaba **6,6 s** con una unidad de red caída, y se rehacía en cada petición: ahora se pide el mapa al kernel y se cachea. En Unix ofrece `/mnt`, `/media` y el home, no solo `/` |
+| `TestTheList::test_it_reads_the_directory_not_a_table` | Un catálogo en la BD sería una segunda verdad sobre ficheros que alguien puede mover con el panel parado |
+| `TestTheListAndItsCatalogue::test_the_parts_travel_with_the_list` | El formulario se dibuja del catálogo que manda la API, no de una lista escrita en la plantilla |
+| `TestTheRoundTrip::*` (5) | Crear, listar, descargar, restaurar y borrar por la API — los dos extremos del formato de acuerdo |
+| `TestEachOneHasItsOwnPermission::*` (2) | Cinco permisos, no uno: descargar no es «ver» (el fichero es la instalación entera) y restaurar no es «crear» (sobrescribe usuarios y roles) |
+| `TestThePickerAnswersTheClick::*` (3) | El modal se abre **antes** del fetch y con un «Explorando carpeta…»: un botón que no hace nada es un botón que se vuelve a pulsar |
+| `TestItStartsWhereTheCopiesGo::*` (2) | Sin `?path=` arranca en la carpeta de copias en uso, no en las raíces |
+| `TestTheFolderPicker::*` (7) | Solo carpetas (nunca ficheros), dice si se puede escribir, una carpeta ilegible es una respuesta y no un error, y `../fuera` como nombre se rechaza en vez de sanearse |
+| `TestItIsAllAudited::*` (2) | Descargar se audita con el mismo peso que borrar; una restauración fallida es la línea más importante del registro, no la menos |
+
+
+---
+
+---
+
+## 147. Copias automáticas: cuándo toca una, y cuáles se van
+
+**Archivo:** `tests/unit/test_backup_schedule.py` — 16 tests
+
+Un **intervalo**, no una hora del día, y la diferencia es todo el diseño: un panel apagado a las
+03:00 tiene que hacer su copia diaria al volver a las 09:00. «Cuánto hace de la última» sigue
+siendo cierto hasta que se hace una; «¿son las 03:00?» es falso 1439 minutos de cada 1440 y pierde
+la ventana entera si el proceso no estaba levantado. Una ventana perdida es justo el caso para el
+que existe una copia de seguridad.
+
+El precio es la deriva —las copias caen unos minutos más tarde cada vez— y es el lado correcto por
+el que equivocarse: una copia a las 03:07 es una copia.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhenOneIsDue::test_zero_hours_is_off` | 0 es como la config dice «sin copias automáticas» |
+| `TestWhenOneIsDue::test_an_unreadable_interval_is_off_not_every_tick` | Una errata no puede convertir el planificador en un bucle que copia en cada tick |
+| `TestWhenOneIsDue::test_with_no_copy_yet_one_is_due_immediately` | Una instalación que nunca hizo una es la que más la necesita |
+| `TestWhenOneIsDue::test_a_window_missed_while_the_panel_was_down_is_still_due` | La razón de ser del intervalo |
+| `TestWhichCopyCounts::test_only_automatic_copies_set_the_clock` | Una copia hecha a mano antes de actualizar no retrasa la programada |
+| `TestRetention::test_zero_keeps_everything` | Leer 0 como «bórralas todas» es la lectura que pierde datos |
+| `TestRetention::test_a_hand_made_copy_is_never_pruned` | Un contador no decide sobre algo que alguien hizo a propósito |
+| `TestTheName::test_two_copies_in_the_same_minute_do_not_collide` | `create_backup` se niega a sobrescribir: sin segundos, la segunda copia del minuto fallaría |
+
+La ejecución (que la copia se escriba de verdad, que la retención borre las correctas y en el orden
+que sobrevive a un disco lleno) se prueba en `tests/integration/test_wa_backup.py`, contra BD y
+disco reales.

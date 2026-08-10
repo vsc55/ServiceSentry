@@ -8,6 +8,50 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.57] - 2026-08-08
+
+### Added
+- **A Backups section, and copies that take themselves.** Full or partial, made by hand or on a
+  schedule, with restore.
+  - A copy is a **zip of JSON, not a dump of the database file**. The panel runs on four
+    engines and the copy has to survive the move: an install that grew on SQLite and is being
+    lifted onto MySQL is exactly when a backup is asked for, and a `.db` answers that with
+    nothing. Rows out and rows in, through the connector both ways.
+  - What a copy holds is one declaration (`PARTS`), read by the API, the form and the restore
+    alike. `core` is **everything no other part claimed** — inverted on purpose, so a table
+    added tomorrow, including the ones modules create at runtime, is in the backup instead of
+    being silently missed. A backup that quietly skips what it did not recognise is the failure
+    you find out about once.
+  - **Secrets are a choice per copy**, and the manifest records which it was: one that holds
+    none but looks complete is discovered at restore time. Leaving them out blanks every value
+    stored encrypted **at any depth** — the secret is a value inside a JSON column, so a pass
+    over column values alone would ship it while reporting a copy that holds none.
+  - **Restore replaces, never merges** — merging would produce a third state that never existed
+    — and runs in one transaction: users back with roles not back is an install nobody can log
+    into. A column the live schema has since dropped does not sink it, because the backup
+    somebody reaches for is an old one.
+  - **Five permissions, not one.** Downloading is not "viewing": the archive is the whole
+    install in one file, so whoever may fetch it holds the install. Restoring is not "creating":
+    it overwrites users and roles. Every action is audited, download included.
+  - **Automatic copies on an interval**, with retention. An interval and not a time of day
+    because a panel that was off at 03:00 must still take its copy when it comes back at 09:00.
+    Retention only ever prunes automatic copies — one somebody took before an upgrade is not
+    something a counter gets to throw away — and prunes **after** the new copy is on disk, so a
+    full disk cannot leave fewer copies than the run started with.
+  - **Where they land is configurable** (`web_admin|backup_dir`, `SS_BACKUP_DIR`), with a folder
+    picker beside the field. The default — beside the data it copies — survives a human mistake
+    and nothing else.
+  - The picker hangs off a generic registry keyed by config path: the field renderer draws two
+    hundred fields and must not know that one of them is a folder.
+
+### Fixed
+- **`apiPost` / `apiDelete` hand back `{status, data}`, not the body.** The new section read
+  `res.ok` off them — a key that is never there — so every request that worked announced
+  itself as an error, and a delete said "save failed" with the file already gone.
+- **`create_backup` reported an unusable folder instead of raising.** `os.makedirs` sat outside
+  the try, so a configured path that cannot be created escaped a function whose contract is to
+  report failure as a value — and would have taken the scheduler thread down with it.
+
 ## [0.0.1+build.56] - 2026-08-06
 
 ### Changed

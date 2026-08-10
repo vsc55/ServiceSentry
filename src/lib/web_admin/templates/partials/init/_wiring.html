@@ -96,6 +96,7 @@ renderGroups();
 _permAutoRefresh();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
+document.getElementById('btn-tab-backup')?.addEventListener('shown.bs.tab', renderBackups);
 // Section render entry points come from the registry (each descriptor names its own JS
 // function), so a module-contributed section is wired without naming it here. The render
 // is resolved at CALL time: a module ships its function in web/_ui.html, and looking it
@@ -123,6 +124,10 @@ document.getElementById('btn-tab-events')?.addEventListener('shown.bs.tab', rend
 // in-progress edits — the already-rendered view stays put until saved/reverted).
 document.getElementById('btn-tab-config')?.addEventListener('shown.bs.tab', () => {
     if (!_isDirty('config')) reloadConfig(true);
+    // Some settings fall back to a path that only exists at run time; the section that owns
+    // the field asks the server what it resolves to so the empty box can show it. Once per
+    // session — it caches its own answer.
+    if (typeof _backupDirPlaceholder === 'function') _backupDirPlaceholder();
 });
 document.getElementById('btn-tab-modules')?.addEventListener('shown.bs.tab', () => {
     if (!_isDirty('modules')) reloadModules(true);

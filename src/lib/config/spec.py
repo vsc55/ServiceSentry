@@ -114,6 +114,34 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # 0 turns the NAMES off and keeps the counts, for an operator who wants the entry
         # small; the counts stay either way, since they are what says the run happened.
         min=0, max=10000, env='SS_AUDIT_DETAIL_MAX_ITEMS'),
+    Cfg('web_admin|backup_dir', str, '', attr='_BACKUP_DIR',
+        # Where copies are written. Empty means `<var_dir>/backups`, which is the sane
+        # default and the wrong place to leave it: a copy on the same disk as the data it
+        # copies survives a mistake and nothing else. Point it at a mount that is not this
+        # machine and the same button starts producing a backup worth the name.
+        # Read at every call rather than cached: changing it must not need a restart, and an
+        # operator who moves it mid-day would otherwise write the next copy to the old path
+        # and not find it there.
+        env='SS_BACKUP_DIR', card='backup'),
+    Cfg('web_admin|backup_every_hours', int, 0, attr='_BACKUP_EVERY_HOURS',
+        # 0 = off. An INTERVAL and not a time of day, because a panel that was down at 03:00
+        # must still take its daily copy when it comes back at 09:00: "how long since the last
+        # one" stays true until one is taken, where "is it 03:00 now" is false 1439 minutes out
+        # of 1440 and misses the window entirely if the process was not up for it. 24 = daily,
+        # 168 = weekly. The cost is drift — a copy lands a few minutes later each time — which
+        # is the side to be wrong on.
+        min=0, max=8760, env='SS_BACKUP_EVERY_HOURS', card='backup'),
+    Cfg('web_admin|backup_keep', int, 7, attr='_BACKUP_KEEP',
+        # Retention is not decoration: without it the folder grows until the disk is full, and
+        # a full disk stops the panel — a backup feature that takes the install down is worse
+        # than none. 0 keeps everything, for an operator who prunes elsewhere. Only automatic
+        # copies are counted; one somebody took by hand before an upgrade is never pruned.
+        min=0, max=365, env='SS_BACKUP_KEEP', card='backup'),
+    Cfg('web_admin|backup_auto_secrets', bool, True, attr='_BACKUP_AUTO_SECRETS',
+        # Defaults to ON, unlike a hand-made copy where somebody is standing there to decide:
+        # an unattended copy that silently holds no credentials is discovered at restore time,
+        # which is the worst moment to discover anything.
+        env='SS_BACKUP_AUTO_SECRETS', card='backup'),
     Cfg('web_admin|pw_min_len', int, 8, attr='_PW_MIN_LEN',
         min=1, max=128, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_max_len', int, 128, attr='_PW_MAX_LEN',
