@@ -1459,7 +1459,7 @@ que reparte la capacidad de bloquear la base de datos.
 |---|---|---|---|
 | `test_permissions_tuple_has_66_flags` | `len(PERMISSIONS) == 66` | 66 elementos | Otro número |
 | `test_permissions_are_unique` | Sin duplicados en `PERMISSIONS` | `set` sin colisiones | Si hay repetidos |
-| `test_permissions_expected_flags` | El conjunto exacto de 66 flags | Coincide con el set esperado | Si falta o sobra alguno |
+| `test_permissions_expected_flags` | El conjunto exacto de 73 flags | Coincide con el set esperado | Si falta o sobra alguno |
 | `test_permission_groups_structure` | `PERMISSION_GROUPS` es lista de 2-tuplas | Lista con pares `(key, [perms])` | Si la estructura difiere |
 | `test_permission_groups_cover_all_permissions` | Todos los flags están en algún grupo | Unión de grupos == PERMISSIONS | Si alguno no está cubierto |
 | `test_permission_groups_no_duplicates` | Ningún flag aparece en más de un grupo | Sin duplicados entre grupos | Si hay solapamiento |
@@ -6653,10 +6653,11 @@ cuando otra réplica no puede leer un secreto.
 
 ## 146. Copias de seguridad: hacer una, y volver a ponerla
 
-**Archivo:** `tests/unit/test_backup_service.py` — 24 tests
-**Archivo:** `tests/unit/test_backup_schedule.py` — 16 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 23 tests
-**Archivo:** `tests/unit/test_wa_backup_ui.py` — 19 tests
+**Archivo:** `tests/unit/test_backup_service.py` — 62 tests
+**Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 33 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 57 tests
+**Archivo:** `tests/unit/test_wa_backup_ui.py` — 89 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
 cuatro motores y la copia tiene que sobrevivir al salto: una instalación que creció en SQLite y se
@@ -6677,6 +6678,12 @@ almacena de verdad.
 | `TestSecrets::test_the_manifest_says_which_it_was` | Una copia sin secretos que parece completa es la trampa que evita el interruptor |
 | `TestPuttingItBack::test_a_table_is_replaced_not_merged` | Fusionar daría un tercer estado que no existió nunca |
 | `TestPuttingItBack::test_restoring_one_part_leaves_the_others_alone` | Restaurar solo los hosts no puede deshacer también los usuarios |
+| `TestRestoringACopyFromAnotherVersion::*` (7) | Restaurar entre versiones: nada se rechaza por la versión, pero se dice hacia dónde salta y **qué no entró** (columnas que este esquema ya no tiene, tablas desaparecidas con sus filas) |
+| `TestARestoreSaysWhereItIs::*` (4) | La restauración informa paso a paso con la **misma forma** que la copia, un reporter roto no aborta la transacción, y una copia inexistente se responde en vez de arrancarse |
+| `TestItSaysWhatItIsDoingOnTheLog::*` (4) | Copia y restauración quedan **en el log del panel** (inicio, resultado, motivo del rechazo, y en warning lo que no se pudo aplicar) |
+| `TestARestoreTicksOffTheSameChecklist::*` (6) | La restauración informa **una entrada por parte** como la copia: filas y tablas, no-ok con el primer motivo, y viaja mientras corre |
+| `TestTheScheduleAndTheVerifyHaveTheirOwnGrants::*` (5) | `backup_schedule` y `backup_verify` son permisos propios: las rutas de tareas y de verificación los piden, «ejecutar ahora» sigue siendo `backup_create`, y los botones siguen los mismos flags |
+| `TestSyslogInADatabaseOfItsOwn::*` (7) | Con `syslog_db\|enabled` las tablas de syslog viven en OTRA base: la copia la alcanza, la restauración las devuelve ahí, `core` no se contamina, y cada base lleva su propia transacción |
 | `TestPuttingItBack::test_a_column_the_schema_dropped_does_not_sink_the_restore` | La copia a la que se recurre es antigua: rechazarla por un esquema que avanzó la haría inútil justo cuando importa |
 | `TestPuttingItBack::test_a_newer_format_is_refused_not_half_applied` | Un formato futuro se rechaza entero |
 | `TestTheNameIsAFilename::*` (3) | El nombre se usa como fichero y viaja en la URL: lo que no encaja en el patrón no puede ser un nombre, y así `..` no entra en ninguna ruta |
@@ -6687,6 +6694,10 @@ almacena de verdad.
 | `TestEachOneHasItsOwnPermission::*` (2) | Cinco permisos, no uno: descargar no es «ver» (el fichero es la instalación entera) y restaurar no es «crear» (sobrescribe usuarios y roles) |
 | `TestThePickerAnswersTheClick::*` (3) | El modal se abre **antes** del fetch y con un «Explorando carpeta…»: un botón que no hace nada es un botón que se vuelve a pulsar |
 | `TestItStartsWhereTheCopiesGo::*` (2) | Sin `?path=` arranca en la carpeta de copias en uso, no en las raíces |
+| `TestTheScheduleTakesCopies::*` (7) | Cada tarea con su frecuencia y su contenido; una desactivada no cae en la migración; la retención **no cruza tareas** |
+| `TestTheOldSettingsBecomeATask::*` (3) | El intervalo anterior se convierte en una tarea una sola vez; una instalación sin programación no adquiere una al actualizar |
+| `TestACalendarTask::*` (5) | Ida y vuelta por la API, un día imposible se descarta en la puerta, y una tarea sin `mode` (las de antes del calendario) sigue ejecutándose |
+| `TestTheTaskApi::*` (5) | Alta, edición sin duplicar, borrado, nombre que no puede dirigir la ruta, y que un *viewer* no escriba |
 | `TestTheFolderPicker::*` (7) | Solo carpetas (nunca ficheros), dice si se puede escribir, una carpeta ilegible es una respuesta y no un error, y `../fuera` como nombre se rechaza en vez de sanearse |
 | `TestItIsAllAudited::*` (2) | Descargar se audita con el mismo peso que borrar; una restauración fallida es la línea más importante del registro, no la menos |
 
@@ -6697,7 +6708,7 @@ almacena de verdad.
 
 ## 147. Copias automáticas: cuándo toca una, y cuáles se van
 
-**Archivo:** `tests/unit/test_backup_schedule.py` — 16 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 33 tests
 
 Un **intervalo**, no una hora del día, y la diferencia es todo el diseño: un panel apagado a las
 03:00 tiene que hacer su copia diaria al volver a las 09:00. «Cuánto hace de la última» sigue
@@ -6717,8 +6728,22 @@ el que equivocarse: una copia a las 03:07 es una copia.
 | `TestWhichCopyCounts::test_only_automatic_copies_set_the_clock` | Una copia hecha a mano antes de actualizar no retrasa la programada |
 | `TestRetention::test_zero_keeps_everything` | Leer 0 como «bórralas todas» es la lectura que pierde datos |
 | `TestRetention::test_a_hand_made_copy_is_never_pruned` | Un contador no decide sobre algo que alguien hizo a propósito |
+| `TestSayingWhenByTheCalendar::*` (11) | Días de la semana a una hora, **conservando la recuperación**: la ventana perdida con el panel apagado sigue pendiente al volver |
+| `TestACopyKnowsWhichTaskTookIt::*` (6) | El nombre lleva la tarea, un nombre peligroso no dirige la ruta, y la poda **nunca cruza tareas** — el fallo que motivó todo el rediseño |
 | `TestTheName::test_two_copies_in_the_same_minute_do_not_collide` | `create_backup` se niega a sobrescribir: sin segundos, la segunda copia del minuto fallaría |
 
 La ejecución (que la copia se escriba de verdad, que la retención borre las correctas y en el orden
 que sobrevive a un disco lleno) se prueba en `tests/integration/test_wa_backup.py`, contra BD y
 disco reales.
+
+Los ficheros propios de un módulo entran en la copia porque **el módulo lo declara**
+(`__backup_part__`), no porque el núcleo escriba su ruta: `test_backup_module_parts.py` cubre el
+catálogo, que una declaración no pueda salirse de `var_dir` (ese directorio se **escribe** al
+restaurar), que no pueda robar un id del núcleo, y el viaje de ida y vuelta de los ficheros.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheCatalogueIsBuiltFromTheDeclaration::*` (6) | El módulo aporta directorio, id, etiqueta desde su propio `lang/`, y un `schema.json` roto no cuesta la parte a los demás |
+| `TestADeclarationCannotEscapeVarDir::*` (5) | `..`, ruta absoluta o con unidad se descartan; ni el id `core` ni un id ya tomado |
+| `TestTheCoreNamesNoModule::test_the_backup_service_carries_no_module_name` | Leído de los literales del servicio: ninguno nombra un watchful |
+| `TestTheFilesActuallyTravel::*` (4) | Copia y restauración por `files/parts/<id>/`, y una parte declarada que no dio nada marca la copia como parcial |

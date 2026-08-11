@@ -1,0 +1,189 @@
+{# ================================================================
+   Backup — the standing instructions, above the copies they produce.
+
+   A LIST and not one interval: configuration and inventory are worth a daily copy, the syslog
+   and the MIBs perhaps weekly — and with a single schedule that cannot be said without copying
+   everything at the pace of the most demanding part, which is how a disk fills.
+
+   Each row states its own retention, because that is per task too: one shared counter would
+   have the daily task pruning the monthly one's copies, deleting exactly the ones that took a
+   month to become worth having.
+
+   Its own file rather than more of _render.html: the copies on disk and the schedule that makes
+   them are two different screens' worth of code that happen to share a pane.
+   ================================================================ #}
+
+let _backupTasks = [];
+
+// Monday first, matching `datetime.weekday()` on the server. Two orders for the same seven
+// days is how a task ticked for Monday runs on Sunday.
+const _DAY_KEYS = ['day_mon', 'day_tue', 'day_wed', 'day_thu', 'day_fri', 'day_sat', 'day_sun'];
+
+/** When a task runs, in words. "24" and "[0,2]" are not answers anybody reads, and a schedule
+ *  nobody can read is a schedule nobody checks. */
+function _backupWhenLabel(tk) {
+    if ((tk.mode || 'interval') === 'calendar') {
+        const days = tk.days || [];
+        const when = days.length
+            ? days.map(d => t(_DAY_KEYS[d]) || _DAY_KEYS[d]).join(', ')
+            : t('backup_every_daily');
+        return when + ' · ' + (tk.at || '03:00');
+    }
+    const n = Number(tk.every_hours) || 0;
+    if (n === 24)  return t('backup_every_daily');
+    if (n === 168) return t('backup_every_weekly');
+    if (n === 720) return t('backup_every_monthly');
+    return t('backup_every_hours_n').replace('{}', n);
+}
+
+function _backupTasksHtml() {
+    const perms = new Set(currentUser.permissions || []);
+    const rows = _backupTasks.map(tk => {
+        const parts = (tk.parts || []).map(p => {
+            const meta = _backupParts.find(x => x.id === p);
+            return '<span class="badge text-bg-secondary me-1">'
+                 + esc(_bkPartLabel(meta, p)) + '</span>';
+        }).join('');
+        // A disabled task keeps its row: it is a decision somebody made and may undo, and
+        // hiding it would leave the list looking like the task was deleted.
+        const secrets = tk.secrets
+            ? '<span class="badge text-bg-success"><i class="bi bi-key"></i></span>'
+            : '<span class="badge text-bg-warning" title="' + escAttr(t('backup_secrets_out_tt'))
+              + '"><i class="bi bi-exclamation-triangle"></i></span>';
+        // The schedule's own permission: editing a task is not taking a copy.
+        const btnEdit = perms.has('backup_schedule')
+            ? '<button class="btn btn-sm btn-secondary py-0 px-1" type="button" onclick="openTaskModal('
+              + jsStr(tk.id || '') + ')" title="' + escAttr(t('edit'))
+              + '"><i class="bi bi-pencil"></i></button>'
+            : '';
+        const btnDel = perms.has('backup_schedule')
+            ? '<button class="btn btn-sm btn-danger py-0 px-1" type="button" onclick="deleteBackupTask('
+              + jsStr(tk.id || '') + ',' + jsStr(tk.name) + ')" title="' + escAttr(t('delete'))
+              + '"><i class="bi bi-trash3"></i></button>'
+            : '';
+        return '<tr class="' + (tk.enabled ? '' : 'ss-row-off') + '">'
+             + '<td><span class="d-flex align-items-center gap-2">'
+             + '<i class="bi bi-clock-history text-secondary"></i>'
+             + '<span class="text-truncate">' + esc(tk.name) + '</span></span></td>'
+             + '<td class="small">' + esc(_backupWhenLabel(tk)) + '</td>'
+             + '<td class="small text-muted">'
+             + esc(t('backup_task_keep_n').replace('{}', tk.keep)) + '</td>'
+             + '<td>' + parts + ' ' + secrets + '</td>'
+             + '<td class="text-end"><span class="d-inline-flex gap-1">' + btnEdit + btnDel
+             + '</span></td></tr>';
+    }).join('');
+    const body = _backupTasks.length
+        ? '<table class="table table-sm table-hover align-middle mb-0"><tbody>' + rows
+          + '</tbody></table>'
+        : '<div class="text-muted small py-2">' + esc(t('backup_tasks_none')) + '</div>';
+    // No add button and no rule under the block. Both made sense when this sat stacked above
+    // the copies: the button because there was no toolbar action for it, the border because
+    // two tables with air between them read as one list interrupted. With the rail this block
+    // IS the pane — the toolbar carries the button, and a line under the only thing on screen
+    // is a second horizontal rule below the table's own last row.
+    return '<div>'
+         + '<div class="d-flex align-items-center gap-2 mb-1">'
+         + '<span class="ss-rail-head mb-0">' + esc(t('backup_tasks')) + '</span>'
+         + '</div>' + body + '</div>';
+}
+
+/** The editor. The parts come from the same catalogue a hand-made copy uses, so a part added
+ *  to `PARTS` appears here without a second list to keep in step. */
+function openTaskModal(uid) {
+    const tk = _backupTasks.find(x => x.id === uid)
+        || {name: '', enabled: true, mode: 'interval', every_hours: 24, days: [], at: '03:00',
+            parts: ['core', 'config_file'], secrets: true, keep: 7};
+    const mode = tk.mode || 'interval';
+    const dayChecks = _DAY_KEYS.map((k, i) =>
+        '<div class="form-check form-check-inline me-0">'
+      + '<input class="form-check-input" type="checkbox" id="tkDay' + i + '"'
+      + ((tk.days || []).includes(i) ? ' checked' : '') + '>'
+      + '<label class="form-check-label small" for="tkDay' + i + '">'
+      + esc(t(k) || k) + '</label></div>').join('');
+    const html =
+        '<input type="hidden" id="tkUid" value="' + escAttr(uid || '') + '">'
+      + '<div class="mb-3"><label class="form-label small" for="tkName">'
+      + esc(t('backup_col_name')) + '</label>'
+      + '<input type="text" class="form-control form-control-sm" id="tkName" value="'
+      + escAttr(tk.name) + '"></div>'
+      + '<div class="mb-2"><label class="form-label small" for="tkMode">'
+      + esc(t('backup_task_when')) + '</label>'
+      + '<select class="form-select form-select-sm" id="tkMode" onchange="_tkModeSwitch()">'
+      + '<option value="interval"' + (mode === 'interval' ? ' selected' : '') + '>'
+      + esc(t('backup_mode_interval')) + '</option>'
+      + '<option value="calendar"' + (mode === 'calendar' ? ' selected' : '') + '>'
+      + esc(t('backup_mode_calendar')) + '</option></select></div>'
+      // Both blocks are BUILT and one is hidden, rather than re-rendered on switch: a
+      // half-filled form must survive changing your mind about how to say when.
+      + '<div class="row g-2 mb-2" id="tkInterval"' + (mode === 'interval' ? '' : ' hidden') + '>'
+      + '<div class="col"><label class="form-label small" for="tkEvery">'
+      + esc(t('backup_task_every')) + '</label>'
+      + '<input type="number" min="1" max="8760" class="form-control form-control-sm" id="tkEvery"'
+      + ' value="' + escAttr(tk.every_hours) + '"></div></div>'
+      + '<div class="mb-2" id="tkCalendar"' + (mode === 'calendar' ? '' : ' hidden') + '>'
+      + '<div class="d-flex flex-wrap gap-2 mb-1">' + dayChecks + '</div>'
+      + '<div class="small text-muted mb-2">' + esc(t('backup_days_hint')) + '</div>'
+      + '<label class="form-label small" for="tkAt">' + esc(t('backup_task_at')) + '</label>'
+      + '<input type="time" class="form-control form-control-sm" id="tkAt" value="'
+      + escAttr(tk.at || '03:00') + '"></div>'
+      + '<div class="mb-3"><label class="form-label small" for="tkKeep">'
+      + esc(t('backup_task_keep')) + '</label>'
+      + '<input type="number" min="0" max="365" class="form-control form-control-sm" id="tkKeep"'
+      + ' value="' + escAttr(tk.keep) + '"></div>'
+      + '<div class="mb-3"><div class="small text-muted mb-1">'
+      + esc(t('backup_col_contents')) + '</div>'
+      + _backupPartChecks('tkPart', _backupParts, tk.parts) + '</div>'
+      + '<div class="form-check form-switch">'
+      + '<input class="form-check-input" type="checkbox" role="switch" id="tkSecrets"'
+      + (tk.secrets ? ' checked' : '') + '>'
+      + '<label class="form-check-label small" for="tkSecrets">'
+      + esc(t('backup_secrets')) + '</label></div>'
+      + '<div class="form-check form-switch">'
+      + '<input class="form-check-input" type="checkbox" role="switch" id="tkEnabled"'
+      + (tk.enabled ? ' checked' : '') + '>'
+      + '<label class="form-check-label small" for="tkEnabled">'
+      + esc(t('enabled')) + '</label></div>';
+    _openBackupModal(uid ? t('backup_task_edit') : t('backup_task_new'), html,
+                     t('save'), 'primary', _saveBackupTask);
+}
+
+function _tkModeSwitch() {
+    const cal = document.getElementById('tkMode')?.value === 'calendar';
+    document.getElementById('tkInterval')?.toggleAttribute('hidden', cal);
+    document.getElementById('tkCalendar')?.toggleAttribute('hidden', !cal);
+}
+
+async function _saveBackupTask() {
+    const uid = document.getElementById('tkUid')?.value || '';
+    const payload = {
+        name: (document.getElementById('tkName')?.value || '').trim(),
+        enabled: !!document.getElementById('tkEnabled')?.checked,
+        mode: document.getElementById('tkMode')?.value || 'interval',
+        every_hours: Number(document.getElementById('tkEvery')?.value || 24),
+        days: _DAY_KEYS.map((_, i) => i)
+                       .filter(i => document.getElementById('tkDay' + i)?.checked),
+        at: document.getElementById('tkAt')?.value || '03:00',
+        keep: Number(document.getElementById('tkKeep')?.value || 7),
+        parts: _checkedParts('tkPart', _backupParts),
+        secrets: !!document.getElementById('tkSecrets')?.checked,
+    };
+    if (uid) payload.uid = uid;
+    const res = await apiPut('/api/v1/backups/tasks', payload);
+    if (_apiOk(res)) {
+        showToast(t('saved'));
+        renderBackups();
+    } else showToast(_apiErr(res), 'danger');
+}
+
+/** Deleting a task does NOT delete the copies it took: they are backups, and the task was only
+ *  the reason they exist. What stops is retention — which the confirmation says, because
+ *  "deleted" reading as "and its copies too" is the misunderstanding that loses data. */
+function deleteBackupTask(uid, name) {
+    showConfirmModal(t('backup_task_delete_confirm').replace('{}', name), async () => {
+        const res = await apiDelete('/api/v1/backups/tasks/' + encodeURIComponent(uid));
+        if (_apiOk(res)) {
+            showToast(t('backup_task_deleted_ok'));
+            renderBackups();
+        } else showToast(_apiErr(res), 'danger');
+    });
+}

@@ -17,9 +17,19 @@
                 title="{{ i18n.reload }}">
             <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
         </button>
-        <button class="btn btn-sm btn-success d-none" id="btnNewBackup" onclick="openBackupModal()"
+        {# Two buttons, one shown at a time by `_backupSyncToolbar`. The toolbar's action has to
+           be the action of the pane under it: offering "create a copy" while the schedule is on
+           screen puts the wrong verb next to the wrong list, and the one you came for is the
+           one that is missing. #}
+        {# Label and action are set by `_backupSyncToolbar`: in a task view this button
+           runs THAT task rather than opening the generic form. #}
+        <button class="btn btn-sm btn-success d-none" id="btnNewBackup"
                 title="{{ i18n.backup_create_tt }}">
             <i class="bi bi-plus-lg me-1"></i>{{ i18n.backup_create }}
+        </button>
+        <button class="btn btn-sm btn-success d-none" id="btnNewBackupTask"
+                onclick="openTaskModal('')" title="{{ i18n.backup_task_new }}">
+            <i class="bi bi-plus-lg me-1"></i>{{ i18n.backup_task_new }}
         </button>
     </div>
     </div>

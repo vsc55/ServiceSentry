@@ -19,6 +19,48 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## La copia de seguridad ignoraba la segunda base de datos de syslog
+
+**Fecha:** 2026-08-11 · **Área:** `lib/core/backup/service.py` (`PARTS`, `_tables_by_part`,
+`create_backup`, `restore_backup`), `lib/core/backup/runner.py` (`_connectors`)
+
+**Síntoma** — reportado así: *«el backup creo que está mal a nivel de la tabla de syslog, si
+tengo activada una segunda base de datos, la recuperación no ha recuperado los datos»*. Con
+`syslog_db|enabled`, marcar la parte *Syslog* al hacer la copia no daba ningún error, la copia
+se creaba con estado **correcto**, y al restaurar no volvía ni una línea de syslog.
+
+**Diagnóstico** — la clave es que el fallo **depende de una opción de configuración**, así que
+en la instalación por defecto (una sola base) todo funciona y ningún test lo veía. La parte
+`syslog` declara sus tablas (`syslog`, `syslog_drops`) y `_tables_by_part` las buscaba en
+`connector.list_tables()` — el conector **principal**. Con la segunda base activada esas tablas
+no están ahí: la intersección salía vacía, la parte copiaba cero tablas, y como la copia no
+distingue *«pedí syslog y no había nada»* de *«no pedí syslog»*, el manifiesto se escribía en
+verde. `lib/web_admin/mixins/stores.py::_init_syslog_stores` construye
+`_syslog_db_connector` con `build_syslog_connector`, y ese conector no llegaba al backup por
+ningún camino.
+
+**Causa raíz** — el servicio de copias asumía **un solo conector** para todo. Es la única
+suposición que la instalación por defecto no desmiente nunca: con `syslog_db` desactivado
+`build_syslog_connector` devuelve el conector principal, así que las dos rutas coinciden y la
+suposición parece cierta.
+
+**Solución** — la parte declara en qué base vive (`'db': 'syslog'`), y tanto `create_backup`
+como `restore_backup` aceptan un mapa `connectors={'syslog': conn}` que el runner construye
+desde el web admin, y solo cuando el conector de syslog **no es** el principal. `conn_for()`
+decide en un único sitio, `_tables_by_part` pregunta a la base de cada parte —así `core` sigue
+siendo *toda tabla que nadie reclamó* **en la base del sistema**, sin arrastrar nada de la
+otra— y la restauración agrupa por base con `_by_database`: **una transacción por base**,
+porque dos bases no pueden compartirla y la garantía que importa (las tablas del sistema
+entran juntas o no entra ninguna) se conserva donde significa algo.
+
+**Lección** — cuando una opción de configuración **mueve dónde viven unos datos**, todo lo que
+los lee de forma transversal hereda esa opción: no basta con que el store la respete. Y una
+parte que se pide y no encuentra nada no puede reportarse igual que una que no se pidió — el
+silencio ahí es exactamente lo que convierte un fallo de copia en un descubrimiento el día de
+la restauración.
+
+---
+
 ## Añadir un check a un servidor activaba seis módulos que nadie tocó
 
 **Fecha:** 2026-08-04 · **Área:** `lib/web_admin/templates/partials/servers/_save.html`

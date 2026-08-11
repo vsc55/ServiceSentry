@@ -121,6 +121,7 @@ Capas transversales que cubren todas las áreas:
 - **SQL** — cada consulta a BD (statement, **nunca los params**).
 - **Config** — lecturas de `config.json` (cache miss) y guardado paso a paso.
 - **Dominio** — login/auth (LDAP/local/SSO), notificaciones (canales/SMTP/webhook), scheduler (ciclo/módulo/ítem), inicialización de DB y Telegram.
+- **Copias de seguridad** (`> Backup > …`) — a nivel **info**: cada copia y cada restauración con lo que se pidió, cómo acabó y cuántas filas movió; los jobs de fondo con su id, desde que arrancan hasta que terminan; las tareas que vencen y lo que borra la retención. A nivel **warning/error**: rechazos (nombre inválido, nombre ya usado, copia inexistente, formato más nuevo), partes que fallaron, y **qué no se pudo aplicar al restaurar** (columna descartada, tabla desaparecida) — la línea que se busca cuando una restauración entre versiones dejó algo fuera. A nivel **debug**, una línea por tabla.
 
 Nada de esto registra contraseñas, tokens ni secretos.
 

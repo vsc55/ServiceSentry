@@ -9,6 +9,11 @@ MODULE_PERMISSIONS = {
         # Reading the list is separate from making one: a copy costs disk and reads every
         # table, so "can see what copies exist" is not "can make another".
         {'flag': 'backup_view',    'roles': ()},
+        # Checking a copy against its own checksums. Separate from `view` because it is not
+        # reading a list: it walks every member of a multi-gigabyte archive and hashes it, so
+        # it is minutes of disk and CPU that anybody who can see the section could otherwise
+        # start, as often as they liked.
+        {'flag': 'backup_verify',  'roles': ()},
         {'flag': 'backup_create',  'roles': ()},
         # Downloading is its OWN flag and not part of view. A copy leaves the machine as one
         # file that holds every credential in the install: whoever may fetch it holds the
@@ -18,6 +23,16 @@ MODULE_PERMISSIONS = {
         # it can hand the panel to whoever the copy says owns it.
         {'flag': 'backup_restore', 'roles': ()},
         {'flag': 'backup_delete',  'roles': ()},
+        # The SCHEDULE, which is a different decision from taking a copy: who says how often
+        # this install is protected, and for how long its copies are kept. It rode on
+        # `backup_create` and `backup_delete`, and those are about archives — a task edited to
+        # run monthly instead of daily destroys no file and quietly reduces the protection,
+        # and deleting a task stops the copies without deleting a single one.
+        #
+        # "Run now" is deliberately NOT here: running a task makes a copy, which is
+        # `backup_create` — the same thing the Create button does, and one grant should not be
+        # two ways to the same result.
+        {'flag': 'backup_schedule', 'roles': ()},
     ),
 }
 
@@ -33,4 +48,14 @@ AUDIT_EVENTS = [
     # Making a folder from the picker. Muted: it creates an empty directory and
     # nothing else — the line exists so the trail explains where a path came from.
     {'key': 'backup_dir_created', 'severity': 'muted'},
+    # A schedule changing is worth a line: a task edited to run monthly instead of daily is a
+    # decision somebody made, and the copies that stop appearing are its consequence.
+    {'key': 'backup_task_saved', 'severity': 'warning'},
+    {'key': 'backup_task_deleted', 'severity': 'danger'},
+    # The one-off carry-over of the pre-task settings. Muted because nothing was decided here —
+    # but recorded, because a task nobody created appearing in the list needs an explanation.
+    {'key': 'backup_task_migrated', 'severity': 'muted'},
+    # Checking a copy. Muted when it passes is not an option: the interesting case is
+    # the one that did not, and a single severity keeps both findable in one filter.
+    {'key': 'backup_verified', 'severity': 'warning'},
 ]

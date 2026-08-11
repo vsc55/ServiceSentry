@@ -1,0 +1,225 @@
+{# ================================================================
+   Backup — the folder picker behind the `backup_dir` setting.
+
+   Its own partial because the render shell has a size limit and this is a screen in its own
+   right: a two-pane file browser, the "new folder" input, and the placeholder the empty
+   setting shows. None of it is about the list of copies.
+
+   It hangs off FIELD_PICKERS, a registry keyed by config path: the field renderer draws two
+   hundred fields and must not know that one of them is a folder.
+   ================================================================ #}
+
+// ── The folder picker ────────────────────────────────────────────────────────
+// Registered against ONE config path rather than built into the field renderer: that file
+// draws two hundred fields and must not know that one of them is a folder.
+FIELD_PICKERS['web_admin|backup_dir'] = {
+    icon: 'bi-folder2-open',
+    title: 'backup_browse',
+    open: (pathStr, current) => _openDirPicker(pathStr, current),
+    // Filled in below. Empty until then rather than a guess: showing `<var_dir>/backups` as
+    // literal text would put a path on screen that may not be the one in use.
+    placeholder: '',
+};
+
+/** Ask the server where copies go, and let the empty box say so.
+ *
+ *  The setting's default is "" meaning `<var_dir>/backups`, and a blank box with a hint below
+ *  it leaves the operator to work out what that resolves to on THIS install. The server knows;
+ *  this asks once and repaints.
+ */
+async function _backupDirPlaceholder() {
+    const fp = FIELD_PICKERS['web_admin|backup_dir'];
+    if (!fp || fp.placeholder) return;
+    const res = await apiGet('/api/v1/backups/browse');
+    if (!res || !res.configured) return;
+    fp.placeholder = res.configured;
+    // Only if the section is on screen: repainting Configuration from under an admin who is
+    // typing into it would throw the edit away to add a placeholder.
+    const pane = document.getElementById('tab-config');
+    if (pane && pane.classList.contains('active')
+        && typeof renderConfig === 'function' && !_isDirty('config')) {
+        renderConfig();
+    }
+}
+
+let _dirPickPath = '';
+let _dirPickField = '';
+
+async function _openDirPicker(fieldPath, current) {
+    _dirPickField = fieldPath;
+    // The modal opens FIRST, empty, and fills when the answer arrives. Awaiting the fetch
+    // before showing it meant the button did nothing at all for as long as the server took —
+    // and a button that does nothing is a button somebody presses again.
+    _openBackupModal(t('backup_browse'), _dirPickBusy(current), t('backup_browse_use'),
+                     'primary', () => {});
+    await _dirPickLoad(current || '');
+}
+
+/** Draw the folder at *path* into the section's modal.
+ *  Directories only — the picker's job is to choose a folder, and every file name it showed
+ *  on the way would be information the screen did not need to do it. */
+/** What the modal shows while the server is listing a folder.
+ *  A spinner alone says "something is happening"; naming the folder says WHAT, which is the
+ *  difference between waiting and wondering whether the click registered. */
+function _dirPickBusy(path) {
+    return `<div class="text-center py-4">
+        <div class="spinner-border spinner-border-sm mb-2"></div>
+        <div class="small text-muted">${esc(t('backup_browse_scanning'))}</div>
+        ${path ? `<code class="d-block text-truncate small mt-1">${esc(path)}</code>` : ''}
+    </div>`;
+}
+
+async function _dirPickLoad(path) {
+    // Every step down the tree shows it too, not only the first: walking into a folder on a
+    // slow mount is exactly when the screen must not look frozen.
+    const pane0 = document.getElementById('dirPickMain');
+    const busy = pane0 || document.getElementById('backupModalBody');
+    if (busy) busy.innerHTML = _dirPickBusy(path);
+    const res = await apiGet('/api/v1/backups/browse?path=' + encodeURIComponent(path || ''));
+    if (!res) { showToast(t('save_error'), 'danger'); return; }
+    _dirPickPath = res.path || '';
+    // ── The left rail: where you can jump to ────────────────────────────────
+    // A rail and not a strip of buttons across the top: the roots are NAVIGATION, the same
+    // job the sidebar does for the panel, and a row of them above the list competed with the
+    // path for the one line that says where you are.
+    const jump = (path, icon, label) =>
+        `<button type="button" class="ss-rail-item"
+                 onclick="_dirPickLoad(${jsStr(path)})" title="${escAttr(path)}">
+            <i class="bi ${icon} me-1 flex-shrink-0"></i>
+            <span class="text-truncate min-w-0">${esc(label)}</span>
+        </button>`;
+    // The configured folder first, and set apart: it is the one place the operator is most
+    // likely to want back after wandering, and hunting for it among the drive letters is the
+    // walk they just did in reverse.
+    const cfgJump = res.configured
+        ? `<div class="ss-rail-group">
+               <div class="ss-rail-head">${esc(t('backup_browse_current'))}</div>
+               ${jump(res.configured, 'bi-archive', _dirPickLeaf(res.configured))}
+           </div>`
+        : '';
+    const rail = `<nav class="ss-rail" id="dirPickRail"
+        style="flex:0 0 13rem;max-width:13rem;min-width:0;
+               border-right:1px solid var(--bs-border-color)">
+        ${cfgJump}
+        <div class="ss-rail-group">
+            <div class="ss-rail-head">${esc(t('backup_browse_places'))}</div>
+            ${(res.roots || []).map(r => jump(r, 'bi-hdd', r)).join('')}
+        </div>
+    </nav>`;
+
+    const up = res.parent
+        ? `<button class="btn btn-sm btn-secondary flex-shrink-0" type="button"
+               onclick="_dirPickLoad(${jsStr(res.parent)})">
+               <i class="bi bi-arrow-90deg-up"></i></button>`
+        : '';
+    const rows = (res.dirs || []).map(d =>
+        `<button type="button" class="list-group-item list-group-item-action py-1"
+                 onclick="_dirPickLoad(${jsStr(d.path)})">
+            <i class="bi bi-folder2 me-2 text-secondary"></i>${esc(d.name)}</button>`).join('')
+        || `<div class="text-muted small py-3 text-center">${esc(t('backup_browse_empty'))}</div>`;
+    // Writability is stated EITHER WAY, not only when it is missing. "No warning" and "I did
+    // not check" look identical on screen, and this is the one property that decides whether
+    // the folder can hold a backup at all.
+    const note = !res.readable
+        ? `<span class="badge text-bg-danger flex-shrink-0">${esc(t('backup_browse_denied'))}</span>`
+        : (res.path
+            ? (res.writable
+                ? `<span class="badge text-bg-success flex-shrink-0"><i class="bi bi-pencil me-1"></i>${esc(t('backup_browse_rw'))}</span>`
+                : `<span class="badge text-bg-warning flex-shrink-0"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('backup_browse_ro'))}</span>`)
+            : '');
+    // Creating one is offered only where it can succeed: an input that always fails is worse
+    // than no input, because it looks like the folder is the problem.
+    const mk = res.readable && res.writable && res.path
+        ? `<div class="input-group input-group-sm mb-2">
+               <input type="text" class="form-control" id="dirPickNew"
+                      placeholder="${escAttr(t('backup_browse_new_ph'))}">
+               <button class="btn btn-secondary" type="button" onclick="_dirPickMake()">
+                   <i class="bi bi-folder-plus me-1"></i>${esc(t('backup_browse_new'))}</button>
+           </div>`
+        : '';
+    // One row for "where am I" and "can I write here", fixed height. Stacked, the badge came
+    // and went with the folder and the whole pane moved a line up and down with it.
+    const main = `
+        <div class="d-flex align-items-center gap-2 mb-2" style="min-height:2rem">
+            ${up}
+            <code class="text-truncate small flex-grow-1 mb-0">${esc(_dirPickPath || '—')}</code>
+            ${note}
+        </div>
+        ${mk}
+        <div class="list-group list-group-flush ss-vscroll flex-grow-1" style="min-height:0">${rows}</div>`;
+
+    // Already open? Then only the RIGHT pane changes. Rebuilding the whole body made the
+    // modal collapse to nothing and grow back on every click, because Bootstrap re-centres a
+    // dialog whose content it has just been handed — and the rail, which did not change, was
+    // being thrown away and rebuilt to show the same six drives.
+    const pane = document.getElementById('dirPickMain');
+    if (pane) {
+        pane.innerHTML = main;
+        _dirPickMarkRail();
+        return;
+    }
+
+    _dirPickPendingMark = true;
+    _openBackupModal(t('backup_browse'), `
+        <div class="d-flex gap-2" style="flex:1 1 auto;min-height:20rem">
+            ${rail}
+            <div class="flex-grow-1 min-w-0 ps-2 d-flex flex-column" id="dirPickMain">${main}</div>
+        </div>`,
+        t('backup_browse_use'), 'primary', () => {
+            // Written through `updateField`, the same call the box itself makes, so the value
+            // lands in `configData` and the form goes dirty — a picker that only painted the
+            // input would be a choice that Save never sees.
+            updateField('config', _dirPickField, _dirPickPath);
+            renderConfig();
+        }, 'lg');
+    if (_dirPickPendingMark) { _dirPickPendingMark = false; _dirPickMarkRail(); }
+}
+
+/** Light the rail entry the current folder is INSIDE, not the one it equals.
+ *
+ *  Exact matching lit `C:\` while you were at `C:\`, and went dark the moment you opened a
+ *  folder in it — losing the one thing the rail is for, which is saying where in the machine
+ *  you are.
+ *
+ *  The DEEPEST match wins, so standing in `/mnt/nas/backups` lights `/mnt` and not `/`, and
+ *  the configured folder beats the drive it lives on. Compared on a separator boundary: a path
+ *  is not inside `/var` because it starts with those four letters (`/variable`).
+ */
+function _dirPickMarkRail() {
+    const cur = String(_dirPickPath || '');
+    const items = Array.from(document.querySelectorAll('#dirPickRail .ss-rail-item'));
+    let best = null;
+    let bestLen = -1;
+    for (const el of items) {
+        const p = el.getAttribute('title') || '';
+        const stem = p.replace(/[\\/]+$/, '');
+        const inside = cur === p || cur === stem
+            || cur.startsWith(stem + '\\') || cur.startsWith(stem + '/')
+            || stem === '';                       // "/" contains everything
+        if (inside && stem.length > bestLen) { best = el; bestLen = stem.length; }
+    }
+    items.forEach(el => el.classList.toggle('active', el === best));
+}
+
+let _dirPickPendingMark = false;
+
+/** The last component of a path, for a rail label. A full path in an 11rem column is an
+ *  ellipsis with nothing readable left in front of it; the tooltip carries the whole thing. */
+function _dirPickLeaf(path) {
+    // Both separators: a Windows path has no forward slash in it, so a class holding
+    // only `/` split nothing and the rail showed the whole path where a name belongs.
+    const parts = String(path || '').replace(/[\/]+$/, '').split(/[\/]/);
+    return parts[parts.length - 1] || path;
+}
+
+/** Create a folder inside the one being shown, then walk into it.
+ *  Walking in is the point: the operator made it to put copies there, so leaving them looking
+ *  at the parent would be one more click to do what they already said. */
+async function _dirPickMake() {
+    const name = (document.getElementById('dirPickNew')?.value || '').trim();
+    if (!name) return;
+    const res = await apiPost('/api/v1/backups/mkdir', {parent: _dirPickPath, name});
+    if (_apiOk(res)) {
+        await _dirPickLoad((res.data || {}).path || _dirPickPath);
+    } else showToast(_apiErr(res), 'danger');
+}
