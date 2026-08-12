@@ -75,6 +75,10 @@ CARDS: tuple[dict, ...] = (
     # nothing here knows about history or syslog specifically.
     {'tab': 'general', 'id': 'maintenance', 'title_key': 'cfg_card_maintenance',
      'icon': 'bi-trash3'},
+    # Where copies are written. A card of its own rather than a line in General: the section
+    # that makes the copies is not the place to say where they land — that is a deployment
+    # decision, made once, by whoever knows which mounts exist.
+    {'tab': 'general', 'id': 'backup', 'title_key': 'cfg_card_backup', 'icon': 'bi-archive'},
 
     # ══ Monitoring ══════════════════════════════════════════════════════════
     {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity'},

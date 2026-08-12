@@ -24,7 +24,7 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **33 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **35 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 | Grupo | Tablas |
@@ -369,6 +369,49 @@ Restricción única: `(module, key, metric)`. Sin índices secundarios.
 | updated_by | TEXT | no | `''` | |
 
 Sin índices.
+
+### `backup_tasks` — tareas de copia programadas
+[lib/core/backup/tasks_store.py:29](../src/lib/core/backup/tasks_store.py#L29)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| data | TEXT | no | `'{}'` | JSON (name/enabled/mode/every_hours/days[]/at/parts[]/secrets/profile/keep_*) |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Sin índices.
+
+Una tabla y no `config.json` porque una tarea es un **registro**, no un ajuste: se crea, se
+renombra, se desactiva y se borra de una en una, como un webhook o un host. Varias tareas es
+justo el motivo de que exista: la configuración interesa a diario y el syslog quizá una vez por
+semana, y con un solo intervalo eso no se puede decir sin copiarlo todo al ritmo del más
+exigente. Nada de `data` va cifrado: una tarea dice **qué** copiar y cada cuánto, nunca una
+credencial.
+
+`profile` es el uid de un perfil de retención (tabla siguiente), vacío = «la política propia de
+esta tarea». Los `keep_*` de la tarea **se conservan aunque siga un perfil**: son a lo que vuelve
+al desvincularla, y lo que queda en pie si el perfil desaparece.
+
+### `backup_profiles` — perfiles de retención compartidos
+[lib/core/backup/profiles_store.py:30](../src/lib/core/backup/profiles_store.py#L30)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| data | TEXT | no | `'{}'` | JSON (name/keep_last/keep_daily/keep_weekly/keep_monthly/keep_yearly/max_size) |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Sin índices.
+
+Una política con nombre que varias tareas **siguen**, no copian: editar «GFS estándar» cambia de
+una vez la retención de todas las tareas que apuntan a él, que es el motivo entero de que exista
+en lugar de un botón que rellene las casillas. Borrar uno en uso se rechaza (409) en vez de dejar
+esas tareas sobre los números que tuvieran guardados: sería un cambio de política que nadie pidió
+y que nada anuncia.
 
 ### `msteams_channels` — destinos de canal Teams
 [lib/core/notify/msteams/store.py:27](../src/lib/core/notify/msteams/store.py#L27)

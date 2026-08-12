@@ -43,6 +43,28 @@ function _fieldTermFor(key, meta, pathStr, target) {
     return (terms && terms[item[tf]]) || null;
 }
 
+/** Pickers a section can hang off ONE config field, keyed by its `section|field` path.
+ *
+ *  A registry and not a name tested for here: the renderer draws two hundred fields and must
+ *  not know that one of them is a folder. The section that owns the field registers its own
+ *  button (see partials/backup/_render.html) and this file only asks whether there is one.
+ *
+ *  `{icon, title, open}` — `open(pathStr, currentValue)` does whatever it likes and calls
+ *  `updateField` when the user picks something.
+ */
+const FIELD_PICKERS = {};
+
+/** A picker may also supply the placeholder for its field.
+ *
+ *  Some settings have a default that only exists at RUN time — the backup folder falls back to
+ *  `<var_dir>/backups`, a path the registry cannot hold because it depends on where the panel
+ *  was installed. The registry says "empty means the default"; this is what lets the box SHOW
+ *  which path that turns out to be, instead of leaving the operator to guess it. */
+function _fieldPickerPlaceholder(pathStr) {
+    const fp = FIELD_PICKERS[pathStr];
+    return fp && fp.placeholder ? ` placeholder="${escAttr(fp.placeholder)}"` : '';
+}
+
 function renderField(key, value, pathStr, target = 'modules') {
     const _parentRaw0 = pathStr.split('|').slice(0, -1).join('|');
     const _meta0 = fieldMeta(ITEM_SCHEMAS[_schemaKeyOf(_parentRaw0) || pathStr.split('|').slice(0, 2).join('|')] || null, key);
@@ -675,10 +697,17 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
                 trailing: `${_pickerBtn}${_actionBtn}`}), _hintHtml);
         }
+        const _fp = FIELD_PICKERS[pathStr];
+        const _fpPh = (value == null || value === '') ? _fieldPickerPlaceholder(pathStr) : '';
+        const _fpBtn = _fp && !_isLocked
+            ? `<button class="btn btn-secondary" type="button"
+                   onclick="FIELD_PICKERS[${jsStr(pathStr)}].open(${jsStr(pathStr)},${jsStr(String(value == null ? '' : value))})"
+                   title="${escAttr(t(_fp.title) || _fp.title)}"><i class="bi ${escAttr(_fp.icon)}"></i></button>`
+            : '';
         return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
-            inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}`,
+            inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}${_fpPh}`,
             onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
-            trailing: _unitSel + _actionBtn}), _hintHtml);
+            trailing: _unitSel + _fpBtn + _actionBtn}), _hintHtml);
     }
     if (Array.isArray(value)) {
         const csv = value.map(v => String(v)).join(', ');

@@ -1,0 +1,142 @@
+{# ================================================================
+   Backup — retention profiles: one policy, several tasks.
+
+   The buckets are what make retention worth configuring and also what made the task editor
+   long: five numbers and a ceiling, retyped from memory in every task. Three tasks with "the
+   same" policy were three chances to type 6 where the others say 4, and nothing on screen would
+   ever have said they disagreed.
+
+   A profile is that policy with a name and one home. A task POINTS at it — so editing "GFS
+   estándar" changes every task that follows it at once, which is the whole reason to have
+   profiles rather than a button that fills the boxes in. That is also why deleting one in use
+   is refused rather than quietly leaving those tasks on whatever numbers they last held.
+
+   The boxes themselves come from _retention.html (`_bkBucketBoxes`): a profile IS a task's
+   retention with a name on it, and two drawings of the same five fields is how they acquire
+   different limits and eventually different meanings.
+   ================================================================ #}
+
+let _backupProfiles = [];
+// `{task_id: rules}` — which numbers actually apply to each task, resolved by the server. A
+// task following a profile carries two sets, and the screen must never guess which is live.
+let _backupPolicies = {};
+// `{profile_id: [task name, …]}`. What makes "saving this changes 3 tasks" sayable BEFORE the
+// save rather than discoverable afterwards in the audit log.
+let _backupProfileUsage = {};
+let _backupSuggested = [];
+
+async function loadBackupProfiles() {
+    const res = await apiGet('/api/v1/backups/profiles');
+    _backupProfiles = (res && res.profiles) || [];
+    _backupProfileUsage = (res && res.used_by) || {};
+    _backupSuggested = (res && res.suggested) || [];
+}
+
+function _backupProfilesHtml() {
+    const perms = new Set(currentUser.permissions || []);
+    const mayEdit = perms.has('backup_schedule');
+    const rows = _backupProfiles.map(p => {
+        const used = _backupProfileUsage[p.id] || [];
+        const btnEdit = mayEdit
+            ? '<button class="btn btn-sm btn-secondary py-0 px-1" type="button"'
+              + ' onclick="openProfileModal(' + jsStr(p.id) + ')" title="'
+              + escAttr(t('edit')) + '"><i class="bi bi-pencil"></i></button>'
+            : '';
+        // No delete button on a profile in use: the answer would be a 409, and offering a
+        // button whose only outcome is an error is offering to be told off.
+        const btnDel = mayEdit && !used.length
+            ? '<button class="btn btn-sm btn-danger py-0 px-1" type="button"'
+              + ' onclick="deleteBackupProfile(' + jsStr(p.id) + ',' + jsStr(p.name)
+              + ')" title="' + escAttr(t('delete')) + '"><i class="bi bi-trash3"></i></button>'
+            : '';
+        return '<tr>'
+             + '<td><span class="d-flex align-items-center gap-2">'
+             + '<i class="bi bi-sliders text-secondary"></i>'
+             + '<span class="text-truncate">' + esc(p.name) + '</span></span></td>'
+             + '<td class="small text-muted">' + esc(_bkPolicyWords(p)) + '</td>'
+             + '<td class="small">' + (used.length
+                    ? '<span class="badge text-bg-secondary" title="' + escAttr(used.join(', '))
+                      + '">' + esc(t('backup_profile_used_n').replace('{}', used.length))
+                      + '</span>'
+                    : '<span class="text-muted">' + esc(t('backup_profile_used_none'))
+                      + '</span>') + '</td>'
+             + '<td class="text-end"><span class="d-inline-flex gap-1">' + btnEdit + btnDel
+             + '</span></td></tr>';
+    }).join('');
+    const body = _backupProfiles.length
+        ? '<table class="table table-sm table-hover align-middle mb-0"><tbody>' + rows
+          + '</tbody></table>'
+        : '<div class="text-muted small py-2">' + esc(t('backup_profiles_none')) + '</div>';
+    return '<div><div class="d-flex align-items-center gap-2 mb-1">'
+         + '<span class="ss-rail-head mb-0">' + esc(t('backup_profiles')) + '</span>'
+         + '</div>' + body + '</div>';
+}
+
+/** The editor. Says up front how many tasks this change reaches — the point of a shared policy
+ *  is also its one hazard, and "3 tasks" is the number somebody needs before saving, not after. */
+function openProfileModal(uid) {
+    const p = _backupProfiles.find(x => x.id === uid)
+        || {name: '', keep_last: 3, keep_daily: 7, keep_weekly: 4, keep_monthly: 6,
+            keep_yearly: 0, max_size: 0};
+    const used = _backupProfileUsage[uid] || [];
+    // Starting points, offered only when creating: filling an existing profile from a
+    // suggestion would overwrite a policy several tasks already follow with one click.
+    const suggest = (uid || !_backupSuggested.length) ? '' :
+        '<div class="mb-3"><div class="small text-muted mb-1">'
+        + esc(t('backup_profile_start')) + '</div><div class="d-flex flex-wrap gap-1">'
+        + _backupSuggested.map((s, i) =>
+            '<button type="button" class="btn btn-sm btn-secondary py-0 px-2"'
+            + ' onclick="_pfApplySuggested(' + i + ')">' + esc(s.label) + '</button>').join('')
+        + '</div></div>';
+    const html =
+        '<input type="hidden" id="pfUid" value="' + escAttr(uid || '') + '">'
+      + (used.length
+            ? '<div class="alert alert-warning py-2 px-3 small">'
+              + esc(t('backup_profile_affects').replace('{}', used.length)
+                     .replace('{}', used.join(', '))) + '</div>'
+            : '')
+      + '<div class="mb-3"><label class="form-label small" for="pfName">'
+      + esc(t('backup_profile_name')) + '</label>'
+      + '<input type="text" class="form-control form-control-sm" id="pfName" value="'
+      + escAttr(p.name) + '"></div>'
+      + suggest
+      + _bkBucketBoxes(p, 'pf_');
+    _openBackupModal(uid ? t('backup_profile_edit') : t('backup_profile_new'), html,
+                     t('save'), 'primary', _saveBackupProfile);
+}
+
+/** Fill the boxes from one of the server's suggestions. The values come from the API, not from
+ *  a list written here: they are the panel's opinion about how much history is worth keeping,
+ *  and an opinion in a template is one no test can read and the API cannot state. */
+function _pfApplySuggested(i) {
+    const s = _backupSuggested[i];
+    if (!s) return;
+    for (const [key] of _BK_BUCKETS) {
+        const el = document.getElementById('pf_' + key);
+        if (el) el.value = Number(s[key]) || 0;
+    }
+}
+
+async function _saveBackupProfile() {
+    const uid = document.getElementById('pfUid')?.value || '';
+    const payload = {name: (document.getElementById('pfName')?.value || '').trim(),
+                     ..._bkBucketValues('pf_')};
+    if (uid) payload.uid = uid;
+    const res = await apiPut('/api/v1/backups/profiles', payload);
+    if (_apiOk(res)) {
+        showToast(t('saved'));
+        renderBackups();
+    } else showToast(_apiErr(res), 'danger');
+}
+
+/** Deleting a profile changes no retention: the button is only offered while nothing follows
+ *  it, and the confirmation says so instead of asking "are you sure?". */
+function deleteBackupProfile(uid, name) {
+    showConfirmModal(t('backup_profile_delete_confirm').replace('{}', name), async () => {
+        const res = await apiDelete('/api/v1/backups/profiles/' + encodeURIComponent(uid));
+        if (_apiOk(res)) {
+            showToast(t('backup_profile_deleted_ok'));
+            renderBackups();
+        } else showToast(_apiErr(res), 'danger');
+    });
+}

@@ -244,6 +244,9 @@ if (eventsLi) eventsLi.style.display = perms.has('events_view') ? '' : 'none';
 // Audit tab
 const auditLi = document.getElementById('tab-audit-li');
 if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
+// Backup tab
+const backupLi = document.getElementById('tab-backup-li');
+if (backupLi) backupLi.style.display = perms.has('backup_view') ? '' : 'none';
 // Modules buttons
 const btnNewModule = document.getElementById('btnNewModule');
 if (btnNewModule) btnNewModule.style.display = perms.has('modules_add') ? '' : 'none';

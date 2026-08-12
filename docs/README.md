@@ -48,9 +48,9 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [ref-configuracion.md](ref-configuracion.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
 | [ref-cli.md](ref-cli.md) | CLI de gestión one-shot: subcomandos `user`/`group` (alta/baja/rol/contraseña/grupos), `status` y `reload` de servicios; contexto headless, capa de servicio compartida en `lib/core` (rutas web + CLI) y auto-discovery de servicios |
 | [ref-modulos.md](ref-modulos.md) | Los 20 módulos integrados: referencia de configuración, campos y flujo de cada uno |
-| [explica-web-admin.md](explica-web-admin.md) | Interfaz web Flask: características, roles (66 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
+| [explica-web-admin.md](explica-web-admin.md) | Interfaz web Flask: características, roles (73 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [explica-seguridad.md](explica-seguridad.md) | Autenticación (local/LDAP/OIDC/SAML2), semántica RBAC (escalada, IDOR), sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
-| [ref-permisos.md](ref-permisos.md) | Fuente única del RBAC: catálogo de los 66 flags de permiso, roles integrados/personalizados, grupos, permisos dinámicos (módulo/servidor/cluster) y estructuras internas |
+| [ref-permisos.md](ref-permisos.md) | Fuente única del RBAC: catálogo de los 73 flags de permiso, roles integrados/personalizados, grupos, permisos dinámicos (módulo/servidor/cluster) y estructuras internas |
 | [caso-entra-id.md](caso-entra-id.md) | Microsoft Entra ID: SSO (OIDC y SAML2) + asistentes de registro de app (Device Code) para SSO/SCIM/M365-email/Teams; flujo, campos de config y **limitaciones** de Graph (config básica de SAML manual, dominios no verificados, `instantiate`, `servicePrincipalNames`) + resolución de problemas |
 | [caso-scim.md](caso-scim.md) | Aprovisionamiento SCIM 2.0 (agnóstico del IdP): activar endpoint + token, JIT vs SCIM, configurar Entra/Okta/otros IdP, altas/bajas y soft-delete de grupos, badges |
 | [caso-ssh-hardening.md](caso-ssh-hardening.md) | Endurecer los hosts monitorizados: cuenta dedicada, comando forzado + envoltorio con allowlist ([ssentry-wrap](ssentry-wrap)), sudoers mínimo para remediación |
@@ -61,6 +61,7 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [explica-i18n.md](explica-i18n.md) | Mecánica de i18n: capa global de UI + capa por módulo, resolución de etiquetas en navegador, pipeline de `discover_schemas`, cómo añadir idiomas |
 | [ref-i18n.md](ref-i18n.md) | Referencia de i18n: estructura de `lang/*.json`, los tres esquemas de tags (`notif_msg_vars`/`notif_email_vars`/`messages_vars`) y placeholders `_fill` (secuencial vs indexado) |
 | [ref-watchful-emit.md](ref-watchful-emit.md) | Cómo publica un resultado un watchful: patrón automático vs manual, cuándo aplica cada uno y los bugs que motivaron la regla |
+| [explica-backup.md](explica-backup.md) | Copias de seguridad y restauración: formato (ZIP de JSON portable entre motores), catálogo de partes, secretos, sha256 y veredicto, flujos de copia y restauración, restaurar entre versiones, tareas programadas (intervalo vs calendario, retención, lease), jobs y progreso, permisos, y comportamiento en microservicios |
 | [ref-tests.md](ref-tests.md) | Inventario completo de tests: qué comprueba cada test, condiciones de OK y error, organizado por grupos |
 | [caso-diagnostico.md](caso-diagnostico.md) | Bugs resueltos y trampas conocidas: causa raíz, solución y lección generalizable de fallos no evidentes que costaron aislar |
 | [ref-pendiente.md](ref-pendiente.md) | Lo aplazado **a propósito**, con el motivo: layouts por hacer, CVE abiertos, deferidos de auditoría y límites conocidos del empaquetado |
@@ -90,10 +91,11 @@ Guía rápida por temas de documentación técnica → documento(s) donde se cub
 | **Rendimiento** (cuellos de botella, concurrencia, cachés) | [explica-rendimiento.md](explica-rendimiento.md) |
 | **Dependencias** (para qué sirve cada una) | [caso-desarrollo.md](caso-desarrollo.md) (§ dependencias) |
 | **Base de datos** (esquema, tablas, relaciones, migraciones) | [ref-esquema-bd.md](ref-esquema-bd.md) |
+| **Copias de seguridad** (formato, partes, restauración, programación, retención) | [explica-backup.md](explica-backup.md) |
 | **Tests** (cobertura, tipos, cómo ejecutarlos) | [ref-tests.md](ref-tests.md) · [caso-desarrollo.md](caso-desarrollo.md) |
 | **Logging** (niveles, destinos, rotación, formato) | [explica-logging.md](explica-logging.md) · [ref-configuracion.md](ref-configuracion.md) |
 | **Notificaciones** (canales, routing, plantillas) | [explica-notificaciones.md](explica-notificaciones.md) |
-| **Diagramas Mermaid** | [explica-arquitectura.md](explica-arquitectura.md) · [ref-esquema-bd.md](ref-esquema-bd.md) · [explica-seguridad.md](explica-seguridad.md) · [explica-notificaciones.md](explica-notificaciones.md) |
+| **Diagramas Mermaid** | [explica-arquitectura.md](explica-arquitectura.md) · [ref-esquema-bd.md](ref-esquema-bd.md) · [explica-seguridad.md](explica-seguridad.md) · [explica-notificaciones.md](explica-notificaciones.md) · [explica-backup.md](explica-backup.md) |
 
 ---
 
@@ -105,7 +107,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 - Detecta **cambios de estado** — no envía notificación si el estado no ha cambiado (sin spam).
 - Envía alertas por **Telegram**, **Email** (SMTP / Microsoft 365 / Gmail), **Webhooks** (con firma HMAC) y **Microsoft Teams**, con matriz de routing por evento y severidad *warning* (aviso ámbar) además de caído/recuperado.
 - **Receptor syslog** integrado (RFC 3164/5424, UDP/TCP/TLS) con BD dedicada opcional, y un **gestor de eventos** que notifica reglas sobre eventos de auditoría o syslog.
-- Incluye **interfaz web de administración** (Flask) con RBAC (66 permisos), grupos, modo oscuro, historial con gráficas e i18n.
+- Incluye **interfaz web de administración** (Flask) con RBAC (73 permisos), grupos, modo oscuro, historial con gráficas e i18n.
 - **Autenticación externa** opcional: LDAP/AD, SSO OIDC/OAuth2 y SAML2, con sincronización de usuarios y mapeo de grupos a roles.
 - **Persistencia pluggable**: SQLite por defecto, o PostgreSQL/MySQL; el esquema se valida y reconcilia automáticamente en cada arranque.
 - Soporta ejecución **local** y **remota** (SSH vía paramiko).

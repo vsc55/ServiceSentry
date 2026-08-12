@@ -29,6 +29,37 @@ SQLite local** (`snmp_mibs/mib_catalog.sqlite`).
 **Aplazado por decisión explícita:** se pidió *"solo el mecanismo general"*. Migrarlo es
 trabajo aparte, no un olvido.
 
+### Copias programadas: una lista de tareas, no un intervalo global
+
+**Lo que hay hoy** (build.57): *un* intervalo para toda la instalación —cada N horas—, con una
+retención y un interruptor de secretos. Copia siempre lo mismo: `core` + `config.json`.
+
+**Lo que falta:** una **lista de tareas programadas**, cada una con su propio nivel de copia y su
+propia frecuencia. El caso que lo motiva: la configuración y el inventario interesan a diario,
+pero el syslog o los MIBs quizá una vez por semana o al mes — y hoy eso no se puede expresar sin
+copiarlo todo con la frecuencia del más exigente, que es como se llena el disco.
+
+Forma: una colección de tareas `{nombre, cada N horas, partes[], secretos, retención propia}`.
+Las partes ya están declaradas en `PARTS` (`lib/core/backup/service.py`), así que el formulario
+de una tarea se dibuja del mismo catálogo que el de una copia manual.
+
+Lo que hay que decidir antes de escribir código, porque cambia el diseño:
+
+- **Dónde viven las tareas.** No son config escalar (`spec.py` no sirve): son *feature data*, como
+  los webhooks o los layouts de Overview. Eso significa tabla propia y store, con su store+mixin
+  como el resto de dominios.
+- **La retención pasa a ser por tarea.** Si no, la diaria borra las copias de la mensual: hoy la
+  poda cuenta todas las automáticas juntas. El nombre tendrá que decir de qué tarea salió
+  (`auto-<tarea>-<fecha>`), y `is_auto`/`prune` en `schedule.py` se acotan a esa tarea.
+- **Solapes.** Dos tareas que vencen a la vez leen todas las tablas dos veces. ¿Se serializan
+  bajo el mismo *lease*, o se deja que cada una vaya por su lado?
+- **La transición.** Los ajustes actuales (`backup_every_hours`, `backup_keep`,
+  `backup_auto_secrets`) son de `spec.py`: o se migran a una tarea llamada «predeterminada» al
+  arrancar, o se retiran y se pierde lo que un operador ya hubiera configurado. Migrar es lo
+  correcto; retirarlos sin más es una copia que deja de hacerse en silencio.
+- El planificador (`runner.py`) recorrería tareas en vez de un único intervalo. `is_due` y
+  `prune` ya son funciones puras y valen tal cual, una por tarea.
+
 ## Seguridad
 
 ### CVE abiertos en el lock

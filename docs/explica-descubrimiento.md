@@ -494,6 +494,52 @@ flowchart TB
 
 ---
 
+## 6b. Partes de backup aportadas por un módulo (`__backup_part__`)
+
+Un módulo watchful guarda ficheros propios fuera de la BD (MIBs, plantillas, lo que descargue o
+suba un operador) y esos ficheros son parte de la instalación. El núcleo **no puede nombrarlos**:
+no lleva ninguna cadena que nombre un módulo, y una copia que conociera un directorio porque
+alguien escribió su ruta en `lib/core/backup` guardaría los ficheros de ese módulo y se dejaría
+callando los del siguiente.
+
+**Descriptor** (en `watchfuls/<m>/schema.json`): `__backup_part__` = un spec o una lista.
+
+```json
+"__backup_part__": {"id": "mibs", "dir": "snmp_mibs/raw",
+                    "label_key": "backup_part_mibs", "default": false}
+```
+
+| Clave | Qué es |
+|---|---|
+| `id` | cómo se llama la parte en el formulario, el manifest y la API. Por defecto, el nombre del módulo. No puede tomar un id del núcleo (`core`, `config_file`, `history`, `audit`, `syslog`). |
+| `dir` | directorio **relativo a `var_dir`**, y se queda ahí: una ruta absoluta o que se escape con `..` se descarta. Ese directorio se **lee** al copiar y se **escribe** al restaurar, así que una declaración que saliera de `var_dir` dejaría al módulo elegir dónde escribe el panel. |
+| `label_key` | clave bajo la sección `ui` del `lang/*.json` **del propio módulo**. Si falta, se usa su `pretty_name`. |
+| `default` | si el formulario la marca por defecto. Los datos masivos normalmente no. |
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    decl["schema.json · __backup_part__ (spec o lista)"]
+    lang["lang/ del módulo · ui.&lt;label_key&gt;"]
+    decl --> disc["lib.modules.discovery.backup_parts<br/>escanea watchfuls/"]
+    lang --> disc
+    disc --> cat["[{id, module, dir, default, label_i18n}]"]
+    cat --> ui["formulario Crear copia / tarea programada"]
+    cat --> zip["create_backup: var_dir/&lt;dir&gt; → files/parts/&lt;id&gt;/"]
+    cat --> res["restore_backup: files/parts/&lt;id&gt;/ → var_dir/&lt;dir&gt;"]
+```
+
+- **Qué datos:** ficheros, no tablas. Las **tablas** de un módulo no necesitan declararse: `core`
+  es *toda tabla que ninguna otra parte reclamó*, así que las que un módulo crea en runtime
+  (§6) ya están en la copia.
+- **Dónde acaban:** dentro del archivo en `files/parts/<id>/`, derivado del id en ambos lados —
+  copia y restauración no pueden discrepar sobre dónde están los ficheros. Al restaurar se
+  vuelcan donde el módulo dice **hoy** que viven; si el módulo ya no está instalado, su parte se
+  salta en vez de desempaquetarse en un directorio que nadie lee.
+
+---
+
 ## 7. Provisión Entra (`__entraid_provision__`)
 
 Un módulo (o la config OIDC) declara la app de Entra que el asistente device-code compartido
@@ -840,6 +886,7 @@ flowchart TB
 | Un tipo de credencial para un módulo | `schema.json` → `__credential__` (+ campos en schema/lang) |
 | Un protocolo de conexión de host | `schema.json` → `__host_profile__` |
 | Una tabla propia de un módulo | `discover_db_tables()` en el `__init__.py` del módulo |
+| Que el backup incluya los ficheros de un módulo | `schema.json` → `__backup_part__` — ver §6b |
 | Registrar una app de Entra para un módulo | `schema.json` → `__entraid_provision__` |
 | Una opción de configuración | `Cfg(...)` en `spec.py` (+ entrada en `CARDS` de `layout.py`) |
 | Un canal de notificación nuevo | un `lib/core/notify/<canal>/channel.py` → `register_channel(Channel(...))` |

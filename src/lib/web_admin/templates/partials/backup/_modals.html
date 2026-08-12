@@ -1,0 +1,27 @@
+{# One modal for both jobs — making a copy and putting one back.
+
+   Its own rather than borrowed: `showConfirmModal` takes a line of TEXT (it sets
+   `.textContent`, deliberately, so a message can never inject markup) and this needs a form.
+   `showInfoModal` shows key/value pairs and has no confirm button at all.
+
+   The body and the confirm button are filled by _render.html; what lives here is the shell,
+   so the markup is in a template like every other modal instead of being built from strings
+   at run time. #}
+<div class="modal fade" id="backupModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="backupModalTitle"></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="backupModalBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
+                    {{ i18n.cancel }}
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" id="backupModalOk"></button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -497,7 +497,24 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # then apply the resulting cross-site cookie policy (self._app isn't set yet → pass app).
         self._recompute_frame_ancestors()
         self._apply_embed_cookie_policy(app)
+        self._start_backup_runner()
         return app
+
+    def _start_backup_runner(self) -> None:
+        """Start the thread that takes the scheduled copies.
+
+        Started even when the schedule is off: whether a copy is due is asked at each tick,
+        from the live setting, so turning it on in Configuration takes effect within a tick
+        instead of at the next restart. A tick with nothing to do is one comparison.
+        """
+        try:
+            from lib.core.backup.runner import BackupRunner  # noqa: PLC0415
+            self._backup_runner = BackupRunner(self)
+            self._backup_runner.start()
+        except Exception:      # pylint: disable=broad-except
+            # A panel that comes up without automatic copies is worth having; one that
+            # refuses to come up because of them is not.
+            self._backup_runner = None
 
     def _require_json(self) -> 'tuple[dict, None] | tuple[None, tuple]':
         """Parse the request body as a JSON object.

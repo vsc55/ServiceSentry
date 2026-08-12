@@ -9,8 +9,8 @@
 >   [explica-web-admin.md](explica-web-admin.md).
 > - Los **endpoints** de roles/grupos/usuarios están en [ref-api.md](ref-api.md).
 
-El sistema usa **66 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
-código) tiene exactamente esos 66 flags.
+El sistema usa **73 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
+código) tiene exactamente esos 73 flags.
 
 ---
 
@@ -18,7 +18,7 @@ código) tiene exactamente esos 66 flags.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (66 flags) |
+| `admin` | Todos los permisos (73 flags) |
 | `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
 | `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`, `credentials_view` (sin `config_view`, que expone secretos sin enmascarar) |
 
@@ -29,7 +29,7 @@ código) tiene exactamente esos 66 flags.
 
 ## Roles personalizados
 
-Se crean desde **Acceso → Roles** asignando cualquier combinación de los 66 permisos. Se
+Se crean desde **Acceso → Roles** asignando cualquier combinación de los 73 permisos. Se
 persisten en la tabla `roles`.
 
 Sus permisos se editan en **un** sitio: la sub-sección **Acceso → Permisos**, que pone todos los
@@ -52,7 +52,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 
 ---
 
-## Catálogo de permisos (66 flags)
+## Catálogo de permisos (73 flags)
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -101,6 +101,17 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `events_delete` | Eliminar reglas de evento |
 | | `events_notify_view` | Ver el log de notificaciones enviadas |
 | | `events_notify_delete` | Vaciar el log de notificaciones enviadas |
+| **Copias de seguridad** | `backup_view` | Ver qué copias existen y las tareas programadas |
+| | `backup_verify` | Verificar una copia contra sus checksums. Flag propio: no escribe nada, pero recorre y hashea un archivo de gigabytes |
+| | `backup_create` | Crear una copia — y **ejecutar una tarea ahora**, que produce exactamente lo mismo |
+| | `backup_download` | Descargar el fichero. **Quien puede bajarlo tiene la instalación** |
+| | `backup_restore` | Aplicar una copia: sobrescribe usuarios y roles, así que puede entregar el panel |
+| | `backup_delete` | Eliminar una copia del disco — y **bloquearla o desbloquearla**, porque el bloqueo solo decide si un archivo puede destruirse y desbloquear es pedir poder borrarlo |
+| | `backup_schedule` | Crear, editar y borrar **tareas** programadas y **perfiles de retención**. No destruye ningún archivo, pero decide cada cuánto se protege la instalación y cuánta historia se guarda —y editar un perfil lo decide de golpe para todas las tareas que lo siguen |
+
+> Ninguno de los siete de **Copias de seguridad** se concede a los roles integrados: una copia
+> es una herramienta de administración, y la lista sola ya dice qué existe y desde cuándo. Ver
+> [explica-backup.md](explica-backup.md#permisos).
 
 > **IP bans (fail2ban)** añade su propia familia granular `ipban_*` (`ipban_ban_view/add/edit/delete`,
 > `ipban_history_view`, `ipban_history_delete`, `ipban_whitelist_view/add/delete`, `ipban_watchlist_clear`,
@@ -131,7 +142,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
   son identidad, la nombran users/groups/roles/resolución/SCIM/CLI, y no las posee ningún dominio.
 - `ROLES` — las claves de rol integrado, mayor privilegio primero. **Derivada** de
   `BUILTIN_ROLE_UIDS`, no escrita otra vez.
-- `PERMISSIONS` — tupla con los 66 flags.
+- `PERMISSIONS` — tupla con los 73 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de
   roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` de los roles integrados.
