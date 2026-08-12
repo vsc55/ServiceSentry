@@ -1635,9 +1635,11 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
     animation: ss-boot-spin 1.1s linear infinite;
 }
-.ss-boot-logo .bi {
-    font-size: 2.6rem; line-height: 1; color: #fff;
-    filter: drop-shadow(0 0 12px rgba(13, 110, 253, .55));
+/* The mark sits INSIDE the ring track rather than filling the circle: the artwork is a badge
+   with glitch lines running past its edge, and sized to the full 96px those lines cross the
+   ring that is supposed to frame them. */
+.ss-boot-logo img {
+    width: 72px; height: 72px; object-fit: contain;
 }
 .ss-boot-name { font-size: 1.35rem; font-weight: 600; letter-spacing: .04em; }
 /* Indeterminate progress: boot has no measurable percentage, so it sweeps rather than fills. */
@@ -1668,6 +1670,30 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .login-card {
     width: 100%;
     max-width: 400px;
+}
+/* Capped by WIDTH and never by height: the lockup is landscape, and a height cap would leave
+   it narrow with air either side of it. The artwork carries its own transparency, so it needs
+   no plate behind it and reads on the card in either theme. */
+.login-logo {
+    width: 100%;
+    max-width: 260px;
+    height: auto;
+}
+/* The same lockup at the head of Diagnostics, where there is room for it. Its own class and
+   not a wider `.login-logo`: one is inside a 400px card and the other spans a section, and a
+   single class would make changing either of them change both. */
+.ss-diag-logo {
+    width: 100%;
+    max-width: 420px;
+    height: auto;
+}
+/* A label whose name does not explain it, carrying its explanation in a `title`. The dotted
+   underline is the part that matters: a tooltip nobody knows is there is a tooltip nobody
+   reads. Generic — any label with a hint can wear it. */
+.ss-help {
+    text-decoration: underline dotted;
+    text-underline-offset: .2em;
+    cursor: help;
 }
 /* Dark mode: a plain .card shares the deep body bg (#181818), so its edge vanishes.
    Lift it onto a raised surface with a crisp border + real drop shadow so the login

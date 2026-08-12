@@ -13,6 +13,8 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     sessions         /api/v1/sessions*
     audit            /api/v1/audit*
     backup           /api/v1/backups*
+    diagnostics      /api/v1/diagnostics*       (read-only; the update check is the one call
+                                                that leaves the machine, and only on a click)
     config           /api/v1/config*            (+ /config/versions, /config/layout, /config/schema,
                                                    /config/db/<op> — optimize | compact)
     credentials      /api/v1/credentials*
@@ -80,6 +82,7 @@ from lib.core.groups.routes import register as _groups
 from lib.core.sessions.routes import register as _sessions
 from lib.core.audit.routes import register as _audit
 from lib.core.backup.routes import register as _backup
+from lib.core.diagnostics.routes import register as _diagnostics
 from lib.core.config.routes import register as _config
 from lib.core.hosts.routes import register as _hosts
 from lib.core.credentials.routes import register as _credentials
@@ -124,6 +127,7 @@ def register_all(app, wa):
     _sessions(app, wa)
     _audit(app, wa)
     _backup(app, wa)
+    _diagnostics(app, wa)
     _roles(app, wa)
     _groups(app, wa)
     _monitoring(app, wa)

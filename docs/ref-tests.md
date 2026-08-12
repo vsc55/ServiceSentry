@@ -6758,3 +6758,76 @@ restaurar), que no pueda robar un id del núcleo, y el viaje de ida y vuelta de 
 | `TestADeclarationCannotEscapeVarDir::*` (5) | `..`, ruta absoluta o con unidad se descartan; ni el id `core` ni un id ya tomado |
 | `TestTheCoreNamesNoModule::test_the_backup_service_carries_no_module_name` | Leído de los literales del servicio: ninguno nombra un watchful |
 | `TestTheFilesActuallyTravel::*` (4) | Copia y restauración por `files/parts/<id>/`, y una parte declarada que no dio nada marca la copia como parcial |
+
+---
+
+## 150. La marca: dos ficheros, un original, y lo que se rompe en silencio
+
+**Archivo:** `tests/unit/test_wa_brand_logo.py` — 16 tests
+
+El panel sirve **dos** derivados de un mismo original guardado en `assets/brand/`: el lockup
+completo en la tarjeta de login y solo el emblema dentro del anillo de carga. Son dos y no uno
+porque un lockup apaisado encogido a un círculo de 96 px es un nombre que nadie lee.
+
+Ningún test juzga cómo se ve. Lo que se fija son las tres propiedades que lo rompen sin que nada
+lo diga:
+
+- **La transparencia.** Es neón sobre nada, y tiene que caer sobre la tarjeta clara y sobre el
+  fondo oscurecido del arranque. Aplanarlo contra negro es justo lo que hace un optimizador si
+  nadie mira, y el resultado —un rectángulo negro sobre una tarjeta blanca— pasa todas las demás
+  comprobaciones.
+- **El peso.** El original son 2 MB y el login es lo primero que ve cualquiera. Bajar de tamaño
+  es el motivo entero de servir un derivado en vez del maestro.
+- **La caja declarada.** `width`/`height` en la etiqueta son lo que reserva el hueco antes de que
+  llegue la imagen; mal puestos, la tarjeta de login salta bajo el cursor mientras carga.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheFilesAreThereAndUsable::test_they_keep_their_transparency` | Alfa real (canal, o `tRNS` si va cuantizado a paleta) |
+| `TestTheFilesAreThereAndUsable::test_they_are_derived_and_not_the_master` | Techo de 200 KiB: que una reexportación no devuelva los 2 MB al login |
+| `TestTheFilesAreThereAndUsable::test_the_mark_is_square` | Va dentro de un anillo circular: cualquier otra proporción es un emblema con un lado plano |
+| `TestTheFilesAreThereAndUsable::test_the_lockup_is_the_landscape_one` | Si los dos ficheros se volvieran la misma imagen, el anillo tendría un nombre ilegible y nada lo diría |
+| `TestTheFilesAreThereAndUsable::test_the_master_is_kept_with_a_recipe` | Un binario servido sin fuente es un callejón sin salida (misma razón que `make_favicon.py`) |
+| `TestTheDiagnosticsSectionShowsItToo::*` (2) | El lockup encabeza también Diagnóstico, con **ancho propio**: una sola clase compartida haría que tocar uno cambiara el otro |
+| `TestThePagesUseThem::*` (6) | Login y arranque los referencian, el icono provisional ya no está, van cacheados con `asset_v`, la caja declarada es la del fichero, y ni el nombre se imprime dos veces bajo un lockup que ya lo lleva ni queda de subtítulo una etiqueta de la barra lateral («Sistema»), que bajo un logo es una palabra suelta que no describe nada |
+| `TestTheStylesheetSizesThem::*` (2) | El lockup se limita por **ancho** (por alto quedaría estrecho con aire a los lados) y el emblema cabe **dentro** del anillo en vez de cruzarlo |
+
+Sin Flask ni Pillow: la cabecera IHDR son once bytes de `struct`, y un test que necesitara una
+librería de imagen sería un test que se salta justo en la máquina donde importa.
+
+---
+
+## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
+
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 32 tests
+**Archivo:** `tests/integration/test_wa_diagnostics.py` — 19 tests
+
+Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
+qué corre, dónde escribe y qué falta. Todas se podían contestar antes —leyendo un log, abriendo
+una shell en el contenedor, o sabiendo qué librería enciende qué función—: eso son tres tardes
+por pregunta.
+
+Los recolectores son funciones puras del proceso y del disco, así que se prueban como están
+escritos: se les da un directorio o un fichero de lock y se lee el diccionario. Dos propiedades
+importan más que cualquier campo suelto:
+
+- **Nada revienta.** Esta es la pantalla que alguien abre porque algo ya va mal. Un recolector
+  que lanza una excepción con un montaje ilegible se lleva por delante las otras cuarenta
+  respuestas, y la única página que podía explicar el fallo pasa a formar parte de él.
+- **«No se puede decidir» es una respuesta.** La comprobación de versión compara una versión
+  semántica contra una etiqueta de release, y la semántica de este proyecto no se mueve a
+  propósito — así que «estás al día» sería una suposición disfrazada de hecho, justo en la
+  pantalla cuyo trabajo entero es no hacer eso.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSystemBlockAlwaysAnswers::*` (3) | Intérprete y máquina siempre contestan; `_safe` convierte una excepción —y una respuesta vacía, que se lee peor— en un campo «desconocido» |
+| `TestDependenciesAreReadFromTheLock::*` (7) | Se lee del **lock** y no de `pip freeze`; ausente y versión distinta son veredictos separados, «más nueva» no es un veredicto, los problemas van primero, comentarios/flags/marcadores de entorno no son paquetes, la **barra de continuación** de `pip-compile --generate-hashes` no forma parte de la versión, y contra el lock real no puede salir «todo difiere» |
+| `TestOptionalFeaturesExplainWhatIsSwitchedOff::*` (3) | Cada entrada nombra su módulo y **qué enciende**, con etiqueta en los dos idiomas: el panel donde nunca aparece el botón de SSO casi nunca está mal configurado |
+| `TestStorageAsksTheOsAndWritesNothing::*` (3) | Existencia, permiso de escritura y sitio libre — preguntando al SO, sin crear nada en el directorio que alguien está mirando porque se comporta raro |
+| `TestTheReportRenders::*` (6) | Los tres formatos son funciones **puras** del payload —por eso salieron de la ruta—: un formato desconocido cae a texto, cada uno declara su mimetype, el texto lista TODAS las dependencias (no solo las malas), el XML escapa con `ElementTree` (un `&` en el nombre de host, rutas de Windows), una lista sale como hijos repetidos y no como `repr` de Python, y el JSON no toca el payload |
+| `TestTellingWhetherAReleaseIsNewer::*` (10) | Más nueva / vamos por delante / **no se puede decidir**; una etiqueta se lee venga como venga; se niega a preguntar por HTTP plano; un **404 no es un endpoint roto** (`/releases/latest` excluye borradores y prereleases, que es el estado de este repositorio hoy) y se reporta como «nada publicado todavía», mientras que un 403 sigue siendo un HTTP con su código; y la dirección tiene **un solo hogar** (el registro de `spec.py`), que es lo que permite que la pantalla de configuración la muestre en gris detrás de la casilla vacía |
+| `TestItIsBehindItsOwnPermission::*` (2) | `diagnostics_view` es propio: ver el panel no lo concede |
+| `TestWhatThePageAnswers::*` (6) | Los seis bloques viajan juntos, la base de datos se lee del **conector** y no de la config, el nivel de log se lee de la **configuración** (no hay atributo que lo espeje: pedirlo devolvía vacío y el campo salía «—» en toda instalación), y la página no escribe una sola línea de auditoría |
+| `TestTheReportIsMeantToBePasted::*` (7) | Texto plano `inline` —se lee antes de enviarlo—, todos los bloques presentes, y el de dependencias **nunca vacío**: lista las 41 con su veredicto, diferencias primero. La pantalla pliega las que coinciden porque se lee de un vistazo; un fichero que se pega en una incidencia no. **Tres formatos** (txt/json/xml) de los MISMOS recolectores —una segunda pasada por formato es como dos informes de la misma instalación acaban discrepando—, cada uno con su mimetype y su extensión, un formato desconocido cae a texto en vez de negarse, y el XML sale bien formado con rutas de Windows dentro (escapado por `ElementTree`, no a mano) y las listas como hijos repetidos |
+| `TestTheOneCallThatLeavesTheMachine::*` (4) | El GET es **incapaz** de salir a la red (se sustituye `fetch_latest` por algo que falla el test si lo llaman); un fallo es una respuesta y no un 500; y las dos salidas quedan auditadas |

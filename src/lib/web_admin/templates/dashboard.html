@@ -14,7 +14,12 @@
    role, and every animation is dropped under prefers-reduced-motion. #}
 <div id="loading">
     <div class="ss-boot" role="status" aria-live="polite">
-        <div class="ss-boot-logo" aria-hidden="true"><i class="bi bi-shield-check"></i></div>
+        {# The mark alone, not the whole lockup: it sits inside a 96px ring, and a landscape
+           lockup shrunk into that is a wordmark nobody can read. Empty `alt` because the
+           element is decorative — the status text below carries the meaning. #}
+        <div class="ss-boot-logo" aria-hidden="true">
+            <img src="/static/img/logo-mark.png?v={{ asset_v }}" alt="" width="256" height="256">
+        </div>
         <div class="ss-boot-name">ServiceSentry</div>
         <div class="ss-boot-bar" aria-hidden="true"><span></span></div>
         <div class="ss-boot-text">{{ i18n.loading }}</div>
@@ -170,6 +175,7 @@
         {% if not standalone %}
         {% include "partials/audit/_pane.html" %}
         {% include "partials/backup/_pane.html" %}
+        {% include "partials/diagnostics/_pane.html" %}
         {% endif %}
 
         <!-- ======= Account (SPA pane on /admin + own page at /account) ====== -->

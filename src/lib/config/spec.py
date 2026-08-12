@@ -142,6 +142,21 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # an unattended copy that silently holds no credentials is discovered at restore time,
         # which is the worst moment to discover anything.
         env='SS_BACKUP_AUTO_SECRETS', card='backup'),
+    Cfg('web_admin|update_check_url', str,
+        'https://api.github.com/repos/vsc55/ServiceSentry/releases/latest',
+        no_rule=True, card='diagnostics',
+        # Where Diagnostics asks whether a newer release exists. The address lives HERE and not
+        # as a constant in `lib/core/diagnostics/update.py` — that module reads it from this
+        # registry — so the config screen can show it greyed behind an empty box like every
+        # other option, "restore default" has something to restore to, and the one address this
+        # panel is willing to contact is visible to whoever is deciding whether it may reach
+        # the internet at all. Left as a constant, the box was blank with nothing behind it.
+        # A field and not a fixed value so a fork, or an install that may only reach an
+        # internal mirror, points it elsewhere without a code change.
+        # The check NEVER runs on its own: no poll, nothing at boot, nothing while a page
+        # paints. It happens when somebody presses the button, which is why there is no
+        # separate on/off switch — a URL nobody clicks is already off.
+        env='SS_UPDATE_CHECK_URL'),
     Cfg('web_admin|pw_min_len', int, 8, attr='_PW_MIN_LEN',
         min=1, max=128, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_max_len', int, 128, attr='_PW_MAX_LEN',

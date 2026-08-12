@@ -247,6 +247,9 @@ if (auditLi) auditLi.style.display = perms.has('audit_view') ? '' : 'none';
 // Backup tab
 const backupLi = document.getElementById('tab-backup-li');
 if (backupLi) backupLi.style.display = perms.has('backup_view') ? '' : 'none';
+// Diagnostics tab
+const diagLi = document.getElementById('tab-diagnostic-li');
+if (diagLi) diagLi.style.display = perms.has('diagnostics_view') ? '' : 'none';
 // Modules buttons
 const btnNewModule = document.getElementById('btnNewModule');
 if (btnNewModule) btnNewModule.style.display = perms.has('modules_add') ? '' : 'none';

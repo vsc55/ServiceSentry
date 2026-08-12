@@ -1,0 +1,50 @@
+{#
+   Diagnostics section: the markup of its tab pane.
+
+   Two buttons in the toolbar and nothing else. "Reload" because the whole point of this
+   screen is that it is computed at the moment it is asked — a diagnostics page served from a
+   cache describes the problem you had before — and "Report", which is the same information as
+   text, because nobody transcribes forty fields into a bug report.
+
+   The update check is NOT here: it belongs beside the version it is about, in the first card,
+   where its answer can sit next to the question.
+#}
+{# `ss-vfill` and NOT `ss-fullbleed ss-fullbleed-top`: those are for a section whose content is
+   one flush card filling the frame (Audit, Credentials), and stacking them under a
+   `.ss-bleed-top` bar applies two different bleed mechanisms at once — which is why this bar
+   sat at other margins, with other corners, than every other section's. Backup and Modules pin
+   their bar the same way over a plain `ss-vfill` pane; this is that. #}
+<div class="tab-pane fade ss-vfill" id="tab-diagnostic">
+    <div class="ss-bleed-top" data-ss-pane-head>
+    <div class="ss-toolbar ss-toolbar-plain">
+        <h6 class="mb-0"><i class="bi bi-clipboard-pulse me-2"></i>{{ i18n.tab_diagnostic }}</h6>
+        <button class="btn btn-sm btn-secondary" id="btnReloadDiagnostics"
+                onclick="renderDiagnostics()" title="{{ i18n.reload }}">
+            <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
+        </button>
+        {# Three formats behind one button. The default (text) stays one click away because it
+           is what a comment box wants; JSON and XML are for the other destination, an asset or
+           ticketing system that ingests one of them. #}
+        <div class="btn-group">
+            <a class="btn btn-sm btn-secondary" href="/api/v1/diagnostics/report"
+               target="_blank" rel="noopener" title="{{ i18n.diag_report_tt }}">
+                <i class="bi bi-file-earmark-text me-1"></i>{{ i18n.diag_report }}
+            </a>
+            <button type="button" class="btn btn-sm btn-secondary dropdown-toggle-split"
+                    data-bs-toggle="dropdown" aria-expanded="false"
+                    aria-label="{{ i18n.diag_report_format }}">
+                <i class="bi bi-caret-down-fill"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" target="_blank" rel="noopener"
+                       href="/api/v1/diagnostics/report?format=txt">TXT</a></li>
+                <li><a class="dropdown-item" target="_blank" rel="noopener"
+                       href="/api/v1/diagnostics/report?format=json">JSON</a></li>
+                <li><a class="dropdown-item" target="_blank" rel="noopener"
+                       href="/api/v1/diagnostics/report?format=xml">XML</a></li>
+            </ul>
+        </div>
+    </div>
+    </div>
+    <div id="diagnostic-container" class="ss-vfill"></div>
+</div>

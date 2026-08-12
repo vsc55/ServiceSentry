@@ -8,6 +8,103 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.61] - 2026-08-12
+
+### Added
+- **A Diagnostics section under System.** The questions it answers are the ones a support
+  thread asks, in that order: what version is this, what is it running on, where does it write,
+  and what is missing. All of them were answerable before — by reading a log, opening a shell in
+  the container, or knowing which library turns which feature on. That is an afternoon per
+  question.
+  - **Version**, the instance id, the log level, and **which services this process runs
+    itself**. On a multi-container install that last one is usually "none", and it reframes
+    every question about a check that did not run: it did not run *here*.
+  - **System**: distribution, kernel, architecture, host, whether this is a container, CPUs,
+    interpreter and its path, PID, and the time zone **with its offset** — which is what a
+    timestamp that looks an hour out gets read against.
+  - **Database** read from the connector the panel is actually using, not from the config: the
+    interesting case is exactly when those two differ. Says whether syslog has a database of
+    its own.
+  - **Storage**: the three directories that matter, each with whether it exists, whether it is
+    writable and how much room is left. Writability is asked of the OS, never tested by writing
+    — a diagnostics page must not create anything in the directory somebody is looking at
+    because it is behaving strangely.
+  - **Optional features** — the card that answers most of what this page exists for. A panel
+    where the SSO button never appears, or every SNMP check is skipped, is almost never
+    misconfigured: the library is not installed, the feature switched itself off, and nothing
+    on screen said which.
+  - **Dependencies**, read from `requirements.lock` and not from `pip freeze`: the lock is what
+    the install was built from, so "installed 3.1 where the lock says 3.4" is a fact about this
+    deployment. Three verdicts and no fourth — "newer" is deliberately not one, because a
+    deployment that drifted upward drifted.
+  - **A report to send**, in `txt`, `json` or `xml` (`/report?format=`), from the same
+    collectors — a second gathering pass per format is how two reports of the same install come
+    to disagree. Text is the default because the destination is usually a comment box and it
+    can be read before it is sent; the other two are for the destination that ingests them,
+    where the alternative is somebody writing a parser for prose. An unknown format falls back
+    to text rather than refusing: it is a link somebody clicks. The XML is built with
+    `ElementTree`, so Windows paths and version strings are escaped by something that is not
+    hand-rolled, and a list field becomes repeated children rather than a stringified Python
+    list.
+  - The dependency fold **on screen** holds the ones that match, never the whole list: the
+    differences are already open above it, and repeating them underneath showed the same
+    package twice with the same badge — which reads as two findings and makes the open table
+    look like a summary of something longer rather than the whole of what is wrong. The
+    **report** lists them all, differences first: a section that shows nothing because nothing
+    is wrong reads as a section that failed to collect.
+  - **The update check never runs on its own.** No poll, nothing at boot, nothing while the
+    page paints — a monitoring panel gets installed on segregated networks by people who would
+    rather it did not talk to anybody. It happens on a click, over HTTPS only, with a short
+    timeout, and is audited whether or not it succeeded: a check that failed still made the
+    attempt. Its address is a config field, so a fork or an internal mirror needs no code
+    change and the one host this panel will contact is visible in the config screen.
+  - **Nothing published yet is not a broken endpoint.** `/releases/latest` answers with the
+    newest *published* release and excludes drafts and prereleases, so a repository whose only
+    release is either — which is this one's state today: a single draft tagged `test` — has
+    nothing to return. Reported as its own answer instead of "HTTP 404", which sends somebody
+    to check the URL, the one thing that is not wrong. A 403 stays an HTTP status, because rate
+    limiting is acted on differently.
+  - It reports **"cannot tell"** when both sides carry the same semantic version. That is this
+    project's normal state — the counter after `+build.` does not participate in precedence —
+    and answering "up to date" there would be a guess dressed as a fact on the one screen whose
+    whole job is not to do that.
+  - One new permission, `diagnostics_view`, granted to nobody by default: the page holds no
+    secret but does describe the shape of the install.
+  - The domain is split by **what an answer depends on**, not by file size: `collect` needs
+    only the process and the disk, `service` needs the running panel, `report` needs only what
+    those two returned, and `routes` is left with three declarations, a permission and an audit
+    line. Only the middle one can be wrong in a way that depends on how the install is
+    deployed — and the serialisers, being pure, are tested without an app at all.
+  - Three things found by looking at the first render: the lock parser carried
+    `pip-compile --generate-hashes`' trailing `\` into the version, so **all forty-one** pinned
+    packages reported "a different version installed" — a screen that is wrong about everything
+    is one people doubt last; the pane stacked two different full-bleed mechanisms, so its
+    toolbar sat at other margins and other corners than every other section's; and two columns
+    of label-left / value-right put a value flat against the next pair's label — "Windows 10
+    Kernel" reading as one field with a strange name — which is a missing gutter and not a
+    missing rule, in both the system block and the optional-features one.
+- **The brand artwork, on the login card and in the boot ring.** Both were a Bootstrap icon
+  standing in for a logo that did not exist yet.
+  - **Two derived files, not one.** The lockup is landscape and the boot ring is a 96px circle,
+    so the ring gets the mark alone — a wordmark shrunk into that is a name nobody can read.
+  - The 2 MB master lives in `assets/brand/`, outside `src/` so it is not packaged, with the
+    two `magick` commands that produce what ships. A committed binary with no source is a dead
+    end: nobody can re-export it at another size or retouch it without starting over — the same
+    reason the favicon has `tools/make_favicon.py`.
+  - Served at **76 KiB and 38 KiB**, quantised to 256 colours. The login page is the first
+    thing anybody sees, and full colour costs 305 KiB for no visible difference on neon
+    artwork.
+  - **The transparency is kept**, which is what lets one file work on the light theme's card
+    and on the dark backdrop without a black plate behind it. Flattening it is what an
+    optimiser does when nobody is watching, and the result passes every other check — so a test
+    states it.
+  - `width`/`height` are the files' own pixels, so the browser reserves the box before the
+    image arrives. The login card must not jump under the cursor while it loads.
+  - The heading under the lockup is gone: the artwork carries a wordmark, and printing the name
+    again underneath is the same word twice in two typefaces. So is the subtitle beneath it —
+    it was `admin_panel`, the sidebar's label for a **section** ("System"), which read as
+    "ServiceSentry / System" under the old heading and as a stray word under a logo.
+
 ## [0.0.1+build.59] - 2026-08-12
 
 ### Changed
