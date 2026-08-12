@@ -135,7 +135,8 @@ a pytest plugin that blocks `import flask` in `sys.meta_path` is how these were 
   real bugs (creating an empty module entry silently enabled six modules).
 - **Modules extend the core by declaring, not by the core naming them**: `__page__` (a section),
   `__overview_widget__` (a dashboard widget), `__host_profile__` (host binding),
-  `__provision_host__`. The core ships no string that names a module.
+  `__backup_part__` (files of its own that a backup must hold), `__provision_host__`. The core
+  ships no string that names a module.
 - **`SS_SECRET_KEY`** pins the key that signs sessions *and* derives the Fernet key for every
   stored secret. Every process sharing a database must hold the same one. Without it, the key
   is a file in `config_dir` — fine while that directory is shared and persistent.

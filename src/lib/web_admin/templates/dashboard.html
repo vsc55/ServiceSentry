@@ -169,6 +169,7 @@
         {% endif %}
         {% if not standalone %}
         {% include "partials/audit/_pane.html" %}
+        {% include "partials/backup/_pane.html" %}
         {% endif %}
 
         <!-- ======= Account (SPA pane on /admin + own page at /account) ====== -->
@@ -213,6 +214,7 @@
 
 <!-- Modals & Toast -->
 {% include "partials/_modals.html" %}
+{% include "partials/backup/_modals.html" %}
 
 {% endblock %}
 

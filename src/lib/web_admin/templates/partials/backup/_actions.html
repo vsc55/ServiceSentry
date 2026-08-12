@@ -1,0 +1,58 @@
+{# ================================================================
+   Backup — what the buttons on a row do: delete, verify, lock.
+
+   Operations on ONE archive, and not part of drawing the list. Their own file because the
+   render shell has a size limit that exists to stop a section growing sub-sections inside
+   itself — restoring and the details dialog left for the same reason.
+
+   Every one of them says what will happen rather than asking "are you sure?": that is not a
+   question anybody can answer, and the one worth answering is what happens if I say yes.
+   ================================================================ #}
+
+function deleteBackup(name) {
+    showConfirmModal(t('backup_delete_confirm').replace('{}', name), async () => {
+        const res = await apiDelete(`/api/v1/backups/${encodeURIComponent(name)}`);
+        if (_apiOk(res)) {
+            showToast(t('backup_deleted_ok'));
+            renderBackups();
+        } else showToast(_apiErr(res), 'danger');
+    });
+}
+
+/** Protect a copy from being deleted, or stop protecting it.
+ *
+ *  Retention answers "how much history" and its two floors answer "never leave the task with
+ *  nothing". Neither can say *this particular archive* — which is what somebody means about the
+ *  copy taken before a migration, or the last one known to be good.
+ *
+ *  Locking needs no confirmation: it takes nothing away, and it is undone by the same button.
+ *  UNLOCKING does, because what it does is hand the copy back to the counter that was about to
+ *  delete it — and the dialog says that instead of asking whether you are sure. */
+function toggleBackupLock(name, locked) {
+    const go = async () => {
+        const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/lock`,
+                                  {locked: !!locked});
+        if (_apiOk(res)) {
+            showToast(t(locked ? 'backup_lock_ok' : 'backup_unlock_ok'));
+            renderBackups();
+        } else showToast(_apiErr(res), 'danger');
+    };
+    if (locked) { go(); return; }
+    showConfirmModal(t('backup_unlock_confirm').replace('{}', name), go);
+}
+
+/** Check a copy against its own checksums, and say which question failed.
+ *  "The file is intact" and "the contents are unchanged" are different failures with different
+ *  causes — a truncated transfer versus altered data — so the answer names which. */
+async function verifyBackup(name) {
+    const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/verify`, {});
+    if (!_apiOk(res)) { showToast(_apiErr(res), 'danger'); return; }
+    const v = res.data || {};
+    if (v.ok) {
+        showToast(t('backup_verify_ok').replace('{}', v.members));
+        return;
+    }
+    const why = v.file === 'bad' ? t('backup_verify_file_bad')
+        : t('backup_verify_members_bad').replace('{}', (v.bad || []).length);
+    showToast(why, 'danger');
+}

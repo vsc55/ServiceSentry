@@ -1,0 +1,248 @@
+{# ================================================================
+   Backup — running a task on demand, and watching it.
+
+   Its own partial because the render shell has a size limit, and this is a self-contained
+   story: start the run, show it in the list at once, keep the row current, and say when it is
+   done.
+
+   No modal to start it. The modal is right for making a copy BY HAND, where a form has to be
+   filled in first; this is a row appearing in the list it belongs to, which is where somebody
+   who pressed "run" is already looking. The dialog is still there for whoever wants the
+   detail — one click on the running row.
+   ================================================================ #}
+
+// The run in flight, if any. A row for it appears at the top of the list the moment the
+// button is pressed — the copy IS being made, so the list showing nothing until it finishes
+// would be the screen disagreeing with the disk for as long as it takes.
+let _bkRunning = null;      // {taskId, taskName, step, total, table}
+
+/** Run a task now: start it, show it in the list, say when it is done.
+ *
+ *  Started and polled rather than awaited — a copy of a large install takes minutes, and a
+ *  request held open that long is one the browser or a proxy gives up on. The progress is per
+ *  TABLE because rows are unbounded and the archive's size is unknown until it closes:
+ *  "syslog 4/11" is a sentence.
+ *
+ *  No modal. The modal is right for making a copy BY HAND, where a form has to be filled in
+ *  first; this is a row appearing in the list it belongs to, which is where somebody who
+ *  pressed "run" is already looking.
+ */
+async function runBackupTask(uid) {
+    const tk = _backupTasks.find(x => x.id === uid);
+    const res = await apiPost(`/api/v1/backups/tasks/${encodeURIComponent(uid)}/run`, {});
+    if (!_apiOk(res)) { showToast(_apiErr(res), 'danger'); return; }
+    const jobId = (res.data || {}).job_id;
+    if (!jobId) { showToast(_apiErr(res), 'danger'); return; }
+    _bkStartWatching({taskId: uid, taskName: (tk && tk.name) || ''}, jobId);
+}
+
+/** Put the run on screen and start following it. One entry point for both kinds of copy:
+ *  the scheduled one appears in its task's list, the hand-made one in the manual list, and
+ *  both draw the same row and the same dialog — a second copy of this was a second place for
+ *  the progress bar to be forgotten, which is how the manual one came to have none. */
+function _bkStartWatching(what, jobId) {
+    _bkRunning = {step: 0, total: 0, table: '', steps: [], ...what};
+    const c = document.getElementById('backup-container');
+    if (c) _renderBackupPane(c);
+    // Only the hand-made one opens the dialog by itself: its form was just there, so the modal
+    // is where the eye already is. A task run is started from a row and shows in that row.
+    if (what.manual) _bkWhenModalClosed(_bkOpenRunningDetail);
+    _bkPollJob(jobId);
+}
+
+/** Run `fn` once the section's modal is really out of the way.
+ *
+ *  Bootstrap ignores `show()` during the hide transition, so opening the progress dialog
+ *  straight after the form's OK closed the form opens nothing at all — the click looks like it
+ *  did nothing, which is exactly what was reported.
+ *
+ *  Testing for the `show` class is not enough, and that was the bug: the class comes off at the
+ *  START of the hide and `hidden.bs.modal` fires at its END, so in between there is no class to
+ *  test and nothing to wait for — and the window a request lands in is precisely that. Both are
+ *  covered here, and whichever answers first wins. */
+function _bkWhenModalClosed(fn) {
+    const el = document.getElementById('backupModal');
+    if (!el) { fn(); return; }
+    let done = false;
+    const go = () => { if (!done) { done = true; fn(); } };
+    el.addEventListener('hidden.bs.modal', go, {once: true});
+    // …and a floor, because if the dialog was ALREADY closed the event never comes at all.
+    // Longer while it is visibly open (the event is what should fire); short otherwise, which
+    // is the mid-transition case and the one that was silently doing nothing.
+    setTimeout(go, el.classList.contains('show') ? 1500 : 300);
+}
+
+/** Whether the run in flight belongs in the list on screen.
+ *  A copy showing up under a task that is not making it would be the screen lying about what
+ *  is there — and the hand-made one has no task to show under, so it lives with its own. */
+function _bkRunningInView() {
+    if (!_bkRunning) return false;
+    // A restore adds nothing to any list — it replaces what the install already holds, and a
+    // row for it would be the screen inventing a copy that is not being made.
+    if (_bkRunning.restore) return false;
+    if (_backupView === 'all') return true;
+    return _bkRunning.taskId ? _backupView === 'task:' + _bkRunning.taskId
+                             : _backupView === 'manual';
+}
+
+/** The row for the copy being made. Same shape as a finished one, so the list does not jump
+ *  when it is replaced by the real thing. */
+function _bkRunningRow() {
+    const r = _bkRunning;
+    const pct = r.total ? Math.round((r.step / r.total) * 100) : 0;
+    return `<tr id="bkRunningRow" style="cursor:pointer"
+                onclick="_bkOpenRunningDetail()" title="${escAttr(t('backup_run_detail'))}">
+        <td><span class="d-flex align-items-center gap-2">
+            <div class="spinner-border spinner-border-sm text-secondary"></div>
+            <span class="min-w-0">
+                <span class="d-block text-truncate" style="font-size:.85rem">${esc(r.taskName)}</span>
+                <code class="text-muted ss-fs-2">${esc(t('backup_run_table'))} ${esc(r.table || '—')}
+                    ${r.total ? `(${r.step}/${r.total})` : ''}</code>
+            </span>
+        </span></td>
+        <td colspan="4">
+            <div class="progress" style="height:.5rem"><div class="progress-bar"
+                 style="width:${pct}%"></div></div>
+        </td>
+    </tr>`;
+}
+
+/** The same run, in full: what it is copying and how far along. The row has one line to say
+ *  it in; this is where somebody who wants to watch it can. */
+function _bkJobBody() {
+    const r = _bkRunning;
+    if (!r) return `<div class="text-muted small py-3">${esc(t('backup_run_finished'))}</div>`;
+    const pct = r.total ? Math.round((r.step / r.total) * 100) : 0;
+    return `<div class="py-1">
+        <div class="mb-2"><strong>${esc(r.taskName)}</strong></div>
+        <div class="small text-muted mb-1">${esc(t('backup_run_table'))}
+            <code>${esc(r.table || '—')}</code>
+            ${r.total ? `(${r.step}/${r.total})` : ''}</div>
+        <div class="progress mb-2" style="height:.6rem">
+            <div class="progress-bar" style="width:${pct}%"></div></div>
+        ${_bkStepsHtml(r.steps)}
+        <div class="small text-muted">${esc(t('backup_run_keep_open'))}</div>
+    </div>`;
+}
+
+/** One line per PART, with what happened to it.
+ *  The bar says how far along; this says what actually made it — which is the question
+ *  afterwards, and the one a percentage cannot answer. */
+function _bkStepsHtml(steps) {
+    if (!steps || !steps.length) return '';
+    return '<div class="mb-2">' + steps.map(st => {
+        const meta = _backupParts.find(x => x.id === st.part);
+        const label = _bkPartLabel(meta, st.part);
+        const icon = st.ok
+            ? '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+            : '<i class="bi bi-x-circle-fill text-danger me-2"></i>';
+        const detail = st.error
+            ? '<span class="text-danger">' + esc(st.error) + '</span>'
+            : '<span class="text-muted">' + esc(t('backup_n_rows').replace('{}', st.rows))
+              + '</span>';
+        return '<div class="small d-flex align-items-center gap-1">' + icon
+             + '<span class="flex-grow-1 text-truncate">' + esc(label) + '</span>'
+             + detail + '</div>';
+    }).join('') + '</div>';
+}
+
+/** The same dialog, once the run is over: the verdict, the checklist that produced it, and the
+ *  way into the copy's full detail.
+ *
+ *  It replaces the bar in place instead of closing the window. A dialog somebody deliberately
+ *  opened to watch a copy being made is a dialog they are reading when it ends — and a partial
+ *  copy is precisely the outcome that must not be dismissed by the screen on their behalf. */
+function _bkJobDoneBody(job) {
+    const status = job.error ? 'error' : (job.status || 'ok');
+    const tone = status === 'ok' ? 'success' : status === 'partial' ? 'warning' : 'danger';
+    const verdict = job.error ? job.error
+                  : status === 'partial' ? t('backup_status_partial')
+                  : status === 'error'   ? t('backup_status_error')
+                  : t('backup_status_ok');
+    // Offered only when there is a copy to open: a run that failed produced no file, and a
+    // button leading to nothing is worse than no button.
+    const detail = job.created
+        ? `<button type="button" class="btn btn-sm btn-secondary"
+                   onclick="openBackupDetail(${jsStr(job.created)})">
+               <i class="bi bi-info-circle me-1"></i>${esc(t('backup_detail'))}</button>`
+        : '';
+    return `<div class="py-1">
+        <div class="mb-2"><strong>${esc(job.created || job.task || '')}</strong></div>
+        <div class="alert alert-${tone} py-2 px-3 small mb-2">
+            ${esc(t('backup_run_finished'))} ${esc(verdict)}</div>
+        ${_bkStepsHtml(job.steps)}
+        ${detail}
+    </div>`;
+}
+
+function _bkOpenRunningDetail() {
+    if (!_bkRunning) return;
+    _openBackupModal(_bkRunningTitle(), _bkJobBody(), t('close'), 'secondary', () => {});
+}
+
+function _bkRunningTitle() {
+    if (!_bkRunning) return '';
+    return _bkRunning.restore ? t('backup_restore')
+         : _bkRunning.manual  ? t('backup_create')
+         : t('backup_run_now');
+}
+
+/** Re-read the page once the outcome has been read, or right away if nobody is reading it.
+ *  Repainting one section instead would leave the other eleven showing the install as it was,
+ *  with no way to tell which is which. */
+function _bkReloadWhenClosed(dialogIsOpen) {
+    const go = () => setTimeout(() => window.location.reload(), 600);
+    const el = document.getElementById('backupModal');
+    if (!dialogIsOpen || !el) { go(); return; }
+    el.addEventListener('hidden.bs.modal', go, {once: true});
+}
+
+/** Ask every second until it is done, repainting only the running row. A tighter loop would
+ *  ask more often about a job whose unit of progress is a whole table. */
+async function _bkPollJob(jobId) {
+    for (let i = 0; i < 3600; i++) {
+        const job = await apiGet(`/api/v1/backups/jobs/${encodeURIComponent(jobId)}`);
+        // Gone means gone: jobs live in this process's memory, so a null answer after a restart
+        // is not something more waiting will fix.
+        if (!job) { _bkRunning = null; showToast(t('save_error'), 'danger'); break; }
+        if (job.done) {
+            const restore = job.kind === 'restore';
+            _bkRunning = null;
+            if (job.error) showToast(job.error, 'danger');
+            else if (restore) showToast(t('backup_restored_ok').replace('{}',
+                Object.values(job.tables || {}).reduce((n, v) => n + (Number(v) || 0), 0)));
+            else if (job.manual) showToast(t('backup_created_ok'));
+            else showToast(t('backup_run_ok').replace('{}', job.task || ''));
+            // The list first, so the copy exists by the time the dialog offers to open it.
+            // A restore changed no copy — and the page is about to reload anyway.
+            if (!restore) await renderBackups();
+            // The dialog is NOT closed. Somebody opened it to watch this, and the moment it
+            // ends is the moment its outcome is worth reading — closing the window then takes
+            // the answer away at exactly the wrong instant, and leaves a toast as the only
+            // trace of a run that may have lost a part. It says it finished and waits to be
+            // dismissed.
+            const m = document.getElementById('backupModal');
+            const body = document.getElementById('backupModalBody');
+            const open = body && m && m.classList.contains('show');
+            if (open) body.innerHTML = restore ? _bkRestoreDoneBody(job) : _bkJobDoneBody(job);
+            // Everything on screen was read before a restore replaced the tables under it, so
+            // the page has to be re-read. On CLOSE, so the report is not swept away by the
+            // reload; straight away when nobody had the dialog open to read it.
+            if (restore && !job.error) _bkReloadWhenClosed(open);
+            return;
+        }
+        Object.assign(_bkRunning, {step: job.step, total: job.total, table: job.table,
+                                   steps: job.steps || []});
+        const row = document.getElementById('bkRunningRow');
+        if (row) row.outerHTML = _bkRunningRow();
+        // …and the detail dialog too, when somebody has it open. Repainted rather than
+        // reopened: `_openBackupModal` would re-show a dialog that is already up and reset the
+        // scroll of whoever is reading it.
+        const modal = document.getElementById('backupModal');
+        const body = document.getElementById('backupModalBody');
+        if (body && modal && modal.classList.contains('show')) body.innerHTML = _bkJobBody();
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    renderBackups();
+}
+

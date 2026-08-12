@@ -1,0 +1,433 @@
+{# ================================================================
+   Backup — the list of copies, and the dialog that makes one.
+
+   The form is DRAWN FROM the catalogue the API sends (`parts`), never from a list written
+   here: a part added to lib/core/backup/service.py — or declared by a module — appears in this
+   form on its own, and the day it did not, the copy would quietly stop holding it while the
+   screen said otherwise.
+
+   Putting a copy BACK is its own story and lives in _restore.html. Delete goes through
+   showConfirmModal, and it says what it will remove rather than asking "are you sure?" — the
+   question a confirmation should answer is what happens if I say yes.
+   ================================================================ #}
+
+let _backups = [];
+let _backupParts = [];
+// What this install is. Held because the restore dialog names both sides of the jump, and a
+// build number on its own is one the operator would have to compare in their head.
+let _bkVersion = '';
+
+async function renderBackups() {
+    const c = document.getElementById('backup-container');
+    if (!c) return;
+    c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3 text-center py-4">
+        <div class="spinner-border spinner-border-sm"></div></div>`;
+    const res = await apiGet('/api/v1/backups');
+    _backups     = (res && res.backups) || [];
+    _backupParts = (res && res.parts) || [];
+    _bkVersion   = (res && res.version) || '';
+    const tk = await apiGet('/api/v1/backups/tasks');
+    _backupTasks = (tk && tk.tasks) || [];
+    // The rules that actually apply to each task, resolved by the server: a task following a
+    // profile carries two sets of numbers, and a row that showed the wrong one would be a
+    // retention screen lying about what is going to be deleted.
+    _backupPolicies = (tk && tk.policies) || {};
+    await loadBackupProfiles();
+    _backupSyncToolbar();
+
+    // The same shell Configuration and Modules navigate by. It earns its width here because
+    // each TASK is an entry: selecting one shows the copies IT took, which is what makes
+    // per-task retention visible instead of something to deduce from file names. A rail with
+    // only "schedule" and "copies" in it would have been two clicks for two lists.
+    const rail = ssRailShell(c, true, t('tab_backup'));
+    if (rail) rail.innerHTML = _backupRailHtml();
+    _renderBackupPane(c);
+}
+
+// What the pane is showing: the schedule, every copy, one task's copies, or the hand-made ones.
+const _BK_VIEW_KEY = 'ss_backup_view';
+let _backupView = localStorage.getItem(_BK_VIEW_KEY) || 'tasks';
+
+/** The toolbar offers the action of the pane under it, and only if the user may take it.
+ *  "Create a copy" over the schedule is the wrong verb next to the wrong list — and the one you
+ *  came for is the one that is missing. */
+function _backupSyncToolbar() {
+    const perms = new Set(currentUser.permissions || []);
+    // Two different grants: making a copy, and deciding how often one is made. "Run now" is
+    // the first of those — it produces a copy, exactly like the Create button.
+    const mayCopy = perms.has('backup_create');
+    const maySchedule = perms.has('backup_schedule');
+    const schedule = _backupView === 'tasks';
+    const profiles = _backupView === 'profiles';
+    const onTask = _backupView.startsWith('task:');
+    document.getElementById('btnNewBackupTask')
+            ?.classList.toggle('d-none', !maySchedule || !schedule);
+    // A profile is part of the same decision a task's retention is, so it rides on the same
+    // grant: `backup_schedule` is "who says how long this install's copies are kept".
+    document.getElementById('btnNewBackupProfile')
+            ?.classList.toggle('d-none', !maySchedule || !profiles);
+    const btn = document.getElementById('btnNewBackup');
+    if (!btn) return;
+    btn.classList.toggle('d-none', !mayCopy || schedule || profiles);
+    // Standing in a task, "create a copy" means THAT copy: the same parts, the same secrets
+    // flag, the same auto-<task>-<date> name and the same retention afterwards. Opening the
+    // generic form there would make a copy the task does not own — outside its counter, never
+    // pruned by it, and not what somebody looking at its list asked for.
+    btn.innerHTML = '<i class="bi bi-plus-lg me-1"></i>'
+                  + esc(onTask ? t('backup_run_now') : t('backup_create'));
+    btn.onclick = onTask ? () => runBackupTask(_backupView.slice(5)) : () => openBackupModal();
+}
+
+function setBackupView(v) {
+    _backupView = v;
+    localStorage.setItem(_BK_VIEW_KEY, v);
+    _backupSyncToolbar();
+    const c = document.getElementById('backup-container');
+    const rail = c && c.closest('.ss-shell')?.querySelector(':scope > .ss-rail');
+    if (rail) rail.innerHTML = _backupRailHtml();
+    if (c) _renderBackupPane(c);
+}
+
+/** The copies a rail entry stands for. One place decides, so the count on the entry and the
+ *  rows in the pane can never disagree about what belongs to a task. */
+function _backupsFor(view) {
+    if (view === 'all')  return _backups;
+    if (view === 'manual') return _backups.filter(b => !b.name.startsWith('auto-'));
+    // Copies whose task no longer exists. Deleting a task does NOT delete them — they are
+    // backups, and the task was only the reason they exist — but retention stops applying, so
+    // they grow for ever counted by nobody. Shown rather than pruned: inventing a policy for
+    // what has no owner is how the copy from before the migration disappears.
+    if (view === 'orphan') {
+        const owned = _backupTasks.map(tk => 'auto-' + _bkSlug(tk.name) + '-');
+        return _backups.filter(b => b.name.startsWith('auto-')
+                                    && !owned.some(p => b.name.startsWith(p)));
+    }
+    if (view.startsWith('task:')) {
+        const tk = _backupTasks.find(x => x.id === view.slice(5));
+        if (!tk) return [];
+        const slug = _bkSlug(tk.name);
+        return _backups.filter(b => b.name.startsWith('auto-' + slug + '-'));
+    }
+    return [];
+}
+
+/** The server's `task_slug`, in the browser. Two implementations of one rule is how a task's
+ *  copies stop being found by the screen that lists them — kept to the same characters. */
+function _bkSlug(name) {
+    return String(name || '').trim().replace(/[^A-Za-z0-9_-]+/g, '-')
+                             .replace(/^-+|-+$/g, '').slice(0, 32).toLowerCase();
+}
+
+function _backupRailHtml() {
+    const item = (id, icon, label, count) =>
+        `<button type="button" class="ss-rail-item${_backupView === id ? ' active' : ''}"
+                 onclick="setBackupView(${jsStr(id)})" title="${escAttr(label)}">
+            <i class="bi ${icon} me-1 flex-shrink-0"></i>
+            <span class="text-truncate min-w-0 flex-grow-1">${esc(label)}</span>
+            ${count === null ? '' : `<span class="badge text-bg-secondary">${count}</span>`}
+        </button>`;
+    const tasks = _backupTasks.map(tk =>
+        item('task:' + tk.id, tk.enabled ? 'bi-clock-history' : 'bi-pause-circle',
+             tk.name, _backupsFor('task:' + tk.id).length)).join('');
+    return `<div class="ss-rail-group">
+            <div class="ss-rail-head">${esc(t('backup_tasks'))}</div>
+            ${item('tasks', 'bi-calendar-week', t('backup_schedule_view'), _backupTasks.length)}
+            ${item('profiles', 'bi-sliders', t('backup_profiles'), _backupProfiles.length)}
+            ${tasks}
+        </div>
+        <div class="ss-rail-group">
+            <div class="ss-rail-head">${esc(t('backup_copies'))}</div>
+            ${item('all', 'bi-archive', t('backup_view_all'), _backups.length)}
+            ${item('manual', 'bi-hand-index', t('backup_view_manual'),
+                   _backupsFor('manual').length)}
+            ${_backupsFor('orphan').length
+                ? item('orphan', 'bi-question-circle', t('backup_view_orphan'),
+                       _backupsFor('orphan').length)
+                : ''}
+        </div>`;
+}
+
+function _renderBackupPane(c) {
+    if (_backupView === 'tasks') {
+        c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">${_backupTasksHtml()}</div>`;
+        return;
+    }
+    if (_backupView === 'profiles') {
+        c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">${_backupProfilesHtml()}</div>`;
+        return;
+    }
+    const rows = _backupsFor(_backupView);
+    // The running row shows in the list it belongs to, and nowhere else — see
+    // `_bkRunningInView`, which is the one place that decides which list that is.
+    const running = _bkRunningInView() ? _bkRunningRow() : '';
+    if (!rows.length && !running) {
+        c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-archive ss-empty-icon"></i>
+                <span>${esc(t('backup_none'))}</span>
+            </div></div>`;
+        return;
+    }
+    // `_thSortInner` is the shared header renderer every other list uses, so the caret, the
+    // hover and the click target are the same thing here as everywhere else — a table that
+    // sorts differently from its neighbours is one somebody has to learn twice.
+    const th = (label, col, width) =>
+        `<th class="small py-2"${width ? ` style="width:${width}"` : ''}>`
+        + _thSortInner(label, col, _bkSort, _bkSortDir, 'setBackupSort') + '</th>';
+    c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead-sticky"><tr>
+                ${th(t('backup_col_name'), 'name')}
+                ${th(t('col_time'), 'mtime', '11rem')}
+                ${th(t('backup_col_size'), 'size', '6rem')}
+                ${th(t('col_status'), 'status', '8rem')}
+                <th class="small py-2" style="width:9rem"></th>
+            </tr></thead>
+            <tbody>${running}${_bkSorted(rows).map(_backupRow).join('')}</tbody>
+        </table></div>`;
+}
+
+// Newest first by default: the copy you want is almost always the last one taken.
+let _bkSort = localStorage.getItem('ss_backup_sort') || 'mtime';
+let _bkSortDir = localStorage.getItem('ss_backup_sort_dir') || 'desc';
+
+function setBackupSort(col) {
+    if (_bkSort === col) _bkSortDir = _bkSortDir === 'asc' ? 'desc' : 'asc';
+    else { _bkSort = col; _bkSortDir = 'asc'; }
+    localStorage.setItem('ss_backup_sort', _bkSort);
+    localStorage.setItem('ss_backup_sort_dir', _bkSortDir);
+    const c = document.getElementById('backup-container');
+    if (c) _renderBackupPane(c);
+}
+
+/** Sorted for display, on a COPY of the list.
+ *  Sorting `_backups` in place would reorder what the rail counts from, and the two would
+ *  disagree the moment a count was taken between two clicks. */
+function _bkSorted(rows) {
+    const dir = _bkSortDir === 'desc' ? -1 : 1;
+    return rows.slice().sort((a, b) => {
+        // Size and time compare as NUMBERS: as text, "9 MiB" sorts above "10 MiB" and
+        // 2026-08-09 above 2026-08-10, which is a sort that looks like it worked.
+        if (_bkSort === 'size' || _bkSort === 'mtime') {
+            return ((Number(a[_bkSort]) || 0) - (Number(b[_bkSort]) || 0)) * dir;
+        }
+        // Status sorts by how bad it is, not by its name — alphabetically the order is
+        // error, ok, partial, which puts the two answers that need attention either side of
+        // the one that does not. Ascending brings the problems to the top.
+        if (_bkSort === 'status') return (_bkStatusRank(a) - _bkStatusRank(b)) * dir;
+        return String(a.name || '').localeCompare(String(b.name || '')) * dir;
+    });
+}
+
+/** Worst first. Unknown sits behind `ok`: it is not a problem, it is an absence. */
+function _bkStatusRank(b) {
+    return {error: 0, partial: 1, ok: 2}[b.status] ?? 3;
+}
+
+/** What a copy is warning about beyond its verdict — today, only that it holds no secrets.
+ *
+ *  Not part of the status column on purpose: a copy taken without credentials was taken
+ *  correctly, so calling it anything but "good" would be wrong — and it will still restore
+ *  credentials that authenticate against nothing, which is found out at restore time and that
+ *  is too late. A copy with nothing to warn about shows nothing at all. */
+function _bkRowMarks(b) {
+    // The padlock is not a warning: it is a decision somebody made about this copy, and the
+    // reason the retention counter appears to be off by one on this task.
+    const lock = b.locked
+        ? `<i class="bi bi-lock-fill text-info ms-2" title="${escAttr(
+               b.lock_by ? t('backup_locked_by').replace('{}', b.lock_by)
+                                               .replace('{}', b.lock_at || '?')
+                         : t('backup_locked_tt'))}"></i>`
+        : '';
+    if (b.secrets) return lock;
+    return lock + `<i class="bi bi-key-fill text-warning ms-2"
+               title="${escAttr(t('backup_secrets_out_tt'))}"></i>`;
+}
+
+/** The verdict the copy was written with. Read from the manifest, never judged here: the copy
+ *  is what somebody restores from months later, and the screen that judged it will be gone.
+ *
+ *  A copy from before verdicts existed says so rather than being called good — a green badge
+ *  on a copy nobody ever checked is the one lie this column could tell. */
+function _bkStatusCell(b) {
+    const badge = (tone, label, tip) =>
+        `<span class="badge text-bg-${tone}"${tip ? ` title="${escAttr(tip)}"` : ''}>`
+        + esc(label) + '</span>';
+    if (b.status === 'ok')      return badge('success', t('backup_status_ok'));
+    if (b.status === 'partial') return badge('warning', t('backup_status_partial'),
+                                             t('backup_status_partial_tt'));
+    if (b.status === 'error')   return badge('danger', t('backup_status_error'));
+    return `<span class="text-muted small" title="${escAttr(t('backup_status_unknown_tt'))}"
+            >${esc(t('backup_status_unknown'))}</span>`;
+}
+
+/** One copy: what it is called, when, how big — and what is wrong with it, if anything.
+ *  Everything else it knows about itself is one click away in the Details dialog, which reads
+ *  it from the manifest rather than from what a row had room to show. */
+function _backupRow(b) {
+    const perms = new Set(currentUser.permissions || []);
+    const when  = b.mtime ? new Date(b.mtime * 1000).toLocaleString() : '—';
+    const rows = Object.values(b.tables || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+    return `<tr>
+        <td><span class="d-flex align-items-center gap-2">
+            <i class="bi bi-file-earmark-zip text-secondary"></i>
+            <span class="min-w-0">
+                <span class="d-block text-truncate" style="font-size:.85rem">${esc(b.name)}</span>
+                <code class="text-muted ss-fs-2">${esc(t('backup_n_rows').replace('{}', rows))}</code>
+                ${_bkRowMarks(b)}
+            </span>
+        </span></td>
+        <td class="small text-muted">${esc(when)}</td>
+        <td class="small text-muted">${esc(b.size_h || '')}</td>
+        <td>${_bkStatusCell(b)}</td>
+        <td class="text-end"><span class="d-inline-flex align-items-center gap-1">
+            <button class="btn btn-sm btn-secondary py-0 px-1" type="button"
+                onclick="openBackupDetail(${jsStr(b.name)})"
+                title="${escAttr(t('backup_detail'))}"><i class="bi bi-info-circle"></i></button>
+            ${perms.has('backup_verify') ? `<button class="btn btn-sm btn-secondary py-0 px-1"
+                type="button" onclick="verifyBackup(${jsStr(b.name)})"
+                title="${escAttr(t('backup_verify'))}"><i class="bi bi-patch-check"></i></button>` : ''}
+            ${perms.has('backup_download') ? `<a class="btn btn-sm btn-secondary py-0 px-1"
+                href="/api/v1/backups/${encodeURIComponent(b.name)}/download"
+                title="${escAttr(t('backup_download'))}"><i class="bi bi-download"></i></a>` : ''}
+            ${perms.has('backup_restore') ? `<button class="btn btn-sm btn-warning py-0 px-1" type="button"
+                onclick="openRestoreModal(${jsStr(b.name)})"
+                title="${escAttr(t('backup_restore'))}"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
+            ${perms.has('backup_delete') ? `<button class="btn btn-sm py-0 px-1 ${
+                    b.locked ? 'btn-info' : 'btn-secondary'}"
+                type="button" onclick="toggleBackupLock(${jsStr(b.name)},${!b.locked})"
+                title="${escAttr(b.locked ? t('backup_unlock') : t('backup_lock'))}"
+                ><i class="bi ${b.locked ? 'bi-lock-fill' : 'bi-unlock'}"></i></button>` : ''}
+            ${perms.has('backup_delete') ? `<span title="${escAttr(
+                b.locked ? t('backup_locked_refused') : t('delete'))}">
+                <button class="btn btn-sm btn-danger py-0 px-1" type="button"
+                onclick="deleteBackup(${jsStr(b.name)})"${b.locked ? ' disabled' : ''}
+                ><i class="bi bi-trash3"></i></button></span>` : ''}
+        </span></td>
+    </tr>`;
+}
+
+/** What to call a part, whoever declared it.
+ *
+ *  A core part carries an i18n KEY, translated here like every other string. One a MODULE
+ *  declared carries the text already translated: its wording lives in that module's lang
+ *  files, which this catalogue does not hold — and the key alone would put `backup_part_mibs`
+ *  on screen. Falls back to the id so a part from a module that has since gone still has a
+ *  name in the copy that holds it. */
+function _bkPartLabel(meta, fallback) {
+    if (!meta) return fallback;
+    return meta.label_key ? t(meta.label_key) : (meta.label || meta.id);
+}
+
+/** The part checkboxes, from the catalogue the API sent.
+ *  A required part is ticked and disabled: a copy without it restores nothing, so offering to
+ *  leave it out is offering to make a copy that does not work. */
+function _backupPartChecks(prefix, parts, selected) {
+    return parts.map(p => {
+        const on = selected ? selected.includes(p.id) : p.default;
+        return `<div class="form-check">
+            <input class="form-check-input" type="checkbox" id="${prefix}_${escAttr(p.id)}"
+                   value="${escAttr(p.id)}" ${on || p.required ? 'checked' : ''}
+                   ${p.required ? 'disabled' : ''}>
+            <label class="form-check-label small" for="${prefix}_${escAttr(p.id)}">
+                ${esc(_bkPartLabel(p, p.id))}
+                ${p.required ? `<span class="badge text-bg-secondary ms-1">${esc(t('backup_required'))}</span>` : ''}
+            </label>
+        </div>`;
+    }).join('');
+}
+
+function _checkedParts(prefix, parts) {
+    return parts.filter(p => {
+        const el = document.getElementById(`${prefix}_${p.id}`);
+        return p.required || (el && el.checked);
+    }).map(p => p.id);
+}
+
+/** Fill the section's own modal and show it.
+ *  `showConfirmModal` takes a line of TEXT — it sets `.textContent` on purpose, so a message
+ *  can never carry markup — and this needs a form; `showInfoModal` shows key/value pairs and
+ *  has no confirm button. Hence a modal of its own, in a template like every other one. */
+function _openBackupModal(title, bodyHtml, okLabel, okVariant, onOk, size) {
+    document.getElementById('backupModalTitle').textContent = title;
+    document.getElementById('backupModalBody').innerHTML = bodyHtml;
+    const ok = document.getElementById('backupModalOk');
+    ok.className = `btn btn-sm btn-${okVariant || 'primary'}`;
+    ok.textContent = okLabel;
+    // The picker needs room — a two-pane file browser in a 500px dialog is two
+    // columns of ellipsis. Set per opening, not once on the element, because the
+    // same modal also shows a short form.
+    const dlg = document.querySelector('#backupModal .modal-dialog');
+    if (dlg) dlg.classList.toggle('modal-lg', size === 'lg');
+    const el = document.getElementById('backupModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(el);
+    // Replaced, not added to: reopening the modal must not leave the previous handler behind
+    // to run the previous job as well.
+    ok.onclick = async () => { modal.hide(); await onOk(); };
+    modal.show();
+}
+
+function openBackupModal() {
+    const pad = n => String(n).padStart(2, '0');
+    const d = new Date();
+    // Seconds included, like the scheduler's own names. `create_backup` refuses to overwrite,
+    // so two copies started inside the same minute would suggest the same name and the second
+    // would fail on a collision the operator did not cause and cannot see — and the moment you
+    // take two by hand is the moment you are trying something and repeating it.
+    const suggested = `copia-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+                    + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    _openBackupModal(t('backup_create'), `
+        <div class="mb-3">
+            <label class="form-label small" for="backupName">${esc(t('backup_col_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="backupName"
+                   value="${escAttr(suggested)}">
+        </div>
+        <div class="mb-3">
+            <div class="small text-muted mb-1">${esc(t('backup_col_contents'))}</div>
+            ${_backupPartChecks('bkNew', _backupParts, null)}
+        </div>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="backupSecrets" checked>
+            <label class="form-check-label small" for="backupSecrets">${esc(t('backup_secrets'))}</label>
+        </div>
+        <div class="small text-muted mt-1">${esc(t('backup_secrets_hint'))}</div>`,
+        t('backup_create'), 'primary', _createBackup);
+}
+
+// The API helpers do NOT share one shape, and both halves of that have now cost a bug:
+//   apiGet / apiPut     -> the parsed BODY
+//   apiPost / apiDelete -> {status, data}
+// Reading `res.ok` off the second pair, or `res.status` off the first, is reading a key that
+// is never there — so a request that worked reported failure. Delete said "error" with the
+// file already gone; saving a task said it with the task already created. This understands
+// both, because the alternative is remembering which helper is which at each call site.
+function _apiOk(res) {
+    if (!res) return false;
+    if (typeof res.status === 'number') return res.status >= 200 && res.status < 300;
+    return res.ok !== false;
+}
+function _apiErr(res) {
+    return (res && ((res.data && res.data.error) || res.error)) || t('save_error');
+}
+
+/** Start the copy the form describes, and watch it like any other.
+ *
+ *  It used to await the request and show nothing at all until it came back — on an install
+ *  whose syslog table is six figures of rows, that is a minute of a screen that looks broken.
+ *  It goes through the same job the schedule does now: a row in the list at once, the dialog
+ *  for whoever wants to watch it, and a toast when it lands. */
+async function _createBackup() {
+    const name = (document.getElementById('backupName')?.value || '').trim();
+    const res  = await apiPost('/api/v1/backups', {
+        name,
+        parts: _checkedParts('bkNew', _backupParts),
+        secrets: !!document.getElementById('backupSecrets')?.checked,
+    });
+    const jobId = _apiOk(res) && (res.data || {}).job_id;
+    if (!jobId) { showToast(_apiErr(res), 'danger'); return; }
+    _bkStartWatching({taskId: '', taskName: name, manual: true}, jobId);
+}
+
+{# What the buttons on a row DO lives in _actions.html — delete, verify and the lock. They are
+   operations on one archive, not part of drawing the list, and this shell has a size limit
+   that exists to stop a section quietly growing sub-sections inside it. #}

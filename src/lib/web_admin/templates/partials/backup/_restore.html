@@ -1,0 +1,96 @@
+{# ================================================================
+   Backup — putting a copy back, and saying what that means first.
+
+   Its own partial because the render shell has a size limit, and because this is one story
+   from end to end: what will be overwritten, which build the copy came from, what to apply,
+   and — afterwards — what the live schema could not take from it.
+
+   Nothing here refuses a copy over its version. The schema moves on almost every build, and a
+   panel that turned down "old" copies would be useless on the one day it is needed. What it
+   does is make the jump visible before the button is pressed, and the losses visible after.
+   ================================================================ #}
+
+/** Which way the version jumps, said before the button is pressed.
+ *
+ *  Nothing is refused over it — the schema moves on almost every build, and a panel that
+ *  turned down "old" copies would be useless on the one day it is needed. But a copy from a
+ *  LATER build loses the columns this schema does not have yet, quietly, and that has to be a
+ *  decision rather than something discovered afterwards. */
+function _bkVersionNote(b) {
+    if (b.version_rel === 'newer') {
+        return `<div class="alert alert-warning py-2 px-3 small mb-2">
+            ${esc(t('backup_restore_newer').replace('{}', b.app_version || '?')
+                                           .replace('{}', _bkVersion || '?'))}</div>`;
+    }
+    if (b.version_rel === 'older') {
+        return `<div class="small text-muted mb-2">
+            ${esc(t('backup_restore_older').replace('{}', b.app_version || '?')
+                                           .replace('{}', _bkVersion || '?'))}</div>`;
+    }
+    return '';
+}
+
+function openRestoreModal(name) {
+    const b = _backups.find(x => x.name === name);
+    if (!b) return;
+    const avail = _backupParts.filter(p => (b.parts || []).includes(p.id));
+    _openBackupModal(t('backup_restore'), `
+        <p class="mb-2">${esc(t('backup_restore_warn').replace('{}', name))}</p>
+        ${_bkVersionNote(b)}
+        <div class="mb-2">
+            <div class="small text-muted mb-1">${esc(t('backup_restore_parts'))}</div>
+            ${_backupPartChecks('bkRes', avail.map(p => ({...p, required: false})), b.parts)}
+        </div>
+        ${b.secrets ? '' : `<div class="alert alert-warning py-2 px-3 small mb-0">
+            ${esc(t('backup_restore_nosecrets'))}</div>`}`,
+        t('backup_restore'), 'warning',
+        () => _restoreBackup(name, _checkedParts('bkRes', avail)));
+}
+
+/** Start the restore and watch it, through the same job the copies use.
+ *
+ *  It used to be awaited: on an install whose tables run to six figures of rows, that is a
+ *  screen saying nothing at all while every one of them is being replaced — the moment where
+ *  silence is most alarming, because what it is silent about is the install being overwritten.
+ */
+async function _restoreBackup(name, parts) {
+    const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/restore`, {parts});
+    const jobId = _apiOk(res) && (res.data || {}).job_id;
+    if (!jobId) { showToast(_apiErr(res), 'danger'); return; }
+    // No row in the list: nothing is being ADDED to it. Only the dialog, which is where the
+    // form that started this already was.
+    _bkStartWatching({taskName: name, manual: true, restore: true}, jobId);
+}
+
+/** What a finished restore has to say: how much went back, and what did not.
+ *
+ *  A toast is the wrong shape for it — it says a number and disappears, and this is the one
+ *  thing somebody has to read. The page reloads when the dialog is CLOSED, not before:
+ *  everything on screen was read before the tables changed under it, so a reload is the honest
+ *  answer, but reloading out from under the report would make it pointless. */
+function _bkRestoreDoneBody(job) {
+    const rows = Object.values(job.tables || {})
+                       .reduce((n, v) => n + (Number(v) || 0), 0);
+    const skipped = Object.entries(job.skipped || {});
+    const lead = job.error ? job.error
+               : skipped.length ? t('backup_restored_partial').replace('{}', rows)
+               : t('backup_restored_ok').replace('{}', rows);
+    const tone = job.error ? 'danger' : skipped.length ? 'warning' : 'success';
+    const list = skipped.map(([table, what]) =>
+        `<div class="small d-flex align-items-center gap-1">
+            <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+            <span class="flex-grow-1 text-truncate font-monospace">${esc(table)}</span>
+            <span class="text-muted">${esc(what.missing
+                ? t('backup_skipped_table').replace('{}', what.rows)
+                : t('backup_skipped_cols').replace('{}', (what.columns || []).join(', ')))}</span>
+        </div>`).join('');
+    return `<div class="py-1">
+        <div class="mb-2"><strong>${esc(job.task || '')}</strong></div>
+        <div class="alert alert-${tone} py-2 px-3 small mb-2">${esc(lead)}</div>
+        ${_bkStepsHtml(job.steps)}
+        ${list}
+        ${job.error ? '' : `<div class="small text-muted mt-2">
+            ${esc(t('backup_restored_reload'))}</div>`}
+    </div>`;
+}
+

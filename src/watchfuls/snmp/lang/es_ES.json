@@ -64,6 +64,7 @@
         "discover_title":        "Descubrir OIDs",
         "discover_error":        "No se pudo conectar a ningún servidor configurado.",
         "item_added":            "Comprobación OID '{}' añadida.",
+        "backup_part_mibs":      "MIBs SNMP (ficheros en bruto)",
         "file_manager":          "Gestor de MIBs",
         "mib_manager_raw":       "MIBs en bruto (.mib)",
         "mib_manager_compiled":  "MIBs compilados (.py)",

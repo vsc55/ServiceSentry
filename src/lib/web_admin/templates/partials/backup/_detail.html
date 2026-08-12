@@ -1,0 +1,111 @@
+{# ================================================================
+   Backup — everything one copy knows about itself.
+
+   The row has five columns and they answer "which copy is this". This answers "what is in it,
+   and can I trust it": every part with its outcome and row count, who made it and with what
+   version, and the sha256 of each member.
+
+   Read entirely from the MANIFEST the copy carries. Nothing here is computed by the screen —
+   the copy is what somebody restores from months later, and a verdict worked out at display
+   time is a verdict that did not travel with the file.
+   ================================================================ #}
+
+function _bkRow(label, value, mono) {
+    if (value === '' || value === null || value === undefined) return '';
+    return '<tr><td class="text-muted small pe-3 text-nowrap">' + esc(label) + '</td>'
+         + '<td class="small' + (mono ? ' font-monospace' : '') + '" style="word-break:break-all">'
+         + esc(String(value)) + '</td></tr>';
+}
+
+/** The parts, with what happened to each. The same checklist the running dialog shows, from
+ *  the manifest instead of from a job — a copy has to answer this long after the run that
+ *  made it is gone. */
+function _bkStepsTable(steps) {
+    if (!steps || !steps.length) return '';
+    return '<div class="mb-3">' + steps.map(st => {
+        const meta = _backupParts.find(x => x.id === st.part);
+        const icon = st.ok ? '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+                           : '<i class="bi bi-x-circle-fill text-danger me-2"></i>';
+        const detail = st.error
+            ? '<span class="text-danger">' + esc(st.error) + '</span>'
+            : '<span class="text-muted">' + esc(t('backup_n_rows').replace('{}', st.rows))
+              + '</span>';
+        return '<div class="small d-flex align-items-center gap-1">' + icon
+             + '<span class="flex-grow-1 text-truncate">'
+             + esc(_bkPartLabel(meta, st.part)) + '</span>' + detail + '</div>';
+    }).join('') + '</div>';
+}
+
+/** The tables it holds, biggest first: on a copy that came out smaller than expected, which
+ *  table is missing its rows is the first thing worth seeing. */
+function _bkTablesHtml(tables) {
+    const rows = Object.entries(tables || {}).sort((a, b) => b[1] - a[1]);
+    if (!rows.length) return '';
+    return '<details class="mb-3"><summary class="small">'
+         + esc(t('backup_detail_tables').replace('{}', rows.length)) + '</summary>'
+         + '<table class="table table-sm mb-0 mt-1"><tbody>'
+         + rows.map(function (e) {
+             return '<tr><td class="small font-monospace">' + esc(e[0]) + '</td>'
+                  + '<td class="small text-end text-muted">' + esc(String(e[1]))
+                  + '</td></tr>';
+         }).join('')
+         + '</tbody></table></details>';
+}
+
+/** The per-member digests, behind a fold: a wall of hex nobody reads top to bottom. It exists
+ *  so `Verify` has something to compare against, not so anybody memorises it. */
+function _bkDigestsHtml(sha) {
+    const rows = Object.entries(sha || {});
+    if (!rows.length) {
+        return '<div class="small text-muted mb-3">' + esc(t('backup_detail_nosha')) + '</div>';
+    }
+    return '<details class="mb-2"><summary class="small">'
+         + esc(t('backup_detail_sha').replace('{}', rows.length)) + '</summary>'
+         + '<table class="table table-sm mb-0 mt-1"><tbody>'
+         + rows.map(function (e) {
+             return '<tr><td class="small font-monospace">' + esc(e[0]) + '</td>'
+                  + '<td class="small font-monospace text-muted" style="word-break:break-all">'
+                  + esc(e[1]) + '</td></tr>';
+         }).join('')
+         + '</tbody></table></details>';
+}
+
+function openBackupDetail(name) {
+    const b = _backups.find(x => x.name === name);
+    if (!b) return;
+    const when = b.mtime ? new Date(b.mtime * 1000).toLocaleString() : '';
+    const rows = Object.values(b.tables || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+    // The same four answers the list gives, including "not recorded" for a copy taken before
+    // verdicts existed: the row and this dialog disagreeing about whether a copy is good is
+    // worse than either of them being unsure.
+    const statusLabel = b.status === 'partial' ? t('backup_status_partial')
+                      : b.status === 'error'   ? t('backup_status_error')
+                      : b.status === 'ok'      ? t('backup_status_ok')
+                      : t('backup_status_unknown');
+    const html =
+        '<table class="table table-sm table-borderless mb-3"><tbody>'
+      + _bkRow(t('backup_col_name'), b.name, true)
+      + _bkRow(t('col_time'), when)
+      + _bkRow(t('backup_col_size'), b.size_h)
+      + _bkRow(t('backup_detail_status'), statusLabel)
+      + _bkRow(t('backup_detail_rows'), rows)
+      + _bkRow(t('col_user'), b.created_by)
+      + _bkRow(t('backup_detail_version'), b.app_version, true)
+      + _bkRow(t('backup_detail_engine'), b.engine)
+      + _bkRow(t('backup_secrets'),
+               b.secrets ? t('backup_secrets_in') : t('backup_secrets_out'))
+      // Only when it IS locked, and saying who and when. A row reading "Locked: no" on every
+      // copy is noise; the interesting fact is that somebody decided this one stays, and the
+      // question afterwards is always which somebody.
+      + (b.locked
+            ? _bkRow(t('backup_locked'),
+                     b.lock_by ? t('backup_locked_by').replace('{}', b.lock_by)
+                                                      .replace('{}', b.lock_at || '?')
+                               : t('backup_locked'))
+            : '')
+      + '</tbody></table>'
+      + _bkStepsTable(b.steps)
+      + _bkTablesHtml(b.tables)
+      + _bkDigestsHtml(b.sha256);
+    _openBackupModal(b.name, html, t('close'), 'secondary', () => {}, 'lg');
+}

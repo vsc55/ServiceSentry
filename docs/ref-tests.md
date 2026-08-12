@@ -1459,7 +1459,7 @@ que reparte la capacidad de bloquear la base de datos.
 |---|---|---|---|
 | `test_permissions_tuple_has_66_flags` | `len(PERMISSIONS) == 66` | 66 elementos | Otro número |
 | `test_permissions_are_unique` | Sin duplicados en `PERMISSIONS` | `set` sin colisiones | Si hay repetidos |
-| `test_permissions_expected_flags` | El conjunto exacto de 66 flags | Coincide con el set esperado | Si falta o sobra alguno |
+| `test_permissions_expected_flags` | El conjunto exacto de 73 flags | Coincide con el set esperado | Si falta o sobra alguno |
 | `test_permission_groups_structure` | `PERMISSION_GROUPS` es lista de 2-tuplas | Lista con pares `(key, [perms])` | Si la estructura difiere |
 | `test_permission_groups_cover_all_permissions` | Todos los flags están en algún grupo | Unión de grupos == PERMISSIONS | Si alguno no está cubierto |
 | `test_permission_groups_no_duplicates` | Ningún flag aparece en más de un grupo | Sin duplicados entre grupos | Si hay solapamiento |
@@ -6651,7 +6651,117 @@ cuando otra réplica no puede leer un secreto.
 
 ---
 
-## 146. Cuánto puede escribir un módulo en una entrada de auditoría
+## 146. Copias de seguridad: hacer una, y volver a ponerla
+
+**Archivo:** `tests/unit/test_backup_service.py` — 67 tests
+**Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 76 tests
+**Archivo:** `tests/unit/test_wa_backup_ui.py` — 115 tests
+
+Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
+cuatro motores y la copia tiene que sobrevivir al salto: una instalación que creció en SQLite y se
+está levantando sobre MySQL es exactamente cuándo se pide una copia, y un `.db` responde a eso con
+nada. Filas fuera y filas dentro, por el conector en ambos sentidos.
+
+Los unitarios manejan un conector SQLite **de verdad**, no uno falso: toda la funcionalidad es
+"filas por el conector", así que un doble estaría probando al doble — y los dos fallos que importan
+(una columna que el esquema vivo ya no tiene, una fila que no volvió) solo existen contra algo que
+almacena de verdad.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatGoesIn::test_core_is_everything_nobody_else_claimed` | Regla invertida: una tabla nueva —incluidas las que crean los módulos en ejecución— entra por defecto en vez de omitirse en silencio |
+| `TestWhatGoesIn::test_a_required_part_goes_in_whether_asked_for_or_not` | Una copia sin `core` no restaura nada |
+| `TestWhatGoesIn::test_the_manifest_is_written_last` | Un archivo interrumpido no tiene manifiesto, así que se rechaza en vez de anunciar lo que no lleva |
+| `TestSecrets::test_excluded_nothing_encrypted_survives_at_any_depth` | El secreto está *dentro* de una columna JSON: una pasada por valores de columna lo enviaría diciendo que no lleva ninguno |
+| `TestSecrets::test_the_manifest_says_which_it_was` | Una copia sin secretos que parece completa es la trampa que evita el interruptor |
+| `TestPuttingItBack::test_a_table_is_replaced_not_merged` | Fusionar daría un tercer estado que no existió nunca |
+| `TestPuttingItBack::test_restoring_one_part_leaves_the_others_alone` | Restaurar solo los hosts no puede deshacer también los usuarios |
+| `TestRestoringACopyFromAnotherVersion::*` (7) | Restaurar entre versiones: nada se rechaza por la versión, pero se dice hacia dónde salta y **qué no entró** (columnas que este esquema ya no tiene, tablas desaparecidas con sus filas) |
+| `TestARestoreSaysWhereItIs::*` (4) | La restauración informa paso a paso con la **misma forma** que la copia, un reporter roto no aborta la transacción, y una copia inexistente se responde en vez de arrancarse |
+| `TestItSaysWhatItIsDoingOnTheLog::*` (4) | Copia y restauración quedan **en el log del panel** (inicio, resultado, motivo del rechazo, y en warning lo que no se pudo aplicar) |
+| `TestARestoreTicksOffTheSameChecklist::*` (6) | La restauración informa **una entrada por parte** como la copia: filas y tablas, no-ok con el primer motivo, y viaja mientras corre |
+| `TestTheScheduleAndTheVerifyHaveTheirOwnGrants::*` (5) | `backup_schedule` y `backup_verify` son permisos propios: las rutas de tareas y de verificación los piden, «ejecutar ahora» sigue siendo `backup_create`, y los botones siguen los mismos flags |
+| `TestSyslogInADatabaseOfItsOwn::*` (7) | Con `syslog_db\|enabled` las tablas de syslog viven en OTRA base: la copia la alcanza, la restauración las devuelve ahí, `core` no se contamina, y cada base lleva su propia transacción |
+| `TestPuttingItBack::test_a_column_the_schema_dropped_does_not_sink_the_restore` | La copia a la que se recurre es antigua: rechazarla por un esquema que avanzó la haría inútil justo cuando importa |
+| `TestPuttingItBack::test_a_newer_format_is_refused_not_half_applied` | Un formato futuro se rechaza entero |
+| `TestTheNameIsAFilename::*` (3) | El nombre se usa como fichero y viaja en la URL: lo que no encaja en el patrón no puede ser un nombre, y así `..` no entra en ninguna ruta |
+| `TestTheDriveListIsNotProbed::*` (4) | Sondear A–Z con `os.path.exists` tardaba **6,6 s** con una unidad de red caída, y se rehacía en cada petición: ahora se pide el mapa al kernel y se cachea. En Unix ofrece `/mnt`, `/media` y el home, no solo `/` |
+| `TestTheList::test_it_reads_the_directory_not_a_table` | Un catálogo en la BD sería una segunda verdad sobre ficheros que alguien puede mover con el panel parado |
+| `TestTheListAndItsCatalogue::test_the_parts_travel_with_the_list` | El formulario se dibuja del catálogo que manda la API, no de una lista escrita en la plantilla |
+| `TestTheRoundTrip::*` (5) | Crear, listar, descargar, restaurar y borrar por la API — los dos extremos del formato de acuerdo |
+| `TestEachOneHasItsOwnPermission::*` (2) | Cinco permisos, no uno: descargar no es «ver» (el fichero es la instalación entera) y restaurar no es «crear» (sobrescribe usuarios y roles) |
+| `TestThePickerAnswersTheClick::*` (3) | El modal se abre **antes** del fetch y con un «Explorando carpeta…»: un botón que no hace nada es un botón que se vuelve a pulsar |
+| `TestItStartsWhereTheCopiesGo::*` (2) | Sin `?path=` arranca en la carpeta de copias en uso, no en las raíces |
+| `TestTheScheduleTakesCopies::*` (7) | Cada tarea con su frecuencia y su contenido; una desactivada no cae en la migración; la retención **no cruza tareas** |
+| `TestTheOldSettingsBecomeATask::*` (3) | El intervalo anterior se convierte en una tarea una sola vez; una instalación sin programación no adquiere una al actualizar |
+| `TestACalendarTask::*` (5) | Ida y vuelta por la API, un día imposible se descarta en la puerta, y una tarea sin `mode` (las de antes del calendario) sigue ejecutándose |
+| `TestTheTaskApi::*` (5) | Alta, edición sin duplicar, borrado, nombre que no puede dirigir la ruta, y que un *viewer* no escriba |
+| `TestTheFolderPicker::*` (7) | Solo carpetas (nunca ficheros), dice si se puede escribir, una carpeta ilegible es una respuesta y no un error, y `../fuera` como nombre se rechaza en vez de sanearse |
+| `TestItIsAllAudited::*` (2) | Descargar se audita con el mismo peso que borrar; una restauración fallida es la línea más importante del registro, no la menos |
+| `TestARetentionProfileIsFollowedNotCopied::*` (10) | El planificador poda por el perfil y no por las casillas guardadas debajo; la lista de tareas dice qué reglas se aplican de verdad; desvincular devuelve la política propia; editar el perfil cambia todas las tareas que lo siguen; borrar uno en uso se rechaza con 409 nombrando las tareas; y renombrarlo no le reinicia la política |
+| `TestACopyThatStays::*` (5) | El bloqueo es un **fichero al lado** del archivo (no una fila): sobrevive al panel parado y a mover la carpeta; el servicio se niega a borrar una copia bloqueada aunque se lo pidan por otra vía; los marcadores no sobreviven al archivo (un `.lock` huérfano haría nacer bloqueada a la siguiente copia del mismo nombre); y un marcador dañado **sigue contando** como bloqueo |
+| `TestALockedCopyIsNotACandidate::*` (3) | La retención nunca la borra, sigue reclamando su franja (proteger una no compra otra de regalo), y el presupuesto gasta su tamaño pero no puede tirarla |
+| `TestKeepingOneCopyWhateverTheCounterSays::*` (5) | De punta a punta: sobrevive a una política que la habría borrado; borrarla se rechaza con 409 diciendo por qué; la lista dice quién la bloqueó y cuándo; se audita en ambos sentidos; y va con `backup_delete` |
+| `TestTheTaskFormFitsOnTheScreen::*` (3) | El editor de tarea va en **pestañas** (cuándo / retención / contenido), el nombre queda fuera de ellas, y el panel largo hace scroll **dentro** de la caja en vez de estirar el diálogo |
+| `TestOnePolicyManyTasks::*` (8) | Perfiles en el rail; el editor dibuja las **mismas** cinco casillas que una tarea; la fila muestra la política resuelta por el servidor; las casillas se ocultan tras un perfil pero no se descartan; el editor dice a cuántas tareas alcanza; sin botón de borrar si está en uso; las sugerencias vienen de la API; todo va con `backup_schedule` |
+
+
+---
+
+---
+
+## 147. Copias automáticas: cuándo toca una, y cuáles se van
+
+**Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
+
+Un **intervalo**, no una hora del día, y la diferencia es todo el diseño: un panel apagado a las
+03:00 tiene que hacer su copia diaria al volver a las 09:00. «Cuánto hace de la última» sigue
+siendo cierto hasta que se hace una; «¿son las 03:00?» es falso 1439 minutos de cada 1440 y pierde
+la ventana entera si el proceso no estaba levantado. Una ventana perdida es justo el caso para el
+que existe una copia de seguridad.
+
+El precio es la deriva —las copias caen unos minutos más tarde cada vez— y es el lado correcto por
+el que equivocarse: una copia a las 03:07 es una copia.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhenOneIsDue::test_zero_hours_is_off` | 0 es como la config dice «sin copias automáticas» |
+| `TestWhenOneIsDue::test_an_unreadable_interval_is_off_not_every_tick` | Una errata no puede convertir el planificador en un bucle que copia en cada tick |
+| `TestWhenOneIsDue::test_with_no_copy_yet_one_is_due_immediately` | Una instalación que nunca hizo una es la que más la necesita |
+| `TestWhenOneIsDue::test_a_window_missed_while_the_panel_was_down_is_still_due` | La razón de ser del intervalo |
+| `TestWhichCopyCounts::test_only_automatic_copies_set_the_clock` | Una copia hecha a mano antes de actualizar no retrasa la programada |
+| `TestRetention::test_zero_keeps_everything` | Leer 0 como «bórralas todas» es la lectura que pierde datos |
+| `TestRetention::test_a_hand_made_copy_is_never_pruned` | Un contador no decide sobre algo que alguien hizo a propósito |
+| `TestRetentionKeepsHistoryNotJustCopies::*` (6) | Franjas (últimas/diarias/semanales/mensuales/anuales): unión de reglas, el contador viejo sigue significando lo mismo, sin reglas se conserva todo, y las mismas copias compran meses de historia en vez de una quincena |
+| `TestTheFloorsNoBucketCanExpress::*` (3) | Nunca se borra la última copia ni la última **correcta** — una racha de parciales dejaba siete copias de las que ninguna servía |
+| `TestTheSizeBudget::*` (4) | El presupuesto borra de la más antigua, solo puede quitar de lo que las reglas conservaban, 0 = sin límite, y quedarse sin sitio no deja la tarea sin ninguna |
+| `TestRetentionOnEveryTickAndAPreviewYouCanTrust::*` (4) | La retención se aplica en cada tick (tarea deshabilitada incluida) y la previsualización responde con la función del planificador, sin tocar nada, con solo `backup_view` |
+| `TestAPolicyWithANameOnIt::*` (5) | Un perfil **sustituye** la política de la tarea (no se fusiona con ella), el contador antiguo no se cuela por detrás, un perfil borrado deja en pie los números propios de la tarea, y la poda obedece al perfil y no a las casillas de debajo |
+| `TestSayingWhenByTheCalendar::*` (11) | Días de la semana a una hora, **conservando la recuperación**: la ventana perdida con el panel apagado sigue pendiente al volver |
+| `TestACopyKnowsWhichTaskTookIt::*` (6) | El nombre lleva la tarea, un nombre peligroso no dirige la ruta, y la poda **nunca cruza tareas** — el fallo que motivó todo el rediseño |
+| `TestTheName::test_two_copies_in_the_same_minute_do_not_collide` | `create_backup` se niega a sobrescribir: sin segundos, la segunda copia del minuto fallaría |
+
+La ejecución (que la copia se escriba de verdad, que la retención borre las correctas y en el orden
+que sobrevive a un disco lleno) se prueba en `tests/integration/test_wa_backup.py`, contra BD y
+disco reales.
+
+Los ficheros propios de un módulo entran en la copia porque **el módulo lo declara**
+(`__backup_part__`), no porque el núcleo escriba su ruta: `test_backup_module_parts.py` cubre el
+catálogo, que una declaración no pueda salirse de `var_dir` (ese directorio se **escribe** al
+restaurar), que no pueda robar un id del núcleo, y el viaje de ida y vuelta de los ficheros.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheCatalogueIsBuiltFromTheDeclaration::*` (6) | El módulo aporta directorio, id, etiqueta desde su propio `lang/`, y un `schema.json` roto no cuesta la parte a los demás |
+| `TestADeclarationCannotEscapeVarDir::*` (5) | `..`, ruta absoluta o con unidad se descartan; ni el id `core` ni un id ya tomado |
+| `TestTheCoreNamesNoModule::test_the_backup_service_carries_no_module_name` | Leído de los literales del servicio: ninguno nombra un watchful |
+| `TestTheFilesActuallyTravel::*` (4) | Copia y restauración por `files/parts/<id>/`, y una parte declarada que no dio nada marca la copia como parcial |
+
+---
+
+## 148. Cuánto puede escribir un módulo en una entrada de auditoría
 
 **Archivo:** `tests/unit/test_module_audit_detail.py` — 7 tests
 
@@ -6681,7 +6791,7 @@ más cubre este código.
 
 ---
 
-## 147. De dónde saca una acción de módulo su dirección y su identidad
+## 149. De dónde saca una acción de módulo su dirección y su identidad
 
 **Archivo:** `tests/unit/test_module_action_identity.py` — 9 tests
 

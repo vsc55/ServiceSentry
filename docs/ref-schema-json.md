@@ -716,6 +716,26 @@ Un campo numérico puede declarar `"unit_field": "<campo>"`: el selector de unid
 (sigue guardándose igual). Es lo que convierte «Alerta si el libre baja de / Unidad» en una
 sola línea. Se declara, no se deduce del sufijo `_unit`.
 
+### `__backup_part__`
+
+Declara **ficheros propios del módulo** que una copia de seguridad tiene que llevar (los que
+viven fuera de la BD: MIBs, plantillas, lo que suba un operador). Dict o lista de dicts:
+
+```json
+"__backup_part__": {"id": "mibs", "dir": "snmp_mibs/raw",
+                    "label_key": "backup_part_mibs", "default": false}
+```
+
+- `id` — nombre de la parte en el formulario, el manifiesto y la API. Por defecto, el del módulo;
+  no puede ser uno del núcleo (`core`, `config_file`, `history`, `audit`, `syslog`).
+- `dir` — **relativo a `var_dir`**. Una ruta absoluta o que se escape con `..` se descarta: ese
+  directorio se lee al copiar y se **escribe** al restaurar.
+- `label_key` — clave bajo `ui` del `lang/*.json` del módulo; si falta, su `pretty_name`.
+- `default` — si el formulario la marca por defecto.
+
+Las **tablas** de un módulo no se declaran: `core` es toda tabla que ninguna otra parte reclamó.
+Ver [explica-descubrimiento.md §6b](explica-descubrimiento.md#6b-partes-de-backup-aportadas-por-un-módulo-__backup_part__).
+
 ### `__page__`
 
 Declara que el módulo reclama una **sección de primer nivel propia**, al lado de Overview,

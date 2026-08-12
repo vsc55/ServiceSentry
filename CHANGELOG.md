@@ -8,7 +8,7 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
-## [0.0.1+build.57] - 2026-08-08
+## [0.0.1+build.60] - 2026-08-08
 
 ### Changed
 - **A MIB compile nobody asked for is now bounded.** Importing a vendor folder leaves hundreds
@@ -119,6 +119,377 @@ All notable changes to **ServiceSentry** are documented in this file.
     auth fields. Pointing them at a `cred_uid` is the next step and is deliberately separate —
     it changes what the checks read at run time, which is a different kind of change from
     describing a shape.
+## [0.0.1+build.59] - 2026-08-12
+
+### Changed
+- **Retention answers "how far back", not "how many".** A single counter was the whole
+  vocabulary, and seven copies can be one week at daily resolution or two years at monthly —
+  only the second survives finding out in March that something broke in January.
+  - A task now carries **buckets**: keep the newest of the last N days, N weeks, N months, N
+    years, plus the newest N whatever the calendar says. A copy survives if **any** rule claims
+    it, which is what makes "7 daily + 4 weekly + 6 monthly" cost 17 copies instead of 180.
+  - **The old single counter still means what it meant.** A task written before this holds only
+    `keep`, and it is read as "the newest N" rather than migrated: a task that was working must
+    not need rewriting to go on working, and a migration is a thing that can go wrong once per
+    install. The API still accepts it too.
+  - All of them zero still means **keep everything**. An operator who prunes elsewhere must be
+    able to say so, and reading "no rules" as "delete them all" is the reading that loses data.
+- **Two floors no bucket can express.** The **newest** copy is never deleted — a policy that
+  leaves a task with nothing has misconfigured the one thing it exists to provide — and neither
+  is the newest **good** one: a run of `partial` copies would otherwise push the last `ok` one
+  out, leaving seven copies of which none is usable. The verdict already travels inside the
+  archive, so this costs a lookup and no guesswork.
+- **Retention runs on every tick, not only after a copy.** A monthly task went a month without
+  its rules being applied and a disabled one went for ever, its copies outside every counter.
+  Switching a task off says "stop making new ones", not "freeze the old ones and let them
+  grow".
+
+### Added
+- **A size budget per task** (`max_size`). The buckets say what is worth keeping; this says what
+  there is room for, and it runs last so it can only ever take away what the rules already
+  chose — with the floors applied again afterwards, because running out of room is not a reason
+  to be left with nothing. When the ceiling and not the calendar is deciding what survives, it
+  is audited (`backup_budget_exceeded`) and notifiable: it means the policy asks for more
+  history than there is room for, which somebody should get to revisit rather than discover
+  later as a gap.
+- **A preview in the task form**: what this policy would keep and delete, against the copies
+  that exist right now, with the total size of what survives. A bucket policy is not something
+  anybody evaluates in their head, and one nobody can predict is one nobody dares touch. It is
+  answered by the server with the **same pure function the scheduler uses** — a preview worked
+  out a second way would be a preview that lies on the day it matters.
+- **Copies whose task no longer exists get their own rail entry.** Deleting a task never
+  deleted its copies — they are backups, and the task was only the reason they exist — but
+  retention stopped applying and they grew counted by nobody. Shown rather than pruned:
+  inventing a policy for what has no owner is how the copy from before the migration
+  disappears.
+- **Retention profiles**: a named policy several tasks share, with its own rail entry. Five
+  numbers and a ceiling retyped from memory in every task were three chances to type 6 where the
+  others say 4, with nothing on screen ever saying they disagreed.
+  - A task **follows** a profile rather than copying it, so editing "standard GFS" changes the
+    retention of every task pointing at it at once. That is the whole reason to have profiles
+    instead of a button that fills the boxes in.
+  - The resolution happens in **one place** (`schedule.with_profile`); everything below it —
+    `survivors`, `prune`, the preview — is written against a task that already knows which
+    numbers are its own. A second place deciding that is a second place for the scheduler and
+    the screen to disagree about what is about to be deleted.
+  - A profile **replaces** the policy, it does not merge with it: one that says nothing about
+    monthlies means none. The task's own numbers stay stored underneath — hidden, not cleared —
+    so unlinking gives it back the policy it had, and a profile that disappears some other way
+    leaves them standing rather than reading as "no rules", which means keep everything.
+  - Deleting a profile a task still follows is **refused, naming the tasks**. Letting it go
+    would move them onto whatever numbers they last held: a change of policy nobody asked for
+    and nothing announces.
+  - The task list now travels with the rules that **actually apply** to each task, resolved by
+    the server. A linked task carries two sets of numbers, and a screen picking between them
+    itself would be a retention screen guessing.
+  - The editor offers **starting points** (`suggested`) that come from the API, not from the
+    template: they are the panel's opinion about how much history is worth keeping, and an
+    opinion written into a page is one the API cannot state.
+  - All of it rides on `backup_schedule` — editing a profile *is* editing several tasks'
+    retention, which is exactly the decision that flag already covered. No new permission.
+
+- **A copy can be locked.** Retention answers "how much history" and its two floors answer
+  "never leave the task with nothing"; neither can say *this particular archive* — which is what
+  somebody means about the copy taken before a migration, or the last one known to be good. A
+  locked copy is skipped by retention **and** refused by the delete button, with the row
+  offering the padlock instead.
+  - The flag is a **file beside the archive** (`<copy>.zip.lock`, carrying who and when), not a
+    column. The listing reads the directory precisely so there is no second source of truth
+    about files somebody can move with the panel stopped — and a lock in a table would be one,
+    with the failure mode of a row claiming an archive that is no longer there is protected.
+  - **A damaged marker still counts as locked.** Its existence is the flag and its contents are
+    a courtesy; reading a broken courtesy as "not protected" fails in the one direction a lock
+    must not.
+  - The refusal lives in the **service** as well as the route, so a caller that works out the
+    doomed list some other way still cannot delete it — and the route answers 409 saying why,
+    because "not found" would be a lie about a file that is right there.
+  - A locked copy **still claims its bucket** (filtered at the end, not hidden from the rules,
+    so protecting one does not silently buy an extra) and **spends its size** against a budget
+    that can never drop it.
+  - Sidecars now go with the archive when it is deleted. A leftover `.lock` would make a later
+    copy of the same name born protected, never pruned, with nothing on screen explaining why.
+  - `backup_delete` in both directions: the lock only affects whether an archive can be
+    destroyed, and unlocking is asking to be able to destroy it. It is a guard rail against
+    retention and against the wrong row, not protection from an administrator.
+  - The lock button carries the state in its **colour** — cyan while locked, grey while not —
+    because the same icon in two greys is a button you have to read to know which way it goes.
+    It is the padlock's own colour in the name column, so one colour means one thing on the row.
+  - The delete button is **disabled, not removed**, on a locked row. Taking it away shortened
+    the row and shifted the whole group, so a locked copy read as a different kind of row rather
+    than as the same row with one action unavailable — and a disabled control can say why in its
+    tooltip, which a missing one cannot.
+
+### Fixed
+- **The scheduled-task form no longer scrolls.** It said three independent things — when it
+  runs, how long its copies are kept, what they hold — stacked in one column, and had grown to
+  nine hundred pixels of dialog with a scrollbar down the middle of a form. They are now three
+  tabs, read at the moment each is needed; the name stays above them, because it identifies the
+  record all three describe and is what the retention preview counts against. A long pane
+  scrolls **inside** the box (`.ss-tabbox`, generic, not per-id) instead of stretching the
+  dialog past the viewport.
+
+## [0.0.1+build.58] - 2026-08-09
+
+### Changed
+- **Scheduled backups are a LIST of tasks, not one interval.** Each task says what to copy, how
+  often and how many to keep. The case it exists for: configuration and inventory are worth a
+  daily copy, the syslog and the MIBs perhaps weekly — and with a single schedule that cannot be
+  said without copying everything at the pace of the most demanding part, which is how a disk
+  fills.
+  - **The section navigates by the same rail Configuration and Modules use**, and it earns its
+    width because each TASK is an entry: selecting one shows the copies *it* took. That is what
+    makes per-task retention visible instead of something to deduce from file names — the
+    schedule says "keep 4" and the entry says how many there are. A rail holding only "schedule"
+    and "copies" would have been two clicks for two lists.
+  - Which copies belong to a task is decided in **one** place, so the count on the entry and the
+    rows in the pane cannot disagree. The browser's slug and the server's `task_slug` are the
+    same rule for the same reason: two implementations is how a task's copies stop being found
+    by the screen that lists them.
+  - Tasks live in their **own table** (`backup_tasks`). A task is a record an operator creates,
+    renames, disables and deletes one at a time, like a webhook or a host; `spec.py` holds
+    scalars somebody tunes, and a list of things somebody keeps belongs where the other lists
+    are.
+  - **Retention is per task**, and this was the reason for the whole redesign: with one shared
+    counter the daily task prunes the monthly one's copies — deleting exactly the ones that took
+    a month to become worth having. The copy's NAME now carries the task that took it
+    (`auto-<task>-<date>`), and the counter is scoped to it.
+  - Copies taken before tasks existed (`auto-<date>`) are still recognised, by the unnamed task
+    rather than by any named one. Without that the upgrade would have left every copy already on
+    disk outside every counter — never pruned, and never counted as "the last one" either.
+  - A task's name is reduced to what may appear in a file name before it is used as one: a task
+    called `../etc` would otherwise steer where its own copies are written.
+  - **One lease for the whole round, and tasks run one after another.** Two due at once on two
+    processes would each copy the same install; two at once in one process would read every
+    table twice and write two archives at the same disk.
+  - **A task says when its own way: every N hours, or days of the week at a time of day.** The
+    interval was the whole vocabulary and it could not say "Mondays at 03:00" — but it is the
+    shape that survives the panel being down, so the calendar had to keep that rather than
+    replace it. It does: the question asked is *"has the last window passed with no copy since"*,
+    which is true from the moment the window passes until a copy is taken. A panel that comes
+    back at 09:00 still takes the 03:00 copy, and a tick every ten minutes catches it as well as
+    a tick every minute would. Asked the naive way — *"is it 03:00 now?"* — it would be false
+    1439 minutes out of 1440 and miss the window entirely whenever the process was not up for it.
+  - No day ticked means **every** day, never "no days": a task somebody created that silently
+    never runs is the failure this whole feature exists against. A day the calendar cannot
+    match is dropped at the door for the same reason.
+  - A task with no `mode` at all is an interval one — that is what every task was before the
+    calendar existed, and an upgrade that stopped running them would be a schedule switched off
+    without anybody saying so.
+  - The three settings this replaces (`backup_every_hours`, `backup_keep`,
+    `backup_auto_secrets`) **migrate into a task** the first time the scheduler finds none —
+    once, audited, and only when something was actually scheduled. Retiring them outright would
+    have turned a configured schedule into no schedule at all, and a copy that quietly stops
+    being taken is discovered when it is needed.
+
+### Added
+- **The schedule and the verify are grants of their own.** Both rode on permissions about
+  ARCHIVES and are not about archives at all: `backup_schedule` covers creating, editing and
+  deleting tasks — a task edited to run monthly instead of daily destroys no file and quietly
+  halves the protection, and deleting one stops the copies without deleting a single one — and
+  `backup_verify` covers checking a copy, which writes nothing but walks every member of a
+  multi-gigabyte archive and hashes it. *Run now* deliberately stays on `backup_create`: it
+  produces a copy exactly like the Create button, and one grant should not be two ways to the
+  same result. The buttons follow the same flags, because a button that 403s says the panel is
+  broken rather than that the grant is missing.
+- **A copy says what it holds and whether it worked, and can prove it later.**
+  - **A checklist per part, with its outcome and its row count**, written into the manifest as
+    the copy is made — and an overall verdict derived from it: `ok`, `partial` when some part
+    failed, `error` when they all did. A percentage says how far along; it cannot say what
+    actually made it, which is the only question afterwards. The verdict goes in the audit line
+    too: "it ran" is not the same as "it worked".
+  - **sha256 per member, plus a `.sha256` sidecar** in the format `sha256sum -c` reads, so a
+    copy can be checked away from the panel that made it. The digest of the archive cannot live
+    inside the archive, hence the sidecar — written after the file is closed. `Verify` compares
+    the file against its own manifest and reports which member drifted, not just that one did.
+  - **A Details dialog on every copy**: when it was taken and by whom, the version and engine
+    that wrote it, whether it carries secrets, the per-part checklist, the tables it holds
+    biggest-first, and the digests. Everything is read from the manifest the archive carries —
+    a verdict worked out at display time is a verdict that did not travel with the file.
+- **Copies in progress are visible while they happen.** Both kinds — the scheduled run and the
+  hand-made one — start a job and report against it: a row appears in the list it belongs to
+  the moment the button is pressed, with the table being copied and a bar, and a dialog for
+  whoever wants to watch it. Held-open requests were the alternative, and a copy of a large
+  install takes minutes: long enough for a browser or a reverse proxy to give up, leaving the
+  operator unable to tell whether it worked.
+- **The copies table sorts by its columns**, through the same header renderer every other list
+  in the panel uses — a table that sorts differently from its neighbours is one somebody has to
+  learn twice.
+- **The *Contents* column gives way to a *Status* one.** Contents repeated the same four part
+  labels on every line — a column that says nothing about the copy in front of it, now that the
+  Details dialog lists them properly. *"Is this copy any good"* is the question you actually ask
+  of a list of backups, and it was answerable one copy at a time by opening a dialog.
+  - It sorts by **how bad the answer is**, not by its name: alphabetically the order would be
+    error, ok, partial, which puts the two answers that need attention either side of the one
+    that does not.
+  - A copy taken before verdicts existed reads **"not recorded"** rather than green. A badge
+    calling a copy nobody ever checked good is the one lie this column could tell — and the
+    Details dialog gives the same four answers, so the two can never disagree about one file.
+  - **No secrets** stays as a mark beside the name instead of joining the column: a copy taken
+    without credentials was taken *correctly*, so calling it anything but good would be wrong —
+    and it will still restore credentials that authenticate against nothing, which is found out
+    at restore time and that is too late.
+
+### Fixed
+- **The copy ignored the second database, so restoring brought no syslog back.** With
+  `syslog_db|enabled` that feed lives in a database of its own, and the backup only ever read
+  the system one: the `syslog` part found no such table, copied nothing, reported nothing wrong,
+  and the emptiness surfaced at restore time — the one moment nobody can afford to find out.
+  It only ever failed with that option on, which is why the default install never showed it.
+  - A part now declares which database it belongs to, and both directions take a map of
+    connectors the web admin fills in — only when the syslog connector really is a different
+    one, because with the option off it hands back the main one.
+  - `core` stays "every table nobody else claimed" **in the system database**, so nothing from
+    the second one is swept into it and restored to the wrong place.
+  - Restoring groups by database and gives each **its own transaction**: two databases cannot
+    share one, and the guarantee that matters — the system tables land together or not at all —
+    is kept where it means something. Bulk log data landing separately locks nobody out.
+  - A second database that cannot be reached costs its own part and nothing else. The copy of
+    everything else is still worth having.
+- **A restore left the other containers running on settings that no longer existed.** It
+  replaces the whole `config` table, and on a multi-container install the workers only find out
+  on their next poll of the shared database — fifteen seconds of a scheduler running the old
+  check list. They are poked now, the same way a config save pokes them, and for every service
+  rather than the ones whose section "changed": a restore replaced all of them.
+- **The progress dialog sometimes never opened, so the click looked like it did nothing.**
+  Bootstrap ignores `show()` during a hide transition, and the check for "is the form still
+  up?" was the `show` class — which comes off at the *start* of the hide while
+  `hidden.bs.modal` only fires at its *end*. In between there is no class to test and no event
+  left to wait for, and the reply to the request that starts the job lands in exactly that
+  window. It now waits for the event **and** a floor, whichever answers first, once.
+- **A copy and a restore left no trace on the log.** They take minutes, run on a thread and
+  rewrite the install — and they went past in total silence, so a screen that failed to open
+  its dialog left nothing anywhere to say whether anything had happened at all. Both are traced
+  now through the panel's own `Debug`, so `global|log_level` governs them and there is no second
+  logging path: what was asked for and how it ended at **info**, one line per table at
+  **debug**, and at **warning/error** the refusals, the parts that failed, and *what could not
+  be applied on restore* — the line somebody greps for when a copy from another build left
+  something out. Background jobs carry their id from start to finish.
+- **Restoring showed nothing until it was over.** It was awaited, so on an install whose tables
+  run to six figures of rows the dialog sat there saying nothing while every one of them was
+  replaced — the moment where silence is most alarming, because what it is silent about is the
+  install being overwritten.
+  - It goes through the **same job the copies use**: a bar, the table being written, and the
+    outcome when it lands. One shape, because the two are the same wait to whoever is watching.
+  - **The same checklist the copy shows**, one entry per part with its rows and its outcome,
+    ticked off as it goes and kept when it ends. The part is the unit somebody chose in the
+    form, so it is the unit they want reported back; "148 rows" left them to work out which of
+    the six things they asked for had actually arrived. A part is *not* ok when a table it
+    holds is gone or a field was dropped — which is exactly the case where rows went in and
+    something was still lost — and it keeps the FIRST reason, because the first thing that went
+    wrong explains the rest.
+  - No row appears in the list of copies. A restore adds nothing to it — it replaces what the
+    install already holds, and a row would be the screen inventing a copy that is not being
+    made.
+  - **The reload waits for the dialog to be closed.** Everything on screen was read before the
+    tables changed under it, so the page has to be re-read; doing it while the outcome is still
+    being read would sweep away the one thing somebody has to see. Nobody watching means it
+    happens straight away.
+  - A copy that is not there is **refused before any of it starts**, and still audited. A
+    progress bar for something that was never going to happen is worse than an error.
+- **Restoring a copy from another build said nothing about it.** The archive's *format* was
+  checked and the app version was not, so a copy from any build restored in silence — and
+  restoring one from a LATER build drops the columns this schema does not have yet. Silent is
+  what turns a version jump into data loss instead of a decision.
+  - The restore dialog now **names both sides of the jump** before the button: a plain line for
+    an older copy, a warning for a newer one saying what it will drop.
+  - The result **says what did not survive the trip**: per table, the columns the live schema
+    could not take, or that the table itself is gone and how many rows went with it. It comes
+    up as a dialog, not a toast — a toast says a number and disappears, and this is the one
+    thing somebody has to read. The page reload that follows a restore waits for it to be
+    closed.
+  - The same goes into the **audit line**, with the build that made the copy. A restore is the
+    moment nobody is looking ten minutes later, and *"which columns went"* is the question that
+    gets asked months afterwards, when the answer on screen is long gone.
+  - Still **nothing is refused over a version**. The schema moves on almost every build, and a
+    panel that turned down "old" copies would be useless on the one day it is needed. Nor are
+    there migrations on restore: rewriting rows according to what one build assumes about
+    another is the kind of code that breaks the copy while applying it, and the single
+    transaction already gives the guarantee that matters — all of it, or none.
+- **The backup knew about one module's files because its path was written into the core.**
+  `var_dir/snmp_mibs/raw` sat in `lib/core/backup/service.py`, which is the core naming a
+  module — the one thing this codebase does not do. It held the SNMP module's files and would
+  have missed the next module's, silently, the way a backup that skips what it did not
+  recognise always does.
+  - A module declares it now, in its own `schema.json`: `__backup_part__` gives an id, a
+    directory **relative to `var_dir`**, the key to its label in the module's own lang files,
+    and whether the form pre-ticks it. A list contributes several.
+  - The declaration **stays inside `var_dir`**: an absolute path, a rooted one or anything that
+    climbs out with `..` is dropped. That directory is read when a copy is made and **written**
+    when one is restored, so a declaration that escaped would let a module choose where the
+    panel writes.
+  - It also cannot take a core part's id. A module shadowing `core` would replace the copy's
+    tables with a directory.
+  - Inside the archive a module's files live at `files/parts/<id>/`, derived from the id on
+    both sides so a copy and a restore cannot disagree about where they are. On restore they go
+    where the module says they live **today**; a module that is no longer installed has its
+    part skipped rather than unpacked into a directory nothing reads.
+  - The label travels already translated, because the wording lives in the module's lang files
+    and the browser's catalogue does not hold them — the key alone would have put
+    `backup_part_mibs` on screen.
+  - **Tables needed no such hook**: `core` is every table no other part claimed, so the ones a
+    module creates at runtime were already in the copy. This was only ever about files.
+- **The progress dialog closed itself the moment the copy ended.** That is the instant its
+  outcome is worth reading, and the window somebody deliberately opened to watch the copy was
+  taken away at exactly the wrong moment — leaving a toast as the only trace of a run that may
+  have lost a part. It now replaces the bar with the verdict, the checklist that produced it and
+  a way into the copy's full detail, and waits to be dismissed.
+- **The hand-made copy showed nothing at all until it finished.** It awaited the request while
+  the scheduled runs had had a progress row for a version — so the one started by a person
+  standing there watching was the one with nothing to watch. Both go through the same start
+  now: one path, because a second one is a second place to forget the bar.
+- **A copy suggested by hand could collide with the one before it.** The proposed name stopped
+  at the minute, `create_backup` refuses to overwrite, and the moment you take two by hand is
+  the moment you are trying something and repeating it — so the second failed on a collision
+  the operator did not cause and could not see. It carries seconds now, like the scheduler's
+  names always have.
+- **`prune` deleted newest-first while its docstring said oldest-first.** It does not change
+  what is deleted, but a run interrupted half way should free the least useful copies rather
+  than the ones nearest to being the last good one. Found by a test written against the
+  documented behaviour.
+
+## [0.0.1+build.57] - 2026-08-08
+
+### Added
+- **A Backups section, and copies that take themselves.** Full or partial, made by hand or on a
+  schedule, with restore.
+  - A copy is a **zip of JSON, not a dump of the database file**. The panel runs on four
+    engines and the copy has to survive the move: an install that grew on SQLite and is being
+    lifted onto MySQL is exactly when a backup is asked for, and a `.db` answers that with
+    nothing. Rows out and rows in, through the connector both ways.
+  - What a copy holds is one declaration (`PARTS`), read by the API, the form and the restore
+    alike. `core` is **everything no other part claimed** — inverted on purpose, so a table
+    added tomorrow, including the ones modules create at runtime, is in the backup instead of
+    being silently missed. A backup that quietly skips what it did not recognise is the failure
+    you find out about once.
+  - **Secrets are a choice per copy**, and the manifest records which it was: one that holds
+    none but looks complete is discovered at restore time. Leaving them out blanks every value
+    stored encrypted **at any depth** — the secret is a value inside a JSON column, so a pass
+    over column values alone would ship it while reporting a copy that holds none.
+  - **Restore replaces, never merges** — merging would produce a third state that never existed
+    — and runs in one transaction: users back with roles not back is an install nobody can log
+    into. A column the live schema has since dropped does not sink it, because the backup
+    somebody reaches for is an old one.
+  - **Five permissions, not one.** Downloading is not "viewing": the archive is the whole
+    install in one file, so whoever may fetch it holds the install. Restoring is not "creating":
+    it overwrites users and roles. Every action is audited, download included.
+  - **Automatic copies on an interval**, with retention. An interval and not a time of day
+    because a panel that was off at 03:00 must still take its copy when it comes back at 09:00.
+    Retention only ever prunes automatic copies — one somebody took before an upgrade is not
+    something a counter gets to throw away — and prunes **after** the new copy is on disk, so a
+    full disk cannot leave fewer copies than the run started with.
+  - **Where they land is configurable** (`web_admin|backup_dir`, `SS_BACKUP_DIR`), with a folder
+    picker beside the field. The default — beside the data it copies — survives a human mistake
+    and nothing else.
+  - The picker hangs off a generic registry keyed by config path: the field renderer draws two
+    hundred fields and must not know that one of them is a folder.
+
+### Fixed
+- **`apiPost` / `apiDelete` hand back `{status, data}`, not the body.** The new section read
+  `res.ok` off them — a key that is never there — so every request that worked announced
+  itself as an error, and a delete said "save failed" with the file already gone.
+- **`create_backup` reported an unusable folder instead of raising.** `os.makedirs` sat outside
+  the try, so a configured path that cannot be created escaped a function whose contract is to
+  report failure as a value — and would have taken the scheduler thread down with it.
 
 ## [0.0.1+build.56] - 2026-08-06
 
