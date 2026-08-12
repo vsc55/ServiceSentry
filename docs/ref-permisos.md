@@ -109,9 +109,12 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `backup_delete` | Eliminar una copia del disco — y **bloquearla o desbloquearla**, porque el bloqueo solo decide si un archivo puede destruirse y desbloquear es pedir poder borrarlo |
 | | `backup_schedule` | Crear, editar y borrar **tareas** programadas y **perfiles de retención**. No destruye ningún archivo, pero decide cada cuánto se protege la instalación y cuánta historia se guarda —y editar un perfil lo decide de golpe para todas las tareas que lo siguen |
 
+| **Diagnóstico** | `diagnostics_view` | Ver el diagnóstico del sistema: versión, dependencias, librerías opcionales, almacenamiento y rutas. No expone secretos, pero sí **la forma de la instalación**, que es el inventario contra el que alguien escribe un exploit — y es, por lo mismo, justo lo que necesita un operador antes de abrir una incidencia. La comprobación de nueva versión es lo único de esa pantalla que sale de la máquina, y solo al pulsarla |
+
 > Ninguno de los siete de **Copias de seguridad** se concede a los roles integrados: una copia
 > es una herramienta de administración, y la lista sola ya dice qué existe y desde cuándo. Ver
-> [explica-backup.md](explica-backup.md#permisos).
+> [explica-backup.md](explica-backup.md#permisos). `diagnostics_view` tampoco, por la misma
+> razón.
 
 > **IP bans (fail2ban)** añade su propia familia granular `ipban_*` (`ipban_ban_view/add/edit/delete`,
 > `ipban_history_view`, `ipban_history_delete`, `ipban_whitelist_view/add/delete`, `ipban_watchlist_clear`,

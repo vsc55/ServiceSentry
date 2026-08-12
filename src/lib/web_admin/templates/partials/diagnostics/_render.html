@@ -1,0 +1,308 @@
+{# ================================================================
+   Diagnostics — what this install is, in one screen.
+
+   The order is the order the questions get asked in a support thread: what version is it,
+   what is it running on, where does it write, what is missing. Everything is drawn from what
+   the API answered — this file names no library and no path of its own, so a collector that
+   grows a row shows it here without a second list to keep in step.
+
+   Nothing on this page changes anything. The single button that has an effect outside the
+   browser is the update check, and it lives next to the version it is about.
+   ================================================================ #}
+
+let _diagData = null;
+
+async function renderDiagnostics() {
+    const c = document.getElementById('diagnostic-container');
+    if (!c) return;
+    c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3 text-center py-4">
+        <div class="spinner-border spinner-border-sm"></div></div>`;
+    const res = await apiGet('/api/v1/diagnostics');
+    if (!res) { c.innerHTML = ''; return; }
+    _diagData = res;
+    c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">
+        ${_dgBrand()}
+        ${_dgVersionCard(res.runtime)}
+        ${_dgSystemCard(res.system)}
+        ${_dgDatabaseCard(res.database)}
+        ${_dgStorageCard(res.storage)}
+        ${_dgFeaturesCard(res.features)}
+        ${_dgDependenciesCard(res.dependencies)}
+    </div>`;
+}
+
+/** The lockup, at the head of the section.
+ *
+ *  Decorative, and the only decoration on the page — which is why it is here and not on a
+ *  screen somebody reads all day: this is the page you open to find out what you are running,
+ *  and the first answer to that is what it is called. `alt` is empty and it is hidden from the
+ *  reader: the version card underneath says the same thing in words.
+ *
+ *  The same file the login card uses, at its own width. It carries transparency, so it needs
+ *  no plate behind it in either theme. */
+function _dgBrand() {
+    return `<div class="text-center py-3" aria-hidden="true">
+        <img src="/static/img/logo.png" alt="" class="ss-diag-logo"
+             width="640" height="427">
+    </div>`;
+}
+
+/** A card, so the six blocks are one shape and not six. */
+function _dgCard(icon, title, body, extra) {
+    return `<div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi ${icon} text-secondary"></i>
+                <span class="fw-semibold">${esc(title)}</span>
+                <span class="ms-auto">${extra || ''}</span>
+            </div>
+            ${body}
+        </div>
+    </div>`;
+}
+
+/** Key/value rows. A definition list and not a table: these are facts about one thing, and a
+ *  table header over two columns of "name / value" is a header that says nothing.
+ *
+ *  Two columns of label-left / value-right put a value flat against the NEXT pair's label —
+ *  "Windows 10 Kernel" read as one field with a strange name. What was missing is the gutter
+ *  between the columns (`gx-5`), and only that: a rule under each pair fixed the symptom by
+ *  drawing a grid the data does not have, and twelve facts about one machine are not a table. */
+function _dgRows(pairs) {
+    // A third element is a hint on the LABEL, for the handful of fields whose name does not
+    // explain them. A value nobody can interpret is a value that costs more than it gives.
+    return '<div class="row gx-5 gy-1 small">' + pairs.filter(p => p).map(([k, v, hint]) =>
+        `<div class="col-12 col-lg-6 d-flex gap-3">
+            <span class="text-muted text-nowrap${hint ? ' ss-help' : ''}"
+                  ${hint ? `title="${escAttr(hint)}"` : ''}>${esc(k)}</span>
+            <span class="ms-auto text-end font-monospace text-truncate"
+                  title="${escAttr(String(v))}">${esc(String(v))}</span>
+        </div>`).join('') + '</div>';
+}
+
+function _dgVersionCard(rt) {
+    rt = rt || {};
+    const btn = `<button class="btn btn-sm btn-secondary py-0 px-2" type="button"
+            id="btnDiagUpdate" onclick="_dgCheckUpdate()">
+            <i class="bi bi-cloud-arrow-down me-1"></i>${esc(t('diag_check_update'))}</button>`;
+    const body = _dgRows([
+        [t('diag_version'), rt.version || '?'],
+        // The id of THIS run, not of the install: it changes on every restart, which is the
+        // fact it is here to report — a process that came back is a process that lost whatever
+        // it was holding in memory (running jobs, caches), and it is what the browser watches
+        // to know the panel restarted underneath it.
+        [t('diag_startup'), rt.startup_id || '—', t('diag_startup_tt')],
+        [t('diag_log_level'), rt.log_level || '—'],
+        // Which services this process runs itself. On a multi-container install the answer is
+        // usually "none of them", and that reframes every question about a check that did not
+        // run: it did not run HERE, and here is not where it was supposed to.
+        [t('diag_embedded'), (rt.embedded_services || []).join(', ') || t('diag_none')],
+    ]) + `<div id="dgUpdateResult" class="mt-2"></div>`;
+    return _dgCard('bi-tag', t('diag_card_version'), body, btn);
+}
+
+/** The one call on this page that leaves the machine, and only from here.
+ *
+ *  Never on load: a monitoring panel gets installed on segregated networks by people who would
+ *  rather it did not talk to anybody, and "it contacted github.com and I never asked" is a bug
+ *  report you cannot argue with. */
+async function _dgCheckUpdate() {
+    const box = document.getElementById('dgUpdateResult');
+    const btn = document.getElementById('btnDiagUpdate');
+    if (btn) btn.disabled = true;
+    if (box) box.innerHTML = `<span class="spinner-border spinner-border-sm"></span>`;
+    const res = await apiPost('/api/v1/diagnostics/update-check', {});
+    if (btn) btn.disabled = false;
+    if (!box) return;
+    const d = (res && res.data) || {};
+    if (!_apiOk(res) || !d.ok) {
+        // The failure is the answer, not an error: unreachable, rate-limited or blocked are
+        // all things the operator needs told plainly on the page they opened to find out.
+        //
+        // `no_releases` is not even a failure — `/releases/latest` excludes drafts and
+        // prereleases, so a repository with none published has nothing to return. Showing
+        // "HTTP 404" there sends somebody to check the URL, which is the one thing that is
+        // not wrong.
+        box.innerHTML = d.error === 'no_releases'
+            ? `<div class="alert alert-secondary py-2 px-3 small mb-0">
+                   ${esc(t('diag_update_none'))}</div>`
+            : `<div class="alert alert-secondary py-2 px-3 small mb-0">
+                   ${esc(t('diag_update_failed'))}
+                   <code>${esc(d.error || _apiErr(res) || '')}</code>
+               </div>`;
+        return;
+    }
+    const cmp = d.compare || {};
+    const tone = cmp.status === 'newer' ? 'warning' : 'secondary';
+    const label = cmp.status === 'newer' ? t('diag_update_newer')
+                : cmp.status === 'current' ? t('diag_update_current')
+                : t('diag_update_unknown');
+    box.innerHTML = `<div class="alert alert-${tone} py-2 px-3 small mb-0">
+        <div>${esc(label)}</div>
+        <div class="mt-1">
+            <span class="text-muted">${esc(t('diag_latest'))}</span>
+            <span class="font-monospace ms-1">${esc(d.tag || '?')}</span>
+            ${d.html_url ? `<a class="ms-2" href="${escAttr(d.html_url)}" target="_blank"
+                rel="noopener">${esc(t('diag_release_notes'))}</a>` : ''}
+        </div>
+    </div>`;
+}
+
+function _dgSystemCard(s) {
+    s = s || {};
+    const body = _dgRows([
+        [t('diag_os'), s.distribution && s.distribution !== 'unknown'
+            ? s.distribution : `${s.os || '?'} ${s.os_release || ''}`],
+        [t('diag_kernel'), s.os_version || '—'],
+        [t('diag_arch'), s.arch || '—'],
+        [t('diag_hostname'), s.hostname || '—'],
+        [t('diag_container'), s.container ? t('yes') : t('no')],
+        [t('diag_cpus'), s.cpu_count || '—'],
+        [t('diag_python'), `${s.python || '?'} (${s.python_impl || '?'})`],
+        [t('diag_python_exe'), s.python_exe || '—'],
+        [t('diag_pid'), s.pid || '—'],
+        // The offset and not just the name: a timestamp that looks an hour off is read
+        // against this, and it is the reason the field is here at all.
+        [t('diag_timezone'), `${s.timezone || '?'} (UTC${s.utc_offset || ''})`],
+        [t('diag_now'), s.now || '—'],
+        [t('diag_uptime'), _dgDuration(s.uptime_seconds)],
+    ]);
+    return _dgCard('bi-cpu', t('diag_card_system'), body);
+}
+
+function _dgDatabaseCard(db) {
+    db = db || {};
+    const body = _dgRows([
+        [t('diag_db_engine'), db.engine || '—'],
+        db.path ? [t('diag_db_path'), db.path] : null,
+        [t('diag_db_syslog'), db.separate_syslog_db
+            ? (db.syslog_engine || t('yes')) : t('diag_db_same')],
+    ]);
+    return _dgCard('bi-database', t('diag_card_database'), body);
+}
+
+function _dgStorageCard(rows) {
+    const body = '<div class="small">' + (rows || []).map(r => {
+        const pct = r.total_bytes ? Math.round(100 * (r.total_bytes - r.free_bytes)
+                                               / r.total_bytes) : 0;
+        // A missing or read-only directory is the finding, so it is a badge and not a colour
+        // on a bar somebody has to interpret.
+        const flag = !r.exists
+            ? `<span class="badge text-bg-danger">${esc(t('diag_missing'))}</span>`
+            : !r.writable
+                ? `<span class="badge text-bg-warning">${esc(t('diag_readonly'))}</span>`
+                : '';
+        return `<div class="mb-2">
+            <div class="d-flex gap-2">
+                <span class="text-muted">${esc(t('diag_path_' + r.key) || r.key)}</span>
+                <span class="font-monospace text-truncate flex-grow-1">${esc(r.path || '—')}</span>
+                ${flag}
+            </div>
+            ${r.total_bytes ? `<div class="d-flex align-items-center gap-2">
+                <div class="progress flex-grow-1" style="height:4px">
+                    <div class="progress-bar ${pct > 90 ? 'bg-danger' : ''}"
+                         style="width:${pct}%"></div>
+                </div>
+                <span class="text-muted">${esc(t('diag_free')
+                    .replace('{}', _dgBytes(r.free_bytes)))}</span>
+            </div>` : ''}
+        </div>`;
+    }).join('') + '</div>';
+    return _dgCard('bi-hdd', t('diag_card_storage'), body);
+}
+
+/** Which optional libraries are installed, and what each one turns on.
+ *
+ *  The card that answers most of what this page exists for: a panel where the SSO button never
+ *  appears, or every SNMP check is skipped, is almost never misconfigured — the library is not
+ *  there, the feature switched itself off, and nothing on screen said which. */
+function _dgFeaturesCard(features) {
+    // Same gutter as `_dgRows`, and for the same reason: two columns of "name … version" put a
+    // version against the next row's tick with nothing between them.
+    const body = '<div class="row gx-5 gy-1 small">' + (features || []).map(f =>
+        `<div class="col-12 col-lg-6 d-flex align-items-center gap-2">
+            <i class="bi ${f.available ? 'bi-check-circle-fill text-success'
+                                       : 'bi-dash-circle text-muted'} flex-shrink-0"></i>
+            <span class="text-truncate">${esc(t(f.feature_key) || f.module)}</span>
+            <span class="ms-auto text-end text-nowrap">
+                <code class="text-muted">${esc(f.module)}</code>
+                ${f.version ? `<span class="text-muted ms-1">${esc(f.version)}</span>` : ''}
+            </span>
+        </div>`).join('') + '</div>';
+    const missing = (features || []).filter(f => !f.available).length;
+    const extra = missing
+        ? `<span class="badge text-bg-secondary">${esc(t('diag_n_absent')
+              .replace('{}', missing))}</span>`
+        : '';
+    return _dgCard('bi-plugin', t('diag_card_features'), body, extra);
+}
+
+/** The lock file against what is installed. Only the differences are shown open: the full list
+ *  is in the repository, and forty identical rows are forty rows nobody reads. */
+function _dgDependenciesCard(deps) {
+    deps = deps || {};
+    const rows = deps.rows || [];
+    if (!deps.found) {
+        return _dgCard('bi-box-seam', t('diag_card_deps'),
+            `<div class="text-muted small">${esc(t('diag_deps_none'))}</div>`);
+    }
+    const bad = rows.filter(r => r.status !== 'ok');
+    const line = r => `<tr>
+        <td class="small font-monospace">${esc(r.name)}</td>
+        <td class="small text-muted">${esc(r.required || '—')}</td>
+        <td class="small">${esc(r.installed || '—')}</td>
+        <td class="small">${_dgDepBadge(r.status)}</td></tr>`;
+    const table = list => `<table class="table table-sm align-middle mb-0"><thead><tr>
+            <th class="small py-1">${esc(t('diag_dep_name'))}</th>
+            <th class="small py-1">${esc(t('diag_dep_required'))}</th>
+            <th class="small py-1">${esc(t('diag_dep_installed'))}</th>
+            <th class="small py-1" style="width:7rem"></th>
+        </tr></thead><tbody>${list.map(line).join('')}</tbody></table>`;
+    // The fold holds the ones that are FINE, never the whole list: the differences are already
+    // open above it, and repeating them underneath made the same package appear twice with the
+    // same badge — which reads as two findings and makes the open table look like a summary of
+    // something longer rather than the whole of what is wrong.
+    const good = rows.filter(r => r.status === 'ok');
+    const body = (bad.length
+            ? table(bad)
+            : `<div class="text-muted small">${esc(t('diag_deps_all_ok'))}</div>`)
+        + (good.length
+            ? `<details class="mt-2"><summary class="small">${esc(t('diag_deps_show_ok')
+                  .replace('{}', good.length))}</summary>${table(good)}</details>`
+            : '');
+    const extra = bad.length
+        ? `<span class="badge text-bg-warning">${esc(t('diag_n_problems')
+              .replace('{}', bad.length))}</span>`
+        : `<span class="badge text-bg-success">${esc(t('diag_deps_ok'))}</span>`;
+    return _dgCard('bi-box-seam', t('diag_card_deps'), body, extra);
+}
+
+function _dgDepBadge(status) {
+    if (status === 'missing') {
+        return `<span class="badge text-bg-danger">${esc(t('diag_missing'))}</span>`;
+    }
+    if (status === 'mismatch') {
+        return `<span class="badge text-bg-warning">${esc(t('diag_mismatch'))}</span>`;
+    }
+    return `<span class="badge text-bg-success">${esc(t('diag_ok'))}</span>`;
+}
+
+/** Bytes as a person reads them, in 1024s like the server's own `fmt_bytes` — the two
+ *  disagreeing would print a different size for the same disk depending on who formatted it. */
+function _dgBytes(n) {
+    let v = Number(n) || 0;
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
+}
+
+/** An uptime nobody has to divide. "9214" is not an answer anybody reads. */
+function _dgDuration(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${m}m`;
+    return `${m}m`;
+}

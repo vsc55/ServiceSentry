@@ -28,7 +28,7 @@ class TestPermissionsConstants:
 
     def test_permissions_tuple_has_73_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 73
+        assert len(PERMISSIONS) == 74
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -43,6 +43,7 @@ class TestPermissionsConstants:
             'audit_view', 'audit_delete',
             'backup_view', 'backup_create', 'backup_download',
             'backup_restore', 'backup_delete', 'backup_verify', 'backup_schedule',
+            'diagnostics_view',
             'modules_view', 'modules_add', 'modules_edit', 'modules_delete',
             'servers_view', 'servers_add', 'servers_edit', 'servers_delete',
             'clusters_view', 'clusters_add', 'clusters_edit', 'clusters_delete',
