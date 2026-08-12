@@ -19,6 +19,46 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Cuatro tests que solo fallaban en CI, y nunca en local
+
+**Fecha:** 2026-08-12 · **Área:** `tests/conftest.py`, `tests/unit/test_backup_service.py`
+(`TestItSaysWhatItIsDoingOnTheLog`), `lib/core/object_base.py` (`ObjectBase.debug`)
+
+**Síntoma** — el workflow de GitHub daba `4 failed, 5364 passed` en la suite completa:
+
+```text
+FAILED …::test_a_copy_says_it_started_and_how_it_ended - assert "create >> 'copia'" in ''
+FAILED …::test_a_refusal_says_why - assert 'already exists' in ''
+```
+
+La captura de stdout estaba **vacía**, no equivocada. En local, `pytest tests/unit` pasaba
+siempre.
+
+**Diagnóstico** — que la diferencia sea *local pasa / CI falla* con el mismo código apunta al
+vecino, no al test: la suite completa mete tests de integración en el mismo proceso, y con
+`-n auto` xdist decide cuál cae antes en cada worker. Los cuatro afirman sobre lo que **imprime**
+la copia, y quién imprime es `ObjectBase.debug`.
+
+**Causa raíz** — `ObjectBase.debug` es un **atributo de clase**: un único objeto para todo el
+proceso, con `enabled`/`level` compartidos. Dos cosas normales lo apagan y ninguna lo restaura:
+`WebAdmin.__init__` aplica `global|log_level`, cuyo default es **`off`** (`spec.py`), y
+`test_wa_services.py::TestDebugAccessor` pone `off` a propósito para comprobar el accesor.
+Cualquiera de las dos antes que estos cuatro tests, en el mismo worker, los deja leyendo una
+captura vacía. Ninguno estaba mal: lo que estaba mal es que el siguiente test heredara el estado.
+
+**Solución** — dos capas. Un fixture `autouse` en `tests/conftest.py` devuelve
+`ObjectBase.debug` al estado en que lo encontró **después de cada test**, así que ningún test
+puede romperse por lo que corrió antes; y la clase de los cuatro declara en voz alta el estado
+que necesita (`enabled=True`, nivel `debug`) en vez de heredarlo. Verificado con un plugin de
+pytest que envenena el estado a `off` antes de la sesión: con él, los cuatro pasan.
+
+**Lección** — un test que **lee** estado global tiene que fijarlo, y quien lo escribe tiene que
+devolverlo. Y el síntoma «falla en CI, pasa en local» rara vez es CI: casi siempre es un vecino
+distinto, y con `xdist` el vecino cambia entre ejecuciones —de ahí que reproducirlo pida
+provocar el estado, no repetir el comando.
+
+---
+
 ## El rail se desplazaba y se comía la barra de herramientas
 
 **Fecha:** 2026-08-12 · **Área:** `static/css/web_admin.css` (`.ss-shell`, `.ss-main`),

@@ -10,7 +10,7 @@ Es la misma razón por la que el favicon tiene `src/tools/make_favicon.py`.
 
 | Fichero | Dónde se usa | Cómo se genera |
 |---|---|---|
-| `src/lib/web_admin/static/img/logo.png` | La tarjeta de login | el original a 640 px de ancho |
+| `src/lib/web_admin/static/img/logo.png` | La tarjeta de login, la cabecera de Diagnóstico y el pie de la barra lateral | el original a 640 px de ancho |
 | `src/lib/web_admin/static/img/logo-mark.png` | El anillo de carga del panel | solo el emblema, 256×256 |
 
 ```bash

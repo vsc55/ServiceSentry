@@ -6763,11 +6763,12 @@ restaurar), que no pueda robar un id del núcleo, y el viaje de ida y vuelta de 
 
 ## 150. La marca: dos ficheros, un original, y lo que se rompe en silencio
 
-**Archivo:** `tests/unit/test_wa_brand_logo.py` — 16 tests
+**Archivo:** `tests/unit/test_wa_brand_logo.py` — 19 tests
 
 El panel sirve **dos** derivados de un mismo original guardado en `assets/brand/`: el lockup
-completo en la tarjeta de login y solo el emblema dentro del anillo de carga. Son dos y no uno
-porque un lockup apaisado encogido a un círculo de 96 px es un nombre que nadie lee.
+completo en la tarjeta de login, encabezando Diagnóstico y al pie de la barra lateral, y solo el
+emblema dentro del anillo de carga. Son dos y no uno porque un lockup apaisado encogido a un
+círculo de 96 px es un nombre que nadie lee.
 
 Ningún test juzga cómo se ve. Lo que se fija son las tres propiedades que lo rompen sin que nada
 lo diga:
@@ -6790,6 +6791,7 @@ lo diga:
 | `TestTheFilesAreThereAndUsable::test_the_master_is_kept_with_a_recipe` | Un binario servido sin fuente es un callejón sin salida (misma razón que `make_favicon.py`) |
 | `TestTheDiagnosticsSectionShowsItToo::*` (2) | El lockup encabeza también Diagnóstico, con **ancho propio**: una sola clase compartida haría que tocar uno cambiara el otro |
 | `TestThePagesUseThem::*` (6) | Login y arranque los referencian, el icono provisional ya no está, van cacheados con `asset_v`, la caja declarada es la del fichero, y ni el nombre se imprime dos veces bajo un lockup que ya lo lleva ni queda de subtítulo una etiqueta de la barra lateral («Sistema»), que bajo un logo es una palabra suelta que no describe nada |
+| `TestTheSidebarFootShowsTheLockup::*` (3) | El lockup a lo ancho en el pie de la barra lateral —la única columna con sitio de sobra y nada dentro—, **dentro** de la navegación que scrollea: entre la lista y el bloque de usuario sería una franja fija que la lista no recupera; ahí baja al pie mientras hay holgura (`margin-top: auto`, que sin espacio libre vale 0 y no puede empujar la primera entrada fuera de alcance) y scrollea bajo la última entrada cuando no la hay. Decorativo (`aria-hidden`) y fuera en modo mini, donde 56 px de un lockup apaisado no los lee nadie. Y la **cabecera** de esa columna conserva su glifo: se probó con el emblema y se retiró —con el lockup a lo ancho debajo, es la marca dos veces en la misma columna, y la que pierde es la copia pequeña, que es justo la que no se lee |
 | `TestTheStylesheetSizesThem::*` (2) | El lockup se limita por **ancho** (por alto quedaría estrecho con aire a los lados) y el emblema cabe **dentro** del anillo en vez de cruzarlo |
 
 Sin Flask ni Pillow: la cabecera IHDR son once bytes de `struct`, y un test que necesitara una

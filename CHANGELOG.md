@@ -8,6 +8,46 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.63] - 2026-08-12
+
+### Added
+- **The lockup fills the foot of the sidebar.** It is the one column with room going spare and
+  nothing in it. Full width, and **inside** the scrolling navigation rather than between it and
+  the user block: there it would be a fixed slice of the column the list never gets back. With
+  slack it drops to the bottom; once the entries fill the column it scrolls below the last one.
+  The head of that column keeps its glyph — the mark was tried there and taken back out, because
+  with the lockup at full width below it, it is the brand twice in one column and the small copy
+  is the one that cannot be read at that size.
+  - It **fades** in mini mode rather than disappearing. `display: none` cannot be transitioned,
+    so collapsing dropped it in a single frame while expanding let the column's .15s width grow
+    it back — the same motion looking like two different ones depending on which way the button
+    was pressed. Sharing that .15s, the two directions are each other's reverse. On mobile the
+    drawer is full width, so it stays visible there.
+
+### Fixed
+- **Four tests that only failed in CI.** The full run reported `4 failed, 5364 passed` in
+  `test_backup_service.py::TestItSaysWhatItIsDoingOnTheLog`, with an **empty** captured stdout;
+  `pytest tests/unit` passed every time locally. `ObjectBase.debug` is a class attribute — one
+  object for the whole process — and two ordinary things turn it off without putting it back:
+  building a `WebAdmin` applies `global|log_level`, whose default is `off`, and one test sets
+  `off` on purpose to prove the accessor works. With `-n auto`, whichever of those lands first
+  in a worker leaves the four asserting on nothing. A `conftest.py` fixture now restores the
+  shared debug state after every test, and the class states the level it needs instead of
+  inheriting it. Neither the product nor either of those tests was wrong: what was wrong is
+  that the next test in the process inherited the state.
+- **Collapsing the sidebar is the reverse of expanding it, for the entries too.** Same cause as
+  the artwork above, reported right after it: the section labels and their carets were hidden
+  with `display: none`, so pressing collapse blanked the text in one frame while pressing expand
+  let the widening column reveal it. They fade over the column's own .15s now, kept in flow and
+  clipped by the sidebar rather than removed.
+  - The icon **stops moving** while that happens. Mini re-centred it in the 56px rail, which
+    rearranged the row underneath the fade; the left padding the entry already has puts it
+    within a pixel of that centre (measured: 19px from the edge in both states), so holding it
+    there costs nothing and removes the jump.
+  - The brand row keeps `display: none` on its name, and that is deliberate: it centres what is
+    left of it, so a name that merely faded would still take its width and push the hamburger —
+    the one control that expands the column again — off the edge.
+
 ## [0.0.1+build.62] - 2026-08-12
 
 ### Fixed

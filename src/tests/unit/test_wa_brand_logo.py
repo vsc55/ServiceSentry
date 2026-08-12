@@ -161,6 +161,55 @@ class TestTheDiagnosticsSectionShowsItToo:
         assert 'max-width: 260px' in block, 'the login lockup was resized with the other one'
 
 
+class TestTheSidebarFootShowsTheLockup:
+    """The sidebar is the one column with room going spare and nothing in it.
+
+    The lockup goes there full-width — the whole point is that it is big, so this is the
+    landscape file and not the mark.
+    """
+
+    def test_it_is_inside_the_scrolling_nav(self):
+        """Between the nav and the user block it would be a fixed slice of the column that the
+        list never gets back. Inside the nav it drops to the foot while there is slack and
+        scrolls below the last entry once there is not."""
+        src = _read(os.path.join(TPL, 'partials', '_sidebar.html'))
+        nav = src[src.index('<nav class="ss-sb-nav">'):src.index('</nav>')]
+        assert 'ss-sb-art' in nav, 'it sits outside the nav and steals room from the list'
+        assert '/static/img/logo.png' in nav and 'asset_v' in nav
+        assert 'aria-hidden' in nav[nav.index('ss-sb-art'):], 'it is decorative, not a heading'
+
+    def test_the_head_of_the_column_keeps_its_glyph(self):
+        """Tried and taken back out: the mark at 28px over the name, with the lockup at full
+        width below it, is the brand twice in one column — and the small copy is the one that
+        cannot be read at that size. The head keeps the glyph."""
+        src = _read(os.path.join(TPL, 'partials', '_sidebar.html'))
+        head = src[src.index('ss-sb-brand'):src.index('ss-sb-nav')]
+        assert '/static/img/logo' not in head, 'the artwork is in this column twice'
+        assert 'bi-shield-check' in head
+
+    def test_it_fills_the_width_and_fades_out_in_mini(self):
+        """56px of a landscape lockup is a wordmark nobody can read, so mini does not show it.
+
+        Reported: it FADES, and does not disappear. `display: none` cannot be transitioned, so
+        collapsing dropped it in one frame while expanding let the column's .15s width grow it
+        back — the same motion looking like two different ones depending on which way the button
+        was pressed. Sharing that .15s, the two directions are each other's reverse.
+        """
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        i = css.index('.ss-sb-art {')
+        block = css[i:css.index('}', i)]
+        assert 'margin-top: auto' in block
+        assert 'transition: opacity' in block, 'the two directions are not each other s reverse'
+        img = css.index('.ss-sb-art img {')
+        assert 'width: 100%' in css[img:css.index('}', img)]
+        mini = css.index('.ss-layout.ss-mini .ss-sb-art {')
+        assert 'opacity: 0' in css[mini:css.index('}', mini)]
+        assert 'display: none' not in css[mini:css.index('}', mini)], 'it cannot be animated'
+        nav = css.index('.ss-sb-nav  {')
+        assert 'flex-direction: column' in css[nav:css.index('}', nav)], \
+            'without a column the auto margin has no free space to eat'
+
+
 class TestTheStylesheetSizesThem:
 
     def _css(self) -> str:

@@ -1797,24 +1797,52 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .ss-sb-brand { display: flex; align-items: center; gap: .6rem; padding: .3rem 1rem;
     min-height: var(--ss-header-h); box-sizing: border-box;
     font-weight: 600; color: #fff; border-bottom: 1px solid rgba(255,255,255,.08); }
+/* A glyph, not the mark: the artwork is at the foot of this same column at full width, and the
+   badge again at 28px beside the name is the brand twice in one column — the small copy
+   losing, because it is the one that cannot be read. */
 .ss-sb-logo { font-size: 1.15rem; flex-shrink: 0; }
 .ss-sb-toggle { margin-left: auto; background: none; border: none; color: #cbd5e1;
     font-size: 1.15rem; line-height: 1; cursor: pointer; padding: .2rem .35rem; border-radius: .35rem; }
 .ss-sb-toggle:hover { background: rgba(255,255,255,.1); color: #fff; }
 
 /* nav list */
-.ss-sb-nav  { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: .5rem 0; }
+.ss-sb-nav  { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: .5rem 0;
+              display: flex; flex-direction: column; }
+/* The lockup filling the empty foot of the column, edge to edge — the sidebar is the one place
+   with room going spare and nothing in it. Inside the scrolling nav on purpose: `margin-top:
+   auto` drops it to the bottom while there is slack, and when the entries fill the column it
+   scrolls below the last one instead of squeezing the list. An auto margin on the LAST item
+   resolves to 0 with no free space, so it cannot push the first entry out of reach. */
+.ss-sb-art { margin-top: auto; padding-top: 1rem; transition: opacity .15s ease; }
+.ss-sb-art img { display: block; width: 100%; height: auto; }
+/* 56px of it is a wordmark nobody can read, so mini does not show it — but it FADES, and does
+   not disappear. `display: none` cannot be transitioned: collapsing dropped it in one frame
+   while expanding let the column's .15s width grow it back, so the same motion looked like two
+   different ones depending on which way you pressed the button. Sharing that .15s, it shrinks
+   and fades out on the way in and grows and fades back on the way out. */
+.ss-layout.ss-mini .ss-sb-art { opacity: 0; pointer-events: none; }
 .ss-sb-list, .ss-sb-sub { list-style: none; margin: 0; padding: 0; }
 .ss-sb-item {
     display: flex; align-items: center; gap: .6rem; width: 100%;
     padding: .4rem 1rem; border: none; background: none; text-align: left;
     color: #cbd5e1; text-decoration: none; cursor: pointer; white-space: nowrap;
     border-left: 3px solid transparent; font-size: .85rem;
+    /* Collapsing and expanding are the same .15s the column takes, so the row's geometry moves
+       with it instead of snapping at one end. Only padding — the hover colour stays instant,
+       which is what makes a control feel connected to the cursor. */
+    transition: padding .15s ease;
 }
+/* The label FADES with the column and is never `display: none`: display cannot be
+   transitioned, so hiding it dropped the text in a single frame while showing it let the
+   column's widening reveal it — the same motion looking like two different ones depending on
+   which way the button was pressed. Kept in flow and clipped by the sidebar's own
+   `overflow: hidden`, the icon beside it never moves. */
+.ss-sb-label { transition: opacity .15s ease; }
 .ss-sb-item:hover { background: rgba(255,255,255,.07); color: #fff; }
 .ss-sb-item.active { background: rgba(13,110,253,.18); color: #fff; border-left-color: var(--bs-primary,#0d6efd); }
 .ss-sb-icon { font-size: .95rem; flex-shrink: 0; width: 1.15rem; text-align: center; }
-.ss-sb-caret { margin-left: auto; font-size: .65rem; transition: transform .15s; }
+.ss-sb-caret { margin-left: auto; font-size: .65rem;
+               transition: transform .15s, opacity .15s ease; }
 .ss-sb-parent[aria-expanded="true"] .ss-sb-caret { transform: rotate(180deg); }
 .ss-sb-subitem { padding-left: 2.35rem; font-size: .8rem; }
 
@@ -1827,15 +1855,22 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 
 /* ── mini (collapsed) mode: icons only ─────────────────────────────────── */
 .ss-layout.ss-mini .ss-sidebar { width: var(--ss-sidebar-mini-w); }
-.ss-layout.ss-mini .ss-sb-label { display: none; }
-.ss-layout.ss-mini .ss-sb-caret { display: none; }
+.ss-layout.ss-mini .ss-sb-label { opacity: 0; }
+.ss-layout.ss-mini .ss-sb-caret { opacity: 0; }
+/* The brand row is the exception, and has to be: it centres what is left of it, so a label
+   that merely faded would still take its width there and push the hamburger — the one control
+   that expands the column again — off the edge. */
+.ss-layout.ss-mini .ss-sb-brand-text { display: none; }
 /* Mini: only the toggle stays in the brand row (centered) — the logo + the two icons side
    by side were cramped in the 56px rail; the hamburger alone is the expand control. */
 .ss-layout.ss-mini .ss-sb-brand { justify-content: center; padding: .8rem 0; }
 .ss-layout.ss-mini .ss-sb-logo { display: none; }
 .ss-layout.ss-mini .ss-sb-toggle { margin: 0; }
-.ss-layout.ss-mini .ss-sb-item { justify-content: center; gap: 0; padding: .55rem 0; }
-.ss-layout.ss-mini .ss-sb-subitem { padding-left: 0; }
+/* The icon keeps its place instead of being re-centred: at 56px, the left padding it already
+   has puts it within a pixel of the centre, and holding it there is what lets the label fade
+   out beside it without the row rearranging itself underneath. */
+.ss-layout.ss-mini .ss-sb-item { gap: 0; padding: .55rem 1rem; }
+.ss-layout.ss-mini .ss-sb-subitem { padding-left: 1rem; }
 
 /* ── mobile top bar + off-canvas ───────────────────────────────────────── */
 .ss-topbar { display: flex; align-items: center; gap: .6rem; padding: .4rem .75rem;
@@ -1861,9 +1896,13 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     .ss-layout.ss-open .ss-sb-backdrop { display: block; }
     /* mini never applies on mobile: labels always show inside the drawer */
     .ss-layout.ss-mini .ss-sidebar { width: var(--ss-sidebar-w); }
-    .ss-layout.ss-mini .ss-sb-label { display: inline; }
+    .ss-layout.ss-mini .ss-sb-label { opacity: 1; display: inline; }
+    .ss-layout.ss-mini .ss-sb-caret { opacity: 1; }
     .ss-layout.ss-mini .ss-sb-item { justify-content: flex-start; gap: .75rem; padding: .55rem 1rem; }
     .ss-layout.ss-mini .ss-sb-subitem { padding-left: 2.6rem; }
+    /* Same rule for the artwork: the drawer is full width here, so a faded-out lockup would be
+       a hole at the foot of it rather than a mark that does not fit. */
+    .ss-layout.ss-mini .ss-sb-art { opacity: 1; }
 }
 .ss-topbar { display: none; }
 @media (max-width: 767.98px) { .ss-topbar { display: flex; } }
@@ -1889,7 +1928,7 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .ss-sb-flyout .ss-sb-subsub { padding-left: 1rem; }
 /* The flyout always shows full items (icon + label) left-aligned, even in mini mode —
    otherwise the mini rule (centred icon, no gap) leaves a big gap before the icon. */
-.ss-layout.ss-mini .ss-sb-flyout .ss-sb-label { display: inline; }
+.ss-layout.ss-mini .ss-sb-flyout .ss-sb-label { opacity: 1; }
 .ss-layout.ss-mini .ss-sb-flyout .ss-sb-item {
     justify-content: flex-start; gap: .75rem; padding: .45rem 1rem;
 }

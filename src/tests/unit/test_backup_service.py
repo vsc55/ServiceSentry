@@ -517,6 +517,23 @@ class TestItSaysWhatItIsDoingOnTheLog:
     used to go past in total silence, so a screen that failed to open its dialog left nothing
     anywhere to say whether anything had happened at all."""
 
+    @pytest.fixture(autouse=True)
+    def _debug_on(self):
+        """Say out loud what these tests need instead of inheriting it.
+
+        `ObjectBase.debug` is one object for the whole process, and whether it prints at all is
+        global state: `global|log_level` defaults to `off`, so any test that builds a WebAdmin
+        first leaves these four asserting on an empty capture. They passed on `tests/unit` and
+        failed in CI's full run, which is the same suite with a different neighbour.
+        """
+        from lib.core.object_base import ObjectBase                      # noqa: PLC0415
+        from lib.debug.debug_level import DebugLevel                     # noqa: PLC0415
+        dbg = ObjectBase.debug
+        was = (dbg.enabled, dbg.level)
+        dbg.enabled, dbg.level = True, DebugLevel.debug
+        yield
+        dbg.enabled, dbg.level = was
+
     @staticmethod
     def _lines(capsys):
         return [l for l in capsys.readouterr().out.splitlines() if 'Backup' in l]

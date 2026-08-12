@@ -59,6 +59,9 @@
 <aside id="ss-sidebar" class="ss-sidebar" aria-label="Main navigation">
     <!-- Brand + collapse toggle -->
     <div class="ss-sb-brand">
+    {# A glyph and not the mark: the artwork is at the FOOT of this column at full width, and
+       the same badge again at 28px over the name is the brand twice in one column — the small
+       copy losing, because that is the one nobody can read. #}
         <i class="bi bi-shield-check ss-sb-logo"></i>
         <span class="ss-sb-label ss-sb-brand-text">ServiceSentry</span>
         <button type="button" class="ss-sb-toggle" onclick="_toggleSidebar()"
@@ -225,6 +228,15 @@
             </li>
             {% endif %}
         </ul>
+        {# The lockup filling the empty foot of the navigation. Decorative, so `alt=""` and
+           aria-hidden — the brand is already named at the head of the column.
+           It lives INSIDE the scrolling nav rather than between it and the user block: there it
+           could never take room the list needs. With slack it drops to the bottom
+           (`margin-top: auto`); once the entries fill the column it just scrolls below the last
+           one. #}
+        <div class="ss-sb-art" aria-hidden="true">
+            <img src="/static/img/logo.png?v={{ asset_v }}" alt="" width="640" height="427">
+        </div>
     </nav>
 
     <!-- User block (bottom) — menu opens to the RIGHT (dropend), like the section flyouts,
