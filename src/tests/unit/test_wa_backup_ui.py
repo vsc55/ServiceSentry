@@ -28,6 +28,12 @@ DETAIL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup'
                       '_detail.html')
 RESTORE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
                        '_restore.html')
+RETENTION = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
+                         '_retention.html')
+PROFILES = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
+                        '_profiles.html')
+ACTIONS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
+                       '_actions.html')
 
 
 def _read(path):
@@ -43,7 +49,8 @@ def _ui() -> str:
     it broke fifteen of these before this helper existed.
     """
     return (_read(RENDER) + _read(PICKER) + _read(TASKS) + _read(RUN)
-            + _read(DETAIL) + _read(RESTORE))
+            + _read(DETAIL) + _read(RESTORE) + _read(RETENTION) + _read(PROFILES)
+            + _read(ACTIONS))
 
 
 class TestThePickerAnswersTheClick:
@@ -568,8 +575,11 @@ class TestTheRowKeepsOnlyWhatCannotWait:
         """It was taken correctly, so the status column calls it good — and it will still
         restore credentials that authenticate against nothing."""
         src = _ui()
+        # Sliced to the END of the function rather than a character window: the window was 400
+        # and the next mark added to this row pushed the assertion past it.
         marks = src[src.index('function _bkRowMarks'):]
-        assert 'b.secrets' in marks[:400]
+        marks = marks[:marks.index('\n}')]
+        assert 'b.secrets' in marks
         row = src[src.index('function _backupRow'):]
         assert '_bkRowMarks(b)' in row[:1400], 'the marks are built and never placed'
 
@@ -827,3 +837,222 @@ class TestARestoreTellsTheOtherProcesses:
     def test_the_restore_is_the_one_that_calls_it(self):
         src = _read(ROUTES)
         assert '_invalidate_caches(wa)' in src
+
+
+class TestRetentionIsSomethingYouCanPredict:
+    """"Keep 7" was the whole vocabulary, and seven copies can be one week at daily resolution
+    or two years at monthly. The buckets say which — and the preview is the half that makes
+    them usable, because nobody evaluates "7 daily + 4 weekly + 6 monthly" against 200 files in
+    their head."""
+
+    def test_the_form_offers_every_bucket(self):
+        src = _read(RETENTION)
+        for key in ('keep_last', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly'):
+            assert key in src, key
+        assert 'max_size' in src, 'no size budget'
+
+    def test_the_rule_the_numbers_do_not_show_is_written_down(self):
+        """That a copy survives if ANY of them claims it — the difference between 17 copies and
+        180, and not something the boxes can say on their own."""
+        assert 'backup_retention_hint' in _read(RETENTION)
+
+    def test_the_preview_asks_the_server(self):
+        """Computing it in the browser would be a second implementation of the rule, and a
+        preview that disagrees with the scheduler is worse than none: it is believed."""
+        src = _read(RETENTION)
+        body = src[src.index('async function _tkPreviewNow'):]
+        assert '/api/v1/backups/tasks/preview' in body[:800]
+        assert '_tkRetentionPayload()' in body[:900]
+
+    def test_it_asks_once_per_pause_not_once_per_keystroke(self):
+        src = _read(RETENTION)
+        assert 'clearTimeout(_tkPreviewTimer)' in src and 'setTimeout(_tkPreviewNow' in src
+
+    def test_the_task_form_uses_the_shared_block(self):
+        """One definition of the policy fields, read and written by the same pair — a form that
+        drew them itself would be a second place for a bucket to be forgotten."""
+        tasks = _read(TASKS)
+        assert '_tkRetentionHtml(tk)' in tasks and '_tkRetentionPayload()' in tasks
+        assert "id=\"tkKeep\"" not in tasks, 'the single counter box is still there'
+
+    def test_the_row_summarises_the_policy_instead_of_a_number(self):
+        tasks = _read(TASKS)
+        assert '_tkPolicySummary(tk)' in tasks
+
+    def test_orphaned_copies_are_shown_and_not_pruned(self):
+        """Deleting a task does not delete its copies — but retention stops applying, so they
+        grow counted by nobody. Shown rather than pruned: inventing a policy for what has no
+        owner is how the copy from before the migration disappears."""
+        src = _read(RENDER)
+        body = src[src.index('function _backupsFor'):]
+        assert "view === 'orphan'" in body[:900]
+        assert 'backup_view_orphan' in src, 'the rail never offers them'
+
+
+class TestACopyCanBeKept:
+    """Retention answers "how much history" and its floors answer "never leave the task with
+    nothing". Neither can say *this particular archive* — which is what somebody means about the
+    copy taken before a migration."""
+
+    def test_the_row_offers_the_lock_and_disables_delete_behind_it(self):
+        """Disabled, not removed. Taking the button away shortens the row and the whole group
+        shifts, so a locked copy reads as a different KIND of row rather than as the same row
+        with one action unavailable — and a disabled control says why in its tooltip, which a
+        missing one cannot."""
+        src = _read(RENDER)
+        row = src[src.index('function _backupRow'):]
+        assert 'toggleBackupLock(' in row, 'no way to lock a copy from the list'
+        assert "b.locked ? ' disabled' : ''" in row, 'the delete button is still live'
+        # The tooltip hangs off a wrapper: a disabled button does not fire the hover that shows
+        # its own `title`, so the explanation would never appear on the one row that needs it.
+        assert 'backup_locked_refused' in row
+
+    def test_a_locked_copy_says_so_without_being_opened(self):
+        src = _read(RENDER)
+        marks = src[src.index('function _bkRowMarks'):]
+        assert 'b.locked' in marks[:marks.index('\n}')]
+
+    def test_the_lock_button_carries_the_state_in_its_colour(self):
+        """Same icon in two greys is a button you have to read to know which way it goes. The
+        cyan is the padlock's own colour in the name column, so one colour means one thing on
+        the row — and both variants are solid, like every other button in the panel."""
+        row = _read(RENDER)
+        row = row[row.index('function _backupRow'):]
+        assert "b.locked ? 'btn-info' : 'btn-secondary'" in row
+        assert 'btn-outline' not in row
+
+    def test_unlocking_asks_and_locking_does_not(self):
+        """Locking takes nothing away and is undone by the same button. Unlocking hands the copy
+        back to the counter that was about to delete it."""
+        src = _read(ACTIONS)
+        body = src[src.index('function toggleBackupLock'):]
+        assert 'backup_unlock_confirm' in body[:900]
+        assert 'if (locked) { go(); return; }' in body[:900], 'locking asks for nothing'
+
+    def test_retention_never_deletes_a_locked_copy(self):
+        py = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'schedule.py'))
+        body = py[py.index('def prune('):]
+        assert "not b.get('locked')" in body, 'the scheduler prunes protected copies'
+
+    def test_the_service_refuses_too_and_takes_the_marker_with_it(self):
+        """A lock only the UI honoured protects nothing on the day it matters — and a `.lock`
+        left behind would make a later copy of the same name born protected."""
+        py = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'service.py'))
+        body = py[py.index('def delete_backup('):py.index('# ── Restoring')]
+        assert 'LOCK_SUFFIX' in body, 'delete_backup deletes a locked copy'
+        assert '.sha256' in body, 'the sidecars outlive the archive'
+
+    def test_the_flag_is_a_file_beside_the_archive_not_a_row(self):
+        """`list_backups` reads the directory precisely so there is no second source of truth
+        about files somebody can move with the panel stopped."""
+        py = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'service.py'))
+        assert "LOCK_SUFFIX = '.lock'" in py
+        assert 'backup_locks' not in py, 'the lock went into a table after all'
+
+    def test_it_rides_on_the_delete_grant(self):
+        """Unlocking is asking to be able to delete, so it cannot be a weaker grant."""
+        routes = _read(ROUTES)
+        after = routes[routes.index("@app.route('/api/v1/backups/<name>/lock'"):]
+        assert '@delete_req' in after[:120]
+
+
+class TestTheTaskFormFitsOnTheScreen:
+    """Three independent things — when it runs, how long copies are kept, what they hold —
+    stacked in one column came to nine hundred pixels of dialog with a scrollbar down the middle
+    of a form. They are read at different moments and almost never edited together."""
+
+    def test_the_editor_is_tabbed(self):
+        body = _read(TASKS)
+        body = body[body.index('function openTaskModal'):]
+        assert 'nav-tabs' in body, 'the form is still one column'
+        for pane in ('tkTabWhen', 'tkTabRetention', 'tkTabParts'):
+            assert pane in body, pane
+
+    def test_the_name_stays_out_of_the_tabs(self):
+        """It identifies the record all three describe, and the retention preview counts
+        against it — a field the form needs on every tab does not belong on one of them."""
+        body = _read(TASKS)
+        body = body[body.index('function openTaskModal'):]
+        assert body.index('id="tkName"') < body.index('nav-tabs')
+
+    def test_the_pane_scrolls_instead_of_the_dialog(self):
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        block = css[css.index('.ss-tabbox'):css.index('.ss-tabbox') + 240]
+        assert 'max-height' in block and 'overflow-y' in block
+        # Generic and not per-id: the rule is about tabbed dialogs, not about this one.
+        assert '#backupModal' not in css.split('.ss-tabbox')[0][-200:]
+        assert 'ss-tabbox' in _read(TASKS), 'the form never wears it'
+
+
+class TestOnePolicyManyTasks:
+    """Five numbers and a ceiling, retyped from memory in every task, were three chances to type
+    6 where the others say 4 — with nothing on screen ever saying they disagreed."""
+
+    def test_the_section_offers_them(self):
+        src = _read(RENDER)
+        assert "item('profiles'" in src, 'the rail never offers the profiles'
+        assert '_backupProfilesHtml()' in src, 'nothing renders them'
+        inc = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                 '_js_sections.html'))
+        assert 'backup/_profiles.html' in inc, 'the partial is never loaded'
+
+    def test_the_profile_editor_draws_the_same_five_boxes_as_a_task(self):
+        """A profile IS a task's retention with a name on it. Two drawings of the same fields is
+        how they acquire different limits and eventually different meanings."""
+        src = _read(PROFILES)
+        assert "_bkBucketBoxes(p, 'pf_')" in src
+        assert 'keep_weekly' not in src.split('openProfileModal')[1], \
+            'the editor writes the fields out a second time'
+
+    def test_a_task_row_shows_the_rules_that_actually_apply(self):
+        """A linked task carries two sets of numbers — its own and its profile's. A row that
+        picked between them itself would be a retention screen guessing at what gets deleted."""
+        src = _read(RETENTION)
+        body = src[src.index('function _tkPolicySummary'):]
+        assert '_backupPolicies[tk.id]' in body[:400], 'the row works the policy out on its own'
+        assert "'policies'" in _read(ROUTES), 'the server never resolves it'
+
+    def test_the_boxes_disappear_behind_a_profile_but_are_not_discarded(self):
+        """They are what the task goes back to when it is unlinked; re-reading them from the
+        server would mean unlinking lost the policy the task had before."""
+        src = _read(RETENTION)
+        assert "id=\"tkOwnRules\"" in src and 'hidden' in src
+        payload = src[src.index('function _tkRetentionPayload'):]
+        assert '_bkBucketValues' in payload[:300], 'unlinking would save zeros'
+        assert 'profile:' in payload[:300], 'the link is never sent'
+
+    def test_the_editor_says_how_many_tasks_it_reaches(self):
+        """The point of a shared policy is also its one hazard, and "3 tasks" is a number
+        somebody needs before saving rather than afterwards in the audit log."""
+        assert 'backup_profile_affects' in _read(PROFILES)
+        assert "'used_by'" in _read(ROUTES), 'the server never counts them'
+
+    def test_a_profile_in_use_offers_no_delete_button(self):
+        """The answer would be a 409, and a button whose only outcome is an error is an offer to
+        be told off."""
+        src = _read(PROFILES)
+        body = src[src.index('const btnDel'):]
+        assert '!used.length' in body[:200]
+        routes = _read(ROUTES)
+        after = routes[routes.index("@app.route('/api/v1/backups/profiles/<uid>'"):]
+        assert '409' in after[:2000], 'the server would delete it anyway'
+
+    def test_the_suggested_policies_come_from_the_server(self):
+        """They are the panel's opinion about how much history is worth keeping. Written into a
+        template it is an opinion the API cannot state and no test can read."""
+        src = _read(PROFILES)
+        assert '_backupSuggested' in src
+        assert 'keep_monthly:' not in src.split('_pfApplySuggested')[1], \
+            'the starting points are hardcoded in the browser'
+        assert 'SUGGESTED' in _read(os.path.join(SRC, 'lib', 'core', 'backup',
+                                                 'profiles_store.py'))
+
+    def test_they_ride_on_the_schedule_grant(self):
+        """Editing a profile is editing the retention of every task that follows it — the same
+        decision `backup_schedule` already covers, not a new one."""
+        routes = _read(ROUTES)
+        for route in ("@app.route('/api/v1/backups/profiles', methods=['PUT'])",
+                      "@app.route('/api/v1/backups/profiles/<uid>', methods=['DELETE'])"):
+            after = routes[routes.index(route):]
+            assert '@schedule_req' in after[:120], route
+        assert "perms.has('backup_schedule')" in _read(PROFILES)

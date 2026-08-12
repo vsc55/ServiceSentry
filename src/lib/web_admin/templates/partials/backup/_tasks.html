@@ -67,7 +67,7 @@ function _backupTasksHtml() {
              + '<span class="text-truncate">' + esc(tk.name) + '</span></span></td>'
              + '<td class="small">' + esc(_backupWhenLabel(tk)) + '</td>'
              + '<td class="small text-muted">'
-             + esc(t('backup_task_keep_n').replace('{}', tk.keep)) + '</td>'
+             + esc(_tkPolicySummary(tk)) + '</td>'
              + '<td>' + parts + ' ' + secrets + '</td>'
              + '<td class="text-end"><span class="d-inline-flex gap-1">' + btnEdit + btnDel
              + '</span></td></tr>';
@@ -87,12 +87,23 @@ function _backupTasksHtml() {
          + '</div>' + body + '</div>';
 }
 
-/** The editor. The parts come from the same catalogue a hand-made copy uses, so a part added
- *  to `PARTS` appears here without a second list to keep in step. */
+/** The editor, in three tabs. The parts come from the same catalogue a hand-made copy uses, so
+ *  a part added to `PARTS` appears here without a second list to keep in step.
+ *
+ *  Tabs and not one column, which is what this was: a task says three independent things —
+ *  when it runs, how long its copies are kept, what they hold — and stacked they came to nine
+ *  hundred pixels of dialog with a scrollbar down the middle of a form. The three are read at
+ *  different moments and almost never edited together.
+ *
+ *  The NAME stays above them: it identifies the record all three tabs describe, and it is what
+ *  the retention preview counts against — a field the form needs while you are on any tab does
+ *  not belong on one of them. */
 function openTaskModal(uid) {
     const tk = _backupTasks.find(x => x.id === uid)
         || {name: '', enabled: true, mode: 'interval', every_hours: 24, days: [], at: '03:00',
-            parts: ['core', 'config_file'], secrets: true, keep: 7};
+            parts: ['core', 'config_file'], secrets: true, profile: '',
+            keep_last: 3, keep_daily: 7, keep_weekly: 4, keep_monthly: 6, keep_yearly: 0,
+            max_size: 0};
     const mode = tk.mode || 'interval';
     const dayChecks = _DAY_KEYS.map((k, i) =>
         '<div class="form-check form-check-inline me-0">'
@@ -100,13 +111,8 @@ function openTaskModal(uid) {
       + ((tk.days || []).includes(i) ? ' checked' : '') + '>'
       + '<label class="form-check-label small" for="tkDay' + i + '">'
       + esc(t(k) || k) + '</label></div>').join('');
-    const html =
-        '<input type="hidden" id="tkUid" value="' + escAttr(uid || '') + '">'
-      + '<div class="mb-3"><label class="form-label small" for="tkName">'
-      + esc(t('backup_col_name')) + '</label>'
-      + '<input type="text" class="form-control form-control-sm" id="tkName" value="'
-      + escAttr(tk.name) + '"></div>'
-      + '<div class="mb-2"><label class="form-label small" for="tkMode">'
+    const whenPane =
+        '<div class="mb-2"><label class="form-label small" for="tkMode">'
       + esc(t('backup_task_when')) + '</label>'
       + '<select class="form-select form-select-sm" id="tkMode" onchange="_tkModeSwitch()">'
       + '<option value="interval"' + (mode === 'interval' ? ' selected' : '') + '>'
@@ -126,25 +132,50 @@ function openTaskModal(uid) {
       + '<label class="form-label small" for="tkAt">' + esc(t('backup_task_at')) + '</label>'
       + '<input type="time" class="form-control form-control-sm" id="tkAt" value="'
       + escAttr(tk.at || '03:00') + '"></div>'
-      + '<div class="mb-3"><label class="form-label small" for="tkKeep">'
-      + esc(t('backup_task_keep')) + '</label>'
-      + '<input type="number" min="0" max="365" class="form-control form-control-sm" id="tkKeep"'
-      + ' value="' + escAttr(tk.keep) + '"></div>'
-      + '<div class="mb-3"><div class="small text-muted mb-1">'
-      + esc(t('backup_col_contents')) + '</div>'
-      + _backupPartChecks('tkPart', _backupParts, tk.parts) + '</div>'
-      + '<div class="form-check form-switch">'
-      + '<input class="form-check-input" type="checkbox" role="switch" id="tkSecrets"'
-      + (tk.secrets ? ' checked' : '') + '>'
-      + '<label class="form-check-label small" for="tkSecrets">'
-      + esc(t('backup_secrets')) + '</label></div>'
-      + '<div class="form-check form-switch">'
+      // "Does it run at all" is a fact about WHEN, and the tab it is on is the one somebody
+      // opens to stop a task without deleting it.
+      + '<div class="form-check form-switch mt-3">'
       + '<input class="form-check-input" type="checkbox" role="switch" id="tkEnabled"'
       + (tk.enabled ? ' checked' : '') + '>'
       + '<label class="form-check-label small" for="tkEnabled">'
       + esc(t('enabled')) + '</label></div>';
+    const partsPane =
+        _backupPartChecks('tkPart', _backupParts, tk.parts)
+      // Credentials are part of what the copy HOLDS, which is this tab's question.
+      + '<div class="form-check form-switch mt-3">'
+      + '<input class="form-check-input" type="checkbox" role="switch" id="tkSecrets"'
+      + (tk.secrets ? ' checked' : '') + '>'
+      + '<label class="form-check-label small" for="tkSecrets">'
+      + esc(t('backup_secrets')) + '</label></div>';
+    const tab = (id, labelKey, icon, active) =>
+        '<li class="nav-item"><button class="nav-link' + (active ? ' active' : '') + '"'
+      + ' data-bs-toggle="tab" data-bs-target="#' + id + '" type="button">'
+      + '<i class="bi ' + icon + ' me-1"></i>' + esc(t(labelKey)) + '</button></li>';
+    const pane = (id, body, active) =>
+        '<div class="tab-pane fade' + (active ? ' show active' : '') + '" id="' + id + '">'
+      + body + '</div>';
+    const html =
+        '<input type="hidden" id="tkUid" value="' + escAttr(uid || '') + '">'
+      + '<div class="mb-3"><label class="form-label small" for="tkName">'
+      + esc(t('backup_col_name')) + '</label>'
+      + '<input type="text" class="form-control form-control-sm" id="tkName" value="'
+      + escAttr(tk.name) + '" oninput="_tkPreview()"></div>'
+      + '<ul class="nav nav-tabs mb-3" role="tablist">'
+      + tab('tkTabWhen', 'backup_tab_when', 'bi-calendar-week', true)
+      + tab('tkTabRetention', 'backup_tab_retention', 'bi-hourglass-split', false)
+      + tab('tkTabParts', 'backup_tab_contents', 'bi-list-check', false)
+      + '</ul>'
+      + '<div class="tab-content ss-tabbox">'
+      + pane('tkTabWhen', whenPane, true)
+      + pane('tkTabRetention', _tkRetentionHtml(tk), false)
+      + pane('tkTabParts', partsPane, false)
+      + '</div>';
     _openBackupModal(uid ? t('backup_task_edit') : t('backup_task_new'), html,
                      t('save'), 'primary', _saveBackupTask);
+    // Fills in what the selected profile says — the box for it is rendered empty, because the
+    // markup is built before it is in the document — and ends by asking for the preview, so an
+    // existing task shows what its policy does before anything is typed.
+    _tkProfileSwitch();
 }
 
 function _tkModeSwitch() {
@@ -163,7 +194,7 @@ async function _saveBackupTask() {
         days: _DAY_KEYS.map((_, i) => i)
                        .filter(i => document.getElementById('tkDay' + i)?.checked),
         at: document.getElementById('tkAt')?.value || '03:00',
-        keep: Number(document.getElementById('tkKeep')?.value || 7),
+        ..._tkRetentionPayload(),
         parts: _checkedParts('tkPart', _backupParts),
         secrets: !!document.getElementById('tkSecrets')?.checked,
     };

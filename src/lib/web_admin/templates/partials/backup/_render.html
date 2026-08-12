@@ -28,6 +28,11 @@ async function renderBackups() {
     _bkVersion   = (res && res.version) || '';
     const tk = await apiGet('/api/v1/backups/tasks');
     _backupTasks = (tk && tk.tasks) || [];
+    // The rules that actually apply to each task, resolved by the server: a task following a
+    // profile carries two sets of numbers, and a row that showed the wrong one would be a
+    // retention screen lying about what is going to be deleted.
+    _backupPolicies = (tk && tk.policies) || {};
+    await loadBackupProfiles();
     _backupSyncToolbar();
 
     // The same shell Configuration and Modules navigate by. It earns its width here because
@@ -53,12 +58,17 @@ function _backupSyncToolbar() {
     const mayCopy = perms.has('backup_create');
     const maySchedule = perms.has('backup_schedule');
     const schedule = _backupView === 'tasks';
+    const profiles = _backupView === 'profiles';
     const onTask = _backupView.startsWith('task:');
     document.getElementById('btnNewBackupTask')
             ?.classList.toggle('d-none', !maySchedule || !schedule);
+    // A profile is part of the same decision a task's retention is, so it rides on the same
+    // grant: `backup_schedule` is "who says how long this install's copies are kept".
+    document.getElementById('btnNewBackupProfile')
+            ?.classList.toggle('d-none', !maySchedule || !profiles);
     const btn = document.getElementById('btnNewBackup');
     if (!btn) return;
-    btn.classList.toggle('d-none', !mayCopy || schedule);
+    btn.classList.toggle('d-none', !mayCopy || schedule || profiles);
     // Standing in a task, "create a copy" means THAT copy: the same parts, the same secrets
     // flag, the same auto-<task>-<date> name and the same retention afterwards. Opening the
     // generic form there would make a copy the task does not own — outside its counter, never
@@ -83,6 +93,15 @@ function setBackupView(v) {
 function _backupsFor(view) {
     if (view === 'all')  return _backups;
     if (view === 'manual') return _backups.filter(b => !b.name.startsWith('auto-'));
+    // Copies whose task no longer exists. Deleting a task does NOT delete them — they are
+    // backups, and the task was only the reason they exist — but retention stops applying, so
+    // they grow for ever counted by nobody. Shown rather than pruned: inventing a policy for
+    // what has no owner is how the copy from before the migration disappears.
+    if (view === 'orphan') {
+        const owned = _backupTasks.map(tk => 'auto-' + _bkSlug(tk.name) + '-');
+        return _backups.filter(b => b.name.startsWith('auto-')
+                                    && !owned.some(p => b.name.startsWith(p)));
+    }
     if (view.startsWith('task:')) {
         const tk = _backupTasks.find(x => x.id === view.slice(5));
         if (!tk) return [];
@@ -113,6 +132,7 @@ function _backupRailHtml() {
     return `<div class="ss-rail-group">
             <div class="ss-rail-head">${esc(t('backup_tasks'))}</div>
             ${item('tasks', 'bi-calendar-week', t('backup_schedule_view'), _backupTasks.length)}
+            ${item('profiles', 'bi-sliders', t('backup_profiles'), _backupProfiles.length)}
             ${tasks}
         </div>
         <div class="ss-rail-group">
@@ -120,12 +140,20 @@ function _backupRailHtml() {
             ${item('all', 'bi-archive', t('backup_view_all'), _backups.length)}
             ${item('manual', 'bi-hand-index', t('backup_view_manual'),
                    _backupsFor('manual').length)}
+            ${_backupsFor('orphan').length
+                ? item('orphan', 'bi-question-circle', t('backup_view_orphan'),
+                       _backupsFor('orphan').length)
+                : ''}
         </div>`;
 }
 
 function _renderBackupPane(c) {
     if (_backupView === 'tasks') {
         c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">${_backupTasksHtml()}</div>`;
+        return;
+    }
+    if (_backupView === 'profiles') {
+        c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">${_backupProfilesHtml()}</div>`;
         return;
     }
     const rows = _backupsFor(_backupView);
@@ -203,8 +231,16 @@ function _bkStatusRank(b) {
  *  credentials that authenticate against nothing, which is found out at restore time and that
  *  is too late. A copy with nothing to warn about shows nothing at all. */
 function _bkRowMarks(b) {
-    if (b.secrets) return '';
-    return `<i class="bi bi-key-fill text-warning ms-2"
+    // The padlock is not a warning: it is a decision somebody made about this copy, and the
+    // reason the retention counter appears to be off by one on this task.
+    const lock = b.locked
+        ? `<i class="bi bi-lock-fill text-info ms-2" title="${escAttr(
+               b.lock_by ? t('backup_locked_by').replace('{}', b.lock_by)
+                                               .replace('{}', b.lock_at || '?')
+                         : t('backup_locked_tt'))}"></i>`
+        : '';
+    if (b.secrets) return lock;
+    return lock + `<i class="bi bi-key-fill text-warning ms-2"
                title="${escAttr(t('backup_secrets_out_tt'))}"></i>`;
 }
 
@@ -257,9 +293,16 @@ function _backupRow(b) {
             ${perms.has('backup_restore') ? `<button class="btn btn-sm btn-warning py-0 px-1" type="button"
                 onclick="openRestoreModal(${jsStr(b.name)})"
                 title="${escAttr(t('backup_restore'))}"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
-            ${perms.has('backup_delete') ? `<button class="btn btn-sm btn-danger py-0 px-1" type="button"
-                onclick="deleteBackup(${jsStr(b.name)})"
-                title="${escAttr(t('delete'))}"><i class="bi bi-trash3"></i></button>` : ''}
+            ${perms.has('backup_delete') ? `<button class="btn btn-sm py-0 px-1 ${
+                    b.locked ? 'btn-info' : 'btn-secondary'}"
+                type="button" onclick="toggleBackupLock(${jsStr(b.name)},${!b.locked})"
+                title="${escAttr(b.locked ? t('backup_unlock') : t('backup_lock'))}"
+                ><i class="bi ${b.locked ? 'bi-lock-fill' : 'bi-unlock'}"></i></button>` : ''}
+            ${perms.has('backup_delete') ? `<span title="${escAttr(
+                b.locked ? t('backup_locked_refused') : t('delete'))}">
+                <button class="btn btn-sm btn-danger py-0 px-1" type="button"
+                onclick="deleteBackup(${jsStr(b.name)})"${b.locked ? ' disabled' : ''}
+                ><i class="bi bi-trash3"></i></button></span>` : ''}
         </span></td>
     </tr>`;
 }
@@ -385,31 +428,6 @@ async function _createBackup() {
     _bkStartWatching({taskId: '', taskName: name, manual: true}, jobId);
 }
 
-/** Restoring says what it will overwrite, and offers to apply only part of it.
- *  "Are you sure?" is not a question anybody can answer — what happens if I say yes is. */
-function deleteBackup(name) {
-    showConfirmModal(t('backup_delete_confirm').replace('{}', name), async () => {
-        const res = await apiDelete(`/api/v1/backups/${encodeURIComponent(name)}`);
-        if (_apiOk(res)) {
-            showToast(t('backup_deleted_ok'));
-            renderBackups();
-        } else showToast(_apiErr(res), 'danger');
-    });
-}
-
-
-/** Check a copy against its own checksums, and say which question failed.
- *  "The file is intact" and "the contents are unchanged" are different failures with different
- *  causes — a truncated transfer versus altered data — so the answer names which. */
-async function verifyBackup(name) {
-    const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/verify`, {});
-    if (!_apiOk(res)) { showToast(_apiErr(res), 'danger'); return; }
-    const v = res.data || {};
-    if (v.ok) {
-        showToast(t('backup_verify_ok').replace('{}', v.members));
-        return;
-    }
-    const why = v.file === 'bad' ? t('backup_verify_file_bad')
-        : t('backup_verify_members_bad').replace('{}', (v.bad || []).length);
-    showToast(why, 'danger');
-}
+{# What the buttons on a row DO lives in _actions.html — delete, verify and the lock. They are
+   operations on one archive, not part of drawing the list, and this shell has a size limit
+   that exists to stop a section quietly growing sub-sections inside it. #}

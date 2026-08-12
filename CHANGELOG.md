@@ -8,6 +8,115 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.59] - 2026-08-12
+
+### Changed
+- **Retention answers "how far back", not "how many".** A single counter was the whole
+  vocabulary, and seven copies can be one week at daily resolution or two years at monthly —
+  only the second survives finding out in March that something broke in January.
+  - A task now carries **buckets**: keep the newest of the last N days, N weeks, N months, N
+    years, plus the newest N whatever the calendar says. A copy survives if **any** rule claims
+    it, which is what makes "7 daily + 4 weekly + 6 monthly" cost 17 copies instead of 180.
+  - **The old single counter still means what it meant.** A task written before this holds only
+    `keep`, and it is read as "the newest N" rather than migrated: a task that was working must
+    not need rewriting to go on working, and a migration is a thing that can go wrong once per
+    install. The API still accepts it too.
+  - All of them zero still means **keep everything**. An operator who prunes elsewhere must be
+    able to say so, and reading "no rules" as "delete them all" is the reading that loses data.
+- **Two floors no bucket can express.** The **newest** copy is never deleted — a policy that
+  leaves a task with nothing has misconfigured the one thing it exists to provide — and neither
+  is the newest **good** one: a run of `partial` copies would otherwise push the last `ok` one
+  out, leaving seven copies of which none is usable. The verdict already travels inside the
+  archive, so this costs a lookup and no guesswork.
+- **Retention runs on every tick, not only after a copy.** A monthly task went a month without
+  its rules being applied and a disabled one went for ever, its copies outside every counter.
+  Switching a task off says "stop making new ones", not "freeze the old ones and let them
+  grow".
+
+### Added
+- **A size budget per task** (`max_size`). The buckets say what is worth keeping; this says what
+  there is room for, and it runs last so it can only ever take away what the rules already
+  chose — with the floors applied again afterwards, because running out of room is not a reason
+  to be left with nothing. When the ceiling and not the calendar is deciding what survives, it
+  is audited (`backup_budget_exceeded`) and notifiable: it means the policy asks for more
+  history than there is room for, which somebody should get to revisit rather than discover
+  later as a gap.
+- **A preview in the task form**: what this policy would keep and delete, against the copies
+  that exist right now, with the total size of what survives. A bucket policy is not something
+  anybody evaluates in their head, and one nobody can predict is one nobody dares touch. It is
+  answered by the server with the **same pure function the scheduler uses** — a preview worked
+  out a second way would be a preview that lies on the day it matters.
+- **Copies whose task no longer exists get their own rail entry.** Deleting a task never
+  deleted its copies — they are backups, and the task was only the reason they exist — but
+  retention stopped applying and they grew counted by nobody. Shown rather than pruned:
+  inventing a policy for what has no owner is how the copy from before the migration
+  disappears.
+- **Retention profiles**: a named policy several tasks share, with its own rail entry. Five
+  numbers and a ceiling retyped from memory in every task were three chances to type 6 where the
+  others say 4, with nothing on screen ever saying they disagreed.
+  - A task **follows** a profile rather than copying it, so editing "standard GFS" changes the
+    retention of every task pointing at it at once. That is the whole reason to have profiles
+    instead of a button that fills the boxes in.
+  - The resolution happens in **one place** (`schedule.with_profile`); everything below it —
+    `survivors`, `prune`, the preview — is written against a task that already knows which
+    numbers are its own. A second place deciding that is a second place for the scheduler and
+    the screen to disagree about what is about to be deleted.
+  - A profile **replaces** the policy, it does not merge with it: one that says nothing about
+    monthlies means none. The task's own numbers stay stored underneath — hidden, not cleared —
+    so unlinking gives it back the policy it had, and a profile that disappears some other way
+    leaves them standing rather than reading as "no rules", which means keep everything.
+  - Deleting a profile a task still follows is **refused, naming the tasks**. Letting it go
+    would move them onto whatever numbers they last held: a change of policy nobody asked for
+    and nothing announces.
+  - The task list now travels with the rules that **actually apply** to each task, resolved by
+    the server. A linked task carries two sets of numbers, and a screen picking between them
+    itself would be a retention screen guessing.
+  - The editor offers **starting points** (`suggested`) that come from the API, not from the
+    template: they are the panel's opinion about how much history is worth keeping, and an
+    opinion written into a page is one the API cannot state.
+  - All of it rides on `backup_schedule` — editing a profile *is* editing several tasks'
+    retention, which is exactly the decision that flag already covered. No new permission.
+
+- **A copy can be locked.** Retention answers "how much history" and its two floors answer
+  "never leave the task with nothing"; neither can say *this particular archive* — which is what
+  somebody means about the copy taken before a migration, or the last one known to be good. A
+  locked copy is skipped by retention **and** refused by the delete button, with the row
+  offering the padlock instead.
+  - The flag is a **file beside the archive** (`<copy>.zip.lock`, carrying who and when), not a
+    column. The listing reads the directory precisely so there is no second source of truth
+    about files somebody can move with the panel stopped — and a lock in a table would be one,
+    with the failure mode of a row claiming an archive that is no longer there is protected.
+  - **A damaged marker still counts as locked.** Its existence is the flag and its contents are
+    a courtesy; reading a broken courtesy as "not protected" fails in the one direction a lock
+    must not.
+  - The refusal lives in the **service** as well as the route, so a caller that works out the
+    doomed list some other way still cannot delete it — and the route answers 409 saying why,
+    because "not found" would be a lie about a file that is right there.
+  - A locked copy **still claims its bucket** (filtered at the end, not hidden from the rules,
+    so protecting one does not silently buy an extra) and **spends its size** against a budget
+    that can never drop it.
+  - Sidecars now go with the archive when it is deleted. A leftover `.lock` would make a later
+    copy of the same name born protected, never pruned, with nothing on screen explaining why.
+  - `backup_delete` in both directions: the lock only affects whether an archive can be
+    destroyed, and unlocking is asking to be able to destroy it. It is a guard rail against
+    retention and against the wrong row, not protection from an administrator.
+  - The lock button carries the state in its **colour** — cyan while locked, grey while not —
+    because the same icon in two greys is a button you have to read to know which way it goes.
+    It is the padlock's own colour in the name column, so one colour means one thing on the row.
+  - The delete button is **disabled, not removed**, on a locked row. Taking it away shortened
+    the row and shifted the whole group, so a locked copy read as a different kind of row rather
+    than as the same row with one action unavailable — and a disabled control can say why in its
+    tooltip, which a missing one cannot.
+
+### Fixed
+- **The scheduled-task form no longer scrolls.** It said three independent things — when it
+  runs, how long its copies are kept, what they hold — stacked in one column, and had grown to
+  nine hundred pixels of dialog with a scrollbar down the middle of a form. They are now three
+  tabs, read at the moment each is needed; the name stays above them, because it identifies the
+  record all three describe and is what the retention preview counts against. A long pane
+  scrolls **inside** the box (`.ss-tabbox`, generic, not per-id) instead of stretching the
+  dialog past the viewport.
+
 ## [0.0.1+build.58] - 2026-08-09
 
 ### Changed

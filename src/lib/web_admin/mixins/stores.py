@@ -108,6 +108,11 @@ class _StoresMixin:
         # lib/core/backup/tasks_store.py.
         from lib.core.backup.tasks_store import BackupTasksStore   # noqa: PLC0415
         self._backup_tasks_store = BackupTasksStore(self._db_connector)
+        # Retention profiles: a named policy several tasks share, so editing it changes all of
+        # them at once instead of five numbers retyped per task. See
+        # lib/core/backup/profiles_store.py.
+        from lib.core.backup.profiles_store import BackupProfilesStore   # noqa: PLC0415
+        self._backup_profiles_store = BackupProfilesStore(self._db_connector)
         # Editable configuration: a row per ``section|field`` in the DB, owned by
         # the single ConfigManager (the one place that reads/writes config).
         from lib.core.config.store import ConfigStore     # noqa: PLC0415

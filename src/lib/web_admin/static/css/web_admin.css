@@ -838,6 +838,18 @@
     min-height: 0;
 }
 
+/* A tabbed FORM inside a dialog, where the panes differ in height (three fields on one, a
+   dozen checkboxes on the next). Tall enough that switching tabs does not make the dialog
+   jump, capped so a long pane scrolls INSIDE the box instead of growing the dialog past the
+   viewport — which is what put a scrollbar down the middle of the backup task form.
+   Generic on purpose: any modal with .nav-tabs over a .tab-content can wear it. */
+.ss-tabbox {
+    min-height: 17rem;
+    max-height: 55vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
 /* ── Cluster edit modal: wide, draggable (by header) and user-resizable ──── */
 #clusterEditModal .cl-modal-dialog {
     pointer-events: auto;               /* needed so the resize handle gets events */

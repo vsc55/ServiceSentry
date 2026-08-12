@@ -52,10 +52,31 @@ AUDIT_EVENTS = [
     # decision somebody made, and the copies that stop appearing are its consequence.
     {'key': 'backup_task_saved', 'severity': 'warning'},
     {'key': 'backup_task_deleted', 'severity': 'danger'},
+    # A shared retention profile changing is a schedule change made in several places at once:
+    # every task that follows it now keeps a different amount of history. Same weight as editing
+    # one task, because that is what it is — times however many follow it, which the line names.
+    {'key': 'backup_profile_saved', 'severity': 'warning'},
+    {'key': 'backup_profile_deleted', 'severity': 'warning'},
+    # Locking a copy and unlocking it, under one key. The interesting case is somebody removing
+    # a protection another person put there, and one key keeps both sides of that in a single
+    # filter — the detail says which way it went.
+    {'key': 'backup_locked', 'severity': 'warning'},
     # The one-off carry-over of the pre-task settings. Muted because nothing was decided here —
     # but recorded, because a task nobody created appearing in the list needs an explanation.
     {'key': 'backup_task_migrated', 'severity': 'muted'},
     # Checking a copy. Muted when it passes is not an option: the interesting case is
     # the one that did not, and a single severity keeps both findable in one filter.
     {'key': 'backup_verified', 'severity': 'warning'},
+    # A size ceiling, not the calendar, decided what survives — which means the policy asks for
+    # more history than there is room for, and the copies lost are ones the rules wanted to
+    # keep. Warning and not muted: it is a decision somebody should get to revisit rather than
+    # discover later as a gap in the history.
+    {'key': 'backup_budget_exceeded', 'severity': 'warning'},
+]
+
+NOTIFY_EVENTS = [
+    # Off by default like every dynamic key in the matrix: an operator who wants to hear about
+    # a full backup folder says so, and one who does not is not woken by it.
+    {'key': 'backup_budget_exceeded', 'source': 'backup',
+     'label_key': 'notif_event_backup_budget', 'matrix': True, 'order': 80},
 ]

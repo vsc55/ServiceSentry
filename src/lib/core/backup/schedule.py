@@ -114,29 +114,218 @@ def last_auto_ts(backups: list, task: str | None = None) -> float | None:
     return max(stamps) if stamps else None
 
 
-def prune(backups: list, keep, task: str | None = None) -> list:
+# ── Retention ────────────────────────────────────────────────────────────────
+#
+# A counter answers "how many do I keep?". The question worth answering is "how far back can I
+# go, and at what resolution?" — and those are not the same: seven copies can be one week at
+# daily resolution or two years at monthly, and only the second survives finding out in March
+# that something broke in January.
+#
+# So retention is a set of BUCKETS, the shape borg and restic settled on: keep the newest copy
+# of each of the last N days, of the last N weeks, and so on. A copy survives if ANY rule claims
+# it, which is what lets "7 daily + 4 weekly + 6 monthly" cost 17 copies instead of 180.
+
+# How a timestamp is reduced to the period it belongs to. `%G-%V` is the ISO week — not `%U`,
+# which restarts at the first Sunday and puts two calendar weeks in one bucket every January.
+_BUCKETS: tuple = (
+    ('keep_daily',   '%Y-%m-%d'),
+    ('keep_weekly',  '%G-%V'),
+    ('keep_monthly', '%Y-%m'),
+    ('keep_yearly',  '%Y'),
+)
+
+# What a task's retention says when it says nothing. `keep_last` carries the old single
+# counter, so a task written before buckets existed keeps behaving exactly as it did.
+RETENTION_KEYS: tuple = ('keep_last',) + tuple(k for k, _f in _BUCKETS) + ('max_size',)
+
+
+def retention_policy(task) -> dict:
+    """The retention rules of *task*, as a dict, whatever shape they arrived in.
+
+    An int is the pre-buckets setting and means "the last N" — read here rather than migrated,
+    because a task that was working must not need rewriting to go on working.
+    """
+    if isinstance(task, (int, float, str)):
+        try:
+            return {'keep_last': int(task)}
+        except (TypeError, ValueError):
+            return {}
+    src = task or {}
+    out = {}
+    for key in RETENTION_KEYS:
+        try:
+            value = int(src.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            out[key] = value
+    # `keep` is what a task carried before the buckets: the same rule as `keep_last`.
+    if 'keep_last' not in out:
+        try:
+            legacy = int(src.get('keep') or 0)
+        except (TypeError, ValueError):
+            legacy = 0
+        if legacy > 0:
+            out['keep_last'] = legacy
+    return out
+
+
+def with_profile(task: dict, profiles=None) -> dict:
+    """*task*, with the rules of the retention profile it points at folded in.
+
+    A task carries either its own numbers or the uid of a shared profile, and everything
+    downstream — :func:`survivors`, :func:`prune`, the preview endpoint — takes a task and asks
+    it for rules. So the resolution happens ONCE, here, and the rest of the code never learns
+    that profiles exist: a second place that decided which numbers apply is a second place for
+    the scheduler and the screen to disagree about what is about to be deleted.
+
+    **A profile that is gone leaves the task's own numbers standing.** They were never
+    overwritten when the profile was linked, so what is left is the last policy that task
+    actually stated — not "no rules", which reads as *keep everything* and fills a disk, and not
+    "no copies", which is worse. A profile in use cannot normally be deleted; this is what
+    happens when a row is removed some other way.
+    """
+    src = dict(task or {})
+    uid = str(src.get('profile') or '')
+    if not uid:
+        return src
+    prof = next((p for p in (profiles or [])
+                 if str(p.get('id') or p.get('uid') or '') == uid), None)
+    if prof is None:
+        return src
+    # Every retention key, including the ones the profile leaves at zero: a profile REPLACES the
+    # task's policy, and merging only its non-zero fields would leave a task keeping monthlies
+    # that the profile it follows says nothing about. `keep` goes too — the legacy counter is
+    # read when no bucket is set, and a task following a profile has stated its buckets.
+    src.update({k: prof.get(k, 0) for k in RETENTION_KEYS})
+    src['keep'] = 0
+    return src
+
+
+def _period(ts: float, fmt: str) -> str:
+    import datetime as _dt      # noqa: PLC0415  (kept local: this module is otherwise pure)
+    return _dt.datetime.fromtimestamp(ts or 0).strftime(fmt)
+
+
+def survivors(backups: list, policy, task: str | None = None) -> list:
+    """The automatic copies of *task* that the policy keeps, newest first.
+
+    Written as "what survives" and not "what goes", because that is the question the rules
+    actually answer — and computing the deletions as the complement means the two can never
+    disagree about a copy that no rule mentioned.
+    """
+    rules = retention_policy(policy)
+    autos = sorted((b for b in (backups or []) if is_auto(b.get('name'), task)),
+                   key=lambda b: b.get('mtime') or 0, reverse=True)
+    if not autos:
+        return []
+    # Nothing configured means keep everything. An operator who prunes elsewhere must be able to
+    # say so, and reading "no rules" as "delete them all" is the reading that loses data.
+    if not any(rules.get(k) for k in ('keep_last',) + tuple(k for k, _f in _BUCKETS)):
+        return list(autos)
+
+    keep: dict = {}
+    for b in autos[:rules.get('keep_last', 0)]:
+        keep[b['name']] = b
+    for key, fmt in _BUCKETS:
+        want = rules.get(key, 0)
+        if want <= 0:
+            continue
+        seen: set = set()
+        for b in autos:                       # newest first, so the first of a period wins
+            period = _period(b.get('mtime') or 0, fmt)
+            if period in seen:
+                continue
+            seen.add(period)
+            keep[b['name']] = b
+            if len(seen) >= want:
+                break
+    return [b for b in autos if b['name'] in keep]
+
+
+def _apply_floors(autos: list, keep: list) -> list:
+    """Add back what must never go, whatever the rules say.
+
+    Two of them, and neither is something a bucket can express:
+
+    * **the newest copy** — a policy that leaves a task with nothing has misconfigured the one
+      thing it exists to provide, and finding that out is finding it out at restore time;
+    * **the newest GOOD copy** — a run of `partial` copies would otherwise push the last `ok`
+      one out, leaving seven copies of which none is usable. The verdict already travels inside
+      the archive, so this costs a lookup and no guesswork.
+    """
+    if not autos:
+        return keep
+    names = {b['name'] for b in keep}
+    out = list(keep)
+    if not names:
+        out.append(autos[0])
+        names.add(autos[0]['name'])
+    if not any(b.get('status') == 'ok' for b in out):
+        good = next((b for b in autos if b.get('status') == 'ok'), None)
+        if good is not None and good['name'] not in names:
+            out.append(good)
+    return sorted(out, key=lambda b: b.get('mtime') or 0, reverse=True)
+
+
+def _over_budget(kept: list, max_size) -> list:
+    """Drop the oldest of *kept* until they fit in *max_size* bytes.
+
+    The buckets say what is worth keeping; this says what there is room for, and it runs LAST so
+    a budget can only ever take away what the rules had already chosen. The floors are applied
+    again afterwards: running out of room is not a reason to be left with nothing.
+
+    A **locked** copy spends its size and is never dropped. Counting it would be dishonest — the
+    room it takes is gone whether or not the budget acknowledges it — and dropping it would make
+    the ceiling override an instruction somebody gave about one specific archive, which is the
+    one thing the lock exists to prevent.
+    """
+    try:
+        budget = int(max_size or 0)
+    except (TypeError, ValueError):
+        return kept
+    if budget <= 0:
+        return kept
+    out = [b for b in kept if b.get('locked')]
+    total = sum(int(b.get('size') or 0) for b in out)
+    for b in kept:                            # newest first: the oldest are what a budget drops
+        if b.get('locked'):
+            continue
+        size = int(b.get('size') or 0)
+        if out and total + size > budget:
+            break
+        out.append(b)
+        total += size
+    return sorted(out, key=lambda b: b.get('mtime') or 0, reverse=True)
+
+
+def prune(backups: list, policy, task: str | None = None) -> list:
     """The names of the automatic copies to delete, oldest first.
 
     Retention is not decoration. Without it the folder grows until the disk is full, and a full
     disk stops the panel — a backup feature that takes the install down is worse than none.
 
-    ``keep <= 0`` deletes NOTHING: an operator who prunes elsewhere must be able to say so, and
-    reading zero as "delete them all" is the reading that loses data. Hand-made copies are never
-    touched: a copy somebody took before an upgrade is not something a counter gets to throw
-    away.
+    *policy* is a task (or its dict of rules, or the bare number it used to be). Hand-made
+    copies are never touched: a copy somebody took before an upgrade is not something a counter
+    gets to throw away.
+
+    Neither is a **locked** one. The buckets answer "how much history", the floors answer "never
+    leave the task with nothing" — and neither can say "this particular archive", which is what
+    somebody means about the copy taken before a migration. Filtered at the end rather than
+    hidden from the rules: a locked copy still claims its bucket like any other, so protecting
+    one does not silently buy an extra.
     """
-    try:
-        k = int(keep)
-    except (TypeError, ValueError):
-        return []
-    if k <= 0:
-        return []
     autos = sorted((b for b in (backups or []) if is_auto(b.get('name'), task)),
                    key=lambda b: b.get('mtime') or 0, reverse=True)
-    # Oldest first, as the docstring says and the code did not: the order does not change WHAT
-    # is deleted, but a run interrupted half way should have freed the least useful copies
-    # rather than the ones nearest to being the last good one.
-    return [b['name'] for b in reversed(autos[k:])]
+    kept = _apply_floors(
+        autos, _over_budget(_apply_floors(autos, survivors(backups, policy, task)),
+                            retention_policy(policy).get('max_size')))
+    keep_names = {b['name'] for b in kept}
+    # Oldest first: the order does not change WHAT is deleted, but a run interrupted half way
+    # should have freed the least useful copies rather than the ones nearest to being the last
+    # good one.
+    return [b['name'] for b in reversed(autos)
+            if b['name'] not in keep_names and not b.get('locked')]
 
 
 # ── A calendar, with the catch-up an interval gave for free ──────────────────

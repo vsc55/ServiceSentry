@@ -275,7 +275,11 @@ class TestTheOldSettingsBecomeATask:
         out = self._runner(admin).tick()
         tasks = admin._backup_tasks_store.list_tasks()
         assert len(tasks) == 1
-        assert tasks[0]['every_hours'] == 12 and tasks[0]['keep'] == 3
+        # As `keep_last`, with the buckets off: the setting it carries over was a plain
+        # counter, and turning it into a retention policy nobody chose would be inventing an
+        # answer on their behalf.
+        assert tasks[0]['every_hours'] == 12 and tasks[0]['keep_last'] == 3
+        assert tasks[0]['keep_daily'] == 0 and tasks[0]['keep_monthly'] == 0
         assert tasks[0]['secrets'] is False
         assert out['created'], 'it migrated but did not run'
 
@@ -397,7 +401,12 @@ class TestTheTaskApi:
         _login(client)
         client.put('/api/v1/backups/tasks', json={'name': 'Minima'})
         tk = client.get('/api/v1/backups/tasks').get_json()['tasks'][0]
-        assert tk['enabled'] is True and tk['every_hours'] == 24 and tk['keep'] == 7
+        assert tk['enabled'] is True and tk['every_hours'] == 24
+        # Retention arrives as BUCKETS, which is what a new task gets: a week at daily
+        # resolution, then a month of weeks and half a year of months, for 17 copies rather
+        # than 180.
+        assert (tk['keep_last'], tk['keep_daily'], tk['keep_weekly'], tk['keep_monthly']) \
+            == (3, 7, 4, 6)
 
     def test_saving_and_deleting_are_audited(self, client, admin):
         """A task edited to run monthly instead of daily is a decision somebody made, and the
@@ -684,3 +693,289 @@ class TestTheScheduleAndTheVerifyAreTheirOwnGrants:
                                  'role': 'maker', 'display_name': 'M'}
         _login(client, 'maker')
         assert client.post(f'/api/v1/backups/tasks/{uid}/run', json={}).status_code == 200
+
+
+class TestRetentionOnEveryTickAndAPreviewYouCanTrust:
+    """Two of the three things that made the old retention feel short: it only ran when a task
+    ran, and nobody could predict what a policy would do before saving it."""
+
+    def _runner(self, admin):
+        from lib.core.backup.runner import BackupRunner
+        return BackupRunner(admin)
+
+    def test_a_task_that_did_not_run_still_prunes(self, admin, client):
+        """A monthly task went a month without its rules being applied; a disabled one went for
+        ever, its copies outside every counter.
+
+        The real shape of it: you tighten the policy of a task you have already switched off.
+        Nothing will ever run it again, so nothing would ever apply what you just said.
+        """
+        _login(client)
+        uid = client.put('/api/v1/backups/tasks', json={
+            'name': 'Vieja', 'parts': ['core'], 'keep_last': 10,
+            'keep_daily': 0, 'keep_weekly': 0, 'keep_monthly': 0}).get_json()['uid']
+        import time as _t
+        from lib.core.backup import service as svc
+        for _ in range(3):
+            # Waited for: a run is a JOB now, and firing three without waiting would race the
+            # copies this test is about counting.
+            _wait_job(client, client.post(f'/api/v1/backups/tasks/{uid}/run',
+                                          json={}).get_json()['job_id'])
+            _t.sleep(1.05)                      # the name carries seconds
+        assert len([b for b in svc.list_backups(admin._var_dir)
+                    if b['name'].startswith('auto-vieja-')]) == 3
+
+        # Switched off AND tightened. Nothing will run it again.
+        client.put('/api/v1/backups/tasks', json={'uid': uid, 'name': 'Vieja',
+                                                  'enabled': False, 'parts': ['core'],
+                                                  'keep_last': 1, 'keep_daily': 0,
+                                                  'keep_weekly': 0, 'keep_monthly': 0})
+        out = self._runner(admin).tick()
+        assert out['pruned'], 'a disabled task never prunes what it already made'
+        kept = [b for b in svc.list_backups(admin._var_dir)
+                if b['name'].startswith('auto-vieja-')]
+        assert len(kept) == 1, [b['name'] for b in kept]
+
+    def test_the_preview_answers_with_the_schedulers_own_rule(self, client, admin):
+        """A preview worked out a second way would be a preview that lies on the day it
+        matters."""
+        _login(client)
+        uid = client.put('/api/v1/backups/tasks', json={
+            'name': 'Prev', 'parts': ['core']}).get_json()['uid']
+        import time as _t
+        for _ in range(3):
+            _wait_job(client, client.post(f'/api/v1/backups/tasks/{uid}/run',
+                                          json={}).get_json()['job_id'])
+            _t.sleep(1.05)
+        res = client.post('/api/v1/backups/tasks/preview',
+                          json={'name': 'Prev', 'keep_last': 1, 'keep_daily': 0,
+                                'keep_weekly': 0, 'keep_monthly': 0})
+        assert res.status_code == 200
+        body = res.get_json()
+        assert body['total'] == 3
+        assert len(body['keep']) == 1 and len(body['delete']) == 2
+        assert body['keep_bytes'] > 0, 'a budget cannot be set against a size nobody shows'
+
+    def test_the_preview_changes_nothing(self, client, admin):
+        _login(client)
+        _create(client, name='amano')
+        client.post('/api/v1/backups/tasks/preview', json={'name': 'x', 'keep_last': 0})
+        from lib.core.backup import service as svc
+        assert [b['name'] for b in svc.list_backups(admin._var_dir)] == ['amano']
+
+    def test_seeing_the_preview_needs_only_view(self, client, admin):
+        """It answers a question about the copies already on disk and changes nothing."""
+        admin._custom_roles['looker'] = {'label': 'L', 'permissions': ['backup_view']}
+        admin._users['looker'] = {'password_hash': admin._users['admin']['password_hash'],
+                                  'role': 'looker', 'display_name': 'L'}
+        _login(client, 'looker')
+        assert client.post('/api/v1/backups/tasks/preview',
+                           json={'name': 'x'}).status_code == 200
+
+
+class TestKeepingOneCopyWhateverTheCounterSays:
+    """The copy taken before a migration, or the last one known to be good. Retention has no
+    vocabulary for "this one" — it answers how much history, not which archive."""
+
+    def test_a_locked_copy_survives_a_policy_that_would_delete_it(self, admin, client):
+        from lib.core.backup import service as svc
+        from lib.core.backup.runner import BackupRunner
+        import time as _t
+        _login(client)
+        uid = client.put('/api/v1/backups/tasks', json={
+            'name': 'Cerrojo', 'parts': ['core'], 'keep_last': 10,
+            'keep_daily': 0, 'keep_weekly': 0, 'keep_monthly': 0}).get_json()['uid']
+        for _ in range(3):
+            _wait_job(client, client.post(f'/api/v1/backups/tasks/{uid}/run',
+                                          json={}).get_json()['job_id'])
+            _t.sleep(1.05)
+        oldest = sorted([b['name'] for b in svc.list_backups(admin._var_dir)
+                         if b['name'].startswith('auto-cerrojo-')])[0]
+        assert client.post(f'/api/v1/backups/{oldest}/lock',
+                           json={'locked': True}).status_code == 200
+
+        # The policy the oldest copy would normally lose to.
+        client.put('/api/v1/backups/tasks', json={'uid': uid, 'name': 'Cerrojo',
+                                                  'parts': ['core'], 'keep_last': 1,
+                                                  'keep_daily': 0, 'keep_weekly': 0,
+                                                  'keep_monthly': 0})
+        BackupRunner(admin).tick()
+        left = [b['name'] for b in svc.list_backups(admin._var_dir)
+                if b['name'].startswith('auto-cerrojo-')]
+        assert oldest in left, 'retention deleted a locked copy'
+        assert len(left) == 2, left        # the newest, and the locked one
+
+    def test_deleting_a_locked_copy_is_refused_and_says_why(self, client, admin):
+        """"Not found" would be a lie about a file that is right there."""
+        from lib.core.backup import service as svc
+        _login(client)
+        _create(client, name='guardada')
+        client.post('/api/v1/backups/guardada/lock', json={'locked': True})
+        res = client.delete('/api/v1/backups/guardada')
+        assert res.status_code == 409 and res.get_json()['error']
+        assert [b['name'] for b in svc.list_backups(admin._var_dir)] == ['guardada']
+
+        assert client.post('/api/v1/backups/guardada/lock',
+                           json={'locked': False}).status_code == 200
+        assert client.delete('/api/v1/backups/guardada').status_code == 200
+
+    def test_the_list_says_who_locked_it_and_when(self, client):
+        _login(client)
+        _create(client, name='marcada')
+        client.post('/api/v1/backups/marcada/lock', json={'locked': True})
+        b = [x for x in client.get('/api/v1/backups').get_json()['backups']
+             if x['name'] == 'marcada'][0]
+        assert b['locked'] is True and b['lock_by'] == 'admin' and b['lock_at']
+
+    def test_it_is_audited_in_both_directions(self, client, admin):
+        """The interesting case is somebody removing a protection another person put there."""
+        _login(client)
+        _create(client, name='auditada')
+        client.post('/api/v1/backups/auditada/lock', json={'locked': True})
+        client.post('/api/v1/backups/auditada/lock', json={'locked': False})
+        rows = [r for r in admin._audit_store.get_all(newest_first=True)
+                if r.get('event') == 'backup_locked']
+        assert len(rows) == 2
+        assert 'false' in str(rows[0].get('detail', '')).lower(), rows[0]
+        assert 'true' in str(rows[1].get('detail', '')).lower(), rows[1]
+
+    def test_locking_needs_the_delete_grant(self, client, admin):
+        """Unlocking is asking to be able to delete, so it cannot be a weaker grant."""
+        admin._custom_roles['looker'] = {'label': 'L', 'permissions': ['backup_view']}
+        admin._users['looker'] = {'password_hash': admin._users['admin']['password_hash'],
+                                  'role': 'looker', 'display_name': 'L'}
+        _login(client, 'looker')
+        assert client.post('/api/v1/backups/x/lock', json={'locked': True}).status_code == 403
+
+
+class TestARetentionProfileIsFollowedNotCopied:
+    """A profile exists so that editing it changes every task that follows it. A profile that
+    only filled the boxes in would be a shortcut for typing, not a policy."""
+
+    @staticmethod
+    def _profile(client, **rules):
+        body = {'name': 'P', 'keep_last': 1, 'keep_daily': 0, 'keep_weekly': 0,
+                'keep_monthly': 0, 'keep_yearly': 0, **rules}
+        return client.put('/api/v1/backups/profiles', json=body).get_json()['uid']
+
+    def test_the_scheduler_prunes_by_the_profile_and_not_by_the_boxes(self, admin, client):
+        """The task keeps its own numbers underneath — they are what it goes back to when it is
+        unlinked — so a task saying "keep 10" while following a profile that says 1 is exactly
+        the case that proves which one the scheduler reads."""
+        from lib.core.backup import service as svc
+        from lib.core.backup.runner import BackupRunner
+        import time as _t
+        _login(client)
+        uid = client.put('/api/v1/backups/tasks', json={
+            'name': 'Perfilada', 'parts': ['core'], 'keep_last': 10,
+            'keep_daily': 0, 'keep_weekly': 0, 'keep_monthly': 0}).get_json()['uid']
+        for _ in range(3):
+            _wait_job(client, client.post(f'/api/v1/backups/tasks/{uid}/run',
+                                          json={}).get_json()['job_id'])
+            _t.sleep(1.05)                      # the name carries seconds
+        assert len([b for b in svc.list_backups(admin._var_dir)
+                    if b['name'].startswith('auto-perfilada-')]) == 3
+
+        pid = self._profile(client, keep_last=1)
+        client.put('/api/v1/backups/tasks', json={'uid': uid, 'name': 'Perfilada',
+                                                  'parts': ['core'], 'profile': pid,
+                                                  'keep_last': 10, 'keep_daily': 0,
+                                                  'keep_weekly': 0, 'keep_monthly': 0})
+        assert BackupRunner(admin).tick()['pruned'], 'the profile was never read'
+        kept = [b for b in svc.list_backups(admin._var_dir)
+                if b['name'].startswith('auto-perfilada-')]
+        assert len(kept) == 1, [b['name'] for b in kept]
+
+    def test_the_task_list_says_which_rules_actually_apply(self, client):
+        """A linked task carries two sets of numbers, so the screen is told the answer rather
+        than left to pick."""
+        _login(client)
+        pid = self._profile(client, keep_last=4)
+        uid = client.put('/api/v1/backups/tasks',
+                         json={'name': 'T', 'keep_last': 99,
+                               'profile': pid}).get_json()['uid']
+        body = client.get('/api/v1/backups/tasks').get_json()
+        assert body['policies'][uid]['keep_last'] == 4
+        assert body['tasks'][0]['keep_last'] == 99, 'its own numbers were overwritten'
+
+    def test_unlinking_gives_the_task_its_own_policy_back(self, client):
+        """The boxes are hidden behind a profile, never cleared — so the form sends them on
+        every save and unlinking restores the policy the task had before it was linked."""
+        _login(client)
+        pid = self._profile(client, keep_last=4)
+        task = {'name': 'T', 'keep_last': 7, 'keep_daily': 0, 'keep_weekly': 0,
+                'keep_monthly': 0, 'keep_yearly': 0, 'profile': pid}
+        uid = client.put('/api/v1/backups/tasks', json=task).get_json()['uid']
+        client.put('/api/v1/backups/tasks', json={**task, 'uid': uid, 'profile': ''})
+        assert client.get('/api/v1/backups/tasks').get_json()['policies'][uid]['keep_last'] == 7
+
+    def test_the_preview_follows_the_profile_too(self, client):
+        """Otherwise the form would predict with the numbers in its hidden boxes and the
+        scheduler would delete by the profile's."""
+        import time as _t
+        _login(client)
+        uid = client.put('/api/v1/backups/tasks',
+                         json={'name': 'Prof', 'parts': ['core']}).get_json()['uid']
+        for _ in range(2):
+            _wait_job(client, client.post(f'/api/v1/backups/tasks/{uid}/run',
+                                          json={}).get_json()['job_id'])
+            _t.sleep(1.05)
+        pid = self._profile(client, keep_last=1)
+        body = client.post('/api/v1/backups/tasks/preview',
+                           json={'name': 'Prof', 'profile': pid,
+                                 'keep_last': 50}).get_json()
+        assert len(body['keep']) == 1 and len(body['delete']) == 1
+
+    def test_deleting_one_in_use_is_refused_with_the_tasks_named(self, client):
+        """Letting it go would silently move those tasks onto whatever numbers they last held —
+        a change of policy nobody asked for and nothing announces."""
+        _login(client)
+        pid = self._profile(client)
+        client.put('/api/v1/backups/tasks', json={'name': 'Sigue', 'profile': pid})
+        res = client.delete(f'/api/v1/backups/profiles/{pid}')
+        assert res.status_code == 409
+        assert 'Sigue' in res.get_json()['error']
+        assert client.get('/api/v1/backups/profiles').get_json()['used_by'][pid] == ['Sigue']
+
+    def test_deleting_an_unused_one_works(self, client):
+        _login(client)
+        pid = self._profile(client)
+        assert client.delete(f'/api/v1/backups/profiles/{pid}').status_code == 200
+        assert client.get('/api/v1/backups/profiles').get_json()['profiles'] == []
+
+    def test_it_needs_a_name(self, client):
+        _login(client)
+        assert client.put('/api/v1/backups/profiles',
+                          json={'name': '  '}).status_code == 400
+
+    def test_renaming_one_does_not_reset_its_policy(self, client):
+        """An upsert REPLACES the record, so a body carrying only a name would leave the profile
+        on today's defaults — silently changing how much history every task following it keeps.
+        One task saved short is visible; this is invisible and multiplied."""
+        _login(client)
+        pid = self._profile(client, keep_last=5)
+        client.put('/api/v1/backups/profiles', json={'uid': pid, 'name': 'Renombrado'})
+        got = client.get('/api/v1/backups/profiles').get_json()['profiles'][0]
+        assert got['name'] == 'Renombrado' and got['keep_last'] == 5
+
+    def test_editing_one_changes_every_task_that_follows_it(self, client):
+        """The whole reason to have profiles rather than a button that fills the boxes in."""
+        _login(client)
+        pid = self._profile(client, keep_last=9)
+        uids = [client.put('/api/v1/backups/tasks',
+                           json={'name': n, 'profile': pid}).get_json()['uid']
+                for n in ('A', 'B')]
+        client.put('/api/v1/backups/profiles', json={'uid': pid, 'name': 'P', 'keep_last': 2,
+                                                     'keep_daily': 0, 'keep_weekly': 0,
+                                                     'keep_monthly': 0, 'keep_yearly': 0})
+        policies = client.get('/api/v1/backups/tasks').get_json()['policies']
+        assert all(policies[u]['keep_last'] == 2 for u in uids)
+
+    def test_writing_one_needs_the_schedule_grant(self, client, admin):
+        admin._custom_roles['looker'] = {'label': 'L', 'permissions': ['backup_view']}
+        admin._users['looker'] = {'password_hash': admin._users['admin']['password_hash'],
+                                  'role': 'looker', 'display_name': 'L'}
+        _login(client, 'looker')
+        assert client.get('/api/v1/backups/profiles').status_code == 200
+        assert client.put('/api/v1/backups/profiles', json={'name': 'X'}).status_code == 403
+        assert client.delete('/api/v1/backups/profiles/x').status_code == 403

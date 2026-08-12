@@ -20,7 +20,8 @@
 | **Secretos** | Decisión **por copia**; el manifiesto registra cuál fue |
 | **Integridad** | `sha256` por miembro dentro del manifiesto + `<copia>.zip.sha256` al lado |
 | **Veredicto** | `ok` / `partial` / `error`, escrito **dentro** del archivo, con una entrada por parte |
-| **Programación** | Lista de **tareas**, cada una con sus partes, su frecuencia y su retención |
+| **Bloqueo** | `<copia>.zip.lock` al lado del archivo: ni la retención ni el botón de borrar la tocan |
+| **Programación** | Lista de **tareas**, cada una con sus partes, su frecuencia y su retención por franjas (GFS) — propia o **de un perfil compartido** |
 | **Quién la ejecuta** | El rol **web** (en microservicios, el contenedor `web`) |
 | **Permisos** | 7 flags distintos — ver [§ Permisos](#permisos) |
 
@@ -317,17 +318,188 @@ caza igual de bien que uno cada minuto.
 
 ### Retención
 
-Es **por tarea**, y esa fue la razón del rediseño: con un contador compartido, la tarea diaria
-podaba las copias de la mensual — borrando exactamente las que tardaron un mes en merecer la
-pena. El nombre de la copia lleva la tarea que la hizo (`auto-<tarea>-<fecha>`).
+Es **por tarea**, y la pregunta que responde no es *«¿cuántas guardo?»* sino *«¿cuánto hacia
+atrás puedo volver, y con qué resolución?»* — siete copias pueden ser una semana a resolución
+diaria o dos años a resolución mensual, y solo lo segundo sobrevive a descubrir en marzo que
+algo se rompió en enero.
 
-- Se poda **después** de que la copia nueva esté en disco: al revés, un disco lleno borraría la
-  vieja y fallaría al escribir la nueva.
-- Se podan **las más antiguas primero**.
-- Una copia hecha **a mano nunca se poda**: un contador no decide sobre algo que alguien hizo a
-  propósito.
-- `keep = 0` significa **conservarlas todas**. Leer el 0 como «bórralas todas» es la lectura que
-  pierde datos.
+Por eso son **franjas**, la forma en que lo resolvieron borg y restic:
+
+| Campo | Qué conserva |
+|---|---|
+| `keep_last` | Las N más recientes, diga lo que diga el calendario |
+| `keep_daily` | La más reciente de cada uno de los últimos N días |
+| `keep_weekly` | La más reciente de cada una de las últimas N semanas (semana ISO) |
+| `keep_monthly` | La más reciente de cada uno de los últimos N meses |
+| `keep_yearly` | La más reciente de cada uno de los últimos N años |
+| `max_size` | Techo en bytes. 0 = sin límite |
+
+**Una copia sobrevive si la reclama CUALQUIERA de las reglas** — la unión, no la intersección.
+Eso es lo que hace que «3 últimas + 7 diarias + 4 semanales + 6 mensuales» cueste 17 copias en
+vez de 180. Con 400 copias diarias, esa política deja **15** y llega **siete meses atrás**; un
+`keep_last: 15` deja las mismas 15 y llega quince días.
+
+```mermaid
+flowchart LR
+    all["400 copias diarias"] --> last["keep_last 3<br/>las 3 últimas"]
+    all --> d["keep_daily 7<br/>1 por día × 7"]
+    all --> w["keep_weekly 4<br/>1 por semana × 4"]
+    all --> m["keep_monthly 6<br/>1 por mes × 6"]
+    all --> y["keep_yearly 2<br/>1 por año × 2"]
+    last --> u["unión = 15 copias<br/>~7 meses de historia"]
+    d --> u
+    w --> u
+    m --> u
+    y --> u
+    u --> floors["suelos"]
+    floors --> budget["presupuesto (si lo hay)"]
+    budget --> floors2["suelos otra vez"]
+    floors2 --> keep["lo que se conserva"]
+```
+
+**Todo a 0 conserva todas.** Quien poda por otro lado tiene que poder decirlo, y leer «sin
+reglas» como «bórralas todas» es la lectura que pierde datos.
+
+#### Dos suelos que ninguna franja puede expresar
+
+- **Nunca se borra la copia más reciente.** Una política que deja una tarea sin nada ha
+  configurado mal lo único que esa tarea existe para dar, y eso se descubre al restaurar.
+- **Nunca se borra la más reciente CORRECTA.** Una racha de copias `partial` empujaría fuera la
+  última `ok` y quedarían siete copias de las que ninguna sirve. El veredicto ya viaja dentro
+  del archivo, así que esto cuesta una consulta y ninguna adivinación.
+
+#### El presupuesto de tamaño
+
+Las franjas dicen qué merece la pena conservar; `max_size` dice para cuánto hay sitio. Se aplica
+**el último**, así que solo puede quitar de lo que las reglas ya habían elegido — nunca añadir —
+y los suelos se vuelven a aplicar después: quedarse sin sitio no es motivo para quedarse sin
+nada.
+
+Cuando es el techo y no el calendario el que decide qué sobrevive, queda **auditado**
+(`backup_budget_exceeded`) y es **notificable**: significa que la política pide más historia de
+la que cabe, y eso es una decisión que alguien debería poder revisar en vez de descubrirla más
+tarde como un hueco.
+
+#### Cuándo se aplica
+
+**En cada tick**, no solo después de copiar. Antes, una tarea mensual pasaba un mes sin que sus
+reglas se aplicaran y una **deshabilitada** no las aplicaba nunca: apagar una tarea dice «deja
+de hacer copias nuevas», no «congela las viejas fuera de todo contador».
+
+#### Lo que la retención nunca toca
+
+- Una copia **bloqueada** (ver abajo).
+- Una copia hecha **a mano**: un contador no decide sobre algo que alguien hizo a propósito.
+- Las copias de una **tarea borrada**. Siguen siendo backups; la tarea solo era la razón de que
+  existieran. No se podan — pero desde esta versión tienen su propia entrada en el rail
+  (*Sin tarea*), porque crecer sin que nadie las cuente y sin que nadie las vea son dos cosas
+  distintas.
+
+#### La previsualización
+
+Nadie evalúa «7 diarias + 4 semanales + 6 mensuales» contra 200 ficheros de cabeza, y una
+política que no se puede predecir es una que nadie se atreve a tocar. El formulario de la tarea
+enseña, contra las copias que existen **ahora**, cuántas sobrevivirían, cuánto ocupan y cuáles
+se borrarían hoy.
+
+Lo calcula el **servidor**, con la misma función pura que usa el planificador
+(`POST /api/v1/backups/tasks/preview`, permiso `backup_view`, no cambia nada). Calcularlo en el
+navegador sería una segunda implementación de la regla — y una previsualización que discrepa del
+planificador es peor que ninguna, porque se cree.
+
+#### Perfiles: una política con nombre
+
+Cinco números y un techo, reescritos de memoria en cada tarea, eran tres oportunidades de teclear
+6 donde las otras dicen 4 — y nada en pantalla decía nunca que no coincidían. Un **perfil de
+retención** es esa política con un nombre y un solo sitio.
+
+Una tarea **sigue** un perfil (guarda su uid en `profile`), no lo copia: editar «GFS estándar»
+cambia de una vez la retención de todas las tareas que apuntan a él. Esa es la razón entera de
+que exista, en lugar de un botón que rellene las casillas.
+
+```mermaid
+flowchart LR
+    subgraph tareas["Tareas"]
+        t1["Diaria<br/>profile: gfs"]
+        t2["Syslog<br/>profile: gfs"]
+        t3["Mensual<br/>profile: ''"]
+    end
+    gfs["Perfil «GFS estándar»<br/>3 + 7d + 4w + 6m"]
+    own["sus propios keep_*"]
+    t1 --> gfs
+    t2 --> gfs
+    t3 --> own
+    gfs --> resolve["with_profile()"]
+    own --> resolve
+    resolve --> prune["prune() — la misma función de siempre"]
+```
+
+Detalles que no son evidentes:
+
+- **La resolución ocurre en un único sitio** (`schedule.with_profile`). Todo lo que hay por
+  debajo —`survivors`, `prune`, la previsualización— recibe una tarea que ya sabe cuáles son sus
+  números. Un segundo sitio que decidiera eso sería un segundo sitio donde el planificador y la
+  pantalla pueden discrepar sobre qué está a punto de borrarse.
+- **El perfil sustituye la política, no se fusiona con ella.** Un perfil que no dice nada de
+  mensuales significa *ninguna mensual*. Fusionar dejaría a una tarea conservando historia que la
+  política que sigue nunca menciona, y nada en pantalla diría por qué.
+- **Los `keep_*` propios de la tarea se conservan debajo**, ocultos y no borrados: son a lo que
+  vuelve al desvincularla, y lo que queda en pie si el perfil desaparece por otra vía. Leer «sin
+  reglas» ahí significaría *conservarlo todo* y llenar el disco.
+- **La lista de tareas viaja con las reglas ya resueltas** (`policies` en
+  `GET /api/v1/backups/tasks`). Una tarea vinculada lleva dos juegos de números encima; una
+  pantalla que eligiera por su cuenta sería una pantalla de retención adivinando.
+- **Borrar un perfil en uso se rechaza (409)** nombrando las tareas. Dejarlo ir movería esas
+  tareas a los números que tuvieran guardados: un cambio de política que nadie pidió y que nada
+  anuncia.
+- Los **puntos de partida** que ofrece el editor (`suggested`) vienen del servidor
+  (`profiles_store.SUGGESTED`): son la opinión del panel sobre cuánta historia merece la pena
+  guardar, y una opinión escrita en una plantilla es una que la API no puede enunciar.
+
+Todo ello va con `backup_schedule`: editar un perfil **es** editar la retención de varias tareas,
+que es exactamente la decisión que ese permiso ya cubría.
+
+#### Bloquear una copia
+
+Las franjas contestan *cuánta historia*; los dos suelos contestan *nunca dejes la tarea sin
+nada*. Ninguno de los dos sabe decir **esta copia en concreto** — que es justo lo que se quiere
+decir de la copia tomada antes de una migración, o de la última que se sabe buena.
+
+El **bloqueo** lo dice. Una copia bloqueada no la borra la retención ni el botón de borrar:
+
+```mermaid
+flowchart TD
+    p["prune(): la política elige"] --> f{"¿bloqueada?"}
+    f -- sí --> keep["se queda, diga lo que diga la política"]
+    f -- no --> del["se borra"]
+    btn["botón Eliminar"] --> chk{"¿bloqueada?"}
+    chk -- sí --> no409["409 · «desbloquéala antes»"]
+    chk -- no --> del
+    svc["delete_backup() del servicio"] --> chk
+```
+
+- **Es un fichero al lado del archivo** (`<copia>.zip.lock`), no una columna. `list_backups` lee
+  el directorio precisamente para que no exista una segunda verdad sobre ficheros que alguien
+  puede copiar, mover o borrar con el panel parado — y un bloqueo en una tabla sería justo eso,
+  con el fallo de que la fila diga «protegida» de un archivo que ya no está. El marcador viaja
+  con la copia, como el `.sha256`, y lleva quién y cuándo.
+- **Un marcador ilegible sigue contando como bloqueo.** Su existencia es la bandera; su contenido
+  es una cortesía, y leer una cortesía rota como «no protegida» es fallar en la única dirección
+  en la que un cerrojo no puede fallar.
+- **Se niega también en el servicio**, no solo en la ruta: un bloqueo que solo respetara la UI no
+  protege nada el día que otro camino calcule la lista de condenadas por su cuenta.
+- **Sigue reclamando su franja.** El filtro se aplica al final, no ocultándola de las reglas:
+  proteger la copia más reciente de un día no puede comprar de regalo otra copia para ese día.
+- **Gasta presupuesto pero no se puede tirar.** El sitio que ocupa está ocupado lo reconozca o no
+  el techo; y un techo que pudiera borrarla anularía la única instrucción que el bloqueo existe
+  para dar.
+- **Los marcadores no sobreviven al archivo.** Un `.lock` huérfano haría nacer bloqueada a la
+  siguiente copia con el mismo nombre, sin que nada en pantalla lo explicara.
+
+Va con `backup_delete`, **en ambos sentidos**: el bloqueo solo afecta a si un archivo se puede
+destruir, y desbloquear es pedir poder borrarlo. Lo que **no** es: protección frente a un
+administrador —quien puede desbloquear puede después borrar—. Es una barrera contra la retención
+y contra la fila equivocada, que es como se pierde la copia buena.
 
 ---
 
@@ -377,8 +549,11 @@ son intercambiables.
 | `backup_create` | Crear una copia · **ejecutar una tarea ahora** | Ejecutar una tarea **es** hacer una copia |
 | `backup_download` | Descargar el fichero | Quien puede bajarlo tiene la instalación |
 | `backup_restore` | Aplicar una copia | Sobrescribe usuarios y roles: puede entregar el panel |
-| `backup_delete` | Borrar una copia del disco | Destruye datos |
-| `backup_schedule` | Crear, editar y borrar **tareas** | No destruye ningún archivo, pero decide cada cuánto se protege la instalación |
+| `backup_delete` | Borrar una copia del disco · **bloquearla y desbloquearla** | Destruye datos. El bloqueo solo afecta a si un archivo puede destruirse, y desbloquear es pedir poder borrarlo |
+| `backup_schedule` | Crear, editar y borrar **tareas** y **perfiles de retención** | No destruye ningún archivo, pero decide cada cuánto se protege la instalación — y un perfil lo decide de golpe para todas las tareas que lo siguen |
+
+> La **previsualización** de una política va con `backup_view`: responde una pregunta sobre
+> las copias que ya están en disco y no cambia nada.
 
 Ninguno se concede a los roles integrados: una copia es una herramienta de administración.
 Los botones siguen los mismos flags — uno que devuelve 403 dice que el panel está roto, no que

@@ -1,0 +1,195 @@
+{# ================================================================
+   Backup — the retention policy of a task, and what it would actually do.
+
+   A counter answers "how many do I keep?". The question worth answering is "how far back can I
+   go, and at what resolution?" — and seven copies can be one week at daily resolution or two
+   years at monthly. Only the second survives finding out in March that something broke in
+   January.
+
+   Which is also what made this the longest block on the form: five numbers and a ceiling,
+   retyped in every task from memory. So a task either states its own policy or FOLLOWS a
+   profile — and the boxes only appear for the first, which is what keeps the editor short in
+   the case where somebody has already decided how much history this install keeps.
+
+   Its own partial because the preview is the half that makes the rest usable: nobody can
+   evaluate "7 daily + 4 weekly + 6 monthly" against 200 files in their head, and a policy
+   nobody can predict is a policy nobody dares touch.
+   ================================================================ #}
+
+// The buckets, in the order they read: the newest few, then coarser and further back.
+const _BK_BUCKETS = [
+    ['keep_last',    'backup_keep_last'],
+    ['keep_daily',   'backup_keep_daily'],
+    ['keep_weekly',  'backup_keep_weekly'],
+    ['keep_monthly', 'backup_keep_monthly'],
+    ['keep_yearly',  'backup_keep_yearly'],
+];
+
+const _BK_MIB = 1024 * 1024;
+
+/** The retention fields. A copy survives if ANY of them claims it — said once, above the
+ *  boxes, because that is the rule the numbers do not show.
+ *
+ *  `prefix` because the same five boxes are the whole of the profile editor: a profile IS a
+ *  task's retention with a name on it, and drawing it twice is how the two acquire different
+ *  limits, different labels and eventually different meanings. */
+function _bkBucketBoxes(src, prefix) {
+    const box = (key, labelKey) =>
+        `<div class="col-6 col-md-4">
+            <label class="form-label small mb-0" for="${prefix}${key}">${esc(t(labelKey))}</label>
+            <input type="number" min="0" max="999" class="form-control form-control-sm"
+                   id="${prefix}${key}" value="${escAttr(src[key] ?? 0)}"
+                   oninput="${prefix === 'tk_' ? '_tkPreview()' : ''}">
+        </div>`;
+    const mib = Math.round((Number(src.max_size) || 0) / _BK_MIB);
+    return `<div class="mb-2">
+        <div class="row g-2">${_BK_BUCKETS.map(b => box(b[0], b[1])).join('')}</div>
+        <div class="small text-muted mt-1">${esc(t('backup_retention_hint'))}</div>
+    </div>
+    <div class="mb-2">
+        <label class="form-label small mb-0" for="${prefix}max_size">
+            ${esc(t('backup_max_size'))}</label>
+        <div class="input-group input-group-sm">
+            <input type="number" min="0" class="form-control" id="${prefix}max_size"
+                   value="${escAttr(mib)}"
+                   oninput="${prefix === 'tk_' ? '_tkPreview()' : ''}">
+            <span class="input-group-text">MiB</span>
+        </div>
+        <div class="small text-muted mt-1">${esc(t('backup_max_size_hint'))}</div>
+    </div>`;
+}
+
+/** The five numbers as read back out of a form drawn with `_bkBucketBoxes`. */
+function _bkBucketValues(prefix) {
+    const out = {};
+    for (const [key] of _BK_BUCKETS) {
+        out[key] = Number(document.getElementById(prefix + key)?.value || 0);
+    }
+    // Bytes on the wire, MiB in the box: an operator types a round number and the rule is
+    // enforced against real file sizes.
+    out.max_size = Number(document.getElementById(prefix + 'max_size')?.value || 0) * _BK_MIB;
+    return out;
+}
+
+/** The Retention tab of the task editor: whose policy this is, and what it would do.
+ *
+ *  The task's own numbers stay in the form even while a profile is selected — hidden, not
+ *  discarded. They are what it goes back to when it is unlinked, and re-reading them off a
+ *  server round trip would mean unlinking a task lost the policy it had before. */
+function _tkRetentionHtml(tk) {
+    const linked = String(tk.profile || '');
+    const opts = [`<option value=""${linked ? '' : ' selected'}>`
+                  + esc(t('backup_profile_own')) + '</option>']
+        .concat(_backupProfiles.map(p =>
+            `<option value="${escAttr(p.id)}"${p.id === linked ? ' selected' : ''}>`
+            + esc(p.name) + '</option>')).join('');
+    return `<div class="mb-3">
+        <label class="form-label small mb-0" for="tkProfile">${esc(t('backup_profile'))}</label>
+        <select class="form-select form-select-sm" id="tkProfile"
+                onchange="_tkProfileSwitch()">${opts}</select>
+    </div>
+    <div id="tkOwnRules"${linked ? ' hidden' : ''}>${_bkBucketBoxes(tk, 'tk_')}</div>
+    <div id="tkProfileRules" class="mb-2"${linked ? '' : ' hidden'}></div>
+    <div class="mb-3" id="tkPreview"></div>`;
+}
+
+/** Following a profile hides the boxes and shows what that profile says instead — the numbers
+ *  are not editable HERE on purpose: they belong to every task that follows it, and a form that
+ *  let you change them from inside one task would be editing the other tasks without saying so. */
+function _tkProfileSwitch() {
+    const uid = document.getElementById('tkProfile')?.value || '';
+    document.getElementById('tkOwnRules')?.toggleAttribute('hidden', !!uid);
+    const box = document.getElementById('tkProfileRules');
+    if (box) {
+        box.toggleAttribute('hidden', !uid);
+        const prof = _backupProfiles.find(p => p.id === uid);
+        box.innerHTML = prof
+            ? `<div class="alert alert-secondary py-2 px-3 small mb-0">
+                   ${esc(_bkPolicyWords(prof))}</div>`
+            : '';
+    }
+    _tkPreviewNow();
+}
+
+/** The policy as the API takes it: which profile (if any), AND the task's own numbers. Both,
+ *  always — see `_tkRetentionHtml` on why the boxes are kept rather than cleared. */
+function _tkRetentionPayload() {
+    return {profile: document.getElementById('tkProfile')?.value || '',
+            ..._bkBucketValues('tk_')};
+}
+
+/** A policy in one line: "3 + 7d + 4w + 6m · ≤ 2 GiB", or "todas". */
+function _bkPolicyWords(rules) {
+    const bits = _BK_BUCKETS
+        .map(([key], i) => [Number(rules[key]) || 0, ['', 'd', 'w', 'm', 'y'][i]])
+        .filter(([n]) => n > 0)
+        .map(([n, suffix]) => n + suffix);
+    if (!bits.length) return t('backup_keep_all');
+    const cap = Number(rules.max_size) || 0;
+    return bits.join(' + ') + (cap ? ' · ≤ ' + _bkBytes(cap) : '');
+}
+
+/** The line under a task's name in the list: the rules that ACTUALLY apply to it, named by
+ *  their profile when it follows one.
+ *
+ *  Resolved by the server and sent alongside the tasks, never worked out here: a task following
+ *  a profile has two sets of numbers stored on it, and a row that showed the wrong one would be
+ *  a retention screen lying about what is going to be deleted. */
+function _tkPolicySummary(tk) {
+    const rules = _backupPolicies[tk.id] || tk;
+    const prof = _backupProfiles.find(p => p.id === String(tk.profile || ''));
+    return (prof ? prof.name + ' · ' : '') + _bkPolicyWords(rules);
+}
+
+// One timer, so typing a three-digit number asks once instead of three times.
+let _tkPreviewTimer = null;
+
+function _tkPreview() {
+    clearTimeout(_tkPreviewTimer);
+    _tkPreviewTimer = setTimeout(_tkPreviewNow, 400);
+}
+
+/** What this policy would do to the copies that exist RIGHT NOW.
+ *
+ *  Answered by the server, with the same pure function the scheduler uses. Computing it here
+ *  would be a second implementation of the rule — and a preview that disagrees with the
+ *  scheduler is worse than no preview, because it is believed. */
+async function _tkPreviewNow() {
+    const box = document.getElementById('tkPreview');
+    if (!box) return;
+    const name = (document.getElementById('tkName')?.value || '').trim();
+    if (!name) { box.innerHTML = ''; return; }     // nothing to count against yet
+    const res = await apiPost('/api/v1/backups/tasks/preview',
+                              {name, ..._tkRetentionPayload()});
+    if (!_apiOk(res)) { box.innerHTML = ''; return; }
+    const d = res.data || {};
+    if (!d.total) {
+        box.innerHTML = `<div class="small text-muted">${esc(t('backup_preview_none'))}</div>`;
+        return;
+    }
+    const gone = (d.delete || []).length;
+    const rows = (d.delete || []).map(b =>
+        `<div class="small d-flex gap-2">
+            <span class="font-monospace text-truncate flex-grow-1">${esc(b.name)}</span>
+            <span class="text-muted">${esc(b.size_h || '')}</span>
+        </div>`).join('');
+    box.innerHTML = `<div class="alert alert-${gone ? 'warning' : 'secondary'} py-2 px-3 small mb-0">
+        <div>${esc(t('backup_preview_keep')
+                    .replace('{}', (d.keep || []).length)
+                    .replace('{}', d.total)
+                    .replace('{}', _bkBytes(d.keep_bytes)))}</div>
+        ${gone ? `<details class="mt-1"><summary>${esc(t('backup_preview_delete')
+                        .replace('{}', gone))}</summary>${rows}</details>` : ''}
+    </div>`;
+}
+
+/** Bytes as a person reads them. The server formats the sizes it sends; this one is a sum
+ *  computed there and formatted here, so it counts in 1024s like `fmt_bytes` does — the two
+ *  disagreeing would print a different size for the same set of files. */
+function _bkBytes(n) {
+    let v = Number(n) || 0;
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
+}

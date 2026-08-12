@@ -27,6 +27,7 @@ import json
 import os
 import posixpath
 import re
+import time
 import zipfile
 
 from lib.core.object_base import ObjectBase
@@ -191,6 +192,75 @@ def _archive_path(var_dir: str, name: str, configured: str = '') -> str:
     if not valid_name(name):
         return ''
     return os.path.join(backups_dir(var_dir, configured), f'{name}.zip')
+
+
+# ── The lock ─────────────────────────────────────────────────────────────────
+#
+# "Keep this one" — the copy taken before a migration, the one that is known good, the last one
+# from before an incident. Retention cannot express it: the buckets answer *how much history*,
+# and the two floors answer *never leave the task with nothing*. None of them can say "this
+# particular archive, whatever the calendar decides".
+#
+# A SIDECAR FILE and not a column. `list_backups` reads the directory precisely so there is no
+# second source of truth about files somebody can copy in, move out or delete with the panel
+# stopped — and a lock kept in a table would be exactly that, with the failure mode that the row
+# says "protected" about an archive that is no longer there. The flag lives beside the thing it
+# protects, like the `.sha256` does, and moves with it.
+
+LOCK_SUFFIX = '.lock'
+
+
+def _lock_path(var_dir: str, name: str, backup_dir: str = '') -> str:
+    path = _archive_path(var_dir, name, backup_dir)
+    return (path + LOCK_SUFFIX) if path else ''
+
+
+def _read_lock(archive_path: str) -> dict | None:
+    """Who locked the archive and when, or None when it is not locked.
+
+    An unreadable or half-written marker still counts as LOCKED — with an empty author rather
+    than an exception. The file's existence is the flag; its contents are a courtesy, and
+    treating a damaged courtesy as "not protected" is how a lock fails in the one direction it
+    must not.
+    """
+    try:
+        with open(archive_path + LOCK_SUFFIX, encoding='utf-8') as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {} if os.path.isfile(archive_path + LOCK_SUFFIX) else None
+
+
+def is_locked(var_dir: str, name: str, backup_dir: str = '') -> bool:
+    path = _archive_path(var_dir, name, backup_dir)
+    return bool(path) and os.path.isfile(path + LOCK_SUFFIX)
+
+
+def set_lock(var_dir: str, name: str, locked: bool, actor: str = '',
+             backup_dir: str = '') -> dict:
+    """Protect *name* from being deleted, or stop protecting it.
+
+    Answers `{'ok': …}` rather than raising: the caller is a route, and a read-only backups
+    directory is a thing an operator can produce — it should read as "could not lock" and not as
+    a traceback on a copy that is otherwise fine.
+    """
+    path = _archive_path(var_dir, name, backup_dir)
+    if not path or not os.path.isfile(path):
+        return {'ok': False, 'message': 'backup not found'}
+    try:
+        if locked:
+            with open(path + LOCK_SUFFIX, 'w', encoding='utf-8') as fh:
+                json.dump({'by': str(actor or ''),
+                           'at': time.strftime('%Y-%m-%d %H:%M:%S')}, fh)
+        elif os.path.isfile(path + LOCK_SUFFIX):
+            os.remove(path + LOCK_SUFFIX)
+    except OSError as exc:
+        _log(f'> Backup > lock >> {name!r} could not be '
+             + ('locked' if locked else 'unlocked') + f': {exc}', DebugLevel.error)
+        return {'ok': False, 'message': str(exc)}
+    _log(f'> Backup > lock >> {name!r} ' + ('locked' if locked else 'unlocked')
+         + f' by {actor or "?"}')
+    return {'ok': True, 'locked': bool(locked)}
 
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
@@ -546,6 +616,13 @@ def list_backups(var_dir: str, backup_dir: str = '', app_version: str = '') -> l
         # something only the caller knows — the service is handed it, like `create_backup` is,
         # rather than importing it and becoming one more thing that has to know where it lives.
         man['version_rel'] = version_relation(man.get('app_version'), app_version)
+        # Protected from deletion — by retention and by the button alike. Read from the sidecar
+        # beside the file, which is what makes it survive the panel being stopped, the folder
+        # being moved and the copy being carried to another machine.
+        lock = _read_lock(full)
+        man['locked'] = lock is not None
+        man['lock_by'] = (lock or {}).get('by', '')
+        man['lock_at'] = (lock or {}).get('at', '')
         out.append(man)
     out.sort(key=lambda m: m.get('mtime', 0), reverse=True)
     return out
@@ -563,14 +640,32 @@ def backup_exists(var_dir: str, name: str, backup_dir: str = '') -> bool:
 
 
 def delete_backup(var_dir: str, name: str, backup_dir: str = '') -> bool:
+    """Remove an archive and the files that describe it.
+
+    **A locked copy is refused here**, not only in the route that asks. Retention already skips
+    them, so this is the second of two guards — and it is the one that holds if a caller ever
+    computes the doomed list some other way. A lock that only the UI honoured would be a lock
+    that protects nothing on the day it matters.
+
+    The sidecars go WITH the archive. Left behind, the `.lock` one is the dangerous half: a
+    later copy taking the same name would be born protected, never pruned, and nothing on screen
+    would explain why.
+    """
     path = _archive_path(var_dir, name, backup_dir)
     if not path or not os.path.isfile(path):
         return False
+    if os.path.isfile(path + LOCK_SUFFIX):
+        return False
     try:
         os.remove(path)
-        return True
     except OSError:
         return False
+    for extra in (path + '.sha256',):
+        try:
+            os.path.isfile(extra) and os.remove(extra)
+        except OSError:
+            pass
+    return True
 
 
 # ── Restoring ────────────────────────────────────────────────────────────────

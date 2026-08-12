@@ -230,3 +230,209 @@ class TestSayingWhenByTheCalendar:
         # A task with no mode at all is an interval one — that is what every task was before
         # the calendar existed, and they must keep running.
         assert sched.task_is_due({'every_hours': 24}, now, None) is True
+
+
+class TestRetentionKeepsHistoryNotJustCopies:
+    """A counter answers "how many do I keep?". The question worth answering is "how far back
+    can I go, and at what resolution?" — and seven copies can be one week at daily resolution
+    or two years at monthly. Only the second survives finding out in March that something broke
+    in January."""
+
+    @staticmethod
+    def _daily(n, task='diaria', status='ok', size=1):
+        """*n* copies, one a day, newest first."""
+        import datetime as dt
+        base = dt.datetime(2026, 8, 11, 3, 0)
+        return [{'name': sched.auto_name(base - dt.timedelta(days=i), task),
+                 'mtime': (base - dt.timedelta(days=i)).timestamp(),
+                 'size': size, 'status': status} for i in range(n)]
+
+    def test_buckets_buy_years_of_history_for_the_price_of_days(self):
+        rows = self._daily(400)
+        policy = {'keep_last': 3, 'keep_daily': 7, 'keep_weekly': 4,
+                  'keep_monthly': 6, 'keep_yearly': 2}
+        kept = sched.survivors(rows, policy, 'diaria')
+        assert 12 <= len(kept) <= 20, len(kept)
+        # The claim, stated as the comparison it actually is: the SAME number of copies buys
+        # months of history instead of a fortnight of it. (Each bucket keeps the NEWEST copy of
+        # its period, so "2 yearly" reaches back to last 31 December — not to the oldest file.)
+        span = (kept[0]['mtime'] - kept[-1]['mtime']) / 86400
+        flat = sched.survivors(rows, {'keep_last': len(kept)}, 'diaria')
+        flat_span = (flat[0]['mtime'] - flat[-1]['mtime']) / 86400
+        assert span > 200 and span > flat_span * 10, (span, flat_span)
+
+    def test_a_copy_survives_if_any_rule_claims_it(self):
+        """The union, not the intersection — which is what makes the numbers add up to 17
+        instead of 180."""
+        rows = self._daily(40)
+        only_weekly = sched.survivors(rows, {'keep_weekly': 3}, 'diaria')
+        both = sched.survivors(rows, {'keep_weekly': 3, 'keep_last': 5}, 'diaria')
+        assert {b['name'] for b in only_weekly} <= {b['name'] for b in both}
+
+    def test_nothing_configured_keeps_everything(self):
+        """An operator who prunes elsewhere must be able to say so, and reading "no rules" as
+        "delete them all" is the reading that loses data."""
+        rows = self._daily(20)
+        assert sched.prune(rows, {}, 'diaria') == []
+        assert sched.prune(rows, {'keep_last': 0, 'keep_daily': 0}, 'diaria') == []
+
+    def test_the_old_single_counter_still_means_what_it_meant(self):
+        """A task that was working must not need rewriting to go on working."""
+        rows = self._daily(20)
+        assert len(sched.survivors(rows, 7, 'diaria')) == 7
+        assert len(sched.survivors(rows, {'keep': 7}, 'diaria')) == 7
+
+    def test_deletions_are_the_complement_and_come_oldest_first(self):
+        rows = self._daily(30)
+        policy = {'keep_last': 2, 'keep_daily': 5}
+        gone = sched.prune(rows, policy, 'diaria')
+        kept = sched.survivors(rows, policy, 'diaria')
+        assert len(gone) + len(kept) == len(rows)
+        assert not ({b['name'] for b in kept} & set(gone))
+        assert gone[0].endswith('20260713-030000'), gone[0]      # the oldest of the 30
+
+    def test_a_hand_made_copy_is_never_touched(self):
+        rows = self._daily(10) + [{'name': 'copia-a-mano', 'mtime': 0, 'size': 1}]
+        assert 'copia-a-mano' not in sched.prune(rows, {'keep_last': 1}, 'diaria')
+
+
+class TestTheFloorsNoBucketCanExpress:
+
+    @staticmethod
+    def _rows(statuses):
+        import datetime as dt
+        base = dt.datetime(2026, 8, 11, 3, 0)
+        return [{'name': sched.auto_name(base - dt.timedelta(days=i), 'x'),
+                 'mtime': (base - dt.timedelta(days=i)).timestamp(),
+                 'size': 10, 'status': st} for i, st in enumerate(statuses)]
+
+    def test_the_newest_copy_is_never_deleted(self):
+        """A policy that leaves a task with nothing has misconfigured the one thing it exists
+        to provide, and that is found out at restore time."""
+        rows = self._rows(['ok'] * 5)
+        gone = sched.prune(rows, {'keep_last': 0, 'keep_daily': 0, 'max_size': 1}, 'x')
+        assert rows[0]['name'] not in gone
+
+    def test_the_newest_GOOD_copy_survives_a_run_of_partial_ones(self):
+        """Otherwise seven copies remain of which none is usable. The verdict already travels
+        inside the archive, so this costs a lookup and no guesswork."""
+        rows = self._rows(['partial', 'partial', 'partial', 'ok', 'ok'])
+        gone = sched.prune(rows, {'keep_last': 2}, 'x')
+        assert rows[3]['name'] not in gone, 'the last good copy was pruned'
+        assert rows[4]['name'] in gone, 'the OLDER good one is not protected too'
+
+    def test_with_no_good_copy_at_all_it_protects_nothing_extra(self):
+        rows = self._rows(['partial'] * 4)
+        assert len(sched.prune(rows, {'keep_last': 1}, 'x')) == 3
+
+
+class TestTheSizeBudget:
+
+    @staticmethod
+    def _rows(n, size):
+        import datetime as dt
+        base = dt.datetime(2026, 8, 11, 3, 0)
+        return [{'name': sched.auto_name(base - dt.timedelta(days=i), 'x'),
+                 'mtime': (base - dt.timedelta(days=i)).timestamp(),
+                 'size': size, 'status': 'ok'} for i in range(n)]
+
+    def test_it_drops_the_oldest_until_they_fit(self):
+        rows = self._rows(10, 10)                      # 100 units in total
+        gone = sched.prune(rows, {'keep_last': 10, 'max_size': 35}, 'x')
+        assert len(rows) - len(gone) == 3
+
+    def test_it_can_only_take_away_what_the_rules_kept(self):
+        """The buckets say what is worth keeping; the budget says what there is room for."""
+        rows = self._rows(10, 1)
+        gone = sched.prune(rows, {'keep_last': 4, 'max_size': 1000}, 'x')
+        assert len(rows) - len(gone) == 4, 'a roomy budget added copies the rules dropped'
+
+    def test_zero_means_no_budget(self):
+        rows = self._rows(5, 10 ** 9)
+        assert sched.prune(rows, {'keep_last': 5, 'max_size': 0}, 'x') == []
+
+    def test_running_out_of_room_still_leaves_one(self):
+        """The floors are applied after the budget: no room is not a reason to be left with
+        nothing."""
+        rows = self._rows(4, 10 ** 9)
+        gone = sched.prune(rows, {'keep_last': 4, 'max_size': 1}, 'x')
+        assert len(gone) == 3 and rows[0]['name'] not in gone
+
+
+class TestALockedCopyIsNotACandidate:
+    """The buckets answer "how much history" and the floors answer "never leave the task with
+    nothing". Neither can say *this particular archive*."""
+
+    @staticmethod
+    def _rows(n, locked=(), size=10):
+        base = dt.datetime(2026, 8, 11, 3, 0)
+        return [{'name': sched.auto_name(base - dt.timedelta(days=i), 'x'),
+                 'mtime': (base - dt.timedelta(days=i)).timestamp(),
+                 'size': size, 'status': 'ok', 'locked': i in locked} for i in range(n)]
+
+    def test_it_is_never_pruned(self):
+        rows = self._rows(6, locked=(5,))
+        gone = sched.prune(rows, {'keep_last': 1}, 'x')
+        assert rows[5]['name'] not in gone
+        assert len(gone) == 4, gone
+
+    def test_it_still_claims_its_bucket(self):
+        """Filtered at the END and not hidden from the rules: protecting the newest copy of a
+        day must not silently buy the task a second one for that day."""
+        rows = self._rows(6, locked=(0,))
+        assert len(sched.survivors(rows, {'keep_last': 3}, 'x')) == 3
+
+    def test_the_budget_spends_its_size_but_cannot_drop_it(self):
+        """The room it takes is gone whether or not the ceiling acknowledges it — and a ceiling
+        that could delete it would override the one instruction the lock exists to give."""
+        rows = self._rows(4, locked=(3,), size=10)         # the OLDEST is locked
+        gone = sched.prune(rows, {'keep_last': 4, 'max_size': 25}, 'x')
+        assert rows[3]['name'] not in gone
+        kept = len(rows) - len(gone)
+        assert kept == 2, [r['name'] for r in rows if r['name'] not in gone]
+
+
+class TestAPolicyWithANameOnIt:
+    """A task states its own retention or FOLLOWS a shared profile. Resolved in one place, so
+    the scheduler and the screen can never disagree about which numbers are live."""
+
+    PROFILES = [{'id': 'p1', 'name': 'GFS', 'keep_last': 2, 'keep_daily': 0, 'keep_weekly': 0,
+                 'keep_monthly': 0, 'keep_yearly': 0, 'max_size': 0}]
+
+    @staticmethod
+    def _rows(n):
+        base = dt.datetime(2026, 8, 11, 3, 0)
+        return [{'name': sched.auto_name(base - dt.timedelta(days=i), 'x'),
+                 'mtime': (base - dt.timedelta(days=i)).timestamp(),
+                 'size': 10, 'status': 'ok'} for i in range(n)]
+
+    def test_a_task_with_no_profile_is_left_exactly_as_written(self):
+        task = {'name': 'x', 'keep_last': 9}
+        assert sched.with_profile(task, self.PROFILES) == task
+
+    def test_the_profile_replaces_the_policy_it_does_not_merge_with_it(self):
+        """A profile that says nothing about monthlies means none — otherwise a task keeps
+        history the policy it follows never mentions, and nothing on screen says why."""
+        task = {'name': 'x', 'profile': 'p1', 'keep_last': 5, 'keep_monthly': 12}
+        got = sched.with_profile(task, self.PROFILES)
+        assert got['keep_last'] == 2 and got['keep_monthly'] == 0
+
+    def test_the_legacy_counter_does_not_leak_past_a_profile(self):
+        """`keep` is read when no bucket is set; a task following a profile HAS stated its
+        buckets, so an old counter left on the row must not come back to life."""
+        task = {'name': 'x', 'profile': 'p1', 'keep': 30}
+        assert sched.retention_policy(sched.with_profile(task, self.PROFILES)) \
+            == {'keep_last': 2}
+
+    def test_a_profile_that_is_gone_leaves_the_tasks_own_numbers_standing(self):
+        """Not "no rules", which reads as keep-everything and fills a disk. The task's own
+        policy was never overwritten, so it is still the last thing that task actually said."""
+        task = {'name': 'x', 'profile': 'deleted', 'keep_last': 4}
+        assert sched.retention_policy(sched.with_profile(task, [])) == {'keep_last': 4}
+
+    def test_pruning_obeys_the_profile_and_not_the_boxes_underneath(self):
+        rows = self._rows(6)
+        task = {'name': 'x', 'profile': 'p1', 'keep_last': 6}
+        assert sched.prune(rows, task, 'x') == [], 'unresolved, the task keeps its own six'
+        gone = sched.prune(rows, sched.with_profile(task, self.PROFILES), 'x')
+        assert len(gone) == 4, gone

@@ -6653,11 +6653,11 @@ cuando otra réplica no puede leer un secreto.
 
 ## 146. Copias de seguridad: hacer una, y volver a ponerla
 
-**Archivo:** `tests/unit/test_backup_service.py` — 62 tests
+**Archivo:** `tests/unit/test_backup_service.py` — 67 tests
 **Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
-**Archivo:** `tests/unit/test_backup_schedule.py` — 33 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 57 tests
-**Archivo:** `tests/unit/test_wa_backup_ui.py` — 89 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 76 tests
+**Archivo:** `tests/unit/test_wa_backup_ui.py` — 115 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
 cuatro motores y la copia tiene que sobrevivir al salto: una instalación que creció en SQLite y se
@@ -6700,6 +6700,12 @@ almacena de verdad.
 | `TestTheTaskApi::*` (5) | Alta, edición sin duplicar, borrado, nombre que no puede dirigir la ruta, y que un *viewer* no escriba |
 | `TestTheFolderPicker::*` (7) | Solo carpetas (nunca ficheros), dice si se puede escribir, una carpeta ilegible es una respuesta y no un error, y `../fuera` como nombre se rechaza en vez de sanearse |
 | `TestItIsAllAudited::*` (2) | Descargar se audita con el mismo peso que borrar; una restauración fallida es la línea más importante del registro, no la menos |
+| `TestARetentionProfileIsFollowedNotCopied::*` (10) | El planificador poda por el perfil y no por las casillas guardadas debajo; la lista de tareas dice qué reglas se aplican de verdad; desvincular devuelve la política propia; editar el perfil cambia todas las tareas que lo siguen; borrar uno en uso se rechaza con 409 nombrando las tareas; y renombrarlo no le reinicia la política |
+| `TestACopyThatStays::*` (5) | El bloqueo es un **fichero al lado** del archivo (no una fila): sobrevive al panel parado y a mover la carpeta; el servicio se niega a borrar una copia bloqueada aunque se lo pidan por otra vía; los marcadores no sobreviven al archivo (un `.lock` huérfano haría nacer bloqueada a la siguiente copia del mismo nombre); y un marcador dañado **sigue contando** como bloqueo |
+| `TestALockedCopyIsNotACandidate::*` (3) | La retención nunca la borra, sigue reclamando su franja (proteger una no compra otra de regalo), y el presupuesto gasta su tamaño pero no puede tirarla |
+| `TestKeepingOneCopyWhateverTheCounterSays::*` (5) | De punta a punta: sobrevive a una política que la habría borrado; borrarla se rechaza con 409 diciendo por qué; la lista dice quién la bloqueó y cuándo; se audita en ambos sentidos; y va con `backup_delete` |
+| `TestTheTaskFormFitsOnTheScreen::*` (3) | El editor de tarea va en **pestañas** (cuándo / retención / contenido), el nombre queda fuera de ellas, y el panel largo hace scroll **dentro** de la caja en vez de estirar el diálogo |
+| `TestOnePolicyManyTasks::*` (8) | Perfiles en el rail; el editor dibuja las **mismas** cinco casillas que una tarea; la fila muestra la política resuelta por el servidor; las casillas se ocultan tras un perfil pero no se descartan; el editor dice a cuántas tareas alcanza; sin botón de borrar si está en uso; las sugerencias vienen de la API; todo va con `backup_schedule` |
 
 
 ---
@@ -6708,7 +6714,7 @@ almacena de verdad.
 
 ## 147. Copias automáticas: cuándo toca una, y cuáles se van
 
-**Archivo:** `tests/unit/test_backup_schedule.py` — 33 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
 
 Un **intervalo**, no una hora del día, y la diferencia es todo el diseño: un panel apagado a las
 03:00 tiene que hacer su copia diaria al volver a las 09:00. «Cuánto hace de la última» sigue
@@ -6728,6 +6734,11 @@ el que equivocarse: una copia a las 03:07 es una copia.
 | `TestWhichCopyCounts::test_only_automatic_copies_set_the_clock` | Una copia hecha a mano antes de actualizar no retrasa la programada |
 | `TestRetention::test_zero_keeps_everything` | Leer 0 como «bórralas todas» es la lectura que pierde datos |
 | `TestRetention::test_a_hand_made_copy_is_never_pruned` | Un contador no decide sobre algo que alguien hizo a propósito |
+| `TestRetentionKeepsHistoryNotJustCopies::*` (6) | Franjas (últimas/diarias/semanales/mensuales/anuales): unión de reglas, el contador viejo sigue significando lo mismo, sin reglas se conserva todo, y las mismas copias compran meses de historia en vez de una quincena |
+| `TestTheFloorsNoBucketCanExpress::*` (3) | Nunca se borra la última copia ni la última **correcta** — una racha de parciales dejaba siete copias de las que ninguna servía |
+| `TestTheSizeBudget::*` (4) | El presupuesto borra de la más antigua, solo puede quitar de lo que las reglas conservaban, 0 = sin límite, y quedarse sin sitio no deja la tarea sin ninguna |
+| `TestRetentionOnEveryTickAndAPreviewYouCanTrust::*` (4) | La retención se aplica en cada tick (tarea deshabilitada incluida) y la previsualización responde con la función del planificador, sin tocar nada, con solo `backup_view` |
+| `TestAPolicyWithANameOnIt::*` (5) | Un perfil **sustituye** la política de la tarea (no se fusiona con ella), el contador antiguo no se cuela por detrás, un perfil borrado deja en pie los números propios de la tarea, y la poda obedece al perfil y no a las casillas de debajo |
 | `TestSayingWhenByTheCalendar::*` (11) | Días de la semana a una hora, **conservando la recuperación**: la ventana perdida con el panel apagado sigue pendiente al volver |
 | `TestACopyKnowsWhichTaskTookIt::*` (6) | El nombre lleva la tarea, un nombre peligroso no dirige la ruta, y la poda **nunca cruza tareas** — el fallo que motivó todo el rediseño |
 | `TestTheName::test_two_copies_in_the_same_minute_do_not_collide` | `create_backup` se niega a sobrescribir: sin segundos, la segunda copia del minuto fallaría |

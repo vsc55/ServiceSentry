@@ -106,8 +106,8 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `backup_create` | Crear una copia — y **ejecutar una tarea ahora**, que produce exactamente lo mismo |
 | | `backup_download` | Descargar el fichero. **Quien puede bajarlo tiene la instalación** |
 | | `backup_restore` | Aplicar una copia: sobrescribe usuarios y roles, así que puede entregar el panel |
-| | `backup_delete` | Eliminar una copia del disco |
-| | `backup_schedule` | Crear, editar y borrar **tareas** programadas. No destruye ningún archivo, pero decide cada cuánto se protege la instalación |
+| | `backup_delete` | Eliminar una copia del disco — y **bloquearla o desbloquearla**, porque el bloqueo solo decide si un archivo puede destruirse y desbloquear es pedir poder borrarlo |
+| | `backup_schedule` | Crear, editar y borrar **tareas** programadas y **perfiles de retención**. No destruye ningún archivo, pero decide cada cuánto se protege la instalación y cuánta historia se guarda —y editar un perfil lo decide de golpe para todas las tareas que lo siguen |
 
 > Ninguno de los siete de **Copias de seguridad** se concede a los roles integrados: una copia
 > es una herramienta de administración, y la lista sola ya dice qué existe y desde cuándo. Ver

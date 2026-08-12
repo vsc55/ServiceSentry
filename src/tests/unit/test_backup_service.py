@@ -229,6 +229,57 @@ class TestTheList:
         assert svc.list_backups(str(tmp_path)) == []
 
 
+class TestACopyThatStays:
+    """Retention answers "how much history"; its floors answer "never leave the task with
+    nothing". Neither can say *this particular archive* — the one taken before a migration."""
+
+    def _root(self, tmp_path):
+        return os.path.join(str(tmp_path), 'backups')
+
+    def test_the_flag_is_a_file_beside_the_archive(self, db, tmp_path):
+        """Beside it, so it survives the panel being stopped, the folder being moved and the
+        copy being carried to another machine — and so nothing can claim a copy is protected
+        after somebody deleted the file."""
+        _make(db, tmp_path)
+        assert svc.set_lock(str(tmp_path), 'copia', True, actor='ana')['ok'] is True
+        assert os.path.isfile(os.path.join(self._root(tmp_path), 'copia.zip.lock'))
+        b = svc.list_backups(str(tmp_path))[0]
+        assert b['locked'] is True and b['lock_by'] == 'ana' and b['lock_at']
+
+    def test_locking_something_that_is_not_there_is_an_answer(self, tmp_path):
+        assert svc.set_lock(str(tmp_path), 'fantasma', True)['ok'] is False
+
+    def test_a_locked_copy_is_not_deleted_even_by_the_service(self, db, tmp_path):
+        """A lock only the route honoured would protect nothing the day some other caller works
+        out the doomed list its own way."""
+        _make(db, tmp_path)
+        svc.set_lock(str(tmp_path), 'copia', True)
+        assert svc.delete_backup(str(tmp_path), 'copia') is False
+        assert svc.list_backups(str(tmp_path))[0]['name'] == 'copia'
+        svc.set_lock(str(tmp_path), 'copia', False)
+        assert svc.delete_backup(str(tmp_path), 'copia') is True
+
+    def test_the_markers_do_not_outlive_the_archive(self, db, tmp_path):
+        """A `.lock` left behind is the dangerous half: a later copy taking the same name would
+        be born protected, never pruned, and nothing on screen would explain why."""
+        _make(db, tmp_path)
+        svc.set_lock(str(tmp_path), 'copia', True)
+        svc.set_lock(str(tmp_path), 'copia', False)
+        assert svc.delete_backup(str(tmp_path), 'copia') is True
+        assert os.listdir(self._root(tmp_path)) == []
+
+    def test_a_damaged_marker_still_counts_as_locked(self, db, tmp_path):
+        """The file's existence is the flag; its contents are a courtesy. Reading a damaged
+        courtesy as "not protected" is failing in the one direction a lock must not."""
+        _make(db, tmp_path)
+        with open(os.path.join(self._root(tmp_path), 'copia.zip.lock'), 'w',
+                  encoding='utf-8') as fh:
+            fh.write('{ half written')
+        b = svc.list_backups(str(tmp_path))[0]
+        assert b['locked'] is True and b['lock_by'] == ''
+        assert svc.delete_backup(str(tmp_path), 'copia') is False
+
+
 class TestTheDriveListIsNotProbed:
     """Measured on a box with two network mappings: probing A–Z with `os.path.exists` took
     **6.6 seconds** the first time, because a disconnected mapping blocks until it gives up.

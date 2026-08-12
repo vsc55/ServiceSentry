@@ -10,9 +10,14 @@ Routes registered by this file:
     GET    /api/v1/backups/tasks              List the scheduled tasks
     PUT    /api/v1/backups/tasks              Create or update one
     DELETE /api/v1/backups/tasks/<uid>        Delete one
+    POST   /api/v1/backups/tasks/preview      What a retention policy would keep / delete
+    GET    /api/v1/backups/profiles           List the shared retention profiles
+    PUT    /api/v1/backups/profiles           Create or update one
+    DELETE /api/v1/backups/profiles/<uid>     Delete one (refused while a task follows it)
     POST   /api/v1/backups/tasks/<uid>/run    Start a run now, as the schedule would
     GET    /api/v1/backups/jobs/<job_id>      How that run is going
     POST   /api/v1/backups/<name>/verify      Check it against its own checksums
+    POST   /api/v1/backups/<name>/lock        Protect it from deletion, or stop protecting it
     POST   /api/v1/backups                    Start one, by hand (answers a job id)
     GET    /api/v1/backups/<name>/download    Download it
     POST   /api/v1/backups/<name>/restore     Start putting it back (answers a job id)
@@ -141,7 +146,111 @@ def register(app, wa):
         task the same way — a default applied in one of the two is how a task runs weekly on
         the screen and daily on disk."""
         store = getattr(wa, '_backup_tasks_store', None)
-        return jsonify({'ok': True, 'tasks': store.list_tasks() if store else []})
+        tasks = store.list_tasks() if store else []
+        profiles = _profiles()
+        return jsonify({
+            'ok': True,
+            'tasks': tasks,
+            # The rules that actually apply to each task, resolved by the same function the
+            # scheduler uses. A task following a profile carries two sets of numbers — its own
+            # and the profile's — and a screen that picked between them itself would be a
+            # retention screen guessing at what is about to be deleted.
+            'policies': {t.get('id'): {k: backup_svc_sched.with_profile(t, profiles).get(k, 0)
+                                       for k in backup_svc_sched.RETENTION_KEYS}
+                         for t in tasks},
+        })
+
+    def _profiles() -> list:
+        store = getattr(wa, '_backup_profiles_store', None)
+        return store.list_profiles() if store is not None else []
+
+    @app.route('/api/v1/backups/profiles', methods=['GET'])
+    @view_req
+    def api_list_backup_profiles():
+        """The shared retention profiles, and the starting points the editor offers.
+
+        `suggested` comes from the server for the same reason the part catalogue does: it is the
+        panel's opinion about how much history is worth keeping, and an opinion written into a
+        template is one the API cannot state and no test can read.
+        """
+        from lib.core.backup.profiles_store import SUGGESTED  # noqa: PLC0415
+        return jsonify({
+            'ok': True,
+            'profiles': _profiles(),
+            # How many tasks follow each one. Sent rather than counted in the browser because it
+            # is the sentence the editor needs before saving — "this changes 3 tasks" — and a
+            # count taken from a list the screen happens to be holding is a count that is right
+            # until somebody else adds a task.
+            'used_by': _profile_usage(),
+            'suggested': [{**s, 'label': wa._t(s['key'])} for s in SUGGESTED],
+        })
+
+    def _profile_usage() -> dict:
+        """`{profile_uid: [task name, …]}` — who would be affected by editing one."""
+        store = getattr(wa, '_backup_tasks_store', None)
+        out: dict = {}
+        for task in (store.list_tasks() if store else []):
+            uid = str(task.get('profile') or '')
+            if uid:
+                out.setdefault(uid, []).append(task.get('name', ''))
+        return out
+
+    @app.route('/api/v1/backups/profiles', methods=['PUT'])
+    @schedule_req
+    def api_save_backup_profile():
+        """Create or update a profile — `backup_schedule`, the same decision editing a task's
+        retention is, and now taken for every task that follows it at once."""
+        body = request.get_json(silent=True) or {}
+        name = str(body.get('name') or '').strip()
+        if not name:
+            return jsonify({'ok': False, 'error': wa._t('backup_profile_bad_name')}), 400
+        store = getattr(wa, '_backup_profiles_store', None)
+        if store is None:
+            return jsonify({'ok': False, 'error': wa._t('not_found')}), 404
+        uid_in = str(body.get('uid') or body.get('id') or '').strip()
+        # Merged over what is stored, not written from the body alone. A record is REPLACED by
+        # an upsert, so a caller that sent only a new name would leave the profile on today's
+        # defaults — silently changing how much history every task following it keeps. One task
+        # saved short is a mistake somebody can see; this one is invisible and multiplied.
+        current = next((p for p in _profiles() if p.get('id') == uid_in), {}) if uid_in else {}
+        doc = {
+            **{k: current[k] for k in backup_svc_sched.RETENTION_KEYS if k in current},
+            'id': uid_in or None,
+            'name': name,
+            **{k: body[k] for k in backup_svc_sched.RETENTION_KEYS if k in body},
+        }
+        doc = {k: v for k, v in doc.items() if v is not None}
+        uid = store.upsert(doc, actor=session.get('username', ''))
+        # The tasks it affects go in the line: a profile edited to keep four weeklies instead of
+        # eight halves the history of every task following it, and the log should not make
+        # somebody cross-reference which those were at the time.
+        wa._audit('backup_profile_saved',
+                  detail={'uid': uid, 'tasks': _profile_usage().get(uid, []),
+                          **{k: doc[k] for k in doc if k != 'id'}})
+        return jsonify({'ok': True, 'uid': uid})
+
+    @app.route('/api/v1/backups/profiles/<uid>', methods=['DELETE'])
+    @schedule_req
+    def api_delete_backup_profile(uid: str):
+        """Delete a profile — refused while a task still follows it.
+
+        The alternative was to let it go and have those tasks fall back to their own stored
+        numbers, which is what happens if a row disappears some other way. As an ANSWER to a
+        button, though, it is a silent change of policy on tasks nobody was looking at: the
+        deletion succeeds, the screen says nothing, and how much history three tasks keep is now
+        whatever they happened to hold before they were linked. Saying "three tasks follow this"
+        costs one more click and no surprises.
+        """
+        used = _profile_usage().get(uid, [])
+        if used:
+            return jsonify({'ok': False,
+                            'error': wa._t('backup_profile_in_use').replace(
+                                '{}', ', '.join(used))}), 409
+        store = getattr(wa, '_backup_profiles_store', None)
+        if store is None or not store.delete(uid):
+            return jsonify({'error': wa._t('not_found')}), 404
+        wa._audit('backup_profile_deleted', detail={'uid': uid})
+        return jsonify({'ok': True})
 
     @app.route('/api/v1/backups/tasks', methods=['PUT'])
     @schedule_req
@@ -176,13 +285,59 @@ def register(app, wa):
             'at': '%02d:%02d' % backup_svc_sched.parse_at(body.get('at')),
             'parts': body.get('parts') if isinstance(body.get('parts'), list) else [],
             'secrets': bool(body.get('secrets', True)),
-            'keep': body.get('keep', 7),
+            # Retention, bucket by bucket. Only what the caller actually sent: a task saved by
+            # an older client keeps whatever it had rather than acquiring today's defaults —
+            # and `keep`, the single counter this replaced, is still accepted and still means
+            # "the newest N", because an API that was working must go on working.
+            **{k: body[k] for k in (*backup_svc_sched.RETENTION_KEYS, 'keep') if k in body},
+            # Which profile this task follows, '' meaning its own numbers. Only when the caller
+            # said something: absent must not read as "unlink", or a client that predates
+            # profiles would quietly detach every task it saves.
+            **({'profile': str(body.get('profile') or '').strip()} if 'profile' in body else {}),
         }
         doc = {k: v for k, v in doc.items() if v is not None}
         uid = store.upsert(doc, actor=session.get('username', ''))
         wa._audit('backup_task_saved', detail={'uid': uid, **{k: doc[k] for k in doc
                                                               if k != 'id'}})
         return jsonify({'ok': True, 'uid': uid})
+
+    @app.route('/api/v1/backups/tasks/preview', methods=['POST'])
+    @view_req
+    def api_preview_retention():
+        """What a retention policy would keep and delete, on the copies that exist today.
+
+        A bucket policy is not something anybody can evaluate in their head — "7 daily + 4
+        weekly + 6 monthly" against 200 files is exactly the kind of arithmetic people get
+        wrong and then trust. So the form shows it, computed by the SAME pure function the
+        scheduler uses: a preview worked out a second way would be a preview that lies on the
+        day it matters.
+
+        `backup_view`, and a POST because the policy travels in the body: it answers a
+        question about the copies already on disk and changes nothing.
+
+        A body naming a `profile` is resolved exactly as the scheduler resolves a task, so the
+        preview of a task that follows a profile shows the profile's rules and not the numbers
+        the form still has in its boxes.
+        """
+        body = request.get_json(silent=True) or {}
+        name = str(body.get('name') or '').strip()
+        rows = backup_svc.list_backups(_var_dir(), _backup_dir())
+        mine = [b for b in rows if backup_svc_sched.is_auto(b.get('name'), name)]
+        policy = backup_svc_sched.with_profile(body, _profiles())
+        doomed = set(backup_svc_sched.prune(rows, policy, name))
+        # The size is what makes a budget legible: "22 copies, 4.1 GiB" is the sentence the
+        # number in the box is trying to be.
+        kept = [b for b in mine if b['name'] not in doomed]
+        return jsonify({
+            'ok': True,
+            'total': len(mine),
+            'keep': [{'name': b['name'], 'mtime': b.get('mtime'), 'size': b.get('size'),
+                      'size_h': b.get('size_h'), 'status': b.get('status')} for b in kept],
+            'delete': [{'name': b['name'], 'mtime': b.get('mtime'), 'size': b.get('size'),
+                        'size_h': b.get('size_h'), 'status': b.get('status')}
+                       for b in mine if b['name'] in doomed],
+            'keep_bytes': sum(int(b.get('size') or 0) for b in kept),
+        })
 
     @app.route('/api/v1/backups/tasks/<uid>/run', methods=['POST'])
     @create_req
@@ -292,9 +447,41 @@ def register(app, wa):
         )
         return jsonify({'ok': True, 'job_id': job_id})
 
+    @app.route('/api/v1/backups/<name>/lock', methods=['POST'])
+    @delete_req
+    def api_lock_backup(name: str):
+        """Protect a copy from being deleted, or stop protecting it.
+
+        `backup_delete`, in BOTH directions, and that is the honest mapping: the lock only ever
+        affects whether an archive can be destroyed. Unlocking is asking to be able to delete
+        it, so it cannot be a weaker grant than deleting — and locking, the harmless half, would
+        be a strange thing to hand to somebody who may not delete anything anyway.
+
+        What it is NOT: protection from an administrator. Whoever may unlock may then delete.
+        It is a guard rail against retention and against the wrong row — which is what loses the
+        copy taken before a migration.
+        """
+        body = request.get_json(silent=True) or {}
+        locked = bool(body.get('locked', True))
+        res = backup_svc.set_lock(_var_dir(), name, locked,
+                                  actor=session.get('username', ''),
+                                  backup_dir=_backup_dir())
+        if not res.get('ok'):
+            return jsonify({'ok': False, 'error': res.get('message', '')}), 400
+        # Both directions audited under one key: the interesting case is somebody removing a
+        # protection another person put there, and a single key keeps both sides of that in one
+        # filter instead of two.
+        wa._audit('backup_locked', detail={'name': name, 'locked': locked})
+        return jsonify(res)
+
     @app.route('/api/v1/backups/<name>', methods=['DELETE'])
     @delete_req
     def api_delete_backup(name: str):
+        # Answered before the attempt so the refusal can say WHY. `delete_backup` refuses a
+        # locked copy on its own — that is the guard that holds for every caller — but it can
+        # only answer False, and "not found" would be a lie about a file that is right there.
+        if backup_svc.is_locked(_var_dir(), name, _backup_dir()):
+            return jsonify({'ok': False, 'error': wa._t('backup_locked_refused')}), 409
         if not backup_svc.delete_backup(_var_dir(), name, _backup_dir()):
             return jsonify({'error': wa._t('not_found')}), 404
         wa._audit('backup_deleted', detail={'name': name})
