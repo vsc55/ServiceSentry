@@ -8,6 +8,27 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.62] - 2026-08-12
+
+### Fixed
+- **A railed section scrolled the page and took its own toolbar off the top.** Reported from
+  Backups — a scrollbar that dragged the rail, the first entry cut in half, and the *Reload* and
+  *New* buttons nowhere on screen — but it was every section with a rail: Configuration and
+  Modules alike.
+  - The rail fitted its column with room to spare, so what was scrolling was not the rail: it
+    was the page. `ssRailShell` named the detail column `.ss-main`, which is the name of the
+    app's content column — `height: 100vh`, and the only scroll container the page has. Two
+    blocks, one class, equal specificity: the later one won the properties it happened to name
+    and the `100vh` stayed. A shell that begins under the breadcrumb holding a full-viewport
+    child overflows the page by exactly the height of the bars above it, and scrolling that
+    overflow away is what took the toolbar and the head of the rail with it. Measured in a
+    browser against the real CSS: 52px of overflow, 52px of bars.
+  - The detail column has a name of its own now, `.ss-shell-main`, and the three rules that were
+    already meant for it (`> .ss-bleed-top` twice, `> .ss-scroll-pad`) say so instead of also
+    matching the app's column. Nothing was misspelt and no rule was missing, which is why no
+    guard caught it — so the guard is the name, plus the block having neither `height` nor
+    `overflow`.
+
 ## [0.0.1+build.61] - 2026-08-12
 
 ### Added

@@ -1927,10 +1927,10 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    flush because the column it lives in already does. */
 .ss-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
              margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
-.ss-main > .ss-bleed-top { margin: 0; }
+.ss-shell-main > .ss-bleed-top { margin: 0; }
 /* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
    the index's border and the first card rather than a strip of page background. */
-.ss-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
+.ss-shell-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
 
 /* ── Configuration — the detail is a SHEET, not a card ──────────────────────────────────
    The frame, the chevron and the colour accent were right when seven tabs showed several
@@ -2033,7 +2033,7 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    One value serves both states — `.ss-toolbar` rounds with --bs-border-radius-lg, and the
    search box's `.rounded-bottom-3` is that same token — so whichever of the two forms the
    bottom edge, the shadow matches it. */
-.ss-main > .ss-bleed-top { position: relative; z-index: 11;
+.ss-shell-main > .ss-bleed-top { position: relative; z-index: 11;
                             border-bottom-left-radius: var(--bs-border-radius-lg);
                             border-bottom-right-radius: var(--bs-border-radius-lg);
                             box-shadow: 0 .4rem .75rem -.2rem rgba(0,0,0,.7); }
@@ -2064,8 +2064,15 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .cfg-sheet .cfg-subhead { position: sticky; top: 3.4rem; z-index: 9;
                           padding: .25rem .5rem;
                           background: var(--ss-card-header-bg, var(--bs-secondary-bg)); }
-.ss-main  { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
-             min-height: 0; }
+/* The shell's detail column. Its own name on purpose: it was `.ss-main` once, which is the
+   app's content column — `height: 100vh` and the page's only scroll container. Both blocks
+   are one class, so the later one won only the properties it happened to name and the detail
+   column kept the 100vh. A shell starting under the breadcrumb then held a full-viewport
+   child, the page grew by exactly the height of the bars above it, and scrolling that
+   overflow away is what took the toolbar and the head of the rail off the top of the screen.
+   It fills its parent here, and the thing that scrolls inside it is the .ss-vscroll body. */
+.ss-shell-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
+                  min-height: 0; }
 /* ── The navigation rail ────────────────────────────────────────────────────
    A grouped index down the side of a pane: a heading per group, one item per thing you can
    open, a count on the right of both.  Named ss- rather than cfg- because Configuration is

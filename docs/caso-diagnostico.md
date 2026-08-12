@@ -19,6 +19,47 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## El rail se desplazaba y se comía la barra de herramientas
+
+**Fecha:** 2026-08-12 · **Área:** `static/css/web_admin.css` (`.ss-shell`, `.ss-main`),
+`templates/partials/core/_utils.html` (`ssRailShell`)
+
+**Síntoma** — reportado desde *Copias de seguridad*: *«en la zona del rail se ha añadido un
+scroll que desplaza el rail y no se ve correctamente»*. En la captura, la primera entrada del
+índice aparecía cortada por arriba y la barra de herramientas de la sección —con *Recargar* y
+*Nuevo*— no estaba en pantalla. Afectaba a **todas** las secciones con rail (Configuración,
+Módulos, Copias), no solo a la que se reportó.
+
+**Diagnóstico** — el rail cabía de sobra en su columna, así que lo que se desplazaba no era él:
+era la página entera. Se reprodujo en un HTML mínimo con el CSS y el `ssRailShell` reales, medido
+con Playwright (`scrollHeight - clientHeight` de `#ss-main` y la altura de cada columna):
+**52 px de desbordamiento**, exactamente el alto de las barras que hay por encima del shell, y la
+columna de detalle midiendo `880px` (el `100vh` de la ventana) dentro de un shell de `828px`.
+
+**Causa raíz** — una **colisión de nombres silenciosa**: `ssRailShell` bautizaba la columna de
+detalle como `.ss-main`, que es el nombre de la columna de contenido de la aplicación
+(`height: 100vh` + `overflow-y: auto`, el único contenedor con scroll de la página). Son dos
+bloques CSS con **la misma especificidad**, así que el segundo solo gana las propiedades que
+nombra —`display`, `flex`, `min-height`— y el `height: 100vh` del primero sobrevive. Un shell
+que empieza *debajo* de la miga de pan con un hijo de un viewport completo desborda la página
+justo por el alto de esas barras; y al desplazar ese desbordamiento se van hacia arriba la barra
+de herramientas y la cabecera del rail. Nada estaba mal escrito ni faltaba ninguna regla: por eso
+no lo veía ningún guard.
+
+**Solución** — la columna de detalle tiene nombre propio, `.ss-shell-main`, y con él las tres
+reglas que ya eran suyas (`> .ss-bleed-top` ×2 y `> .ss-scroll-pad`) dicen lo que querían decir
+en lugar de coincidir también con la columna de la aplicación. El guard que lo defiende es **el
+nombre**, más el bloque sin `height` ni `overflow`
+(`test_wa_config_views.py::TestItSitsBesideTheSection`).
+
+**Lección** — dos cosas distintas con la misma clase CSS no dan error: dan una herencia parcial
+donde la regla más nueva parece haber ganado. Cuando un componente genérico crea nodos desde
+JavaScript, sus clases se eligen con el mismo cuidado que un nombre global — y un layout que
+«casi» encaja se mide en el navegador, porque 52 px de desbordamiento es un dato y «parece que
+scrollea de más» no lo es.
+
+---
+
 ## La copia de seguridad ignoraba la segunda base de datos de syslog
 
 **Fecha:** 2026-08-11 · **Área:** `lib/core/backup/service.py` (`PARTS`, `_tables_by_part`,

@@ -209,7 +209,7 @@ class TestItSitsBesideTheSection:
         assert '-.75rem' in block, 'the container top padding still shows above it'
         assert 'var(--bs-gutter-x' in block, 'the container gutters still show beside it'
         assert '-1rem' in block, 'the container pb-3 still shows under it'
-        assert '.ss-main > .ss-bleed-top { margin: 0; }' in css, \
+        assert '.ss-shell-main > .ss-bleed-top { margin: 0; }' in css, \
             'the toolbar cancels the same padding a second time'
 
     def test_the_index_scrolls_on_its_own(self):
@@ -217,6 +217,29 @@ class TestItSitsBesideTheSection:
         being an index exactly when the detail gets long."""
         css = _read(CSS)
         assert '.ss-rail' in css and 'overflow-y: auto' in css
+
+    def test_the_detail_column_does_not_borrow_the_page_column_s_name(self):
+        """Reported from Backups as "a scroll appeared that drags the rail": the toolbar was
+        gone off the top and the first entry was cut in half.
+
+        The detail column was called `.ss-main`, which is the name of the app's content column
+        — `height: 100vh`, the page's only scroll container. Two blocks, one class: the later
+        one won the properties it named and the 100vh stayed. A shell that begins under the
+        breadcrumb then holds a full-viewport child, so the page grew by exactly the height of
+        the bars above it and scrolling that overflow away took the toolbar and the head of the
+        rail with it. Measured in a browser: 52px of overflow, 52px of bars.
+
+        It has a name of its own now. The guard is the name, because the collision was silent —
+        nothing was misspelt and no rule was missing."""
+        assert "main.className = 'ss-shell-main'" in _fn(_read(UTILS), 'ssRailShell')
+        css = _read(CSS)
+        i = css.index('.ss-shell-main {')
+        block = css[i:css.index('}', i)]
+        assert 'height: 100vh' not in block and 'overflow' not in block, \
+            'the detail column is a second scroll container again'
+        # The app column keeps the 100vh — that one IS the page's scroll container.
+        j = css.index('.ss-main   {')
+        assert 'height: 100vh' in css[j:css.index('}', j)]
 
 
 class TestItIsAPassNotARenderer:
@@ -870,7 +893,7 @@ class TestTheHeaderIsPinned:
         than as a fade applied to whatever happens to be beneath it, and above the header in
         the stack so it lands on the header instead of behind it."""
         css = _read(CSS)
-        i = css.index('.ss-main > .ss-bleed-top { position: relative;')
+        i = css.index('.ss-shell-main > .ss-bleed-top { position: relative;')
         block = css[i:css.index('}', i)]
         assert 'box-shadow' in block and 'z-index: 11' in block
 

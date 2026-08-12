@@ -797,7 +797,12 @@ function ssRailShell(container, on, label) {
     rail.className = 'ss-rail';
     rail.setAttribute('aria-label', label || '');
     const main = document.createElement('div');
-    main.className = 'ss-main';
+    // `ss-shell-main`, NOT `ss-main`: that name belongs to the app's content column, which is
+    // `height: 100vh` and the page's only scroll container. Reusing it here made the detail
+    // column a second full-viewport box inside a shell that starts below the breadcrumb, so
+    // every railed section overflowed the page by exactly the height of the bars above it —
+    // and scrolling that overflow away took the toolbar and the top of the rail with it.
+    main.className = 'ss-shell-main';
     built.appendChild(rail);
     built.appendChild(main);
     pane.appendChild(built);
