@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from lib import APP_NAME
+
 # Theme colours (hex, no '#') by event kind — matches the app's alert palette.
 _COLOURS = {
     'down':     'D13438',   # red
@@ -28,7 +30,7 @@ def _colour(kind: str) -> str:
 def _title(kind: str, item: str) -> str:
     label = {'down': 'DOWN', 'warn': 'WARNING', 'recovery': 'RECOVERED',
              'syslog': 'SYSLOG', 'test': 'TEST'}.get((kind or '').lower(), (kind or 'INFO').upper())
-    return f'[{label}] {item}' if item else f'[{label}] ServiceSentry'
+    return f'[{label}] {item}' if item else f'[{label}] {APP_NAME}'
 
 
 def message_card(*, kind: str = 'info', module: str = '', item: str = '',
@@ -46,7 +48,7 @@ def message_card(*, kind: str = 'info', module: str = '', item: str = '',
         'summary': _title(kind, item),
         'sections': [{
             'activityTitle': _title(kind, item),
-            'activitySubtitle': 'ServiceSentry',
+            'activitySubtitle': APP_NAME,
             'text': message or '',
             'facts': facts,
             'markdown': True,

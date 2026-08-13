@@ -6656,7 +6656,7 @@ cuando otra réplica no puede leer un secreto.
 **Archivo:** `tests/unit/test_backup_service.py` — 67 tests
 **Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
 **Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 76 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 81 tests
 **Archivo:** `tests/unit/test_wa_backup_ui.py` — 115 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
@@ -6833,3 +6833,39 @@ importan más que cualquier campo suelto:
 | `TestWhatThePageAnswers::*` (6) | Los seis bloques viajan juntos, la base de datos se lee del **conector** y no de la config, el nivel de log se lee de la **configuración** (no hay atributo que lo espeje: pedirlo devolvía vacío y el campo salía «—» en toda instalación), y la página no escribe una sola línea de auditoría |
 | `TestTheReportIsMeantToBePasted::*` (7) | Texto plano `inline` —se lee antes de enviarlo—, todos los bloques presentes, y el de dependencias **nunca vacío**: lista las 41 con su veredicto, diferencias primero. La pantalla pliega las que coinciden porque se lee de un vistazo; un fichero que se pega en una incidencia no. **Tres formatos** (txt/json/xml) de los MISMOS recolectores —una segunda pasada por formato es como dos informes de la misma instalación acaban discrepando—, cada uno con su mimetype y su extensión, un formato desconocido cae a texto en vez de negarse, y el XML sale bien formado con rutas de Windows dentro (escapado por `ElementTree`, no a mano) y las listas como hijos repetidos |
 | `TestTheOneCallThatLeavesTheMachine::*` (4) | El GET es **incapaz** de salir a la red (se sustituye `fetch_latest` por algo que falla el test si lo llaman); un fallo es una respuesta y no un 500; y las dos salidas quedan auditadas |
+
+---
+
+## 152. El nombre del producto tiene un solo hogar
+
+**Archivo:** `tests/unit/test_app_name.py` — 6 tests
+
+`lib.APP_NAME` es ese hogar. Todo lo que **firma** algo con el nombre lo lee de ahí: los
+títulos de página, la cabecera de la barra lateral, la pantalla de arranque, los correos, las
+tarjetas de Teams, el `User-Agent`, el informe de diagnóstico. Estaba escrito a mano en unos
+cincuenta literales repartidos por veintiocho ficheros, y eso no es un renombrado: es una
+búsqueda, hecha a mano, en la que cada resultado hay que juzgarlo.
+
+Y como juzgarlos **es** el trabajo, la guarda no prohíbe la cadena sin más: la prohíbe donde el
+panel se firma a sí mismo, y lleva una lista explícita de lo que debe seguir siendo literal, con
+el motivo de cada entrada:
+
+- **Identificadores registrados en el sistema de otro** — los nombres de las apps de Entra ID
+  (`providers/entraid/declarations.py`, que ya era hogar único de los suyos) y el rol y el
+  usuario que se crean en Proxmox. Se buscan **por nombre** en un tenant que no es nuestro: si
+  salieran de `APP_NAME`, un renombrado dejaría de encontrar la app que registró el año pasado
+  y registraría otra al lado.
+- **La URL del repositorio** — la copia que GitHub tiene del nombre, que un renombrado del
+  producto no mueve.
+
+La prosa traducida (`lib/i18n/lang/*.py`) queda fuera a propósito: ahí el nombre vive dentro de
+frases que hay que releer en cada idioma cuando cambie, de todos modos.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheNameHasOneHome::test_the_constant_is_declared_where_the_version_is` | Declarado **encima** de los imports del paquete, como `__version__`: un módulo importado mientras `lib` aún se inicializa puede leerlo igual, y eso es lo que lo hace usable desde `config/spec.py` |
+| `TestTheNameHasOneHome::test_the_pages_are_handed_it` | Una clave de contexto (`app_name`) y una constante JS (`APP_NAME` en `core/_constants.html`), para que ninguna plantilla ni ningún script tenga que saber de dónde sale |
+| `TestTheNameHasOneHome::test_the_brand_places_read_it` | Los cuatro sitios donde cae la vista: la pestaña del navegador, la cabecera de la barra lateral, la pantalla de arranque y la página de estado |
+| `TestTheNameHasOneHome::test_no_code_spells_it_out` | Solo **literales de cadena**, leídos con `ast`: así un comentario o un docstring que explique la regla no hace saltar la guarda que la comprueba |
+| `TestTheNameHasOneHome::test_no_template_spells_it_out` | Igual en las plantillas, con los comentarios (Jinja, HTML y JS) retirados antes de mirar |
+| `TestTheNameHasOneHome::test_the_exceptions_are_still_real` | Una lista de excepciones que nadie poda es donde la regla se muere: cada entrada tiene que seguir existiendo y seguir conteniendo el nombre |

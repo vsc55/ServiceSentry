@@ -6,6 +6,13 @@
 >
 > Los bugs ya resueltos viven en [caso-diagnostico.md](caso-diagnostico.md); lo publicado, en
 > el [CHANGELOG](../CHANGELOG.md). Aquí solo hay futuro.
+>
+> **Última revisión: 2026-08-13** (build.64). En ella se retiraron dos entradas que ya estaban
+> hechas —las **copias programadas como lista de tareas** (tareas con sus partes, su frecuencia
+> y su retención, perfiles compartidos, bloqueo de copias y la migración del intervalo antiguo)
+> y el **lease del planificador de copias**, que además nunca había funcionado— y se añadieron
+> las tres que faltaban: el entorno en los servicios standalone, el frontend sin navegador y el
+> nombre de la marca.
 
 ## Frontend
 
@@ -18,6 +25,35 @@ Ronda de unificación de listados y tablas por sección (rama `feat/list-table-l
 
 Saber cuáles faltan evita volver a proponer las que ya están.
 
+### Ningún test ejecuta JavaScript
+
+Los tests de frontend leen la plantilla **como texto**: comprueban que una regla CSS está, que
+una función se llama, que una clase se usa. No abren un navegador, así que no ven ni geometría
+ni transiciones.
+
+Los dos bugs de la barra lateral de agosto de 2026 son exactamente lo que se escapa por ahí: una
+columna de detalle que heredaba `height: 100vh` y desbordaba la página 52 px, y un
+`display: none` sin animar que hacía que plegar y desplegar se vieran distintos. Ninguna guarda
+de texto podía verlos; los dos se aislaron **midiendo en Chromium**.
+
+**Playwright ya está instalado** en el venv y funciona (se usó para reproducir, medir y
+verificar los dos). Lo que falta es decidir qué merece un test con navegador —el desbordamiento
+de la página en cada sección con rail y la simetría del plegado son los dos primeros
+candidatos— y dónde vive: `tests/e2e/` es la carpeta, porque necesita un navegador de verdad.
+
+### La marca dice «SENTINEL NEXUS»
+
+El lockup (`assets/brand/logo.png`) lleva ese nombre, y el panel se llama **ServiceSentry** en el
+`<title>`, en la barra lateral y en el arranque. Pasaba desapercibido mientras el arte solo
+estaba en el login; desde que ocupa el pie de la barra lateral a lo ancho, es lo primero que se
+lee.
+
+**Decisión pendiente, del dueño del proyecto**, no trabajo de código: o el arte se rehace con el
+nombre del panel, o el panel pasa a llamarse como el arte. Lo segundo ya es barato: el nombre
+vive en `lib.APP_NAME` y todo lo que firma con él lo lee de ahí (ver `test_app_name.py`, que
+también documenta las dos excepciones que **no** deben seguirlo — los identificadores
+registrados en Entra ID y en Proxmox).
+
 ## Backend
 
 ### Catálogo MIB en tabla de módulo
@@ -29,36 +65,29 @@ SQLite local** (`snmp_mibs/mib_catalog.sqlite`).
 **Aplazado por decisión explícita:** se pidió *"solo el mecanismo general"*. Migrarlo es
 trabajo aparte, no un olvido.
 
-### Copias programadas: una lista de tareas, no un intervalo global
+### Entorno `SS_*` en los servicios standalone, y el ipban del Syslog dedicado
 
-**Lo que hay hoy** (build.57): *un* intervalo para toda la instalación —cada N horas—, con una
-retención y un interruptor de secretos. Copia siempre lo mismo: `core` + `config.json`.
+Plan aprobado y **sin escribir**. Dos agujeros reales del modelo multi-contenedor:
 
-**Lo que falta:** una **lista de tareas programadas**, cada una con su propio nivel de copia y su
-propia frecuencia. El caso que lo motiva: la configuración y el inventario interesan a diario,
-pero el syslog o los MIBs quizá una vez por semana o al mes — y hoy eso no se puede expresar sin
-copiarlo todo con la frecuencia del más exigente, que es como se llena el disco.
+- **Los overrides por entorno no se aplican al consumir la config.** `ConfigManager.read()`
+  devuelve la config guardada *sin* env a propósito (la UI necesita distinguir *guardado* de
+  *fijado por entorno*), y el env solo se superpone en parches por sección. Consecuencia
+  confirmada: **`telegram|*` no se aplica en ningún punto de envío** —ni web ni standalone—, así
+  que un despliegue que fije `SS_TELEGRAM_TOKEN`/`CHAT_ID` no envía con esas credenciales; y
+  `SS_EVENTS_AUTOSTART` se ignora en el arranque embebido.
+- **El Syslog standalone no bloquea IPs baneadas.** El jail vive en la BD compartida y el
+  listener descarta IPs *si* recibe los callbacks `is_banned`/`on_offense`, que `syslog/manager.py`
+  cablea desde `self._ipban` — pero `SyslogService` no construye ese objeto, así que un
+  contenedor de syslog dedicado no aplica fail2ban.
 
-Forma: una colección de tareas `{nombre, cada N horas, partes[], secretos, retención propia}`.
-Las partes ya están declaradas en `PARTS` (`lib/core/backup/service.py`), así que el formulario
-de una tarea se dibuja del mismo catálogo que el de una copia manual.
+Forma decidida: un `overlay_all_env(cfg)` en `lib/config/manager.py` aplicado **solo en los
+surfaces de CONSUMO** (el router de notificaciones y los tres `_read_config_file` de servicio),
+nunca en `ConfigManager.read` / `_read_config_file` del web ni en `_config_section` — ahí
+rompería la edición de config, que usa el valor guardado como base del merge. Y un
+`lib/services/ipban/factory.py` con `make_ipban()` + `configure_ipban()` framework-free, que el
+WebAdmin reutiliza y el `SyslogService` llama al construirse y al reconciliar.
 
-Lo que hay que decidir antes de escribir código, porque cambia el diseño:
-
-- **Dónde viven las tareas.** No son config escalar (`spec.py` no sirve): son *feature data*, como
-  los webhooks o los layouts de Overview. Eso significa tabla propia y store, con su store+mixin
-  como el resto de dominios.
-- **La retención pasa a ser por tarea.** Si no, la diaria borra las copias de la mensual: hoy la
-  poda cuenta todas las automáticas juntas. El nombre tendrá que decir de qué tarea salió
-  (`auto-<tarea>-<fecha>`), y `is_auto`/`prune` en `schedule.py` se acotan a esa tarea.
-- **Solapes.** Dos tareas que vencen a la vez leen todas las tablas dos veces. ¿Se serializan
-  bajo el mismo *lease*, o se deja que cada una vaya por su lado?
-- **La transición.** Los ajustes actuales (`backup_every_hours`, `backup_keep`,
-  `backup_auto_secrets`) son de `spec.py`: o se migran a una tarea llamada «predeterminada» al
-  arrancar, o se retiran y se pierde lo que un operador ya hubiera configurado. Migrar es lo
-  correcto; retirarlos sin más es una copia que deja de hacerse en silencio.
-- El planificador (`runner.py`) recorrería tareas en vez de un único intervalo. `is_due` y
-  `prune` ya son funciones puras y valen tal cual, una por tarea.
+`EventService` no lo necesita: no tiene listener de red ni acción de baneo.
 
 ## Seguridad
 

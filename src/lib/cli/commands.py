@@ -14,6 +14,7 @@ import getpass
 import sys
 import time
 
+from lib import APP_NAME
 from lib.core.groups import service as groups_svc
 from lib.core.users import service as users_svc
 from lib.core.users.service import AdminOpError
@@ -302,5 +303,5 @@ def run(args, config_dir: str, var_dir: str) -> int:
     try:
         ctx = CliContext(config_dir, var_dir)
     except Exception as exc:  # pylint: disable=broad-except
-        return _err(f"could not open ServiceSentry data ({config_dir}): {exc}")
+        return _err(f"could not open {APP_NAME} data ({config_dir}): {exc}")
     return handler(ctx, args)

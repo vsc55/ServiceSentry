@@ -48,6 +48,8 @@ import json as _json
 from dataclasses import dataclass
 from datetime import timedelta
 
+from lib import APP_NAME
+
 # Default UI language.  Inlined (not imported from web_admin) to keep this
 # module dependency-free; lib.i18n.DEFAULT_LANG carries the same value.
 _DEFAULT_LANG = 'en_EN'
@@ -438,7 +440,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('email|smtp_username', str, '', no_rule=True),
     Cfg('email|smtp_password', str, '', no_rule=True),
     Cfg('email|from_email', str, '', no_rule=True),
-    Cfg('email|from_name', str, 'ServiceSentry', no_rule=True),
+    Cfg('email|from_name', str, APP_NAME, no_rule=True),
     # Global language for ALL notification content (Telegram/Email/Teams/webhook), resolved by
     # lib.core.notify.formatting.notify_lang.
     Cfg('notifications|lang', str, '', no_rule=True),

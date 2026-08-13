@@ -8,6 +8,45 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.64] - 2026-08-13
+
+### Fixed
+- **The scheduled backup's lease had never held.** `_claim()` asked the web admin for
+  `_instance_id`, an attribute no `WebAdmin` has, so the identity was always empty and the guard
+  returned "take it" before reaching the store — and had it got there, `acquire()` is not a
+  method of `ServiceLeaderStore` either (it is `try_acquire`), so the `AttributeError` would
+  have been swallowed by the catch-all and answered "take it" too. Two ways of saying yes to
+  every process, on the one code path whose whole job is to say no to all but one: four web
+  replicas over one database meant four archives of the same install every tick, each pruning
+  against a folder the other three were writing into.
+  - The identity is now the shape its neighbours use — `backup-<host>-<pid>`, like the health
+    and certificate scanners — computed once, because a lease renewed under a new id every tick
+    is not a renewal but a process taking the lease off itself.
+
+### Changed
+- **The product's name lives in one place.** `lib.APP_NAME`, read by everything that signs
+  something with it: the page titles, the sidebar head, the boot screen, the emails, the Teams
+  cards and manifest, the webhooks, the `User-Agent` of every outbound request, the diagnostics
+  report and the config warnings. It was spelt out in fifty-odd string literals across
+  twenty-eight files, which is not a rename but a hand search where every hit has to be judged.
+  The value is unchanged: this moves where it is written, not what it says.
+  - Templates read `{{ app_name }}` from the context processor, scripts read an `APP_NAME`
+    constant, and a guard (`tests/unit/test_app_name.py`) fails on any new literal.
+  - **Two kinds deliberately keep theirs**, with the reason written down: identifiers registered
+    in somebody else's system — the Entra app display names and the Proxmox role and user, which
+    are looked up BY name in a tenant we do not own, so deriving them would mean a rename
+    silently registering a second app beside the one it registered last year — and the GitHub
+    repository URL. Translated prose keeps the name inline too: it sits in sentences that have
+    to be re-read in every language when it changes anyway.
+
+### Docs
+- `ref-pendiente.md` reviewed end to end: dropped the two entries that were already delivered
+  (scheduled backups as a list of tasks, and the lease above), and added the three that were
+  missing — the `SS_*` environment in the standalone services with the syslog container's
+  missing ipban, the frontend having no test that executes JavaScript (with Playwright already
+  installed and two bugs this month that only a browser could have caught), and the artwork
+  reading "SENTINEL NEXUS" while the panel is called ServiceSentry.
+
 ## [0.0.1+build.63] - 2026-08-12
 
 ### Added

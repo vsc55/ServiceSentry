@@ -21,12 +21,13 @@ from urllib.parse import quote
 
 import requests as _req
 
+from lib import APP_NAME
 from lib.providers.entraid.client import GRAPH_BASE, graph_error
 
 
 # ── Graph activity-feed notification ────────────────────────────────────────
 def send_activity_notification(access_token: str, user_id: str, *, text: str,
-                               web_url: str = '', topic: str = 'ServiceSentry') -> None:
+                               web_url: str = '', topic: str = APP_NAME) -> None:
     """Send a Teams *activity feed* notification to a user via Graph.  Raises on failure.
 
     ``user_id`` is the user's object id or UPN/email.  For a ``source: text`` topic,

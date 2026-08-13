@@ -116,7 +116,7 @@ async function _ensureCodeMirror() {
             await _cmLoadAsset('/static/js/codemirror/beautify-html.min.js', false);
             return true;
         } catch (e) {
-            console.warn('[ServiceSentry] CodeMirror could not be loaded:', e);
+            console.warn(`[${APP_NAME}] CodeMirror could not be loaded:`, e);
             _cmLoadPromise = null; // allow retry
             return false;
         }

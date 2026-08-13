@@ -13,7 +13,7 @@
 <div class="hero" data-overall-ok="{{ 'true' if overall_ok else 'false' }}">
   <div class="hero-inner">
     <i class="bi {% if overall_ok %}bi-shield-check{% else %}bi-shield-exclamation{% endif %} hero-icon"></i>
-    <h1 class="hero-title">ServiceSentry</h1>
+    <h1 class="hero-title">{{ app_name }}</h1>
     <div class="hero-pill">
       {% if overall_ok %}<i class="bi bi-check-circle-fill"></i> {{ i18n.status_all_ok }}
       {% else %}<i class="bi bi-exclamation-triangle-fill"></i> {{ i18n.status_degraded }}{% endif %}

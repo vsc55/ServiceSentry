@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 import xml.etree.ElementTree as ET
 
+from lib import APP_NAME
+
 # `(mimetype, extension)` per format. The fallback is TEXT and not an error: this is reached
 # from a link somebody clicks, and refusing to produce a report over a query string is refusing
 # at the moment they are least able to care.
@@ -47,7 +49,7 @@ def as_json(data: dict, stamp: str) -> str:
 
 
 def as_text(data: dict, stamp: str) -> str:
-    lines = [f'ServiceSentry diagnostics — {stamp}', '']
+    lines = [f'{APP_NAME} diagnostics — {stamp}', '']
     for title, block in (('Runtime', data['runtime']), ('System', data['system']),
                          ('Database', data['database'])):
         lines.append(f'[{title}]')

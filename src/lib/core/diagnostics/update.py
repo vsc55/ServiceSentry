@@ -24,6 +24,7 @@ import re
 import urllib.error
 import urllib.request
 
+from lib import APP_NAME
 from lib.config.spec import cfg_default
 
 # The releases API of the repository this is built from, read from the ONE registry of defaults
@@ -101,7 +102,7 @@ def fetch_latest(url: str = '', timeout: float = TIMEOUT) -> dict:
         'Accept': 'application/vnd.github+json',
         # An API that rate-limits by client wants to know who is asking; an unnamed request
         # is the one that gets throttled first.
-        'User-Agent': 'ServiceSentry-diagnostics',
+        'User-Agent': f'{APP_NAME}-diagnostics',
     })
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:      # noqa: S310 (https only)

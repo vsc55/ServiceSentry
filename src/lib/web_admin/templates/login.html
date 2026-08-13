@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}ServiceSentry — Login{% endblock %}
+{% block title %}{{ app_name }} — Login{% endblock %}
 
 {# Page styles live in static/css/web_admin.css (loaded by base.html). #}
 
@@ -17,7 +17,7 @@
                `width`/`height` are the file's own pixels so the browser reserves the box
                before the image arrives — the card must not jump while it loads. #}
             <div class="text-center mb-4">
-                <img src="/static/img/logo.png?v={{ asset_v }}" alt="ServiceSentry"
+                <img src="/static/img/logo.png?v={{ asset_v }}" alt="{{ app_name }}"
                      class="login-logo" width="640" height="427">
             </div>
             {% with messages = get_flashed_messages(with_categories=true) %}

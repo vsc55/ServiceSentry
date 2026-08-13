@@ -297,6 +297,72 @@ class TestTheOldSettingsBecomeATask:
         assert admin._backup_tasks_store.count() == 1
 
 
+class TestOnlyOneProcessTakesTheScheduledCopy:
+    """Reported from a read of the code, not from a screen: the lease had never stopped
+    anything.
+
+    `_claim` asked the web admin for `_instance_id` — an attribute no WebAdmin has — so the
+    identity was always empty and the guard returned True before it ever reached the store. And
+    had it got there, `acquire()` is not a method of `ServiceLeaderStore` (it is `try_acquire`),
+    so the AttributeError would have been swallowed and answered True as well: two ways of
+    saying yes to every process, on the one code path whose whole job is to say no to all but
+    one. Four web replicas over one database meant four archives of the same install, every
+    tick, each one pruning against a folder the other three were writing into.
+    """
+
+    def _runner(self, admin):
+        from lib.core.backup.runner import BackupRunner
+        return BackupRunner(admin)
+
+    def _task(self, admin, name='diaria'):
+        admin._backup_tasks_store.upsert({'name': name, 'enabled': True, 'every_hours': 24,
+                                          'parts': ['core'], 'secrets': True, 'keep': 7})
+
+    def test_the_lease_is_actually_held(self, admin):
+        """The identity is the one its neighbours use — job, host, pid — because two processes
+        on one host differ by nothing else."""
+        r = self._runner(admin)
+        assert r._claim() is True
+        assert r._instance().startswith('backup-')
+        assert str(os.getpid()) in r._instance()
+        from lib.core.backup.runner import LEASE_KEY
+        holder = admin._service_leader_store.current_leader(LEASE_KEY)
+        assert holder and holder.get('instance_id') == r._instance()
+
+    def test_a_second_process_does_not_get_it(self, admin):
+        """Another replica, same database. It must be turned away while the first holds the
+        lease — and it is the lease that turns it away, not luck about who ticks first."""
+        first = self._runner(admin)
+        assert first._claim() is True
+        other = self._runner(admin)
+        other._inst_id = 'backup-other-host-999'          # a different process
+        assert other._claim() is False
+
+    def test_the_one_turned_away_takes_no_copy(self, admin):
+        self._task(admin)
+        first = self._runner(admin)
+        assert first._claim() is True
+        other = self._runner(admin)
+        other._inst_id = 'backup-other-host-999'
+        out = other.tick()
+        assert out['leader'] is False
+        assert out['created'] == [], 'the second replica wrote its own archive anyway'
+
+    def test_renewing_is_not_competing_with_itself(self, admin):
+        """The id is computed once. Rebuilt per tick it would be a new holder every time, so a
+        process would spend its ticks taking the lease off itself — which looks like it works
+        and gives the guarantee away."""
+        r = self._runner(admin)
+        assert r._claim() is True and r._claim() is True
+        assert r._instance() == self._runner(admin)._instance(), 'same process, same identity'
+
+    def test_an_install_with_no_lease_store_still_copies(self, admin, monkeypatch):
+        """Most installs are one process. Refusing to work without a lease would turn the
+        common deployment into the broken one."""
+        monkeypatch.setattr(admin, '_service_leader_store', None, raising=False)
+        assert self._runner(admin)._claim() is True
+
+
 class TestTheFolderPicker:
     """Browsing for a folder, and making one. Gated on `config_edit` and not on a backup
     permission: it serves the CONFIG field, and whoever may edit that field can already type

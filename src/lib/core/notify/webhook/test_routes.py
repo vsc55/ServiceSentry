@@ -7,6 +7,8 @@ sibling :mod:`.webhooks` module."""
 from datetime import datetime, timezone
 from flask import jsonify
 
+from lib import APP_NAME
+
 
 def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
@@ -34,7 +36,7 @@ def register(app, wa):
         ok, msg = webhook_notify._dispatch(
             data,
             kind='test',
-            module='ServiceSentry',
+            module=APP_NAME,
             item='webhook_test',
             status='TEST',
             message=wa._t('webhook_test_message'),

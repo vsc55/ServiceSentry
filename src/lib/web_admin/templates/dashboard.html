@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}ServiceSentry — {% if standalone %}{{ standalone|capitalize }}{% else %}Admin{% endif %}{% endblock %}
+{% block title %}{{ app_name }} — {% if standalone %}{{ standalone|capitalize }}{% else %}Admin{% endif %}{% endblock %}
 {% block body_class %}{% if standalone %}standalone-page {{ standalone }}-page{% endif %}{% endblock %}
 
 {# All page styles live in static/css/web_admin.css (loaded by base.html). #}
@@ -20,7 +20,7 @@
         <div class="ss-boot-logo" aria-hidden="true">
             <img src="/static/img/logo-mark.png?v={{ asset_v }}" alt="" width="256" height="256">
         </div>
-        <div class="ss-boot-name">ServiceSentry</div>
+        <div class="ss-boot-name">{{ app_name }}</div>
         <div class="ss-boot-bar" aria-hidden="true"><span></span></div>
         <div class="ss-boot-text">{{ i18n.loading }}</div>
     </div>
@@ -43,7 +43,7 @@
     <div class="ss-topbar d-md-none">
         <button type="button" class="btn btn-sm btn-light" onclick="_openSidebar()"
                 aria-label="Open menu"><i class="bi bi-list"></i></button>
-        <span class="ss-topbar-brand"><i class="bi bi-shield-check me-1"></i>ServiceSentry</span>
+        <span class="ss-topbar-brand"><i class="bi bi-shield-check me-1"></i>{{ app_name }}</span>
     </div>
 
     <!-- Breadcrumb: the path you would follow in the sidebar to reach the active section

@@ -107,7 +107,7 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
   vendorizados). El JS se ensambla server-side como un único bundle inline vía
   `partials/_js_sections.html`.
 - **Cache-busting por mtime**: CSS/JS se enlazan con `?v=<asset_v>` calculado por `stat` del
-  fichero ([mixins/context.py:46](../src/lib/web_admin/mixins/context.py#L46)), de modo que un fichero editado
+  fichero ([mixins/context.py:47](../src/lib/web_admin/mixins/context.py#L47)), de modo que un fichero editado
   siempre llega al navegador sin invalidación manual.
 - **Polling ligero + overlay de conexión perdida**: el cliente sondea endpoints ligeros
   (`/api/v1/health`, `/api/v1/config/versions`, estado) y muestra un overlay si el servidor no

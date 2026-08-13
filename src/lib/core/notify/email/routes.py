@@ -10,6 +10,8 @@ Routes registered by this file:
 
 from flask import jsonify
 
+from lib import APP_NAME
+
 
 def register(app, wa):
     config_edit_req = wa._perm_required('config_edit')
@@ -56,7 +58,7 @@ def register(app, wa):
                 test_to = v or None
             elif v is not None:
                 cfg[k] = v
-        sender_name = cfg.get('from_name') or 'ServiceSentry'
+        sender_name = cfg.get('from_name') or APP_NAME
         from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
         lang = notify_lang(full_cfg)   # global notification language
         lang_key = lang or 'en_EN'

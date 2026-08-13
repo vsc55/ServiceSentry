@@ -30,6 +30,7 @@ import re
 import time
 import zipfile
 
+from lib import APP_NAME
 from lib.core.object_base import ObjectBase
 from lib.debug.debug_level import DebugLevel
 from lib.security.secret_manager import ENC_PREFIX
@@ -698,7 +699,7 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None,
     man = read_manifest(path)
     if man is None:
         _log(f'> Backup > restore >> {name!r} is not one of ours', DebugLevel.warning)
-        return {'ok': False, 'message': 'not a ServiceSentry backup'}
+        return {'ok': False, 'message': f'not a {APP_NAME} backup'}
     if int(man.get('format') or 0) > FORMAT:
         _log(f'> Backup > restore >> {name!r} format {man.get("format")} is newer than '
              f'this install ({FORMAT})', DebugLevel.error)
@@ -1088,7 +1089,7 @@ def verify_backup(var_dir: str, name: str, backup_dir: str = '') -> dict:
         return {'ok': False, 'message': 'backup not found'}
     man = read_manifest(path)
     if man is None:
-        return {'ok': False, 'message': 'not a ServiceSentry backup'}
+        return {'ok': False, 'message': f'not a {APP_NAME} backup'}
 
     out = {'ok': True, 'file': 'missing', 'members': 0, 'bad': []}
     side = path + '.sha256'

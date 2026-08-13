@@ -24,6 +24,7 @@ import os
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from lib import APP_NAME
 from lib.debug import DebugLevel
 from lib.i18n import SUPPORTED_LANGS, coerce_lang
 from lib.security import secret_manager
@@ -272,7 +273,7 @@ class _ConfigMixin:
             value, err = self._parse_env_var(raw, cast)
             if err:
                 print(
-                    f'[ServiceSentry] WARNING: env var {env_key}={raw!r} is invalid'
+                    f'[{APP_NAME}] WARNING: env var {env_key}={raw!r} is invalid'
                     f' ({err}) — saved config value will be used, field will not be locked',
                     flush=True,
                 )
@@ -286,7 +287,7 @@ class _ConfigMixin:
                 ok, _err = cfg_validate(path, value)
                 if not ok:
                     print(
-                        f'[ServiceSentry] WARNING: env var {env_key}={raw!r} value {value}'
+                        f'[{APP_NAME}] WARNING: env var {env_key}={raw!r} value {value}'
                         f' is out of range [{rule["min"]}, {rule["max"]}]'
                         f' — saved config value will be used, field will not be locked',
                         flush=True,
@@ -296,7 +297,7 @@ class _ConfigMixin:
             # Language validation
             if section == 'web_admin' and field == 'lang' and value not in SUPPORTED_LANGS:
                 print(
-                    f'[ServiceSentry] WARNING: env var {env_key}={raw!r} is not a'
+                    f'[{APP_NAME}] WARNING: env var {env_key}={raw!r} is not a'
                     f' supported language ({", ".join(SUPPORTED_LANGS)})'
                     f' — saved config value will be used, field will not be locked',
                     flush=True,

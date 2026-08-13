@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 
 from flask import jsonify, session
+from lib import APP_NAME
 from lib.security import secret_manager
 
 
@@ -166,7 +167,7 @@ def register(app, wa):
         ok, msg = webhook_notify._dispatch(
             stored,
             kind='test',
-            module='ServiceSentry',
+            module=APP_NAME,
             item='webhook_test',
             status='TEST',
             message=wa._t('webhook_test_message'),

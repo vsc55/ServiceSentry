@@ -30,6 +30,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+from lib import APP_NAME
 from lib.providers.entraid.client import (
     AUTHORITY, GRAPH_BASE, GRAPH_SCOPE, EntraApiError, api_error)
 
@@ -94,7 +95,7 @@ class EntraApi:
         else:
             body = None
         req = urllib.request.Request(url, data=body, method=method)
-        req.add_header('User-Agent', 'ServiceSentry/1.0')
+        req.add_header('User-Agent', f'{APP_NAME}/1.0')
         for k, v in hdrs.items():
             req.add_header(k, v)
         try:

@@ -8,6 +8,9 @@ function t(k) { return I18N[k] || k; }
 function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); }); return s; }
 
 // ──────────────────────────── Constants ────────────────────────────
+// The product's name, from its one home in lib/__init__.py (context processor → app_name).
+// Anything in the JS that has to SAY the name reads this instead of spelling it out.
+const APP_NAME = {{ app_name | tojson }};
 const LABELS = I18N.labels || {};
 const SECTION_LABELS = I18N.sections || {};
 const SENSITIVE   = new Set({{ wa_sensitive_fields | tojson }});

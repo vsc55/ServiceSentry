@@ -29,6 +29,7 @@ means a copy started by hand and one started by the schedule cannot collide with
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import threading
 import time
 import uuid
@@ -489,19 +490,43 @@ class BackupRunner:
         return store.enabled_tasks()
 
     # ── The lease ────────────────────────────────────────────────────────────
+    def _instance(self) -> str:
+        """Who this process is, to the lease.
+
+        The same shape the health and certificate scanners use for theirs
+        (`lib/web_admin/mixins/scanners.py`) — job, host, pid — because the lease's whole
+        purpose is telling two processes apart, and two of them on one host differ only by the
+        pid. Computed once: a lease renewed under a NEW id every tick is not a renewal, it is
+        one process fighting itself for its own lease.
+        """
+        cached = getattr(self, '_inst_id', '')
+        if not cached:
+            from lib.services.heartbeat import hostname      # noqa: PLC0415
+            cached = f'backup-{hostname()}-{os.getpid()}'
+            self._inst_id = cached
+        return cached
+
     def _claim(self) -> bool:
         """Try to become the process that takes this copy.
 
         An install with no lease store — a single process, which is most of them — takes it:
         the lease exists to stop FOUR processes writing four archives a tick, and refusing to
         work without one would turn the common deployment into the broken one.
+
+        It had never once stopped anything. It asked for `_instance_id`, an attribute no
+        WebAdmin has, so `instance` was always `''` and the guard above returned True before
+        reaching the store — and had it got there, `acquire()` is not a method of
+        `ServiceLeaderStore` either (it is `try_acquire`), so the AttributeError would have been
+        swallowed by the catch-all below and returned True as well. Two ways of saying yes to
+        every process, on the one code path whose entire job is to say no to all but one.
         """
         store = getattr(self._wa, '_service_leader_store', None)
-        instance = str(getattr(self._wa, '_instance_id', '') or '')
-        if store is None or not instance:
+        if store is None:
             return True
+        from lib.services.heartbeat import hostname          # noqa: PLC0415
         try:
-            return bool(store.acquire(LEASE_KEY, instance, LEASE_TTL))
+            return bool(store.try_acquire(LEASE_KEY, self._instance(),
+                                          host=hostname(), ttl=LEASE_TTL))
         except Exception:      # pylint: disable=broad-except
             # A lease that cannot be asked for must not stop the copy: the worst case is a
             # duplicate archive, and the worst case of the other choice is no backups at all.

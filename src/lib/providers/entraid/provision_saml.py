@@ -17,6 +17,7 @@ import time as _time
 
 import requests as _req
 
+from lib import APP_NAME
 from lib.providers.entraid.client import (
     AUTHORITY, GRAPH_APP_ID, GRAPH_BASE, GROUP_READ_ALL, SAML2_APP_NAME, graph_error)
 
@@ -200,7 +201,8 @@ def provision_saml2_app(access_token: str, acs_url: str, sp_entity_id: str, tena
     try:
         rs = _req.post(f'{GRAPH_BASE}/applications/{app_obj_id}/addPassword', headers=hdrs,
                        timeout=15, json={'passwordCredential': {
-                           'displayName': 'ServiceSentry Graph', 'endDateTime': '2099-12-31T00:00:00Z'}})
+                           'displayName': f'{APP_NAME} Graph',
+                           'endDateTime': '2099-12-31T00:00:00Z'}})
         if rs.ok:
             graph_secret = rs.json().get('secretText', '') or ''
     except Exception:  # pylint: disable=broad-except
