@@ -6,10 +6,12 @@
 * the per-watchful-module action dispatch ``/api/v1/modules/watchfuls/<module>/<action>`` (test/probe/
   discover/MIB…).
 
-Validation, per-item write authorization, UID normalization, host provisioning and the
-watchful-action config resolution live in the Flask-free :mod:`lib.core.modules.service`;
-these routes own request parsing, secret restore/masking, dynamic dispatch, persistence and
-audit.
+What they call is Flask-free and lives one concept per module: :mod:`~lib.core.modules.service`
+(the config document — what may be seen, whether it is well formed, what the UI is built from),
+:mod:`~lib.core.modules.items` (an item's identity), :mod:`~lib.core.modules.authz` (may this
+save touch this item), :mod:`~lib.core.modules.provisioning` and
+:mod:`~lib.core.modules.actions`. These routes own request parsing, secret restore/masking,
+dynamic dispatch, persistence and audit.
 
 Routes registered by this file:
 
@@ -32,8 +34,12 @@ from flask import jsonify, request, session
 
 from lib.security import secret_manager
 
+from lib.core.modules import actions as modules_actions
+from lib.core.modules import authz as modules_authz
+from lib.core.modules import items as modules_items
+from lib.core.modules import provisioning as modules_prov
 from lib.core.modules import service as modules_svc
-from lib.core.modules.service import AdminOpError
+from lib.core.users.service import AdminOpError
 from lib.core.permissions import service as perms_svc
 
 
@@ -81,7 +87,7 @@ def register(app, wa):
         perms = wa._get_session_permissions()
         has_global_edit = 'modules_edit' in perms
         # Reject immediately when the user has no write permission of any kind.
-        if not modules_svc.has_any_module_write(perms):
+        if not modules_authz.has_any_module_write(perms):
             return jsonify({'error': wa._t('access_denied')}), 403
         data, err = wa._require_json()
         if err:
@@ -94,28 +100,28 @@ def register(app, wa):
             secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
             # Items bound to a credential keep no inline user/secret (cleared after
             # the restore above so a stale value can't be persisted/restored).
-            modules_svc.strip_credential_fields(data, wa._modules_dir)
+            modules_prov.strip_credential_fields(data, wa._modules_dir)
             if not has_global_edit:
-                modules_svc.authorize_modules_save(old_data, data, perms)
+                modules_authz.authorize_modules_save(old_data, data, perms)
         except AdminOpError as e:
             code = 403 if e.key == 'access_denied' else 400
             return jsonify({'error': wa._t(e.key, *e.args)}), code
-        modules_svc.ensure_item_uids(data)     # generate stable UIDs for new items
+        modules_items.ensure_item_uids(data)     # generate stable UIDs for new items
         # Read the duplicates BEFORE re-keying resolves them: afterwards there is nothing to
         # see. A repeated uid used to cost an item its existence (the re-key builds a dict
         # keyed by uid, so the second write replaced the first); it no longer does, but a
         # duplicate should never arrive, and knowing one did — with the module and the uid —
         # is the difference between finding its cause and guessing at it.
-        dup_uids = modules_svc.duplicate_item_uids(data)
-        modules_svc.rekey_items_by_uid(data)   # keep each item's dict key == its UID
+        dup_uids = modules_items.duplicate_item_uids(data)
+        modules_items.rekey_items_by_uid(data)   # keep each item's dict key == its UID
         # Taken AFTER the re-key, so a clone is recorded under the uid it will actually be
         # stored with, and taken rather than read — the mark answers a question about this
         # write, and persisting it would turn it into a permanent property of the item.
-        clone_marks = modules_svc.take_clone_marks(data)
+        clone_marks = modules_items.take_clone_marks(data)
         # Generic: provision/link a host for any item that declares one
         # (__provision_host__ in its schema) — so address modules (ping/web/
         # ssl_cert) can monitor that endpoint. Module-agnostic (discovery-driven).
-        provisioned = modules_svc.sync_provisioned_hosts(
+        provisioned = modules_prov.sync_provisioned_hosts(
             getattr(wa, '_hosts_store', None), getattr(wa, '_modules_dir', None),
             data, session.get('username', 'system'))
         if wa._save_modules(data):
@@ -138,9 +144,9 @@ def register(app, wa):
             # reports the new item's fields either way, which is the one distinction somebody
             # looking at two near-identical rows actually needs. Discovery supplies the field
             # each module calls its name, so the entry reads as names rather than uids.
-            origins = modules_svc.item_origin_rows(
+            origins = modules_items.item_origin_rows(
                 old_data, data, clone_marks,
-                modules_svc.item_schemas(getattr(wa, '_modules_dir', None)))
+                modules_items.item_schemas(getattr(wa, '_modules_dir', None)))
             if origins:
                 changes = list(changes or []) + origins
             # Only when something actually changed. A PUT that stores what was already there
@@ -339,8 +345,8 @@ def register(app, wa):
                 # no form knows only the key), then restore the check's own masked secrets
                 # from the stored config, so an action run after a reload (the UI only holds
                 # the masked placeholder) authenticates. Client values win in both.
-                modules_svc._fill_from_stored_item(wa, module_name, config)
-                modules_svc._restore_action_secrets(wa, module_name, config)
+                modules_actions.fill_from_stored_item(wa, module_name, config)
+                modules_actions.restore_action_secrets(wa, module_name, config)
                 # Inject server-side context after stripping client values so the server value
                 # always wins regardless of what the client sent.
                 config['__var_dir__'] = wa._var_dir or ''
@@ -348,14 +354,14 @@ def register(app, wa):
                 config['__connector__'] = getattr(wa, '_db_connector', None)
                 # Host-aware discovery: resolve the bound host (address + SSH, server-side) so
                 # the action can run on it (local or over SSH).
-                host_ctx = modules_svc._resolve_host_ctx(wa, config)
+                host_ctx = modules_actions.resolve_host_ctx(wa, config)
                 if host_ctx is not None:
                     config['__host__'] = host_ctx
                     # Fill the module's connection fields (address + SSH) from the bound host so
                     # actions like datastore's list_databases work on a host-bound check.
-                    modules_svc._merge_host_conn(wa, module_name, config, host_ctx)
+                    modules_actions.merge_host_conn(wa, module_name, config, host_ctx)
                 # A referenced credential supplies the identity — overlay it last so it wins.
-                modules_svc._apply_cred_to_config(wa, config)
+                modules_actions.apply_cred_to_config(wa, config)
                 result = method(config)
             else:
                 result = method()

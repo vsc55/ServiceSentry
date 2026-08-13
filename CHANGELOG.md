@@ -8,6 +8,62 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.67] - 2026-08-13
+
+### Changed
+- **`lib/core/modules/service.py` is one file per concept.** At 787 lines it was the largest
+  module left in `lib/core` and 46% of its own domain, holding five jobs with nothing to do
+  with each other — its own section banners had been saying so for a while.
+  - `authz.py` — may this save touch this item. The module save is the one write that crosses
+    domains: a check belongs to a module but is bound to a HOST or a CLUSTER, and the person
+    editing it may hold the permission for one and not the other. Answering that wrong is an
+    authorisation bug, not a bad screen, and it was buried in the middle of a file that also
+    knew about uids and page templates. A rule about who may write what should be findable by
+    the name of the file it is in.
+  - `items.py` — an item's identity: its uid, its name, its schema, and keeping them in step.
+    The rekey, the duplicate check and the clone mark all lean on the same question, so they
+    stop being three neighbours and become one module.
+  - `provisioning.py` — credentials kept out of the payload on the way out, and the hosts a
+    module declares created on the way in. The one thing in the package that writes into
+    another domain, with its store still injected explicitly.
+  - `actions.py` — the config a watchful action runs with, resolved the way a scheduled check
+    would: bound host, restored secrets, referenced credential.
+  - `service.py` — what is left is the config DOCUMENT: what may be seen of it, whether it is
+    well formed, the spellings it is normalised to, and what the UI is built from. 123 lines.
+  - `lib/core/modules/__init__.py` carries the map, like the backup domain's does.
+- The helpers that cross a module boundary lost their leading underscore
+  (`is_item_collection`, `item_host_uid`, `resolve_host_ctx`, `fill_from_stored_item`,
+  `restore_action_secrets`, `apply_cred_to_config`, `merge_host_conn`) — the routes were
+  already reaching for most of them through the module, which is not what a leading underscore
+  claims.
+- `routes.py` imports `AdminOpError` from `lib.core.users.service`, where it is defined,
+  instead of through the module-config service that only passed it along.
+- **`partials/cfg/_render.html` no longer needs its exemption.** It was the only file in the
+  repo with one written into a test — `pytest.skip('config renderer, tracked separately')`,
+  on the guard that keeps a section shell under 450 lines — and the reason given ("not a
+  section shell with sub-sections to split out") was wrong on both counts. It held four:
+  `_seed.html` (every option visible before it was ever saved, and the baseline that has to
+  know that seeding is not an edit), `_search.html` (the one pass that decides which rows and
+  sections are on screen), `_actions.html` (the buttons a section declares as data) and
+  `_advanced.html` (this browser's own localStorage). 814 → 437 lines, and the skip is gone.
+- **`partials/core/_field_render.html` is six partials.** At 1523 lines it was the largest
+  thing in the repo that is not a language dictionary, and it was called "render a field"
+  while also holding a whole object's fields, the host binding, the shared control skeleton,
+  the multi-value chips and the conditional fields: `_field_scalars.html`, `_field_hosts.html`,
+  `_field_ctl.html`, `_field_chips.html`, `_field_conditional.html`. What is left (833) is the
+  one job the name claims.
+- Both splits made the text guards read the SURFACE rather than a file — `_cfg_js()` and
+  `_field_js()`, the same helper the backup section's guards already had, with the same reason
+  written on it: naming the file a function happens to live in today is a guard that fails the
+  next time one moves.
+
+### Fixed
+- **The Config section came up empty after that split**, and the browser guards were what
+  said so: `renderConfig` used a `const wa = configData.web_admin` shorthand declared inside
+  the seeding block, so moving the seeding into `_cfgSeedDefaults()` left every card below
+  reading a variable from a function that had already returned. It is declared in the
+  renderer now, after the call that guarantees the section exists.
+
 ## [0.0.1+build.66] - 2026-08-13
 
 ### Added

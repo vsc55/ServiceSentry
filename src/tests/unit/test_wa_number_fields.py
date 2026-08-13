@@ -25,8 +25,17 @@ import os
 from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
-RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
-                      '_field_render.html')
+CORE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core')
+# The field renderer is six partials — one field, a whole object's fields, the host binding,
+# the shared control skeleton, the chips and the conditional fields. They are ONE surface, and
+# a guard that named the file a function happens to live in today would fail the next time one
+# moves, which is exactly what happened when the renderer was split.
+_FIELD_PARTS = ('_field_render.html', '_field_scalars.html', '_field_hosts.html',
+                '_field_ctl.html', '_field_chips.html', '_field_conditional.html')
+
+
+def _field_js() -> str:
+    return ''.join(_read(os.path.join(CORE, f)) for f in _FIELD_PARTS)
 
 
 def _schemas():
@@ -47,11 +56,11 @@ class TestTheVocabularyIsRead:
     def test_zero_as_blank_is_honoured_on_its_own(self):
         """Not as a side effect of having a placeholder: a field can be clearable and inherit
         nothing, and that combination is the one that was broken."""
-        assert 'meta.zero_as_blank' in _read(RENDER), \
+        assert 'meta.zero_as_blank' in _field_js(), \
             'the schema key is declared by modules and read by nobody'
 
     def test_the_validator_reads_the_marks_the_renderer_writes(self):
-        body = _fn(_read(RENDER), 'validateAndUpdateNumber')
+        body = _fn(_field_js(), 'validateAndUpdateNumber')
         assert "hasAttribute('data-zero-as-blank')" in body
         assert "hasAttribute('data-inherit-blank')" in body
 
@@ -59,7 +68,7 @@ class TestTheVocabularyIsRead:
         """Blank → null when the field inherits, 0 when it is an on/off amount, and the
         stored value restored only when it is neither. Collapsing any two of them is how a
         cleared box comes back with a number in it."""
-        body = _fn(_read(RENDER), 'validateAndUpdateNumber')
+        body = _fn(_field_js(), 'validateAndUpdateNumber')
         assert 'updateField(target, pathStr, null)' in body      # inherit
         assert 'updateField(target, pathStr, min ?? 0)' in body  # off
 
@@ -69,7 +78,7 @@ class TestEveryDeclaringFieldIsCovered:
     def test_no_module_declares_a_key_the_core_ignores(self):
         """The regression in one line: if a module says `zero_as_blank` the core must act on
         it, whether or not that field also happens to carry a placeholder."""
-        render = _read(RENDER)
+        render = _field_js()
         declaring = []
         for name, schema in _schemas():
             for field, meta in (schema.get('list') or {}).items():
@@ -141,7 +150,7 @@ class TestAModuleDefaultCanBeCleared:
 
         The cascade gained the module step: global → registry → the module's own value →
         the field's schema default."""
-        body = _read(RENDER)
+        body = _field_js()
         assert 'meta.placeholder_module' in body
         assert '_placeholderModuleValue(pathStr, meta.placeholder_module)' in body
 
@@ -269,13 +278,13 @@ class TestAnAmountAndItsUnitAreOneQuestion:
     ships a field the convention does not fit."""
 
     def test_the_pairing_is_declared(self):
-        body = _read(RENDER)
+        body = _field_js()
         assert 'meta.unit_field' in body, 'the schema key is declared and read by nobody'
         assert 'function _unitSelect' in body
 
     def test_the_unit_loses_its_own_row(self):
         """Otherwise it appears twice: attached to the amount AND on a row of its own."""
-        body = _read(RENDER)
+        body = _field_js()
         assert '_claimedUnits' in body
         assert '!_claimedUnits.has(k)' in body
 
@@ -293,13 +302,13 @@ class TestAnAmountAndItsUnitAreOneQuestion:
         rule = css[css.index('.ss-unit-sel'):]
         rule = rule[:rule.index('}')]
         assert 'width:' in rule.replace(' ', '') or 'width :' in rule
-        assert 'flex-grow-0' not in _read(RENDER),             'flex-grow-0 alone leaves the width:1% that collapsed it'
-        assert 'ss-unit-sel' in _fn(_read(RENDER), '_unitSelect')
+        assert 'flex-grow-0' not in _field_js(),             'flex-grow-0 alone leaves the width:1% that collapsed it'
+        assert 'ss-unit-sel' in _fn(_field_js(), '_unitSelect')
 
     def test_the_unit_still_writes_through_the_same_field(self):
         """It is the same config field — drawn elsewhere, stored identically. A bespoke write
         path is how the two copies start disagreeing."""
-        assert 'updateField(' in _fn(_read(RENDER), '_unitSelect')
+        assert 'updateField(' in _fn(_field_js(), '_unitSelect')
 
     def test_every_declared_unit_exists_and_has_options(self):
         """A `unit_field` pointing at a field that is missing, or that has no options, draws

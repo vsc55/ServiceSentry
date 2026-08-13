@@ -1,0 +1,72 @@
+{# ================================================================
+   Config — the search box, and THE one pass that decides what is on screen.
+
+   The search term and "only what changed" are two conditions on the same question, so they
+   compose in one pass instead of being two that take turns overwriting each other's
+   `display` — where what you end up seeing depends on which ran last.
+
+   Kept apart from the renderer because it runs on every keystroke and the renderer runs
+   once: they are the same DOM at two different rhythms.
+   ================================================================ #}
+
+let _cfgSearchTerm = '';
+let _cfgSearchInHints = true;
+
+function _toggleCfgSearchHints() {
+    _cfgSearchInHints = !_cfgSearchInHints;
+    const btn = document.getElementById('cfgSearchHintsToggle');
+    if (btn) btn.classList.toggle('active', _cfgSearchInHints);
+    _filterConfig(_cfgSearchTerm);
+}
+
+/** Record what is being searched for, then redraw. The drawing itself is `_cfgApplyView`'s,
+ *  which is the only place that knows the right ORDER to do it in. */
+function _filterConfig(term) {
+    _cfgSearchTerm = term;
+    // (No "a filter is running" badge any more: closing the box clears the term, so a search
+    // can never be narrowing the panel from off-screen. See partials/init/_wiring.html.)
+    if (typeof _cfgApplyView === 'function') _cfgApplyView();
+}
+
+/** THE one pass that decides which rows and which sections are on screen — for the search box
+ *  and for "only what changed" alike. They are two conditions on the same question, so they
+ *  compose here instead of being two passes taking turns overwriting each other's `display`,
+ *  where the visible result depends on which ran last.
+ *
+ *  A section is whatever `_cfgCardNode` says it is — the SAME unit the index navigates by.
+ *  Matching `.cfg-card` instead was close enough to look right and wrong where it mattered:
+ *  notification templates is two cards inside a wrapper, so the wrapper — the thing the index
+ *  actually lists — was never decided about, and survived every filter with nothing in it.
+ *  Two passes with two ideas of what a section is will always disagree about one of them.
+ */
+function _cfgFilterPass(container) {
+    const q = (_cfgSearchTerm || '').trim().toLowerCase();
+    const changedOnly = (typeof _cfgChangedOnly !== 'undefined') && _cfgChangedOnly;
+    const filtering = !!q || changedOnly;
+    // The switch reports the mode it is in even when something else set it — the count badge
+    // in a section header is the same switch, and a control that only tracks its own clicks
+    // starts lying the first time anything else turns the mode on.
+    const sw = document.getElementById('chkCfgChangedOnly');
+    if (sw) sw.checked = changedOnly;
+    const lay = (typeof CONFIG_LAYOUT !== 'undefined' && CONFIG_LAYOUT) || { cards: [] };
+    const sections = (lay.cards || [])
+        .map(card => _cfgCardNode(container, card))
+        .filter(Boolean);
+    sections.forEach(card => {
+        let anyMatch = false;
+        card.querySelectorAll('.cfg-field-wrap').forEach(wrap => {
+            const labelEl  = wrap.querySelector('label');
+            const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
+            const hintEl   = _cfgSearchInHints ? wrap.querySelector('[id^="fhint_"]') : null;
+            const hintTxt  = hintEl ? hintEl.textContent.trim().toLowerCase() : '';
+            const hit      = !q || labelTxt.includes(q) || hintTxt.includes(q);
+            // A row with no `data-cfg-path` is a button or a list, not an option — it cannot
+            // have been "changed", so it steps aside with the rest under that filter.
+            const match    = hit && (!changedOnly || _cfgFieldIsChanged(wrap));
+            wrap.style.display = match ? '' : 'none';
+            if (match) anyMatch = true;
+            _cfgMarkRow(wrap);
+        });
+        card.style.display = (!filtering || anyMatch) ? '' : 'none';
+    });
+}

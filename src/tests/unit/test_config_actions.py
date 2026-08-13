@@ -249,7 +249,7 @@ class TestTheButtonSaysTheVerbAndTheCardSaysTherest:
         import os as _os
         root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
         body = _io.open(_os.path.join(root, 'lib', 'web_admin', 'templates', 'partials',
-                                      'cfg', '_render.html'), encoding='utf-8').read()
+                                      'cfg', '_actions.html'), encoding='utf-8').read()
         assert 'shortLabel && a.button_key) || a.label_key' in body, \
             'the button label no longer falls back to the full one'
 

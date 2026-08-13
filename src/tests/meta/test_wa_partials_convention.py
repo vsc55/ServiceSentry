@@ -117,10 +117,12 @@ class TestSize:
     @pytest.mark.parametrize('rel', sorted(r for r in _partials()
                                            if os.path.basename(r) == '_render.html'))
     def test_render_shells_stay_thin(self, rel):
+        """No exemptions. `cfg/_render.html` had one — "the config panel's registry-driven
+        renderer, not a section shell with sub-sections to split out" — and it was wrong on
+        both counts: it held the seeding pass, the search filter, the declared-action
+        renderer and a localStorage inspector, which are four concepts and now four
+        partials. An exemption written into a guard is a guard that has stopped guarding
+        the one file it was pointed at."""
         n = len(io.open(os.path.join(TPL, rel), encoding='utf-8').read().splitlines())
-        # cfg/_render.html is the config panel's registry-driven renderer, not a section
-        # shell with sub-sections to split out — it is exempt until that is refactored.
-        if rel == 'partials/cfg/_render.html':
-            pytest.skip('config renderer, tracked separately')
         assert n <= self.LIMIT, (f'{rel} is {n} lines — split its sub-sections into '
                                  f'their own partials (see ipban/_bans|_history|_whitelist)')

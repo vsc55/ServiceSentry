@@ -1,0 +1,82 @@
+{# ================================================================
+   Fields that appear because another field says so.
+
+   A driver dropdown that reveals the settings its engine needs, a mode that hides half a
+   form. Declared as data on the markup (`.sw-field[data-sw-when]`) rather than in code, so a
+   schema can add a conditional field without anything here learning its name.
+
+   Applied to EVERY container rendering that item path, because a card and the fullscreen
+   modal showing the same item are two copies of one form.
+   ================================================================ #}
+
+/**
+ * Show/hide fields wrapped in .sw-field[data-sw-when] inside the item container
+ * identified by itemPathStr. Called when a controlling select changes value and
+ * when the item's collapse panel opens.
+ */
+function _refreshConditionalFields(itemPathStr) {
+    // Use querySelectorAll so both the regular card AND the fullscreen modal
+    // (which render the same item path) are updated simultaneously.
+    const containers = document.querySelectorAll(`[data-sw-item-path="${CSS.escape(itemPathStr)}"]`);
+    if (!containers.length) return;
+    const parts    = itemPathStr.split('|');
+    const itemData = getPath(modulesData, parts) || getPath(configData, parts) || {};
+    containers.forEach(container => {
+        container.querySelectorAll('.sw-field[data-sw-when]').forEach(el => {
+            try {
+                const cond = JSON.parse(el.dataset.swWhen);
+                let visible = true;
+                for (const [ctrl, allowed] of Object.entries(cond)) {
+                    if (!Array.isArray(allowed) || !allowed.includes(itemData[ctrl])) {
+                        visible = false; break;
+                    }
+                }
+                if (visible) {
+                    el.style.removeProperty('display');
+                } else {
+                    el.style.setProperty('display', 'none');
+                }
+            } catch {}
+        });
+        // Update placeholder for inputs with a placeholder_map (keyed by the
+        // sibling field the module's schema declares via placeholder_map_field).
+        container.querySelectorAll('input[data-placeholder-map]').forEach(el => {
+            try {
+                const map = JSON.parse(el.dataset.placeholderMap);
+                const keyField = el.dataset.placeholderMapField || '';
+                const ph = keyField ? map[itemData[keyField] || ''] : undefined;
+                el.placeholder = ph != null ? String(ph) : '';
+            } catch {}
+        });
+        // Update placeholder for inputs that inherit a module-level field value.
+        // Use the SAME cascade as the render (_placeholderModuleValue): module-level
+        // setting → live Configuration > Modules global → the module's __module__
+        // schema default. 0 is a real inherited value (kept, not blanked) — otherwise
+        // this live refresh would clobber the correct placeholder set at render time.
+        container.querySelectorAll('input[data-placeholder-module]').forEach(el => {
+            try {
+                const modField = el.dataset.placeholderModule;
+                const cfgPath  = el.dataset.cfgPath || '';
+                const ph = cfgPath ? _placeholderModuleValue(cfgPath, modField) : null;
+                el.placeholder = (ph != null && ph !== '') ? String(ph) : '';
+            } catch {}
+        });
+    });
+    // Whatever depends on WHICH options apply has to be recomputed after they change, and
+    // this is the only place that changes them. The config index counts and marks only the
+    // options that apply, and the select that switches them fires
+    // `updateField(...);_refreshConditionalFields(...)` in that order — so the refresh
+    // `updateField` already triggered ran against the OLD visibility, and switching the
+    // database engine left the count one change behind for ever.
+    // Scoped to the config sheet: this runs constantly for module items, and their panel has
+    // no index to keep in step.
+    if (typeof _cfgRefreshMarks === 'function'
+        && [...containers].some(el => el.closest('#config-container'))) {
+        _cfgRefreshMarks();
+    }
+}
+
+document.addEventListener('show.bs.collapse', function(e) {
+    const p = e.target.dataset.swItemPath;
+    if (p) _refreshConditionalFields(p);
+});

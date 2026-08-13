@@ -53,7 +53,7 @@ class TestMergeHostConn:
     """_merge_host_conn fills a module's connection fields from the bound host."""
 
     def test_fills_address_and_ssh(self):
-        from lib.core.modules.service import _merge_host_conn
+        from lib.core.modules.actions import merge_host_conn
 
         class _WA:
             _modules_dir = None
@@ -61,18 +61,18 @@ class TestMergeHostConn:
                'host': '', 'ssh_host': '', 'ssh_user': '', 'ssh_password': ''}
         ctx = {'address': '10.0.0.5',
                'ssh': {'ssh_user': 'root', 'ssh_port': 22, 'ssh_password': 'p'}}
-        _merge_host_conn(_WA(), 'datastore', cfg, ctx)
+        merge_host_conn(_WA(), 'datastore', cfg, ctx)
         assert cfg['host'] == '10.0.0.5'          # db address_field ← host address
         assert cfg['ssh_host'] == '10.0.0.5'      # ssh address_field ← host address
         assert cfg['ssh_user'] == 'root' and cfg['ssh_password'] == 'p'
 
     def test_explicit_check_value_wins(self):
-        from lib.core.modules.service import _merge_host_conn
+        from lib.core.modules.actions import merge_host_conn
 
         class _WA:
             _modules_dir = None
         cfg = {'db_type': 'mysql', 'host': 'explicit.db'}
-        _merge_host_conn(_WA(), 'datastore', cfg, {'address': '10.0.0.5', 'ssh': {}})
+        merge_host_conn(_WA(), 'datastore', cfg, {'address': '10.0.0.5', 'ssh': {}})
         assert cfg['host'] == 'explicit.db'       # the check's own value is kept
 
 
@@ -81,7 +81,7 @@ class TestResolveHostCtxCred:
     not only inline secrets — else disk/services/temperature discover get no data."""
 
     def test_ssh_cred_uid_is_resolved(self):
-        from lib.core.modules.service import _resolve_host_ctx
+        from lib.core.modules.actions import resolve_host_ctx
 
         class _Cstore:
             def get(self, uid, decrypt=True):
@@ -95,13 +95,13 @@ class TestResolveHostCtxCred:
 
         cfg = {'_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                          'profiles': {'ssh': {'cred_uid': 'cred1', 'ssh_port': 22}}}}
-        ctx = _resolve_host_ctx(_WA(), cfg)
+        ctx = resolve_host_ctx(_WA(), cfg)
         assert ctx['ssh']['ssh_user'] == 'svc'        # credential identity applied
         assert ctx['ssh']['ssh_password'] == 'secret'
         assert ctx['ssh']['ssh_port'] == 22           # other ssh fields preserved
 
     def test_no_cred_uid_left_unchanged(self):
-        from lib.core.modules.service import _resolve_host_ctx
+        from lib.core.modules.actions import resolve_host_ctx
 
         class _WA:
             _hosts_store = None
@@ -109,7 +109,7 @@ class TestResolveHostCtxCred:
 
         cfg = {'_host': {'address': 'h', 'kind': 'remote', 'os': 'linux',
                          'profiles': {'ssh': {'ssh_user': 'root'}}}}
-        ctx = _resolve_host_ctx(_WA(), cfg)
+        ctx = resolve_host_ctx(_WA(), cfg)
         assert ctx['ssh']['ssh_user'] == 'root'
 
 

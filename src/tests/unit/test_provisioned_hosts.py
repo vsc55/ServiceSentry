@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from lib.core.modules.service import sync_provisioned_hosts
+from lib.core.modules.provisioning import sync_provisioned_hosts
 
 # The synthetic module the tests declare a __provision_host__ for.
 _MOD = 'demo'

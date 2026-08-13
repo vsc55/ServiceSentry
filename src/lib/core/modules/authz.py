@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""May this save touch this item?
+
+The module save is the one write in the panel that crosses domains: a check belongs to a
+module, but it is bound to a HOST or a CLUSTER, and the person editing it may hold the
+permission for one and not the other. So "who may write here" cannot be answered by the module
+flag alone, and answering it wrong is an authorisation bug rather than a bad screen.
+
+Its own module for that reason: a rule about who may write what should be findable by the name
+of the file it is in. It was the middle of a 787-line one.
+
+Flask-free: it is given the permission set and the two payloads, and it raises on a violation.
+"""
+
+from __future__ import annotations
+
+from lib.core.users.service import AdminOpError
+
+from .items import is_item_collection, item_host_uid
+
+
+def has_any_module_write(perms) -> bool:
+    """True if *perms* carry any write capability that could authorize a module save —
+    module-level, per-module, or a server/cluster permission that can authorize a
+    host-bound check change.  Used to reject a no-write user before parsing the body."""
+    return (
+        'modules_edit' in perms or 'modules_add' in perms or 'modules_delete' in perms or
+        'servers_add' in perms or 'servers_edit' in perms or
+        'clusters_add' in perms or 'clusters_edit' in perms or 'clusters_delete' in perms or
+        any(p.startswith('module.') and (p.endswith('.edit') or p.endswith('.add') or p.endswith('.delete'))
+            for p in perms) or
+        any(p.startswith('server.') and (p.endswith('.add') or p.endswith('.edit'))
+            for p in perms) or
+        any(p.startswith('cluster.') and (p.endswith('.add') or p.endswith('.edit') or p.endswith('.delete'))
+            for p in perms)
+    )
+
+
+def _is_cluster_item(o, n) -> bool:
+    """A cluster item is a multi-host-bound check — it carries ``host_uids`` (a
+    list), unlike an ordinary single-bound (``host_uid``) or unbound check."""
+    for it in (n, o):
+        if isinstance(it, dict) and isinstance(it.get('host_uids'), list):
+            return True
+    return False
+
+
+def _cluster_authorized(perms, action: str, uid: str = '') -> bool:
+    """True if *perms* authorize *action* (add/edit/delete) on a cluster — via the
+    global ``clusters_*`` flag or a per-cluster ``cluster.{uid}.{action}`` override."""
+    if {'add': 'clusters_add', 'edit': 'clusters_edit',
+            'delete': 'clusters_delete'}.get(action) in perms:
+        return True
+    return bool(uid) and f'cluster.{uid}.{action}' in perms
+
+
+def _server_authorized(perms, action: str, host_uid: str) -> bool:
+    """True if *perms* authorize *action* on server *host_uid* — via the global
+    ``servers_*`` flag or a per-server ``server.{uid}.{action}`` override."""
+    _g = {'view': 'servers_view', 'add': 'servers_add',
+          'edit': 'servers_edit', 'delete': 'servers_delete'}
+    if _g.get(action) in perms:
+        return True
+    return bool(host_uid) and f'server.{host_uid}.{action}' in perms
+
+
+def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
+    """Authorize a change to module *name* for a user lacking global module-write.
+
+    Host-bound item changes (items carrying ``host_uid``) may be authorized by
+    per-server / global server permissions: adding an item needs server ``add``,
+    modifying or removing one needs server ``edit``.  Module-level scalar changes
+    and non-host-bound items still require the module permissions.
+    """
+    if old_mod == new_mod:
+        return True
+    if f'module.{name}.edit' in perms:
+        return True
+    is_new = old_mod is None
+    is_removed = new_mod is None
+    if is_new and 'modules_add' in perms:
+        return True
+    if is_removed and 'modules_delete' in perms:
+        return True
+
+    old_mod = old_mod if isinstance(old_mod, dict) else {}
+    new_mod = new_mod if isinstance(new_mod, dict) else {}
+
+    # Module-level (non-collection) scalar changes require module edit — except on
+    # a brand-new module being scaffolded purely to hold host-bound items.
+    if not is_new:
+        old_s = {k: v for k, v in old_mod.items() if not is_item_collection(v)}
+        new_s = {k: v for k, v in new_mod.items() if not is_item_collection(v)}
+        for k in set(old_s) | set(new_s):
+            if old_s.get(k) != new_s.get(k):
+                return False
+
+    # Authorize each added/removed/modified item by its host binding.
+    coll_names = ({k for k, v in old_mod.items() if is_item_collection(v)}
+                  | {k for k, v in new_mod.items() if is_item_collection(v)})
+    saw_change = False
+    for coll in coll_names:
+        old_items = old_mod.get(coll) if is_item_collection(old_mod.get(coll)) else {}
+        new_items = new_mod.get(coll) if is_item_collection(new_mod.get(coll)) else {}
+        for ik in set(old_items) | set(new_items):
+            o, n = old_items.get(ik), new_items.get(ik)
+            if o == n:
+                continue
+            saw_change = True
+            if _is_cluster_item(o, n):
+                # Multi-bind cluster check → its own clusters_* permissions (or a
+                # per-cluster cluster.{uid}.{action} override), with a distinct
+                # delete (removal) action.
+                c_action = 'add' if o is None else ('delete' if n is None else 'edit')
+                cl_uid = ((n or {}).get('uid') if isinstance(n, dict) else None) \
+                    or ((o or {}).get('uid') if isinstance(o, dict) else None) or ik
+                if not _cluster_authorized(perms, c_action, cl_uid):
+                    return False
+                continue
+            hu = item_host_uid(o, n)
+            action = 'add' if o is None else 'edit'        # add new / modify|remove
+            if not _server_authorized(perms, action, hu):
+                return False
+    # A change with no authorizable host-bound item diff (whole-module add/remove
+    # with no host-bound items, or only scalar churn) is not server-authorizable.
+    return saw_change
+
+
+def authorize_modules_save(old_data: dict, data: dict, perms) -> None:
+    """Authorize every changed module individually (for a user without global
+    ``modules_edit``). Raises :class:`AdminOpError` (``access_denied``) on the first
+    unauthorized change."""
+    for name in set(old_data) | set(data):
+        if not authorize_module_write(name, old_data.get(name), data.get(name), perms):
+            raise AdminOpError('access_denied')

@@ -224,7 +224,7 @@ Dos defectos alineados:
 1. **[`_field_ops.html` → `cloneItem`](../src/lib/web_admin/templates/partials/actions/_field_ops.html)**
    copiaba el elemento con `JSON.parse(JSON.stringify(...))`, **incluido su `uid`**. Un uid es
    identidad, no dato; el servidor solo genera uno cuando falta
-   ([`service.py` → `ensure_item_uids`](../src/lib/core/modules/service.py)), así que la copia
+   ([`items.py` → `ensure_item_uids`](../src/lib/core/modules/items.py)), así que la copia
    llegaba diciendo ser el original. El re-keying lo repara dándole un uid nuevo, pero
    `duplicate_item_uids` lo registra — correctamente: **había** llegado un duplicado.
 2. **[`routes.py:119`](../src/lib/core/modules/routes.py)** anotaba ese duplicado con `+` sobre

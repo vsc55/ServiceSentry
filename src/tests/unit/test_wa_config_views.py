@@ -26,8 +26,24 @@ CFG = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'cfg')
 VIEWS = os.path.join(CFG, '_views.html')
 RENDER = os.path.join(CFG, '_render.html')
 PANE = os.path.join(CFG, '_pane.html')
+# The four concepts that came out of `_render.html` when it went over the size guard: the
+# seeding pass, the search filter, the declared actions and the localStorage inspector.
+SEED = os.path.join(CFG, '_seed.html')
+SEARCH = os.path.join(CFG, '_search.html')
+ACTIONS = os.path.join(CFG, '_actions.html')
+ADVANCED = os.path.join(CFG, '_advanced.html')
 UTILS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_utils.html')
 CSS = os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')
+
+
+def _cfg_js() -> str:
+    """What `_render.html` used to be, as one text.
+
+    Five files because the shell has a size limit, but ONE surface — and a guard that named
+    the file a function happens to live in today would fail the next time one moves. That is
+    exactly how these broke when the renderer was split, so they read the surface instead.
+    """
+    return ''.join(_read(f) for f in (RENDER, SEED, SEARCH, ACTIONS, ADVANCED))
 
 
 def _card_open() -> str:
@@ -56,12 +72,12 @@ class TestThereIsOneNavigator:
     def test_the_renderer_builds_no_tab_strip(self):
         """The body is the cards, in the layout's order — no nav, no panes. A pane is a place
         for the index to fail to look inside, which is exactly how it failed before."""
-        body = _fn(_read(RENDER), 'renderConfig')
+        body = _fn(_cfg_js(), 'renderConfig')
         for forbidden in ('nav-tabs', 'nav-pills', 'tab-pane', 'data-bs-toggle="tab"'):
             assert forbidden not in body, f'the tab strip is being rebuilt ({forbidden})'
 
     def test_the_body_is_the_cards_in_the_layouts_order(self):
-        body = _fn(_read(RENDER), 'renderConfig')
+        body = _fn(_cfg_js(), 'renderConfig')
         assert 'for (const card of _lay.cards) _body += _cardHtml[card.id]' in body
 
     def test_it_is_wired_into_the_shell(self):
@@ -255,7 +271,7 @@ class TestItIsAPassNotARenderer:
         """One call, because the filter now runs INSIDE it: `renderConfig` used to apply the
         index and then re-apply the search, which only worked while the two happened to be
         idempotent in that order."""
-        body = _fn(_read(RENDER), 'renderConfig')
+        body = _fn(_cfg_js(), 'renderConfig')
         assert '_cfgApplyView()' in body
         assert '_filterConfig(' not in body, 'two entry points decide what is on screen'
 
@@ -278,7 +294,7 @@ class TestTheSearchAndTheIndexShareOneScreen:
     def test_searching_looks_across_every_section(self):
         """The index shows one section; the search must not be confined to it. Every card is in
         the DOM precisely so that a search can reach the thirty-three that are hidden."""
-        body = _fn(_read(RENDER), '_cfgFilterPass')
+        body = _fn(_cfg_js(), '_cfgFilterPass')
         assert 'rounded-3' not in body, 'the search matches a frame instead of a section'
         assert "querySelectorAll('.cfg-field-wrap')" in body
 
@@ -291,7 +307,7 @@ class TestTheSearchAndTheIndexShareOneScreen:
         Both now walk `_cfgCardNode`, which is what the index navigates by. Two passes with two
         ideas of what a section is will always disagree about one of them, and it will be the
         one built slightly differently from the rest."""
-        body = _fn(_read(RENDER), '_cfgFilterPass')
+        body = _fn(_cfg_js(), '_cfgFilterPass')
         assert '_cfgCardNode(container, card)' in body
         assert "container.querySelectorAll('.cfg-card')" not in body
 
@@ -299,7 +315,7 @@ class TestTheSearchAndTheIndexShareOneScreen:
         """Not "show all thirty-four cards at once" — that is nobody's idea of a configuration
         screen. An empty box means the search is over, and what the section looks like when
         nobody is searching is the index."""
-        body = _fn(_read(RENDER), '_filterConfig')
+        body = _fn(_cfg_js(), '_filterConfig')
         assert '_cfgApplyView()' in body
 
     def test_the_index_becomes_the_result_list(self):
@@ -331,7 +347,7 @@ class TestTheSearchAndTheIndexShareOneScreen:
         compose inside `_filterConfig`. They used to be two passes taking turns overwriting each
         other's `display`, where the visible result depends on which ran last — not a rule
         anybody could predict from the screen."""
-        body = _fn(_read(RENDER), '_cfgFilterPass')
+        body = _fn(_cfg_js(), '_cfgFilterPass')
         assert '_cfgFieldIsChanged(wrap)' in body and 'hit &&' in body
         head = _fn(_read(VIEWS), '_cfgSheetHead')
         assert 'style.display' not in head, 'the header pass hides rows again'
@@ -353,7 +369,7 @@ class TestTheSearchAndTheIndexShareOneScreen:
         pane = _read(PANE)
         assert 'chkCfgChangedOnly' in pane and 'form-switch' in pane
         assert 'toggleConfigChangedOnly()' in pane
-        body = _fn(_read(RENDER), '_cfgFilterPass')
+        body = _fn(_cfg_js(), '_cfgFilterPass')
         assert 'sw.checked = changedOnly' in body, 'the switch never reflects the mode'
         for lang in ('es_ES', 'en_EN'):
             assert "'cfg_changed_only_short'" in _read(
@@ -420,7 +436,7 @@ class TestASectionIsASheetNotACard:
     def test_nothing_remembers_a_collapse_that_cannot_happen(self):
         """`renderConfig` used to save which cards were open so a re-render could restore them.
         There is nothing to restore: a sheet cannot be shut."""
-        body = _fn(_read(RENDER), 'renderConfig')
+        body = _fn(_cfg_js(), 'renderConfig')
         assert 'prevState' not in body
 
     def test_fail2ban_keeps_its_cards(self):
@@ -495,7 +511,7 @@ class TestASectionIsASheetNotACard:
         i = css.index('.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-changed {')
         assert 'box-shadow: inset' in css[i:css.index('}', i)], \
             'a border here shifts the marked row against the ones around it'
-        assert '_cfgMarkRow(wrap)' in _fn(_read(RENDER), '_cfgFilterPass'), \
+        assert '_cfgMarkRow(wrap)' in _fn(_cfg_js(), '_cfgFilterPass'), \
             'the mark is not refreshed by the pass that already walks every row'
 
     def test_the_four_hand_written_selects_are_declared_instead(self):
@@ -720,10 +736,10 @@ class TestASectionIsASheetNotACard:
         ops = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'actions',
                                  '_field_ops.html'))
         assert '_dirtyFields.delete(pathStr)' in ops, 'the pending set only grows'
-        mirror = _fn(_read(RENDER), '_cfgMirrorSeeded')
+        mirror = _fn(_cfg_js(), '_cfgMirrorSeeded')
         assert 'in _serverConfigData[sec]' in mirror, \
             'seeding still reads as an edit against the baseline'
-        assert '_cfgMirrorSeeded()' in _fn(_read(RENDER), 'renderConfig')
+        assert '_cfgMirrorSeeded()' in _fn(_cfg_js(), 'renderConfig')
 
     def test_an_option_the_server_never_sent_still_has_something_to_return_to(self):
         """Reported after the first fix: the audit sort field stayed marked as edited on the way
@@ -750,7 +766,7 @@ class TestASectionIsASheetNotACard:
         that copy against the baseline, so creating a webhook lit "unsaved changes" for
         something already written. Clicking Save then sent nothing (it sends `_dirtyFields`,
         which these never enter) and could not put the light out."""
-        adopt = _fn(_read(RENDER), '_cfgAdoptSection')
+        adopt = _fn(_cfg_js(), '_cfgAdoptSection')
         assert '_serverConfigData[section] = deepClone(configData[section])' in adopt
         for name, section in ((os.path.join(CFG, 'notify', '_webhooks.html'), 'webhooks'),
                               (os.path.join(CFG, 'notify', '_msteams.html'), 'msteams_channels')):
@@ -766,7 +782,7 @@ class TestASectionIsASheetNotACard:
         cannot swallow one. Overwriting a value the baseline holds would silently accept an
         edit as the new "as loaded" state — the save button would go out with the change still
         unwritten."""
-        mirror = _fn(_read(RENDER), '_cfgMirrorSeeded')
+        mirror = _fn(_cfg_js(), '_cfgMirrorSeeded')
         assert 'if (!(k in _serverConfigData[sec]))' in mirror
 
     def test_the_marks_and_the_counts_follow_an_edit_and_a_save(self):
@@ -918,8 +934,8 @@ class TestAnOptionThatDoesNotApplyIsNotCounted:
     already in the DOM; nothing was asking it.
     """
 
-    FIELD_RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
-                                'core', '_field_render.html')
+    FIELD_COND = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                              'core', '_field_conditional.html')
 
     def test_the_one_definition_asks_whether_it_applies(self):
         """Into `_cfgFieldIsChanged` rather than into the counter: it is the single definition
@@ -951,7 +967,7 @@ class TestAnOptionThatDoesNotApplyIsNotCounted:
         """The select fires `updateField(...);_refreshConditionalFields(...)` in that order, so
         the refresh updateField triggers runs against the OLD visibility. Whatever depends on
         which options apply has to be recomputed by the thing that changes them."""
-        body = _fn(_read(self.FIELD_RENDER), '_refreshConditionalFields')
+        body = _fn(_read(self.FIELD_COND), '_refreshConditionalFields')
         assert '_cfgRefreshMarks' in body, \
             'switching the database engine leaves the count one change behind'
         assert 'config-container' in body, \

@@ -1,0 +1,229 @@
+{# ================================================================
+   Every field of an object, in order and in groups — the caller of `renderField`.
+
+   `renderField` answers "what does THIS field look like"; this answers "what does the whole
+   thing look like": which fields come first, which fold into a collapsible group, where a
+   group's action buttons go, and which groups a tabbed dialog is asking for this time.
+
+   Its own partial because those are two questions, and the layout decisions
+   (`onlyGroups`, `skipHostPicker`, the groups themselves) are all in this one — none of
+   which a single field knows or should.
+   ================================================================ #}
+
+/** Render all scalar (non-object) fields of *obj*.
+ *  _postGroupHtml: optional map of groupName → HTML string injected after
+ *  the last field of that group (used to embed action buttons inside a group). */
+// opts (all optional, used by the cluster edit modal's tabbed layout):
+//   onlyGroups     — render only fields whose `group` is in this list (a tab pane)
+//   skipHostPicker — do not emit the host / multi-host binding picker
+function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}, opts = {}) {
+    let h = '';
+    // _schemaKeyOf handles both flat ("snmp|servers") and nested ("snmp|servers|router|checks") paths.
+    const _sch = ITEM_SCHEMAS[_schemaKeyOf(pathPrefix)]
+        || ITEM_SCHEMAS[pathPrefix.split('|')[0] + '|__module__'] || null;
+
+    // Module i18n for group labels
+    const _modName = pathPrefix.split('|')[0];
+    const _modI18n = ITEM_SCHEMAS[_modName + '|__i18n__'];
+    const _modLd = _modI18n && (_modI18n[CURRENT_LANG] || _modI18n[SYSTEM_DEFAULT_LANG]);
+    const _groupLabels = (_modLd && _modLd.group_labels) || {};
+
+    // __group_when__: explicit show_when for group headers (independent of field show_when)
+    const _groupWhen = (_sch && _sch['__group_when__']) || {};
+    // __group_collapsed__: group names that render collapsible + collapsed by default
+    // (e.g. proxmox 'provision'). The header becomes a toggle; the fields go in a
+    // Bootstrap .collapse closed initially.
+    const _groupCollapsed = (_sch && _sch['__group_collapsed__']) || [];
+
+    // Module-level infra fields (threads/timeout) group under an "Execution" header
+    // even without an explicit schema `group` — only on the module-level pane
+    // (pathPrefix has no '|'), never on item fields.
+    const _isModuleLevel = target === 'modules' && !pathPrefix.includes('|');
+    // Module-level pane → collapsible sections. A field's `group` (its own, or the
+    // "execution" that ModuleBase.discover_schemas stamps on threads/timeout) is
+    // authoritative; every remaining ungrouped module field forms the "Defaults"
+    // section. Section labels come from group_labels (ModuleBase supplies the
+    // Execution/Defaults ones). Item/config panes get no auto-group.
+    const _effGroup = (k) => {
+        const m = fieldMeta(_sch, k);
+        if (m && m.group) return m.group;
+        return _isModuleLevel ? 'defaults' : null;
+    };
+
+    // Sort keys: follow schema definition order when available, else enabled-first + alpha.
+    // On the module-level pane, execution-group fields always sort last (after Defaults).
+    const _schemaKeys = _sch
+        ? (_sch['__field_order__'] || Object.keys(_sch).filter(k => !k.startsWith('__')))
+        : null;
+    let keys = (_schemaKeys ? Object.keys(obj).filter(k => _schemaKeys.includes(k)) : Object.keys(obj)).sort((a, b) => {
+        if (_isModuleLevel) {
+            const ae = _effGroup(a) === 'execution' ? 1 : 0;
+            const be = _effGroup(b) === 'execution' ? 1 : 0;
+            if (ae !== be) return ae - be;          // execution group last
+        }
+        if (_schemaKeys) {
+            const ai = _schemaKeys.indexOf(a), bi = _schemaKeys.indexOf(b);
+            if (ai !== -1 && bi !== -1) return ai - bi;
+            if (ai !== -1) return -1;
+            if (bi !== -1) return 1;
+        }
+        if (a === 'enabled') return -1; if (b === 'enabled') return 1;
+        return a.localeCompare(b);
+    });
+    // Optional (modal tab panes): restrict to specific field groups. The cred
+    // picker (auto-scoped to the auth fields below) follows the same filter.
+    if (opts && Array.isArray(opts.onlyGroups)) {
+        keys = keys.filter(k => opts.onlyGroups.includes(_effGroup(k)));
+    }
+    // An amount and its unit are ONE question — "warn under 50 GB" — and reading it off two
+    // rows makes the reader assemble it. A field that declares `unit_field` draws the unit
+    // beside its own box, so the unit loses its separate row here.
+    const _claimedUnits = new Set(keys
+        .map(k => (fieldMeta(_sch, k) || {}).unit_field).filter(Boolean));
+    if (_claimedUnits.size) keys = keys.filter(k => !_claimedUnits.has(k));
+
+    // ── Host binding (host-centric config) ──────────────────────────────────
+    // A module whose connection fields are declared in __host_profile__ (exposed
+    // as MODULE_HOST_FIELDS) lets an item reference a host instead of inline
+    // connection.  Show a host picker and, when one is bound, hide those fields.
+    const _modBase = _modName.replace(/^watchfuls\./, '');
+    const _hostFields = (target !== 'config')
+        ? (MODULE_HOST_FIELDS[_modBase] || MODULE_HOST_FIELDS[_modName] || []) : [];
+    // A collection is host-capable when MODULE_HOST_COLLECTIONS lists it — this
+    // covers SSH-only/address-only modules (cpu, dns, ram_swap, web…) whose
+    // connection fields are never inline, while still excluding nested
+    // sub-collections (e.g. snmp 'servers|checks').  The suffix matches
+    // _schemaKeyOf (the schema key without the leading "module|").
+    const _collKey = (target !== 'config') ? (_schemaKeyOf(pathPrefix) || '') : '';
+    const _collSuffix = _collKey.includes('|') ? _collKey.slice(_collKey.indexOf('|') + 1) : '';
+    const _hostColls = (target !== 'config')
+        ? (MODULE_HOST_COLLECTIONS[_modBase] || MODULE_HOST_COLLECTIONS[_modName] || null) : null;
+    const _hostCapable = !!(_hostColls && _collSuffix && _hostColls.includes(_collSuffix));
+    // Multi-bind modules (e.g. proxmox cluster) bind to several hosts via host_uids.
+    const _hostMultiBind = !!(MODULE_HOST_MULTI_BIND[_modBase] || MODULE_HOST_MULTI_BIND[_modName]);
+    const _hostBound = _hostCapable && obj &&
+        (_hostMultiBind ? (Array.isArray(obj.host_uids) && obj.host_uids.length) : obj.host_uid);
+    if (_hostCapable && !(opts && opts.skipHostPicker)) {
+        h += _hostMultiBind
+            ? _renderHostMultiPicker(pathPrefix, obj.host_uids || [], target)
+            : _renderHostPicker(pathPrefix, obj.host_uid || '', target);
+    }
+
+    // ── Credential binding (module-declared credential type) ──────────────────
+    // A module that declares a __credential__ (e.g. web → web_auth) lets a check
+    // reference a reusable credential instead of inline auth fields.  Show a
+    // picker before those fields and hide them when a credential is bound.
+    const _credSpec = (target !== 'config' && typeof _credTypeForModule === 'function')
+        ? _credTypeForModule(_modBase) : null;
+    const _credFieldNames = _credSpec ? _credSpec.fields : [];
+    const _collHasCred = _credFieldNames.some(f => keys.includes(f));
+    const _credBound = _collHasCred && obj && obj.cred_uid;
+    let _credPickerDone = false;
+
+    let _curGroup = null;
+    let _openCollapseId = null;   // id of an open collapsible-group <div>, if any
+    for (const k of keys) {
+        if (exclude.includes(k)) continue;
+        if (k === 'host_uid') continue;   // rendered by the host picker above
+        if (k === 'cred_uid') continue;   // rendered by the credential picker
+        if (k === 'created_at' || k === 'updated_at' || k === 'updated_by') continue;  // read-only audit metadata
+        const v = obj[k];
+        if (typeof v === 'object' && v !== null && !Array.isArray(v)) continue;
+        const _meta = fieldMeta(_sch, k);
+        const _rawFHtml = renderField(k, v, pathPrefix + '|' + k, target);
+        const _pp = pathPrefix + '|' + k;
+        const _fhtml = _rawFHtml;   // `renderField` marks locked fields itself, for every caller
+
+        const _group = _effGroup(k);
+        const _showWhen = _meta && _meta.show_when && typeof _meta.show_when === 'object'
+            ? _meta.show_when : null;
+
+        // Detect group transition: inject post-group HTML when leaving a group
+        if (_group !== _curGroup) {
+            if (_curGroup !== null && _postGroupHtml[_curGroup]) {
+                h += _postGroupHtml[_curGroup];
+            }
+            if (_openCollapseId) { h += '</div>'; _openCollapseId = null; }  // close prev collapse
+
+            // Group header uses __group_when__ for its own visibility (not the field's show_when)
+            if (_group) {
+                const _gWhen = _groupWhen[_group] || null;
+                let _gVisible = true;
+                if (_gWhen) {
+                    for (const [ctrl, allowed] of Object.entries(_gWhen)) {
+                        if (!Array.isArray(allowed) || !allowed.includes(obj[ctrl])) {
+                            _gVisible = false; break;
+                        }
+                    }
+                }
+                const _glabel = esc(_groupLabels[_group] || _group);
+                const _swAttr = _gWhen ? ` data-sw-when="${escAttr(JSON.stringify(_gWhen))}"` : '';
+                const _hdrHide = _gVisible ? '' : ' style="display:none"';
+                // Collapsible when the schema declares it (__group_collapsed__) or
+                // on the module pane. Every module-level section (Defaults /
+                // Execution / any explicit group) starts COLLAPSED so the module
+                // view is compact; expand on click. Item groups stay plain unless
+                // declared collapsed.
+                const _startClosed = _groupCollapsed.includes(_group) || _isModuleLevel;
+                if (_startClosed || _isModuleLevel) {
+                    const _cid = 'grp_' + (pathPrefix + '_' + _group).replace(/\W/g, '_');
+                    h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
+                        <button type="button" class="btn btn-link p-0 border-0 text-decoration-none ss-section-title text-muted d-flex align-items-center gap-1${_startClosed ? ' collapsed' : ''}"
+                                data-bs-toggle="collapse" data-bs-target="#${_cid}" aria-expanded="${_startClosed ? 'false' : 'true'}">
+                            <i class="bi bi-chevron-down ss-section-caret" style="font-size:.7rem;transition:transform .15s"></i>${_glabel}</button>
+                    </div><div class="collapse${_startClosed ? '' : ' show'}" id="${_cid}">`;
+                    _openCollapseId = _cid;
+                } else {
+                    h += `<div class="sw-field ss-section-hdr"${_swAttr}${_hdrHide}>
+                        <small class="text-muted ss-section-title">${_glabel}</small>
+                    </div>`;
+                }
+            }
+            _curGroup = _group;
+        }
+
+        // Compute initial field visibility from current item data
+        let _visible = true;
+        if (_showWhen) {
+            for (const [ctrl, allowed] of Object.entries(_showWhen)) {
+                if (!Array.isArray(allowed) || !allowed.includes(obj[ctrl])) {
+                    _visible = false; break;
+                }
+            }
+        }
+        const _disp = _visible ? '' : ' style="display:none"';
+
+        // Credential picker: rendered once, right before the first credential
+        // field, sharing that field's show_when so it appears in the same context.
+        if (_collHasCred && !_credPickerDone && _credFieldNames.includes(k)) {
+            _credPickerDone = true;
+            const _cp = _renderCredPicker(pathPrefix, obj.cred_uid || '', _credSpec.type, target);
+            h += _showWhen
+                ? `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_cp}</div>`
+                : _cp;
+        }
+
+        let _inner = _showWhen
+            ? `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`
+            : _fhtml;
+        // Connection field of a host-capable module: wrap so it can be hidden
+        // when a host is bound (its value comes from the host then).
+        if (_hostCapable && _hostFields.includes(k)) {
+            const _hpDisp = _hostBound ? ' style="display:none"' : '';
+            _inner = `<div class="hostprof-field" data-hp-item="${escAttr(pathPrefix)}"${_hpDisp}>${_inner}</div>`;
+        }
+        // Credential field of a credential-capable module: hide when a
+        // credential is bound (its value comes from the credential then).
+        if (_collHasCred && _credFieldNames.includes(k)) {
+            const _cpDisp = _credBound ? ' style="display:none"' : '';
+            _inner = `<div class="credprof-field" data-cp-item="${escAttr(pathPrefix)}"${_cpDisp}>${_inner}</div>`;
+        }
+        h += _inner;
+    }
+    // Inject post-group HTML for the final group
+    if (_curGroup !== null && _postGroupHtml[_curGroup]) {
+        h += _postGroupHtml[_curGroup];
+    }
+    if (_openCollapseId) { h += '</div>'; }   // close the final collapsible group
+    return h;
+}

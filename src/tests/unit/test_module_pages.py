@@ -142,7 +142,7 @@ class TestLiveRefreshWithoutAForm:
             'label': 'Prod', 'cred_uid': 'cred-1', 'enabled': True, 'timeout': 30}}}}
 
     def _fill(self, config, stored=None):
-        from lib.core.modules import service as svc
+        from lib.core.modules import actions as svc
 
         class _WA:
             _secret_keys = frozenset()
@@ -150,7 +150,7 @@ class TestLiveRefreshWithoutAForm:
             def _load_modules(self):
                 return stored if stored is not None else {}
 
-        svc._fill_from_stored_item(_WA(), 'demo', config)
+        svc.fill_from_stored_item(_WA(), 'demo', config)
         return config
 
     def test_the_key_alone_is_enough(self):
@@ -173,12 +173,12 @@ class TestLiveRefreshWithoutAForm:
 
     def test_a_config_read_failure_is_not_fatal(self):
         """The action should still run on what the caller sent."""
-        from lib.core.modules import service as svc
+        from lib.core.modules import actions as svc
 
         class _Boom:
             def _load_modules(self):
                 raise RuntimeError('db down')
 
         cfg = {'_item_key': 'k1'}
-        svc._fill_from_stored_item(_Boom(), 'demo', cfg)
+        svc.fill_from_stored_item(_Boom(), 'demo', cfg)
         assert cfg == {'_item_key': 'k1'}
