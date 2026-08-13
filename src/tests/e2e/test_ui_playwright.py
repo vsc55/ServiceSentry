@@ -685,3 +685,124 @@ class TestTheSidebarFollowsTheModules:
         _ready(page)
         assert page.evaluate(
             "() => document.getElementById('nav-page-overview-li').style.display !== 'none'")
+
+
+class TestTheRestoreFormPicksTables:
+    """The advanced fold of the restore dialog, in a browser.
+
+    Read as text these guards say the markup is there and the request is shaped right; what no
+    amount of reading settles is whether the fold populates at all — it is built from an
+    endpoint, wired after the dialog is in the DOM, and its answer depends on which boxes a
+    person left ticked. The trap it is aimed at is the empty selection: `tables` absent means
+    "all of them" and `[]` means "none", so a fold nobody touched must send NO list.
+    """
+
+    NAME = 'e2e-restore'
+
+    def _copy(self, page):
+        """Take a copy through the panel's own API, as the form does, and wait for the job."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        job = page.evaluate("""async (name) => {
+            const res = await apiPost('/api/v1/backups',
+                {name, parts: ['core', 'history', 'audit', 'syslog'], secrets: true});
+            const id = (res.data || {}).job_id;
+            if (!id) return {error: 'no job id'};
+            for (let i = 0; i < 300; i++) {
+                const j = await apiGet(`/api/v1/backups/jobs/${id}`);
+                if (j && j.done) return j;
+                await new Promise(r => setTimeout(r, 100));
+            }
+            return {error: 'the job never finished'};
+        }""", self.NAME)
+        assert not job.get('error'), job
+        # `_backups` is what the dialog reads the copy out of, so the list has to be drawn
+        # before it is opened — exactly the order the section itself uses.
+        page.evaluate('async () => { await renderBackups(); }')
+
+    def _open(self, page):
+        self._copy(page)
+        page.evaluate('async (name) => { await openRestoreModal(name); }', self.NAME)
+        page.wait_for_selector('#backupModalBody details', timeout=10_000)
+
+    def test_the_fold_is_filled_from_the_archive(self, page):
+        """Not from a list in the template: the boxes are the tables the copy actually holds,
+        and `core` is decided by the rule the restore itself applies."""
+        self._open(page)
+        tables = page.evaluate("""() => Array.from(
+            document.querySelectorAll('[data-bk-table]')).map(el => el.dataset.bkTable)""")
+        assert 'users' in tables, tables
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_leaving_one_out_is_what_produces_a_list(self, page):
+        """The one that matters. An untouched fold asks for NO list, so an ordinary restore is
+        byte for byte the request it always was; leaving one box out is what produces a list,
+        and what stays in it is everything else — a picker that sent only the box somebody
+        clicked would restore one table and call it the selection."""
+        self._open(page)
+        assert page.evaluate('() => _bkChosenTables()') is None, \
+            'an untouched fold already asks for a narrowed restore'
+        left = page.evaluate("""() => {
+            const el = document.querySelector('[data-bk-table="users"]');
+            el.checked = false;
+            _bkTablePickChanged();
+            return _bkChosenTables();
+        }""")
+        assert isinstance(left, list) and 'users' not in left, left
+        assert len(left) > 0, 'leaving one table out emptied the whole selection'
+
+    def test_the_dialog_scrolls_instead_of_hiding_its_own_buttons(self, page):
+        """Reported from a screenshot: with the fold open the last group of tables sat under
+        the footer and the end of the list was unreachable.
+
+        Two scrollers for one form, and the outer one missing. The dialog is a flex column
+        with `overflow: hidden`, so a body that overflows is not a scrollbar — it is content
+        clipped behind the buttons — while the fold had a capped box of its own that hid where
+        the list ended. Exactly one scroller now, and it is the body.
+        """
+        # A short window on purpose, which is the reported case: the form is only too tall
+        # relative to the screen, and a full-height desktop viewport hides the whole bug.
+        page.set_viewport_size({'width': 1280, 'height': 520})
+        self._open(page)
+        # Open the fold — closed, its tables are in the DOM but laid out nowhere, and the
+        # dialog is the short one this bug never happened to.
+        page.evaluate("() => { document.querySelector('#backupModalBody details').open = true }")
+        box = page.evaluate("""() => {
+            const content = document.querySelector('#backupModal .modal-content');
+            const body = document.getElementById('backupModalBody');
+            const ok = document.getElementById('backupModalOk').getBoundingClientRect();
+            const inner = Array.from(body.querySelectorAll('*')).filter(el => {
+                const oy = getComputedStyle(el).overflowY;
+                return (oy === 'auto' || oy === 'scroll')
+                       && el.scrollHeight - el.clientHeight > 2;
+            }).length;
+            return {dialog: content.parentElement.className,
+                    over: Math.round(content.getBoundingClientRect().bottom
+                                     - window.innerHeight),
+                    okBelow: Math.round(ok.bottom - window.innerHeight),
+                    hidden: body.scrollHeight - body.clientHeight,
+                    scroller: getComputedStyle(body).overflowY, inner};
+        }""")
+        assert box['over'] <= 1, f'the dialog runs off the bottom of the window: {box}'
+        assert box['okBelow'] <= 1, f'the buttons are off screen: {box}'
+        assert box['hidden'] > 0, \
+            f'the form fits after all — this asserts nothing until it does not: {box}'
+        assert box['scroller'] in ('auto', 'scroll'), \
+            f'the body is not the scroller, so the overflow is clipped: {box}'
+        assert box['inner'] == 0, \
+            f'a second scrollbar inside the body hides where the list ends: {box}'
+
+    def test_a_part_that_is_not_ticked_dims_its_tables(self, page):
+        """Disabled rather than hidden: hiding it would make a tick above look like it had
+        cleared a choice made below."""
+        self._open(page)
+        state = page.evaluate("""() => {
+            const part = document.getElementById('bkRes_core');
+            part.checked = false;
+            part.dispatchEvent(new Event('change'));
+            const box = document.querySelector('[data-bk-table="users"]');
+            const group = document.querySelector('[data-bk-group="core"]');
+            return {disabled: box.disabled, dimmed: group.classList.contains('opacity-50'),
+                    shown: getComputedStyle(group).display !== 'none'};
+        }""")
+        assert state == {'disabled': True, 'dimmed': True, 'shown': True}, state

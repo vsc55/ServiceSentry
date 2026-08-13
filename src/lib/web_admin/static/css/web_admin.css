@@ -913,8 +913,15 @@
    `.modal-lg > .modal-content` is `resize: both` on purpose — these dialogs are meant to be
    dragged bigger — and a child with a fixed height defeats that: the box grows and the content
    stays put, leaving the empty half somebody reported. Only when large: the same modal also
-   shows a short form, which must keep its natural height. */
-#backupModal .modal-lg > .modal-content > .modal-body {
+   shows a short form, which must keep its natural height.
+
+   Not when the dialog asked to SCROLL (`.modal-dialog-scrollable`, the restore form with its
+   table fold open): that one is flowing content taller than the screen, and a body that hides
+   its overflow instead of scrolling it puts the end of the list underneath the buttons — the
+   generic `.modal-lg > .modal-content > .modal-body { overflow: auto }` above is exactly right
+   for it, and this rule's whole job is to turn that off. Same modal, two shapes — a filled
+   two-pane browser and a long form — and this is the line that tells them apart. */
+#backupModal .modal-lg:not(.modal-dialog-scrollable) > .modal-content > .modal-body {
     display: flex;
     flex-direction: column;
     overflow: hidden;

@@ -117,6 +117,66 @@ class TestTheRoundTrip:
         assert client.post('/api/v1/backups/nope/restore', json={}).status_code == 400
 
 
+class TestRestoringOnlyTheTablesYouChose:
+    """The advanced half of the restore form, through the app.
+
+    The service covers what happens to the rows; what only the app can answer is that the form
+    is offered the archive's real contents, that the narrower request reaches the job, and that
+    the log says which tables somebody asked for — the rowcounts say what came back, and only
+    the request says what was deliberately left alone.
+    """
+
+    def test_the_archive_says_what_it_holds_by_part(self, client):
+        _login(client)
+        _create(client)
+        res = client.get('/api/v1/backups/copia/tables')
+        assert res.status_code == 200
+        parts = res.get_json()['parts']
+        core = next(p for p in parts if p['id'] == 'core')
+        assert 'users' in [tb['name'] for tb in core['tables']]
+        assert all('rows' in tb for tb in core['tables'])
+
+    def test_a_copy_that_is_not_there_answers_404(self, client):
+        _login(client)
+        assert client.get('/api/v1/backups/nope/tables').status_code == 404
+
+    def test_only_the_named_tables_come_back(self, client, admin):
+        """A probe table beside `users`, so what is left alone is left alone visibly: it is in
+        the copy, it changed afterwards, and the restore must not touch it."""
+        _login(client)
+        con = admin._db_connector
+        con.execute('CREATE TABLE probe (v TEXT)')
+        con.execute("INSERT INTO probe (v) VALUES ('before')")
+        con.commit()
+        _create(client)
+        con.execute("UPDATE probe SET v='after'")
+        con.execute('DELETE FROM users')
+        con.commit()
+
+        job = _restore(client, 'copia', tables=['users'])
+        assert not job.get('error'), job
+        assert con.fetchone('SELECT COUNT(*) FROM users')[0] > 0
+        assert con.fetchone('SELECT v FROM probe')[0] == 'after'
+
+    def test_the_audit_line_says_which_tables_were_asked_for(self, client, admin):
+        _login(client)
+        _create(client)
+        _restore(client, 'copia', tables=['users'])
+        line = next(e for e in admin._audit_store.get_all(newest_first=True)
+                    if e.get('event') == 'backup_restored')
+        assert 'users' in str(line.get('detail') or line)
+
+    def test_an_ordinary_restore_still_says_all(self, client, admin):
+        """The request without a table list is the one it always was, and the log has to read
+        as such — "all" and a list of every table are not the same sentence."""
+        _login(client)
+        _create(client)
+        _restore(client, 'copia')
+        line = next(e for e in admin._audit_store.get_all(newest_first=True)
+                    if e.get('event') == 'backup_restored')
+        assert "'only_tables': 'all'" in str(line.get('detail') or line)
+
+
 class TestEachOneHasItsOwnPermission:
     """A viewer may see that copies exist and nothing else — not fetch one, not apply one."""
 
@@ -139,6 +199,11 @@ class TestEachOneHasItsOwnPermission:
         assert viewer.get('/api/v1/backups/x/download').status_code == 403
         assert viewer.post('/api/v1/backups/x/restore', json={}).status_code == 403
         assert viewer.delete('/api/v1/backups/x').status_code == 403
+
+    def test_the_table_catalogue_rides_on_the_listing_grant(self, viewer):
+        """`backup_view`, and no weaker: it adds the grouping, not the contents — every
+        manifest already travels with its table names and row counts in the list."""
+        assert viewer.get('/api/v1/backups/x/tables').status_code == 403
 
 
 class TestItIsAllAudited:
@@ -229,11 +294,12 @@ class TestTheScheduleTakesCopies:
         worth having."""
         import os
         import time
+        from lib.core.backup import archive as bk_archive
         from lib.core.backup import service as svc
         self._task(admin, 'diaria', every_hours=24, keep=1)
         self._task(admin, 'mensual', every_hours=720, keep=1)
         r = self._runner(admin)
-        root = svc.backups_dir(admin._var_dir)
+        root = bk_archive.backups_dir(admin._var_dir)
         for i in range(3):
             r.tick(now_ts=time.time() + i)
             for fn in os.listdir(root):           # age everything so the next tick is due

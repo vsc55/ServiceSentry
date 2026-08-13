@@ -357,8 +357,18 @@ function _openBackupModal(title, bodyHtml, okLabel, okVariant, onOk, size) {
     // The picker needs room — a two-pane file browser in a 500px dialog is two
     // columns of ellipsis. Set per opening, not once on the element, because the
     // same modal also shows a short form.
+    //
+    // `scroll` is wide AND the body scrolls, for a form that can be taller than the screen
+    // (the restore fold with thirty tables in it). It has to be the BODY: the dialog is a
+    // flex column with `overflow: hidden`, so a body that overflows is not a scrollbar, it is
+    // content clipped behind the footer — which is how the last group of tables and the
+    // buttons ended up on top of each other. And exactly ONE scroller: a capped box inside a
+    // scrolling body is two bars for one list, and the inner one hides where the end is.
     const dlg = document.querySelector('#backupModal .modal-dialog');
-    if (dlg) dlg.classList.toggle('modal-lg', size === 'lg');
+    if (dlg) {
+        dlg.classList.toggle('modal-lg', size === 'lg' || size === 'scroll');
+        dlg.classList.toggle('modal-dialog-scrollable', size === 'scroll');
+    }
     const el = document.getElementById('backupModal');
     const modal = bootstrap.Modal.getOrCreateInstance(el);
     // Replaced, not added to: reopening the modal must not leave the previous handler behind

@@ -7,21 +7,18 @@ Routes registered by this file:
     GET    /api/v1/backups                    List the copies on disk + the part catalogue
     GET    /api/v1/backups/browse             Sub-directories of ?path=, for the folder picker
     POST   /api/v1/backups/mkdir              Create a folder from the picker
-    GET    /api/v1/backups/tasks              List the scheduled tasks
-    PUT    /api/v1/backups/tasks              Create or update one
-    DELETE /api/v1/backups/tasks/<uid>        Delete one
-    POST   /api/v1/backups/tasks/preview      What a retention policy would keep / delete
-    GET    /api/v1/backups/profiles           List the shared retention profiles
-    PUT    /api/v1/backups/profiles           Create or update one
-    DELETE /api/v1/backups/profiles/<uid>     Delete one (refused while a task follows it)
-    POST   /api/v1/backups/tasks/<uid>/run    Start a run now, as the schedule would
     GET    /api/v1/backups/jobs/<job_id>      How that run is going
+    GET    /api/v1/backups/<name>/tables      What it holds, by part and table
     POST   /api/v1/backups/<name>/verify      Check it against its own checksums
     POST   /api/v1/backups/<name>/lock        Protect it from deletion, or stop protecting it
     POST   /api/v1/backups                    Start one, by hand (answers a job id)
     GET    /api/v1/backups/<name>/download    Download it
     POST   /api/v1/backups/<name>/restore     Start putting it back (answers a job id)
     DELETE /api/v1/backups/<name>             Delete it
+
+The SCHEDULE — tasks and retention profiles — lives in `routes_schedule.py` and is registered
+from here: it is its own decision with its own permission. This file is about archives; that
+one is about how often the install is protected.
 
 Every one of these is audited, download included: the archive holds the whole install, so
 "who took a copy off this machine, and when" is a question the log has to be able to answer.
@@ -32,8 +29,14 @@ import os
 from flask import jsonify, request, send_file, session
 
 from lib import __version__
-from lib.core.backup import schedule as backup_svc_sched
+from lib.core.backup import archive as backup_archive
+from lib.core.backup import folders as backup_folders
+from lib.core.backup import locks as backup_locks
+from lib.core.backup import parts as backup_parts
+from lib.core.backup import restore as backup_restore
+from lib.core.backup import routes_schedule
 from lib.core.backup import service as backup_svc
+from lib.core.backup import verify as backup_verify
 
 
 def register(app, wa):
@@ -42,10 +45,6 @@ def register(app, wa):
     download_req = wa._perm_required('backup_download')
     restore_req  = wa._perm_required('backup_restore')
     delete_req   = wa._perm_required('backup_delete')
-    # The schedule is a decision of its own: who says how often this install is protected and
-    # how long its copies are kept. It rode on create/delete, and those are about ARCHIVES —
-    # a task edited to run monthly destroys no file and quietly halves the protection.
-    schedule_req = wa._perm_required('backup_schedule')
     # Verifying is not reading the list: it walks every member of the archive and hashes it.
     verify_req   = wa._perm_required('backup_verify')
 
@@ -59,6 +58,9 @@ def register(app, wa):
         mount must not have to restart the panel, and a value captured at registration would
         write the next copy to the old path and go looking in the new one."""
         return str(getattr(wa, '_BACKUP_DIR', '') or '')
+
+    # The schedule's endpoints, handed the two helpers above rather than a second copy of them.
+    routes_schedule.register(app, wa, _var_dir, _backup_dir)
 
     @app.route('/api/v1/backups', methods=['GET'])
     @view_req
@@ -75,7 +77,7 @@ def register(app, wa):
         return jsonify({
             'ok': True,
             'backups': backup_svc.list_backups(_var_dir(), _backup_dir(), __version__),
-            'parts': backup_svc.parts_catalogue(session.get('lang') or wa._DEFAULT_LANG),
+            'parts': backup_parts.parts_catalogue(session.get('lang') or wa._DEFAULT_LANG),
             # What this install is, so the restore dialog can say which way the jump goes
             # instead of showing a build number the operator has to compare in their head.
             'version': __version__,
@@ -95,11 +97,11 @@ def register(app, wa):
         # the picker is opened to change a folder, and the folder in use is the one answer
         # that is always relevant. Falling back to var_dir when it does not exist yet keeps
         # the first open — before any copy has been taken — somewhere real.
-        configured = backup_svc.backups_dir(_var_dir(), _backup_dir())
+        configured = backup_archive.backups_dir(_var_dir(), _backup_dir())
         path = request.args.get('path', '')
         if not path:
             path = configured if os.path.isdir(configured) else _var_dir()
-        out = backup_svc.list_dirs(path)
+        out = backup_folders.list_dirs(path)
         # The folder the copies go to, travelling with every listing: the picker's left rail
         # offers a way back to it from wherever the operator has wandered, and computing it
         # there would mean the browser doing the `<var_dir>/backups` fallback a second time.
@@ -113,7 +115,7 @@ def register(app, wa):
         reason: whoever may point the setting at a path may already make the panel write
         there."""
         body = request.get_json(silent=True) or {}
-        res = backup_svc.make_dir(str(body.get('parent') or ''), str(body.get('name') or ''))
+        res = backup_folders.make_dir(str(body.get('parent') or ''), str(body.get('name') or ''))
         if not res.get('ok'):
             return jsonify({'ok': False, 'error': res.get('message', '')}), 400
         wa._audit('backup_dir_created', detail={'path': res['path']})
@@ -124,7 +126,7 @@ def register(app, wa):
     def api_create_backup():
         body = request.get_json(silent=True) or {}
         name = str(body.get('name') or '').strip()
-        if not backup_svc.valid_name(name):
+        if not backup_archive.valid_name(name):
             return jsonify({'ok': False, 'error': wa._t('backup_bad_name')}), 400
         parts = body.get('parts')
         # Started, not awaited — the same treatment the scheduled runs get, and for the same
@@ -139,226 +141,6 @@ def register(app, wa):
         )
         return jsonify({'ok': True, 'job_id': job_id})
 
-    @app.route('/api/v1/backups/tasks', methods=['GET'])
-    @view_req
-    def api_list_backup_tasks():
-        """The scheduled tasks. Normalised by the store, so the form and the scheduler read a
-        task the same way — a default applied in one of the two is how a task runs weekly on
-        the screen and daily on disk."""
-        store = getattr(wa, '_backup_tasks_store', None)
-        tasks = store.list_tasks() if store else []
-        profiles = _profiles()
-        return jsonify({
-            'ok': True,
-            'tasks': tasks,
-            # The rules that actually apply to each task, resolved by the same function the
-            # scheduler uses. A task following a profile carries two sets of numbers — its own
-            # and the profile's — and a screen that picked between them itself would be a
-            # retention screen guessing at what is about to be deleted.
-            'policies': {t.get('id'): {k: backup_svc_sched.with_profile(t, profiles).get(k, 0)
-                                       for k in backup_svc_sched.RETENTION_KEYS}
-                         for t in tasks},
-        })
-
-    def _profiles() -> list:
-        store = getattr(wa, '_backup_profiles_store', None)
-        return store.list_profiles() if store is not None else []
-
-    @app.route('/api/v1/backups/profiles', methods=['GET'])
-    @view_req
-    def api_list_backup_profiles():
-        """The shared retention profiles, and the starting points the editor offers.
-
-        `suggested` comes from the server for the same reason the part catalogue does: it is the
-        panel's opinion about how much history is worth keeping, and an opinion written into a
-        template is one the API cannot state and no test can read.
-        """
-        from lib.core.backup.profiles_store import SUGGESTED  # noqa: PLC0415
-        return jsonify({
-            'ok': True,
-            'profiles': _profiles(),
-            # How many tasks follow each one. Sent rather than counted in the browser because it
-            # is the sentence the editor needs before saving — "this changes 3 tasks" — and a
-            # count taken from a list the screen happens to be holding is a count that is right
-            # until somebody else adds a task.
-            'used_by': _profile_usage(),
-            'suggested': [{**s, 'label': wa._t(s['key'])} for s in SUGGESTED],
-        })
-
-    def _profile_usage() -> dict:
-        """`{profile_uid: [task name, …]}` — who would be affected by editing one."""
-        store = getattr(wa, '_backup_tasks_store', None)
-        out: dict = {}
-        for task in (store.list_tasks() if store else []):
-            uid = str(task.get('profile') or '')
-            if uid:
-                out.setdefault(uid, []).append(task.get('name', ''))
-        return out
-
-    @app.route('/api/v1/backups/profiles', methods=['PUT'])
-    @schedule_req
-    def api_save_backup_profile():
-        """Create or update a profile — `backup_schedule`, the same decision editing a task's
-        retention is, and now taken for every task that follows it at once."""
-        body = request.get_json(silent=True) or {}
-        name = str(body.get('name') or '').strip()
-        if not name:
-            return jsonify({'ok': False, 'error': wa._t('backup_profile_bad_name')}), 400
-        store = getattr(wa, '_backup_profiles_store', None)
-        if store is None:
-            return jsonify({'ok': False, 'error': wa._t('not_found')}), 404
-        uid_in = str(body.get('uid') or body.get('id') or '').strip()
-        # Merged over what is stored, not written from the body alone. A record is REPLACED by
-        # an upsert, so a caller that sent only a new name would leave the profile on today's
-        # defaults — silently changing how much history every task following it keeps. One task
-        # saved short is a mistake somebody can see; this one is invisible and multiplied.
-        current = next((p for p in _profiles() if p.get('id') == uid_in), {}) if uid_in else {}
-        doc = {
-            **{k: current[k] for k in backup_svc_sched.RETENTION_KEYS if k in current},
-            'id': uid_in or None,
-            'name': name,
-            **{k: body[k] for k in backup_svc_sched.RETENTION_KEYS if k in body},
-        }
-        doc = {k: v for k, v in doc.items() if v is not None}
-        uid = store.upsert(doc, actor=session.get('username', ''))
-        # The tasks it affects go in the line: a profile edited to keep four weeklies instead of
-        # eight halves the history of every task following it, and the log should not make
-        # somebody cross-reference which those were at the time.
-        wa._audit('backup_profile_saved',
-                  detail={'uid': uid, 'tasks': _profile_usage().get(uid, []),
-                          **{k: doc[k] for k in doc if k != 'id'}})
-        return jsonify({'ok': True, 'uid': uid})
-
-    @app.route('/api/v1/backups/profiles/<uid>', methods=['DELETE'])
-    @schedule_req
-    def api_delete_backup_profile(uid: str):
-        """Delete a profile — refused while a task still follows it.
-
-        The alternative was to let it go and have those tasks fall back to their own stored
-        numbers, which is what happens if a row disappears some other way. As an ANSWER to a
-        button, though, it is a silent change of policy on tasks nobody was looking at: the
-        deletion succeeds, the screen says nothing, and how much history three tasks keep is now
-        whatever they happened to hold before they were linked. Saying "three tasks follow this"
-        costs one more click and no surprises.
-        """
-        used = _profile_usage().get(uid, [])
-        if used:
-            return jsonify({'ok': False,
-                            'error': wa._t('backup_profile_in_use').replace(
-                                '{}', ', '.join(used))}), 409
-        store = getattr(wa, '_backup_profiles_store', None)
-        if store is None or not store.delete(uid):
-            return jsonify({'error': wa._t('not_found')}), 404
-        wa._audit('backup_profile_deleted', detail={'uid': uid})
-        return jsonify({'ok': True})
-
-    @app.route('/api/v1/backups/tasks', methods=['PUT'])
-    @schedule_req
-    def api_save_backup_task():
-        """Create or update a task — `backup_schedule`, which is the decision being made here:
-        not "may I take a copy" but "how often is this install copied, and how many kept".
-
-        The name is checked as the file-name component it becomes: a task called `../etc`
-        would otherwise steer where its own copies are written.
-        """
-        body = request.get_json(silent=True) or {}
-        name = str(body.get('name') or '').strip()
-        if not name or not backup_svc_sched.task_slug(name):
-            return jsonify({'ok': False, 'error': wa._t('backup_task_bad_name')}), 400
-        store = getattr(wa, '_backup_tasks_store', None)
-        if store is None:
-            return jsonify({'ok': False, 'error': wa._t('not_found')}), 404
-        # `id`, not `uid`: that is the key JsonDocStore splits a record on. Sending `uid`
-        # left the id absent, so every edit minted a new one and "save" quietly meant "add".
-        doc = {
-            'id': str(body.get('uid') or body.get('id') or '').strip() or None,
-            'name': name,
-            'enabled': bool(body.get('enabled', True)),
-            'mode': (str(body.get('mode') or '').strip()
-                     if str(body.get('mode') or '').strip() in backup_svc_sched.MODES
-                     else backup_svc_sched.MODE_INTERVAL),
-            'every_hours': body.get('every_hours', 24),
-            # Normalised HERE as well as in the store: a client that sent 'lunes' or [9] must
-            # not be able to store a day nothing will ever match, which is a task that looks
-            # scheduled and never runs.
-            'days': backup_svc_sched.normalise_days(body.get('days')),
-            'at': '%02d:%02d' % backup_svc_sched.parse_at(body.get('at')),
-            'parts': body.get('parts') if isinstance(body.get('parts'), list) else [],
-            'secrets': bool(body.get('secrets', True)),
-            # Retention, bucket by bucket. Only what the caller actually sent: a task saved by
-            # an older client keeps whatever it had rather than acquiring today's defaults —
-            # and `keep`, the single counter this replaced, is still accepted and still means
-            # "the newest N", because an API that was working must go on working.
-            **{k: body[k] for k in (*backup_svc_sched.RETENTION_KEYS, 'keep') if k in body},
-            # Which profile this task follows, '' meaning its own numbers. Only when the caller
-            # said something: absent must not read as "unlink", or a client that predates
-            # profiles would quietly detach every task it saves.
-            **({'profile': str(body.get('profile') or '').strip()} if 'profile' in body else {}),
-        }
-        doc = {k: v for k, v in doc.items() if v is not None}
-        uid = store.upsert(doc, actor=session.get('username', ''))
-        wa._audit('backup_task_saved', detail={'uid': uid, **{k: doc[k] for k in doc
-                                                              if k != 'id'}})
-        return jsonify({'ok': True, 'uid': uid})
-
-    @app.route('/api/v1/backups/tasks/preview', methods=['POST'])
-    @view_req
-    def api_preview_retention():
-        """What a retention policy would keep and delete, on the copies that exist today.
-
-        A bucket policy is not something anybody can evaluate in their head — "7 daily + 4
-        weekly + 6 monthly" against 200 files is exactly the kind of arithmetic people get
-        wrong and then trust. So the form shows it, computed by the SAME pure function the
-        scheduler uses: a preview worked out a second way would be a preview that lies on the
-        day it matters.
-
-        `backup_view`, and a POST because the policy travels in the body: it answers a
-        question about the copies already on disk and changes nothing.
-
-        A body naming a `profile` is resolved exactly as the scheduler resolves a task, so the
-        preview of a task that follows a profile shows the profile's rules and not the numbers
-        the form still has in its boxes.
-        """
-        body = request.get_json(silent=True) or {}
-        name = str(body.get('name') or '').strip()
-        rows = backup_svc.list_backups(_var_dir(), _backup_dir())
-        mine = [b for b in rows if backup_svc_sched.is_auto(b.get('name'), name)]
-        policy = backup_svc_sched.with_profile(body, _profiles())
-        doomed = set(backup_svc_sched.prune(rows, policy, name))
-        # The size is what makes a budget legible: "22 copies, 4.1 GiB" is the sentence the
-        # number in the box is trying to be.
-        kept = [b for b in mine if b['name'] not in doomed]
-        return jsonify({
-            'ok': True,
-            'total': len(mine),
-            'keep': [{'name': b['name'], 'mtime': b.get('mtime'), 'size': b.get('size'),
-                      'size_h': b.get('size_h'), 'status': b.get('status')} for b in kept],
-            'delete': [{'name': b['name'], 'mtime': b.get('mtime'), 'size': b.get('size'),
-                        'size_h': b.get('size_h'), 'status': b.get('status')}
-                       for b in mine if b['name'] in doomed],
-            'keep_bytes': sum(int(b.get('size') or 0) for b in kept),
-        })
-
-    @app.route('/api/v1/backups/tasks/<uid>/run', methods=['POST'])
-    @create_req
-    def api_run_backup_task(uid: str):
-        """Run a task now, through the scheduler's own path.
-
-        Not the generic create: that would produce a copy the task does not own — outside its
-        retention counter and not the thing somebody pressing "run" asked to try.
-        """
-        store = getattr(wa, '_backup_tasks_store', None)
-        task = next((t for t in (store.list_tasks() if store else []) if t.get('id') == uid),
-                    None)
-        if task is None:
-            return jsonify({'error': wa._t('not_found')}), 404
-        # Started, not awaited. A copy of a large install takes minutes — the syslog table
-        # alone is six figures of rows — and a request held open that long is one a browser or
-        # a reverse proxy eventually gives up on, leaving the operator unable to tell whether
-        # it worked. The browser polls the job id instead, the same shape the MIB compile uses.
-        from lib.core.backup.runner import BackupRunner  # noqa: PLC0415
-        return jsonify({'ok': True, 'job_id': BackupRunner(wa).start_run(task)})
-
     @app.route('/api/v1/backups/jobs/<job_id>', methods=['GET'])
     @view_req
     def api_backup_job(job_id: str):
@@ -368,25 +150,11 @@ def register(app, wa):
         memory, so one started before a restart is genuinely gone and the browser should stop
         asking rather than wait for an answer that will never come.
         """
-        from lib.core.backup.runner import job_status  # noqa: PLC0415
+        from lib.core.backup.jobs import job_status  # noqa: PLC0415
         job = job_status(job_id)
         if job is None:
             return jsonify({'error': wa._t('not_found')}), 404
         return jsonify({'ok': True, **job})
-
-    @app.route('/api/v1/backups/tasks/<uid>', methods=['DELETE'])
-    @schedule_req
-    def api_delete_backup_task(uid: str):
-        """Delete a task — the schedule's permission and not `backup_delete`, which is about
-        destroying archives. This destroys none; it stops new ones being made."""
-        store = getattr(wa, '_backup_tasks_store', None)
-        if store is None or not store.delete(uid):
-            return jsonify({'error': wa._t('not_found')}), 404
-        # The copies it already took are NOT deleted with it: they are backups, and the task
-        # was only the reason they exist. Retention stops applying to them, which is the
-        # honest consequence of removing the thing that was counting.
-        wa._audit('backup_task_deleted', detail={'uid': uid})
-        return jsonify({'ok': True})
 
     @app.route('/api/v1/backups/<name>/download', methods=['GET'])
     @download_req
@@ -400,6 +168,27 @@ def register(app, wa):
         return send_file(stream, mimetype='application/zip', as_attachment=True,
                          download_name=f'{name}.zip')
 
+    @app.route('/api/v1/backups/<name>/tables', methods=['GET'])
+    @view_req
+    def api_backup_tables(name: str):
+        """What one copy holds, grouped by part — what the restore form's advanced half offers.
+
+        `backup_view`, which is what the listing already grants: every manifest travels with
+        its `tables` map, so the names and the row counts are on screen before this is asked
+        for. What this adds is the GROUPING, and the reason it is a route rather than a few
+        lines of JavaScript is that `core` means "every table nobody else claimed" — a rule
+        that already decides what a copy holds and what a restore applies, and must not get a
+        third implementation in the browser.
+
+        Read when the advanced panel is opened, not with the list: it opens one archive, and
+        doing it for every copy on the shelf would make drawing the section pay for a fold
+        most people never unfold.
+        """
+        res = backup_restore.archive_contents(_var_dir(), name, _backup_dir())
+        if not res.get('ok'):
+            return jsonify({'ok': False, 'error': res.get('message', '')}), 404
+        return jsonify(res)
+
     @app.route('/api/v1/backups/<name>/verify', methods=['POST'])
     @verify_req
     def api_verify_backup(name: str):
@@ -410,7 +199,7 @@ def register(app, wa):
         it, which is minutes of disk and CPU that anybody able to see the section could
         otherwise start, as often as they liked.
         """
-        res = backup_svc.verify_backup(_var_dir(), name, _backup_dir())
+        res = backup_verify.verify_backup(_var_dir(), name, _backup_dir())
         if 'message' in res:
             return jsonify({'ok': False, 'error': res['message']}), 404
         wa._audit('backup_verified', detail={'name': name, 'ok': res['ok'],
@@ -423,6 +212,12 @@ def register(app, wa):
     def api_restore_backup(name: str):
         body = request.get_json(silent=True) or {}
         parts = body.get('parts')
+        # The advanced half: named tables inside those parts. Absent means "all of them", which
+        # is every caller that predates this — and an empty LIST means none, which the service
+        # honours rather than reading as "everything". A client that sends `tables: []` has
+        # asked for no table at all, and rewriting the whole install for it would be the one
+        # mistake this endpoint cannot make.
+        tables = body.get('tables')
         # Asked here and not inside the job: "there is no such copy" is an answer to THIS
         # request, and finding it out on a thread would put a progress bar on screen for
         # something that was never going to happen. Audited all the same — an attempt to
@@ -439,6 +234,7 @@ def register(app, wa):
         from lib.core.backup.runner import BackupRunner  # noqa: PLC0415
         job_id = BackupRunner(wa).start_restore(
             name, parts, session.get('username', ''), request.remote_addr or '',
+            tables=tables if isinstance(tables, list) else None,
             # Every store reads through the connector, so the rows are already the new ones —
             # but anything cached in this process is not. Dropped as soon as the restore
             # worked rather than left for the next request to notice, which is how a restore
@@ -463,9 +259,9 @@ def register(app, wa):
         """
         body = request.get_json(silent=True) or {}
         locked = bool(body.get('locked', True))
-        res = backup_svc.set_lock(_var_dir(), name, locked,
-                                  actor=session.get('username', ''),
-                                  backup_dir=_backup_dir())
+        res = backup_locks.set_lock(_var_dir(), name, locked,
+                                    actor=session.get('username', ''),
+                                    backup_dir=_backup_dir())
         if not res.get('ok'):
             return jsonify({'ok': False, 'error': res.get('message', '')}), 400
         # Both directions audited under one key: the interesting case is somebody removing a
@@ -480,7 +276,7 @@ def register(app, wa):
         # Answered before the attempt so the refusal can say WHY. `delete_backup` refuses a
         # locked copy on its own — that is the guard that holds for every caller — but it can
         # only answer False, and "not found" would be a lie about a file that is right there.
-        if backup_svc.is_locked(_var_dir(), name, _backup_dir()):
+        if backup_locks.is_locked(_var_dir(), name, _backup_dir()):
             return jsonify({'ok': False, 'error': wa._t('backup_locked_refused')}), 409
         if not backup_svc.delete_backup(_var_dir(), name, _backup_dir()):
             return jsonify({'error': wa._t('not_found')}), 404

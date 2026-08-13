@@ -8,6 +8,98 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.66] - 2026-08-13
+
+### Added
+- **A restore can go table by table.** The form offered the parts a copy is made of — a curated
+  grouping that answers the ordinary question and cannot answer this one: a bad import touched
+  one table, and everything else on the install has moved on since the copy was taken. Putting
+  the whole part back would roll the rest of it with it.
+  - **An "advanced" fold** under the parts, with a group per part and a checkbox per table,
+    each carrying its row count. Everything starts ticked, so opening it and changing nothing
+    restores exactly what the parts above describe.
+  - **Finer, not safer, and it says so.** What you leave out keeps whatever it holds today, and
+    rows that point at it can end up pointing at nothing — restoring `hosts` without
+    `credentials` is a decision, not an accident. The warning is inside the fold, where the
+    choice is made.
+  - **`tables` absent means all of them; `tables: []` means none.** Reading the empty list as
+    "everything" would rewrite the whole install for a caller who asked for nothing, and the
+    form never sends a list at all unless something was actually left out — an ordinary restore
+    is byte for byte the request it always was.
+  - **A table left out is never emptied.** A restore empties a table before refilling it;
+    one that was not chosen is not touched, because emptied-and-not-refilled is the worst
+    outcome available here.
+  - **The parts still bound it.** Naming a table of a part that is not ticked does not smuggle
+    it back in: the two narrow the same selection rather than competing for it.
+- **`GET /api/v1/backups/<name>/tables`** — what one copy holds, grouped by part, behind
+  `backup_view`. The grouping is the server's because `core` means "every table nobody else
+  claimed", the rule that already decides what a copy holds and what a restore applies; a
+  second implementation in the browser would be right until the day a part is added.
+- **The restore dialog scrolls its body** (`modal-dialog-scrollable`, a third size for
+  `_openBackupModal`). Reported from a screenshot: with the fold open the last group of tables
+  sat under the footer and the end of the list could not be reached. Two scrollers for one
+  form and the outer one missing — the dialog is a flex column with `overflow: hidden`, so a
+  body that overflows is not a scrollbar but content clipped behind the buttons, while the fold
+  had a capped box of its own that hid where the list ended. Exactly one scroller now, and the
+  picker's `#backupModal` rule — which turns the scrolling body off so a two-pane browser can
+  fill it — is scoped `:not(.modal-dialog-scrollable)`, because it is the same modal in its
+  other shape.
+
+### Changed
+- **A hand-picked restore is logged as one.** The first line rises to warning and names the
+  tables, the audit entry carries `only_tables` (`all` when nothing was narrowed), and the
+  report afterwards says the rest was left as it is — "148 rows in 9 tables" reads as a full
+  restore unless something says otherwise, and "why is half this install older than the other
+  half" is asked months later.
+
+### Changed
+- **`lib/core/backup/` is one file per concept.** `service.py` had reached 1182 lines and was
+  the largest module in `lib/core` — a domain describing itself inside one file. It is now the
+  domain it always described, and the seams were already written into its section banners:
+  - `archive.py` — where a copy lives and how it is laid out, plus how a value goes in and
+    comes back. The bottom of the package; it imports no sibling, deliberately.
+  - `parts.py` — what a copy can hold and which tables each part means. The vocabulary both
+    directions read, so `core` ("every table nobody else claimed") is decided once.
+  - `create.py` / `restore.py` — the two directions. `verify.py` — a copy against its own
+    checksums, which is also its own permission. `locks.py` — the `.lock` sidecar protocol.
+  - `service.py` — what is left is the shelf: which copies exist, how big, from which build,
+    and removing one. 152 lines.
+  - `folders.py` — the directory picker behind the backup-dir SETTING. It opens no archive,
+    reads no manifest, touches no connector and its routes are gated on `config_edit`: it was
+    never backup code, and it was 113 lines of a file about backups.
+  - `jobs.py` — the copies and restores somebody is standing there waiting for, out of
+    `runner.py`, whose docstring is entirely about a thread, a tick and a lease. Half of it
+    was neither.
+  - `routes_schedule.py` — tasks and retention profiles, which are their own decision with
+    their own permission (`backup_schedule`). `routes.py` is about archives.
+  - `lib/core/backup/__init__.py` now carries the map, so the next reader does not grep.
+- **Three dead helpers removed** — `_lock_path`, `_tables_in_archive` and `_module_part` had
+  no caller at all.
+- The helpers that cross a module boundary lost their leading underscore (`archive_path`,
+  `read_lock`, `file_sha256`, `clean_cell`/`restore_cell`, `tables_by_part`, `part_ids`,
+  `DB_DIR`/`FILES_DIR`/`PARTS_PREFIX`/`INTERNAL_TABLES`): a name imported by four modules is
+  not private, and pretending otherwise is how a "private" helper ends up with four callers.
+- `member_tables` moved the `db/hosts.json` → `hosts` translation into `archive.py`, so the
+  part grouping never has to know the archive's own layout.
+
+### Tests
+- **The fold is driven in a browser**, not only read as text: it is built from an endpoint and
+  wired after the dialog is in the DOM, so whether it populates at all is not something reading
+  the template can settle. A copy is taken through the panel's own API, the dialog is opened,
+  and the four things only a browser knows are asked — the boxes are the tables the archive
+  holds, an untouched fold asks for no list, leaving one out produces the list with everything
+  else in it, and unticking a part dims its group instead of hiding it.
+- **A geometry guard for the dialog itself**, measured in a deliberately short window (1280×520
+  — the form is only too tall *relative to the screen*, and a desktop viewport hides the whole
+  bug): something has to overflow, the body has to be what scrolls, nothing inside it may
+  scroll as well, and the buttons have to stay on screen. Validated by putting the CSS back the
+  way it was and watching it go red.
+
+### Docs
+- `explica-backup.md` gains *Restaurar solo unas tablas*: the three meanings of the `tables`
+  field, why finer is not safer, and where the choice shows up afterwards. The restore
+  flowchart and the audit table follow.
+
 ## [0.0.1+build.65] - 2026-08-13
 
 ### Added

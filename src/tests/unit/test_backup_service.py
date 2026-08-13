@@ -21,6 +21,13 @@ import zipfile
 
 import pytest
 
+from lib.core.backup import archive as bk_archive
+from lib.core.backup import create as bk_create
+from lib.core.backup import folders as bk_folders
+from lib.core.backup import locks as bk_locks
+from lib.core.backup import parts as bk_parts
+from lib.core.backup import restore as bk_restore
+from lib.core.backup import verify as bk_verify
 from lib.core.backup import service as svc
 from lib.db.sqlite import SQLiteConnector
 from lib.db.schema import Column, TableSpec
@@ -50,8 +57,8 @@ def db(tmp_path):
 def _make(db, tmp_path, **kw):
     kw.setdefault('parts', ['core'])
     kw.setdefault('include_secrets', True)
-    return svc.create_backup(db, kw.pop('name', 'copia'), var_dir=str(tmp_path),
-                             config_dir=str(tmp_path), **kw)
+    return bk_create.create_backup(db, kw.pop('name', 'copia'), var_dir=str(tmp_path),
+                                   config_dir=str(tmp_path), **kw)
 
 
 class TestWhatGoesIn:
@@ -88,14 +95,14 @@ class TestWhatGoesIn:
             def list_tables():
                 return ['hosts', 'sqlite_sequence', 'sqlite_stat1', 'sqlite_stat4']
 
-        assert svc._tables_for(_Stub(), {'core'}) == ['hosts']
+        assert bk_parts.tables_for(_Stub(), {'core'}) == ['hosts']
 
     def test_the_manifest_is_written_last(self, db, tmp_path):
         """An archive interrupted half way has no manifest at all, so `read_manifest` refuses
         it instead of reporting a copy that holds less than it claims."""
         _make(db, tmp_path)
         with zipfile.ZipFile(os.path.join(str(tmp_path), 'backups', 'copia.zip')) as zf:
-            assert zf.namelist()[-1] == svc.MANIFEST_NAME
+            assert zf.namelist()[-1] == bk_archive.MANIFEST_NAME
 
 
 class TestSecrets:
@@ -136,7 +143,7 @@ class TestPuttingItBack:
         _make(db, tmp_path)
         db.execute("DELETE FROM hosts")
         db.commit()
-        out = svc.restore_backup(db, str(tmp_path), 'copia')
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok'], out.get('message')
         assert db.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
 
@@ -146,7 +153,7 @@ class TestPuttingItBack:
         _make(db, tmp_path)
         db.execute("INSERT INTO hosts (uid, name, address) VALUES ('h2','LATER','10.0.0.2')")
         db.commit()
-        svc.restore_backup(db, str(tmp_path), 'copia')
+        bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert [r[0] for r in db.fetchall('SELECT uid FROM hosts')] == ['h1']
 
     def test_restoring_one_part_leaves_the_others_alone(self, db, tmp_path):
@@ -154,7 +161,7 @@ class TestPuttingItBack:
         db.execute("DELETE FROM hosts")
         db.execute("DELETE FROM syslog")
         db.commit()
-        svc.restore_backup(db, str(tmp_path), 'copia', parts=['syslog'])
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', parts=['syslog'])
         assert db.fetchone('SELECT COUNT(*) FROM syslog')[0] == 1
         assert db.fetchone('SELECT COUNT(*) FROM hosts')[0] == 0
 
@@ -165,7 +172,7 @@ class TestPuttingItBack:
         db.execute('DROP TABLE hosts')
         db.reconcile_table(_spec('hosts', ['uid', 'name']))     # `address` is gone
         db.commit()
-        out = svc.restore_backup(db, str(tmp_path), 'copia')
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok'], out.get('message')
         assert db.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
 
@@ -174,17 +181,17 @@ class TestPuttingItBack:
         path = os.path.join(str(tmp_path), 'backups', 'copia.zip')
         with zipfile.ZipFile(path) as zf:
             members = {n: zf.read(n) for n in zf.namelist()}
-        man = json.loads(members[svc.MANIFEST_NAME])
-        man['format'] = svc.FORMAT + 1
-        members[svc.MANIFEST_NAME] = json.dumps(man).encode()
+        man = json.loads(members[bk_archive.MANIFEST_NAME])
+        man['format'] = bk_archive.FORMAT + 1
+        members[bk_archive.MANIFEST_NAME] = json.dumps(man).encode()
         with zipfile.ZipFile(path, 'w') as zf:
             for n, b in members.items():
                 zf.writestr(n, b)
-        out = svc.restore_backup(db, str(tmp_path), 'copia')
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok'] is False and 'newer' in out['message']
 
     def test_an_unknown_name_is_an_answer_not_a_crash(self, db, tmp_path):
-        assert svc.restore_backup(db, str(tmp_path), 'nope')['ok'] is False
+        assert bk_restore.restore_backup(db, str(tmp_path), 'nope')['ok'] is False
 
 
 class TestTheNameIsAFilename:
@@ -193,7 +200,7 @@ class TestTheNameIsAFilename:
 
     @pytest.mark.parametrize('bad', ['../etc/passwd', 'a/b', 'a\\b', '', '.hidden', 'x' * 65])
     def test_a_name_that_could_escape_is_refused(self, bad):
-        assert svc.valid_name(bad) is False
+        assert bk_archive.valid_name(bad) is False
 
     def test_creating_under_a_bad_name_writes_nothing(self, db, tmp_path):
         out = _make(db, tmp_path, name='../escapado')
@@ -241,30 +248,30 @@ class TestACopyThatStays:
         copy being carried to another machine — and so nothing can claim a copy is protected
         after somebody deleted the file."""
         _make(db, tmp_path)
-        assert svc.set_lock(str(tmp_path), 'copia', True, actor='ana')['ok'] is True
+        assert bk_locks.set_lock(str(tmp_path), 'copia', True, actor='ana')['ok'] is True
         assert os.path.isfile(os.path.join(self._root(tmp_path), 'copia.zip.lock'))
         b = svc.list_backups(str(tmp_path))[0]
         assert b['locked'] is True and b['lock_by'] == 'ana' and b['lock_at']
 
     def test_locking_something_that_is_not_there_is_an_answer(self, tmp_path):
-        assert svc.set_lock(str(tmp_path), 'fantasma', True)['ok'] is False
+        assert bk_locks.set_lock(str(tmp_path), 'fantasma', True)['ok'] is False
 
     def test_a_locked_copy_is_not_deleted_even_by_the_service(self, db, tmp_path):
         """A lock only the route honoured would protect nothing the day some other caller works
         out the doomed list its own way."""
         _make(db, tmp_path)
-        svc.set_lock(str(tmp_path), 'copia', True)
+        bk_locks.set_lock(str(tmp_path), 'copia', True)
         assert svc.delete_backup(str(tmp_path), 'copia') is False
         assert svc.list_backups(str(tmp_path))[0]['name'] == 'copia'
-        svc.set_lock(str(tmp_path), 'copia', False)
+        bk_locks.set_lock(str(tmp_path), 'copia', False)
         assert svc.delete_backup(str(tmp_path), 'copia') is True
 
     def test_the_markers_do_not_outlive_the_archive(self, db, tmp_path):
         """A `.lock` left behind is the dangerous half: a later copy taking the same name would
         be born protected, never pruned, and nothing on screen would explain why."""
         _make(db, tmp_path)
-        svc.set_lock(str(tmp_path), 'copia', True)
-        svc.set_lock(str(tmp_path), 'copia', False)
+        bk_locks.set_lock(str(tmp_path), 'copia', True)
+        bk_locks.set_lock(str(tmp_path), 'copia', False)
         assert svc.delete_backup(str(tmp_path), 'copia') is True
         assert os.listdir(self._root(tmp_path)) == []
 
@@ -292,8 +299,7 @@ class TestTheDriveListIsNotProbed:
     def _roots_src() -> str:
         import io as _io
         import os as _os
-        src = _io.open(_os.path.join(_os.path.dirname(_os.path.abspath(svc.__file__)),
-                                     'service.py'), encoding='utf-8').read()
+        src = _io.open(_os.path.abspath(bk_folders.__file__), encoding='utf-8').read()
         return src[src.index('def _roots()'):]
 
     def test_it_asks_the_kernel_on_windows(self):
@@ -319,19 +325,19 @@ class TestTheDriveListIsNotProbed:
     def test_it_is_cached(self):
         """A drive appearing is not something to rescan for on every click, and the picker
         takes a typed path regardless."""
-        svc._ROOTS_CACHE = []
-        first = svc._roots()
-        svc._ROOTS_CACHE = ['SENTINEL']
-        assert svc._roots() == ['SENTINEL'], 'the cache is not consulted'
-        svc._ROOTS_CACHE = list(first)
+        bk_folders._ROOTS_CACHE = []
+        first = bk_folders._roots()
+        bk_folders._ROOTS_CACHE = ['SENTINEL']
+        assert bk_folders._roots() == ['SENTINEL'], 'the cache is not consulted'
+        bk_folders._ROOTS_CACHE = list(first)
 
     def test_the_caller_cannot_corrupt_the_cache(self):
         """It hands back a copy: a caller that appended to the returned list would grow the
         cached roots on every request."""
-        svc._ROOTS_CACHE = ['SENTINEL']
-        svc._roots().append('OTRA')
-        assert svc._roots() == ['SENTINEL']
-        svc._ROOTS_CACHE = []
+        bk_folders._ROOTS_CACHE = ['SENTINEL']
+        bk_folders._roots().append('OTRA')
+        assert bk_folders._roots() == ['SENTINEL']
+        bk_folders._ROOTS_CACHE = []
 
 
 class TestACopyKnowsWhetherItWorked:
@@ -349,9 +355,9 @@ class TestACopyKnowsWhetherItWorked:
     def test_a_part_that_produced_nothing_is_not_ok(self, db, tmp_path):
         """`config_file` asked for and absent. Writing the copy anyway and calling it complete
         is how a restore finds out at the worst moment."""
-        res = svc.create_backup(db, 'sincfg', var_dir=str(tmp_path),
-                                config_dir=str(tmp_path / 'no-such-dir'),
-                                parts=['core', 'config_file'], include_secrets=True)
+        res = bk_create.create_backup(db, 'sincfg', var_dir=str(tmp_path),
+                                      config_dir=str(tmp_path / 'no-such-dir'),
+                                      parts=['core', 'config_file'], include_secrets=True)
         man = res['manifest']
         assert man['status'] == 'partial'
         bad = [s for s in man['steps'] if not s['ok']]
@@ -360,7 +366,7 @@ class TestACopyKnowsWhetherItWorked:
 
     def test_the_steps_are_per_part_not_per_table(self):
         """The part is the unit somebody ticked; the table is how it gets written."""
-        parts = {p['id'] for p in svc.parts_catalogue()}
+        parts = {p['id'] for p in bk_parts.parts_catalogue()}
         assert 'core' in parts and 'syslog' in parts
 
 
@@ -383,7 +389,7 @@ class TestCheckingACopy:
 
     def test_a_good_copy_verifies(self, db, tmp_path):
         _make(db, tmp_path)
-        out = svc.verify_backup(str(tmp_path), 'copia')
+        out = bk_verify.verify_backup(str(tmp_path), 'copia')
         assert out['ok'] is True and out['file'] == 'ok' and out['bad'] == []
 
     def test_a_tampered_member_is_caught(self, db, tmp_path):
@@ -396,7 +402,7 @@ class TestCheckingACopy:
         with zipfile.ZipFile(path, 'w') as zf:
             for n, b in members.items():
                 zf.writestr(n, b)
-        out = svc.verify_backup(str(tmp_path), 'copia')
+        out = bk_verify.verify_backup(str(tmp_path), 'copia')
         assert out['ok'] is False
         assert [b['member'] for b in out['bad']] == ['db/hosts.json']
 
@@ -405,18 +411,18 @@ class TestCheckingACopy:
         path = os.path.join(str(tmp_path), 'backups', 'copia.zip')
         with open(path, 'ab') as fh:
             fh.write(b'rubbish')
-        assert svc.verify_backup(str(tmp_path), 'copia')['file'] == 'bad'
+        assert bk_verify.verify_backup(str(tmp_path), 'copia')['file'] == 'bad'
 
     def test_a_missing_sidecar_is_reported_not_failed(self, db, tmp_path):
         """Copies written before checksums existed have none, and calling those corrupt would
         be the check lying."""
         _make(db, tmp_path)
         os.remove(os.path.join(str(tmp_path), 'backups', 'copia.zip.sha256'))
-        out = svc.verify_backup(str(tmp_path), 'copia')
+        out = bk_verify.verify_backup(str(tmp_path), 'copia')
         assert out['file'] == 'missing' and out['ok'] is True
 
     def test_verifying_something_that_is_not_there(self, db, tmp_path):
-        assert svc.verify_backup(str(tmp_path), 'nope')['ok'] is False
+        assert bk_verify.verify_backup(str(tmp_path), 'nope')['ok'] is False
 
 
 class TestRestoringACopyFromAnotherVersion:
@@ -450,7 +456,7 @@ class TestRestoringACopyFromAnotherVersion:
         db.execute('DROP TABLE hosts')
         db.reconcile_table(_spec('hosts', ['uid', 'name']))     # `address` is gone
         db.commit()
-        out = svc.restore_backup(db, str(tmp_path), 'copia')
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok']
         assert out['skipped']['hosts'] == {'columns': ['address']}
         assert out['tables']['hosts'] == 1, 'the rest of the row still went in'
@@ -461,20 +467,20 @@ class TestRestoringACopyFromAnotherVersion:
         _make(db, tmp_path)
         db.execute('DROP TABLE credentials')
         db.commit()
-        out = svc.restore_backup(db, str(tmp_path), 'copia')
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['skipped']['credentials'] == {'missing': True, 'rows': 1}
 
     def test_nothing_skipped_when_the_schema_matches(self, db, tmp_path):
         """Empty is the normal answer; anything in it is the difference between "restored" and
         "restored, and here is what did not survive the trip"."""
         _make(db, tmp_path)
-        assert svc.restore_backup(db, str(tmp_path), 'copia')['skipped'] == {}
+        assert bk_restore.restore_backup(db, str(tmp_path), 'copia')['skipped'] == {}
 
     def test_the_result_names_the_build_that_made_it(self, db, tmp_path):
         """So the log can say where the rows came from, months after the answer on screen is
         gone."""
         _make(db, tmp_path, app_version='0.0.1+build.40')
-        assert svc.restore_backup(db, str(tmp_path), 'copia')['app_version'] \
+        assert bk_restore.restore_backup(db, str(tmp_path), 'copia')['app_version'] \
             == '0.0.1+build.40'
 
 
@@ -485,8 +491,8 @@ class TestARestoreSaysWhereItIs:
     def test_it_reports_every_step(self, db, tmp_path):
         _make(db, tmp_path, parts=['core', 'config_file'])
         seen = []
-        svc.restore_backup(db, str(tmp_path), 'copia', config_dir=str(tmp_path),
-                           progress_cb=seen.append)
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', config_dir=str(tmp_path),
+                                  progress_cb=seen.append)
         assert seen, 'nothing to draw a bar against'
         assert seen[0]['step'] == 1 and seen[-1]['step'] == seen[-1]['total']
         assert 'config.json' in [s['table'] for s in seen], 'only the tables are counted'
@@ -495,7 +501,7 @@ class TestARestoreSaysWhereItIs:
         """One shape means one dialog: the two are the same wait to whoever is watching."""
         _make(db, tmp_path)
         seen = []
-        svc.restore_backup(db, str(tmp_path), 'copia', progress_cb=seen.append)
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', progress_cb=seen.append)
         assert set(seen[0]) == {'step', 'total', 'table', 'steps'}
 
     def test_a_broken_reporter_does_not_lose_the_restore(self, db, tmp_path):
@@ -506,7 +512,7 @@ class TestARestoreSaysWhereItIs:
         def _boom(_):
             raise RuntimeError('the screen went away')
 
-        assert svc.restore_backup(db, str(tmp_path), 'copia', progress_cb=_boom)['ok']
+        assert bk_restore.restore_backup(db, str(tmp_path), 'copia', progress_cb=_boom)['ok']
 
     def test_a_copy_that_is_not_there_is_answered_not_started(self, tmp_path):
         assert svc.backup_exists(str(tmp_path), 'nope') is False
@@ -553,7 +559,7 @@ class TestItSaysWhatItIsDoingOnTheLog:
     def test_a_restore_names_the_copy_and_the_build_that_made_it(self, db, tmp_path, capsys):
         _make(db, tmp_path, app_version='0.0.1+build.40')
         self._lines(capsys)
-        svc.restore_backup(db, str(tmp_path), 'copia')
+        bk_restore.restore_backup(db, str(tmp_path), 'copia')
         out = '\n'.join(self._lines(capsys))
         assert "restore >> 'copia'" in out and '0.0.1+build.40' in out
         assert 'done,' in out
@@ -565,10 +571,20 @@ class TestItSaysWhatItIsDoingOnTheLog:
         db.execute('DROP TABLE credentials')
         db.commit()
         self._lines(capsys)
-        svc.restore_backup(db, str(tmp_path), 'copia')
+        bk_restore.restore_backup(db, str(tmp_path), 'copia')
         out = '\n'.join(self._lines(capsys))
         assert 'credentials' in out and 'table is gone' in out
         assert 'WARNING' in out
+
+    def test_a_hand_picked_restore_names_its_tables_and_is_a_warning(self, db, tmp_path,
+                                                                     capsys):
+        """What was left alone was left alone on purpose, and this is where somebody works out
+        months later why half the install is older than the other half."""
+        _make(db, tmp_path)
+        self._lines(capsys)
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        line = next(ln for ln in self._lines(capsys) if 'tables=' in ln)
+        assert "tables=['hosts']" in line and 'WARNING' in line
 
 
 class TestARestoreTicksOffTheSameChecklist:
@@ -579,13 +595,13 @@ class TestARestoreTicksOffTheSameChecklist:
     def test_every_part_gets_an_entry(self, db, tmp_path):
         (tmp_path / 'config.json').write_text('{}', encoding='utf-8')
         _make(db, tmp_path, parts=['core', 'config_file', 'syslog'])
-        out = svc.restore_backup(db, str(tmp_path), 'copia', config_dir=str(tmp_path))
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', config_dir=str(tmp_path))
         assert {s['part'] for s in out['steps']} == {'core', 'config_file', 'syslog'}
         assert all(s['ok'] for s in out['steps']), out['steps']
 
     def test_the_entries_carry_what_went_in(self, db, tmp_path):
         _make(db, tmp_path)
-        core = next(s for s in svc.restore_backup(db, str(tmp_path), 'copia')['steps']
+        core = next(s for s in bk_restore.restore_backup(db, str(tmp_path), 'copia')['steps']
                     if s['part'] == 'core')
         assert core['rows'] > 0 and core['tables'] > 0
 
@@ -593,7 +609,7 @@ class TestARestoreTicksOffTheSameChecklist:
         _make(db, tmp_path)
         db.execute('DROP TABLE credentials')
         db.commit()
-        core = next(s for s in svc.restore_backup(db, str(tmp_path), 'copia')['steps']
+        core = next(s for s in bk_restore.restore_backup(db, str(tmp_path), 'copia')['steps']
                     if s['part'] == 'core')
         assert not core['ok']
         assert 'credentials' in core['error']
@@ -606,7 +622,7 @@ class TestARestoreTicksOffTheSameChecklist:
         db.execute('DROP TABLE credentials')
         db.execute('DROP TABLE hosts')
         db.commit()
-        core = next(s for s in svc.restore_backup(db, str(tmp_path), 'copia')['steps']
+        core = next(s for s in bk_restore.restore_backup(db, str(tmp_path), 'copia')['steps']
                     if s['part'] == 'core')
         assert core['error'].startswith('credentials'), core['error']
 
@@ -615,8 +631,8 @@ class TestARestoreTicksOffTheSameChecklist:
         end — which is a checklist that arrives after the wait it existed for."""
         _make(db, tmp_path)
         seen = []
-        svc.restore_backup(db, str(tmp_path), 'copia',
-                           progress_cb=lambda p: seen.append(len(p['steps'])))
+        bk_restore.restore_backup(db, str(tmp_path), 'copia',
+                                  progress_cb=lambda p: seen.append(len(p['steps'])))
         assert seen and seen[-1] >= 1
 
     def test_a_config_part_that_is_not_in_the_archive_is_not_ok(self, db, tmp_path):
@@ -624,9 +640,107 @@ class TestARestoreTicksOffTheSameChecklist:
         settings and nothing to say why."""
         _make(db, tmp_path, parts=['core', 'config_file'])
         # The copy carries the part but the file never existed, so the member is absent.
-        out = svc.restore_backup(db, str(tmp_path), 'copia', config_dir=str(tmp_path))
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', config_dir=str(tmp_path))
         cfg = next(s for s in out['steps'] if s['part'] == 'config_file')
         assert not cfg['ok'] and 'config.json' in cfg['error']
+
+
+class TestChoosingWhichTablesComeBack:
+    """The advanced half of the restore form: named tables inside the chosen parts.
+
+    It is finer, not safer, and the tests say so on purpose — what is left out keeps whatever
+    it holds today, which is the whole point when one table is the problem and the rest of the
+    install has moved on since the copy. The dangerous case is the empty list: `tables=[]` is
+    "no table at all", and reading it as "everything" would rewrite the whole install for
+    somebody who asked for nothing.
+    """
+
+    def test_the_catalogue_groups_the_archives_tables_by_part(self, db, tmp_path):
+        """From the archive's own members, by the SAME rule the restore applies: a grouping
+        worked out a second way in the browser would be right until a part is added."""
+        _make(db, tmp_path, parts=['core', 'audit', 'syslog'])
+        out = bk_restore.archive_contents(str(tmp_path), 'copia')
+        assert out['ok'], out.get('message')
+        by_id = {p['id']: [tb['name'] for tb in p['tables']] for p in out['parts']}
+        assert by_id['core'] == ['credentials', 'hosts']
+        assert by_id['audit'] == ['audit']
+        assert by_id['syslog'] == ['syslog']
+
+    def test_the_catalogue_carries_the_row_counts(self, db, tmp_path):
+        """What is in the box before it is put back. They come from the manifest, the only
+        place they exist without decompressing every member."""
+        _make(db, tmp_path)
+        out = bk_restore.archive_contents(str(tmp_path), 'copia')
+        core = next(p for p in out['parts'] if p['id'] == 'core')
+        assert {tb['name']: tb['rows'] for tb in core['tables']} == {'hosts': 1,
+                                                                     'credentials': 1}
+
+    def test_a_copy_that_is_not_there_is_an_answer_not_a_crash(self, tmp_path):
+        assert bk_restore.archive_contents(str(tmp_path), 'nope')['ok'] is False
+
+    def test_a_table_left_out_keeps_what_it_has_today(self, db, tmp_path):
+        """The reason the feature exists: a bad import touched one table, and everything else
+        has moved on since the copy was taken."""
+        _make(db, tmp_path)
+        db.execute("DELETE FROM hosts")
+        db.execute("UPDATE credentials SET name='CHANGED SINCE'")
+        db.commit()
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        assert out['ok'], out.get('message')
+        assert db.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
+        assert db.fetchone('SELECT name FROM credentials')[0] == 'CHANGED SINCE'
+
+    def test_a_table_left_out_is_never_emptied(self, db, tmp_path):
+        """A restore empties a table before refilling it. One that was not chosen must not be
+        touched at all — emptied and not refilled is the worst outcome available here."""
+        _make(db, tmp_path)
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        assert db.fetchone('SELECT COUNT(*) FROM credentials')[0] == 1
+
+    def test_none_means_every_table_as_it_always_did(self, db, tmp_path):
+        _make(db, tmp_path)
+        db.execute("DELETE FROM hosts")
+        db.execute("DELETE FROM credentials")
+        db.commit()
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
+        assert sorted(out['tables']) == ['credentials', 'hosts']
+        assert out['partial'] is False
+
+    def test_an_empty_list_means_none_not_all(self, db, tmp_path):
+        """The one mistake this must not make: `[]` is "no table", and reading it as "all"
+        would rewrite the install of a caller who asked for nothing."""
+        _make(db, tmp_path)
+        db.execute("DELETE FROM hosts")
+        db.commit()
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=[])
+        assert out['ok'] and out['tables'] == {}
+        assert db.fetchone('SELECT COUNT(*) FROM hosts')[0] == 0
+
+    def test_a_part_with_nothing_chosen_gets_no_checklist_line(self, db, tmp_path):
+        """It was excluded. A line saying "0 rows, ok" about something nobody asked for reads
+        as a part that failed."""
+        _make(db, tmp_path, parts=['core', 'audit'])
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        assert [s['part'] for s in out['steps']] == ['core']
+        assert out['steps'][0]['tables'] == 1
+
+    def test_the_parts_still_bound_what_the_tables_can_reach(self, db, tmp_path):
+        """Naming a table of a part that was not ticked does not smuggle it back in: the two
+        narrow the same selection, they do not compete for it."""
+        _make(db, tmp_path, parts=['core', 'audit'])
+        db.execute("DELETE FROM audit")
+        db.commit()
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', parts=['core'],
+                                        tables=['hosts', 'audit'])
+        assert 'audit' not in out['tables']
+        assert db.fetchone('SELECT COUNT(*) FROM audit')[0] == 0
+
+    def test_the_result_says_it_was_a_subset(self, db, tmp_path):
+        """"148 rows in 9 tables" reads as a full restore unless something says the other
+        tables were left as they are — and the dialog and the audit line both need to."""
+        _make(db, tmp_path)
+        assert bk_restore.restore_backup(db, str(tmp_path), 'copia',
+                                         tables=['hosts'])['partial'] is True
 
 
 class TestSyslogInADatabaseOfItsOwn:
@@ -657,9 +771,10 @@ class TestSyslogInADatabaseOfItsOwn:
 
     def test_the_copy_reaches_the_second_database(self, two, tmp_path):
         main, side = two
-        res = svc.create_backup(main, 'copia', var_dir=str(tmp_path), config_dir=str(tmp_path),
-                                parts=['core', 'syslog'], include_secrets=True,
-                                connectors={'syslog': side})
+        res = bk_create.create_backup(main, 'copia', var_dir=str(tmp_path),
+                                      config_dir=str(tmp_path), parts=['core', 'syslog'],
+                                      include_secrets=True,
+                                      connectors={'syslog': side})
         assert res['ok'], res.get('message')
         assert res['manifest']['tables'].get('syslog') == 1, res['manifest']['tables']
         assert res['manifest']['tables'].get('syslog_drops') == 1
@@ -668,18 +783,19 @@ class TestSyslogInADatabaseOfItsOwn:
         """The bug itself, kept as a test: the same call without the second connector finds
         nothing — which is why the fix is passing it, not hoping the tables are there."""
         main, _side = two
-        res = svc.create_backup(main, 'copia', var_dir=str(tmp_path), config_dir=str(tmp_path),
-                                parts=['core', 'syslog'], include_secrets=True)
+        res = bk_create.create_backup(main, 'copia', var_dir=str(tmp_path),
+                                      config_dir=str(tmp_path), parts=['core', 'syslog'],
+                                      include_secrets=True)
         assert 'syslog' not in res['manifest']['tables']
 
     def test_the_restore_puts_them_back_where_they_live(self, two, tmp_path):
         main, side = two
-        svc.create_backup(main, 'copia', var_dir=str(tmp_path), config_dir=str(tmp_path),
-                          parts=['core', 'syslog'], include_secrets=True,
-                          connectors={'syslog': side})
+        bk_create.create_backup(main, 'copia', var_dir=str(tmp_path), config_dir=str(tmp_path),
+                                parts=['core', 'syslog'], include_secrets=True,
+                                connectors={'syslog': side})
         side.execute('DELETE FROM syslog')
         side.commit()
-        out = svc.restore_backup(main, str(tmp_path), 'copia', connectors={'syslog': side})
+        out = bk_restore.restore_backup(main, str(tmp_path), 'copia', connectors={'syslog': side})
         assert out['ok'], out.get('message')
         assert side.fetchone('SELECT msg FROM syslog')[0] == 'noisy'
         assert main.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
@@ -688,7 +804,7 @@ class TestSyslogInADatabaseOfItsOwn:
         """`core` is every table nobody claimed IN THE SYSTEM DATABASE. Asking the wrong one
         would sweep a syslog table into it and restore it to the wrong place."""
         main, side = two
-        by_part = dict(svc._tables_by_part(main, {'core', 'syslog'}, {'syslog': side}))
+        by_part = dict(bk_parts.tables_by_part(main, {'core', 'syslog'}, {'syslog': side}))
         assert by_part['core'] == ['hosts']
         assert by_part['syslog'] == ['syslog', 'syslog_drops']
 
@@ -696,21 +812,22 @@ class TestSyslogInADatabaseOfItsOwn:
         """Two databases cannot share one, and the guarantee that matters — the system tables
         land together or not at all — is kept where it means something."""
         main, side = two
-        groups = svc._by_database([('core', ['hosts']), ('syslog', ['syslog'])], main,
-                                  {'syslog': side})
+        groups = bk_restore._by_database([('core', ['hosts']), ('syslog', ['syslog'])], main,
+                                         {'syslog': side})
         assert [c for c, _g in groups] == [main, side]
 
     def test_one_database_stays_one_transaction(self, db):
         """With `syslog_db` off the web admin hands back the main connector for both, and a
         restore that split them into two transactions would give up the atomicity for nothing."""
-        groups = svc._by_database([('core', ['hosts']), ('syslog', ['syslog'])], db, {})
+        groups = bk_restore._by_database([('core', ['hosts']), ('syslog', ['syslog'])], db, {})
         assert len(groups) == 1
 
     def test_an_unreachable_second_database_costs_only_its_part(self, two, tmp_path):
         """The copy of everything else is still worth having."""
         main, side = two
         side.close()
-        res = svc.create_backup(main, 'copia', var_dir=str(tmp_path), config_dir=str(tmp_path),
-                                parts=['core', 'syslog'], include_secrets=True,
-                                connectors={'syslog': side})
+        res = bk_create.create_backup(main, 'copia', var_dir=str(tmp_path),
+                                      config_dir=str(tmp_path), parts=['core', 'syslog'],
+                                      include_secrets=True,
+                                      connectors={'syslog': side})
         assert res['ok'] and 'hosts' in res['manifest']['tables']

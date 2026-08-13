@@ -6462,7 +6462,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 25 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 29 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6513,6 +6513,28 @@ navegador no se quejó» no las cubría.
 Ambas clases se validaron **reintroduciendo los bugs** en el CSS y comprobando que se ponen
 rojas (52 px en las tres secciones, y `display: none` en la etiqueta); una guarda de geometría
 que pasa con y sin el fallo no vale nada.
+
+**`TestTheRestoreFormPicksTables`** — el pliegue «avanzado» del diálogo de restauración, movido de
+verdad. Leído como texto se comprueba que el marcado está y que la petición tiene la forma
+correcta; lo que ninguna lectura resuelve es si el pliegue **se rellena**: se construye desde un
+endpoint, se cablea después de que el diálogo esté en el DOM, y su respuesta depende de qué
+casillas dejó marcadas una persona. Se toma una copia por la propia API del panel, se abre el
+diálogo y se comprueba lo único que no se puede leer: que las casillas son las tablas que el
+archivo lleva, que **sin tocar nada `_bkChosenTables()` devuelve `null`** —una restauración
+normal sigue siendo exactamente la petición de siempre, y una lista vacía ahí significa *ninguna
+tabla*—, que dejar una fuera produce la lista con todas las demás, y que destildar una parte
+**atenúa** su grupo en vez de ocultarlo.
+
+El cuarto es de **geometría**, y salió de una captura: con el pliegue abierto, el último grupo de
+tablas quedaba **debajo del pie** del diálogo. Dos scrolls para un formulario y el de fuera sin
+existir — el diálogo es una columna flex con `overflow: hidden`, así que un cuerpo que desborda
+no es una barra de scroll, es contenido recortado detrás de los botones, y el pliegue tenía
+además una caja con tope propia que escondía dónde acababa la lista. Se mide con la ventana
+**baja a propósito** (1280×520, que es el caso reportado: el formulario solo es demasiado alto
+*en relación con la pantalla*) y se exige que haya algo que desbordar, que el cuerpo sea quien
+scrollea, que **nada dentro** de él scrollee también, y que los botones sigan en pantalla.
+Validado reintroduciendo el bug: la regla `#backupModal .modal-lg …` sin su
+`:not(.modal-dialog-scrollable)` lo pone rojo.
 
 **`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
 Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe
@@ -6676,11 +6698,11 @@ cuando otra réplica no puede leer un secreto.
 
 ## 146. Copias de seguridad: hacer una, y volver a ponerla
 
-**Archivo:** `tests/unit/test_backup_service.py` — 67 tests
+**Archivo:** `tests/unit/test_backup_service.py` — 78 tests
 **Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
 **Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 81 tests
-**Archivo:** `tests/unit/test_wa_backup_ui.py` — 115 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 87 tests
+**Archivo:** `tests/unit/test_wa_backup_ui.py` — 126 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
 cuatro motores y la copia tiene que sobrevivir al salto: una instalación que creció en SQLite y se
@@ -6729,6 +6751,9 @@ almacena de verdad.
 | `TestKeepingOneCopyWhateverTheCounterSays::*` (5) | De punta a punta: sobrevive a una política que la habría borrado; borrarla se rechaza con 409 diciendo por qué; la lista dice quién la bloqueó y cuándo; se audita en ambos sentidos; y va con `backup_delete` |
 | `TestTheTaskFormFitsOnTheScreen::*` (3) | El editor de tarea va en **pestañas** (cuándo / retención / contenido), el nombre queda fuera de ellas, y el panel largo hace scroll **dentro** de la caja en vez de estirar el diálogo |
 | `TestOnePolicyManyTasks::*` (8) | Perfiles en el rail; el editor dibuja las **mismas** cinco casillas que una tarea; la fila muestra la política resuelta por el servidor; las casillas se ocultan tras un perfil pero no se descartan; el editor dice a cuántas tareas alcanza; sin botón de borrar si está en uso; las sugerencias vienen de la API; todo va con `backup_schedule` |
+| `TestChoosingWhichTablesComeBack::*` (10) | Restaurar **tabla a tabla**: el catálogo agrupa por parte con la misma regla que aplica la restauración, lo que se deja fuera conserva lo de hoy y **no se vacía**, `tables=[]` significa *ninguna* y no *todas*, una parte sin tablas elegidas no genera línea de checklist, las partes siguen acotando lo que las tablas pueden alcanzar, y el resultado dice que fue un subconjunto |
+| `TestRestoringOnlyTheTablesYouChose::*` (5) | Lo mismo por la API: el archivo dice qué lleva por parte y con filas, una copia inexistente responde 404, solo vuelven las tablas nombradas, y la auditoría registra **cuáles se pidieron** (`all` cuando no se pidió ninguna en concreto) |
+| `TestTheRestoreFormCanGoTableByTable::*` (10) | El pliegue avanzado: sin tocarlo **no se manda lista** (la petición es la de siempre), nada seleccionado se rechaza antes de enviarlo, una parte destildada se atenúa en vez de ocultarse, el aviso dice que más fino no es más seguro, el diálogo pide cuerpo con scroll y el pliegue **no lleva barra propia**, y después se dice que el resto se quedó como estaba |
 
 
 ---

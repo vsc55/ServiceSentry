@@ -102,8 +102,9 @@ scrollea de más» no lo es.
 
 ## La copia de seguridad ignoraba la segunda base de datos de syslog
 
-**Fecha:** 2026-08-11 · **Área:** `lib/core/backup/service.py` (`PARTS`, `_tables_by_part`,
-`create_backup`, `restore_backup`), `lib/core/backup/runner.py` (`_connectors`)
+**Fecha:** 2026-08-11 · **Área:** `lib/core/backup/` — entonces todo en `service.py`, hoy
+repartido: `parts.py` (`PARTS`, `tables_by_part`, `conn_for`), `create.py`, `restore.py` y
+`jobs.py` (`_connectors`)
 
 **Síntoma** — reportado así: *«el backup creo que está mal a nivel de la tabla de syslog, si
 tengo activada una segunda base de datos, la recuperación no ha recuperado los datos»*. Con
