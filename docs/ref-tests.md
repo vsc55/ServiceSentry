@@ -6462,7 +6462,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 19 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 25 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6490,6 +6490,29 @@ Pocos y de carga a propósito: aquí no se cubre la interacción caso por caso �
 tests hacen eso mucho más barato—. Existe para responder a la única pregunta que los demás no
 pueden: ¿esto arranca? Comprobado rompiendo a propósito un partial compartido y verificando que
 el fallo nombra la causa.
+
+**`TestTheLayoutFitsTheWindow` + `TestCollapsingTheSidebarIsTheReverseOfExpandingIt`** — la otra
+mitad del frontend que nadie miraba: la **geometría**. Las páginas de los dos bugs de agosto de
+2026 cargaban sin un solo error de consola y estaban mal en pantalla igualmente, así que «el
+navegador no se quejó» no las cubría.
+
+- **Ninguna sección con rail desborda su columna.** Un píxel de más ahí es una barra de scroll, y
+  esa barra se lleva la barra de herramientas: la columna de detalle del shell se llamaba
+  `.ss-main` —que es también la columna de contenido de la aplicación, `height: 100vh`— y con la
+  misma especificidad el bloque nuevo sólo ganaba las propiedades que nombraba. Se mide en las
+  tres secciones (Configuración, Módulos, Copias) y la tolerancia es 1 px de redondeo: **52 era
+  el bug**. Se comprueba además el síntoma tal como se reportó —se scrollea la columna a tope y
+  la barra tiene que seguir **por debajo** de la miga de pan, que es sticky y se queda encima— y
+  que el índice llegue al pie de la ventana.
+- **Plegar es la inversa de desplegar.** Nada de la navegación se esconde con `display`, que no
+  se puede animar: la etiqueta se desvanece (opacidad 0 con transición declarada), el icono de
+  al lado **no se mueve** mientras lo hace (±1,5 px), y el lockup del pie se va y vuelve. Se mide
+  **en reposo**, en los dos extremos y nunca a mitad de animación: un test que muestrea una
+  transición es un test que falla en CI por algo que no tiene que ver con el código.
+
+Ambas clases se validaron **reintroduciendo los bugs** en el CSS y comprobando que se ponen
+rojas (52 px en las tres secciones, y `display: none` en la etiqueta); una guarda de geometría
+que pasa con y sin el fallo no vale nada.
 
 **`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
 Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe

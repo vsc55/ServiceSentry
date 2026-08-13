@@ -8,6 +8,52 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.65] - 2026-08-13
+
+### Added
+- **Guards that measure the layout, in a browser.** The suite had 19 browser tests and all of
+  them asked one question — did the page load without the browser complaining. This month's two
+  sidebar bugs answered "yes" to that and were wrong on screen anyway: a column overflowing the
+  page by 52px, and a collapse that blinked where the expand animated. Sizes and positions are
+  arithmetic the browser does from the whole cascade, so a guard that reads the stylesheet
+  cannot see the outcome.
+  - **No railed section overflows its column** — measured in all three (Configuration, Modules,
+    Backup), 1px tolerance for rounding. Plus the symptom as reported: the column is scrolled to
+    the end and the toolbar must still sit *below* the breadcrumb that stays pinned over it, and
+    the index must reach the foot of the window.
+  - **Collapsing is the reverse of expanding** — nothing in the navigation hidden by `display`
+    (which cannot be animated), the label fading with a declared transition, the icon beside it
+    not moving while it does, and the artwork going away and coming back.
+  - Measured at rest and never mid-animation: a test that samples a transition fails on a loaded
+    CI machine for reasons that have nothing to do with the code. All of it validated by
+    **putting both bugs back** and watching three of the six go red — a geometry guard that
+    passes with and without the defect is worth nothing.
+
+### Docs
+- **`ref-pendiente.md` checked entry by entry against the code, and four of them were already
+  done.** Being listed as pending is not free: it is work somebody proposes, estimates and
+  starts a second time.
+  - **Layouts per section** — the three "pending" ones (Servers, Syslog, History) shipped on
+    2026-07-29 in `a5c724f` ("the last table sections"): four views for Servers, three for
+    Syslog, two for History, in the JS bundle, documented in `ref-tests.md` §126–§128 and held
+    by 64 guards.
+  - **`SS_*` in the standalone services and the dedicated syslog's ipban** — shipped too:
+    `overlay_all_env` exists, `services/base.py::_read_config_file` applies it for all three
+    services, the notification router applies it as well, `SS_EVENTS_AUTOSTART` is honoured by
+    the embedded boot, and `SyslogService` builds its jail through `ipban/factory.py`.
+  - Scheduled backups as a list of tasks, and the scheduler's lease (fixed in `build.64`).
+- **"No test executes JavaScript" was wrong as well**, and is now the narrower thing that is
+  true: `tests/e2e/test_ui_playwright.py` loads all six served pages and fails on any console
+  error, and CI installs Chromium so it runs there. What nothing measures is **geometry** —
+  which is exactly where this week's two sidebar bugs lived, both on pages that loaded without
+  a single console error.
+- The MIB-catalogue entry now names the contradiction it depends on: the module's own docstring
+  argues that its standalone SQLite file is deliberate — a local derived cache, and the
+  application database may be remote. Either that reasoning still holds and the entry should
+  go, or it does not and the docstring is wrong; deciding that is the work.
+- The review line at the top says what to do about all of it: check what is listed against the
+  code before believing it, and delete the entry in the same commit that finishes the work.
+
 ## [0.0.1+build.64] - 2026-08-13
 
 ### Fixed
