@@ -58,8 +58,69 @@ class TestWhatThePageAnswers:
         _login(client)
         body = client.get('/api/v1/diagnostics').get_json()
         for key in ('runtime', 'system', 'network', 'database', 'storage',
-                    'dependencies', 'features'):
+                    'dependencies', 'features', 'instances'):
             assert key in body, key
+
+    def test_the_other_processes_come_with_what_they_run(self, client, admin):
+        """Split across containers, everything else on this page describes the web admin. The
+        worker, the syslog receiver and the event processor answer no HTTP unless a control
+        token is set — which is not the default — so the panel reads what they published into
+        the heartbeat registry instead."""
+        store = getattr(admin, '_service_instances_store', None)
+        if store is None:
+            pytest.skip('this build has no instance registry')
+        store.heartbeat('rohan:9:syslog', 'syslog', mode='standalone', running=True,
+                        host='rohan', pid=9, version='0.0.1+build.1')
+        store.set_env('rohan:9:syslog', {
+            'python': '3.11.2', 'os': 'Debian GNU/Linux 12',
+            'lock': [{'name': 'flask', 'required': '3.1.0', 'installed': '3.0.0'}],
+            'extra': [], 'features': ['paramiko']})
+        _login(client)
+        rows = client.get('/api/v1/diagnostics').get_json()['instances']
+        row = next(r for r in rows if r['service'] == 'syslog' and r['host'] == 'rohan')
+        assert row['python'] == '3.11.2' and row['known'] is True
+        assert row['features'] == ['paramiko']
+        # The difference against this process, computed where both sides are in hand.
+        assert row['diff']['same'] is False
+        assert any(d['name'] == 'flask' for d in row['diff']['rows'])
+
+    def test_a_single_process_install_has_nothing_to_compare(self, client, admin):
+        """A table of one row saying "same as this process" exists to be dismissed."""
+        _login(client)
+        rows = client.get('/api/v1/diagnostics').get_json()['instances']
+        assert all(r.get('is_self') for r in rows), rows
+
+    def test_the_document_carries_them_too(self, client, admin):
+        """The one place the screen cannot go. "The worker is on an older image" answers a
+        whole class of "it works in the panel but the check never runs", and nobody
+        transcribes that into an issue by hand."""
+        import xml.etree.ElementTree as ET                   # noqa: PLC0415
+        store = getattr(admin, '_service_instances_store', None)
+        if store is None:
+            pytest.skip('this build has no instance registry')
+        store.heartbeat('rohan:9:syslog', 'syslog', mode='standalone', running=True,
+                        host='rohan', pid=9, version='0.0.1+build.1')
+        store.set_env('rohan:9:syslog', {
+            'python': '3.11.2', 'lock': [{'name': 'flask', 'required': '3.1.0',
+                                          'installed': '0.0.1'}], 'extra': []})
+        _login(client)
+        text = client.get('/api/v1/diagnostics/report').get_data(as_text=True)
+        assert '[Other processes]' in text and 'rohan' in text
+        assert 'flask' in text.split('[Other processes]')[1]
+        root = ET.fromstring(
+            client.get('/api/v1/diagnostics/report?format=xml').get_data(as_text=True))
+        assert root.find('instances/instance').get('host') == 'rohan'
+        # Every difference is a child, so the one being looked for is found among them —
+        # the seeded instance declares one package and this process runs eighty.
+        names = {d.get('name') for d in root.findall('instances/instance/difference')}
+        assert 'flask' in names, sorted(names)[:8]
+
+    def test_a_single_process_report_has_no_such_block(self, client):
+        """A section that says "no other processes" on every single-container install is a
+        section that trains people to skip it."""
+        _login(client)
+        assert '[Other processes]' not in client.get(
+            '/api/v1/diagnostics/report').get_data(as_text=True)
 
     def test_the_runtime_block_says_which_services_run_here(self, client):
         """On a multi-container install the answer is usually "none of them", and that reframes
@@ -344,11 +405,20 @@ class TestAskingTheWorldAboutTheVersionsInstalled:
         assert names and 'evil-package' not in names
 
     def test_it_answers_the_counts_the_card_shows(self, client, monkeypatch):
-        self._stub(monkeypatch, behind=3, vuln_total=5, vuln_packages=2)
+        """`behind` is DERIVED from the rows that get drawn, not carried beside them: three
+        lists feed one check now, and a number the browser cannot reach by counting what it
+        shows is a number that drifts from the table under it."""
+        self._stub(monkeypatch, vuln_total=5, vuln_packages=2, rows=[
+            {'name': 'flask', 'installed': '1.0', 'state': 'behind', 'vulns': [],
+             'vuln_count': 0}])
+        monkeypatch.setattr('lib.core.diagnostics.service.dependency_rows',
+                            lambda _wa: [{'name': 'flask', 'required': '1.0',
+                                          'installed': '1.0', 'status': 'ok'}])
+        monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows', lambda _wa: [])
         _login(client)
         body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
         assert body['ok'] is True and body['checked_at']
-        assert body['behind'] == 3 and body['vuln_total'] == 5
+        assert body['behind'] == 1 and body['vuln_total'] == 5
 
     def test_it_is_audited_with_what_it_found(self, client, admin, monkeypatch):
         """"When did we last look, and what did it say" is the question afterwards."""
@@ -365,6 +435,41 @@ class TestAskingTheWorldAboutTheVersionsInstalled:
         _viewer(admin, ['config_view'])
         _login(client, 'looker')
         assert client.post('/api/v1/diagnostics/dependency-check', json={}).status_code == 403
+
+    def test_it_covers_what_only_another_container_runs(self, client, monkeypatch):
+        """Split across containers this process is the web admin, and its packages are not the
+        installation's. One round for all of them: four containers each asking PyPI and OSV
+        about their own list would put four processes on the internet for nearly the same
+        question, in exactly the deployment where that is least welcome."""
+        seen = self._stub(monkeypatch)
+        monkeypatch.setattr('lib.core.diagnostics.service.elsewhere_rows',
+                            lambda _wa: [{'name': 'flask', 'required': '',
+                                          'installed': '0.0.1', 'status': 'elsewhere'}])
+        _login(client)
+        body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
+        assert ('flask', '0.0.1') in {(r['name'], r['installed']) for r in seen['rows']}
+        # And the answer says so, so the browser can tell that row from the local one — the
+        # same package at two versions is two rows and only one of them is this process's.
+        assert body['elsewhere'] == [{'name': 'flask', 'installed': '0.0.1'}]
+
+    def test_another_container_being_behind_is_not_the_lock_being_behind(self, client,
+                                                                        monkeypatch):
+        """The header count has an action behind it: regenerate the lock. A worker on an old
+        image is a different action, and counting them together makes the number useless."""
+        self._stub(monkeypatch, behind=2, rows=[
+            {'name': 'flask', 'installed': '3.1.0', 'state': 'behind'},
+            {'name': 'flask', 'installed': '0.0.1', 'state': 'behind'}])
+        monkeypatch.setattr('lib.core.diagnostics.service.dependency_rows',
+                            lambda _wa: [{'name': 'flask', 'required': '3.1.0',
+                                          'installed': '3.1.0', 'status': 'ok'}])
+        monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows', lambda _wa: [])
+        monkeypatch.setattr('lib.core.diagnostics.service.elsewhere_rows',
+                            lambda _wa: [{'name': 'flask', 'required': '',
+                                          'installed': '0.0.1', 'status': 'elsewhere'}])
+        _login(client)
+        body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
+        # Counted by name AND version: by name alone both rows would land in the lock's count.
+        assert body['behind'] == 1 and body['behind_unpinned'] == 0
 
     def test_it_asks_about_the_whole_environment_and_not_only_the_lock(self, client,
                                                                       monkeypatch):
@@ -391,8 +496,12 @@ class TestAskingTheWorldAboutTheVersionsInstalled:
         """The header number has an action behind it — regenerate the lock — and a newer
         `pytest` in somebody's checkout is not that action. Advisories are NOT split the same
         way: the code runs on this machine either way."""
-        self._stub(monkeypatch, behind=2, rows=[
-            {'name': 'pytest', 'state': 'behind'}, {'name': 'authlib', 'state': 'behind'}])
+        self._stub(monkeypatch, rows=[
+            {'name': 'pytest', 'installed': '9.0.0', 'state': 'behind'},
+            {'name': 'authlib', 'installed': '1.7.2', 'state': 'behind'}])
+        monkeypatch.setattr('lib.core.diagnostics.service.dependency_rows',
+                            lambda _wa: [{'name': 'authlib', 'required': '1.7.2',
+                                          'installed': '1.7.2', 'status': 'ok'}])
         monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows',
                             lambda _wa: [{'name': 'pytest', 'required': '',
                                           'installed': '9.0.0', 'status': 'unpinned'}])

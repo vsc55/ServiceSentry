@@ -1,0 +1,113 @@
+{# ================================================================
+   Diagnostics — the other processes of this installation.
+
+   Everything else on this page describes the process that served the request. On a single
+   container that is the whole installation; split into web / worker / syslog / events it is
+   the web admin and nothing else, and the other three are invisible from every screen —
+   while "is that pod on the same build?" is what a support thread opens with.
+
+   Read from the heartbeat registry, which each service already writes to, and never over
+   HTTP: the standalone services answer no HTTP unless `SS_CONTROL_TOKEN` is set, which is not
+   the default.
+
+   The card shows the DIFFERENCE, not four copies of the same list. Four containers built from
+   one image carry identical packages, and printing them four times is a screen nobody reads
+   to find the one row that matters.
+   ================================================================ #}
+
+/** The other processes, or nothing at all.
+ *
+ *  Absent on a single-process install — there is nothing to compare, and a table of one row
+ *  saying "same as this process" exists only to be dismissed. */
+function _dgInstancesCard(list) {
+    const rows = (list || []).filter(i => !i.is_self);
+    if (!rows.length) return '';
+    const drifted = rows.filter(i => i.diff && !i.diff.same).length;
+    const unknown = rows.filter(i => !i.known).length;
+    const state = drifted
+        ? `<span class="badge text-bg-warning">${esc(t('diag_inst_n_drift')
+              .replace('{}', drifted))}</span>`
+        : `<span class="badge text-bg-success">${esc(t('diag_inst_all_same'))}</span>`;
+    return _dgCard('bi-diagram-3', t('diag_card_instances'),
+        `<div class="small text-muted mb-2">${esc(t('diag_inst_lead'))}</div>`
+        + `<table class="table table-sm align-middle mb-0"><thead><tr>
+            <th class="small py-1">${esc(t('diag_inst_service'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_where'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_version'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_python'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_packages'))}</th>
+           </tr></thead><tbody>${rows.map(_dgInstanceRow).join('')}</tbody></table>`
+        + (unknown
+            ? `<div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"
+                 ></i>${esc(t('diag_inst_unknown_note').replace('{}', unknown))}</div>`
+            : ''),
+        state);
+}
+
+function _dgInstanceRow(inst) {
+    // The version is the first thing to look at and the reason this card exists: four
+    // containers are supposed to be one image, and a tag left behind shows up here before it
+    // shows up as a bug nobody can reproduce.
+    const mine = ((_diagData || {}).runtime || {}).version || '';
+    const drift = inst.version && mine && inst.version !== mine;
+    return `<tr>
+        <td class="small"><span class="font-monospace">${esc(inst.service)}</span>
+            <span class="badge text-bg-secondary ms-1">${esc(inst.mode)}</span>
+            ${_dgInstState(inst)}</td>
+        <td class="small text-muted">${esc(inst.host || '—')}${
+            inst.pid ? esc(` · ${inst.pid}`) : ''}</td>
+        <td class="small">${drift
+            ? `<span class="badge text-bg-warning ss-help"
+                 title="${escAttr(t('diag_inst_version_drift').replace('{}', mine))}"
+               ><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(inst.version)}</span>`
+            : `<span class="text-muted">${esc(inst.version || '—')}</span>`}</td>
+        <td class="small text-muted">${esc(inst.python || '—')}${
+            inst.os ? `<span class="ms-1">· ${esc(inst.os)}</span>` : ''}</td>
+        <td class="small">${_dgInstPackages(inst)}</td></tr>`;
+}
+
+/** Alive / stale / stopped, in the words the Services tab already uses. */
+function _dgInstState(inst) {
+    const cls = {alive: 'text-bg-success', stale: 'text-bg-warning',
+                 stopped: 'text-bg-secondary'}[inst.state] || 'text-bg-danger';
+    return `<span class="badge ${cls} ms-1">${esc(t('svc_state_' + inst.state)
+        || inst.state)}</span>`;
+}
+
+/** How its packages compare with this process's — the whole point of the row.
+ *
+ *  "Same" is a finished answer and says so in one word. A difference is a count that opens
+ *  the list, because the useful question after "they differ" is always *in what*. */
+function _dgInstPackages(inst) {
+    if (!inst.known) {
+        return `<span class="text-muted ss-help"
+            title="${escAttr(t('diag_inst_unknown_tt'))}">—</span>`;
+    }
+    if (inst.diff && inst.diff.same) {
+        return `<span class="text-muted">${esc(t('diag_inst_same')
+            .replace('{}', inst.packages))}</span>`;
+    }
+    return `<button type="button" class="badge text-bg-warning border-0 ss-help"
+        onclick="_dgShowInstanceDiff('${escAttr(inst.service)}', '${escAttr(inst.host)}',
+                                     ${Number(inst.pid) || 0})"
+        title="${escAttr(t('diag_inst_diff_open'))}"
+        >${esc(t('diag_inst_n_diff').replace('{}', (inst.diff || {}).count || 0))}</button>`;
+}
+
+/** What differs, package by package, against this process.
+ *
+ *  Identified by service+host+pid rather than by index: the card is redrawn whenever the page
+ *  refreshes, and an index into a list that was rebuilt points at whatever moved into that
+ *  slot. */
+function _dgShowInstanceDiff(service, host, pid) {
+    const inst = ((_diagData || {}).instances || []).find(
+        i => i.service === service && i.host === host && (Number(i.pid) || 0) === pid);
+    if (!inst || !inst.diff) return;
+    const label = {missing_there: t('diag_inst_absent_there'),
+                   missing_here: t('diag_inst_absent_here')};
+    const pairs = inst.diff.rows.map(r => [
+        r.name,
+        r.kind === 'version' ? `${r.here}  →  ${r.there}` : label[r.kind] || r.kind]);
+    showInfoModal(`${service} · ${host}`, pairs,
+                  t('diag_inst_diff_lead').replace('{}', inst.version || '?'), 'warning');
+}

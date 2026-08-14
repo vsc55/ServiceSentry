@@ -11,8 +11,45 @@ what the answer means; this decides how to ask it.
 """
 
 import asyncio
+import threading
 
 from . import mib_resolver as _mib_resolver
+
+
+def run_coroutine(coro):
+    """Run *coro* to completion from synchronous code — running loop in this thread or not.
+
+    `asyncio.run` **refuses** when the calling thread already has one going, and this module is
+    called from whatever thread the panel is serving on. Where a loop is already there the work
+    goes to a thread of its own with its own loop: what is being awaited here talks to a UDP
+    socket and belongs to no particular loop.
+
+    Found the hard way. Discovery is `asyncio.run` inside a `try/except: continue`, so on a
+    thread with a live loop every server raised, every server was skipped, and the empty list
+    read as *this device has no OIDs* — the exact symptom the walk was rewritten to fix, from a
+    different cause. It showed up in CI because the browser tests run Playwright's sync API,
+    which keeps a loop alive in the main thread; but the reason to fix it is that a request
+    thread is not ours to make assumptions about.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)               # the ordinary case: nothing running here
+    box: dict = {}
+
+    def _worker():
+        try:
+            box['value'] = asyncio.run(coro)
+        except BaseException as exc:           # noqa: BLE001  (re-raised in the caller)
+            box['error'] = exc
+
+    thread = threading.Thread(target=_worker, name='snmp-sync', daemon=True)
+    thread.start()
+    thread.join()
+    if 'error' in box:
+        raise box['error']
+    return box['value']
+
 
 # ── Optional dependency: pysnmp ───────────────────────────────────────────────
 # pysnmp 6+/7+ (lextudio fork) moved everything to pysnmp.hlapi.v3arch.asyncio.
@@ -156,7 +193,7 @@ class SnmpClient:
                     pass
 
         try:
-            return asyncio.run(_run())
+            return run_coroutine(_run())
         except Exception as exc:  # pylint: disable=broad-except
             return None, str(exc)
 

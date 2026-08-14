@@ -86,3 +86,49 @@ class TestServiceInstancesStore:
         removed = s.prune(older_than_secs=3600)
         assert removed == 1
         assert {r['instance_id'] for r in s.list_instances()} == {'new'}
+
+
+class TestWhatTheProcessRunsOn:
+    """The `env` column: interpreter, OS and packages, so the panel can answer for the
+    containers it is not running in.
+
+    Written by :meth:`set_env` and deliberately NOT by :meth:`heartbeat`. That row is
+    rewritten every few seconds by every instance, and this is a few kilobytes that cannot
+    change while the process lives.
+    """
+
+    def test_it_is_stored_and_read_back_as_a_dict(self):
+        s, _ = _store()
+        s.heartbeat('h1:1:monitoring', 'monitoring', mode='standalone', running=True)
+        s.set_env('h1:1:monitoring', {'python': '3.14.0', 'lock': [{'name': 'flask'}]})
+        row = s.list_instances()[0]
+        assert row['env']['python'] == '3.14.0'
+        assert row['env']['lock'] == [{'name': 'flask'}]
+
+    def test_an_instance_that_never_published_reads_as_empty(self):
+        """Not `None` and not a crash: the panel says "has not published yet", which is a
+        different sentence from "differs"."""
+        s, _ = _store()
+        s.heartbeat('h1:1:monitoring', 'monitoring', mode='standalone', running=True)
+        assert s.list_instances()[0]['env'] == {}
+
+    def test_the_beat_does_not_carry_it(self):
+        """The whole reason it has its own column. A beat that rewrote it would push the same
+        kilobytes over the same wire every few seconds, per instance, forever."""
+        s, _ = _store()
+        s.heartbeat('h1:1:monitoring', 'monitoring', mode='standalone', running=True)
+        s.set_env('h1:1:monitoring', {'python': '3.14.0'})
+        s.heartbeat('h1:1:monitoring', 'monitoring', mode='standalone', running=False,
+                    detail={'interval': 60})
+        row = s.list_instances()[0]
+        assert row['env'] == {'python': '3.14.0'}, 'the beat wiped what start-up published'
+        assert row['running'] is False, 'and the beat still updated what it owns'
+
+    def test_publishing_nothing_leaves_what_was_there(self):
+        """A process that could not describe itself must not erase a good answer — the guard
+        that calls this swallows the failure, so the empty dict is what arrives."""
+        s, _ = _store()
+        s.heartbeat('h1:1:monitoring', 'monitoring', mode='standalone', running=True)
+        s.set_env('h1:1:monitoring', {'python': '3.14.0'})
+        s.set_env('h1:1:monitoring', {})
+        assert s.list_instances()[0]['env'] == {'python': '3.14.0'}

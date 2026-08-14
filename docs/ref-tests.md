@@ -3465,7 +3465,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 89 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 135 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 
@@ -3579,7 +3579,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 69. Servicios — Registro de heartbeat / estado (ServiceInstancesStore)
 
-**Archivo:** `tests/unit/test_service_instances_store.py` — 6 tests
+**Archivo:** `tests/unit/test_service_instances_store.py` — 10 tests
 
 ### `TestServiceInstancesStore`
 
@@ -3591,6 +3591,18 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_mark_down` | `mark_down` marca una instancia como caída | La instancia queda con running=False | Sigue marcada como activa |
 | `test_clear_others_removes_same_host_restarts` | `clear_others` elimina reinicios previos del mismo proceso embebido en el host | Elimina 2 (PIDs viejos) y conserva la actual, la réplica de otro host y otro servicio | Borra réplicas ajenas o la instancia vigente |
 | `test_prune_drops_stale_rows` | `prune` elimina instancias con last_seen caducado | Elimina 1 (la antigua) y conserva 'new' | Poda la reciente o conserva la obsoleta |
+
+### `TestWhatTheProcessRunsOn`
+
+La columna `env`: intérprete, SO y paquetes de ese proceso, que es lo que permite responder por
+los contenedores en los que el panel **no** se está ejecutando.
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_it_is_stored_and_read_back_as_a_dict` | `set_env` guarda la huella y se lee ya parseada | El dict vuelve tal cual | Vuelve como texto o se pierde |
+| `test_an_instance_that_never_published_reads_as_empty` | Una instancia que nunca publicó lee `{}` | Dict vacío, ni `None` ni excepción | El panel no puede distinguir «no publicó» de «difiere» |
+| `test_the_beat_does_not_carry_it` | Un latido posterior **no** pisa lo que publicó el arranque | `env` intacto y el latido sí actualiza lo suyo | El latido lo borra —o lo reescribe cada pocos segundos, que es la razón de que tenga columna propia— |
+| `test_publishing_nothing_leaves_what_was_there` | Publicar vacío no borra una respuesta buena | Se conserva lo anterior | Un proceso que no pudo describirse borra el dato del que sí pudo |
 
 ---
 
@@ -6462,7 +6474,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 45 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 49 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6952,9 +6964,9 @@ librería de imagen sería un test que se salta justo en la máquina donde impor
 
 ## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
 
-**Archivo:** `tests/unit/test_diagnostics_collect.py` — 42 tests
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 46 tests
 **Archivo:** `tests/unit/test_diagnostics_advisories.py` — 68 tests
-**Archivo:** `tests/integration/test_wa_diagnostics.py` — 34 tests
+**Archivo:** `tests/integration/test_wa_diagnostics.py` — 40 tests
 
 Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
 qué corre, dónde escribe y qué falta. Todas se podían contestar antes —leyendo un log, abriendo
@@ -6990,6 +7002,27 @@ importan más que cualquier campo suelto:
 | `TestTellingWhetherAVersionIsBehind::*` + `TestAskingPyPI::*` + `TestAskingTheAdvisoryService::*` + `TestTheTwoHalvesMerged::*` + `TestWhereToReadAboutARelease::*` + `TestSayingHowManyWereAsked::*` + `TestWhereToReadAboutAnAdvisory::*` (43) | La comprobación remota de dependencias, **sin tocar la red** (`urlopen` sustituido en todos): comparar versiones no es PEP 440 a propósito —«no se puede decir» es la respuesta honesta y nunca se pinta como «al día»—; un paquete que PyPI no publica cuesta **su celda y nada más**; un nombre que no es un nombre no llega a construir la URL; una respuesta del lote de longitud distinta se **rechaza** en vez de alinearse como se pueda (señalaría el paquete equivocado como vulnerable); y las dos mitades informan por separado, porque «PyPI contestó y OSV no» es un estado real y una columna de ceros afirmaría algo que nadie comprobó. Además: el enlace de una versión nueva es la **página del paquete en PyPI** para esa versión, construida en el servidor a partir de dos cadenas — PyPI también trae un `project_urls` con lo que cada proyecto haya querido poner, y renderizar uno de esos como enlace que se pulsa dentro del panel dejaría al paquete elegir el destino |
 | `TestAskingTheWorldAboutTheVersionsInstalled::*` (8) | Por la app: el GET **sigue sin poder** salir a la red, la lista de paquetes es la del **servidor** (un cliente que pudiera nombrarlos convertiría el panel en un proxy hacia un servicio externo), los contadores llegan como los pinta la tarjeta, la llamada saliente se audita **con lo que encontró**, y arranca con el permiso propio de la página. Además pregunta por **todo el entorno** y no solo por el lock —que es de dónde salían los ceros—, dice **por nombre** cuáles no fija el lock (el navegador no debe deducirlo de una fila local que falta: el día que el lock no cargue, todos serían «no fijados») y separa el contador de «desactualizadas», que sí tiene una acción detrás —regenerar el lock— de un `pytest` más nuevo en un checkout, que no; los avisos **no** se separan, porque el código corre en la máquina de las dos formas |
 | `TestTheOneCallThatLeavesTheMachine::*` (4) | El GET es **incapaz** de salir a la red (se sustituye `fetch_latest` por algo que falla el test si lo llaman); un fallo es una respuesta y no un 500; y las dos salidas quedan auditadas |
+
+---
+
+## 151b. Diagnóstico: los otros procesos de la instalación
+
+**Archivo:** `tests/unit/test_diagnostics_instances.py` — 19 tests
+
+Repartido en contenedores —web, worker, receptor syslog, procesador de eventos—, la pantalla de
+diagnóstico describe **el proceso que sirve la petición y nada más**. Los otros tres no
+responden HTTP salvo que se fije `SS_CONTROL_TOKEN`, que no es el valor por defecto, así que
+cada servicio publica qué ejecuta en su latido y el panel lo lee de la **base de datos
+compartida** — que es lo que el propio plano de control ya declara como su fuente de verdad.
+
+Lo que se prueba aquí es la **comparación**, que es la parte que puede mentir en silencio:
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTellingTwoProcessesApart::*` (7) | La respuesta es **la diferencia**, no cuatro copias de la misma lista: cuatro contenedores de una imagen traen listas idénticas y «iguales que aquí» es la respuesta entera cuando es cierta. Cubre que una versión distinta viaja **con los dos lados** («difieren» no es accionable; cuál y de qué a qué, sí), que faltar en un lado o en el otro son **hallazgos distintos** (un worker sin `paramiko` salta todos los checks SSH), que el lock y el resto de lo instalado son **una sola lista** aquí —`pip` también ejecuta allí—, que `charset-normalizer` y `charset_normalizer` no son una diferencia (PEP 503, o cada contenedor parecería haber derivado), que el orden es estable, y que una instancia que **no ha publicado** no se cuenta como diferencia: «desconocido» y «difiere» son frases distintas y solo una implica trabajo |
+| `TestWhatOnlyTheOtherProcessesRun::*` (6) | Los nombres extra que la consulta remota debe cubrir, **y ninguno más**: una sola tanda de peticiones para toda la instalación, porque cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a internet a preguntar casi lo mismo, justo en el despliegue donde peor sienta. Una imagen igual en todas partes **no añade nada**, este proceso no se pregunta dos veces, y dos contenedores con dos versiones del mismo paquete son **dos preguntas** —responder una por las dos es como un contenedor acaba informado como limpio porque otro lo está— |
+| `TestTheListDegradesInsteadOfFailing::*` (3) | Se llega desde la página que alguien abre porque algo ya va mal: sin registro y con un store que revienta, la tarjeta cuesta la tarjeta y nada más |
+| `test_the_versions_of_one_process_are_read_from_both_halves` (3) | Las versiones salen del lock **y** de lo instalado alrededor, normalizadas |
 
 ---
 

@@ -843,6 +843,78 @@ class TestTheDiagnosticsPageSaysWhetherWeAreOnHttps:
         assert net['tls_terminated_here'] is False
 
 
+class TestTheOtherProcessesOfTheInstallation:
+    """The card that exists only when the panel is not the whole installation.
+
+    Everything else on the diagnostics page describes the process serving the request. Split
+    into web / worker / syslog / events, that is the web admin and nothing else — and the
+    question a support thread opens with is whether the other pods are on the same build.
+    """
+
+    def _seed(self, admin, **env):
+        store = getattr(admin, '_service_instances_store', None)
+        if store is None:
+            pytest.skip('this build has no instance registry')
+        store.heartbeat('rohan:9:syslog', 'syslog', mode='standalone', running=True,
+                        host='rohan', pid=9, version=env.pop('version', '0.0.1+build.1'))
+        store.set_env('rohan:9:syslog', {
+            'python': '3.11.2', 'os': 'Debian GNU/Linux 12', 'features': [],
+            'lock': [], 'extra': [], **env})
+
+    def _open(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => _navTab('#tab-diagnostic')")
+        page.wait_for_selector('#btnDiagDeps', timeout=15_000)
+
+    def test_a_single_process_install_draws_no_card(self, page):
+        """A table of one row saying "same as this process" exists to be dismissed."""
+        self._open(page)
+        assert not page.evaluate(
+            "() => !!Array.from(document.querySelectorAll('#diagnostic-container .card'))"
+            "        .find(c => c.querySelector('.bi-diagram-3'))")
+
+    def test_another_container_is_listed_with_what_it_runs(self, page, admin):
+        self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0',
+                                 'installed': '3.1.0'}])
+        self._open(page)
+        text = page.evaluate("""() => {
+            const c = Array.from(document.querySelectorAll('#diagnostic-container .card'))
+                .find(x => x.querySelector('.bi-diagram-3'));
+            return c ? c.textContent.replace(/\\s+/g, ' ') : '';
+        }""")
+        assert 'syslog' in text and 'rohan' in text and '3.11.2' in text, text[:300]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_a_container_on_another_build_is_marked(self, page, admin):
+        """The whole reason the card exists: four containers are meant to be one image, and a
+        tag left behind shows up here before it shows up as a bug nobody can reproduce."""
+        self._seed(admin, version='0.0.1+build.1')
+        self._open(page)
+        mark = page.evaluate("""() => {
+            const c = Array.from(document.querySelectorAll('#diagnostic-container .card'))
+                .find(x => x.querySelector('.bi-diagram-3'));
+            const b = c && c.querySelector('td .badge.text-bg-warning');
+            return b ? b.textContent.trim() : null;
+        }""")
+        assert mark and 'build.1' in mark, mark
+
+    def test_the_difference_opens_package_by_package(self, page, admin):
+        """"They differ" is not actionable. Which package, and from what to what, is."""
+        self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0',
+                                 'installed': '0.0.1'}])
+        self._open(page)
+        page.click('#diagnostic-container .card:has(.bi-diagram-3) td button.text-bg-warning')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        pairs = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => [tr.children[0].textContent.trim(),
+                        tr.children[1].textContent.trim()])""")
+        row = next((p for p in pairs if p[0] == 'flask'), None)
+        assert row and '0.0.1' in row[1], pairs[:6]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+
 class TestTheDependencyCheckDrawsItsTwoColumns:
     """The button that asks PyPI and the advisory service, driven in a browser.
 
@@ -889,6 +961,11 @@ class TestTheDependencyCheckDrawsItsTwoColumns:
             'ok': True, 'rows': self.ROWS + [self.EXTRA], 'behind': 2, 'unknown': 0,
             'vulns_ok': True, 'vulns_error': '', 'vuln_total': 3, 'vuln_packages': 2,
             'vuln_asked': 88})
+        # The counts are DERIVED from the rows that get drawn, matched by name AND version, so
+        # the two lists the server builds have to name the same pins the stub answers for.
+        monkeypatch.setattr('lib.core.diagnostics.service.dependency_rows',
+                            lambda _wa: [{'name': 'flask', 'required': '1.0.0',
+                                          'installed': '1.0.0', 'status': 'ok'}])
         monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows',
                             lambda _wa: [{'name': 'pip', 'required': '',
                                           'installed': '1.0.0', 'status': 'unpinned'}])

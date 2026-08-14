@@ -43,6 +43,10 @@ _SCHEMA = TableSpec(
         Column('last_seen',     'REAL'),
         Column('last_cycle_at', 'REAL'),                            # last check cycle / activity
         Column('detail',        'TEXT', nullable=False, default="''"),  # JSON extras (interval, ports…)
+        # What the process RUNS ON — interpreter, OS, its packages. Written once (see
+        # `set_env`) because none of it can change without a restart, and a restart is a new
+        # row. Its own column and not part of `detail`: `detail` is rewritten on every beat.
+        Column('env',           'TEXT', nullable=False, default="''"),  # JSON fingerprint
     ),
     indexes=(
         Index('idx_svcinst_key',      ('service_key',)),
@@ -65,7 +69,7 @@ class ServiceInstancesStore:
 
     _COLS = ('instance_id', 'service_key', 'mode', 'host', 'pid', 'version',
              'control_url', 'running', 'started_at', 'last_seen', 'last_cycle_at',
-             'detail')
+             'detail', 'env')
 
     def __init__(self, db: BaseConnector) -> None:
         self._db = db
@@ -119,6 +123,24 @@ class ServiceInstancesStore:
         except Exception:  # pylint: disable=broad-except
             pass
 
+    def set_env(self, instance_id: str, env: dict | None) -> None:
+        """Record what this instance runs on — once, at startup.
+
+        Kept out of :meth:`heartbeat` on purpose. That row is rewritten every few seconds by
+        every instance, and this is a few kilobytes that cannot change while the process
+        lives: beating it would be the same bytes over the same wire forever, on the one
+        table a multi-container install writes to most.
+        """
+        if not env:
+            return
+        try:
+            self._db.execute(
+                f'UPDATE {_T} SET env=? WHERE instance_id=?',
+                (json.dumps(env, ensure_ascii=False), instance_id))
+            self._db.commit()
+        except Exception:  # pylint: disable=broad-except
+            pass          # best-effort, exactly like the beat it travels beside
+
     def mark_down(self, instance_id: str) -> None:
         """Mark an instance as cleanly stopped (running=0), keeping the row so the
         UI shows it as stopped rather than abruptly vanishing."""
@@ -164,6 +186,7 @@ class ServiceInstancesStore:
         d = dict(zip(self._COLS, row))
         d['running'] = bool(d.get('running'))
         d['detail'] = _loads(d.get('detail'))
+        d['env'] = _loads(d.get('env'))
         return d
 
     def list_instances(self) -> list[dict]:

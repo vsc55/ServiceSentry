@@ -8,6 +8,66 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.71] - 2026-08-15
+
+### Added
+- **The diagnostics page can answer for the containers it is not running in.** Everything on
+  it described the process that served the request: on a single container that is the whole
+  installation, split into web / worker / syslog / events it is the web admin and nothing
+  else — and the other three were invisible from every screen, while "is that pod on the same
+  build?" is what a support thread opens with.
+  - Each service publishes its **interpreter, OS, packages and optional libraries** into a new
+    `env` column on `service_instances`, and the panel reads them from there. Not over HTTP:
+    the standalone services answer none unless `SS_CONTROL_TOKEN` is set, which is not the
+    default, and a diagnostics screen that works only on the installs that opted into a token
+    is a screen for somebody else. The shared database is what this control plane already
+    declares as its source of truth.
+  - Published **once, at start-up**, and deliberately not part of the beat: that row is
+    rewritten every few seconds by every instance, and none of this can change while the
+    process lives. A restart is a new instance row anyway.
+  - The card shows the **difference**, never four copies of one list. Four containers built
+    from one image carry identical packages, and "same as here" is the whole answer when it is
+    true; a count opens the list package by package when it is not, because "they differ" is
+    not actionable and "which one, and from what to what" is.
+  - A container on **another code version** is marked in amber. That is the real failure: they
+    are meant to come from one image, and a tag left behind shows up here before it shows up
+    as a bug nobody can reproduce.
+  - "Has not published yet" is said, never guessed at — an older build, or one whose first
+    beat has not landed, is a different sentence from "differs" and only one of them means
+    somebody has work.
+  - The remote check covers **what only the other processes run**, in the same round. Each
+    container asking PyPI and OSV about its own list would put four processes on the internet
+    for nearly the same question, in exactly the deployment where that is least welcome — and
+    it contributes nothing when they all came from one image, which is the norm.
+  - Packages are matched by **name and version**, not name alone: the web on 3.4.9 and a
+    worker on 3.5.0 are two questions for the advisory service, and answering one of them for
+    both is how a container gets reported clean because a different one is.
+  - The block travels in the **document** too (text and XML), which is the one place the
+    screen cannot go.
+
+### Fixed
+- **SNMP discovery gave up in silence on a thread that already had an event loop.** It ran
+  `asyncio.run` inside a per-server `try/except: continue`, and `asyncio.run` refuses to start
+  a loop where one is already going — so every server raised, every server was skipped, and the
+  empty list read as *this device has no OIDs*. Which is the exact symptom the walk had already
+  been rewritten once to fix, from an entirely different cause. The same call sat in
+  `snmp_get`, the path the checks take.
+  - `run_coroutine()` runs the coroutine on a thread of its own when the caller's already has a
+    loop, and plainly otherwise. Both call sites go through it.
+  - Found because CI failed five discovery tests that passed on their own, and passed beside
+    `unit`, beside `meta` and beside the whole watchful tree. The pointer was not the assertion
+    but a `RuntimeWarning` in the log — *coroutine was never awaited*, on the `continue` line.
+    Playwright's sync API keeps a loop alive in the main thread, so the pair that reproduces it
+    is `tests/e2e watchfuls/snmp`. The panel serves from whatever thread it is given, which is
+    the reason to fix it regardless of the tests.
+
+### Changed
+- `behind` and `behind_unpinned` are now **derived from the rows the answer carries**, matched
+  by name and version, instead of passed through from the check. Three lists feed one round
+  now, and a count the browser cannot reach by counting what it draws is a count that drifts
+  from the table under it.
+
+
 ## [0.0.1+build.70] - 2026-08-14
 
 ### Added

@@ -652,8 +652,17 @@ Restricción única: `(ip, track)`. Índices: `idx_ip_offc_updated(updated_at)`.
 | last_seen | REAL | sí | — | |
 | last_cycle_at | REAL | sí | — | |
 | detail | TEXT | no | `''` | JSON |
+| env | TEXT | no | `''` | JSON |
 
 Índices: `idx_svcinst_key(service_key)`, `idx_svcinst_lastseen(last_seen)`.
+
+`env` es la huella del proceso —intérprete, SO, sus paquetes y qué librerías opcionales
+tiene— y es lo que permite ver desde el panel las dependencias de los **otros contenedores**
+en modo multi-servicio: sin ella, la pantalla de diagnóstico describe el proceso web y nada
+más. Se escribe **una sola vez, al arrancar** (`ServiceInstancesStore.set_env`) y no viaja en
+el latido: nada de eso puede cambiar sin reiniciar, y un reinicio es una fila nueva. Va en su
+propia columna y no dentro de `detail` porque `detail` se reescribe en cada latido, y son unos
+pocos KB por instancia.
 
 ### `service_leader` — lease de líder (alta disponibilidad)
 [lib/services/manager/leader.py:34](../src/lib/services/manager/leader.py#L34)

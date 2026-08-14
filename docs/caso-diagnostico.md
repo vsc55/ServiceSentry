@@ -19,6 +19,55 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Cinco tests que solo fallaban con el navegador delante, y un descubrimiento SNMP que se rendía en silencio
+
+**Fecha:** 2026-08-15 · **Área:** `watchfuls/snmp/client.py` (`run_coroutine`),
+`watchfuls/snmp/actions.py` (`discover`)
+
+**Síntoma** — CI en rojo con cinco fallos en `watchfuls/snmp/tests/test_snmp.py`, todos de
+descubrimiento y todos con la misma forma: el walk parcheado nunca se llamaba y `discover`
+devolvía `[]`. En local, ese fichero pasaba entero (131 tests). También pasaba junto a `unit`,
+junto a `meta` y con el árbol de watchfuls completo.
+
+**Diagnóstico** — no estaba en el assert, estaba en los *warnings* del log de CI:
+
+```
+watchfuls/snmp/actions.py:175: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call'
+was never awaited
+    continue
+```
+
+La línea 175 es el `continue` del `except Exception` que envuelve la llamada. O sea: el
+`asyncio.run` **lanzaba**, y la corrutina se quedaba sin esperar. Con eso, la combinación que
+faltaba era evidente: `tests/e2e watchfuls/snmp -n auto` reproduce los cinco en 60 segundos.
+La API **síncrona de Playwright** mantiene un event loop vivo en el hilo principal mientras dura
+su fixture de sesión, y `asyncio.run()` se niega a arrancar otro ahí.
+
+**Causa raíz** — `discover` llamaba `asyncio.run(...)` **dentro de un `try/except: continue`
+por servidor**. En un hilo con loop vivo, cada servidor lanzaba, cada servidor se saltaba, y la
+lista vacía se leía como *este dispositivo no tiene OIDs* — que es exactamente el síntoma que el
+walk ya se había reescrito una vez para arreglar, por una causa completamente distinta. El mismo
+`asyncio.run` estaba en `snmp_get`, la ruta de los checks.
+
+**Solución** — `run_coroutine(coro)` en `client.py`: si el hilo ya tiene un loop corriendo,
+ejecuta la corrutina en un hilo propio con su propio loop; si no, `asyncio.run` como siempre. Lo
+usan los dos sitios. Guarda nueva `TestItDoesNotAssumeItOwnsTheThread` (4 tests), verificada en
+rojo revirtiendo el arreglo.
+
+**Lección** — dos, y la segunda es la cara:
+
+- **`asyncio.run` no se puede llamar desde código que no controla su hilo.** El panel atiende
+  desde el hilo que le toque, así que cualquier API asíncrona envuelta en una fachada síncrona
+  necesita el camino de los dos casos. Que aquí lo destapase Playwright es accidental; el motivo
+  para arreglarlo no.
+- **Un `except` por elemento convierte «no pudimos preguntar» en «no hay nada».** Es la misma
+  familia que la tabla de dependencias que decía «todo bien» siendo el recorte nuestro: cuando
+  el fallo es de quien pregunta y no de quien responde, el resultado no parece un error, parece
+  una respuesta — y nadie va a mirar. La pista útil no estaba en el assert sino en un
+  `RuntimeWarning` que el log traía desde el principio.
+
+---
+
 ## La tabla de dependencias decía «todo bien» tres veces, y ninguna era el dato
 
 **Fecha:** 2026-08-14 · **Área:** `lib/core/diagnostics/advisories.py`,

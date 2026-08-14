@@ -822,6 +822,18 @@ fallo que todo el mundo se encuentra es el de que discrepen. Un veredicto **`ign
 arreglo. Nombra además la trampa de la cookie: `secure_cookies` sobre lo que el panel cree HTTP
 hace que el navegador tire la sesión y el login parezca un bucle.
 
+**Otros procesos.** En despliegue multi-contenedor todo lo anterior describe **solo el proceso
+web**: el worker, el receptor syslog y el procesador de eventos no responden HTTP salvo que se
+fije `SS_CONTROL_TOKEN`, que no es el valor por defecto. Así que cada servicio publica su huella
+—intérprete, SO, paquetes, librerías opcionales— **una vez al arrancar** en la columna `env` de
+`service_instances`, y el panel la lee de ahí: la base de datos compartida es lo que el propio
+plano de control declara como su fuente de verdad. La tarjeta muestra **la diferencia**, no
+cuatro copias de la misma lista —cuatro contenedores de una imagen traen listas idénticas—, y
+marca en ámbar el que corre otra versión de código, que es el fallo real: se supone que salen
+todos de la misma imagen. La comprobación remota cubre además lo que **solo ellos** ejecutan, en
+la misma tanda: cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a
+internet a preguntar casi lo mismo.
+
 **Dependencias.** Las dos columnas remotas —última versión y avisos— **no existen hasta que
 alguien pulsa**: una columna vacía en toda instalación parece rota, y una página que contacta
 con pypi.org porque la han abierto es un informe de bug indiscutible en una red segregada. La

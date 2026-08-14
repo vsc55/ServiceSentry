@@ -10,11 +10,10 @@ instead of typing an OID from a vendor PDF. ``audit_detail`` is the other half o
 what the audit log should say once one has run.
 """
 
-import asyncio
 import os
 
 from . import mib_resolver as _mib_resolver
-from .client import _HAS_PYSNMP
+from .client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
 
 
@@ -158,7 +157,7 @@ class SnmpActions:
                 # Discovery used to walk with the community string whatever the version, so a
                 # v3 server answered nothing and the empty result read as "this device has no
                 # OIDs" rather than "nobody asked it properly".
-                oids = asyncio.run(cls._snmp_walk(
+                oids = run_coroutine(cls._snmp_walk(
                     host, port, version, community, timeout, retries,
                     max_oids=per_server,
                     v3_username=str(srv.get('snmpv3_username', '') or ''),
