@@ -17,6 +17,9 @@
         "snmpv3_priv_key":      "Clave de privacidad",
         "snmpv3_auth_protocol": "Protocolo de autenticación",
         "snmpv3_priv_protocol": "Protocolo de privacidad",
+        "snmpv3_level":         "Tipo de identificación",
+        "snmpv3_context":       "Contexto",
+        "snmpv3_engine_id":     "Engine ID",
         "server":               "Servidor",
         "oid":                  "OID",
         "operator":             "Operador",
@@ -39,11 +42,21 @@
         "snmpv3_priv_key":      "Contraseña de privacidad (cifrado) para SNMP v3. Dejar vacío para authNoPriv.",
         "snmpv3_auth_protocol": "Algoritmo de hash para autenticación SNMP v3.",
         "snmpv3_priv_protocol": "Algoritmo de cifrado para privacidad SNMP v3.",
+        "snmpv3_level":         "Qué protege la sesión SNMP v3: solo identificar al usuario, además autenticarlo, o cifrar también la conversación. Es lo que decide qué claves hacen falta debajo.",
+        "snmpv3_context":       "Contexto SNMP v3 al que se dirigen las consultas. Muchos equipos exponen una VLAN o una instancia por contexto; dejar vacío para el contexto por defecto.",
+        "snmpv3_engine_id":     "Engine ID del agente, en hexadecimal. Solo hace falta cuando el dispositivo no lo anuncia y falla el descubrimiento automático.",
         "server":               "Clave del servidor (de la sección Servidores) que usará esta comprobación. Dejar vacío para usar el primer servidor habilitado.",
         "oid":                  "OID a consultar en notación decimal puntuada (ej. 1.3.6.1.2.1.1.1.0 para sysDescr). Usa Descubrir para explorar OIDs disponibles.",
         "operator":             "Operador de comparación. Usa 'any' para comprobar solo la accesibilidad.",
         "value":                "Valor esperado para la comparación. Los operadores numéricos (gt/lt/gte/lte) convierten el valor del OID a float.",
         "alert":                "Fallos consecutivos antes de disparar una alerta."
+    },
+    "option_labels": {
+        "snmpv3_level": {
+            "noAuthNoPriv":     "Sin autenticación ni cifrado",
+            "authNoPriv":       "Con autenticación, sin cifrado",
+            "authPriv":         "Con autenticación y cifrado"
+        }
     },
     "new_item_key_label":       "Nombre o identificador de la entrada:",
     "rename_item_prompt":       "Introduce el nuevo nombre o identificador:",

@@ -48,17 +48,27 @@ class SnmpActions:
             _names = list(result.get('failed_names') or [])
             detail['imported'] = _imp
             detail['failed']   = _nfail
-            if _names:
+            # The audit entry keeps BOTH lists, and the reason for each failure — the
+            # only place either can be answered later, since re-running the import to
+            # find out costs another few hundred requests against GitHub's 60/h
+            # anonymous limit.
+            _imported_names = [str(n) for n in (result.get('imported_names') or [])]
+            _failed_detail  = [d for d in (result.get('failed_detail') or [])
+                               if isinstance(d, dict)]
+            if _imported_names:
+                detail['imported_names'] = _imported_names
+            if _failed_detail:
+                detail['failed_detail'] = _failed_detail
+            elif _names:
                 detail['failed_names'] = _names
             _name = f'GitHub import: {_imp} ok, {_nfail} failed'
             if result.get('truncated'):
                 _name += ' (truncated)'
-            if _names:
-                _shown = ', '.join(_names[:10])
-                _more  = len(_names) - 10
-                if _more > 0:
-                    _shown += f', +{_more} more'
-                _name += f' — failed: {_shown}'
+            # The summary line stays a COUNT. It named the first ten failures for a
+            # while, which reads well for three and turned into six lines of prose for
+            # twelve behind a TLS timeout each — in a table cell, where the row is the
+            # index and not the record. Which files, and why, are the structured fields
+            # above; the entry opens onto them.
             detail['name'] = _name
         elif _done:
             for _f in ('compiled', 'partial', 'failed', 'result_ok', 'message', 'total'):
@@ -99,16 +109,19 @@ class SnmpActions:
         # Determine application data directory injected by the route handler.
         var_dir = str(cfg.get('__var_dir__') or '').strip()
 
-        # Ensure raw MIB directory exists, then compile only when new raw files
-        # have appeared since the last compilation.  Calling compile_raw_mibs()
-        # unconditionally costs ~800 ms every discover (pysmi setup), so the
-        # mtime check avoids that overhead when nothing has changed.
+        # Ensure the raw MIB directory exists, then compile the few files that are
+        # waiting — and ONLY while they are few.  A discovery used to compile whatever
+        # had appeared since the last one, which is fine for a MIB dropped in by hand
+        # and is an hour of parsing after a folder import: ~2.7 s per MIB, and a vendor
+        # repository brings hundreds.  Past the limit they stay raw and the MIB manager
+        # compiles them when asked, with a progress bar and a cancel button.
         if var_dir:
             raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')
             compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled')
             os.makedirs(raw_dir, exist_ok=True)
-            if _mib_resolver.raw_dir_has_new_mibs(raw_dir, compiled_dir):
-                _mib_resolver.compile_raw_mibs(raw_dir, compiled_dir)
+            _pending = _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir)
+            if _pending and len(_pending) <= _mib_resolver.AUTO_COMPILE_LIMIT:
+                _mib_resolver.compile_raw_mibs(raw_dir, compiled_dir, mibs_filter=_pending)
 
         # Build/refresh OID index if missing or older than any compiled MIB.
         # Done once (~0.6 s); subsequent calls load from disk in ~30 ms.
@@ -141,18 +154,40 @@ class SnmpActions:
             retries   = max(0, int(srv.get('retries',  _SERVER_DEFAULTS['retries'])  or _SERVER_DEFAULTS['retries']))
 
             try:
+                # The v3 identity travels with the request, exactly as it does for a check.
+                # Discovery used to walk with the community string whatever the version, so a
+                # v3 server answered nothing and the empty result read as "this device has no
+                # OIDs" rather than "nobody asked it properly".
                 oids = asyncio.run(cls._snmp_walk(
                     host, port, version, community, timeout, retries,
                     max_oids=per_server,
+                    v3_username=str(srv.get('snmpv3_username', '') or ''),
+                    v3_auth_key=str(srv.get('snmpv3_auth_key', '') or ''),
+                    v3_priv_key=str(srv.get('snmpv3_priv_key', '') or ''),
+                    v3_auth_proto=str(srv.get('snmpv3_auth_protocol',
+                                              _SERVER_DEFAULTS['snmpv3_auth_protocol'])
+                                      or _SERVER_DEFAULTS['snmpv3_auth_protocol']),
+                    v3_priv_proto=str(srv.get('snmpv3_priv_protocol',
+                                              _SERVER_DEFAULTS['snmpv3_priv_protocol'])
+                                      or _SERVER_DEFAULTS['snmpv3_priv_protocol']),
                 ))
             except Exception:  # pylint: disable=broad-except
                 continue
 
+            # Which server answered, but only when that is a question. The discovery hangs off
+            # `checks`, INSIDE one server, so the modal asks one and the prefix repeated the
+            # same name down every row while eating the 160 px the value has to live in — and
+            # the value is the only thing that says whether an OID is worth adding.
+            #
+            # The server's NAME when it is shown, never its key: items are rekeyed by uid when
+            # stored, so the key is a 36-character UUID and it filled that column on its own.
+            srv_label = str(srv.get('label') or '').strip() or srv_key
+            prefix = f'[{srv_label}] ' if len(servers) > 1 else ''
             for item in oids:
                 mib_info = resolver.resolve(item['name'])
                 results.append({
                     'name':         item['name'],
-                    'display_name': f'[{srv_key}] {item["display_name"]}',
+                    'display_name': f'{prefix}{item["display_name"]}',
                     'status':       item['status'],
                     'mib_category': item.get('mib_category', 'unknown'),
                     **mib_info,   # mib_module, mib_name, mib_type

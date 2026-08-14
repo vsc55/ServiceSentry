@@ -382,7 +382,9 @@ function _renderDiscoverList() {
                 ${_subtitleBadge ? `<div class="text-truncate">${_subtitleBadge}</div>` : ''}
                 <code class="text-truncate d-block ss-fs-3" title="${escAttr(svc.name)}">${esc(svc.name)}</code>
             </div>
-            ${svc.display_name ? `<span class="text-muted text-truncate d-inline-block flex-shrink-0" style="font-size:.75rem;max-width:160px">${esc(svc.display_name)}</span>` : ''}
+            ${svc.display_name ? `<span class="text-muted text-truncate d-inline-block flex-shrink-0"
+                 style="font-size:.75rem;max-width:160px"
+                 title="${escAttr(svc.display_name)}">${esc(svc.display_name)}</span>` : ''}
             ${_typeBadge}
             ${_trailIcon}
         </div>`;

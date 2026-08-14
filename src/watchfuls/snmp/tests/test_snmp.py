@@ -553,7 +553,45 @@ class TestImportFromGithubAsync:
         assert out['imported'] == 3 and out['failed'] == 2
         assert out['failed_names'] == ['A-MIB', 'B-MIB']
         assert '3 ok, 2 failed' in out['name']
-        assert 'A-MIB' in out['name'] and 'B-MIB' in out['name']
+
+    def test_the_summary_line_stays_a_count(self):
+        """It named the first ten failures for a while. That reads well for three and turns
+        into six lines of prose for twelve behind a TLS timeout each — in a table cell, where
+        the row is the index and not the record. The names are structured fields; the entry
+        opens onto them."""
+        out = Watchful.audit_detail('import_mib_from_github_status', {
+            'ok': True, 'done': True, 'imported': 988, 'failed': 12,
+            'failed_names': [f'CISCO-{i}-MIB.my' for i in range(12)],
+            'failed_detail': [{'name': f'CISCO-{i}-MIB.my',
+                               'error': '<urlopen error _ssl.c:1059: The handshake operation '
+                                        'timed out>'} for i in range(12)],
+        })
+        assert out['name'] == 'GitHub import: 988 ok, 12 failed'
+        assert len(out['failed_detail']) == 12, 'the reasons must still be IN the entry'
+
+    def test_audit_names_both_outcomes_and_the_reason(self):
+        """Reported from the audit log: "81 ok, 3 failed" named the three that failed and
+        nothing else — not which 81 worked, and not why the three did not. Both questions
+        are asked exactly when the import cannot be cheaply repeated."""
+        out = Watchful.audit_detail('import_mib_from_github_status', {
+            'ok': True, 'done': True, 'imported': 2, 'failed': 1,
+            'failed_names': ['IP-MIB.txt'],
+            'failed_detail': [{'name': 'IP-MIB.txt', 'error': 'rejected'}],
+            'imported_names': ['A-MIB.txt', 'B-MIB.txt'],
+        })
+        assert out['imported_names'] == ['A-MIB.txt', 'B-MIB.txt']
+        assert out['failed_detail'] == [{'name': 'IP-MIB.txt', 'error': 'rejected'}]
+
+    def test_audit_still_lists_names_when_no_reason_came_back(self):
+        """An older job dict, or one whose failures carried no error text: the names are
+        still worth recording, and the entry must not lose them because the richer field
+        was not there."""
+        out = Watchful.audit_detail('import_mib_from_github_status', {
+            'ok': True, 'done': True, 'imported': 1, 'failed': 1,
+            'failed_names': ['C-MIB'],
+        })
+        assert out['failed_names'] == ['C-MIB']
+        assert 'failed_detail' not in out
 
     def test_start_run_keeps_failed_names(self, tmp_path):
         # The job must retain WHICH files failed (not just the count) so the UI
@@ -590,6 +628,11 @@ class TestImportFromGithubAsync:
         assert st['imported'] == 2
         assert st['failed'] == 1
         assert st['failed_names'] == ['BAD-MIB.txt']
+        # …and the two that WORKED, plus WHY the third did not. "2 ok, 1 failed"
+        # answers how many; the entry exists so somebody can see which, and a
+        # re-run to find out costs another pass over GitHub's 60/h anonymous limit.
+        assert st['imported_names'] == ['OK1-MIB.txt', 'OK2-MIB.txt']
+        assert st['failed_detail'] == [{'name': 'BAD-MIB.txt', 'error': 'boom'}]
 
 
 class TestMibCatalog:
@@ -840,3 +883,265 @@ class TestMibFilenameGuards:
         os.makedirs(base)
         result = mib_admin._confined_path(base, 'MY-MIB.py')
         assert result is not None and result.startswith(base)
+
+
+class TestCredentialType:
+    """The reusable SNMP identity, and the one thing that makes it worth having a schema:
+    which fields apply depends on the version, and on v3 also on the security level."""
+
+    @staticmethod
+    def _fields():
+        import os
+        from lib.modules.discovery.credential_schemas import credential_schemas
+        # The module's own folder, up one: the watchfuls TREE, which is what the catalog scans.
+        watchfuls_dir = os.path.dirname(os.path.dirname(os.path.abspath(snmp.__file__)))
+        cat = credential_schemas(watchfuls_dir)
+        assert 'snmp_auth' in cat, 'the module declares no credential type'
+        return {f['name']: f for f in cat['snmp_auth']['fields']}
+
+    def test_v1_and_v2c_ask_only_for_the_community(self):
+        """Everything else on the form belongs to v3, and a form that offers a user name for
+        a v2c device is asking for something that has nowhere to go."""
+        f = self._fields()
+        assert f['community']['show_when'] == {'version': ['1', '2c']}
+        for name in ('snmpv3_username', 'snmpv3_level', 'snmpv3_context'):
+            assert f[name]['show_when']['version'] == ['3']
+
+    def test_the_keys_follow_the_security_level_not_only_the_version(self):
+        """noAuthNoPriv needs neither key, authNoPriv needs one, authPriv both. Gating them on
+        the version alone would show two key boxes that the device will ignore — and a filled
+        box that does nothing is worse than an absent one, because it looks configured."""
+        f = self._fields()
+        for name in ('snmpv3_auth_protocol', 'snmpv3_auth_key'):
+            assert f[name]['show_when'] == {'version': ['3'],
+                                            'snmpv3_level': ['authNoPriv', 'authPriv']}
+        for name in ('snmpv3_priv_protocol', 'snmpv3_priv_key'):
+            assert f[name]['show_when'] == {'version': ['3'], 'snmpv3_level': ['authPriv']}
+
+    def test_every_secret_is_marked_as_one(self):
+        """`secret` is what encrypts the value at rest and masks it in the API. A key that
+        misses it is stored in clear and returned in clear."""
+        f = self._fields()
+        for name in ('community', 'snmpv3_auth_key', 'snmpv3_priv_key'):
+            assert f[name]['secret'] is True, f'{name} is stored in the clear'
+        assert f['snmpv3_username']['secret'] is False, 'a user name is not a secret'
+
+    def test_the_protocol_lists_dropped_none(self):
+        """The collection's lists carry a "none" option because they have no level field: it
+        is how they say authNoPriv. Here the level says it, and two places to say the same
+        thing is two places to disagree."""
+        f = self._fields()
+        for name in ('snmpv3_auth_protocol', 'snmpv3_priv_protocol'):
+            values = [o.get('value') if isinstance(o, dict) else o for o in f[name]['options']]
+            assert 'none' not in values, f'{name} says authNoPriv a second way'
+
+
+class TestTheImplicitCompileIsBounded:
+    """Parsing ASN.1 costs ~2.7 s per MIB and is 89% of a compile, so the number of files IS
+    the number of seconds. One dropped into raw/ should still just work; a vendor folder
+    brings hundreds, and at that size an implicit compile is not a convenience — it is a
+    panel that does not start for an hour with nothing on screen to say why."""
+
+    @staticmethod
+    def _dirs(tmp_path, raw_names, compiled_names=()):
+        """The layout `discover` looks under, so the two tests that drive it through the real
+        entry point actually find these files. Built one level down (`snmp_mibs/`) for that
+        reason and not for tidiness: pointed anywhere else, `discover` sees an empty raw dir,
+        finds nothing pending, and the test passes for the wrong reason."""
+        import os
+        raw = tmp_path / 'snmp_mibs' / 'raw'
+        comp = tmp_path / 'snmp_mibs' / 'compiled'
+        raw.mkdir(parents=True)
+        comp.mkdir(parents=True)
+        for n in compiled_names:
+            (comp / f'{n}.py').write_text('# compiled')
+        # Written after, so a raw file is never accidentally older than its module.
+        for n in raw_names:
+            (raw / f'{n}.txt').write_text('-- mib --')
+            if n in compiled_names:
+                st = os.stat(comp / f'{n}.py')
+                os.utime(raw / f'{n}.txt', (st.st_atime, st.st_mtime - 10))
+        return str(raw), str(comp)
+
+    def test_pending_is_per_file_not_per_directory(self, tmp_path):
+        """`raw_dir_has_new_mibs` answers for the whole directory against the newest module
+        of them all, which is what made the automatic compile all-or-nothing: one new file
+        made the directory "new" and the compile walked every name in it."""
+        raw, comp = self._dirs(tmp_path, ['A-MIB', 'B-MIB', 'C-MIB'], ['A-MIB', 'B-MIB'])
+        assert mib_resolver.pending_raw_mibs(raw, comp) == ['C-MIB']
+        assert mib_resolver.raw_dir_has_new_mibs(raw, comp) is True
+
+    def test_a_raw_file_newer_than_its_module_is_pending(self, tmp_path):
+        import os
+        raw, comp = self._dirs(tmp_path, ['A-MIB'], ['A-MIB'])
+        assert mib_resolver.pending_raw_mibs(raw, comp) == []
+        st = os.stat(os.path.join(comp, 'A-MIB.py'))
+        os.utime(os.path.join(raw, 'A-MIB.txt'), (st.st_atime, st.st_mtime + 10))
+        assert mib_resolver.pending_raw_mibs(raw, comp) == ['A-MIB']
+
+    def test_nothing_pending_when_everything_is_built(self, tmp_path):
+        raw, comp = self._dirs(tmp_path, ['A-MIB', 'B-MIB'], ['A-MIB', 'B-MIB'])
+        assert mib_resolver.pending_raw_mibs(raw, comp) == []
+
+    def test_discover_skips_a_bulk_compile(self, tmp_path):
+        """The case this came from: 988 files imported from a vendor repo, and the next
+        discovery would have parsed all of them before answering."""
+        raw, comp = self._dirs(tmp_path, [f'M{i}-MIB' for i in range(50)])
+        called = []
+        with patch.object(mib_resolver, 'compile_raw_mibs',
+                          side_effect=lambda *a, **k: called.append(k) or {'ok': True}):
+            Watchful.discover({'__var_dir__': str(tmp_path), 'servers': {}})
+        assert not called, 'a discovery still triggers a bulk compile'
+
+    def test_discover_still_picks_up_a_handful(self, tmp_path):
+        """The automatic path is what makes dropping a .mib into raw/ work at all — it is
+        the SIZE that had to be bounded, not the behaviour."""
+        raw, comp = self._dirs(tmp_path, ['A-MIB', 'B-MIB'])
+        called = []
+        with patch.object(mib_resolver, 'compile_raw_mibs',
+                          side_effect=lambda *a, **k: called.append(k) or {'ok': True}):
+            Watchful.discover({'__var_dir__': str(tmp_path), 'servers': {}})
+        assert len(called) == 1
+        assert called[0]['mibs_filter'] == ['A-MIB', 'B-MIB'], \
+            'it compiles the whole directory instead of what is waiting'
+
+    def test_reimporting_an_unchanged_mib_does_not_make_it_stale(self, tmp_path):
+        """Whether a MIB needs compiling is its mtime against the module's. Rewriting
+        identical bytes marks it stale and buys a re-parse of a file that did not change —
+        which is how re-importing a folder for a few new MIBs came to cost as much as the
+        first import."""
+        import json as _json
+        raw = tmp_path / 'snmp_mibs' / 'raw'
+        raw.mkdir(parents=True)
+        target = raw / 'SAME-MIB.txt'
+        target.write_text('-- mib --', encoding='utf-8')
+        before = target.stat().st_mtime_ns
+        listing = [{'type': 'file', 'name': 'SAME-MIB.txt',
+                    'download_url': 'https://raw/SAME-MIB.txt'}]
+
+        def fake(req, timeout=None):
+            u = getattr(req, 'full_url', req)
+            body = _json.dumps(listing).encode() if 'api.github.com' in u else b'-- mib --'
+            m = MagicMock(); m.read.return_value = body
+            m.__enter__ = lambda s: s; m.__exit__ = MagicMock(return_value=False)
+            return m
+
+        with patch('urllib.request.urlopen', side_effect=fake), \
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
+            res = mib_admin._run_github_import(
+                str(tmp_path), 'https://github.com/o/r/tree/master/mibs', False, None)
+        assert res['count'] == 1, 'the file must still count as imported'
+        assert target.stat().st_mtime_ns == before, 'identical content was rewritten'
+
+
+class TestDiscoveryUsesTheServersIdentity:
+    """Reported as "you launch OID discovery against a server and get nothing back".
+
+    The walk built its own auth: `CommunityData(community, mpModel=1)` whatever the version.
+    Against a v3 device that is a v2c request carrying a community string, which it answers
+    neither — so the walk timed out, `discover` swallowed it, and the empty list read as "this
+    device has no OIDs" instead of "nobody asked it properly". The checks worked all along,
+    which is what made it look like the device rather than the code.
+    """
+
+    V3 = {'enabled': True, 'host': '10.0.0.1', 'version': '3',
+          'snmpv3_username': 'monitor', 'snmpv3_auth_key': 'authpass1',
+          'snmpv3_priv_key': 'privpass1', 'snmpv3_auth_protocol': 'SHA',
+          'snmpv3_priv_protocol': 'AES-128', 'checks': {}}
+
+    def test_one_builder_answers_for_every_version(self):
+        """Two copies is how one of them came to not know about v3."""
+        from watchfuls.snmp.client import SnmpClient
+        assert type(SnmpClient._auth_data('1', 'public')).__name__ == 'CommunityData'
+        assert type(SnmpClient._auth_data('2c', 'public')).__name__ == 'CommunityData'
+        assert type(SnmpClient._auth_data(
+            '3', 'public', v3_username='u', v3_auth_key='k' * 8,
+            v3_priv_key='p' * 8)).__name__ == 'UsmUserData'
+
+    def test_a_v3_server_is_walked_as_v3(self, tmp_path):
+        seen = {}
+
+        async def fake_walk(*a, **kw):
+            seen.update(kw)
+            return []
+
+        with patch.object(Watchful, '_snmp_walk', side_effect=fake_walk):
+            Watchful.discover({'__var_dir__': str(tmp_path), 'servers': {'s': dict(self.V3)}})
+        assert seen.get('v3_username') == 'monitor', 'the walk never sees the v3 identity'
+        assert seen.get('v3_auth_key') == 'authpass1'
+        assert seen.get('v3_priv_key') == 'privpass1'
+        assert seen.get('v3_auth_proto') == 'SHA'
+        assert seen.get('v3_priv_proto') == 'AES-128'
+
+    def test_the_protocols_fall_back_to_the_schema_defaults(self, tmp_path):
+        """A v3 server saved before those fields existed carries neither. Passing '' would
+        select whatever `_AUTH_PROTOCOLS.get` falls back to, which is not the default the
+        server entry itself would show."""
+        srv = {k: v for k, v in self.V3.items()
+               if k not in ('snmpv3_auth_protocol', 'snmpv3_priv_protocol')}
+        seen = {}
+
+        async def fake_walk(*a, **kw):
+            seen.update(kw)
+            return []
+
+        with patch.object(Watchful, '_snmp_walk', side_effect=fake_walk):
+            Watchful.discover({'__var_dir__': str(tmp_path), 'servers': {'s': srv}})
+        assert seen['v3_auth_proto'] == snmp.defaults._SERVER_DEFAULTS['snmpv3_auth_protocol']
+        assert seen['v3_priv_proto'] == snmp.defaults._SERVER_DEFAULTS['snmpv3_priv_protocol']
+
+
+class TestDiscoveryShowsTheValue:
+    """The middle column of a discovered row is what that OID currently reads — the one thing
+    that tells you whether it is worth adding."""
+
+    @staticmethod
+    def _srv(label='', **extra):
+        srv = {'enabled': True, 'host': '10.0.0.1', 'version': '2c', 'community': 'public',
+               'checks': {}, **extra}
+        if label:
+            srv['label'] = label
+        return srv
+
+    @staticmethod
+    def _walk(value):
+        async def fake_walk(*a, **kw):
+            return [{'name': '1.3.6.1.2.1.1.1.0', 'display_name': value,
+                     'status': 'DisplayString', 'mib_category': 'string'}]
+        return fake_walk
+
+    def test_one_server_gets_no_prefix(self, tmp_path):
+        """The discovery hangs off `checks`, inside ONE server, so the modal always asks one:
+        the prefix repeated the same name down every row while eating the 160 px the value has
+        to live in."""
+        with patch.object(Watchful, '_snmp_walk', side_effect=self._walk('Linux pve01 6.8.12')):
+            out = Watchful.discover({
+                '__var_dir__': str(tmp_path),
+                'servers': {'6dadeda3-9d91-41c2-9721-2b3c4d5e6f70': self._srv('PVE01')},
+            })
+        assert out, 'the walk returned rows and discover dropped them'
+        assert out[0]['display_name'] == 'Linux pve01 6.8.12'
+
+    def test_several_servers_are_named_not_keyed(self, tmp_path):
+        """When more than one answered, which one did is a real question — and the answer is
+        the server's NAME. Items are rekeyed by uid when stored, so the collection key is a
+        36-character UUID: prefixed to the value it filled the column on its own."""
+        with patch.object(Watchful, '_snmp_walk', side_effect=self._walk('up')):
+            out = Watchful.discover({
+                '__var_dir__': str(tmp_path),
+                'servers': {'6dadeda3-9d91-41c2-9721-2b3c4d5e6f70': self._srv('PVE01'),
+                            '7eadeda3-9d91-41c2-9721-2b3c4d5e6f71': self._srv('PVE02')},
+            })
+        shown = {r['display_name'] for r in out}
+        assert shown == {'[PVE01] up', '[PVE02] up'}
+        assert not any('6dadeda3' in s for s in shown)
+
+    def test_an_unlabelled_server_falls_back_to_its_key(self, tmp_path):
+        """A collection whose items are keyed by hand has no label field, and with several
+        answering a row with no prefix would not say which one did."""
+        with patch.object(Watchful, '_snmp_walk', side_effect=self._walk('up')):
+            out = Watchful.discover({
+                '__var_dir__': str(tmp_path),
+                'servers': {'sw1': self._srv(), 'sw2': self._srv()},
+            })
+        assert {r['display_name'] for r in out} == {'[sw1] up', '[sw2] up'}

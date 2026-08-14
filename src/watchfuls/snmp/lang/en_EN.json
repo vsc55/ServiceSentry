@@ -17,6 +17,9 @@
         "snmpv3_priv_key":      "Privacy Key",
         "snmpv3_auth_protocol": "Auth Protocol",
         "snmpv3_priv_protocol": "Privacy Protocol",
+        "snmpv3_level":         "Identification type",
+        "snmpv3_context":       "Context",
+        "snmpv3_engine_id":     "Engine ID",
         "server":               "Server",
         "oid":                  "OID",
         "operator":             "Operator",
@@ -39,11 +42,21 @@
         "snmpv3_priv_key":      "SNMP v3 privacy (encryption) passphrase. Leave empty for authNoPriv.",
         "snmpv3_auth_protocol": "Hash algorithm for SNMP v3 authentication.",
         "snmpv3_priv_protocol": "Encryption algorithm for SNMP v3 privacy.",
+        "snmpv3_level":         "What the SNMP v3 session protects: the user's identity alone, authentication as well, or the conversation encrypted on top. It is what decides which keys are needed below.",
+        "snmpv3_context":       "SNMP v3 context the queries are addressed to. Many devices expose a VLAN or an instance per context; leave empty for the default one.",
+        "snmpv3_engine_id":     "The agent's engine ID, in hex. Only needed when the device does not advertise it and automatic discovery fails.",
         "server":               "Key of the server entry (from the Servers section) to use for this check. Leave empty to use the first enabled server.",
         "oid":                  "OID to query in dotted-decimal notation (e.g. 1.3.6.1.2.1.1.1.0 for sysDescr). Use Discover to browse available OIDs.",
         "operator":             "Comparison operator. Use 'any' to check reachability only.",
         "value":                "Expected value for the comparison. Numeric operators (gt/lt/gte/lte) cast the OID value to float.",
         "alert":                "Consecutive failures before triggering an alert."
+    },
+    "option_labels": {
+        "snmpv3_level": {
+            "noAuthNoPriv":     "No authentication, no privacy",
+            "authNoPriv":       "Authentication, no privacy",
+            "authPriv":         "Authentication and privacy"
+        }
     },
     "new_item_key_label":       "Entry name or identifier:",
     "rename_item_prompt":       "Enter new entry name or identifier:",

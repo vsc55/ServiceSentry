@@ -8,6 +8,28 @@ let _auditEntries  = [];
 let _auditPage     = 1;
 let _auditPageSize = null; // lazy init from _tableRowsDefault
 
+// The keys the two renderers below handle by name. Everything else in a detail object is
+// something a module (or a future core event) put there, and both of them have to account
+// for it: the modal by showing it, the row by becoming clickable so the modal can be reached.
+const _AUDIT_KNOWN_KEYS = new Set([
+    'reason', 'name', 'username', 'role', 'auth_source', 'remember', 'uid', 'retry_after',
+    'display_name', 'changes', 'before', 'after', 'results',
+]);
+// …and the ones the ROW already states, which are not on their own a reason to open anything.
+const _AUDIT_ROW_KEYS = new Set([..._AUDIT_KNOWN_KEYS, 'ok', 'module', 'action']);
+
+/** Does this entry hold more than the row is already showing? */
+function _auditHasMore(d) {
+    return Object.keys(d).some(k => !_AUDIT_ROW_KEYS.has(k));
+}
+
+/** A label for a table cell. The detail is a record, not a paragraph: an import that names
+ *  twelve failed files with a TLS error each turned one row into six lines of prose. */
+function _auditClip(s, max = 72) {
+    const v = String(s);
+    return v.length <= max ? v : v.slice(0, max) + '…';
+}
+
 // Full detail renderer — used in the modal
 function formatAuditDetailFull(detail) {
     if (!detail) return '';
@@ -43,6 +65,16 @@ function formatAuditDetailFull(detail) {
         if (Array.isArray(detail.changes) && detail.changes.length) {
             html += formatAuditDetailFull(detail.changes);
         }
+        // Everything this function does NOT know by name. It used to fall back to the
+        // generic renderer only when it had recognised nothing at all (`html || …`), so an
+        // entry carrying one known key and ten unknown ones showed the one and dropped the
+        // ten — and a module's audit hook is free to record whatever it likes, which is the
+        // whole point of the hook. The SNMP MIB import was the case that showed it: which
+        // files were imported and why the others failed were both in the entry, and neither
+        // was reachable from the screen that exists to read entries.
+        const _rest = Object.fromEntries(
+            Object.entries(detail).filter(([k]) => !_AUDIT_KNOWN_KEYS.has(k)));
+        if (Object.keys(_rest).length) html += renderReadable(_rest);
         // before/after snapshots (SCIM & other create/update/delete audits): a
         // create shows only `after`, a delete only `before`, an update both (diff).
         if (detail.before || detail.after) {
@@ -171,9 +203,14 @@ function auditSummaryHtml(idx, detail) {
             const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
             const snap = !!(detail.before || detail.after);
             label = n
-                ? esc(detail.name) + ' · ' + tf('audit_n_changes', n)
-                : esc(detail.name);
-            if (!n && !snap) return `<span class="text-muted small">${label}</span>`;
+                ? esc(_auditClip(detail.name)) + ' · ' + tf('audit_n_changes', n)
+                : esc(_auditClip(detail.name));
+            // Plain text ONLY when the entry really holds nothing else. Reported from a MIB
+            // import: the row printed the whole summary as prose and there was no way to
+            // open it, while the lists that answered the question sat unread in the entry.
+            if (!n && !snap && !_auditHasMore(detail)) {
+                return `<span class="text-muted small">${label}</span>`;
+            }
         } else if (detail.auth_source || detail.uid) {
             // login_ok / logout: show source·role (login) or role (logout) inline;
             // clickable badge opens the modal with remember / session id.

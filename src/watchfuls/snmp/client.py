@@ -78,6 +78,36 @@ class SnmpClient:
     # ── SNMP GET ───────────────────────────────────────────────────────────────
 
     @staticmethod
+    def _auth_data(
+        version: str,
+        community: str,
+        v3_username: str = '',
+        v3_auth_key: str = '',
+        v3_priv_key: str = '',
+        v3_auth_proto: str = 'MD5',
+        v3_priv_proto: str = 'DES',
+    ):
+        """How this server proves who it is — for every request the module makes.
+
+        Written once because it was written twice and only one copy learned v3: the check
+        path built a ``UsmUserData``, the discovery walk built a ``CommunityData`` and, for
+        ``version == '3'``, sent it with ``mpModel=1``. That is a v2c request with a community
+        string to a device that answers neither, so a v3 server discovered nothing at all
+        while its checks ran fine — and the walk's timeout was swallowed, so the screen said
+        only that there was nothing to show.
+        """
+        if version == '3':
+            return UsmUserData(
+                v3_username or 'public',
+                authKey=v3_auth_key or None,
+                privKey=v3_priv_key or None,
+                authProtocol=_AUTH_PROTOCOLS.get(v3_auth_proto, usmHMACMD5AuthProtocol),
+                privProtocol=_PRIV_PROTOCOLS.get(v3_priv_proto, usmDESPrivProtocol),
+            )
+        # v1 speaks mpModel 0, v2c speaks 1. Anything else has already been handled above.
+        return CommunityData(community, mpModel=0 if version == '1' else 1)
+
+    @staticmethod
     def _snmp_get(
         host: str,
         port: int,
@@ -97,17 +127,10 @@ class SnmpClient:
             return None, 'pysnmp is not installed'
 
         async def _run() -> tuple:
-            if version == '3':
-                auth_data = UsmUserData(
-                    v3_username or 'public',
-                    authKey=v3_auth_key or None,
-                    privKey=v3_priv_key or None,
-                    authProtocol=_AUTH_PROTOCOLS.get(v3_auth_proto, usmHMACMD5AuthProtocol),
-                    privProtocol=_PRIV_PROTOCOLS.get(v3_priv_proto, usmDESPrivProtocol),
-                )
-            else:
-                mp_model  = 0 if version == '1' else 1
-                auth_data = CommunityData(community, mpModel=mp_model)
+            auth_data = SnmpClient._auth_data(
+                version, community, v3_username, v3_auth_key, v3_priv_key,
+                v3_auth_proto, v3_priv_proto,
+            )
 
             transport = await UdpTransportTarget.create(
                 (host, port), timeout=timeout, retries=retries
@@ -148,6 +171,11 @@ class SnmpClient:
         timeout: int,
         retries: int,
         max_oids: int = 300,
+        v3_username: str = '',
+        v3_auth_key: str = '',
+        v3_priv_key: str = '',
+        v3_auth_proto: str = 'MD5',
+        v3_priv_proto: str = 'DES',
     ) -> list:
         """Async SNMP walk — mib-2 and enterprises subtrees run in parallel.
 
@@ -156,8 +184,10 @@ class SnmpClient:
         wall-clock time roughly in half vs sequential walks.
         Falls back to sequential GETNEXT for SNMPv1.
         """
-        mp_model  = 0 if version == '1' else 1
-        auth_data = CommunityData(community, mpModel=mp_model)
+        auth_data = SnmpClient._auth_data(
+            version, community, v3_username, v3_auth_key, v3_priv_key,
+            v3_auth_proto, v3_priv_proto,
+        )
         use_bulk  = version != '1'
 
         async def _walk_subtree(root_oid: str, limit: int) -> list[dict]:

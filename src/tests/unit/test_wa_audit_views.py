@@ -279,3 +279,44 @@ class TestTheLabelsExist:
             m = re.search(r"'audit_activity_capped':\s*'([^']*)'", src)
             assert m, lang
             assert m.group(1).count('{}') == 2, f'{lang}: audit_activity_capped lost a number'
+
+
+class TestAnEntryIsAlwaysReachable:
+    """The log exists to be read. An entry the reader cannot open is a record nobody has.
+
+    Reported from a MIB import: the row printed its whole summary as prose — six lines of
+    file names and TLS errors in a table cell — and was not clickable, while the two lists
+    that answered "which ones, and why" sat unread inside the entry.
+    """
+
+    DETAIL = os.path.join(AUD, '_detail.html')
+
+    def test_a_detail_with_more_than_the_row_shows_is_clickable(self):
+        """The old rule was "clickable if it has `changes` or a before/after snapshot", which
+        is the vocabulary of the core's own events. A module's audit hook records whatever it
+        likes, and under that rule everything it recorded was unreachable."""
+        body = _fn(_strip_comments(_read(self.DETAIL)), 'auditSummaryHtml')
+        assert '_auditHasMore(detail)' in body, 'only core-shaped details can be opened'
+        more = _fn(_strip_comments(_read(self.DETAIL)), '_auditHasMore')
+        assert '_AUDIT_ROW_KEYS' in more
+
+    def test_the_row_label_is_clipped(self):
+        """A cell is an index, not the record. Twelve failures with a TLS timeout each turned
+        one row into six lines."""
+        body = _fn(_strip_comments(_read(self.DETAIL)), 'auditSummaryHtml')
+        assert body.count('_auditClip(detail.name)') == 2, \
+            'one of the two label branches prints the name unclipped'
+
+    def test_the_modal_shows_the_keys_it_does_not_know(self):
+        """It used to fall back to the generic renderer only when it had recognised NOTHING
+        (`html || renderReadable(detail)`), so an entry with one known key and ten unknown
+        ones showed the one and dropped the ten."""
+        body = _fn(_strip_comments(_read(self.DETAIL)), 'formatAuditDetailFull')
+        assert '_AUDIT_KNOWN_KEYS' in body and 'renderReadable(_rest)' in body
+
+    def test_the_two_key_sets_stay_in_step(self):
+        """The row set is the modal's plus the keys the row itself states. Written out twice
+        they would drift, and the drift shows up as an entry that is clickable and opens on
+        nothing, or one that holds something and cannot be opened."""
+        src = _strip_comments(_read(self.DETAIL))
+        assert '..._AUDIT_KNOWN_KEYS' in src, 'the row set is a second hand-written list'

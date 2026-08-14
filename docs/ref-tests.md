@@ -3465,7 +3465,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 70 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 89 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 
@@ -5824,7 +5824,7 @@ guard que no es cosmético es `test_no_view_builds_its_own_action_buttons`: los 
 
 ## 124. Audit — cuatro vistas, y dos de ellas no son listas
 
-**Archivo:** `tests/unit/test_wa_audit_views.py` — 29 tests
+**Archivo:** `tests/unit/test_wa_audit_views.py` — 33 tests
 
 La tabla lee el registro línea a línea: es la forma correcta para «qué pasó a las 14:32» y la
 equivocada para cualquier pregunta sobre el registro **entero**. Dos de ésas merecen vista
@@ -6808,6 +6808,66 @@ restaurar), que no pueda robar un id del núcleo, y el viaje de ida y vuelta de 
 | `TestTheFilesActuallyTravel::*` (4) | Copia y restauración por `files/parts/<id>/`, y una parte declarada que no dio nada marca la copia como parcial |
 
 ---
+
+## 148. Cuánto puede escribir un módulo en una entrada de auditoría
+
+**Archivo:** `tests/unit/test_module_audit_detail.py` — 7 tests
+
+El *hook* `audit_detail` de un módulo decide **qué** merece registrarse; **cuánto** cabe en una
+entrada no es decisión suya. El detalle se guarda como JSON en una sola fila y se pinta entero al
+abrir la entrada, y lo que un módulo lista no lo acota nada: la importación de MIBs de SNMP nombra
+cada fichero que trajo y cada uno que no pudo, con el motivo, y un repositorio grande tiene
+cientos.
+
+Por eso el techo vive en **un** sitio —la ruta que escribe la entrada— y respeta el ajuste que ya
+existía para esto (`web_admin|audit_detail_max_items`). Dejado a cada módulo, cada uno elegiría un
+número distinto y el ajuste no significaría nada.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_a_short_list_is_left_alone` | Por debajo del techo no se toca nada |
+| `test_a_long_list_is_cut_and_says_so` | Una lista cortada en silencio se lee como una lista completa de N: peor que no listar |
+| `test_every_list_is_bounded_not_a_named_few` | La regla es sobre listas, no sobre claves concretas: un módulo nuevo hereda el techo sin tocar esto |
+| `test_what_is_not_a_list_is_untouched` | Los contadores y el resumen son lo que dice que la acción ocurrió |
+| `test_zero_drops_the_names_and_keeps_the_rest` | `0` apaga los nombres; los contadores nunca se van |
+| `test_a_nonsense_ceiling_does_not_lose_the_entry` | La config llega como texto: un valor inválido no puede costar el registro |
+| `test_the_callers_dict_is_not_modified` | El dict del llamante se queda como estaba |
+
+El fichero **no** lleva guarda de Flask a propósito: el modelado es dato entra / dato sale, y la
+guarda saltaría los tests justo en la instalación (un contenedor de servicio recortado) donde nada
+más cubre este código.
+
+---
+
+## 149. De dónde saca una acción de módulo su dirección y su identidad
+
+**Archivo:** `tests/unit/test_module_action_identity.py` — 9 tests
+
+Una acción lanzada desde un formulario plano lleva `host_uid` y `cred_uid` en el nivel superior, y
+la ruta los resuelve ahí. Un **descubrimiento acotado a un ítem padre** tiene otra forma: la UI
+envía `{escalares del módulo…, "<colección>": {"<clave>": {…el ítem…}}}`, y es *dentro del ítem*
+donde viven esas dos claves.
+
+Resolver solo el nivel superior le entregaba a la acción un ítem sin dirección y sin identidad.
+Se reportó como *"lanzas descubrimiento de OIDs contra un servidor y no obtienes nada"*: el
+servidor SNMP tomaba la dirección del host al que está vinculado y la comunidad de una credencial,
+así que `discover` veía `host: ''` y lo saltaba antes de enviar un paquete — mientras las
+comprobaciones de ese mismo servidor funcionaban, porque el camino de comprobación sí resuelve por
+ítem. Nada lo decía: un resultado vacío se lee como "este equipo no tiene OIDs".
+
+| Test | Qué comprueba |
+|---|---|
+| `test_the_credential_reaches_the_item` | La credencial llega al ítem anidado |
+| `test_the_credential_wins_over_the_items_own_value` | Misma precedencia que el nivel superior: la credencial se aplica la última y gana |
+| `test_the_bound_host_fills_an_empty_address` | El caso reportado: `host` vacío porque la dirección viene del host vinculado |
+| `test_an_address_typed_on_the_item_beats_the_bound_host` | El host **rellena**, no manda: por eso el campo sigue siendo editable |
+| `test_an_item_without_either_is_left_alone` | Sin `host_uid` ni `cred_uid` no se toca nada |
+| `test_module_scalars_are_not_mistaken_for_a_collection` | Los campos propios del módulo viajan al lado de la colección |
+| `test_a_dunder_key_is_never_walked` | `__host__` / `__connector__` los inyecta la ruta, no son ítems |
+| `test_a_disabled_credential_supplies_nothing` | Una credencial deshabilitada no aporta |
+| `test_a_missing_store_is_not_an_error` | Un proceso recortado puede no tener los almacenes: no puede convertir cada acción en un 500 |
+
+Sin guarda de Flask: la resolución es diccionarios entra, diccionarios salen.
 
 ## 150. La marca: dos ficheros, un original, y lo que se rompe en silencio
 

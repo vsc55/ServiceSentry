@@ -8,6 +8,118 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.69] - 2026-08-08
+
+### Changed
+- **A MIB compile nobody asked for is now bounded.** Importing a vendor folder leaves hundreds
+  of raw MIBs on disk, and the next *discovery* — or the next module **startup** — compiled all
+  of them. Measured on 1695 real MIBs: **~2.7 s each**, of which **89 % is parsing ASN.1**, so
+  the file count is the second count. That is a discovery that answers in an hour, and a panel
+  that does not come up, with nothing on screen to say why.
+  - The automatic path survives for the case it existed for — a `.mib` dropped into `raw/`
+    still just works — but only while the pending set is **small** (5). Past that the files
+    stay raw until the MIB manager is told to compile them, which it already knows how to do
+    per file, per selection or all at once, with a progress bar and a **cancel** button. That
+    is what an hour of work needs and what an implicit compile can never have.
+  - Pending is now decided **per file** instead of per directory. `raw_dir_has_new_mibs`
+    compares the whole folder against the newest compiled module of them all, so one new file
+    made the directory "new" and the compile that followed walked every name in it.
+  - **A re-import no longer invalidates what was already built.** The importer rewrote every
+    file it fetched, identical bytes included, and staleness is decided by mtime — so
+    re-importing a folder for a handful of new MIBs marked all of them for a re-parse. That is
+    how a second import came to cost as much as the first. Unchanged content is left alone.
+  - What was measured and **rejected**: pysmi's `JsonCodeGen` (skips generating Python
+    entirely) is only **1.13×** faster, because the cost is the parse and not the code
+    generation. Six processes give **2.9×**, worth doing but not before not doing the work at
+    all. Downloading pre-compiled `.py` from a mirror would skip the parse and is not on the
+    table: it is importing third-party Python into the panel's own process.
+
+### Fixed
+- **A discovery scoped to one item ran without its address or its identity.** An action posted
+  as a flat form carries `host_uid` and `cred_uid` at the top level and the route resolved them
+  there; a discovery scoped to a parent item posts
+  `{module scalars…, "<collection>": {"<key>": {…the item…}}}`, and the item is where those two
+  keys live. The action was handed an item with an empty address and no credentials.
+  - Reported as *"you launch OID discovery against a server and get nothing back"*: the SNMP
+    server took its address from a bound host and its community from a credential, so
+    `discover` saw `host: ''` and skipped it **before sending a packet**. The checks on that
+    same server worked, because the check path resolves per item — which is exactly what made
+    it look like the device. Nothing said otherwise: an empty result reads as *this device has
+    no OIDs*.
+  - Fixed in the core, not in the module: every module whose discovery scopes to a parent item
+    has this shape, and the alternative is each of them reaching into the credential store on
+    its own. Precedence matches the top-level pass on purpose — the bound host only fills what
+    the item left blank, the credential is applied last and wins. Two passes that disagreed
+    would be the harder bug of the two to find.
+- **A discovered OID shows what it currently reads.** The value was there all along, behind
+  the server's collection KEY: items are rekeyed by uid when stored, so a 36-character UUID
+  was prefixed to it and filled the 160 px column on its own, truncating away the one thing
+  that column is for.
+  - The prefix is gone when there is nothing to disambiguate. The discovery hangs off
+    `checks`, *inside* one server, so the modal always asks one — the name repeated down every
+    row and bought nothing. With several answering it comes back, as the server's **name**.
+  - The column carries the full value as its tooltip either way: `sysDescr` does not fit in
+    160 px whatever prefix it is given.
+- **OID discovery against an SNMPv3 server returned nothing.** The walk built its own
+  credentials — `CommunityData(community, mpModel=1)` whatever the version — so against a v3
+  device it sent a v2c request carrying a community string, which that device answers neither.
+  The walk timed out, `discover` swallowed it, and the empty result read as *this device has no
+  OIDs* rather than *nobody asked it properly*. The checks on the same server worked all along,
+  which is exactly what made it look like the device and not the code.
+  - There is now **one** builder for "how this server proves who it is", used by the check and
+    by the walk. It was written twice and only one copy ever learned v3.
+  - The protocols fall back to the schema's own defaults, so a v3 server saved before those
+    fields existed is walked with what its own form would show rather than with whatever a
+    lookup miss happens to return.
+- **An audit entry a module wrote is now readable.** A MIB import logged
+  `GitHub import: 988 ok, 12 failed` and the row printed the whole thing as prose — six lines
+  of file names and TLS errors in a table cell — with **no way to open it**, while the fields
+  that answered "which ones, and why" sat unread inside the entry. Three faults in a row:
+  - The modal fell back to the generic renderer only when it had recognised **nothing**
+    (`html || renderReadable(detail)`), so an entry with one known key and ten unknown ones
+    showed the one and dropped the ten. It now renders what it does not know by name, which is
+    everything a module's audit hook records — the hook exists so a module can record what it
+    likes, and until now none of it reached the screen that exists to read entries.
+  - The row was clickable only when the detail held `changes` or a before/after snapshot — the
+    core's own vocabulary. Now anything beyond what the row already states makes it clickable,
+    and the label is clipped: a cell is an index, not the record.
+  - The import's summary line named the first ten failures. That reads well for three and
+    turns into six lines for twelve behind a TLS timeout each. It is a count now; the names
+    and the reasons are structured fields, and the entry opens onto them.
+- **The MIB import records which files worked, and why the others did not.** It kept the failed
+  names and threw the error away, so *rejected* (the file did not look like a MIB) and a
+  handshake timeout — different problems with different answers — arrived as the same fact. The
+  imported names were not recorded at all. Both questions get asked exactly when the import
+  cannot be cheaply repeated: a re-run to find out costs another few hundred requests against
+  GitHub's 60/h anonymous limit.
+  - How much of that one entry may hold is now decided in **one** place, on the route that
+    writes it, honouring `web_admin|audit_detail_max_items` — the setting that already existed
+    for this. Left to each module they would each pick a different number. What is dropped is
+    said out loud: a list silently cut at N reads as a complete list of N.
+
+### Added
+- **The SNMP module declares a credential type (`snmp_auth`).** The identity was written into
+  every server entry — community, v3 user, both keys, both protocols — so a device family
+  sharing one v3 user meant typing that user, and rotating it, once per entry. It is now a
+  reusable credential the manager creates and edits, like `ssh` and `web_auth` before it.
+  - **What applies follows the version, and on v3 the security level too.** v1/v2c ask for the
+    community and nothing else — a form offering a user name for a v2c device is asking for
+    something with nowhere to go. On v3, *no auth/no privacy* asks for neither key,
+    *auth/no privacy* for one, *auth and privacy* for both. Gating the keys on the version
+    alone would show boxes the device will ignore, and a filled box that does nothing is worse
+    than an absent one, because it looks configured.
+  - The protocol lists **drop `none`**. The collection's copies carry it because they have no
+    level field: `none` is how they say *authNoPriv*. Here the level says it, and two ways to
+    say one thing are two ways to disagree.
+  - Adds *context* and *engine ID* for v3 — the context because many devices expose a VLAN or
+    an instance per context, the engine ID for the devices that do not advertise it.
+  - Reuses the module's existing field names, so seven of the ten labels and hints were already
+    written; the three new ones went into both `lang/` files.
+  - The credential is **declared, not yet consumed**: the server entries still carry their own
+    auth fields. Pointing them at a `cred_uid` is the next step and is deliberately separate —
+    it changes what the checks read at run time, which is a different kind of change from
+    describing a shape.
+
 ## [0.0.1+build.68] - 2026-08-14
 
 ### Fixed
