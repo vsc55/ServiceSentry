@@ -8,6 +8,18 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.68] - 2026-08-14
+
+### Fixed
+- **A module's own test still imported a symbol build.67 moved.**
+  `watchfuls/proxmox/tests/test_proxmox.py` asked `lib.core.modules.service` for
+  `_apply_cred_to_config`, which now lives in `lib.core.modules.actions` as
+  `apply_cred_to_config`. Every consumer under `lib/` and `tests/` had been updated; this one
+  was in the OTHER tree the suite collects — `pytest.ini` gathers `src/watchfuls/<m>/tests/`
+  as well, because a module's tests travel with the module. Four green runs of
+  `tests/{unit,integration,e2e,meta}` said nothing about it, and CI failed on the one file
+  none of them covers. Moving a symbol means searching both trees.
+
 ## [0.0.1+build.67] - 2026-08-13
 
 ### Changed
