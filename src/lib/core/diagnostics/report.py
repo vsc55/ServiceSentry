@@ -51,6 +51,7 @@ def as_json(data: dict, stamp: str) -> str:
 def as_text(data: dict, stamp: str) -> str:
     lines = [f'{APP_NAME} diagnostics — {stamp}', '']
     for title, block in (('Runtime', data['runtime']), ('System', data['system']),
+                         ('Network', data.get('network') or {}),
                          ('Database', data['database'])):
         lines.append(f'[{title}]')
         lines += [f'  {k} = {v}' for k, v in block.items()]
@@ -84,9 +85,9 @@ def as_xml(data: dict, stamp: str) -> str:
     destination that was supposed to parse it.
     """
     root = ET.Element('diagnostics', {'generated': stamp})
-    for name in ('runtime', 'system', 'database'):
+    for name in ('runtime', 'system', 'network', 'database'):
         block = ET.SubElement(root, name)
-        for key, value in data[name].items():
+        for key, value in (data.get(name) or {}).items():
             child = ET.SubElement(block, key)
             # A list (the embedded services) becomes repeated children rather than a
             # stringified Python list, which is the whole reason to offer XML at all.

@@ -79,6 +79,63 @@ def runtime(wa) -> dict:
     }
 
 
+def network(wa, seen: dict | None = None) -> dict:
+    """How this request reached the panel, and whether that answer can be believed.
+
+    The panel never terminates TLS itself — there is no `ssl_context` anywhere in it, on
+    purpose: something in front does that. So "are we on HTTPS" is not a property of this
+    process. It is a CLAIM made by a proxy, and the only honest report says three things apart
+    from each other: what the panel concluded, what the proxy actually sent, and whether the
+    panel was configured to believe it.
+
+    That third one is the failure this block exists for. ``X-Forwarded-Proto`` is read only
+    when `web_admin|proxy_count` is above zero — that setting is what mounts ProxyFix at all —
+    so with it left at 0 behind a proxy the panel serves an install that IS on https while
+    believing it is on http. Then `secure_cookies` makes the browser drop the session cookie
+    over what it has been told is an insecure connection, and the result is a login that
+    silently loops. The panel already knows how to say this (`_hook_csrf` logs it) but only at
+    the moment it breaks, and only to whoever is reading the log.
+
+    *seen* is what the REQUEST observed, handed in by the route: this module stays Flask-free,
+    and half of this answer only exists while a request is being served.
+    """
+    seen = seen or {}
+    proxies = int(getattr(wa, '_PROXY_COUNT', 0) or 0)
+    trusted = proxies > 0
+    declared = str(seen.get('forwarded_proto') or '')
+    secure = bool(seen.get('secure'))
+    out = {
+        # What the panel concluded — already through ProxyFix when it is mounted.
+        'scheme': str(seen.get('scheme') or ''),
+        'secure': secure,
+        'host': str(seen.get('host') or ''),
+        'client_ip': str(seen.get('client_ip') or ''),
+        # What the proxy said, trusted or not. Reported RAW because the interesting case is
+        # precisely the one where the panel is ignoring it.
+        'forwarded_proto': declared,
+        'forwarded_for': str(seen.get('forwarded_for') or ''),
+        'forwarded_host': str(seen.get('forwarded_host') or ''),
+        'proxy_count': proxies,
+        'trusting_proxy_headers': trusted,
+        # The panel's own socket, as a constant and not a probe: no code path gives it a TLS
+        # context, and phrasing it as a question invites somebody to hunt for the setting that
+        # would answer it.
+        'tls_terminated_here': False,
+        'force_https': bool(getattr(wa, '_FORCE_HTTPS', False)),
+        'secure_cookies': bool(getattr(wa, '_SECURE_COOKIES', False)),
+        'public_url': str(getattr(wa, '_PUBLIC_URL', '') or ''),
+    }
+    # One word for the row a person actually reads. `ignored` is not a worse `http`: it means
+    # the install is on https and the panel does not know, which is a different problem with a
+    # different fix (set `proxy_count`), and the two look identical in every other field.
+    out['verdict'] = ('ignored' if (declared and not trusted)
+                      else 'https' if secure else 'http')
+    # The login loop, named before it happens: a Secure cookie cannot survive a connection the
+    # panel believes is plain, whoever is right about that.
+    out['cookie_trap'] = bool(out['secure_cookies'] and not secure)
+    return out
+
+
 def storage_paths(wa) -> dict:
     """The three directories worth reporting on, resolved the way their owners resolve them."""
     var_dir = str(getattr(wa, '_var_dir', '') or '')
@@ -100,15 +157,42 @@ def update_url(wa) -> str:
     return str((section or {}).get('update_check_url') or '')
 
 
-def payload(wa) -> dict:
+def dependency_rows(wa) -> list:
+    """The packages the remote check asks about: what the lock pins, as installed here.
+
+    Read from the same collector the page draws, so the two halves of that table cannot
+    disagree about which packages exist — and read on the SERVER, because the alternative is a
+    client that gets to choose which names this panel sends to an outside service.
+    """
+    return list((collect.dependencies(lock_path()) or {}).get('rows') or [])
+
+
+def unpinned_rows(wa) -> list:
+    """Everything else installed here — the environment the lock does not describe.
+
+    Asked about for advisories and nothing more. They are not drift and they are not a finding
+    on their own: a container built from the lock still carries `pip` and `setuptools`, and a
+    checkout carries the test tooling as well. But they are code on the machine, and a screen
+    that said "no known vulnerabilities" while `pip` had one would have answered a narrower
+    question than the one somebody read.
+    """
+    return list(collect.installed_outside_lock(lock_path()) or [])
+
+
+def payload(wa, seen: dict | None = None) -> dict:
     """Everything answerable without leaving the machine.
 
     Computed on every call and never cached: a diagnostics page served from a cache describes
     the problem you had before.
+
+    *seen* is what the request observed — the scheme, the client address and the forwarded
+    headers. Passed in rather than read here, because this module is Flask-free and that half
+    of the answer exists only while a request is being served.
     """
     return {
         'runtime': runtime(wa),
         'system': collect.system_info(),
+        'network': network(wa, seen),
         'database': database(wa),
         'storage': collect.storage(storage_paths(wa)),
         'dependencies': collect.dependencies(lock_path()),

@@ -21,6 +21,8 @@ and it is not called.
 import io
 import os
 
+import pytest
+
 from lib.core.diagnostics import collect as diag
 from lib.core.diagnostics import report
 from lib.core.diagnostics import update as diag_update
@@ -114,6 +116,77 @@ class TestDependenciesAreReadFromTheLock:
     def test_no_lock_is_a_state_and_not_a_crash(self, tmp_path):
         out = diag.dependencies(os.path.join(str(tmp_path), 'nope.lock'))
         assert out['found'] is False and out['rows'] == []
+
+
+class TestTheRestOfTheEnvironment:
+    """What the lock does NOT pin, which is where the honest answer about advisories lives.
+
+    Reported: "0 CVE en todas las dependencias, ¿es correcto?". It was — for the forty-one
+    packages the lock pins. `pip`, `setuptools` and `pytest` had five between them and were
+    never asked about, because the table only ever knew about the lock. An advisory does not
+    care whether a package was pinned: the code runs on the machine either way.
+
+    Deliberately NOT a fourth status in :func:`dependencies`. These are not drift, there is
+    nothing to reconcile, and a container built from the lock still carries `pip` — putting
+    them in the same list would report a correct install as fifty problems.
+    """
+
+    def _lock(self, tmp_path, body):
+        path = os.path.join(str(tmp_path), 'requirements.lock')
+        io.open(path, 'w', encoding='utf-8').write(body)
+        return path
+
+    def test_what_is_pinned_is_not_in_it(self, tmp_path):
+        """The two lists do not overlap: one package on both sides would be asked about twice
+        and drawn in two tables with the same version."""
+        out = diag.installed_outside_lock(self._lock(tmp_path, 'pytest==0.0.1\n'))
+        assert 'pytest' not in {diag.canonical_name(r['name']) for r in out}
+
+    def test_what_is_not_pinned_is(self, tmp_path):
+        out = diag.installed_outside_lock(self._lock(tmp_path, 'nothing-at-all==1.0\n'))
+        names = {diag.canonical_name(r['name']) for r in out}
+        assert 'pytest' in names, 'pytest is installed and this lock does not pin it'
+
+    def test_the_rows_look_like_the_pinned_ones(self, tmp_path):
+        """Same shape, so the remote check consumes one list and never learns a second row
+        format — and `required` is empty because nothing pinned them."""
+        row = diag.installed_outside_lock(self._lock(tmp_path, ''))[0]
+        assert set(row) == {'name', 'required', 'installed', 'status'}
+        assert row['required'] == '' and row['status'] == 'unpinned' and row['installed']
+
+    @pytest.mark.parametrize('a,b', [
+        ('charset-normalizer', 'charset_normalizer'),
+        ('Charset.Normalizer', 'charset--normalizer'),
+        ('  PyYAML  ', 'pyyaml'),
+    ])
+    def test_the_same_package_spelled_two_ways_is_one_package(self, a, b):
+        """`pip` writes `charset-normalizer` in a lock and the distribution on disk may call
+        itself `charset_normalizer`. Comparing them literally puts one package on both sides of
+        "is this pinned", which is how a pinned package shows up as unpinned."""
+        assert diag.canonical_name(a) == diag.canonical_name(b)
+
+    def test_a_lock_that_spells_it_the_other_way_still_pins_it(self, tmp_path):
+        """The real case: `charset-normalizer` in the lock, `charset_normalizer` on disk."""
+        out = diag.installed_outside_lock(self._lock(tmp_path, 'Charset_Normalizer==1.0\n'))
+        assert 'charset-normalizer' not in {diag.canonical_name(r['name']) for r in out}
+
+    def test_no_lock_means_everything_installed(self, tmp_path):
+        """A missing lock is a state, not a crash — and with nothing pinned, nothing is."""
+        out = diag.installed_outside_lock(os.path.join(str(tmp_path), 'nope.lock'))
+        assert len(out) > 5
+
+    def test_each_package_appears_once(self, tmp_path):
+        """Two `site-packages` on the path, or a vendored copy: the same distribution is found
+        twice. The list is what gets asked about, and asking twice is one wasted request and
+        one duplicated row."""
+        out = diag.installed_outside_lock(self._lock(tmp_path, ''))
+        keys = [diag.canonical_name(r['name']) for r in out]
+        assert len(keys) == len(set(keys))
+
+    def test_it_is_sorted_by_name(self, tmp_path):
+        out = diag.installed_outside_lock(self._lock(tmp_path, ''))
+        keys = [diag.canonical_name(r['name']) for r in out]
+        assert keys == sorted(keys)
 
 
 class TestOptionalFeaturesExplainWhatIsSwitchedOff:

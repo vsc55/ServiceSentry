@@ -1,0 +1,153 @@
+{# ================================================================
+   Diagnostics — the advisories themselves.
+
+   `_deps.html` answers "what is wrong with THIS package", a row at a time. This answers what
+   comes after: *what are we exposed to*. The same advisory routinely lands on several
+   packages, so counted per row it reads as several findings — with the identifiers scattered
+   down a column of eighty rows, most of which say 0.
+
+   And it says how bad each one is, which is the part that must never become this panel's own
+   opinion: either the database published a rating, or its published CVSS vector scores one.
+   The vector read out metric by metric lives next door in `_cvss.html`.
+
+   Its own partial because these are a different concept from the table they sit above, and
+   `_deps.html` had grown past the size a section shell is allowed.
+   ================================================================ #}
+
+/** The advisories themselves, once — above the tables, never folded.
+ *
+ *  The tables answer "what is wrong with THIS package" and are read a row at a time. This
+ *  answers the question that comes after: *what are we actually exposed to*. The same advisory
+ *  routinely lands on several packages, so counted per row it looks like several findings and
+ *  the work of noticing they are one is left to whoever is reading — with the identifiers
+ *  scattered down a column of eighty rows, most of which say 0.
+ *
+ *  So: each identifier once, how many packages carry it, and which. Open, because it exists
+ *  only when there is something in it. */
+/** Every advisory once, keyed by identifier, carrying which packages have it.
+ *
+ *  One function because the table and the modal must not disagree about what they are showing
+ *  — the modal opens on the row that was clicked, and rebuilding the grouping a second time is
+ *  how the two come to say different things about the same advisory. */
+function _dgAdvisories() {
+    const seen = new Map();
+    if (!_dgRemote || !_dgRemote.vulnsOk) return seen;
+    _dgRemote.rowList.forEach(r => (r.vulns || []).forEach(v => {
+        const e = seen.get(v.id) || {...v, where: []};
+        e.where.push(r.name);
+        seen.set(v.id, e);
+    }));
+    return seen;
+}
+
+function _dgAdvisorySection() {
+    const seen = _dgAdvisories();
+    if (!seen.size) return '';
+    // Worst first, then most-repeated: the order somebody would read them in. Alphabetical
+    // would bury the critical one wherever its identifier happened to fall.
+    const list = Array.from(seen.values()).sort((a, b) =>
+        _dgSevRank(b.severity) - _dgSevRank(a.severity)
+        || b.where.length - a.where.length || a.id.localeCompare(b.id));
+    const line = a => `<tr>
+        <td class="small font-monospace">${a.url
+            ? `<a href="${escAttr(a.url)}" target="_blank" rel="noopener noreferrer"
+                 >${esc(a.id)}<i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></a>`
+            : esc(a.id)}</td>
+        <td class="small">${_dgSevBadge(a)}</td>
+        <td class="small text-center"><span class="badge text-bg-danger"
+            >${a.where.length}</span></td>
+        <td class="small text-muted">${esc(a.where.join(', '))}</td></tr>`;
+    return `<div class="mb-3" id="dgDepsAdvisories">
+        <div class="small fw-semibold mb-1"><i class="bi bi-shield-exclamation me-1"
+            ></i>${esc(t('diag_deps_adv_section').replace('{}', list.length))}</div>
+        <table class="table table-sm align-middle mb-0"><thead><tr>
+            <th class="small py-1">${esc(t('diag_deps_adv_id'))}</th>
+            <th class="small py-1">${esc(t('diag_deps_adv_severity'))}</th>
+            <th class="small py-1 text-center">${esc(t('diag_deps_adv_count'))}</th>
+            <th class="small py-1">${esc(t('diag_deps_adv_where'))}</th>
+        </tr></thead><tbody>${list.map(line).join('')}</tbody></table></div>`;
+}
+
+/** The bands, worst last — so index is order and an unknown one sorts below all of them. */
+const _DG_SEV = ['none', 'low', 'moderate', 'high', 'critical'];
+const _DG_SEV_CLASS = {critical: 'text-bg-danger', high: 'text-bg-warning',
+                       moderate: 'text-bg-info', low: 'text-bg-secondary',
+                       none: 'text-bg-secondary'};
+
+function _dgSevRank(severity) {
+    return _DG_SEV.indexOf(String(severity || ''));
+}
+
+/** How bad one advisory is, said in a word — and where the word came from.
+ *
+ *  Never this panel's own grade: either the database published a rating, or the CVSS base
+ *  score is the arithmetic its published vector defines. The tooltip says which, because
+ *  "GitHub calls this moderate" and "its vector scores 8.0" are two different claims and they
+ *  do disagree. A record that could not be read is a dash: inventing a severity on the page
+ *  whose job is not to state what it does not know would be the worst possible place for it. */
+function _dgSevBadge(a) {
+    if (!a.severity) {
+        return `<span class="text-muted ss-help"
+            title="${escAttr(t('diag_sev_unknown_tt'))}">—</span>`;
+    }
+    const score = (a.score === null || a.score === undefined) ? '' : ` ${a.score}`;
+    // The badge OPENS the detail. A word and a number are the summary of a vector that says
+    // how the attack reaches the software and what it costs when it lands — and `AV:N` versus
+    // `AV:L` is the difference between patching tonight and patching next release. That does
+    // not fit in a tooltip, and a tooltip cannot be read twice or copied.
+    return `<button type="button"
+        class="badge ${_DG_SEV_CLASS[a.severity] || 'text-bg-secondary'} border-0 ss-help"
+        onclick="_dgShowSeverity('${escAttr(a.id)}')"
+        title="${escAttr(t('diag_sev_open'))}"
+        >${esc(t('diag_sev_' + a.severity))}${esc(score)}</button>`;
+}
+
+/** Everything the severity of one advisory is made of.
+ *
+ *  Read out of the answer already in hand — the click is on a badge that is already on screen,
+ *  and asking the network again to explain what it just said is a second chance for the two to
+ *  disagree. Values only, so the panel's own key/value modal serves it: the identifier's link
+ *  is in the row beside it, one column to the left. */
+function _dgShowSeverity(id) {
+    const found = _dgAdvisories().get(id);
+    if (!found) return;
+    const rows = [[t('diag_deps_adv_id'), found.id],
+                  [t('diag_deps_adv_severity'), t('diag_sev_' + found.severity)]];
+    if (found.score !== null && found.score !== undefined) {
+        rows.push([t('diag_sev_score'), found.score]);
+    }
+    rows.push([t('diag_sev_source'),
+               found.published ? t('diag_sev_published') : t('diag_sev_computed')]);
+    // The other names the same flaw goes by, so somebody searching for the PYSEC number their
+    // scanner printed finds it here under its GHSA one.
+    if ((found.aliases || []).length) {
+        rows.push([t('diag_sev_aliases'), found.aliases.join(', ')]);
+    }
+    if (found.vector) rows.push([t('diag_sev_vector'), found.vector]);
+    // The vector read out, metric by metric: it is a compressed sentence, and every one of
+    // those letters is somebody's decision about when to patch.
+    _dgCvssRows(found.vector).forEach(pair => rows.push(pair));
+    rows.push([t('diag_deps_adv_where'), found.where.join(', ')]);
+    // The summary leads, because it is the one line in a human language: the metrics say how
+    // bad it is and this says what it is.
+    showInfoModal(found.id, rows, found.summary || '',
+                  found.severity === 'critical' || found.severity === 'high'
+                      ? 'danger' : 'warning');
+}
+
+
+/** The advisories for one package, as a list somebody can read and follow.
+ *
+ *  Read out of the answer already in hand rather than fetched again: the click is on a number
+ *  that is already on screen, and asking the network a second time to show what was asked the
+ *  first is a second way for the two to disagree. */
+function _dgShowVulns(name) {
+    const row = (_dgRemote && _dgRemote.byName[name]) || null;
+    if (!row || !row.vuln_count) return;
+    showLinksModal(t('diag_deps_vulns_title').replace('{}', name),
+                   (row.vulns || []).map(v => ({
+                       label: v.id, url: v.url,
+                       note: [v.severity ? t('diag_sev_' + v.severity) : '',
+                              v.summary || ''].filter(Boolean).join(' — ')})),
+                   t('diag_deps_vulns_lead').replace('{}', row.installed || '?'));
+}

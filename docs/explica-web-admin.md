@@ -128,6 +128,7 @@ flowchart TD
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): **página propia** (`/syslog`) con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
 | **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
 | **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (monitor embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
+| **Diagnóstico del sistema** | System → Diagnostic: qué es esta instalación, respondido **sin salir de la máquina** — versión y servicios embebidos, sistema operativo e intérprete, **red y TLS**, motor de base de datos, almacenamiento con espacio libre, las 41 dependencias del lock contra lo instalado y qué librerías opcionales encienden qué función. Se descarga como documento (`txt`/`json`/`xml`) para pegar en una incidencia. Dos comprobaciones **salen** de la máquina y solo al pulsar su botón, las dos auditadas: versión nueva del panel, y última versión en PyPI + avisos de seguridad en OSV.dev de todo lo instalado. Permiso `diagnostics_view`. Ver §[Diagnóstico](#diagnóstico) |
 | **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [explica-seguridad.md](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | **Página propia** (`/overview`, separada del panel de administración) con tarjetas de resumen (Modules, Checks, Servers, **Services**, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events, **fail2ban**) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente, **IP baneadas**); cada widget enlaza (click-through) a su pestaña del panel; los widgets de tabla con filtro muestran un **indicador del filtro activo** en la cabecera — uno o varios badges (p.ej. Servers "Error + Mantenimiento" pinta ambos; Syslog pinta "≥ nivel"); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin. El widget **Services** cuenta los servicios embebidos activos vs parados |
@@ -798,6 +799,39 @@ Controlabilidad: un servicio es controlable cuando corre **embebido aquí** (su 
 > `/api/v1/config`, el WebAdmin recorre `self._embedded_services` llamando a
 > `on_config_changed(changed)` de cada uno (syslog re-aplica el listener, el monitor
 > para si lo deshabilitas, events para al salir de modo embebido).
+
+### Diagnóstico
+
+La pantalla que contesta «qué es esta instalación» sin abrir una shell en el contenedor. Todo
+lo local se calcula en cada llamada y **nunca se cachea**: un diagnóstico servido de caché
+describe el problema que tenías antes.
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/api/v1/diagnostics` | `diagnostics_view` | Runtime, sistema, red/TLS, base de datos, almacenamiento, dependencias y librerías opcionales |
+| `GET` | `/api/v1/diagnostics/report` | `diagnostics_view` | Lo mismo como documento — `?format=txt\|json\|xml` |
+| `POST` | `/api/v1/diagnostics/update-check` | `diagnostics_view` | ¿Hay una versión más nueva publicada? |
+| `POST` | `/api/v1/diagnostics/dependency-check` | `diagnostics_view` | Última versión en PyPI + avisos en OSV.dev de lo instalado |
+
+**Red y TLS.** El panel **no termina TLS nunca** (no hay `ssl_context` en ninguna parte: eso lo
+hace lo que tenga delante), así que «¿estamos en HTTPS?» es una afirmación de otro. El bloque
+separa las tres respuestas —lo que concluyó el panel, lo que mandó el proxy *en crudo*
+(`X-Forwarded-Proto`/`-For`/`-Host`) y si el panel lo está leyendo (`proxy_count`)— porque el
+fallo que todo el mundo se encuentra es el de que discrepen. Un veredicto **`ignored`** no es un
+`http` peor: la instalación **sí** está en HTTPS y el panel no se ha enterado, lo que tiene otro
+arreglo. Nombra además la trampa de la cookie: `secure_cookies` sobre lo que el panel cree HTTP
+hace que el navegador tire la sesión y el login parezca un bucle.
+
+**Dependencias.** Las dos columnas remotas —última versión y avisos— **no existen hasta que
+alguien pulsa**: una columna vacía en toda instalación parece rota, y una página que contacta
+con pypi.org porque la han abierto es un informe de bug indiscutible en una red segregada. La
+comprobación cubre **todo lo instalado**, no solo el lock (lo que el lock no fija va en su
+propio pliegue: no es desviación, pero `pip` también ejecuta en el contenedor y también puede
+tener avisos), lista cada aviso **una sola vez** —colapsando `GHSA-…` y `PYSEC-…` del mismo
+fallo por sus alias— con su gravedad, y dice **cuántos paquetes se consultaron**, que es lo que
+convierte «0 avisos» en algo comprobable. La gravedad nunca es una nota del panel: o la publicó
+la base de datos, o es la puntuación base CVSS calculada de su vector publicado, y la pantalla
+dice cuál de las dos.
 
 ### Salud
 

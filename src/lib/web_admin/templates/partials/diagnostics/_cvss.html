@@ -1,0 +1,53 @@
+{# ================================================================
+   Diagnostics — a CVSS vector, read out.
+
+   The severity column says one word. This is what that word is made of: the vector is a
+   compressed sentence about how an attack reaches the software and what it costs when it
+   lands, and every one of those metrics is the difference between "patch this tonight" and
+   "next release" — `AV:N` versus `AV:L` is remote versus somebody already on the box.
+
+   Nothing here judges. The metrics are the ones the advisory published; this partial turns
+   them into words in the reader's language and hands them to the panel's own modal.
+
+   Its own partial because `_deps.html` is at the section size limit and this is a table of
+   labels: it grows with the specification, not with the page.
+   ================================================================ #}
+
+/** The metrics of a CVSS 3.x base vector, in the order the specification writes them. */
+const _DG_CVSS_ORDER = ['AV', 'AC', 'PR', 'UI', 'S', 'C', 'I', 'A'];
+
+/** Each metric's label key, and a key per value it can take. Data, so a metric this does not
+ *  know is skipped rather than rendered as a letter nobody can read. */
+const _DG_CVSS = {
+    AV: {label: 'diag_cvss_av', v: {N: 'diag_cvss_av_n', A: 'diag_cvss_av_a',
+                                    L: 'diag_cvss_av_l', P: 'diag_cvss_av_p'}},
+    AC: {label: 'diag_cvss_ac', v: {L: 'diag_cvss_low', H: 'diag_cvss_high'}},
+    PR: {label: 'diag_cvss_pr', v: {N: 'diag_cvss_none', L: 'diag_cvss_low',
+                                    H: 'diag_cvss_high'}},
+    UI: {label: 'diag_cvss_ui', v: {N: 'diag_cvss_none', R: 'diag_cvss_ui_r'}},
+    S:  {label: 'diag_cvss_s',  v: {U: 'diag_cvss_s_u', C: 'diag_cvss_s_c'}},
+    C:  {label: 'diag_cvss_c',  v: {H: 'diag_cvss_high', L: 'diag_cvss_low',
+                                    N: 'diag_cvss_none'}},
+    I:  {label: 'diag_cvss_i',  v: {H: 'diag_cvss_high', L: 'diag_cvss_low',
+                                    N: 'diag_cvss_none'}},
+    A:  {label: 'diag_cvss_a',  v: {H: 'diag_cvss_high', L: 'diag_cvss_low',
+                                    N: 'diag_cvss_none'}},
+};
+
+/** `[[label, value], …]` for a vector string — empty for anything that is not one. */
+function _dgCvssRows(vector) {
+    const text = String(vector || '');
+    if (!/^CVSS:3/i.test(text)) return [];
+    const parts = {};
+    text.split('/').slice(1).forEach(chunk => {
+        const i = chunk.indexOf(':');
+        if (i > 0) parts[chunk.slice(0, i).toUpperCase()] = chunk.slice(i + 1).toUpperCase();
+    });
+    const out = [];
+    _DG_CVSS_ORDER.forEach(key => {
+        const spec = _DG_CVSS[key];
+        const val = spec && spec.v[parts[key]];
+        if (val) out.push([t(spec.label), `${t(val)}  (${key}:${parts[key]})`]);
+    });
+    return out;
+}

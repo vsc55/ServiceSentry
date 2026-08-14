@@ -806,3 +806,413 @@ class TestTheRestoreFormPicksTables:
                     shown: getComputedStyle(group).display !== 'none'};
         }""")
         assert state == {'disabled': True, 'dimmed': True, 'shown': True}, state
+
+
+class TestTheDiagnosticsPageSaysWhetherWeAreOnHttps:
+    """The Network and TLS card, drawn in a browser.
+
+    Read as text, the guards say the markup exists; what only a browser settles is that the
+    card is BUILT — it is drawn from an endpoint whose answer depends on headers this page did
+    not send, and its verdict badge is chosen in JavaScript from three fields at once.
+    """
+
+    def _open(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => _navTab('#tab-diagnostic')")
+        page.wait_for_selector('#diagnostic-container .card', timeout=15_000)
+
+    def test_the_card_is_drawn_from_the_answer(self, page):
+        self._open(page)
+        text = page.evaluate("""() => {
+            const cards = Array.from(document.querySelectorAll('#diagnostic-container .card'));
+            const c = cards.find(x => x.querySelector('.bi-shield-lock'));
+            return c ? c.textContent.replace(/\s+/g, ' ') : '';
+        }""")
+        assert text, 'the network card was not drawn at all'
+        assert 'HTTP' in text, text[:200]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_a_direct_install_says_so_rather_than_showing_empty_rows(self, page):
+        """The proxy rows are about something that is not there on a direct install, so the
+        count says "none (direct)" and the forwarded headers are absent instead of "—"."""
+        self._open(page)
+        net = page.evaluate('() => _diagData.network')
+        assert net['verdict'] == 'http' and net['proxy_count'] == 0
+        assert net['forwarded_proto'] == ''
+        assert net['tls_terminated_here'] is False
+
+
+class TestTheDependencyCheckDrawsItsTwoColumns:
+    """The button that asks PyPI and the advisory service, driven in a browser.
+
+    The network is never touched: `advisories.check` is replaced in the process serving the
+    page, so what is being verified is the half only a browser settles — that the card redraws
+    with two columns that did not exist before the click, that the count lands in the header,
+    and that the "not checked" state is a dash rather than a zero it did not verify.
+    """
+
+    ROWS = [{'name': 'flask', 'installed': '1.0.0', 'latest': '9.9.9', 'state': 'behind',
+             'error': '', 'url': 'https://pypi.org/project/flask/9.9.9/',
+             'vulns': [{'id': 'GHSA-1', 'url': 'https://osv.dev/vulnerability/GHSA-1',
+                        'severity': 'high', 'score': 8.0, 'published': True,
+                        'vector': 'CVSS:3.1/AV:N', 'summary': 'a thing'},
+                       {'id': 'GHSA-2', 'url': 'https://osv.dev/vulnerability/GHSA-2',
+                        'severity': 'low', 'score': 2.0, 'published': False,
+                        'vector': '', 'summary': ''}],
+             'vuln_count': 2}]
+
+    # A package the lock does not pin. `pip` is the real case: it is in every container built
+    # from the lock, it is not a dependency of anything here, and it had an advisory while the
+    # table said every dependency was clean.
+    EXTRA = {'name': 'pip', 'installed': '1.0.0', 'latest': '2.0.0', 'state': 'behind',
+             'error': '', 'url': 'https://pypi.org/project/pip/2.0.0/',
+             'vulns': [{'id': 'GHSA-9', 'url': 'https://osv.dev/vulnerability/GHSA-9',
+                        'severity': 'critical', 'score': 9.8, 'published': True,
+                        'vector': '', 'summary': ''}],
+             'vuln_count': 1}
+
+    @pytest.fixture()
+    def stubbed(self, monkeypatch):
+        from lib.core.diagnostics import advisories as adv
+        monkeypatch.setattr(adv, 'check', lambda rows, timeout=adv.TIMEOUT: {
+            'ok': True, 'rows': self.ROWS, 'behind': 1, 'unknown': 0, 'vulns_ok': True,
+            'vulns_error': '', 'vuln_total': 2, 'vuln_packages': 1, 'vuln_asked': 41})
+        # The route asks the server which packages the lock does not pin, and the answer would
+        # otherwise be this checkout's real fifty — names the stub has no rows for.
+        monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows', lambda _wa: [])
+
+    @pytest.fixture()
+    def stubbed_extra(self, monkeypatch):
+        from lib.core.diagnostics import advisories as adv
+        monkeypatch.setattr(adv, 'check', lambda rows, timeout=adv.TIMEOUT: {
+            'ok': True, 'rows': self.ROWS + [self.EXTRA], 'behind': 2, 'unknown': 0,
+            'vulns_ok': True, 'vulns_error': '', 'vuln_total': 3, 'vuln_packages': 2,
+            'vuln_asked': 88})
+        monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows',
+                            lambda _wa: [{'name': 'pip', 'required': '',
+                                          'installed': '1.0.0', 'status': 'unpinned'}])
+
+    @pytest.fixture()
+    def stubbed_shared(self, monkeypatch):
+        """One advisory landing on both packages — the case the per-row count cannot show."""
+        from lib.core.diagnostics import advisories as adv
+        shared = {'id': 'GHSA-1', 'url': 'https://osv.dev/vulnerability/GHSA-1'}
+        rows = [dict(self.ROWS[0]),
+                dict(self.EXTRA, vulns=[shared, self.EXTRA['vulns'][0]], vuln_count=2)]
+        monkeypatch.setattr(adv, 'check', lambda r, timeout=adv.TIMEOUT: {
+            'ok': True, 'rows': rows, 'behind': 2, 'unknown': 0, 'vulns_ok': True,
+            'vulns_error': '', 'vuln_total': 4, 'vuln_packages': 2, 'vuln_asked': 88})
+        monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows',
+                            lambda _wa: [{'name': 'pip', 'required': '',
+                                          'installed': '1.0.0', 'status': 'unpinned'}])
+
+    def _open(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => _navTab('#tab-diagnostic')")
+        page.wait_for_selector('#btnDiagDeps', timeout=15_000)
+
+    def _unfold(self, page):
+        """Open the "the ones that are fine" fold, the way the panel's own toggle does.
+
+        The stubbed row is `flask`, which this checkout has at the pinned version — so it is
+        in the fold, and a `<details>` that is closed makes its rows invisible to a click. The
+        alternative is asserting against a row Playwright cannot see, which stops meaning "a
+        person can do this"."""
+        page.evaluate("""() => {
+            const d = document.querySelector('#dgDepsTables details');
+            if (d) { d.open = true; d.dispatchEvent(new Event('toggle')); }
+        }""")
+
+    def test_the_columns_are_not_there_until_it_is_asked(self, page):
+        """An empty "Latest" column on every install is a column that looks broken — and
+        filling it on load is the one thing this page does not do."""
+        self._open(page)
+        heads = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#dgDepsResult ~ table th, .card th'))
+            .map(th => th.textContent.trim())""")
+        assert not any('CVE' in h for h in heads), heads
+
+    def test_pressing_it_redraws_the_card_with_both(self, page, stubbed):
+        self._open(page)
+        page.click('#btnDiagDeps')
+        # Waited on the DOM and not on `_dgRemote`: that is a script-scope `let`, so it is
+        # never a property of `window` — `window._dgRemote !== null` is true from the first
+        # instant and the wait waits for nothing. The column appearing is the outcome anyway.
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        state = page.evaluate("""() => {
+            const card = document.getElementById('dgDepsResult').closest('.card');
+            return {text: card.textContent.replace(/\s+/g, ' '),
+                    heads: Array.from(card.querySelectorAll('th')).map(th => th.textContent.trim())};
+        }""")
+        assert any('CVE' in h for h in state['heads']), state['heads']
+        assert '9.9.9' in state['text'], state['text'][:300]
+        assert '2' in state['text']
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_open_fold_stays_open(self, page, stubbed):
+        """Reported: with "the 41 that match" expanded, pressing check collapsed it.
+
+        The fold is part of the tables, so every redraw builds a new `<details>` — and a new
+        one is closed. Somebody reading the list watched it shut under them."""
+        self._open(page)
+        page.evaluate("""() => {
+            const d = document.querySelector('#dgDepsTables details');
+            d.open = true;
+            d.dispatchEvent(new Event('toggle'));
+        }""")
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        assert page.evaluate("() => document.querySelector('#dgDepsTables details').open"),             'the fold collapsed when the table was updated'
+
+    def test_a_newer_version_is_marked_and_not_just_coloured(self, page, stubbed):
+        """Colour alone is what nobody sees on a table of forty rows — and what somebody with
+        a colour-vision deficiency cannot see at all. A newer version is a finding, so it
+        carries a badge, an arrow and the jump spelled out in its title."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        mark = page.evaluate("""() => {
+            const el = Array.from(document.querySelectorAll('#dgDepsTables .badge'))
+                .find(b => b.textContent.includes('9.9.9'));
+            return el ? {cls: el.className, icon: !!el.querySelector('.bi-arrow-up-circle-fill'),
+                         title: el.getAttribute('title') || '',
+                         href: el.getAttribute('href') || '',
+                         target: el.getAttribute('target') || '',
+                         rel: el.getAttribute('rel') || ''} : null;
+        }""")
+        assert mark, 'the newer version is not marked at all'
+        assert 'text-bg-warning' in mark['cls'] and mark['icon']
+        assert '1.0.0' in mark['title'] and '9.9.9' in mark['title'], mark['title']
+        # The badge IS the link: "there is a newer one" and "here is what changed" are one
+        # click, and it opens away from the panel rather than navigating out of it.
+        assert mark['href'] == 'https://pypi.org/project/flask/9.9.9/', mark
+        assert mark['target'] == '_blank' and 'noopener' in mark['rel']
+
+    def test_the_count_says_how_many_were_asked_about(self, page, stubbed):
+        """"No advisories at all" is the answer somebody should be able to disbelieve until
+        the screen says how it was reached: zero found and nobody asked look identical."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        assert '41' in page.evaluate(
+            "() => document.getElementById('dgDepsResult').textContent")
+
+    def test_the_count_opens_the_advisories(self, page, stubbed):
+        """Reported: the counter is a number and nothing else. A tooltip listing four
+        identifiers is unreadable, uncopyable and gone the moment the pointer moves — and the
+        identifier was never the answer anybody wanted, the write-up is.
+
+        So the badge opens the list, and each entry leads to its page on the service that
+        reported it. An in-panel modal, never a browser dialog."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        self._unfold(page)
+        page.click('#dgDepsTables button.text-bg-danger')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        links = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody a')).map(a => ({
+                text: a.textContent.trim(), href: a.getAttribute('href'),
+                target: a.getAttribute('target'), rel: a.getAttribute('rel') || ''}))""")
+        assert [l['href'] for l in links] == ['https://osv.dev/vulnerability/GHSA-1',
+                                              'https://osv.dev/vulnerability/GHSA-2'], links
+        assert all(l['target'] == '_blank' and 'noopener' in l['rel'] for l in links), links
+        assert 'GHSA-1' in links[0]['text']
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_count_is_centred_under_its_heading(self, page, stubbed):
+        """Reported off a screenshot: a column of numbers hanging on the left under a heading
+        that is not. Geometry, so it is asked of the browser rather than of the stylesheet."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        self._unfold(page)
+        boxes = page.evaluate("""() => {
+            // The table the stubbed row is actually in, and its own heading: this checkout
+            // may have no mismatched packages at all, in which case the open half is a
+            // sentence and the only table on the card is the fold.
+            const cell = document.querySelector('#dgDepsTables button.text-bg-danger')
+                .closest('td');
+            const table = cell.closest('table');
+            const i = Array.from(cell.parentElement.children).indexOf(cell);
+            const th = table.querySelectorAll('thead th')[i].getBoundingClientRect();
+            const mark = cell.firstElementChild.getBoundingClientRect();
+            return {head: th.left + th.width / 2, mark: mark.left + mark.width / 2,
+                    width: th.width};
+        }""")
+        assert boxes['width'] > 0, 'the column is not laid out, so this proves nothing'
+        assert abs(boxes['head'] - boxes['mark']) < 4, boxes
+
+    def test_the_advisories_are_listed_once_each_with_how_many_carry_them(self, page,
+                                                                         stubbed_shared):
+        """The tables answer "what is wrong with this package", a row at a time. This answers
+        what comes after: *what are we exposed to*. The same advisory routinely lands on
+        several packages, and counted per row it reads as several findings with the identifiers
+        scattered down a column of eighty rows that mostly say 0."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_selector('#dgDepsTables a[href*="osv.dev"]', timeout=15_000)
+        rows = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#dgDepsAdvisories tbody tr'))
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        # Worst first, then most-repeated: the order somebody would read them in. Alphabetical
+        # would bury the critical one wherever its identifier happened to fall.
+        assert [r[0].split()[0] for r in rows] == ['GHSA-9', 'GHSA-1', 'GHSA-2'], rows
+        assert [r[2] for r in rows] == ['1', '2', '1'], rows
+        # The one carried by two packages names both, which is the whole point of listing them
+        # once: per row it reads as two findings.
+        shared = rows[1]
+        assert 'flask' in shared[3] and 'pip' in shared[3], shared
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_each_advisory_says_how_bad_it_is(self, page, stubbed_shared):
+        """And never in this panel's own words: the database published a rating or its vector
+        scored one, and the tooltip says which of the two it is looking at."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_selector('#dgDepsTables a[href*="osv.dev"]', timeout=15_000)
+        cells = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#dgDepsAdvisories tbody tr'))
+            .map(tr => { const b = tr.children[1].querySelector('.badge');
+                         return b ? {text: b.textContent.trim(), cls: b.className} : null; })""")
+        assert [c and c['text'] for c in cells] == ['Critical 9.8', 'High 8', 'Low 2'], cells
+        # The word carries it, not the colour — a table of eighty rows read by somebody with a
+        # colour-vision deficiency is the case this page has to survive.
+        assert 'text-bg-danger' in cells[0]['cls'], cells[0]
+        assert 'text-bg-secondary' in cells[2]['cls'], cells[2]
+
+    def test_the_severity_opens_what_it_is_made_of(self, page, stubbed_shared):
+        """A word and a number are the summary of a vector that says how the attack reaches
+        the software and what it costs when it lands — and `AV:N` versus `AV:L` is the
+        difference between patching tonight and patching next release. That does not fit in a
+        tooltip, and a tooltip cannot be read twice or copied."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_selector('#dgDepsTables a[href*="osv.dev"]', timeout=15_000)
+        page.click('#dgDepsAdvisories tbody tr:nth-child(2) .badge')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        seen = page.evaluate("""() => ({
+            title: document.getElementById('infoModalTitle').textContent.trim(),
+            pairs: Array.from(document.querySelectorAll('#infoModalBody tbody tr'))
+                .map(tr => [tr.children[0].textContent.trim(),
+                            tr.children[1].textContent.trim()])})""")
+        keys = [k for k, _v in seen['pairs']]
+        assert seen['title'] == 'GHSA-1', seen['title']
+        assert 'CVSS score' in keys and 'Source' in keys, keys
+        # The vector read out: the metric that decides how urgent this is, in words.
+        assert ['Attack vector', 'Network  (AV:N)'] in seen['pairs'], seen['pairs']
+        assert any(k == 'Where' and 'flask' in v and 'pip' in v for k, v in seen['pairs'])
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_a_finding_inside_a_fold_opens_it(self, page, stubbed_shared):
+        """The folds hold what was uninteresting BEFORE the check. The check is what can make
+        them interesting, and leaving the answer shut behind a summary line asks somebody to go
+        looking for the finding they pressed the button to be told about."""
+        self._open(page)
+        assert not page.evaluate(
+            "() => document.querySelector('#dgDepsTables details').open"), 'it started open'
+        page.click('#btnDiagDeps')
+        page.wait_for_selector('#dgDepsTables a[href*="osv.dev"]', timeout=15_000)
+        opened = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#dgDepsTables details'))
+            .map(d => ({open: d.open, has: !!d.querySelector('.text-bg-danger')}))""")
+        assert opened and all(d['open'] for d in opened if d['has']), opened
+
+    def test_the_rest_of_the_environment_gets_its_own_fold(self, page, stubbed_extra):
+        """Reported: every dependency showed 0 CVE. True of the packages the lock pins — and
+        `pip`, `setuptools` and `pytest` had five between them and were never asked about.
+
+        They are drawn apart from the pinned ones because it is a different claim: they are not
+        drift, there is nothing to reconcile, and listing them beside the lock would report a
+        correct install as fifty problems."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        found = page.evaluate("""() => {
+            const folds = Array.from(document.querySelectorAll('#dgDepsTables details'));
+            const extra = folds.find(d => d.querySelector('td')
+                && d.textContent.includes('pip'));
+            if (!extra) return null;
+            return {summary: extra.querySelector('summary').textContent,
+                    heads: Array.from(extra.querySelectorAll('th'))
+                        .map(th => th.textContent.trim()),
+                    body: extra.textContent.replace(/\\s+/g, ' ')};
+        }""")
+        assert found, 'the packages outside the lock are nowhere on the card'
+        assert '1' in found['summary'], found['summary']
+        # No "Pinned" column: there is no lock entry to compare against, and an empty cell in a
+        # column headed *Pinned* reads as a package that lost its pin.
+        assert not any('Fija' in h or 'Pinned' in h for h in found['heads']), found['heads']
+        assert '1' in found['body'], found['body'][:200]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_a_newer_tool_is_not_counted_against_the_lock(self, page, stubbed_extra):
+        """The header number has an action behind it — regenerate the lock. A newer `pytest`
+        in somebody's checkout is not that action, so it is said separately instead of added
+        in: otherwise the fold shows arrows the header never counted."""
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        # Two came back behind — one pinned, one not. The header counts the pinned one.
+        badge = page.evaluate("""() => {
+            const el = document.querySelector('#dgDepsBadge .bi-arrow-up-circle-fill');
+            return el ? el.parentElement.textContent.trim() : null;
+        }""")
+        assert badge and '1' in badge and '2' not in badge, badge
+        # And the other one is SAID, rather than dropped: otherwise the fold below shows an
+        # arrow the header never counted and the number reads as wrong.
+        assert '1' in page.evaluate(
+            "() => document.getElementById('dgDepsResult').textContent")
+
+    def test_it_updates_the_table_and_leaves_the_page_where_it_was(self, page, stubbed):
+        """Reported twice: "it reloads the whole section". It never reloaded the document — a
+        JS variable survives the click and no navigation happens — but the first version
+        replaced the card ELEMENT and the second replaced its contents, and both threw away
+        everything the reader was looking at, scroll box included.
+
+        Now three nodes change and nothing else: the summary, the tables and the header badge.
+        """
+        self._open(page)
+        before = page.evaluate("""() => {
+            const box = document.querySelector('#diagnostic-container .ss-vscroll');
+            // Scrolled to where the button IS, which is the only honest way to ask this: a
+            // click on something off screen scrolls it into view first — the browser does
+            // that, not the panel — and measuring THAT proves nothing about the update.
+            document.getElementById('btnDiagDeps').scrollIntoView({block: 'center'});
+            const card = document.getElementById('dgDepsResult').closest('.card');
+            card.dataset.stamp = 'kept';
+            document.getElementById('dgDepsTables').dataset.stamp = 'tables';
+            return {scroll: box.scrollTop};
+        }""")
+        assert before['scroll'] > 0, 'the pane does not scroll, so this proves nothing'
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('th'))"
+            "        .some(th => th.textContent.includes('CVE'))", timeout=15_000)
+        after = page.evaluate("""() => {
+            const box = document.querySelector('#diagnostic-container .ss-vscroll');
+            const card = document.getElementById('dgDepsResult').closest('.card');
+            return {scroll: box.scrollTop, card: card.dataset.stamp || 'REPLACED',
+                    tables: document.getElementById('dgDepsTables').dataset.stamp || 'REPLACED'};
+        }""")
+        assert after['card'] == 'kept', 'the card element was replaced again'
+        assert after['tables'] == 'tables', 'the table container was replaced, not filled'
+        assert after['scroll'] == before['scroll'],             f"the pane jumped: {before['scroll']} -> {after['scroll']}"

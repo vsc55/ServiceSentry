@@ -16,8 +16,12 @@ MODULE_PERMISSIONS = {
 
 
 AUDIT_EVENTS = [
-    # The update check is the only thing here that leaves the machine. Recorded because
-    # "who made this box talk to github.com, and when" is a question a segregated network
-    # will ask, and the honest answer has to be findable.
+    # The two checks that leave the machine. Recorded because "who made this box talk to
+    # github.com, and when" is a question a segregated network will ask, and the honest answer
+    # has to be findable.
     {'key': 'diagnostics_update_checked', 'severity': 'muted'},
+    # The dependency check reaches TWO services (pypi.org per package, api.osv.dev once) and
+    # its answer is a security finding, so the line carries the counts as well as the fact:
+    # "when did we last look, and what did it say" is the question afterwards.
+    {'key': 'diagnostics_dependencies_checked', 'severity': 'muted'},
 ]

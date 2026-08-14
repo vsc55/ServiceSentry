@@ -19,6 +19,53 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## La tabla de dependencias decía «todo bien» tres veces, y ninguna era el dato
+
+**Fecha:** 2026-08-14 · **Área:** `lib/core/diagnostics/advisories.py`,
+`lib/core/diagnostics/collect.py`, `lib/core/diagnostics/routes.py`
+
+**Síntoma** — recién estrenadas las dos columnas remotas, la tabla mostraba **0 CVE en las
+41 dependencias** y prácticamente todas «en la última versión». El usuario no se lo creyó
+—«es raro que no tengan CVE ningún paquete»— y tenía razón tres veces seguidas, cada una por
+un motivo distinto y ninguno en los datos.
+
+**Diagnóstico** — la sospecha no se podía resolver mirando la pantalla, porque una columna de
+ceros y una columna que nadie consultó se dibujan igual. Hizo falta un **control**: las mismas
+funciones, el mismo servicio, sobre versiones viejas a propósito. `urllib3 1.24.1` devolvió 24
+avisos, `cryptography 41.0.0` devolvió 22 y `requests 2.19.0` devolvió 10. Con el camino
+demostrado vivo, cada «todo bien» que quedaba pasó a ser un defecto que buscar:
+
+1. ocho paquetes mostraban «—» en la columna de versión, no un fallo. Eran los **más grandes**:
+   el documento por proyecto de PyPI trae todas las releases y todos los ficheros, y
+   `cryptography` son 3,1 MB. El tope de lectura era de 1 MiB, y un cuerpo truncado no es JSON,
+   así que llegaban como `not_json` — un error que manda a mirar la salida de PyPI;
+2. los ceros eran ciertos… **de los 41 paquetes que fija el lock**. `pip`, `setuptools` y
+   `pytest` sumaban cinco avisos y no se preguntaba por ellos: la tabla nació del lock y la
+   pregunta que la gente le hace es «¿tiene esta máquina algo con avisos?»;
+3. ya con avisos en pantalla, `pip` mostraba dos donde hay uno: `GHSA-wf93-…` y `PYSEC-2026-196`
+   son el mismo path traversal con dos nombres. El total decía el doble.
+
+**Causa raíz** — los tres son el mismo error de forma: **el panel respondía una pregunta más
+estrecha que la que se leía en la pantalla**, y en los tres casos el recorte era nuestro (un
+tope de lectura, el alcance de una lista, un identificador tomado como si fuera el fallo), no
+del dato ni del servicio.
+
+**Solución** — tope a 16 MB, con `too_large` como respuesta propia y distinta de `not_json`;
+`collect.installed_outside_lock()` añade lo instalado que el lock no fija, en su propio pliegue
+y sin contarlo como desviación; y los identificadores se colapsan por los **alias** que publica
+la ficha de cada aviso. Y, por encima de los tres, la pantalla dice ahora **cuántos paquetes se
+consultaron**, que es lo que convierte «0 avisos» en una afirmación comprobable.
+
+**Lección** — **un límite propio se lee como un dato limpio.** Cuando el recorte lo pone
+nuestro código —un tope, un alcance, una deduplicación que falta—, el resultado no parece un
+error: parece una buena noticia, y por eso nadie va a mirar. Dos hábitos lo evitan: que cada
+modo de fallo tenga **su propia respuesta** (`too_large` ≠ `not_json`) y que la pantalla lleve
+**el denominador** —cuántos se preguntaron, con qué alcance—, porque un número sin él no se
+puede dudar. Corolario: la forma de comprobar un «no hay nada» es un **control positivo** por
+el mismo camino, no releer el código.
+
+---
+
 ## Cuatro tests que solo fallaban en CI, y nunca en local
 
 **Fecha:** 2026-08-12 · **Área:** `tests/conftest.py`, `tests/unit/test_backup_service.py`

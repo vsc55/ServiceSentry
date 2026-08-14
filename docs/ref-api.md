@@ -314,6 +314,64 @@ Ver [explica-seguridad.md](explica-seguridad.md#quién-aparece-en-la-columna-usu
 | GET | `/api/v1/modules/page/<module>` | `modules_view` | Datos de la **sección propia** de un módulo (`__page__`), desde su hook `page_data` (últimos resultados del monitor). 404 si el módulo no declara página |
 | GET, POST | `/api/v1/modules/watchfuls/<module>/<action>` | `modules_view` (+ inline si muta) | Despacha `Watchful.<action>` del módulo. Es también por dónde entran el **refresco en vivo** de una sección (`__page__.refresh`) y los datos de una **vista** que declara `action` — una llamada por ítem configurado, con la config de ese ítem en el cuerpo |
 
+## Copias de seguridad — [lib/core/backup/routes.py](../src/lib/core/backup/routes.py)
+
+| Método | Ruta | Permiso | Propósito |
+|---|---|---|---|
+| GET | `/api/v1/backups` | `backup_view` | Archivos presentes, con su manifiesto y estado de bloqueo |
+| POST | `/api/v1/backups` | `backup_create` | Crear una copia (asíncrona: devuelve `job_id`) |
+| GET | `/api/v1/backups/jobs/<job_id>` | `backup_view` | Progreso del trabajo en curso |
+| GET | `/api/v1/backups/browse` | `config_edit` | Navegar directorios del servidor (elegir destino) |
+| POST | `/api/v1/backups/mkdir` | `config_edit` | Crear directorio de destino |
+| GET | `/api/v1/backups/<name>/download` | `backup_download` | Descargar el archivo |
+| GET | `/api/v1/backups/<name>/tables` | `backup_view` | Qué tablas trae el archivo, por parte — lo que alimenta la restauración selectiva |
+| POST | `/api/v1/backups/<name>/verify` | `backup_verify` | Verificar integridad sin restaurar |
+| POST | `/api/v1/backups/<name>/restore` | `backup_restore` | Restaurar; acepta `parts` y `tables` (ver más abajo) |
+| POST | `/api/v1/backups/<name>/lock` | `backup_delete` | Proteger / desproteger contra borrado y retención |
+| DELETE | `/api/v1/backups/<name>` | `backup_delete` | Borrar el archivo |
+
+> **`tables` ausente y `tables: []` no son lo mismo.** Ausente significa *todas las del ámbito*;
+> una lista vacía significa *ninguna*. La asimetría es deliberada y está cubierta por tests: un
+> cliente que envía la selección del usuario sin filtrar no puede restaurar de más por omisión.
+
+### Programación y retención — [routes_schedule.py](../src/lib/core/backup/routes_schedule.py)
+
+| Método | Ruta | Permiso | Propósito |
+|---|---|---|---|
+| GET | `/api/v1/backups/tasks` | `backup_view` | Tareas programadas |
+| PUT | `/api/v1/backups/tasks` | `backup_schedule` | Crear / editar una tarea |
+| DELETE | `/api/v1/backups/tasks/<uid>` | `backup_schedule` | Borrar una tarea |
+| POST | `/api/v1/backups/tasks/<uid>/run` | `backup_create` | Ejecutarla ahora |
+| POST | `/api/v1/backups/tasks/preview` | `backup_view` | Qué borraría la retención, antes de aplicarla |
+| GET | `/api/v1/backups/profiles` | `backup_view` | Perfiles (qué partes entran en una copia) |
+| PUT | `/api/v1/backups/profiles` | `backup_schedule` | Crear / editar un perfil |
+| DELETE | `/api/v1/backups/profiles/<uid>` | `backup_schedule` | Borrar un perfil |
+
+## Diagnóstico — [lib/core/diagnostics/routes.py](../src/lib/core/diagnostics/routes.py)
+
+| Método | Ruta | Permiso | Propósito |
+|---|---|---|---|
+| GET | `/api/v1/diagnostics` | `diagnostics_view` | Todo lo que se responde **sin salir de la máquina**: runtime, sistema, red/TLS, base de datos, almacenamiento, dependencias y librerías opcionales |
+| GET | `/api/v1/diagnostics/report` | `diagnostics_view` | Lo mismo como documento — `?format=txt\|json\|xml`, `inline` para leerlo antes de pegarlo |
+| POST | `/api/v1/diagnostics/update-check` | `diagnostics_view` | Preguntar a la API de releases si hay una versión más nueva |
+| POST | `/api/v1/diagnostics/dependency-check` | `diagnostics_view` | Preguntar a PyPI la última versión publicada y a OSV.dev los avisos que afectan a la instalada |
+
+**El corte es local / remoto, y por eso son cuatro rutas y no una.** Meterlo todo en un GET
+haría que una página que lee el proceso esperase a un socket que el cortafuegos de alguien está
+descartando. Las dos comprobaciones remotas ocurren **al pulsar un botón**, nunca al pintar, y
+cada una queda auditada (`diagnostics_update_checked`, `diagnostics_dependencies_checked`) —
+«quién hizo que esta máquina saliera a internet, y cuándo» es una pregunta con dueño.
+
+Son **POST para algo que lee**: no es la obtención de un recurso, es *hacer que esta máquina
+hable con el exterior*, y eso va detrás de un verbo que un navegador no emite solo desde un
+prefetch o un enlace.
+
+La lista de paquetes se construye **en el servidor** —lo que fija el lock más el resto de lo
+instalado—: un cliente que pudiera nombrarlos convertiría el panel en un proxy hacia un
+servicio externo. La respuesta dice por nombre cuáles no fija el lock (`unpinned`), separa
+«desactualizadas del lock» de `behind_unpinned`, y cada aviso viaja con su enlace, su gravedad
+y los otros identificadores del mismo fallo.
+
 ## Overview — [lib/core/overview/routes.py](../src/lib/core/overview/routes.py)
 
 | Método | Ruta | Permiso | Propósito |

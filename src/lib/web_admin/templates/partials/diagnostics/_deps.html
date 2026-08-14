@@ -1,0 +1,336 @@
+{# ================================================================
+   Diagnostics — the dependency table, and the two answers that come from outside.
+
+   The local half is the lock file against what is installed, and it is drawn on load like
+   everything else on this page. The remote half — the newest version PyPI publishes, and how
+   many known advisories affect the version installed — is not: those leave the machine, so
+   they happen when a person presses the button and the columns do not exist until they have.
+
+   Its own partial because the section shell has a size limit and this is the piece that grew:
+   one card with a local table, a remote merge keyed by name, four cells and a fetch.
+   ================================================================ #}
+
+/** What PyPI and OSV.dev said, once somebody asked. Keyed by package name so the local table
+ *  and the remote answer meet where they are DRAWN and not where they are fetched: the card
+ *  works with the local half alone, which is what it shows until the button is pressed. */
+let _dgRemote = null;
+
+/** Which folds are open, by name.
+ *
+ *  State of the VIEW, kept by the view. A fold is drawn as part of the tables, so every redraw
+ *  builds a new `<details>` — and a new one is closed. Somebody with the forty matching
+ *  packages open pressed "check versions" and watched the list they were reading collapse,
+ *  which is the fold being rebuilt and nothing else. Remembered here so any redraw restores it,
+ *  rather than patched at the one call site that happened to be reported — which is also why
+ *  this is a map and not a flag: the second fold arrived later and inherited the fix. */
+const _dgFolds = {ok: false, extra: false};
+
+/** A fold telling us it changed. A function and not an inline assignment: a declared function
+ *  is reachable from an `ontoggle` attribute on any browser, a script-scope `let` is a scope
+ *  question nobody should have to answer. */
+function _dgFoldToggle(el, key) {
+    _dgFolds[key || 'ok'] = !!(el && el.open);
+}
+
+/** One `<details>`, remembering whether it was open. */
+function _dgFold(key, label, body) {
+    return `<details class="mt-2"${_dgFolds[key] ? ' open' : ''}
+              ontoggle="_dgFoldToggle(this, '${key}')"
+           ><summary class="small">${esc(label)}</summary>${body}</details>`;
+}
+
+/** The lock file against what is installed. Only the differences are shown open: the full list
+ *  is in the repository, and forty identical rows are forty rows nobody reads.
+ *
+ *  Three of its pieces carry an id — the summary line, the tables and the header badge — and
+ *  that is the whole point: pressing the button rewrites those three and nothing else. The
+ *  card, the section and the document are left exactly where they were. */
+function _dgDependenciesCard(deps) {
+    deps = deps || {};
+    if (!deps.found) {
+        return _dgCard('bi-box-seam', t('diag_card_deps'),
+            `<div class="text-muted small">${esc(t('diag_deps_none'))}</div>`);
+    }
+    const bad = (deps.rows || []).filter(r => r.status !== 'ok');
+    const state = bad.length
+        ? `<span class="badge text-bg-warning">${esc(t('diag_n_problems')
+              .replace('{}', bad.length))}</span>`
+        : `<span class="badge text-bg-success">${esc(t('diag_deps_ok'))}</span>`;
+    // A button, because both answers come from outside this machine: they happen when a person
+    // asks for them and never while the page paints.
+    // The button's children are drawn ONCE and never replaced: a spinner that is shown or
+    // hidden, an icon, and a text node. Not because rewriting them moves anything — measured,
+    // it does not — but because the element that carries the focus should not be rebuilt under
+    // the reader's cursor while it is being pressed.
+    const btn = `<button class="btn btn-sm btn-secondary py-0 px-2 ms-2" type="button"
+            id="btnDiagDeps" onclick="_dgCheckDeps()" title="${escAttr(t('diag_deps_check_tt'))}"
+            ><span class="spinner-border spinner-border-sm me-1 d-none" id="dgDepsSpin"></span
+            ><i class="bi bi-cloud-arrow-down me-1" id="dgDepsIcon"></i><span id="dgDepsLabel"
+            >${esc(t('diag_deps_check'))}</span></button>`;
+    return _dgCard('bi-box-seam', t('diag_card_deps'),
+                   `<div id="dgDepsResult">${_dgRemoteSummary()}</div>`
+                   + `<div id="dgDepsTables">${_dgDepsTables(deps)}</div>`,
+                   `<span id="dgDepsBadge">${_dgRemoteBadge()}</span>` + state + btn);
+}
+
+/** The tables themselves — the open one for the differences, the fold for the rest.
+ *
+ *  One function for both the first paint and the redraw after the check, so the two cannot
+ *  disagree about what a row looks like. The two remote columns exist only once somebody has
+ *  asked: an empty "Latest" column on every install is a column that looks broken. */
+function _dgDepsTables(deps) {
+    const rows = (deps || {}).rows || [];
+    const rem = name => (_dgRemote && _dgRemote.byName[name]) || null;
+    const line = r => `<tr>
+        <td class="small font-monospace">${esc(r.name)}</td>
+        <td class="small text-muted">${esc(r.required || '—')}</td>
+        <td class="small">${esc(r.installed || '—')}</td>
+        ${_dgRemote ? `<td class="small">${_dgLatestCell(rem(r.name))}</td>
+        <td class="small text-center">${_dgVulnCell(rem(r.name))}</td>` : ''}
+        <td class="small">${_dgDepBadge(r.status)}</td></tr>`;
+    const table = list => `<table class="table table-sm align-middle mb-0"><thead><tr>
+            <th class="small py-1">${esc(t('diag_dep_name'))}</th>
+            <th class="small py-1">${esc(t('diag_dep_required'))}</th>
+            <th class="small py-1">${esc(t('diag_dep_installed'))}</th>
+            ${_dgRemote ? `<th class="small py-1">${esc(t('diag_dep_latest'))}</th>
+            <th class="small py-1 text-center">${esc(t('diag_dep_vulns'))}</th>` : ''}
+            <th class="small py-1" style="width:7rem"></th>
+        </tr></thead><tbody>${list.map(line).join('')}</tbody></table>`;
+    // The fold holds the ones that are FINE, never the whole list: the differences are already
+    // open above it, and repeating them underneath made the same package appear twice with the
+    // same badge — which reads as two findings and makes the open table look like a summary of
+    // something longer rather than the whole of what is wrong.
+    const bad = rows.filter(r => r.status !== 'ok');
+    const good = rows.filter(r => r.status === 'ok');
+    return _dgAdvisorySection()
+        + (bad.length
+            ? table(bad)
+            : `<div class="text-muted small">${esc(t('diag_deps_all_ok'))}</div>`)
+        + (good.length
+            ? _dgFold('ok', t('diag_deps_show_ok').replace('{}', good.length), table(good))
+            : '')
+        + _dgUnpinnedTable();
+}
+
+/** Everything else installed here — the environment the lock does not describe.
+ *
+ *  Its own fold, below and separate, because it is a different claim: these are not drift and
+ *  there is nothing to reconcile. They are asked about because an advisory does not care
+ *  whether a package was pinned — `pip` and `setuptools` run in the container too — and a
+ *  table reporting "no known vulnerabilities" while one of them had one would have answered a
+ *  narrower question than the one being read off the screen.
+ *
+ *  No "Pinned" column and no status badge: there is no lock entry to compare against, and an
+ *  empty cell in a column headed *Pinned* reads as a package that lost its pin. */
+function _dgUnpinnedTable() {
+    if (!_dgRemote || !_dgRemote.unpinned.length) return '';
+    const line = name => {
+        const x = _dgRemote.byName[name] || null;
+        return `<tr><td class="small font-monospace">${esc(name)}</td>
+            <td class="small">${esc((x && x.installed) || '—')}</td>
+            <td class="small">${_dgLatestCell(x)}</td>
+            <td class="small text-center">${_dgVulnCell(x)}</td></tr>`;
+    };
+    const table = `<table class="table table-sm align-middle mb-0"><thead><tr>
+            <th class="small py-1">${esc(t('diag_dep_name'))}</th>
+            <th class="small py-1">${esc(t('diag_dep_installed'))}</th>
+            <th class="small py-1">${esc(t('diag_dep_latest'))}</th>
+            <th class="small py-1 text-center">${esc(t('diag_dep_vulns'))}</th>
+        </tr></thead><tbody>${_dgRemote.unpinned.map(line).join('')}</tbody></table>`;
+    return _dgFold('extra',
+                   t('diag_deps_unpinned').replace('{}', _dgRemote.unpinned.length),
+                   `<div class="small text-muted mt-1 mb-2">${esc(t('diag_deps_unpinned_hint'))}</div>`
+                   + table);
+}
+
+/** The newest version PyPI publishes, and whether what is installed is behind it.
+ *
+ *  `unknown` is an answer and not a blank: a version this panel cannot compare — a release
+ *  candidate, a date-shaped one — must never be painted as up to date. */
+function _dgLatestCell(x) {
+    if (!x) return `<span class="text-muted">—</span>`;
+    if (!x.latest) {
+        const why = x.error === 'not_found' ? t('diag_dep_latest_notfound')
+                                            : t('diag_dep_latest_unreachable');
+        return `<span class="text-muted ss-help" title="${escAttr(why)}">—</span>`;
+    }
+    // A newer version is a FINDING, so it looks like one: colour alone was the first version
+    // of this and colour alone is the thing nobody sees on a table of forty rows — and cannot
+    // see at all with a colour-vision deficiency. Badge, arrow and the jump spelled out.
+    if (x.state === 'behind') {
+        const tip = t('diag_dep_newer_tt').replace('{}', x.installed || '?')
+                                          .replace('{}', x.latest);
+        // The badge IS the link: "there is a newer one" and "let me go read about it" are the
+        // same click. It goes to the package's own page on PyPI for that version. The URL is
+        // built on the SERVER — the browser guessing at one would be a second place that knows
+        // how PyPI addresses are shaped.
+        return x.url
+            ? `<a class="badge text-bg-warning ss-help text-decoration-none"
+                  href="${escAttr(x.url)}" target="_blank" rel="noopener noreferrer"
+                  title="${escAttr(tip + ' — ' + t('diag_dep_newer_link'))}"
+               ><i class="bi bi-arrow-up-circle-fill me-1"></i>${esc(x.latest)
+               }<i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></a>`
+            : `<span class="badge text-bg-warning ss-help" title="${escAttr(tip)}"
+               ><i class="bi bi-arrow-up-circle-fill me-1"></i>${esc(x.latest)}</span>`;
+    }
+    // Up to date says so quietly: it is the answer for most rows, and forty green badges are
+    // forty things to look past to find the one that is not.
+    if (x.state === 'current') return `<span class="text-muted">${esc(x.latest)}</span>`;
+    return `<span class="text-muted ss-help" title="${escAttr(t('diag_dep_latest_unknown'))}"
+        >${esc(x.latest)} ?</span>`;
+}
+
+/** How many known advisories affect the version INSTALLED, and a way into them.
+ *
+ *  A count somebody can look up, not a severity this panel decided on its own — which is a
+ *  number they would have to take on faith. A dash when the advisory service did not answer:
+ *  printing 0 there would state something nobody checked.
+ *
+ *  The count OPENS them. A tooltip listing four identifiers is unreadable, uncopyable and
+ *  gone the moment the pointer moves — and the identifier alone is not the answer anybody
+ *  wanted; the write-up is. So the badge is a button onto the list, each entry linking to its
+ *  page on the same service that reported it. */
+function _dgVulnCell(x) {
+    if (!x || !_dgRemote || !_dgRemote.vulnsOk) return `<span class="text-muted">—</span>`;
+    if (!x.vuln_count) return `<span class="text-muted">0</span>`;
+    return `<button type="button" class="badge text-bg-danger border-0 ss-help"
+        onclick="_dgShowVulns('${escAttr(x.name)}')"
+        title="${escAttr(t('diag_deps_vulns_open'))}">${x.vuln_count}</button>`;
+}
+
+
+/** The one number somebody opened the card for, in its header. */
+function _dgRemoteBadge() {
+    if (!_dgRemote) return '';
+    const behind = _dgRemote.behind
+        ? `<span class="badge text-bg-warning me-2"><i class="bi bi-arrow-up-circle-fill me-1"
+           ></i>${esc(t('diag_deps_behind_badge').replace('{}', _dgRemote.behind))}</span>`
+        : '';
+    if (!_dgRemote.vulnsOk) {
+        return behind
+            + `<span class="badge text-bg-secondary me-2">${esc(t('diag_deps_vulns_unknown'))}</span>`;
+    }
+    return behind + (_dgRemote.vulnTotal
+        ? `<span class="badge text-bg-danger me-2">${esc(t('diag_deps_n_vulns')
+               .replace('{}', _dgRemote.vulnTotal)
+               .replace('{}', _dgRemote.vulnPackages))}</span>`
+        : `<span class="badge text-bg-success me-2">${esc(t('diag_deps_no_vulns'))}</span>`);
+}
+
+/** When it was asked, and the two things the columns alone do not say. */
+function _dgRemoteSummary() {
+    if (!_dgRemote) return '';
+    const when = `<span class="text-muted">${esc(t('diag_checked_at')
+        .replace('{}', _dgRemote.checkedAt))}</span>`;
+    // The count in the header is about the LOCK, because that is the one with an action behind
+    // it — regenerate it. The rest of the environment is said separately rather than added in:
+    // otherwise the fold shows arrows the header never counted, and the number reads as wrong.
+    const behind = _dgRemote.behind
+        ? ` · ${esc(t('diag_deps_n_behind').replace('{}', _dgRemote.behind))}` : '';
+    const extra = _dgRemote.behindExtra
+        ? ` · ${esc(t('diag_deps_n_behind_unpinned').replace('{}', _dgRemote.behindExtra))}` : '';
+    // How many were actually asked about. Without it, "0 CVE" and "nobody looked" read the
+    // same — and no advisories at all is precisely the answer somebody should be able to
+    // disbelieve until the screen says how it was reached.
+    const asked = _dgRemote.vulnsOk && _dgRemote.asked
+        ? ` · ${esc(t('diag_deps_asked').replace('{}', _dgRemote.asked))}` : '';
+    // Two services, so "PyPI answered and OSV did not" is a real state and has to be said:
+    // a column of dashes is not the same claim as a column of zeros.
+    const err = _dgRemote.vulnsOk ? ''
+        : ` · <span class="text-warning">${esc(t('diag_deps_vulns_failed'))}</span>`;
+    return `<div class="small mb-2">${when}${behind}${extra}${asked}${err}</div>`;
+}
+
+/** Ask, once, on a click.
+ *
+ *  Forty small requests to one service and a single batch to another, so the button says it is
+ *  working: a card that looks identical for six seconds reads as a button that did nothing. */
+async function _dgCheckDeps() {
+    const btn = document.getElementById('btnDiagDeps');
+    _dgBusy(true, t('diag_deps_checking'));
+    const res = await apiPost('/api/v1/diagnostics/dependency-check', {});
+    const data = (res && res.data) || {};
+    if (!data.ok) {
+        _dgBusy(false, t('diag_deps_check'));
+        showToast(t('diag_deps_check_failed'), 'danger');
+        return;
+    }
+    const byName = {};
+    (data.rows || []).forEach(r => { byName[r.name] = r; });
+    _dgRemote = {byName, checkedAt: data.checked_at || '', behind: data.behind || 0,
+                 vulnsOk: !!data.vulns_ok, vulnTotal: data.vuln_total || 0,
+                 vulnPackages: data.vuln_packages || 0, asked: data.vuln_asked || 0,
+                 // Which of the answers belong to no lock entry. The server says so by name:
+                 // it is the side that read the lock, and a browser deciding it from a missing
+                 // local row would call a package unpinned every time the lock failed to load.
+                 unpinned: data.unpinned || [], behindExtra: data.behind_unpinned || 0,
+                 rowList: data.rows || []};
+    _dgOpenWhereTheFindingsAre();
+    // THREE nodes, and only these three. The first version rebuilt the whole card and the one
+    // after it swapped the card's contents; both were reported as "it reloads the section",
+    // because everything a person was looking at was thrown away and drawn again — the scroll
+    // box included. The answer is a table update, so the update is the table.
+    //
+    // And the pane is pinned across it. The table gains two columns and its rows get taller,
+    // so the box can shift under the browser's own scroll anchoring; read before and written
+    // back after the layout these writes cause. (The 700px jump that was reported turned out
+    // to be neither of those: it is the browser scrolling the focused BUTTON into view, which
+    // a programmatic `focus()` triggers and a person clicking a visible button does not.)
+    const box = document.querySelector('#diagnostic-container .ss-vscroll');
+    const at = box ? box.scrollTop : 0;
+    _dgSet('dgDepsResult', _dgRemoteSummary());
+    _dgSet('dgDepsTables', _dgDepsTables((_diagData || {}).dependencies));
+    _dgSet('dgDepsBadge', _dgRemoteBadge());
+    if (box) requestAnimationFrame(() => { box.scrollTop = at; });
+    _dgBusy(false, t('diag_deps_recheck'));
+}
+
+/** Open the folds that now have something in them.
+ *
+ *  Both folds hold what was uninteresting BEFORE the check: the packages matching the lock,
+ *  and the environment around it. The check is what can make them interesting — a newer
+ *  release, an advisory — and leaving the answer shut behind a summary line is asking somebody
+ *  to go looking for the finding they pressed the button to be told about.
+ *
+ *  Only ever opens. A fold the reader closed on purpose stays closed unless there is now
+ *  something in it, and one they had open is never shut by this. */
+function _dgOpenWhereTheFindingsAre() {
+    const hit = name => {
+        const r = _dgRemote.byName[name];
+        return !!r && (r.state === 'behind' || r.vuln_count > 0);
+    };
+    const rows = ((_diagData || {}).dependencies || {}).rows || [];
+    if (rows.some(r => r.status === 'ok' && hit(r.name))) _dgFolds.ok = true;
+    if (_dgRemote.unpinned.some(hit)) _dgFolds.extra = true;
+}
+
+/** The button, working or not — by toggling what is already there.
+ *
+ *  Never `innerHTML` on it: see where it is built. The label is a text node inside a span, so
+ *  the focused element itself is not rebuilt and the page stays where the reader left it. */
+function _dgBusy(on, label) {
+    const btn = document.getElementById('btnDiagDeps');
+    if (!btn) return;
+    btn.disabled = !!on;
+    document.getElementById('dgDepsSpin')?.classList.toggle('d-none', !on);
+    document.getElementById('dgDepsIcon')?.classList.toggle('d-none', !!on);
+    const lbl = document.getElementById('dgDepsLabel');
+    if (lbl) lbl.textContent = label;
+}
+
+/** Write into one node by id, if it is still there. */
+function _dgSet(id, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+}
+
+
+function _dgDepBadge(status) {
+    if (status === 'missing') {
+        return `<span class="badge text-bg-danger">${esc(t('diag_missing'))}</span>`;
+    }
+    if (status === 'mismatch') {
+        return `<span class="badge text-bg-warning">${esc(t('diag_mismatch'))}</span>`;
+    }
+    return `<span class="badge text-bg-success">${esc(t('diag_ok'))}</span>`;
+}

@@ -57,7 +57,8 @@ class TestWhatThePageAnswers:
     def test_it_carries_every_block_the_screen_draws(self, client):
         _login(client)
         body = client.get('/api/v1/diagnostics').get_json()
-        for key in ('runtime', 'system', 'database', 'storage', 'dependencies', 'features'):
+        for key in ('runtime', 'system', 'network', 'database', 'storage',
+                    'dependencies', 'features'):
             assert key in body, key
 
     def test_the_runtime_block_says_which_services_run_here(self, client):
@@ -114,7 +115,7 @@ class TestTheReportIsMeantToBePasted:
     def test_it_carries_every_block(self, client):
         _login(client)
         text = client.get('/api/v1/diagnostics/report').get_data(as_text=True)
-        for block in ('[Runtime]', '[System]', '[Database]', '[Storage]',
+        for block in ('[Runtime]', '[System]', '[Network]', '[Database]', '[Storage]',
                       '[Optional features]', '[Dependencies]'):
             assert block in text, block
 
@@ -220,3 +221,181 @@ class TestTheOneCallThatLeavesTheMachine:
         rows = [r for r in admin._audit_store.get_all(newest_first=True)
                 if r.get('event') == 'diagnostics_update_checked']
         assert len(rows) == 2
+
+
+class TestAreWeOnHttpsAndCanWeBelieveIt:
+    """The question a reverse proxy makes impossible to answer from inside.
+
+    The panel never terminates TLS — there is no `ssl_context` anywhere in it — so "are we on
+    HTTPS" is a claim made by whatever sits in front. The block reports the three answers
+    separately, because the failure everybody hits is the one where they disagree: a proxy
+    declares HTTPS, `proxy_count` is 0 so the panel ignores it, and `secure_cookies` then makes
+    the browser drop the session cookie on a connection the panel thinks is plain. That is the
+    login loop, and until now the only place it was said was the log, at the moment it broke.
+    """
+
+    def _net(self, client, **headers):
+        return client.get('/api/v1/diagnostics',
+                          headers=headers).get_json()['network']
+
+    def test_a_direct_install_says_http_and_trusts_nothing(self, client):
+        _login(client)
+        net = self._net(client)
+        assert net['verdict'] == 'http'
+        assert net['proxy_count'] == 0 and net['trusting_proxy_headers'] is False
+
+    def test_a_declared_https_nobody_trusts_is_its_own_verdict(self, client):
+        """Not a worse `http`: the install IS on https and the panel does not know it, which
+        has a different fix and looks identical in every other field."""
+        _login(client)
+        net = self._net(client, **{'X-Forwarded-Proto': 'https'})
+        assert net['verdict'] == 'ignored'
+        assert net['forwarded_proto'] == 'https'
+        assert net['secure'] is False, 'it must not claim the connection is secure'
+
+    def test_with_the_proxy_trusted_the_scheme_is_believed(self, client, admin):
+        """The same request, one setting apart. This is the fix the warning points at."""
+        _login(client)
+        admin._PROXY_COUNT = 1
+        from werkzeug.middleware.proxy_fix import ProxyFix      # noqa: PLC0415
+        admin.app.wsgi_app = ProxyFix(admin.app.wsgi_app, x_for=1, x_proto=1,
+                                      x_host=1, x_prefix=1)
+        try:
+            net = self._net(client, **{'X-Forwarded-Proto': 'https'})
+            assert net['verdict'] == 'https' and net['secure'] is True
+            assert net['trusting_proxy_headers'] is True
+        finally:
+            admin.app.wsgi_app = admin.app.wsgi_app.app
+            admin._PROXY_COUNT = 0
+
+    def test_the_raw_header_is_reported_whether_or_not_it_is_read(self, client):
+        """The interesting case is precisely the one where the panel is ignoring it, so the
+        header cannot be reported only when it is being believed."""
+        _login(client)
+        net = self._net(client, **{'X-Forwarded-Proto': 'https',
+                                   'X-Forwarded-For': '203.0.113.7',
+                                   'X-Forwarded-Host': 'panel.example.org'})
+        assert net['forwarded_proto'] == 'https'
+        assert net['forwarded_for'] == '203.0.113.7'
+        assert net['forwarded_host'] == 'panel.example.org'
+
+    def test_the_cookie_trap_is_named_before_it_happens(self, client, admin):
+        """A Secure cookie cannot survive a connection the panel believes is plain, whoever is
+        right about that — and the symptom is a login that silently loops."""
+        _login(client)
+        admin._SECURE_COOKIES = True
+        try:
+            assert self._net(client)['cookie_trap'] is True
+        finally:
+            admin._SECURE_COOKIES = False
+
+    def test_it_never_claims_to_terminate_tls_itself(self, client):
+        """A constant, not a probe: nothing in the panel gives its socket a TLS context, and
+        reporting it as a question sends somebody hunting for a certificate setting."""
+        _login(client)
+        assert self._net(client)['tls_terminated_here'] is False
+
+    def test_the_report_carries_it_too(self, client):
+        """The block exists for a support thread, which is the one place the screen cannot go."""
+        _login(client)
+        text = client.get('/api/v1/diagnostics/report').get_data(as_text=True)
+        assert '[Network]' in text and 'verdict = ' in text
+
+
+class TestAskingTheWorldAboutTheVersionsInstalled:
+    """The second thing on this page that leaves the machine, behind the same door as the first.
+
+    Latest published version and known advisories are both questions about the outside world,
+    so they are a POST somebody presses, never part of the page. What only the app can settle
+    is that the door holds: the GET still reaches nobody, the package list is the SERVER's, and
+    the outbound call is audited with what it found.
+    """
+
+    def _stub(self, monkeypatch, **kw):
+        from lib.core.diagnostics import advisories as adv
+        seen = {}
+
+        def _check(rows, timeout=adv.TIMEOUT):
+            seen['rows'] = rows
+            return {'ok': True, 'rows': [], 'behind': 0, 'unknown': 0, 'vulns_ok': True,
+                    'vulns_error': '', 'vuln_total': 0, 'vuln_packages': 0, **kw}
+
+        monkeypatch.setattr(adv, 'check', _check)
+        return seen
+
+    def test_the_page_still_reaches_nobody(self, client, monkeypatch):
+        """The GET must stay incapable of it: the check is the button, and a page that phones
+        out because it was opened is the bug report you cannot argue with."""
+        from lib.core.diagnostics import advisories as adv
+        monkeypatch.setattr(adv.urllib.request, 'urlopen',
+                            lambda *_a, **_kw: pytest.fail('the page reached out'))
+        _login(client)
+        assert client.get('/api/v1/diagnostics').status_code == 200
+
+    def test_the_packages_asked_about_come_from_the_server(self, client, monkeypatch):
+        """A client that could name them could make this panel query an outside service for
+        anything it liked — and the server already holds the only correct list."""
+        seen = self._stub(monkeypatch)
+        _login(client)
+        res = client.post('/api/v1/diagnostics/dependency-check',
+                          json={'packages': ['evil-package']})
+        assert res.status_code == 200
+        names = [r['name'] for r in seen['rows']]
+        assert names and 'evil-package' not in names
+
+    def test_it_answers_the_counts_the_card_shows(self, client, monkeypatch):
+        self._stub(monkeypatch, behind=3, vuln_total=5, vuln_packages=2)
+        _login(client)
+        body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
+        assert body['ok'] is True and body['checked_at']
+        assert body['behind'] == 3 and body['vuln_total'] == 5
+
+    def test_it_is_audited_with_what_it_found(self, client, admin, monkeypatch):
+        """"When did we last look, and what did it say" is the question afterwards."""
+        self._stub(monkeypatch, vuln_total=4, vuln_packages=1)
+        _login(client)
+        client.post('/api/v1/diagnostics/dependency-check', json={})
+        line = next(e for e in admin._audit_store.get_all(newest_first=True)
+                    if e.get('event') == 'diagnostics_dependencies_checked')
+        assert '4' in str(line.get('detail') or line)
+
+    def test_a_viewer_without_the_flag_cannot_start_it(self, client, admin):
+        """It is an outbound call from this machine: it rides on the page's own permission and
+        not on being able to see the panel."""
+        _viewer(admin, ['config_view'])
+        _login(client, 'looker')
+        assert client.post('/api/v1/diagnostics/dependency-check', json={}).status_code == 403
+
+    def test_it_asks_about_the_whole_environment_and_not_only_the_lock(self, client,
+                                                                      monkeypatch):
+        """Reported: every dependency showed 0 CVE. It was true of the forty-one the lock pins
+        — and `pip`, `setuptools` and `pytest` had five between them and were never asked
+        about. An advisory does not care whether a package was pinned."""
+        seen = self._stub(monkeypatch)
+        _login(client)
+        client.post('/api/v1/diagnostics/dependency-check', json={})
+        rows = {r['name'].lower(): r for r in seen['rows']}
+        assert 'pytest' in rows, 'the tooling of this environment was not asked about'
+        assert rows['pytest']['status'] == 'unpinned'
+
+    def test_the_answer_says_which_ones_the_lock_does_not_pin(self, client, monkeypatch):
+        """By NAME. The browser holds the answer keyed by name, and it must not have to infer
+        "unpinned" from a missing local row — that would call every package unpinned the day
+        the lock failed to load."""
+        self._stub(monkeypatch)
+        _login(client)
+        body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
+        assert 'pytest' in [n.lower() for n in body['unpinned']]
+
+    def test_a_newer_tool_is_not_counted_against_the_lock(self, client, monkeypatch):
+        """The header number has an action behind it — regenerate the lock — and a newer
+        `pytest` in somebody's checkout is not that action. Advisories are NOT split the same
+        way: the code runs on this machine either way."""
+        self._stub(monkeypatch, behind=2, rows=[
+            {'name': 'pytest', 'state': 'behind'}, {'name': 'authlib', 'state': 'behind'}])
+        monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows',
+                            lambda _wa: [{'name': 'pytest', 'required': '',
+                                          'installed': '9.0.0', 'status': 'unpinned'}])
+        _login(client)
+        body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
+        assert body['behind'] == 1 and body['behind_unpinned'] == 1

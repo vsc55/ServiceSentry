@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import sys
 import time
@@ -183,6 +184,58 @@ def dependencies(lock_path: str) -> dict:
         'missing': sum(1 for r in rows if r['status'] == 'missing'),
         'mismatch': sum(1 for r in rows if r['status'] == 'mismatch'),
     }
+
+
+# The same package spelled two ways. `pip` writes `charset-normalizer` in a lock and the
+# distribution on disk may call itself `charset_normalizer`; comparing the two literally puts
+# one package on both sides of "is this pinned".
+_CANON_RE = re.compile(r'[-_.]+')
+
+
+def canonical_name(name: str) -> str:
+    """A package name as PEP 503 compares them: lowercase, every run of `-_.` a single dash."""
+    return _CANON_RE.sub('-', str(name or '').strip()).lower()
+
+
+def installed_outside_lock(lock_path: str) -> list:
+    """What is installed in this environment that the lock does NOT pin.
+
+    The lock is the deployment's contract and the table above is about keeping it; this is the
+    rest of the environment — `pip` and `setuptools` in a container built from that lock, plus
+    the test and tooling packages in a development checkout. They are not a drift to fix, which
+    is why they are not a fourth status in :func:`dependencies` and never appear as a problem.
+
+    They exist here for exactly one reason: **they are code that runs on the machine, so they
+    can carry an advisory.** A table that reported "no known vulnerabilities" while `pip` had
+    one would be answering a narrower question than the one being read off the screen.
+
+    Rows are shaped like the pinned ones — name, required (empty, nothing pinned it), installed,
+    status — so the remote check consumes one list and does not learn a second row format.
+    """
+    from importlib import metadata                  # noqa: PLC0415  (stdlib, imported lazily)
+    pinned = {canonical_name(n) for n, _v in _parse_lock(lock_path)}
+    out, seen = [], set()
+    try:
+        dists = list(metadata.distributions())
+    except Exception:      # pylint: disable=broad-except
+        return out
+    for dist in dists:
+        try:
+            name = str((dist.metadata or {}).get('Name') or '')
+            version = str(dist.version or '')
+        except Exception:      # pylint: disable=broad-except
+            # A half-written `.dist-info` in a shared image. One unreadable package is one row
+            # missing, never a page that fails.
+            continue
+        key = canonical_name(name)
+        # The same distribution twice — two `site-packages` on the path, a vendored copy. The
+        # first one wins because the first one is the one that gets imported.
+        if not key or key in pinned or key in seen:
+            continue
+        seen.add(key)
+        out.append({'name': name, 'required': '', 'installed': version, 'status': 'unpinned'})
+    out.sort(key=lambda r: canonical_name(r['name']))
+    return out
 
 
 # ── Optional features ────────────────────────────────────────────────────────

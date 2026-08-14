@@ -6,8 +6,9 @@
    the API answered — this file names no library and no path of its own, so a collector that
    grows a row shows it here without a second list to keep in step.
 
-   Nothing on this page changes anything. The single button that has an effect outside the
-   browser is the update check, and it lives next to the version it is about.
+   Nothing on this page changes anything. The two buttons with an effect outside the browser
+   are the update check, which lives next to the version it is about, and the dependency check
+   in `_deps.html` — the card that grew a remote half and moved out to keep this shell thin.
    ================================================================ #}
 
 let _diagData = null;
@@ -24,6 +25,7 @@ async function renderDiagnostics() {
         ${_dgBrand()}
         ${_dgVersionCard(res.runtime)}
         ${_dgSystemCard(res.system)}
+        ${_dgNetworkCard(res.network)}
         ${_dgDatabaseCard(res.database)}
         ${_dgStorageCard(res.storage)}
         ${_dgFeaturesCard(res.features)}
@@ -170,6 +172,52 @@ function _dgSystemCard(s) {
     return _dgCard('bi-cpu', t('diag_card_system'), body);
 }
 
+/** How this page reached the panel, and whether that answer can be believed.
+ *
+ *  The panel never terminates TLS itself, so "are we on HTTPS" is a claim made by whatever
+ *  sits in front. Three answers, kept apart on purpose: what the panel concluded, what the
+ *  proxy actually sent, and whether the panel is reading it. They agree on a healthy install
+ *  and the interesting case is the one where they do not. */
+function _dgNetworkCard(n) {
+    n = n || {};
+    // `ignored` is not a worse `http`: the install IS on https and the panel does not know,
+    // which has a different fix (set the proxy count) and looks identical in every other row.
+    const verdict = n.verdict === 'https'
+        ? `<span class="badge text-bg-success"><i class="bi bi-lock-fill me-1"></i>HTTPS</span>`
+        : n.verdict === 'ignored'
+            ? `<span class="badge text-bg-warning"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('diag_net_ignored'))}</span>`
+            : `<span class="badge text-bg-secondary"><i class="bi bi-unlock me-1"></i>HTTP</span>`;
+    const body = _dgRows([
+        [t('diag_net_scheme'), n.scheme || '—', t('diag_net_scheme_tt')],
+        [t('diag_net_host'), n.host || '—'],
+        [t('diag_net_client'), n.client_ip || '—', t('diag_net_client_tt')],
+        [t('diag_net_proxies'), n.proxy_count === 0 ? t('diag_net_direct') : n.proxy_count,
+         t('diag_net_proxies_tt')],
+        // Raw, and only when a proxy actually sent one: a row saying "—" on a direct install
+        // is a row about something that is not there.
+        n.forwarded_proto ? [t('diag_net_fwd_proto'), n.forwarded_proto,
+                             t('diag_net_fwd_proto_tt')] : null,
+        n.forwarded_for ? [t('diag_net_fwd_for'), n.forwarded_for] : null,
+        n.forwarded_host ? [t('diag_net_fwd_host'), n.forwarded_host] : null,
+        [t('diag_net_force_https'), n.force_https ? t('yes') : t('no')],
+        [t('diag_net_secure_cookies'), n.secure_cookies ? t('yes') : t('no')],
+        [t('diag_net_public_url'), n.public_url || '—'],
+        // A constant, not a probe: nothing in the panel gives its socket a TLS context, and
+        // asking it as a question sends somebody hunting for the setting that would answer it.
+        [t('diag_net_tls_here'), n.tls_terminated_here ? t('yes') : t('no'),
+         t('diag_net_tls_here_tt')],
+    ]);
+    // The two things worth saying out loud, said before anybody has to work them out from the
+    // rows above. Both are configuration, so both name the setting that fixes them.
+    const warn = n.verdict === 'ignored'
+        ? `<div class="alert alert-warning py-2 px-3 small mt-2 mb-0">
+               ${esc(t('diag_net_ignored_hint'))}</div>` : '';
+    const trap = n.cookie_trap
+        ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-0">
+               ${esc(t('diag_net_cookie_trap'))}</div>` : '';
+    return _dgCard('bi-shield-lock', t('diag_card_network'), body + warn + trap, verdict);
+}
+
 function _dgDatabaseCard(db) {
     db = db || {};
     const body = _dgRows([
@@ -235,56 +283,6 @@ function _dgFeaturesCard(features) {
               .replace('{}', missing))}</span>`
         : '';
     return _dgCard('bi-plugin', t('diag_card_features'), body, extra);
-}
-
-/** The lock file against what is installed. Only the differences are shown open: the full list
- *  is in the repository, and forty identical rows are forty rows nobody reads. */
-function _dgDependenciesCard(deps) {
-    deps = deps || {};
-    const rows = deps.rows || [];
-    if (!deps.found) {
-        return _dgCard('bi-box-seam', t('diag_card_deps'),
-            `<div class="text-muted small">${esc(t('diag_deps_none'))}</div>`);
-    }
-    const bad = rows.filter(r => r.status !== 'ok');
-    const line = r => `<tr>
-        <td class="small font-monospace">${esc(r.name)}</td>
-        <td class="small text-muted">${esc(r.required || '—')}</td>
-        <td class="small">${esc(r.installed || '—')}</td>
-        <td class="small">${_dgDepBadge(r.status)}</td></tr>`;
-    const table = list => `<table class="table table-sm align-middle mb-0"><thead><tr>
-            <th class="small py-1">${esc(t('diag_dep_name'))}</th>
-            <th class="small py-1">${esc(t('diag_dep_required'))}</th>
-            <th class="small py-1">${esc(t('diag_dep_installed'))}</th>
-            <th class="small py-1" style="width:7rem"></th>
-        </tr></thead><tbody>${list.map(line).join('')}</tbody></table>`;
-    // The fold holds the ones that are FINE, never the whole list: the differences are already
-    // open above it, and repeating them underneath made the same package appear twice with the
-    // same badge — which reads as two findings and makes the open table look like a summary of
-    // something longer rather than the whole of what is wrong.
-    const good = rows.filter(r => r.status === 'ok');
-    const body = (bad.length
-            ? table(bad)
-            : `<div class="text-muted small">${esc(t('diag_deps_all_ok'))}</div>`)
-        + (good.length
-            ? `<details class="mt-2"><summary class="small">${esc(t('diag_deps_show_ok')
-                  .replace('{}', good.length))}</summary>${table(good)}</details>`
-            : '');
-    const extra = bad.length
-        ? `<span class="badge text-bg-warning">${esc(t('diag_n_problems')
-              .replace('{}', bad.length))}</span>`
-        : `<span class="badge text-bg-success">${esc(t('diag_deps_ok'))}</span>`;
-    return _dgCard('bi-box-seam', t('diag_card_deps'), body, extra);
-}
-
-function _dgDepBadge(status) {
-    if (status === 'missing') {
-        return `<span class="badge text-bg-danger">${esc(t('diag_missing'))}</span>`;
-    }
-    if (status === 'mismatch') {
-        return `<span class="badge text-bg-warning">${esc(t('diag_mismatch'))}</span>`;
-    }
-    return `<span class="badge text-bg-success">${esc(t('diag_ok'))}</span>`;
 }
 
 /** Bytes as a person reads them, in 1024s like the server's own `fmt_bytes` — the two

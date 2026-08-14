@@ -75,3 +75,31 @@ function showInfoModal(title, data, lead, variant) {
     document.getElementById('infoModalBody').innerHTML = body;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
 }
+
+// ──────────────────────────── Generic list-of-links modal ──────────
+// The same modal, for the case `showInfoModal` cannot serve: a list where each entry LEADS
+// somewhere.  That one escapes its values — which is right for a key/value dump and is exactly
+// why an anchor cannot be handed to it.
+//
+// `items` is [{label, url, note}].  The URL is expected to come from the server, and the only
+// ones honoured here are absolute http(s): a `javascript:` href reaching a link somebody clicks
+// inside the panel is the one thing this must not pass through.  An entry without a usable one
+// is still listed, just not as a link — dropping it would hide a finding to tidy up a link.
+function showLinksModal(title, items, lead) {
+    document.getElementById('infoModalTitle').textContent = title || '';
+    const rows = (items || []).map(it => {
+        const url = /^https?:\/\//i.test(String(it.url || '')) ? String(it.url) : '';
+        const label = url
+            ? `<a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer"
+                  >${esc(String(it.label || ''))}<i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></a>`
+            : esc(String(it.label || ''));
+        return `<tr><td class="font-monospace" style="white-space:nowrap;width:1%">${label}</td>`
+             + `<td class="text-muted small">${esc(String(it.note || ''))}</td></tr>`;
+    }).join('');
+    document.getElementById('infoModalBody').innerHTML =
+        (lead ? `<p class="small text-muted mb-2">${esc(lead)}</p>` : '')
+        + (rows
+            ? `<table class="table table-sm table-striped align-middle mb-0 ss-fs-3"><tbody>${rows}</tbody></table>`
+            : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+}

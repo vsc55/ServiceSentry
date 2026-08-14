@@ -4,13 +4,15 @@
 
 Routes registered by this file:
 
-    GET  /api/v1/diagnostics               Everything that can be answered locally
-    POST /api/v1/diagnostics/update-check  Ask the releases API whether there is a newer one
-    GET  /api/v1/diagnostics/report        The same thing as a document: ?format=txt|json|xml
+    GET  /api/v1/diagnostics                 Everything that can be answered locally
+    POST /api/v1/diagnostics/update-check    Ask the releases API whether there is a newer one
+    POST /api/v1/diagnostics/dependency-check  Ask PyPI and OSV about the installed versions
+    GET  /api/v1/diagnostics/report          The same thing as a document: ?format=txt|json|xml
 
-The split between the first two is the point: *local* and *remote*. Putting them in one
-endpoint would make a page that reads the process wait on a socket somebody's firewall is
-dropping. The check happens when a person presses a button, never on load.
+The split is the point: *local* and *remote*. Putting them in one endpoint would make a page
+that reads the process wait on a socket somebody's firewall is dropping. The two remote checks
+happen when a person presses a button, never on load — and each is audited, because "who made
+this box reach out, and when" is a question with an owner.
 
 What each answer CONTAINS lives next door — :mod:`service` (a function of the running panel),
 :mod:`collect` (a function of the process and the disk) and :mod:`report` (a function of what
@@ -20,6 +22,7 @@ those returned). What is left here is three declarations, a permission and an au
 from flask import Response, jsonify, request
 
 from lib import __version__
+from lib.core.diagnostics import advisories as diag_advisories
 from lib.core.diagnostics import report as diag_report
 from lib.core.diagnostics import service as diag_service
 from lib.core.diagnostics import update as diag_update
@@ -27,6 +30,25 @@ from lib.core.diagnostics import update as diag_update
 
 def register(app, wa):
     view_req = wa._perm_required('diagnostics_view')
+
+    def _seen() -> dict:
+        """What THIS request looked like, for the network block.
+
+        Gathered here because `service` is Flask-free and this half of the answer exists only
+        while a request is being served. `scheme`, `host` and `remote_addr` are already through
+        ProxyFix when it is mounted; the `X-Forwarded-*` headers are read RAW beside them, so
+        the report can say "a proxy declared https and this panel is ignoring it" — which is a
+        different fault from plain HTTP and has a different fix.
+        """
+        return {
+            'scheme': request.scheme,
+            'secure': request.is_secure,
+            'host': request.host,
+            'client_ip': request.remote_addr or '',
+            'forwarded_proto': request.headers.get('X-Forwarded-Proto', ''),
+            'forwarded_for': request.headers.get('X-Forwarded-For', ''),
+            'forwarded_host': request.headers.get('X-Forwarded-Host', ''),
+        }
 
     @app.route('/api/v1/diagnostics', methods=['GET'])
     @view_req
@@ -37,7 +59,7 @@ def register(app, wa):
         already wrong, and an entry per refresh would bury the line that matters — the update
         check, which is the one action here with an outside effect.
         """
-        return jsonify({'ok': True, **diag_service.payload(wa)})
+        return jsonify({'ok': True, **diag_service.payload(wa, _seen())})
 
     @app.route('/api/v1/diagnostics/update-check', methods=['POST'])
     @view_req
@@ -61,6 +83,50 @@ def register(app, wa):
                           'latest': res.get('tag', ''), 'error': res.get('error', '')})
         return jsonify(out)
 
+    @app.route('/api/v1/diagnostics/dependency-check', methods=['POST'])
+    @view_req
+    def api_diagnostics_dependency_check():
+        """What PyPI and OSV.dev say about the versions installed here.
+
+        A POST for the same reason the update check is one: it is not the retrieval of a
+        resource, it is *making this machine talk to the internet* — forty small requests to
+        pypi.org and one to api.osv.dev — and that belongs behind a verb a browser will not
+        issue from a prefetch.
+
+        The package list is built HERE, from the lock and what is installed. A client that
+        could name the packages could make the panel query an outside service for anything it
+        liked, and the server already has the only list that is correct.
+
+        It is TWO lists: what the lock pins, and everything else installed beside it. The
+        second exists because an advisory does not care whether a package was pinned — `pip`
+        and `setuptools` run in the container too — and the answer says which names came from
+        it, so the screen can keep the two apart without deciding it for itself.
+        """
+        import time                                          # noqa: PLC0415
+        rows = diag_service.dependency_rows(wa)
+        extra = diag_service.unpinned_rows(wa)
+        res = diag_advisories.check(rows + extra)
+        # By name, not by position: the browser holds the answer keyed by name, and a list of
+        # indexes into a list it rebuilds is an association waiting to slip.
+        names = {r['name'] for r in extra}
+        res['unpinned'] = [r['name'] for r in extra]
+        # "Behind" is split and the advisories are NOT, because they answer different
+        # questions. A newer release of a package the lock pins is an action with an owner —
+        # regenerate the lock — while a newer `pytest` in a developer's checkout is not, and
+        # counting them together turns the one number into something nobody acts on. An
+        # advisory has the same weight either way: it is code running on this machine.
+        res['behind_unpinned'] = sum(1 for r in res['rows']
+                                     if r['name'] in names and r['state'] == 'behind')
+        res['behind'] = int(res.get('behind') or 0) - res['behind_unpinned']
+        wa._audit('diagnostics_dependencies_checked',
+                  detail={'packages': len(rows), 'unpinned': len(extra),
+                          'behind': res.get('behind', 0),
+                          'vulnerable_packages': res.get('vuln_packages', 0),
+                          'advisories': res.get('vuln_total', 0),
+                          'vulns_ok': res.get('vulns_ok'),
+                          'error': res.get('vulns_error', '')})
+        return jsonify({'checked_at': time.strftime('%Y-%m-%d %H:%M:%S'), **res})
+
     @app.route('/api/v1/diagnostics/report', methods=['GET'])
     @view_req
     def api_diagnostics_report():
@@ -71,7 +137,7 @@ def register(app, wa):
         """
         import time                                          # noqa: PLC0415
         body, mimetype, ext = diag_report.render(
-            diag_service.payload(wa), request.args.get('format'),
+            diag_service.payload(wa, _seen()), request.args.get('format'),
             time.strftime('%Y-%m-%d %H:%M:%S'))
         # `inline`, not an attachment: it opens in the tab so it can be read before it is
         # pasted anywhere. Whoever wants a file still gets one with Save As.

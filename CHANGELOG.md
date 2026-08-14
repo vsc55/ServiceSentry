@@ -8,6 +8,153 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.70] - 2026-08-14
+
+### Added
+- **Diagnostics answers "are we on HTTPS?" — and whether that answer can be believed.** The
+  panel never terminates TLS itself (there is no `ssl_context` anywhere in it, deliberately:
+  something in front does that), so behind a reverse proxy the question could not be answered
+  from any screen. The new **Network and TLS** card reports the three answers separately,
+  because the failure everybody hits is the one where they disagree:
+  - **what the panel concluded** — the scheme, host and client address, already through
+    ProxyFix when it is mounted;
+  - **what the proxy actually sent** — `X-Forwarded-Proto` / `-For` / `-Host`, shown raw,
+    whether or not this panel is reading them;
+  - **whether it is reading them** — `proxy_count`, which is what mounts ProxyFix at all.
+  - A verdict of **`ignored`** when a proxy declared HTTPS and the count is 0. That is not a
+    worse `http`: the install IS on https and the panel does not know, which has a different
+    fix and is identical in every other field. Every URL the panel builds, and the address
+    fail2ban bans, are wrong until `proxy_count` is set.
+  - The **cookie trap** named before it happens: `secure_cookies` on while the panel believes
+    the connection is plain means the browser drops the session cookie and the login appears to
+    loop. `_hook_csrf` already knew how to say this, but only in the log and only at the moment
+    it broke.
+  - `TLS terminated by the panel` is reported as a constant `no` rather than probed — phrasing
+    it as a question sends somebody hunting for a certificate setting that does not exist.
+- The block travels in the **document** too (text, JSON and XML), which is the one place the
+  screen cannot go: a support thread.
+- **The dependency table can ask the world about itself.** Two columns behind a button:
+  the newest version PyPI publishes, and how many known advisories affect the version
+  installed (OSV.dev). Both leave the machine, so both follow the rule the update check
+  already set — never on load, never a poll, one button, audited with what it found.
+  - **The columns do not exist until it is asked.** An empty "Latest" on every install is a
+    column that looks broken, and this page's whole contract is that opening it contacts
+    nobody.
+  - **PyPI has no batch endpoint and OSV does**, so the first is one small request per package
+    in a bounded pool and the second is a single request for all of them — which is also why
+    the advisory half keeps working where pypi.org is blocked and the other half does not.
+  - The two halves **report separately**: "PyPI answered and OSV did not" is a real state, and
+    a CVE column of zeros would be stating something nobody checked. It says a dash.
+  - The count carries its **identifiers** in the tooltip — something an operator can look up,
+    rather than a severity this panel decided on its own.
+  - Comparing versions is deliberately not PEP 440: `behind` / `current` / **`unknown`**, and
+    a version it cannot read is never painted as up to date.
+  - The package list is built **on the server** from the lock and what is installed. A client
+    that could name them could make the panel query an outside service for anything it liked.
+  - **The click updates three nodes** — the summary line, the tables and the header badge —
+    and nothing else. Reported twice as "it reloads the whole section"; it never reloaded the
+    document (a JS variable survives the click and no navigation happens), but the first
+    version replaced the card element and the second replaced its contents, and both threw away
+    everything the reader was looking at. The 700px jump that came with it turned out to be
+    neither: it is the browser scrolling the focused BUTTON into view, which a programmatic
+    `focus()` and an automated click both trigger and a person clicking a visible button does
+    not — measured before believing either explanation.
+  - **An open fold stays open.** The "the ones that are fine" list is part of the tables, so
+    every redraw built a new `<details>` — and a new one is closed: somebody reading the forty
+    matching packages watched them shut when they pressed the button. The state belongs to the
+    view and is kept by the view, so any redraw restores it rather than only the one call site
+    that happened to be reported.
+  - **A newer version is marked, not just tinted**: a badge with an arrow and the jump
+    (`3.4.9 → 3.5.0`) in its title, plus a count in the card header. Colour alone is what
+    nobody notices on a table of forty rows and what somebody with a colour-vision deficiency
+    cannot see at all.
+  - **That badge is the link**, to the package's own page on PyPI for that version: "there is
+    a newer one" and "let me go read about it" are one click. The URL is built on the server
+    from two strings it already had. PyPI also carries a `project_urls` map with whatever each
+    project chose to put in it, and rendering one of those as a link somebody clicks inside the
+    panel would let the package pick where the operator lands.
+  - **The summary says how many packages were asked about.** "No advisories at all" is exactly
+    the answer somebody should be able to disbelieve, and zero found and nobody asked read
+    identically without it.
+  - **PyPI's project document is bigger than it looks** — `cryptography` alone is 3.1 MB,
+    because it carries every release and every file. The first read cap was one megabyte, which
+    truncated eight of the forty packages in this lock; a truncated body is not JSON, so those
+    eight came back as `not_json` and the table showed a dash for exactly the biggest and most
+    interesting packages while looking like a clean answer. The cap is 16 MB, and hitting it is
+    now its own answer (`too_large`) rather than a parse error that sends somebody to look at
+    PyPI's output instead of at our own limit.
+  - **It asks about the whole environment, not only the lock.** Reported: every dependency
+    showed 0 CVE. That was true — of the forty-one packages `requirements.lock` pins. `pip`,
+    `setuptools` and `pytest` had five advisories between them and were never asked about,
+    because the table only ever knew about the lock. An advisory does not care whether a
+    package was pinned: the code runs on the machine either way.
+    - They get **their own fold**, below the pinned ones and separate from them, because it is
+      a different claim: they are not drift and there is nothing to reconcile — a container
+      built from the lock still carries `pip`. Listing them beside the lock would report a
+      correct install as fifty problems, which is why this is not a fourth status.
+    - No "Pinned" column in it: there is no lock entry to compare against, and an empty cell
+      under a heading that says *Pinned* reads as a package that lost its pin.
+    - The **"outdated" count stays about the lock**, which is the one with an action behind it
+      — regenerate the lock. A newer `pytest` in a developer's checkout is not that action, so
+      it is stated separately rather than added in; otherwise the fold shows arrows the header
+      never counted. Advisories are deliberately **not** split that way.
+    - The server says by name which packages the lock does not pin. A browser inferring it
+      from a missing local row would call every package unpinned the day the lock failed to
+      load.
+    - Names are compared **PEP 503-normalised** (`charset-normalizer` in the lock,
+      `charset_normalizer` on disk), and each distribution is counted once — two
+      `site-packages` on the path would otherwise mean one wasted request and a duplicated row.
+  - **The CVE count opens the advisories.** A tooltip listing four identifiers is unreadable,
+    uncopyable and gone the moment the pointer moves — and the identifier was never the answer
+    anybody wanted; the write-up is. The badge opens an in-panel modal where each entry links
+    to its page on the same service that reported it. The column is centred under its heading,
+    which it was not.
+  - **A section listing every advisory once**, above the tables: how bad it is, how many
+    packages carry it and which. The tables answer "what is wrong with this package", a row at
+    a time; this answers what comes after — *what are we exposed to* — and the same advisory
+    routinely lands on several packages, where counted per row it reads as several findings
+    with the identifiers scattered down a column of eighty rows that mostly say 0.
+  - **A severity, and never this panel's own.** Either the database published a rating — that
+    is the word shown — or it published a CVSS vector, and the base score is the arithmetic the
+    specification defines for it. Which of the two it is looking at is stated, because they
+    disagree: an advisory GitHub calls *moderate* can carry a vector that scores 8.0. Clicking
+    it opens the vector read out metric by metric, in the reader's language: `AV:N` versus
+    `AV:L` is the difference between patching tonight and patching next release, and that does
+    not fit in a tooltip.
+  - **One flaw reported twice is counted once.** Found on real data: `pip` came back with
+    `GHSA-wf93-…` and `PYSEC-2026-196`, which are the same path traversal under two names, and
+    the panel said six advisories where there were three — on the one screen built so that a
+    number can be believed. Identifiers are collapsed through the aliases their own records
+    publish, keeping the entry that published a severity, and the other names travel with it so
+    a search for the one a scanner printed still finds it.
+  - **A finding inside a fold opens it.** Both folds hold what was uninteresting *before* the
+    check; the check is what can make them interesting, and leaving the answer shut behind a
+    summary line asks somebody to go looking for the thing they pressed the button to be told
+    about. It only ever opens: a fold closed on purpose stays closed unless there is now
+    something in it.
+
+### Fixed
+- **The permissions reference stated something this release made false.** `diagnostics_view`
+  was documented as opening a page where "the update check is the only thing that leaves the
+  machine". There are two now, and the entry says so — which of them go out, that both are
+  audited, and that they ride on the page's own permission rather than a separate one.
+
+### Changed
+- **`ref-api.md` calls itself a complete inventory of the HTTP surface and was not one.** Two
+  whole domains were missing — Backup (18 endpoints, including the table listing that feeds
+  selective restore) and Diagnostics (4). Both are now written up, with the `tables` absent /
+  `tables: []` asymmetry spelled out beside the restore endpoint. Verified by comparing every
+  `@app.route('/api/…')` in the tree against the document: **138 of 138**.
+- **The diagnostics page had no functional documentation at all.** `explica-web-admin.md` gains
+  its feature row and an endpoint section covering what the screen answers locally, the
+  Network/TLS block and why it separates three answers, and the dependency check — its scope,
+  the advisories listed once, and where a severity comes from.
+- The dependency partial was split at the point it stopped being one concept:
+  `diagnostics/_advisories.html` (every advisory once, and how bad it is) and
+  `diagnostics/_cvss.html` (a vector read out metric by metric) now live beside
+  `diagnostics/_deps.html`, which is back to the card, its tables and the fetch.
+
+
 ## [0.0.1+build.69] - 2026-08-08
 
 ### Changed

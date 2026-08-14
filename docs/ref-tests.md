@@ -6462,7 +6462,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 29 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 45 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6535,6 +6535,49 @@ además una caja con tope propia que escondía dónde acababa la lista. Se mide 
 scrollea, que **nada dentro** de él scrollee también, y que los botones sigan en pantalla.
 Validado reintroduciendo el bug: la regla `#backupModal .modal-lg …` sin su
 `:not(.modal-dialog-scrollable)` lo pone rojo.
+
+**`TestTheDiagnosticsPageSaysWhetherWeAreOnHttps`** — la tarjeta de red, dibujada de verdad. Se
+construye desde un endpoint cuya respuesta depende de cabeceras que esta página no manda, y el
+distintivo del veredicto se elige en JavaScript a partir de tres campos a la vez: leído como
+texto se comprueba que el marcado existe, no que la tarjeta salga. Comprueba además que en una
+instalación directa el bloque lo dice —«ninguno (acceso directo)», sin filas de cabeceras que no
+están— en vez de pintar guiones.
+
+**`TestTheDependencyCheckDrawsItsTwoColumns`** — el botón que pregunta a PyPI y al servicio de
+avisos, pulsado de verdad (con `advisories.check` sustituido: la red no se toca). Comprueba lo
+único que no se puede leer en la plantilla — que **las dos columnas no existen hasta que se
+pulsa**, que al hacerlo la tarjeta se redibuja con ellas y el contador cae en la cabecera. La
+espera es **sobre el DOM y no sobre `_dgRemote`**: es un `let` de ámbito de script, así que
+`window._dgRemote !== null` es cierto desde el primer instante y la espera no espera nada — el
+mismo malentendido que este fichero ya documentaba para `usersData`, cometido otra vez.
+
+Dos guardas más salieron de un «se recarga toda la sección» reportado dos veces: que el clic
+**cambia tres nodos y deja la página donde estaba** (la tarjeta y el contenedor de las tablas
+siguen siendo los mismos elementos, y el scroll no se mueve), midiéndolo con el botón **a la
+vista** —un clic sobre algo fuera de pantalla lo trae a la vista primero, y eso lo hace el
+navegador, no el panel: medir eso no prueba nada—; que **el pliegue abierto sigue abierto**
+tras actualizar (se redibuja con las tablas, y un `<details>` nuevo nace cerrado: quien tenía
+desplegadas las 41 que coinciden veía cerrarse la lista que estaba leyendo); y que una versión
+nueva se marca con **insignia, flecha y el salto escrito en el título**, no solo con color, que
+es lo que nadie ve en una tabla de cuarenta filas — y esa insignia **es el enlace** a la página del paquete en
+PyPI, abriéndose fuera del panel; y que el resumen dice **cuántos paquetes se consultaron**,
+porque «0 avisos» y «nadie miró» se leen igual.
+
+Y una tanda que salió de la pregunta siguiente, «¿es correcto que salga 0 CVE en todo?»: lo
+era del lock, mientras `pip`, `setuptools` y `pytest` sumaban cinco avisos sin que nadie los
+preguntara. De ahí también que **el contador abra los avisos** —un tooltip con cuatro
+identificadores no se lee, no se copia y desaparece al mover el ratón, y el identificador nunca
+fue la respuesta que se buscaba: lo es la ficha—, que la columna esté **centrada bajo su
+cabecera** (geometría, así que se le pregunta al navegador y no a la hoja de estilos), que
+exista una **sección con cada aviso una sola vez** —gravedad, en cuántos paquetes está y en
+cuáles, lo peor primero—, que **la gravedad abra su desglose** (el vector leído métrica a
+métrica: `AV:N` frente a `AV:L` es la diferencia entre parchear esta noche y parchear en la
+próxima), y que **un hallazgo dentro de un pliegue lo abra** — dejarlo cerrado es pedirle a
+alguien que vaya a buscar aquello por lo que pulsó el botón. Ahora **el resto del entorno tiene su propio pliegue**, aparte de las fijadas
+porque es otra afirmación —no son desviación, no hay nada que reconciliar— y sin columna
+«Fija», que vacía se leería como un paquete que perdió su pin; y el contador de la cabecera
+**no cuenta un `pytest` más nuevo como deuda del lock**, que es la única con una acción detrás,
+aunque lo diga aparte para que el pliegue no muestre flechas que la cabecera nunca contó.
 
 **`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
 Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe
@@ -6909,8 +6952,9 @@ librería de imagen sería un test que se salta justo en la máquina donde impor
 
 ## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
 
-**Archivo:** `tests/unit/test_diagnostics_collect.py` — 32 tests
-**Archivo:** `tests/integration/test_wa_diagnostics.py` — 19 tests
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 42 tests
+**Archivo:** `tests/unit/test_diagnostics_advisories.py` — 68 tests
+**Archivo:** `tests/integration/test_wa_diagnostics.py` — 34 tests
 
 Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
 qué corre, dónde escribe y qué falta. Todas se podían contestar antes —leyendo un log, abriendo
@@ -6933,13 +6977,18 @@ importan más que cualquier campo suelto:
 |---|---|
 | `TestTheSystemBlockAlwaysAnswers::*` (3) | Intérprete y máquina siempre contestan; `_safe` convierte una excepción —y una respuesta vacía, que se lee peor— en un campo «desconocido» |
 | `TestDependenciesAreReadFromTheLock::*` (7) | Se lee del **lock** y no de `pip freeze`; ausente y versión distinta son veredictos separados, «más nueva» no es un veredicto, los problemas van primero, comentarios/flags/marcadores de entorno no son paquetes, la **barra de continuación** de `pip-compile --generate-hashes` no forma parte de la versión, y contra el lock real no puede salir «todo difiere» |
+| `TestTheRestOfTheEnvironment::*` (10) | Lo que el lock **no** fija y aun así corre aquí. Se reportó «todas las dependencias con 0 CVE»: era cierto de los cuarenta y un paquetes del lock, y `pip`, `setuptools` y `pytest` sumaban cinco avisos sin que nadie los preguntara — un aviso no distingue si el paquete estaba fijado. Deliberadamente **no** es un cuarto estado de `dependencies`: no son desviación y no hay nada que reconciliar, y meterlos en la misma lista reportaría una instalación correcta como cincuenta problemas. Cubre que las dos listas no se solapan, que las filas tienen la **misma forma** (una sola lista que consumir), que `charset-normalizer` y `charset_normalizer` son un solo paquete (PEP 503, o un paquete fijado sale como no fijado), que cada distribución aparece una vez (dos `site-packages` en la ruta) y que sin lock no revienta |
 | `TestOptionalFeaturesExplainWhatIsSwitchedOff::*` (3) | Cada entrada nombra su módulo y **qué enciende**, con etiqueta en los dos idiomas: el panel donde nunca aparece el botón de SSO casi nunca está mal configurado |
 | `TestStorageAsksTheOsAndWritesNothing::*` (3) | Existencia, permiso de escritura y sitio libre — preguntando al SO, sin crear nada en el directorio que alguien está mirando porque se comporta raro |
 | `TestTheReportRenders::*` (6) | Los tres formatos son funciones **puras** del payload —por eso salieron de la ruta—: un formato desconocido cae a texto, cada uno declara su mimetype, el texto lista TODAS las dependencias (no solo las malas), el XML escapa con `ElementTree` (un `&` en el nombre de host, rutas de Windows), una lista sale como hijos repetidos y no como `repr` de Python, y el JSON no toca el payload |
 | `TestTellingWhetherAReleaseIsNewer::*` (10) | Más nueva / vamos por delante / **no se puede decidir**; una etiqueta se lee venga como venga; se niega a preguntar por HTTP plano; un **404 no es un endpoint roto** (`/releases/latest` excluye borradores y prereleases, que es el estado de este repositorio hoy) y se reporta como «nada publicado todavía», mientras que un 403 sigue siendo un HTTP con su código; y la dirección tiene **un solo hogar** (el registro de `spec.py`), que es lo que permite que la pantalla de configuración la muestre en gris detrás de la casilla vacía |
 | `TestItIsBehindItsOwnPermission::*` (2) | `diagnostics_view` es propio: ver el panel no lo concede |
-| `TestWhatThePageAnswers::*` (6) | Los seis bloques viajan juntos, la base de datos se lee del **conector** y no de la config, el nivel de log se lee de la **configuración** (no hay atributo que lo espeje: pedirlo devolvía vacío y el campo salía «—» en toda instalación), y la página no escribe una sola línea de auditoría |
+| `TestAreWeOnHttpsAndCanWeBelieveIt::*` (7) | La pregunta que un proxy inverso hace imposible responder desde dentro. El panel **no termina TLS nunca** (no hay `ssl_context` en ninguna parte), así que «¿estamos en HTTPS?» es una afirmación de quien esté delante, y el bloque separa las tres respuestas: lo que concluyó el panel, lo que mandó el proxy **en crudo** y si el panel lo está leyendo. `ignored` no es un `http` peor: la instalación **sí** está en HTTPS y el panel no se ha enterado, que tiene otro arreglo (`proxy_count`) y es idéntico en todos los demás campos. Cubre además la trampa de la cookie —`secure_cookies` sobre lo que el panel cree HTTP es el login en bucle— y que el informe de texto lo lleva |
+| `TestWhatThePageAnswers::*` (6) | Los siete bloques viajan juntos, la base de datos se lee del **conector** y no de la config, el nivel de log se lee de la **configuración** (no hay atributo que lo espeje: pedirlo devolvía vacío y el campo salía «—» en toda instalación), y la página no escribe una sola línea de auditoría |
 | `TestTheReportIsMeantToBePasted::*` (7) | Texto plano `inline` —se lee antes de enviarlo—, todos los bloques presentes, y el de dependencias **nunca vacío**: lista las 41 con su veredicto, diferencias primero. La pantalla pliega las que coinciden porque se lee de un vistazo; un fichero que se pega en una incidencia no. **Tres formatos** (txt/json/xml) de los MISMOS recolectores —una segunda pasada por formato es como dos informes de la misma instalación acaban discrepando—, cada uno con su mimetype y su extensión, un formato desconocido cae a texto en vez de negarse, y el XML sale bien formado con rutas de Windows dentro (escapado por `ElementTree`, no a mano) y las listas como hijos repetidos |
+| `TestHowBadEachOneIs::*` (25) | La columna de gravedad, y por qué no es una opinión. O la base de datos publicó una calificación —esa es la palabra que se muestra— o publicó un vector CVSS, y la puntuación base es la **aritmética que define la especificación** para él; una nota inventada aquí sería un número que hay que creerse, en la página cuyo trabajo es no producirlos. Diez vectores de referencia **derivados a mano**, métrica a métrica (tres de los primeros «valores esperados» puestos de memoria estaban mal y la implementación bien: una referencia que nadie ha derivado no es una referencia), las dos ramas de `S:U`/`S:C`, las bandas de la especificación, y que un vector ilegible puntúa `None` y no `0.0` —cero es la nota de algo sin impacto, y esa diferencia es la columna entera—. Además: la ficha se pide **una vez por identificador distinto** (el mismo aviso cae en varios paquetes), con techo de conexiones; y `GHSA-…` y `PYSEC-…` del mismo fallo se **cuentan una sola vez** —salió con datos reales: `pip` traía los dos y el panel decía seis avisos donde había tres—, quedando el que publicó gravedad, de forma estable entre ejecuciones y no según qué hilo contestó antes |
+| `TestTellingWhetherAVersionIsBehind::*` + `TestAskingPyPI::*` + `TestAskingTheAdvisoryService::*` + `TestTheTwoHalvesMerged::*` + `TestWhereToReadAboutARelease::*` + `TestSayingHowManyWereAsked::*` + `TestWhereToReadAboutAnAdvisory::*` (43) | La comprobación remota de dependencias, **sin tocar la red** (`urlopen` sustituido en todos): comparar versiones no es PEP 440 a propósito —«no se puede decir» es la respuesta honesta y nunca se pinta como «al día»—; un paquete que PyPI no publica cuesta **su celda y nada más**; un nombre que no es un nombre no llega a construir la URL; una respuesta del lote de longitud distinta se **rechaza** en vez de alinearse como se pueda (señalaría el paquete equivocado como vulnerable); y las dos mitades informan por separado, porque «PyPI contestó y OSV no» es un estado real y una columna de ceros afirmaría algo que nadie comprobó. Además: el enlace de una versión nueva es la **página del paquete en PyPI** para esa versión, construida en el servidor a partir de dos cadenas — PyPI también trae un `project_urls` con lo que cada proyecto haya querido poner, y renderizar uno de esos como enlace que se pulsa dentro del panel dejaría al paquete elegir el destino |
+| `TestAskingTheWorldAboutTheVersionsInstalled::*` (8) | Por la app: el GET **sigue sin poder** salir a la red, la lista de paquetes es la del **servidor** (un cliente que pudiera nombrarlos convertiría el panel en un proxy hacia un servicio externo), los contadores llegan como los pinta la tarjeta, la llamada saliente se audita **con lo que encontró**, y arranca con el permiso propio de la página. Además pregunta por **todo el entorno** y no solo por el lock —que es de dónde salían los ceros—, dice **por nombre** cuáles no fija el lock (el navegador no debe deducirlo de una fila local que falta: el día que el lock no cargue, todos serían «no fijados») y separa el contador de «desactualizadas», que sí tiene una acción detrás —regenerar el lock— de un `pytest` más nuevo en un checkout, que no; los avisos **no** se separan, porque el código corre en la máquina de las dos formas |
 | `TestTheOneCallThatLeavesTheMachine::*` (4) | El GET es **incapaz** de salir a la red (se sustituye `fetch_latest` por algo que falla el test si lo llaman); un fallo es una respuesta y no un 500; y las dos salidas quedan auditadas |
 
 ---
