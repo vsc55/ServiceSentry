@@ -16,6 +16,7 @@ import time as _time
 
 import requests as _req
 
+from lib import APP_NAME
 from lib.providers.entraid.client import (
     DEFAULT_APP_NAME, GRAPH_APP_ID, GRAPH_BASE, graph_error)
 
@@ -54,10 +55,10 @@ def _expose_api_sso(access_token: str, obj_id: str, client_id: str) -> bool:
     scope_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'servicesentry:{client_id}:access_as_user'))
     scope = {
         'id': scope_id, 'value': 'access_as_user', 'type': 'User', 'isEnabled': True,
-        'adminConsentDisplayName': 'Access ServiceSentry as the user',
-        'adminConsentDescription': 'Allows Teams to call ServiceSentry on behalf of the signed-in user.',
-        'userConsentDisplayName': 'Access ServiceSentry as you',
-        'userConsentDescription': 'Allows Teams to call ServiceSentry on your behalf.',
+        'adminConsentDisplayName': f'Access {APP_NAME} as the user',
+        'adminConsentDescription': f'Allows Teams to call {APP_NAME} on behalf of the signed-in user.',
+        'userConsentDisplayName': f'Access {APP_NAME} as you',
+        'userConsentDescription': f'Allows Teams to call {APP_NAME} on your behalf.',
     }
     # TWO steps: Graph validates preAuthorizedApplications.delegatedPermissionIds against
     # the *already-stored* scopes, so the scope must be created FIRST (a single combined

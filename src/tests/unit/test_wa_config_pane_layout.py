@@ -244,7 +244,7 @@ class TestTheSearchBoxIsCollapsed:
         """
         # The selector carries more than one rule (a margin reset elsewhere), so pick the one
         # that actually casts the shadow rather than whichever comes first in the file.
-        blocks = [b for b in re.findall(r'.ss-main > \.ss-bleed-top \{(.*?)\}', _css(), re.S)
+        blocks = [b for b in re.findall(r'\.ss-shell-main > \.ss-bleed-top \{(.*?)\}', _css(), re.S)
                   if 'box-shadow' in b]
         assert blocks, 'the pinned header no longer casts the shadow this guards'
         body = blocks[0]

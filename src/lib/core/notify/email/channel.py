@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 
+from lib import APP_NAME
 from lib.core.notify.formatting import notify_lang, plain
 from lib.core.notify.recipients import RecipientResolver
 from lib.core.notify.registry import Channel, register_channel
@@ -39,7 +40,7 @@ def send(router, cfg, *, kind='', module='', item='', status='', message='',
     _html_override = (
         (cfg.get('notif_html_templates') or {}).get('alert', {}).get(lang_key)
     ) or None
-    prefix = email_cfg.get('subject_prefix') or '[ServiceSentry]'
+    prefix = email_cfg.get('subject_prefix') or f'[{APP_NAME}]'
     subject = f'{prefix} {kind.upper()}: {item}'
     body_html = email_templates.render_alert(
         kind=kind, module=module, item=item, status=status,
@@ -66,7 +67,7 @@ def flush(router, cfg, alerts, hostname, public_url) -> tuple:
     body_html = email_templates.render_summary(
         items=items, timestamp=time.strftime('%Y-%m-%d %H:%M:%S'),
         public_url=public_url, lang=lang, strings=strings, html_override=html_override)
-    prefix = email_cfg.get('subject_prefix') or '[ServiceSentry]'
+    prefix = email_cfg.get('subject_prefix') or f'[{APP_NAME}]'
     subject = f'{prefix} {hostname}: {len(alerts)} alert(s)'
     return email_notify._dispatch(email_cfg, subject=subject, body_html=body_html,
                                   recipients=_resolve_recipients(router, email_cfg), lang=lang)

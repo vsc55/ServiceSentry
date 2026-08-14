@@ -80,7 +80,7 @@ class TestTheButtons:
         import os                                                # noqa: PLC0415
         base = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
         render = io.open(os.path.join(base, 'lib', 'web_admin', 'templates', 'partials',
-                                      'cfg', '_render.html'), encoding='utf-8-sig').read()
+                                      'cfg', '_actions.html'), encoding='utf-8-sig').read()
         # Matched WITHOUT the closing paren on purpose: what this guards is that the section
         # is passed at all, not how many arguments follow it. Pinning the exact call shape
         # made it fail the day maintenance actions started receiving the button element too —

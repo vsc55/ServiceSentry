@@ -48,6 +48,7 @@ Routes registered by this file:
 
 from flask import jsonify
 
+from lib import APP_NAME
 from lib.providers.entraid import (app_permissions, app_secrets, auth, cred_link, declarations,
                                    device_flow, directory, provision_saml, provision_scim,
                                    provisioning, sections)
@@ -261,7 +262,7 @@ def register(app, wa):
             return jsonify(resp)
         try:
             res = app_secrets.add_app_secret(body['access_token'], flow['app_id'],
-                                              display_name='ServiceSentry OIDC')
+                                              display_name=f'{APP_NAME} OIDC')
         except Exception as exc:  # pylint: disable=broad-except
             return jsonify({'status': 'error', 'message': str(exc)})
         wa._save_oidc_secret(res.get('secret', ''), res.get('expires_at', ''))
@@ -463,7 +464,7 @@ def register(app, wa):
             return jsonify(resp)
         try:
             res = app_secrets.add_app_secret(body['access_token'], flow['app_id'],
-                                              display_name='ServiceSentry')
+                                              display_name=APP_NAME)
         except Exception as exc:  # pylint: disable=broad-except
             _wiz_err('cred_secret', str(exc))
             return jsonify({'status': 'error', 'message': str(exc)})

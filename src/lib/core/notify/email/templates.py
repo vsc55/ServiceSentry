@@ -13,6 +13,8 @@ from __future__ import annotations
 import html
 import re
 
+from lib import APP_NAME
+
 # ── Brand colours (Bootstrap 5 palette) ─────────────────────────────────────
 _COLORS = {
     'test':     {'bar': '#0d6efd', 'badge_bg': '#cfe2ff', 'badge_fg': '#084298'},
@@ -24,7 +26,7 @@ _COLORS = {
 
 # English strings used as the fallback baseline for all templates.
 _DEFAULT_STRINGS: dict[str, str] = {
-    'footer':          'This notification was sent automatically by ServiceSentry. Do not reply to this email.',
+    'footer':          f'This notification was sent automatically by {APP_NAME}. Do not reply to this email.',
     'view_status':     'View Status Page',
     'badge_test':      'Test',
     'badge_down':      'DOWN',
@@ -32,7 +34,7 @@ _DEFAULT_STRINGS: dict[str, str] = {
     'badge_recovery':  'RECOVERED',
     'badge_info':      'INFO',
     # Test email
-    'test_subject':    'ServiceSentry — Test Email',
+    'test_subject':    f'{APP_NAME} — Test Email',
     'test_title':      'Email notification test',
     'test_body_1':     'This is a test notification sent from {sender}.',
     'test_body_2':     'If you received this message, your email notification settings are configured correctly and working as expected.',
@@ -133,7 +135,7 @@ def _wrap(kind: str, title: str, body_html: str, footer_html: str = '',
               <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
                   <td style="font-size:18px;font-weight:700;color:#212529;letter-spacing:-.3px">
-                    ServiceSentry
+                    {APP_NAME}
                   </td>
                   <td align="right">
                     <span style="display:inline-block;font-size:11px;font-weight:700;
@@ -265,7 +267,7 @@ HTML_TPL_VARS: dict[str, list[str]] = {
 
 # ── Public template functions ────────────────────────────────────────────────
 
-def render_test(sender_name: str = 'ServiceSentry', lang: str = '',
+def render_test(sender_name: str = APP_NAME, lang: str = '',
                 strings: 'dict | None' = None,
                 html_override: 'str | None' = None) -> str:
     """HTML for the test email sent from the web admin configuration panel."""

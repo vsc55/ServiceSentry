@@ -17,6 +17,7 @@ never raises out of :func:`send_all`.
 
 from __future__ import annotations
 
+from lib import APP_NAME
 from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
 from lib.core.object_base import ObjectBase
@@ -78,8 +79,8 @@ def send_channel_test(channel: dict, lang: str = '') -> tuple[bool, str]:
     url = (channel.get('webhook_url') or '').strip()
     if not url:
         return False, translate(lang, 'msteams_url_required')
-    card = cards.message_card(kind='test', module='ServiceSentry', item='msteams_test',
-                              status='TEST', message='ServiceSentry Teams test', timestamp='')
+    card = cards.message_card(kind='test', module=APP_NAME, item='msteams_test',
+                              status='TEST', message=f'{APP_NAME} Teams test', timestamp='')
     return _post_card(url, card)
 
 
@@ -89,7 +90,7 @@ def send_user_test(wa, cfg: dict | None = None, lang: str = '') -> tuple[bool, s
         return False, translate(lang, 'msteams_no_requests')
     if cfg is None:
         cfg = wa._config_section('msteams')
-    text = cards.plain_text(kind='test', item='msteams_test', message='ServiceSentry Teams test')
+    text = cards.plain_text(kind='test', item='msteams_test', message=f'{APP_NAME} Teams test')
     results = _send_users(wa, cfg, text)
     if not results:
         return False, translate(lang, 'msteams_no_recipients')

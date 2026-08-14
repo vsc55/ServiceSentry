@@ -1,0 +1,159 @@
+{# ================================================================
+   Config — every option visible before it was ever saved, and the baseline that knows it.
+
+   The screen shows 100% of the options, each with its default until somebody changes it, and
+   the defaults come from the server's registry (`CONFIG_REGISTRY_DEFAULTS`, built from
+   lib/config/spec.py) rather than from a list written here — the UI cannot drift from the
+   source of truth if it never holds a second copy of it.
+
+   The second half is the consequence and belongs with it: filling in an option the server
+   never sent is NOT an edit, so the "as loaded" baseline has to be told, or the Save button
+   comes up lit for dozens of keys nobody touched. That bug is why these two live together.
+   ================================================================ #}
+
+/** Fill in every option the server never sent, so a card can render before the option was
+ *  ever saved.
+ *
+ *  Called at the top of `renderConfig`. Extracted from it because it is not rendering: it is
+ *  what the renderer needs to be true before it can draw, and it was a hundred and twenty
+ *  lines of assignments in front of the function that draws the screen.
+ */
+function _cfgSeedDefaults() {
+    if (!configData.web_admin) configData.web_admin = {};
+    const wa = configData.web_admin;
+    if (!('default_lang'      in wa)) wa.default_lang      = SYSTEM_DEFAULT_LANG;
+    if (!('default_dark_mode' in wa)) wa.default_dark_mode = false;
+    if (!('secure_cookies'    in wa)) wa.secure_cookies    = WA_SECURE_COOKIES;
+    if (!('remember_me_days'  in wa)) wa.remember_me_days  = WA_REMEMBER_ME_DAYS;
+    if (!('audit_max_entries' in wa)) wa.audit_max_entries = WA_AUDIT_MAX_ENTRIES;
+    if (!('audit_detail_max_items' in wa)) wa.audit_detail_max_items = WA_AUDIT_DETAIL_MAX_ITEMS;
+    if (!('audit_sort_dir'   in wa)) wa.audit_sort_dir    = 'desc';
+    if (!('pw_min_len'        in wa)) wa.pw_min_len        = WA_PW_MIN_LEN;
+    if (!('pw_max_len'        in wa)) wa.pw_max_len        = WA_PW_MAX_LEN;
+    if (!('pw_require_upper'  in wa)) wa.pw_require_upper  = WA_PW_REQUIRE_UPPER;
+    if (!('pw_require_digit'  in wa)) wa.pw_require_digit  = WA_PW_REQUIRE_DIGIT;
+    if (!('pw_require_symbol' in wa)) wa.pw_require_symbol = WA_PW_REQUIRE_SYMBOL;
+    if (!('public_status'     in wa)) wa.public_status     = WA_PUBLIC_STATUS;
+    if (!('public_status_detail' in wa)) wa.public_status_detail = WA_PUBLIC_STATUS_DETAIL;
+    if (!('status_refresh_secs' in wa)) wa.status_refresh_secs = WA_STATUS_REFRESH_SECS;
+    if (!('status_lang'       in wa)) wa.status_lang       = WA_STATUS_LANG;
+    if (!('port'              in wa)) wa.port              = WA_WEB_PORT;
+    if (!('proxy_count'       in wa)) wa.proxy_count       = WA_PROXY_COUNT;
+    if (!('public_url'        in wa)) wa.public_url        = WA_PUBLIC_URL;
+    if (!('force_https'       in wa)) wa.force_https       = WA_FORCE_HTTPS;
+    if (!('force_fqdn'        in wa)) wa.force_fqdn        = WA_FORCE_FQDN;
+    if (!('table_rows_default' in wa)) wa.table_rows_default = _tableRowsDefault;
+    if (!('table_rows_options'        in wa)) wa.table_rows_options        = [..._tableRowChoices];
+    if (!('role_modal_scrollable' in wa)) wa.role_modal_scrollable = true;
+    if (!('config_poll_secs'          in wa)) wa.config_poll_secs          = 30;
+    if (!('config_update_banner_secs' in wa)) wa.config_update_banner_secs = 8;
+    if (!('lockout_max_attempts'      in wa)) wa.lockout_max_attempts      = 5;
+    if (!('lockout_duration_secs'     in wa)) wa.lockout_duration_secs     = 900;
+    if (!('session_check_secs'        in wa)) wa.session_check_secs        = 20;
+    if (!('session_revoke_redirect_secs' in wa)) wa.session_revoke_redirect_secs = 3;
+    if (!('access_poll_secs'             in wa)) wa.access_poll_secs             = 30;
+    if (!('force_reload_on_update'       in wa)) wa.force_reload_on_update       = false;
+    if (!('force_reload_secs'            in wa)) wa.force_reload_secs            = 10;
+
+    // Pre-populate config sections from the central registry so each card
+    // renders before the option has ever been saved. The values come from the
+    // server's spec (CONFIG_REGISTRY_DEFAULTS) — never hardcoded here — so the
+    // UI can't drift from the source of truth.
+    function _seedSection(section) {
+        if (!configData[section]) configData[section] = {};
+        const tgt = configData[section];
+        for (const path in CONFIG_REGISTRY_DEFAULTS) {
+            const sep = path.indexOf('|');
+            if (path.slice(0, sep) !== section) continue;
+            const field = path.slice(sep + 1);
+            if (!(field in tgt)) {
+                const def = CONFIG_REGISTRY_DEFAULTS[path];
+                tgt[field] = (def === null ? '' : def);
+            }
+        }
+    }
+    // Seed EVERY section in the registry so 100% of the options are always visible
+    // (each shown with its default until saved) — derived from the source of truth,
+    // never a hardcoded subset. Webhooks is a list (CRUD-managed), not a scalar
+    // section, so it is excluded (seeded as [] below).
+    [...new Set(Object.keys(CONFIG_REGISTRY_DEFAULTS).map(p => p.slice(0, p.indexOf('|'))))]
+        .filter(s => s && s !== 'webhooks')
+        .forEach(_seedSection);
+
+    // Dynamic defaults the static registry can't express: the "no access" role's
+    // uid depends on the live roles list.
+    for (const s of ['ldap', 'oidc']) {
+        if (!configData[s].default_role) configData[s].default_role = (rolesData.none?.uid || 'none');
+    }
+
+    // Modules card: seed threads/timeout from the schema defaults (also registry).
+    if (!configData.modules) configData.modules = {};
+    if (!('threads' in configData.modules)) configData.modules.threads = cfgDefaultFor('modules|threads');
+    if (!('timeout' in configData.modules)) configData.modules.timeout = cfgDefaultFor('modules|timeout');
+
+    // Webhooks list (array — CRUD managed separately)
+    if (!Array.isArray(configData.webhooks)) configData.webhooks = [];
+    // Teams channel destinations (array — CRUD managed separately)
+    if (!Array.isArray(configData.msteams_channels)) configData.msteams_channels = [];
+
+    // Pre-populate SAML2 section defaults
+    if (!configData.saml2) configData.saml2 = {};
+    const _saml2 = configData.saml2;
+    if (!('enabled'          in _saml2)) _saml2.enabled          = false;
+    if (!('idp_entity_id'    in _saml2)) _saml2.idp_entity_id    = '';
+    if (!('idp_sso_url'      in _saml2)) _saml2.idp_sso_url      = '';
+    if (!('idp_cert'         in _saml2)) _saml2.idp_cert         = '';
+    if (!('sp_entity_id'     in _saml2)) _saml2.sp_entity_id     = '';
+    if (!('sp_acs_url'       in _saml2)) _saml2.sp_acs_url       = '';
+    if (!('sp_cert'          in _saml2)) _saml2.sp_cert          = '';
+    if (!('sp_key'           in _saml2)) _saml2.sp_key           = '';
+    if (!('username_attr'    in _saml2)) _saml2.username_attr    = 'uid';
+    if (!('email_attr'       in _saml2)) _saml2.email_attr       = 'email';
+    if (!('name_attr'        in _saml2)) _saml2.name_attr        = 'displayName';
+    if (!('groups_attr'      in _saml2)) _saml2.groups_attr      = 'groups';
+    if (!('group_role_map'      in _saml2)) _saml2.group_role_map      = '{}';
+    if (!('group_display_names' in _saml2)) _saml2.group_display_names = '{}';
+    if (!('default_role'        in _saml2)) _saml2.default_role        = (rolesData.none?.uid || 'none');
+    if (!('auto_create_users' in _saml2)) _saml2.auto_create_users = true;
+}
+
+
+/** Give the "as loaded" baseline the keys the renderer seeded, so seeding never reads as an
+ *  edit.
+ *
+ *  Adds only what the baseline is MISSING, and never touches a value it already holds — a real
+ *  edit changes a key both sides have, so nothing can be swallowed here.
+ */
+function _cfgMirrorSeeded() {
+    if (typeof _serverConfigData !== 'object' || !_serverConfigData) return;
+    for (const [sec, vals] of Object.entries(configData || {})) {
+        if (Array.isArray(vals) || typeof vals !== 'object' || vals === null) {
+            if (!(sec in _serverConfigData)) _serverConfigData[sec] = deepClone(vals);
+            continue;
+        }
+        if (!_serverConfigData[sec] || typeof _serverConfigData[sec] !== 'object') {
+            _serverConfigData[sec] = {};
+        }
+        for (const [k, v] of Object.entries(vals)) {
+            if (!(k in _serverConfigData[sec])) _serverConfigData[sec][k] = deepClone(v);
+        }
+    }
+}
+
+
+/** Adopt a section into the "as loaded" baseline: it was written through its OWN endpoint, so
+ *  it is saved state, not a pending edit.
+ *
+ *  Webhooks, Teams channels and the scheduler interval are records with their own routes; the
+ *  panel writes them to the server and then syncs the in-memory copy so the screen agrees.
+ *  Only the copy was synced, though, and the Save button is decided by comparing that copy
+ *  against the baseline — so creating a webhook lit "unsaved changes" for something already
+ *  written, and clicking Save then sent nothing (it sends `_dirtyFields`, which these never
+ *  enter) and could not put the light out.
+ */
+function _cfgAdoptSection(section) {
+    if (typeof _serverConfigData !== 'object' || !_serverConfigData) return;
+    if (!configData || !(section in configData)) return;
+    _serverConfigData[section] = deepClone(configData[section]);
+    if (typeof markDirty === 'function') markDirty('config');
+}

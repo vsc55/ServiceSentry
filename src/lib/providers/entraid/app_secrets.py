@@ -9,10 +9,11 @@ caller decides when to stop using the old one.
 
 import requests as _req
 
+from lib import APP_NAME
 from lib.providers.entraid.client import GRAPH_BASE, graph_error
 
 def add_app_secret(access_token: str, app_id: str, *,
-                   display_name: str = 'ServiceSentry Graph') -> dict:
+                   display_name: str = f'{APP_NAME} Graph') -> dict:
     """Mint a NEW client secret on an EXISTING app (looked up by appId).
 
     Returns ``{'secret', 'expires_at', 'key_id'}``.  ``expires_at`` is the **effective**

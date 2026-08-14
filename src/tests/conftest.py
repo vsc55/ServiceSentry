@@ -33,6 +33,27 @@ from watchfuls.web import Watchful as WebWatchful
 
 # ──────────────────────────── Fixtures ─────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _shared_debug_state():
+    """Put `ObjectBase.debug` back the way the test found it.
+
+    It is a CLASS attribute — **one** object for the whole process — and two ordinary things
+    turn it off: building a `WebAdmin` applies `global|log_level`, whose default is `off`, and
+    one test sets `off` on purpose to prove the accessor works. Neither is wrong; what was
+    wrong is that the next test in that worker inherited it.
+
+    It cost a CI failure that no local run could reproduce: four tests in
+    `test_backup_service.py` assert on what the copy prints, they passed on `tests/unit` alone,
+    and they failed in the full run — where xdist had put an integration test in front of them
+    in the same process. A test that reads global state has to be told what that state is;
+    restoring it here means no test can be broken by what ran before it.
+    """
+    from lib.core.object_base import ObjectBase                          # noqa: PLC0415
+    dbg = ObjectBase.debug
+    was = (dbg.enabled, dbg.level)
+    yield
+    dbg.enabled, dbg.level = was
+
 # Sample module/item configuration the tests expect. Seeded directly into the
 # DB-backed modules store by the ``admin`` fixture (module config lives in the
 # database).

@@ -51,6 +51,8 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
+from lib import APP_NAME
+
 _VALID_HTML_TYPES = {'test', 'alert', 'summary'}
 
 # Sample data used to render built-in HTML previews
@@ -295,7 +297,7 @@ def register(app, wa):
 
         if tpl_type == 'test':
             html_out = email_templates.render_test(
-                sender_name='ServiceSentry', lang=lang, strings=strings,
+                sender_name=APP_NAME, lang=lang, strings=strings,
                 html_override=html_override)
         elif tpl_type == 'alert':
             html_out = email_templates.render_alert(

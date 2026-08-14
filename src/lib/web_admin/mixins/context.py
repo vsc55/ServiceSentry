@@ -20,6 +20,7 @@ import os
 
 from flask import session
 
+from lib import APP_NAME
 from lib.config.layout import config_layout
 from lib.config.spec import registry_defaults
 from lib.core.audit.events import audit_severity as _audit_severity
@@ -104,6 +105,10 @@ class _ContextMixin:
         dark_mode = session.get('dark_mode', self._DEFAULT_DARK_MODE)
         return {
             'asset_v': self._asset_version(app),
+            # The product's name, from its one home in `lib/__init__.py`. Every page that signs
+            # itself — the title, the sidebar head, the boot screen, the status page — reads it
+            # from here rather than spelling it out, so the name lives in exactly one place.
+            'app_name': APP_NAME,
             'lang': lang,
             'default_lang': self._DEFAULT_LANG,
             'dark_mode': dark_mode,

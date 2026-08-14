@@ -26,6 +26,7 @@ import uuid
 
 import importlib.util as _importlib_util
 
+from lib import APP_NAME
 from lib.debug import DebugLevel
 from . import mib_resolver as _mib_resolver
 from . import mib_catalog as _mib_catalog
@@ -213,7 +214,7 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
         if validate_external_url(u):
             return None
         req = urllib.request.Request(u, headers={
-            'User-Agent': 'ServiceSentry',
+            'User-Agent': APP_NAME,
             'Accept': 'application/vnd.github+json',
         })
         with urllib.request.urlopen(req, timeout=20) as r:
@@ -225,7 +226,7 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
         dest = _confined_path(raw_dir, name)
         if not dest:
             return False
-        req = urllib.request.Request(dl_url, headers={'User-Agent': 'ServiceSentry'})
+        req = urllib.request.Request(dl_url, headers={'User-Agent': APP_NAME})
         with urllib.request.urlopen(req, timeout=20) as r:
             content = r.read().decode('utf-8', errors='replace')
         # An unchanged file is not rewritten. Whether a MIB needs compiling is decided by

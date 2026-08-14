@@ -1,0 +1,143 @@
+{# ================================================================
+   Backup — the advanced half of the restore form: which TABLES come back.
+
+   The parts above are a curated grouping and answer the ordinary question. This answers the
+   one they cannot: a bad import touched `hosts` and everything else on the install has moved
+   on since the copy was taken, so putting the whole part back would roll the rest of it with
+   it.
+
+   Its own partial because it is a whole little machine — a fetch, a grouped form, a running
+   count and the rule that decides whether a selection is worth sending at all — and the
+   restore dialog it hangs off is one story that should stay readable.
+
+   The grouping is NOT computed here. `core` means "every table nobody else claimed", a rule
+   that already decides what a copy holds and what a restore applies; the browser asks
+   /api/v1/backups/<copy>/tables for it rather than becoming its third implementation.
+   ================================================================ #}
+
+/** What the archive being restored holds. Loaded when the dialog opens and kept until the
+ *  next one opens: the fold is closed to begin with, and fetching on every disclosure would
+ *  re-read the archive for a form that is already on screen. */
+let _bkPickParts = [];
+
+/** Ask what one copy holds, by part and table.
+ *  An archive that cannot be read answers with nothing rather than an error dialog: the
+ *  advanced fold simply does not appear, and the ordinary part-level restore — which reads the
+ *  archive itself and will say so properly — is still on offer. */
+async function _bkLoadTables(name) {
+    const res = await apiGet(`/api/v1/backups/${encodeURIComponent(name)}/tables`);
+    _bkPickParts = (res && res.parts) || [];
+    return _bkPickParts;
+}
+
+/** The fold, with a group per part and a checkbox per table.
+ *
+ *  Everything starts ticked, so opening the fold and changing nothing restores exactly what
+ *  the parts above describe. The warning is inside the fold rather than over the whole dialog:
+ *  it is about a choice nobody has made yet. */
+function _bkTablePickHtml(parts) {
+    if (!parts.length) return '';
+    const groups = parts.map(p => {
+        const meta = _backupParts.find(x => x.id === p.id);
+        const rows = p.tables.map(tb => `
+            <div class="col">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" checked
+                           data-bk-part="${escAttr(p.id)}" data-bk-table="${escAttr(tb.name)}"
+                           id="bkTbl_${escAttr(p.id)}_${escAttr(tb.name)}"
+                           onchange="_bkTablePickChanged()">
+                    <label class="form-check-label small text-truncate"
+                           for="bkTbl_${escAttr(p.id)}_${escAttr(tb.name)}">
+                        <span class="font-monospace">${esc(tb.name)}</span>
+                        <span class="text-muted">${esc(t('backup_n_rows')
+                                                        .replace('{}', tb.rows))}</span>
+                    </label>
+                </div>
+            </div>`).join('');
+        return `<div class="mb-2" data-bk-group="${escAttr(p.id)}">
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <span class="small fw-semibold flex-grow-1 text-truncate"
+                      >${esc(_bkPartLabel(meta, p.id))}</span>
+                <span class="small text-muted" data-bk-count="${escAttr(p.id)}"></span>
+                <button type="button" class="btn btn-sm btn-secondary py-0 px-2"
+                        onclick="_bkPickAll(${jsStr(p.id)}, true)"
+                        >${esc(t('backup_tables_all'))}</button>
+                <button type="button" class="btn btn-sm btn-secondary py-0 px-2"
+                        onclick="_bkPickAll(${jsStr(p.id)}, false)"
+                        >${esc(t('backup_tables_none'))}</button>
+            </div>
+            <div class="row row-cols-1 row-cols-sm-2 g-0 ms-2">${rows}</div>
+        </div>`;
+    }).join('');
+    // No box of its own to scroll in. The dialog's BODY is the scroller — one bar for one
+    // form: a capped list inside it is a second bar for the same content, and the inner one
+    // hides where the end of the list is while the outer one says the form is finished.
+    return `<details class="mb-2">
+        <summary class="small">${esc(t('backup_restore_advanced'))}</summary>
+        <div class="alert alert-warning py-2 px-3 small mt-2 mb-2"
+             >${esc(t('backup_restore_tables_warn'))}</div>
+        ${groups}
+    </details>`;
+}
+
+/** Tick or untick a whole group. Two solid buttons and not a tri-state header checkbox: a
+ *  parent box that is half-ticked has to invent a meaning for its own click, and "all" and
+ *  "none" are the only two answers anybody wants from it. */
+function _bkPickAll(pid, on) {
+    document.querySelectorAll(`[data-bk-part="${CSS.escape(pid)}"]`)
+            .forEach(el => { el.checked = !!on; });
+    _bkTablePickChanged();
+}
+
+/** Keep the fold in step with the parts above it, and count what is ticked.
+ *
+ *  A part that is not being restored has no say in which of its tables are: its group is
+ *  disabled rather than hidden, so the boxes stay where they were and come back as they were
+ *  if the part is ticked again. Hiding it would make a tick above look like it had cleared a
+ *  choice made below. */
+function _bkTablePickChanged() {
+    _bkPickParts.forEach(p => {
+        const box = document.getElementById(`bkRes_${p.id}`);
+        const on = !box || box.checked;
+        const group = document.querySelector(`[data-bk-group="${CSS.escape(p.id)}"]`);
+        if (group) group.classList.toggle('opacity-50', !on);
+        const boxes = Array.from(
+            document.querySelectorAll(`[data-bk-part="${CSS.escape(p.id)}"]`));
+        boxes.forEach(el => { el.disabled = !on; });
+        const label = document.querySelector(`[data-bk-count="${CSS.escape(p.id)}"]`);
+        if (label) {
+            const n = boxes.filter(el => el.checked).length;
+            label.textContent = t('backup_tables_count').replace('{}', n)
+                                                        .replace('{}', boxes.length);
+        }
+    });
+}
+
+/** Which tables to ask for — or null for "the parts as they come".
+ *
+ *  null and a list are different requests, and the difference is the point: with the fold
+ *  untouched this returns null and the restore is byte for byte the one it always was. A list
+ *  is only sent once somebody has actually left something out, so a copy restored the ordinary
+ *  way never travels through the narrower path. */
+function _bkChosenTables() {
+    if (!_bkPickParts.length) return null;
+    const chosen = [];
+    let leftOut = false;
+    _bkPickParts.forEach(p => {
+        const box = document.getElementById(`bkRes_${p.id}`);
+        // A part that is not ticked is decided above, not here: its tables are neither chosen
+        // nor "left out", or unticking a part would count as a table-level choice and drag
+        // every other part through the narrow path with it.
+        if (box && !box.checked) return;
+        p.tables.forEach(tb => {
+            // By data attribute and not by id: a table name is whatever a module created, and
+            // an id built from one is a selector that breaks on the first table with a dot in
+            // its name — silently, by finding nothing and reading as "not ticked".
+            const el = document.querySelector(`[data-bk-part="${CSS.escape(p.id)}"]`
+                                            + `[data-bk-table="${CSS.escape(tb.name)}"]`);
+            if (el && !el.checked) { leftOut = true; return; }
+            chosen.push(tb.name);
+        });
+    });
+    return leftOut ? chosen : null;
+}

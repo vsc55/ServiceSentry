@@ -185,6 +185,11 @@ De ahí hacia abajo hay **dos clases genéricas**, nunca reglas por id:
 | `.ss-vfill` | columna flex que crece hasta llenar a su padre — se encadena desde el contenedor de sección hasta la tarjeta que debe estirarse |
 | `.ss-vscroll` | crece Y scrollea su propio desbordamiento (el cuerpo de la tabla), dejando fijas las bandas de paginación |
 
+Las secciones con índice lateral (Configuración, Módulos, Copias) lo construyen con
+`ssRailShell()`: un `.ss-shell` con el rail (`.ss-rail`) y la columna de detalle
+(**`.ss-shell-main`**, nunca `.ss-main` — ver la ficha en
+[caso-diagnostico.md](caso-diagnostico.md)).
+
 > **Trampa conocida.** Bootstrap decide la visibilidad del panel por clase
 > (`.tab-content > .tab-pane { display: none }`, especificidad 0-1-0). Cualquier regla **por id**
 > que toque `display` (1-0-0) la secuestra y deja ese panel dibujado debajo de los demás. Las

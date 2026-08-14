@@ -19,7 +19,7 @@ Flask-free: the resolution is dicts in, dicts out.
 
 import pytest
 
-from lib.core.modules.service import apply_item_identities
+from lib.core.modules.actions import apply_item_identities
 
 
 class _Hosts:

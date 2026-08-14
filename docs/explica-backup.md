@@ -3,9 +3,15 @@
 > Qué es una copia en ServiceSentry, qué lleva dentro, cómo se hace, cómo se devuelve y qué
 > decisiones de diseño hay detrás. Fuente única del tema: el resto de documentos enlazan aquí.
 >
-> Código: [`src/lib/core/backup/`](../src/lib/core/backup/) —
-> `service.py` (sin Flask: conectores y rutas de disco), `runner.py` (el hilo y los jobs),
-> `schedule.py` (funciones puras de *cuándo*), `tasks_store.py`, `routes.py`, `manifest.py`.
+> Código: [`src/lib/core/backup/`](../src/lib/core/backup/), un fichero por concepto —
+> `archive.py` (dónde vive una copia y cómo está dispuesta por dentro), `parts.py` (qué puede
+> llevar), `create.py` / `restore.py` (las dos direcciones), `verify.py`, `locks.py`,
+> `service.py` (el estante: qué copias hay y borrar una), `folders.py` (el explorador de
+> carpetas del ajuste), `schedule.py` (funciones puras de *cuándo*), `runner.py` (el hilo, el
+> tick y el lease) y `jobs.py` (lo que alguien está esperando delante de la pantalla),
+> `routes.py` + `routes_schedule.py`, `tasks_store.py`, `profiles_store.py`, `manifest.py`.
+> Todo menos las rutas es **sin Flask**. El mapa completo está en el docstring de
+> [`__init__.py`](../src/lib/core/backup/__init__.py).
 > Interfaz: [`templates/partials/backup/`](../src/lib/web_admin/templates/partials/backup/).
 
 ---
@@ -41,7 +47,7 @@ escriben **filas por el conector**. El precio es que una copia es más lenta y m
 
 ## Las partes de una copia
 
-Qué puede llevar una copia está declarado en `PARTS` ([`service.py`](../src/lib/core/backup/service.py)),
+Qué puede llevar una copia está declarado en `PARTS` ([`parts.py`](../src/lib/core/backup/parts.py)),
 y ese catálogo lo leen **la API, el formulario y la restauración**. Una parte añadida ahí
 aparece en los tres sin tocar nada más.
 
@@ -218,7 +224,8 @@ flowchart TB
     job --> fmt{"¿format &gt; el de esta instalación?"}
     fmt -- sí --> ko["se rechaza"]
     fmt -- no --> want["partes: las del archivo ∩ las marcadas"]
-    want --> group["_by_database(): agrupar por base"]
+    want --> only["tablas: las de esas partes ∩ las elegidas<br/>(sin lista = todas)"]
+    only --> group["_by_database(): agrupar por base"]
     group --> tx["por cada base: UNA transacción<br/>DELETE + INSERT por tabla"]
     tx --> drop["columnas que el esquema vivo no tiene → se descartan y se REPORTAN"]
     drop --> filesr["config.json y ficheros de módulo<br/>a donde el módulo dice que viven HOY"]
@@ -244,6 +251,34 @@ no dejan a nadie fuera.
 `parts` acota lo que se aplica. `required` dice qué debe **contener** una copia, no qué debe
 aplicarse: leerlo como lo segundo convertiría toda restauración parcial en total, que es lo
 contrario de lo que se pide al restaurar solo los hosts tras una importación mala.
+
+### Restaurar solo unas tablas
+
+`tables` acota **dentro** de esas partes, tabla a tabla. Es la mitad «avanzada» del formulario, y
+las partes siguen mandando: nombrar una tabla de una parte que no está marcada no la cuela: las
+dos estrechan la misma selección, no compiten por ella.
+
+| Qué se manda | Qué significa |
+|---|---|
+| `tables` ausente | Todas las tablas de las partes elegidas — la petición de siempre |
+| `tables: ['hosts']` | Solo esa; las demás **ni se vacían ni se tocan** |
+| `tables: []` | **Ninguna.** No es «todas»: leerlo así reescribiría la instalación entera de quien no pidió nada |
+
+**Más fino no es más seguro, y esa es la advertencia que sale en pantalla.** Las partes son una
+agrupación curada; una lista de tablas a mano no lo es. Restaurar `hosts` sin `credentials` deja
+filas apuntando a una credencial que ya no existe, y nada aquí lo impedirá. Para lo que sirve es
+para el caso contrario, el que la granularidad por partes no sabe decir: *una* tabla es el
+problema y el resto de la instalación ha avanzado desde que se hizo la copia.
+
+Lo que se elige a mano se registra como tal: la línea del log sube a **warning** y nombra las
+tablas, la auditoría lleva `only_tables` (`all` cuando no se acotó), y el diálogo del final dice
+que el resto se quedó como estaba — «148 filas en 9 tablas» se lee como una restauración completa
+si nadie dice lo contrario.
+
+El formulario pregunta qué lleva el archivo a `GET /api/v1/backups/<copia>/tables`, que agrupa
+por parte con **la misma** regla que aplica la restauración. La alternativa —agrupar en el
+navegador desde el manifiesto— sería una tercera implementación de «`core` es toda tabla que
+nadie reclamó», correcta hasta el día que se añada una parte.
 
 ---
 
@@ -570,7 +605,7 @@ cuándo»* es una pregunta que el registro tiene que poder responder.
 |---|---|---|
 | `backup_created` | success | partes, secretos, tablas, tamaño, **veredicto** |
 | `backup_downloaded` | warning | nombre — escrito **antes** de que el fichero salga |
-| `backup_restored` | danger | partes, tablas, **build de origen** y **qué no se pudo aplicar** |
+| `backup_restored` | danger | partes, `only_tables` (**qué se pidió**, `all` si no se acotó), tablas con sus filas, **build de origen** y **qué no se pudo aplicar** |
 | `backup_deleted` | danger | nombre(s); en la poda, la tarea |
 | `backup_verified` | warning | resultado |
 | `backup_task_saved` / `_deleted` | warning / danger | la tarea |
@@ -585,6 +620,14 @@ En el **log** del panel (`global|log_level`, ver [explica-logging.md](explica-lo
 [DEBUG  ] > Backup > restore >> hosts: 12 rows
 [WARNING] > Backup > restore >> credentials: table is gone, 4 rows not applied
 [WARNING] > Backup > restore >> 'copia-20260811-2102' done, 148 rows in 9 tables, 1 could not be applied in full
+```
+
+Una restauración acotada a mano sube a **warning** desde la primera línea y nombra las tablas —
+lo que se dejó fuera se dejó fuera a propósito, y esto es lo que explica meses después por qué
+media instalación es más vieja que la otra media:
+
+```
+[WARNING] > Backup > restore >> 'copia-20260811-2102' parts=['core'] tables=['hosts'] made with 0.0.1+build.65
 ```
 
 ---

@@ -1,0 +1,129 @@
+{# ================================================================
+   Config — the buttons a section carries.
+
+   A provider, a service or a module DECLARES its buttons as data
+   (`lib/config/config_actions.py :: CONFIG_ACTIONS`) and ships the JS they name in its own
+   `web/*_ui.html`. Rendered generically here: the panel hardcodes no package-specific
+   button, which is the same rule the rest of the discovery mechanism follows.
+
+   `testTelegram` predates that and is the exception it explains: a button written into the
+   panel for one integration. A new one would be declared, not written here.
+   ================================================================ #}
+
+async function testTelegram() {
+    const tg = configData.telegram || {};
+    const token = tg.token;   // null = masked/stored, '' = not set
+    const chat_id = (tg.chat_id || '').trim();
+    // null means the token is stored server-side (sensitive field); only reject '' or undefined
+    if (token === '' || token === undefined || !chat_id) {
+        showToast(t('telegram_test_missing'), 'warning');
+        return;
+    }
+    const btn = document.getElementById('btnTestTelegram');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('telegram_test'); }
+    const r = await apiPost('/api/v1/notify/telegram/test', { token, chat_id });
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-telegram me-1"></i>' + t('telegram_test'); }
+    if (r && r.status === 200 && r.data?.ok) {
+        showToast(t('telegram_test_ok'));
+    } else {
+        showToast(r?.data?.error || t('telegram_test_error'), 'danger');
+    }
+}
+
+// ─────────────── Package-contributed config actions (generic) ───────────────
+// A provider/service/module declares buttons for a config section as DATA
+// (lib/config/config_actions.py :: CONFIG_ACTIONS) and ships the JS they name in its
+// own web/*_ui.html. This renders them generically: the panel never hardcodes a
+// package-specific button. `show_when` is a tiny gate: {field, not_empty}.
+function _cfgActionVisible(act, data) {
+    // A declared permission gates the button entirely (the API enforces it too — this
+    // only keeps an action the user cannot perform off the screen).
+    if (act.perm && !new Set(currentUser.permissions || []).has(act.perm)) return false;
+    const w = act.show_when;
+    if (!w || !w.field) return true;
+    const v = (data || {})[w.field];
+    if (w.not_empty) return String(v == null ? '' : v).trim() !== '';
+    return true;
+}
+
+/** One action's button.
+ *
+ *  `button_key` when the card around it already carries the name and the description —
+ *  "Borrar todos los eventos de auditoría" is the right card title and a terrible button
+ *  caption, because everything but the verb has already been said two lines above. Falls
+ *  back to `label_key` for a bare row, where the button IS the only label.
+ *
+ *  The icon stays. On a wide button the verb alone leaves it looking unfinished, and the
+ *  glyph is what makes a destructive action recognisable before the word is read.
+ */
+function _cfgActionButton(a, sec, opts = {}) {
+    const tip = a.tooltip_key ? ` title="${escAttr(t(a.tooltip_key))}"` : '';
+    const ico = a.icon ? `<i class="bi ${escAttr(a.icon)} me-1"></i>` : '';
+    const label = t((opts.shortLabel && a.button_key) || a.label_key);
+    // The section is passed to the handler so one function can serve several sections
+    // instead of a wrapper per section; `this` lets an action that takes a while show it on
+    // the button the user clicked. Handlers that predate either simply ignore them.
+    return `<button class="btn btn-${escAttr(a.variant || 'secondary')} btn-sm${opts.cls || ''}" type="button"
+                    onclick="${escAttr(a.fn)}(${jsStr(sec)}, this)"${tip}>${ico}${esc(label)}</button>`;
+}
+
+/** Actions in declaration order, split into the groups they declare.
+ *
+ *  `group_label_key` used to be read only as a CAPTION — one row, and the key was used for
+ *  its label when every action happened to agree on one. Maintenance is where that stopped
+ *  working: reclaiming space and deleting data are opposite kinds of act, and eight buttons
+ *  in one row said they were the same kind.
+ */
+function _cfgActionGroups(acts) {
+    const out = [];
+    for (const a of acts) {
+        const key = a.group_label_key || '';
+        let g = out.find(x => x.key === key);
+        if (!g) { g = { key, acts: [] }; out.push(g); }
+        g.acts.push(a);
+    }
+    return out;
+}
+
+function _cfgSectionActions(sec, data) {
+    const cards = (CONFIG_LAYOUT && CONFIG_LAYOUT.cards) || [];
+    const card = cards.find(c => (c.section || c.id) === sec);
+    const acts = ((card && card.actions) || []).filter(a => _cfgActionVisible(a, data));
+    if (!acts.length) return '';
+    const groups = _cfgActionGroups(acts);
+    // A section whose actions declare no group at all keeps the old single row: it is the
+    // right shape for two or three related buttons, and nothing else needed changing.
+    if (groups.length === 1 && !groups[0].key) {
+        return `<div class="cfg-field-wrap mb-2"><div class="row align-items-center">
+            <div class="col-sm-4 text-sm-end"><small class="text-muted fw-semibold">${esc(t('cfg_actions_label'))}</small></div>
+            <div class="col-sm-8 d-flex gap-2 align-items-center flex-wrap">
+                ${acts.map(a => _cfgActionButton(a, sec)).join('')}</div>
+        </div></div>`;
+    }
+    return `<div class="cfg-actions-wrap">${_cfgActionsAsCards(groups, sec)}</div>`;
+}
+
+/** A card per action: icon + name, one line of what it does, and the verb on the button.
+ *
+ *  The description is the point. A button caption fits a verb and a noun, which identifies an
+ *  action you already know and does not tell you what it will do to your data — and this is
+ *  the section where being wrong about that is expensive. With the card saying it, the button
+ *  is free to be short.
+ */
+function _cfgActionsAsCards(groups, sec) {
+    return groups.map(g => `
+        <div class="cfg-actgroup">
+            <div class="cfg-actgroup-head">${esc(t(g.key || 'cfg_actions_label'))}</div>
+            <div class="cfg-actgrid">
+                ${g.acts.map(a => `
+                <div class="cfg-actcard">
+                    <div class="cfg-actcard-title">
+                        <i class="bi ${escAttr(a.icon || 'bi-dot')} me-1"></i>${esc(t(a.label_key))}
+                    </div>
+                    ${a.desc_key ? `<div class="cfg-actcard-desc">${esc(t(a.desc_key))}</div>` : ''}
+                    <div class="mt-auto pt-2">
+                        ${_cfgActionButton(a, sec, { cls: ' w-100', shortLabel: true })}</div>
+                </div>`).join('')}
+            </div>
+        </div>`).join('');
+}

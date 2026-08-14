@@ -6,59 +6,56 @@
 >
 > Los bugs ya resueltos viven en [caso-diagnostico.md](caso-diagnostico.md); lo publicado, en
 > el [CHANGELOG](../CHANGELOG.md). Aquí solo hay futuro.
+>
+> **Última revisión: 2026-08-13** (build.65), y esta vez **comprobando cada entrada contra el
+> código**, que es como se descubrió que cuatro de ellas ya estaban hechas:
+>
+> - **Copias programadas como lista de tareas** — entregado (tareas con partes, frecuencia y
+>   retención propias, perfiles compartidos, bloqueo de copias y migración del intervalo viejo).
+> - **El lease del planificador de copias** — arreglado en `build.64`; nunca había funcionado.
+> - **Layouts por sección** — las tres «pendientes» (Servers, Syslog, History) están entregadas,
+>   documentadas y con 64 guards desde el 2026-07-29 (`a5c724f`, *«the last table sections»*).
+> - **`SS_*` en los servicios standalone y el ipban del Syslog dedicado** — entregado:
+>   `overlay_all_env` existe, `services/base.py::_read_config_file` lo aplica para los tres
+>   servicios, el router de notificaciones también, `SS_EVENTS_AUTOSTART` se respeta en el
+>   arranque embebido, y `SyslogService` construye su jail con `ipban/factory.py`.
+>
+> Cuatro entradas caducadas en un solo documento no es mala suerte: es lo que pasa cuando algo
+> se marca como pendiente y nadie lo tacha al terminarlo. Y no es inofensivo — es trabajo que
+> alguien vuelve a proponer, a estimar y a empezar. **Antes de dar por pendiente lo que hay
+> aquí, compruébalo contra el código**; y al terminar algo, la entrada se borra en el mismo
+> commit.
 
 ## Frontend
 
-### Layouts por sección
+### La marca dice «SENTINEL NEXUS»
 
-Ronda de unificación de listados y tablas por sección (rama `feat/list-table-layouts`).
+El lockup (`assets/brand/logo.png`) lleva ese nombre, y el panel se llama **ServiceSentry** en el
+`<title>`, en la barra lateral y en el arranque. Pasaba desapercibido mientras el arte solo
+estaba en el login; desde que ocupa el pie de la barra lateral a lo ancho, es lo primero que se
+lee.
 
-- **Hechas:** Credentials, Audit, Events. Users / Roles / Groups ya tenían el par.
-- **Pendientes:** **Servers, Syslog, History.**
-
-Saber cuáles faltan evita volver a proponer las que ya están.
+**Decisión pendiente, del dueño del proyecto**, no trabajo de código: o el arte se rehace con el
+nombre del panel, o el panel pasa a llamarse como el arte. Lo segundo ya es barato: el nombre
+vive en `lib.APP_NAME` y todo lo que firma con él lo lee de ahí (ver `test_app_name.py`, que
+también documenta las dos excepciones que **no** deben seguirlo — los identificadores
+registrados en Entra ID y en Proxmox).
 
 ## Backend
 
-### Catálogo MIB en tabla de módulo
+### Catálogo MIB en tabla de módulo — o no
 
 Existe el mecanismo general de tablas-de-módulo en la BD principal
-(`lib/db/module_tables.py`), pero el **catálogo de símbolos MIB de SNMP sigue en su fichero
-SQLite local** (`snmp_mibs/mib_catalog.sqlite`).
+(`lib/db/module_tables.py`), y el **catálogo de símbolos MIB de SNMP sigue en su fichero SQLite
+local** (`{var_dir}/snmp_mibs/mib_catalog.db`). Se aplazó en su día por decisión explícita: se
+pidió *«solo el mecanismo general»*.
 
-**Aplazado por decisión explícita:** se pidió *"solo el mecanismo general"*. Migrarlo es
-trabajo aparte, no un olvido.
-
-### Copias programadas: una lista de tareas, no un intervalo global
-
-**Lo que hay hoy** (build.57): *un* intervalo para toda la instalación —cada N horas—, con una
-retención y un interruptor de secretos. Copia siempre lo mismo: `core` + `config.json`.
-
-**Lo que falta:** una **lista de tareas programadas**, cada una con su propio nivel de copia y su
-propia frecuencia. El caso que lo motiva: la configuración y el inventario interesan a diario,
-pero el syslog o los MIBs quizá una vez por semana o al mes — y hoy eso no se puede expresar sin
-copiarlo todo con la frecuencia del más exigente, que es como se llena el disco.
-
-Forma: una colección de tareas `{nombre, cada N horas, partes[], secretos, retención propia}`.
-Las partes ya están declaradas en `PARTS` (`lib/core/backup/service.py`), así que el formulario
-de una tarea se dibuja del mismo catálogo que el de una copia manual.
-
-Lo que hay que decidir antes de escribir código, porque cambia el diseño:
-
-- **Dónde viven las tareas.** No son config escalar (`spec.py` no sirve): son *feature data*, como
-  los webhooks o los layouts de Overview. Eso significa tabla propia y store, con su store+mixin
-  como el resto de dominios.
-- **La retención pasa a ser por tarea.** Si no, la diaria borra las copias de la mensual: hoy la
-  poda cuenta todas las automáticas juntas. El nombre tendrá que decir de qué tarea salió
-  (`auto-<tarea>-<fecha>`), y `is_auto`/`prune` en `schedule.py` se acotan a esa tarea.
-- **Solapes.** Dos tareas que vencen a la vez leen todas las tablas dos veces. ¿Se serializan
-  bajo el mismo *lease*, o se deja que cada una vaya por su lado?
-- **La transición.** Los ajustes actuales (`backup_every_hours`, `backup_keep`,
-  `backup_auto_secrets`) son de `spec.py`: o se migran a una tarea llamada «predeterminada» al
-  arrancar, o se retiran y se pierde lo que un operador ya hubiera configurado. Migrar es lo
-  correcto; retirarlos sin más es una copia que deja de hacerse en silencio.
-- El planificador (`runner.py`) recorrería tareas en vez de un único intervalo. `is_due` y
-  `prune` ya son funciones puras y valen tal cual, una por tarea.
+**Antes de migrarlo hay que resolver una contradicción**, porque el código dice lo contrario que
+esta entrada: el docstring de `watchfuls/snmp/mib_catalog.py` sostiene que ese fichero es *a
+propósito* un caché derivado local —se reconstruye desde los MIB compilados, la BD de la
+aplicación puede ser remota y no tiene por qué cargar con un caché por instalación—. O esa
+razón sigue valiendo y esta entrada sobra, o ya no vale y el docstring miente. Decidirlo es el
+trabajo; migrar, después, es mecánico.
 
 ## Seguridad
 

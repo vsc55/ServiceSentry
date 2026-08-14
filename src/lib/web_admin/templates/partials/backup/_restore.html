@@ -30,10 +30,23 @@ function _bkVersionNote(b) {
     return '';
 }
 
-function openRestoreModal(name) {
+/** Is this part FILES rather than tables?
+ *
+ *  `config_file` and anything a module declared are files, so the table picker has no say in
+ *  them: a restore that chose no table at all is still a restore if one of those is ticked. */
+function _bkIsFilePart(pid) {
+    const meta = _backupParts.find(x => x.id === pid);
+    return !meta || meta.kind !== 'db';
+}
+
+async function openRestoreModal(name) {
     const b = _backups.find(x => x.name === name);
     if (!b) return;
     const avail = _backupParts.filter(p => (b.parts || []).includes(p.id));
+    // Asked for BEFORE the dialog opens, not when the fold is disclosed: the archive is on the
+    // same disk the list came from, and a fold that spends half a second empty after being
+    // clicked reads as a fold with nothing in it.
+    const inside = await _bkLoadTables(name);
     _openBackupModal(t('backup_restore'), `
         <p class="mb-2">${esc(t('backup_restore_warn').replace('{}', name))}</p>
         ${_bkVersionNote(b)}
@@ -41,10 +54,23 @@ function openRestoreModal(name) {
             <div class="small text-muted mb-1">${esc(t('backup_restore_parts'))}</div>
             ${_backupPartChecks('bkRes', avail.map(p => ({...p, required: false})), b.parts)}
         </div>
+        ${_bkTablePickHtml(inside)}
         ${b.secrets ? '' : `<div class="alert alert-warning py-2 px-3 small mb-0">
             ${esc(t('backup_restore_nosecrets'))}</div>`}`,
         t('backup_restore'), 'warning',
-        () => _restoreBackup(name, _checkedParts('bkRes', avail)));
+        // Wide, and the BODY scrolls: with the fold open this form is taller than the screen
+        // on any install with a few dozen tables, and a dialog that clips instead of scrolling
+        // puts the last group of them underneath its own buttons.
+        () => _restoreBackup(name, _checkedParts('bkRes', avail), _bkChosenTables()),
+        'scroll');
+    // Wired after the body is in the DOM, and once: the part checkboxes are drawn by the shared
+    // `_backupPartChecks`, which knows nothing about a fold under it — putting a handler in
+    // there would hang it on the create form and the task form as well.
+    avail.forEach(p => {
+        const el = document.getElementById(`bkRes_${p.id}`);
+        if (el) el.addEventListener('change', _bkTablePickChanged);
+    });
+    _bkTablePickChanged();      // draw the counters before anybody touches anything
 }
 
 /** Start the restore and watch it, through the same job the copies use.
@@ -53,8 +79,28 @@ function openRestoreModal(name) {
  *  screen saying nothing at all while every one of them is being replaced — the moment where
  *  silence is most alarming, because what it is silent about is the install being overwritten.
  */
-async function _restoreBackup(name, parts) {
-    const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/restore`, {parts});
+/** Would this restore put anything back at all?
+ *
+ *  Nothing ticked is not a restore, and sending it would empty every table of the parts that
+ *  ARE ticked with nothing to refill them — the one outcome worse than not restoring. Refused
+ *  in the form rather than by the API, which cannot tell "the operator cleared the boxes" from
+ *  "a script means exactly this". A file part with no tables under it still counts: config.json
+ *  and a module's files come back without a single row being touched. */
+function _bkNothingToRestore(parts, tables) {
+    if (!parts.length) return true;
+    return Array.isArray(tables) && !tables.length && !parts.some(p => _bkIsFilePart(p));
+}
+
+async function _restoreBackup(name, parts, tables) {
+    if (_bkNothingToRestore(parts, tables)) {
+        showToast(t('backup_restore_nothing'), 'warning');
+        return;
+    }
+    // `tables` only travels when something was actually left out: with the fold untouched this
+    // is the request it always was.
+    const body = {parts};
+    if (Array.isArray(tables)) body.tables = tables;
+    const res = await apiPost(`/api/v1/backups/${encodeURIComponent(name)}/restore`, body);
     const jobId = _apiOk(res) && (res.data || {}).job_id;
     if (!jobId) { showToast(_apiErr(res), 'danger'); return; }
     // No row in the list: nothing is being ADDED to it. Only the dialog, which is where the
@@ -87,6 +133,8 @@ function _bkRestoreDoneBody(job) {
     return `<div class="py-1">
         <div class="mb-2"><strong>${esc(job.task || '')}</strong></div>
         <div class="alert alert-${tone} py-2 px-3 small mb-2">${esc(lead)}</div>
+        ${job.partial && !job.error ? `<div class="small text-muted mb-2">
+            ${esc(t('backup_restored_tables_only'))}</div>` : ''}
         ${_bkStepsHtml(job.steps)}
         ${list}
         ${job.error ? '' : `<div class="small text-muted mt-2">

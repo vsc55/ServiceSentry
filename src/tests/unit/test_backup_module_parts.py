@@ -16,7 +16,9 @@ import json
 import os
 import re
 
-from lib.core.backup import service as svc
+from lib.core.backup import create as bk_create
+from lib.core.backup import parts as bk_parts
+from lib.core.backup import restore as bk_restore
 from lib.modules.discovery.backup_parts import _safe_rel, backup_parts_catalog
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
@@ -107,7 +109,7 @@ class TestADeclarationCannotEscapeVarDir:
         copy's tables with a directory."""
         root = str(tmp_path)
         _write_module(root, 'thing', {'__backup_part__': {'id': 'core', 'dir': 'x'}})
-        assert backup_parts_catalog(root, reserved=svc.PART_IDS) == []
+        assert backup_parts_catalog(root, reserved=bk_parts.PART_IDS) == []
 
     def test_two_modules_cannot_claim_the_same_id(self, tmp_path):
         root = str(tmp_path)
@@ -137,11 +139,11 @@ class TestTheCoreNamesNoModule:
         assert named == [], f'the core names {named}'
 
     def test_the_core_catalogue_holds_no_module_part(self):
-        assert 'mibs' not in svc.PART_IDS
+        assert 'mibs' not in bk_parts.PART_IDS
 
     def test_the_module_still_gets_its_part(self):
         """The point is not that the core forgot it — it is that the module supplies it."""
-        got = {p['id']: p for p in svc.parts_catalogue('es_ES')}
+        got = {p['id']: p for p in bk_parts.parts_catalogue('es_ES')}
         assert 'mibs' in got, 'the SNMP module no longer contributes its MIBs'
         assert got['mibs']['module'] == 'snmp'
         assert got['mibs'].get('label') and 'backup_part' not in got['mibs']['label']
@@ -149,7 +151,7 @@ class TestTheCoreNamesNoModule:
     def test_a_module_part_is_labelled_not_keyed(self):
         """Its wording lives in the module's lang files, which the browser's catalogue does not
         hold — shipping the key alone would put `backup_part_mibs` on screen."""
-        got = {p['id']: p for p in svc.parts_catalogue('es_ES')}
+        got = {p['id']: p for p in bk_parts.parts_catalogue('es_ES')}
         assert 'label_key' not in got['mibs']
         assert 'label' not in got['core'], 'a core part stopped carrying its key'
 
@@ -171,7 +173,7 @@ class TestTheFilesActuallyTravel:
 
     @staticmethod
     def _declare(monkeypatch, pid='stuff', rel='thing_files/raw'):
-        monkeypatch.setattr(svc, 'module_parts', lambda: [
+        monkeypatch.setattr(bk_parts, 'module_parts', lambda: [
             {'id': pid, 'module': 'thing', 'dir': rel, 'default': False,
              'label_i18n': {'en_EN': 'Thing files'}}])
 
@@ -183,15 +185,15 @@ class TestTheFilesActuallyTravel:
         io.open(str(raw / 'one.txt'), 'w', encoding='utf-8').write('hello')
         con = self._db(tmp_path)
 
-        res = svc.create_backup(con, 'copia', var_dir=str(var), config_dir=str(tmp_path),
-                                parts=['core', 'stuff'], include_secrets=True)
+        res = bk_create.create_backup(con, 'copia', var_dir=str(var), config_dir=str(tmp_path),
+                                      parts=['core', 'stuff'], include_secrets=True)
         assert res['ok'], res
         assert res['manifest']['files']['stuff'] == 1
         step = next(s for s in res['manifest']['steps'] if s['part'] == 'stuff')
         assert step['ok'] and step['rows'] == 1
 
         os.remove(str(raw / 'one.txt'))
-        out = svc.restore_backup(con, str(var), 'copia', config_dir=str(tmp_path))
+        out = bk_restore.restore_backup(con, str(var), 'copia', config_dir=str(tmp_path))
         assert out['ok'], out
         assert io.open(str(raw / 'one.txt'), encoding='utf-8').read() == 'hello'
         con.close()
@@ -204,8 +206,8 @@ class TestTheFilesActuallyTravel:
         os.makedirs(str(var / 'thing_files' / 'raw'))
         io.open(str(var / 'thing_files' / 'raw' / 'one.txt'), 'w').write('x')
         con = self._db(tmp_path)
-        svc.create_backup(con, 'copia', var_dir=str(var), config_dir=str(tmp_path),
-                          parts=['core', 'stuff'], include_secrets=True)
+        bk_create.create_backup(con, 'copia', var_dir=str(var), config_dir=str(tmp_path),
+                                parts=['core', 'stuff'], include_secrets=True)
         import zipfile
         with zipfile.ZipFile(str(var / 'backups' / 'copia.zip')) as zf:
             names = zf.namelist()
@@ -215,11 +217,11 @@ class TestTheFilesActuallyTravel:
     def test_a_part_nobody_declares_is_not_copied(self, tmp_path, monkeypatch):
         """Asking for the part of a module that is not installed must not make a copy that
         claims to hold it."""
-        monkeypatch.setattr(svc, 'module_parts', lambda: [])
+        monkeypatch.setattr(bk_parts, 'module_parts', lambda: [])
         con = self._db(tmp_path)
-        res = svc.create_backup(con, 'copia', var_dir=str(tmp_path / 'var'),
-                                config_dir=str(tmp_path), parts=['core', 'stuff'],
-                                include_secrets=True)
+        res = bk_create.create_backup(con, 'copia', var_dir=str(tmp_path / 'var'),
+                                      config_dir=str(tmp_path), parts=['core', 'stuff'],
+                                      include_secrets=True)
         assert res['ok']
         assert 'stuff' not in res['manifest']['parts']
         con.close()
@@ -229,9 +231,9 @@ class TestTheFilesActuallyTravel:
         and calling it complete is how a restore finds out at the worst moment."""
         self._declare(monkeypatch)
         con = self._db(tmp_path)
-        res = svc.create_backup(con, 'copia', var_dir=str(tmp_path / 'var'),
-                                config_dir=str(tmp_path), parts=['core', 'stuff'],
-                                include_secrets=True)
+        res = bk_create.create_backup(con, 'copia', var_dir=str(tmp_path / 'var'),
+                                      config_dir=str(tmp_path), parts=['core', 'stuff'],
+                                      include_secrets=True)
         step = next(s for s in res['manifest']['steps'] if s['part'] == 'stuff')
         assert not step['ok'] and res['manifest']['status'] == 'partial'
         con.close()

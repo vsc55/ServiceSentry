@@ -134,12 +134,12 @@ class TestApiCredentials:
         assert tc.call_args.kwargs['user'] == 'creduser'
 
     def test_action_config_applies_credential(self, admin):
-        from lib.core.modules.service import _apply_cred_to_config
+        from lib.core.modules.actions import apply_cred_to_config
         uid = admin._credentials_store.create(
             {'name': 'web1', 'ctype': 'web_auth',
              'data': {'auth_user': 'admin', 'auth_password': 'pw'}}, actor='a')
         config = {'cred_uid': uid, 'auth_user': 'stale', 'auth_password': 'oldpw', 'url': 'http://x'}
-        _apply_cred_to_config(admin, config)
+        apply_cred_to_config(admin, config)
         assert config['auth_user'] == 'admin' and config['auth_password'] == 'pw'  # credential wins
         assert config['url'] == 'http://x'                                         # untouched
 

@@ -8,7 +8,7 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
-## [0.0.1+build.60] - 2026-08-08
+## [0.0.1+build.69] - 2026-08-08
 
 ### Changed
 - **A MIB compile nobody asked for is now bounded.** Importing a vendor folder leaves hundreds
@@ -119,6 +119,410 @@ All notable changes to **ServiceSentry** are documented in this file.
     auth fields. Pointing them at a `cred_uid` is the next step and is deliberately separate —
     it changes what the checks read at run time, which is a different kind of change from
     describing a shape.
+
+## [0.0.1+build.68] - 2026-08-14
+
+### Fixed
+- **A module's own test still imported a symbol build.67 moved.**
+  `watchfuls/proxmox/tests/test_proxmox.py` asked `lib.core.modules.service` for
+  `_apply_cred_to_config`, which now lives in `lib.core.modules.actions` as
+  `apply_cred_to_config`. Every consumer under `lib/` and `tests/` had been updated; this one
+  was in the OTHER tree the suite collects — `pytest.ini` gathers `src/watchfuls/<m>/tests/`
+  as well, because a module's tests travel with the module. Four green runs of
+  `tests/{unit,integration,e2e,meta}` said nothing about it, and CI failed on the one file
+  none of them covers. Moving a symbol means searching both trees.
+
+## [0.0.1+build.67] - 2026-08-13
+
+### Changed
+- **`lib/core/modules/service.py` is one file per concept.** At 787 lines it was the largest
+  module left in `lib/core` and 46% of its own domain, holding five jobs with nothing to do
+  with each other — its own section banners had been saying so for a while.
+  - `authz.py` — may this save touch this item. The module save is the one write that crosses
+    domains: a check belongs to a module but is bound to a HOST or a CLUSTER, and the person
+    editing it may hold the permission for one and not the other. Answering that wrong is an
+    authorisation bug, not a bad screen, and it was buried in the middle of a file that also
+    knew about uids and page templates. A rule about who may write what should be findable by
+    the name of the file it is in.
+  - `items.py` — an item's identity: its uid, its name, its schema, and keeping them in step.
+    The rekey, the duplicate check and the clone mark all lean on the same question, so they
+    stop being three neighbours and become one module.
+  - `provisioning.py` — credentials kept out of the payload on the way out, and the hosts a
+    module declares created on the way in. The one thing in the package that writes into
+    another domain, with its store still injected explicitly.
+  - `actions.py` — the config a watchful action runs with, resolved the way a scheduled check
+    would: bound host, restored secrets, referenced credential.
+  - `service.py` — what is left is the config DOCUMENT: what may be seen of it, whether it is
+    well formed, the spellings it is normalised to, and what the UI is built from. 123 lines.
+  - `lib/core/modules/__init__.py` carries the map, like the backup domain's does.
+- The helpers that cross a module boundary lost their leading underscore
+  (`is_item_collection`, `item_host_uid`, `resolve_host_ctx`, `fill_from_stored_item`,
+  `restore_action_secrets`, `apply_cred_to_config`, `merge_host_conn`) — the routes were
+  already reaching for most of them through the module, which is not what a leading underscore
+  claims.
+- `routes.py` imports `AdminOpError` from `lib.core.users.service`, where it is defined,
+  instead of through the module-config service that only passed it along.
+- **`partials/cfg/_render.html` no longer needs its exemption.** It was the only file in the
+  repo with one written into a test — `pytest.skip('config renderer, tracked separately')`,
+  on the guard that keeps a section shell under 450 lines — and the reason given ("not a
+  section shell with sub-sections to split out") was wrong on both counts. It held four:
+  `_seed.html` (every option visible before it was ever saved, and the baseline that has to
+  know that seeding is not an edit), `_search.html` (the one pass that decides which rows and
+  sections are on screen), `_actions.html` (the buttons a section declares as data) and
+  `_advanced.html` (this browser's own localStorage). 814 → 437 lines, and the skip is gone.
+- **`partials/core/_field_render.html` is six partials.** At 1523 lines it was the largest
+  thing in the repo that is not a language dictionary, and it was called "render a field"
+  while also holding a whole object's fields, the host binding, the shared control skeleton,
+  the multi-value chips and the conditional fields: `_field_scalars.html`, `_field_hosts.html`,
+  `_field_ctl.html`, `_field_chips.html`, `_field_conditional.html`. What is left (833) is the
+  one job the name claims.
+- Both splits made the text guards read the SURFACE rather than a file — `_cfg_js()` and
+  `_field_js()`, the same helper the backup section's guards already had, with the same reason
+  written on it: naming the file a function happens to live in today is a guard that fails the
+  next time one moves.
+
+### Fixed
+- **The Config section came up empty after that split**, and the browser guards were what
+  said so: `renderConfig` used a `const wa = configData.web_admin` shorthand declared inside
+  the seeding block, so moving the seeding into `_cfgSeedDefaults()` left every card below
+  reading a variable from a function that had already returned. It is declared in the
+  renderer now, after the call that guarantees the section exists.
+
+## [0.0.1+build.66] - 2026-08-13
+
+### Added
+- **A restore can go table by table.** The form offered the parts a copy is made of — a curated
+  grouping that answers the ordinary question and cannot answer this one: a bad import touched
+  one table, and everything else on the install has moved on since the copy was taken. Putting
+  the whole part back would roll the rest of it with it.
+  - **An "advanced" fold** under the parts, with a group per part and a checkbox per table,
+    each carrying its row count. Everything starts ticked, so opening it and changing nothing
+    restores exactly what the parts above describe.
+  - **Finer, not safer, and it says so.** What you leave out keeps whatever it holds today, and
+    rows that point at it can end up pointing at nothing — restoring `hosts` without
+    `credentials` is a decision, not an accident. The warning is inside the fold, where the
+    choice is made.
+  - **`tables` absent means all of them; `tables: []` means none.** Reading the empty list as
+    "everything" would rewrite the whole install for a caller who asked for nothing, and the
+    form never sends a list at all unless something was actually left out — an ordinary restore
+    is byte for byte the request it always was.
+  - **A table left out is never emptied.** A restore empties a table before refilling it;
+    one that was not chosen is not touched, because emptied-and-not-refilled is the worst
+    outcome available here.
+  - **The parts still bound it.** Naming a table of a part that is not ticked does not smuggle
+    it back in: the two narrow the same selection rather than competing for it.
+- **`GET /api/v1/backups/<name>/tables`** — what one copy holds, grouped by part, behind
+  `backup_view`. The grouping is the server's because `core` means "every table nobody else
+  claimed", the rule that already decides what a copy holds and what a restore applies; a
+  second implementation in the browser would be right until the day a part is added.
+- **The restore dialog scrolls its body** (`modal-dialog-scrollable`, a third size for
+  `_openBackupModal`). Reported from a screenshot: with the fold open the last group of tables
+  sat under the footer and the end of the list could not be reached. Two scrollers for one
+  form and the outer one missing — the dialog is a flex column with `overflow: hidden`, so a
+  body that overflows is not a scrollbar but content clipped behind the buttons, while the fold
+  had a capped box of its own that hid where the list ended. Exactly one scroller now, and the
+  picker's `#backupModal` rule — which turns the scrolling body off so a two-pane browser can
+  fill it — is scoped `:not(.modal-dialog-scrollable)`, because it is the same modal in its
+  other shape.
+
+### Changed
+- **A hand-picked restore is logged as one.** The first line rises to warning and names the
+  tables, the audit entry carries `only_tables` (`all` when nothing was narrowed), and the
+  report afterwards says the rest was left as it is — "148 rows in 9 tables" reads as a full
+  restore unless something says otherwise, and "why is half this install older than the other
+  half" is asked months later.
+
+### Changed
+- **`lib/core/backup/` is one file per concept.** `service.py` had reached 1182 lines and was
+  the largest module in `lib/core` — a domain describing itself inside one file. It is now the
+  domain it always described, and the seams were already written into its section banners:
+  - `archive.py` — where a copy lives and how it is laid out, plus how a value goes in and
+    comes back. The bottom of the package; it imports no sibling, deliberately.
+  - `parts.py` — what a copy can hold and which tables each part means. The vocabulary both
+    directions read, so `core` ("every table nobody else claimed") is decided once.
+  - `create.py` / `restore.py` — the two directions. `verify.py` — a copy against its own
+    checksums, which is also its own permission. `locks.py` — the `.lock` sidecar protocol.
+  - `service.py` — what is left is the shelf: which copies exist, how big, from which build,
+    and removing one. 152 lines.
+  - `folders.py` — the directory picker behind the backup-dir SETTING. It opens no archive,
+    reads no manifest, touches no connector and its routes are gated on `config_edit`: it was
+    never backup code, and it was 113 lines of a file about backups.
+  - `jobs.py` — the copies and restores somebody is standing there waiting for, out of
+    `runner.py`, whose docstring is entirely about a thread, a tick and a lease. Half of it
+    was neither.
+  - `routes_schedule.py` — tasks and retention profiles, which are their own decision with
+    their own permission (`backup_schedule`). `routes.py` is about archives.
+  - `lib/core/backup/__init__.py` now carries the map, so the next reader does not grep.
+- **Three dead helpers removed** — `_lock_path`, `_tables_in_archive` and `_module_part` had
+  no caller at all.
+- The helpers that cross a module boundary lost their leading underscore (`archive_path`,
+  `read_lock`, `file_sha256`, `clean_cell`/`restore_cell`, `tables_by_part`, `part_ids`,
+  `DB_DIR`/`FILES_DIR`/`PARTS_PREFIX`/`INTERNAL_TABLES`): a name imported by four modules is
+  not private, and pretending otherwise is how a "private" helper ends up with four callers.
+- `member_tables` moved the `db/hosts.json` → `hosts` translation into `archive.py`, so the
+  part grouping never has to know the archive's own layout.
+
+### Tests
+- **The fold is driven in a browser**, not only read as text: it is built from an endpoint and
+  wired after the dialog is in the DOM, so whether it populates at all is not something reading
+  the template can settle. A copy is taken through the panel's own API, the dialog is opened,
+  and the four things only a browser knows are asked — the boxes are the tables the archive
+  holds, an untouched fold asks for no list, leaving one out produces the list with everything
+  else in it, and unticking a part dims its group instead of hiding it.
+- **A geometry guard for the dialog itself**, measured in a deliberately short window (1280×520
+  — the form is only too tall *relative to the screen*, and a desktop viewport hides the whole
+  bug): something has to overflow, the body has to be what scrolls, nothing inside it may
+  scroll as well, and the buttons have to stay on screen. Validated by putting the CSS back the
+  way it was and watching it go red.
+
+### Docs
+- `explica-backup.md` gains *Restaurar solo unas tablas*: the three meanings of the `tables`
+  field, why finer is not safer, and where the choice shows up afterwards. The restore
+  flowchart and the audit table follow.
+
+## [0.0.1+build.65] - 2026-08-13
+
+### Added
+- **Guards that measure the layout, in a browser.** The suite had 19 browser tests and all of
+  them asked one question — did the page load without the browser complaining. This month's two
+  sidebar bugs answered "yes" to that and were wrong on screen anyway: a column overflowing the
+  page by 52px, and a collapse that blinked where the expand animated. Sizes and positions are
+  arithmetic the browser does from the whole cascade, so a guard that reads the stylesheet
+  cannot see the outcome.
+  - **No railed section overflows its column** — measured in all three (Configuration, Modules,
+    Backup), 1px tolerance for rounding. Plus the symptom as reported: the column is scrolled to
+    the end and the toolbar must still sit *below* the breadcrumb that stays pinned over it, and
+    the index must reach the foot of the window.
+  - **Collapsing is the reverse of expanding** — nothing in the navigation hidden by `display`
+    (which cannot be animated), the label fading with a declared transition, the icon beside it
+    not moving while it does, and the artwork going away and coming back.
+  - Measured at rest and never mid-animation: a test that samples a transition fails on a loaded
+    CI machine for reasons that have nothing to do with the code. All of it validated by
+    **putting both bugs back** and watching three of the six go red — a geometry guard that
+    passes with and without the defect is worth nothing.
+
+### Docs
+- **`ref-pendiente.md` checked entry by entry against the code, and four of them were already
+  done.** Being listed as pending is not free: it is work somebody proposes, estimates and
+  starts a second time.
+  - **Layouts per section** — the three "pending" ones (Servers, Syslog, History) shipped on
+    2026-07-29 in `a5c724f` ("the last table sections"): four views for Servers, three for
+    Syslog, two for History, in the JS bundle, documented in `ref-tests.md` §126–§128 and held
+    by 64 guards.
+  - **`SS_*` in the standalone services and the dedicated syslog's ipban** — shipped too:
+    `overlay_all_env` exists, `services/base.py::_read_config_file` applies it for all three
+    services, the notification router applies it as well, `SS_EVENTS_AUTOSTART` is honoured by
+    the embedded boot, and `SyslogService` builds its jail through `ipban/factory.py`.
+  - Scheduled backups as a list of tasks, and the scheduler's lease (fixed in `build.64`).
+- **"No test executes JavaScript" was wrong as well**, and is now the narrower thing that is
+  true: `tests/e2e/test_ui_playwright.py` loads all six served pages and fails on any console
+  error, and CI installs Chromium so it runs there. What nothing measures is **geometry** —
+  which is exactly where this week's two sidebar bugs lived, both on pages that loaded without
+  a single console error.
+- The MIB-catalogue entry now names the contradiction it depends on: the module's own docstring
+  argues that its standalone SQLite file is deliberate — a local derived cache, and the
+  application database may be remote. Either that reasoning still holds and the entry should
+  go, or it does not and the docstring is wrong; deciding that is the work.
+- The review line at the top says what to do about all of it: check what is listed against the
+  code before believing it, and delete the entry in the same commit that finishes the work.
+
+## [0.0.1+build.64] - 2026-08-13
+
+### Fixed
+- **The scheduled backup's lease had never held.** `_claim()` asked the web admin for
+  `_instance_id`, an attribute no `WebAdmin` has, so the identity was always empty and the guard
+  returned "take it" before reaching the store — and had it got there, `acquire()` is not a
+  method of `ServiceLeaderStore` either (it is `try_acquire`), so the `AttributeError` would
+  have been swallowed by the catch-all and answered "take it" too. Two ways of saying yes to
+  every process, on the one code path whose whole job is to say no to all but one: four web
+  replicas over one database meant four archives of the same install every tick, each pruning
+  against a folder the other three were writing into.
+  - The identity is now the shape its neighbours use — `backup-<host>-<pid>`, like the health
+    and certificate scanners — computed once, because a lease renewed under a new id every tick
+    is not a renewal but a process taking the lease off itself.
+
+### Changed
+- **The product's name lives in one place.** `lib.APP_NAME`, read by everything that signs
+  something with it: the page titles, the sidebar head, the boot screen, the emails, the Teams
+  cards and manifest, the webhooks, the `User-Agent` of every outbound request, the diagnostics
+  report and the config warnings. It was spelt out in fifty-odd string literals across
+  twenty-eight files, which is not a rename but a hand search where every hit has to be judged.
+  The value is unchanged: this moves where it is written, not what it says.
+  - Templates read `{{ app_name }}` from the context processor, scripts read an `APP_NAME`
+    constant, and a guard (`tests/unit/test_app_name.py`) fails on any new literal.
+  - **Two kinds deliberately keep theirs**, with the reason written down: identifiers registered
+    in somebody else's system — the Entra app display names and the Proxmox role and user, which
+    are looked up BY name in a tenant we do not own, so deriving them would mean a rename
+    silently registering a second app beside the one it registered last year — and the GitHub
+    repository URL. Translated prose keeps the name inline too: it sits in sentences that have
+    to be re-read in every language when it changes anyway.
+
+### Docs
+- `ref-pendiente.md` reviewed end to end: dropped the two entries that were already delivered
+  (scheduled backups as a list of tasks, and the lease above), and added the three that were
+  missing — the `SS_*` environment in the standalone services with the syslog container's
+  missing ipban, the frontend having no test that executes JavaScript (with Playwright already
+  installed and two bugs this month that only a browser could have caught), and the artwork
+  reading "SENTINEL NEXUS" while the panel is called ServiceSentry.
+
+## [0.0.1+build.63] - 2026-08-12
+
+### Added
+- **The lockup fills the foot of the sidebar.** It is the one column with room going spare and
+  nothing in it. Full width, and **inside** the scrolling navigation rather than between it and
+  the user block: there it would be a fixed slice of the column the list never gets back. With
+  slack it drops to the bottom; once the entries fill the column it scrolls below the last one.
+  The head of that column keeps its glyph — the mark was tried there and taken back out, because
+  with the lockup at full width below it, it is the brand twice in one column and the small copy
+  is the one that cannot be read at that size.
+  - It **fades** in mini mode rather than disappearing. `display: none` cannot be transitioned,
+    so collapsing dropped it in a single frame while expanding let the column's .15s width grow
+    it back — the same motion looking like two different ones depending on which way the button
+    was pressed. Sharing that .15s, the two directions are each other's reverse. On mobile the
+    drawer is full width, so it stays visible there.
+
+### Fixed
+- **Four tests that only failed in CI.** The full run reported `4 failed, 5364 passed` in
+  `test_backup_service.py::TestItSaysWhatItIsDoingOnTheLog`, with an **empty** captured stdout;
+  `pytest tests/unit` passed every time locally. `ObjectBase.debug` is a class attribute — one
+  object for the whole process — and two ordinary things turn it off without putting it back:
+  building a `WebAdmin` applies `global|log_level`, whose default is `off`, and one test sets
+  `off` on purpose to prove the accessor works. With `-n auto`, whichever of those lands first
+  in a worker leaves the four asserting on nothing. A `conftest.py` fixture now restores the
+  shared debug state after every test, and the class states the level it needs instead of
+  inheriting it. Neither the product nor either of those tests was wrong: what was wrong is
+  that the next test in the process inherited the state.
+- **Collapsing the sidebar is the reverse of expanding it, for the entries too.** Same cause as
+  the artwork above, reported right after it: the section labels and their carets were hidden
+  with `display: none`, so pressing collapse blanked the text in one frame while pressing expand
+  let the widening column reveal it. They fade over the column's own .15s now, kept in flow and
+  clipped by the sidebar rather than removed.
+  - The icon **stops moving** while that happens. Mini re-centred it in the 56px rail, which
+    rearranged the row underneath the fade; the left padding the entry already has puts it
+    within a pixel of that centre (measured: 19px from the edge in both states), so holding it
+    there costs nothing and removes the jump.
+  - The brand row keeps `display: none` on its name, and that is deliberate: it centres what is
+    left of it, so a name that merely faded would still take its width and push the hamburger —
+    the one control that expands the column again — off the edge.
+
+## [0.0.1+build.62] - 2026-08-12
+
+### Fixed
+- **A railed section scrolled the page and took its own toolbar off the top.** Reported from
+  Backups — a scrollbar that dragged the rail, the first entry cut in half, and the *Reload* and
+  *New* buttons nowhere on screen — but it was every section with a rail: Configuration and
+  Modules alike.
+  - The rail fitted its column with room to spare, so what was scrolling was not the rail: it
+    was the page. `ssRailShell` named the detail column `.ss-main`, which is the name of the
+    app's content column — `height: 100vh`, and the only scroll container the page has. Two
+    blocks, one class, equal specificity: the later one won the properties it happened to name
+    and the `100vh` stayed. A shell that begins under the breadcrumb holding a full-viewport
+    child overflows the page by exactly the height of the bars above it, and scrolling that
+    overflow away is what took the toolbar and the head of the rail with it. Measured in a
+    browser against the real CSS: 52px of overflow, 52px of bars.
+  - The detail column has a name of its own now, `.ss-shell-main`, and the three rules that were
+    already meant for it (`> .ss-bleed-top` twice, `> .ss-scroll-pad`) say so instead of also
+    matching the app's column. Nothing was misspelt and no rule was missing, which is why no
+    guard caught it — so the guard is the name, plus the block having neither `height` nor
+    `overflow`.
+
+## [0.0.1+build.61] - 2026-08-12
+
+### Added
+- **A Diagnostics section under System.** The questions it answers are the ones a support
+  thread asks, in that order: what version is this, what is it running on, where does it write,
+  and what is missing. All of them were answerable before — by reading a log, opening a shell in
+  the container, or knowing which library turns which feature on. That is an afternoon per
+  question.
+  - **Version**, the instance id, the log level, and **which services this process runs
+    itself**. On a multi-container install that last one is usually "none", and it reframes
+    every question about a check that did not run: it did not run *here*.
+  - **System**: distribution, kernel, architecture, host, whether this is a container, CPUs,
+    interpreter and its path, PID, and the time zone **with its offset** — which is what a
+    timestamp that looks an hour out gets read against.
+  - **Database** read from the connector the panel is actually using, not from the config: the
+    interesting case is exactly when those two differ. Says whether syslog has a database of
+    its own.
+  - **Storage**: the three directories that matter, each with whether it exists, whether it is
+    writable and how much room is left. Writability is asked of the OS, never tested by writing
+    — a diagnostics page must not create anything in the directory somebody is looking at
+    because it is behaving strangely.
+  - **Optional features** — the card that answers most of what this page exists for. A panel
+    where the SSO button never appears, or every SNMP check is skipped, is almost never
+    misconfigured: the library is not installed, the feature switched itself off, and nothing
+    on screen said which.
+  - **Dependencies**, read from `requirements.lock` and not from `pip freeze`: the lock is what
+    the install was built from, so "installed 3.1 where the lock says 3.4" is a fact about this
+    deployment. Three verdicts and no fourth — "newer" is deliberately not one, because a
+    deployment that drifted upward drifted.
+  - **A report to send**, in `txt`, `json` or `xml` (`/report?format=`), from the same
+    collectors — a second gathering pass per format is how two reports of the same install come
+    to disagree. Text is the default because the destination is usually a comment box and it
+    can be read before it is sent; the other two are for the destination that ingests them,
+    where the alternative is somebody writing a parser for prose. An unknown format falls back
+    to text rather than refusing: it is a link somebody clicks. The XML is built with
+    `ElementTree`, so Windows paths and version strings are escaped by something that is not
+    hand-rolled, and a list field becomes repeated children rather than a stringified Python
+    list.
+  - The dependency fold **on screen** holds the ones that match, never the whole list: the
+    differences are already open above it, and repeating them underneath showed the same
+    package twice with the same badge — which reads as two findings and makes the open table
+    look like a summary of something longer rather than the whole of what is wrong. The
+    **report** lists them all, differences first: a section that shows nothing because nothing
+    is wrong reads as a section that failed to collect.
+  - **The update check never runs on its own.** No poll, nothing at boot, nothing while the
+    page paints — a monitoring panel gets installed on segregated networks by people who would
+    rather it did not talk to anybody. It happens on a click, over HTTPS only, with a short
+    timeout, and is audited whether or not it succeeded: a check that failed still made the
+    attempt. Its address is a config field, so a fork or an internal mirror needs no code
+    change and the one host this panel will contact is visible in the config screen.
+  - **Nothing published yet is not a broken endpoint.** `/releases/latest` answers with the
+    newest *published* release and excludes drafts and prereleases, so a repository whose only
+    release is either — which is this one's state today: a single draft tagged `test` — has
+    nothing to return. Reported as its own answer instead of "HTTP 404", which sends somebody
+    to check the URL, the one thing that is not wrong. A 403 stays an HTTP status, because rate
+    limiting is acted on differently.
+  - It reports **"cannot tell"** when both sides carry the same semantic version. That is this
+    project's normal state — the counter after `+build.` does not participate in precedence —
+    and answering "up to date" there would be a guess dressed as a fact on the one screen whose
+    whole job is not to do that.
+  - One new permission, `diagnostics_view`, granted to nobody by default: the page holds no
+    secret but does describe the shape of the install.
+  - The domain is split by **what an answer depends on**, not by file size: `collect` needs
+    only the process and the disk, `service` needs the running panel, `report` needs only what
+    those two returned, and `routes` is left with three declarations, a permission and an audit
+    line. Only the middle one can be wrong in a way that depends on how the install is
+    deployed — and the serialisers, being pure, are tested without an app at all.
+  - Three things found by looking at the first render: the lock parser carried
+    `pip-compile --generate-hashes`' trailing `\` into the version, so **all forty-one** pinned
+    packages reported "a different version installed" — a screen that is wrong about everything
+    is one people doubt last; the pane stacked two different full-bleed mechanisms, so its
+    toolbar sat at other margins and other corners than every other section's; and two columns
+    of label-left / value-right put a value flat against the next pair's label — "Windows 10
+    Kernel" reading as one field with a strange name — which is a missing gutter and not a
+    missing rule, in both the system block and the optional-features one.
+- **The brand artwork, on the login card and in the boot ring.** Both were a Bootstrap icon
+  standing in for a logo that did not exist yet.
+  - **Two derived files, not one.** The lockup is landscape and the boot ring is a 96px circle,
+    so the ring gets the mark alone — a wordmark shrunk into that is a name nobody can read.
+  - The 2 MB master lives in `assets/brand/`, outside `src/` so it is not packaged, with the
+    two `magick` commands that produce what ships. A committed binary with no source is a dead
+    end: nobody can re-export it at another size or retouch it without starting over — the same
+    reason the favicon has `tools/make_favicon.py`.
+  - Served at **76 KiB and 38 KiB**, quantised to 256 colours. The login page is the first
+    thing anybody sees, and full colour costs 305 KiB for no visible difference on neon
+    artwork.
+  - **The transparency is kept**, which is what lets one file work on the light theme's card
+    and on the dark backdrop without a black plate behind it. Flattening it is what an
+    optimiser does when nobody is watching, and the result passes every other check — so a test
+    states it.
+  - `width`/`height` are the files' own pixels, so the browser reserves the box before the
+    image arrives. The login card must not jump under the cursor while it loads.
+  - The heading under the lockup is gone: the artwork carries a wordmark, and printing the name
+    again underneath is the same word twice in two typefaces. So is the subtitle beneath it —
+    it was `admin_panel`, the sidebar's label for a **section** ("System"), which read as
+    "ServiceSentry / System" under the old heading and as a stray word under a logo.
+
 ## [0.0.1+build.59] - 2026-08-12
 
 ### Changed

@@ -203,7 +203,7 @@ class TestRekeyItemsByUid:
         """Re-keying now repairs a collision, which also means it erases the evidence. The
         duplicate is read BEFORE that and recorded in the same audit entry as the save that
         carried it — the record somebody will be reading when they ask where an item went."""
-        from lib.core.modules.service import duplicate_item_uids
+        from lib.core.modules.items import duplicate_item_uids
         data = {"ping": {"list": {"a": {"uid": "SAME"}, "b": {"uid": "SAME"},
                                   "c": {"uid": "OTHER"}}}}
         assert duplicate_item_uids(data) == ["ping/SAME"]
@@ -217,7 +217,7 @@ class TestRekeyItemsByUid:
 
         Whatever put the duplicate there (an imported config, a hand-edited file), saving
         does not get to resolve it by dropping a check."""
-        from lib.core.modules.service import rekey_items_by_uid as _rekey
+        from lib.core.modules.items import rekey_items_by_uid as _rekey
         data = {"ping": {"list": {
             "a": {"uid": "SAME", "label": "keep me", "enabled": False},
             "b": {"uid": "SAME", "label": "and me"},
@@ -230,7 +230,7 @@ class TestRekeyItemsByUid:
 
     def test_an_item_keyed_as_another_items_uid_survives_too(self):
         """The same collision from the other direction: one item's KEY is another's uid."""
-        from lib.core.modules.service import rekey_items_by_uid as _rekey
+        from lib.core.modules.items import rekey_items_by_uid as _rekey
         data = {"ping": {"list": {
             "U2": {"uid": "U1", "label": "first"},
             "other": {"uid": "U2", "label": "second"},
@@ -240,7 +240,7 @@ class TestRekeyItemsByUid:
         assert {v["label"] for v in data["ping"]["list"].values()} == {"first", "second"}
 
     def test_rekey_flat_and_nested(self):
-        from lib.core.modules.service import rekey_items_by_uid as _rekey_items_by_uid
+        from lib.core.modules.items import rekey_items_by_uid as _rekey_items_by_uid
         data = {
             "ping": {"list": {
                 "host1": {"uid": "U1", "label": "A"},

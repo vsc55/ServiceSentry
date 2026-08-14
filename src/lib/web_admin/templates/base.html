@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}ServiceSentry{% endblock %}</title>
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
     {# Both, deliberately: the SVG is what a modern browser picks and stays crisp at any
        density, the .ico covers the ones that only take a bitmap — and it is the file the
        browser requests from the site root on its own, whether or not these tags exist

@@ -154,6 +154,7 @@ class _ScannersMixin:
 
         def _rotate():
             """App-only token with the app's CURRENT secret → mint the next one."""
+            from lib import APP_NAME                              # noqa: PLC0415
             oidc = self._config_section('oidc')
             tenant = _ent_auth.tenant_from_provider_url(oidc.get('provider_url', '') or '')
             if not tenant:
@@ -161,7 +162,7 @@ class _ScannersMixin:
             token = _ent_auth.app_token(tenant, oidc.get('client_id', ''),
                                         oidc.get('client_secret', ''))
             return _ent_prov.add_app_secret(token, oidc.get('client_id', ''),
-                                            display_name='ServiceSentry OIDC (auto)')
+                                            display_name=f'{APP_NAME} OIDC (auto)')
 
         def _save(secret, expires_at):
             self._save_oidc_secret(secret, expires_at)

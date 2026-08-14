@@ -913,8 +913,15 @@
    `.modal-lg > .modal-content` is `resize: both` on purpose — these dialogs are meant to be
    dragged bigger — and a child with a fixed height defeats that: the box grows and the content
    stays put, leaving the empty half somebody reported. Only when large: the same modal also
-   shows a short form, which must keep its natural height. */
-#backupModal .modal-lg > .modal-content > .modal-body {
+   shows a short form, which must keep its natural height.
+
+   Not when the dialog asked to SCROLL (`.modal-dialog-scrollable`, the restore form with its
+   table fold open): that one is flowing content taller than the screen, and a body that hides
+   its overflow instead of scrolling it puts the end of the list underneath the buttons — the
+   generic `.modal-lg > .modal-content > .modal-body { overflow: auto }` above is exactly right
+   for it, and this rule's whole job is to turn that off. Same modal, two shapes — a filled
+   two-pane browser and a long form — and this is the line that tells them apart. */
+#backupModal .modal-lg:not(.modal-dialog-scrollable) > .modal-content > .modal-body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1635,9 +1642,11 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
     animation: ss-boot-spin 1.1s linear infinite;
 }
-.ss-boot-logo .bi {
-    font-size: 2.6rem; line-height: 1; color: #fff;
-    filter: drop-shadow(0 0 12px rgba(13, 110, 253, .55));
+/* The mark sits INSIDE the ring track rather than filling the circle: the artwork is a badge
+   with glitch lines running past its edge, and sized to the full 96px those lines cross the
+   ring that is supposed to frame them. */
+.ss-boot-logo img {
+    width: 72px; height: 72px; object-fit: contain;
 }
 .ss-boot-name { font-size: 1.35rem; font-weight: 600; letter-spacing: .04em; }
 /* Indeterminate progress: boot has no measurable percentage, so it sweeps rather than fills. */
@@ -1668,6 +1677,30 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .login-card {
     width: 100%;
     max-width: 400px;
+}
+/* Capped by WIDTH and never by height: the lockup is landscape, and a height cap would leave
+   it narrow with air either side of it. The artwork carries its own transparency, so it needs
+   no plate behind it and reads on the card in either theme. */
+.login-logo {
+    width: 100%;
+    max-width: 260px;
+    height: auto;
+}
+/* The same lockup at the head of Diagnostics, where there is room for it. Its own class and
+   not a wider `.login-logo`: one is inside a 400px card and the other spans a section, and a
+   single class would make changing either of them change both. */
+.ss-diag-logo {
+    width: 100%;
+    max-width: 420px;
+    height: auto;
+}
+/* A label whose name does not explain it, carrying its explanation in a `title`. The dotted
+   underline is the part that matters: a tooltip nobody knows is there is a tooltip nobody
+   reads. Generic — any label with a hint can wear it. */
+.ss-help {
+    text-decoration: underline dotted;
+    text-underline-offset: .2em;
+    cursor: help;
 }
 /* Dark mode: a plain .card shares the deep body bg (#181818), so its edge vanishes.
    Lift it onto a raised surface with a crisp border + real drop shadow so the login
@@ -1771,24 +1804,52 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .ss-sb-brand { display: flex; align-items: center; gap: .6rem; padding: .3rem 1rem;
     min-height: var(--ss-header-h); box-sizing: border-box;
     font-weight: 600; color: #fff; border-bottom: 1px solid rgba(255,255,255,.08); }
+/* A glyph, not the mark: the artwork is at the foot of this same column at full width, and the
+   badge again at 28px beside the name is the brand twice in one column — the small copy
+   losing, because it is the one that cannot be read. */
 .ss-sb-logo { font-size: 1.15rem; flex-shrink: 0; }
 .ss-sb-toggle { margin-left: auto; background: none; border: none; color: #cbd5e1;
     font-size: 1.15rem; line-height: 1; cursor: pointer; padding: .2rem .35rem; border-radius: .35rem; }
 .ss-sb-toggle:hover { background: rgba(255,255,255,.1); color: #fff; }
 
 /* nav list */
-.ss-sb-nav  { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: .5rem 0; }
+.ss-sb-nav  { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: .5rem 0;
+              display: flex; flex-direction: column; }
+/* The lockup filling the empty foot of the column, edge to edge — the sidebar is the one place
+   with room going spare and nothing in it. Inside the scrolling nav on purpose: `margin-top:
+   auto` drops it to the bottom while there is slack, and when the entries fill the column it
+   scrolls below the last one instead of squeezing the list. An auto margin on the LAST item
+   resolves to 0 with no free space, so it cannot push the first entry out of reach. */
+.ss-sb-art { margin-top: auto; padding-top: 1rem; transition: opacity .15s ease; }
+.ss-sb-art img { display: block; width: 100%; height: auto; }
+/* 56px of it is a wordmark nobody can read, so mini does not show it — but it FADES, and does
+   not disappear. `display: none` cannot be transitioned: collapsing dropped it in one frame
+   while expanding let the column's .15s width grow it back, so the same motion looked like two
+   different ones depending on which way you pressed the button. Sharing that .15s, it shrinks
+   and fades out on the way in and grows and fades back on the way out. */
+.ss-layout.ss-mini .ss-sb-art { opacity: 0; pointer-events: none; }
 .ss-sb-list, .ss-sb-sub { list-style: none; margin: 0; padding: 0; }
 .ss-sb-item {
     display: flex; align-items: center; gap: .6rem; width: 100%;
     padding: .4rem 1rem; border: none; background: none; text-align: left;
     color: #cbd5e1; text-decoration: none; cursor: pointer; white-space: nowrap;
     border-left: 3px solid transparent; font-size: .85rem;
+    /* Collapsing and expanding are the same .15s the column takes, so the row's geometry moves
+       with it instead of snapping at one end. Only padding — the hover colour stays instant,
+       which is what makes a control feel connected to the cursor. */
+    transition: padding .15s ease;
 }
+/* The label FADES with the column and is never `display: none`: display cannot be
+   transitioned, so hiding it dropped the text in a single frame while showing it let the
+   column's widening reveal it — the same motion looking like two different ones depending on
+   which way the button was pressed. Kept in flow and clipped by the sidebar's own
+   `overflow: hidden`, the icon beside it never moves. */
+.ss-sb-label { transition: opacity .15s ease; }
 .ss-sb-item:hover { background: rgba(255,255,255,.07); color: #fff; }
 .ss-sb-item.active { background: rgba(13,110,253,.18); color: #fff; border-left-color: var(--bs-primary,#0d6efd); }
 .ss-sb-icon { font-size: .95rem; flex-shrink: 0; width: 1.15rem; text-align: center; }
-.ss-sb-caret { margin-left: auto; font-size: .65rem; transition: transform .15s; }
+.ss-sb-caret { margin-left: auto; font-size: .65rem;
+               transition: transform .15s, opacity .15s ease; }
 .ss-sb-parent[aria-expanded="true"] .ss-sb-caret { transform: rotate(180deg); }
 .ss-sb-subitem { padding-left: 2.35rem; font-size: .8rem; }
 
@@ -1801,15 +1862,22 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 
 /* ── mini (collapsed) mode: icons only ─────────────────────────────────── */
 .ss-layout.ss-mini .ss-sidebar { width: var(--ss-sidebar-mini-w); }
-.ss-layout.ss-mini .ss-sb-label { display: none; }
-.ss-layout.ss-mini .ss-sb-caret { display: none; }
+.ss-layout.ss-mini .ss-sb-label { opacity: 0; }
+.ss-layout.ss-mini .ss-sb-caret { opacity: 0; }
+/* The brand row is the exception, and has to be: it centres what is left of it, so a label
+   that merely faded would still take its width there and push the hamburger — the one control
+   that expands the column again — off the edge. */
+.ss-layout.ss-mini .ss-sb-brand-text { display: none; }
 /* Mini: only the toggle stays in the brand row (centered) — the logo + the two icons side
    by side were cramped in the 56px rail; the hamburger alone is the expand control. */
 .ss-layout.ss-mini .ss-sb-brand { justify-content: center; padding: .8rem 0; }
 .ss-layout.ss-mini .ss-sb-logo { display: none; }
 .ss-layout.ss-mini .ss-sb-toggle { margin: 0; }
-.ss-layout.ss-mini .ss-sb-item { justify-content: center; gap: 0; padding: .55rem 0; }
-.ss-layout.ss-mini .ss-sb-subitem { padding-left: 0; }
+/* The icon keeps its place instead of being re-centred: at 56px, the left padding it already
+   has puts it within a pixel of the centre, and holding it there is what lets the label fade
+   out beside it without the row rearranging itself underneath. */
+.ss-layout.ss-mini .ss-sb-item { gap: 0; padding: .55rem 1rem; }
+.ss-layout.ss-mini .ss-sb-subitem { padding-left: 1rem; }
 
 /* ── mobile top bar + off-canvas ───────────────────────────────────────── */
 .ss-topbar { display: flex; align-items: center; gap: .6rem; padding: .4rem .75rem;
@@ -1835,9 +1903,13 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     .ss-layout.ss-open .ss-sb-backdrop { display: block; }
     /* mini never applies on mobile: labels always show inside the drawer */
     .ss-layout.ss-mini .ss-sidebar { width: var(--ss-sidebar-w); }
-    .ss-layout.ss-mini .ss-sb-label { display: inline; }
+    .ss-layout.ss-mini .ss-sb-label { opacity: 1; display: inline; }
+    .ss-layout.ss-mini .ss-sb-caret { opacity: 1; }
     .ss-layout.ss-mini .ss-sb-item { justify-content: flex-start; gap: .75rem; padding: .55rem 1rem; }
     .ss-layout.ss-mini .ss-sb-subitem { padding-left: 2.6rem; }
+    /* Same rule for the artwork: the drawer is full width here, so a faded-out lockup would be
+       a hole at the foot of it rather than a mark that does not fit. */
+    .ss-layout.ss-mini .ss-sb-art { opacity: 1; }
 }
 .ss-topbar { display: none; }
 @media (max-width: 767.98px) { .ss-topbar { display: flex; } }
@@ -1863,7 +1935,7 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 .ss-sb-flyout .ss-sb-subsub { padding-left: 1rem; }
 /* The flyout always shows full items (icon + label) left-aligned, even in mini mode —
    otherwise the mini rule (centred icon, no gap) leaves a big gap before the icon. */
-.ss-layout.ss-mini .ss-sb-flyout .ss-sb-label { display: inline; }
+.ss-layout.ss-mini .ss-sb-flyout .ss-sb-label { opacity: 1; }
 .ss-layout.ss-mini .ss-sb-flyout .ss-sb-item {
     justify-content: flex-start; gap: .75rem; padding: .45rem 1rem;
 }
@@ -1901,10 +1973,10 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    flush because the column it lives in already does. */
 .ss-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
              margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
-.ss-main > .ss-bleed-top { margin: 0; }
+.ss-shell-main > .ss-bleed-top { margin: 0; }
 /* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
    the index's border and the first card rather than a strip of page background. */
-.ss-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
+.ss-shell-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
 
 /* ── Configuration — the detail is a SHEET, not a card ──────────────────────────────────
    The frame, the chevron and the colour accent were right when seven tabs showed several
@@ -2007,7 +2079,7 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    One value serves both states — `.ss-toolbar` rounds with --bs-border-radius-lg, and the
    search box's `.rounded-bottom-3` is that same token — so whichever of the two forms the
    bottom edge, the shadow matches it. */
-.ss-main > .ss-bleed-top { position: relative; z-index: 11;
+.ss-shell-main > .ss-bleed-top { position: relative; z-index: 11;
                             border-bottom-left-radius: var(--bs-border-radius-lg);
                             border-bottom-right-radius: var(--bs-border-radius-lg);
                             box-shadow: 0 .4rem .75rem -.2rem rgba(0,0,0,.7); }
@@ -2038,8 +2110,15 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .cfg-sheet .cfg-subhead { position: sticky; top: 3.4rem; z-index: 9;
                           padding: .25rem .5rem;
                           background: var(--ss-card-header-bg, var(--bs-secondary-bg)); }
-.ss-main  { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
-             min-height: 0; }
+/* The shell's detail column. Its own name on purpose: it was `.ss-main` once, which is the
+   app's content column — `height: 100vh` and the page's only scroll container. Both blocks
+   are one class, so the later one won only the properties it happened to name and the detail
+   column kept the 100vh. A shell starting under the breadcrumb then held a full-viewport
+   child, the page grew by exactly the height of the bars above it, and scrolling that
+   overflow away is what took the toolbar and the head of the rail off the top of the screen.
+   It fills its parent here, and the thing that scrolls inside it is the .ss-vscroll body. */
+.ss-shell-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
+                  min-height: 0; }
 /* ── The navigation rail ────────────────────────────────────────────────────
    A grouped index down the side of a pane: a heading per group, one item per thing you can
    open, a count on the right of both.  Named ss- rather than cfg- because Configuration is

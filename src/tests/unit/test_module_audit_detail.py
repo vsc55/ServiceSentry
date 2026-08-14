@@ -17,7 +17,7 @@ skip the tests in exactly the install (a slimmed service container) where nothin
 this code.
 """
 
-from lib.core.modules.service import cap_audit_lists
+from lib.core.modules.actions import cap_audit_lists
 
 
 class TestItBoundsWhatAModuleWrote:

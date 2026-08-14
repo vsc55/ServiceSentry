@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}ServiceSentry — {% if standalone %}{{ standalone|capitalize }}{% else %}Admin{% endif %}{% endblock %}
+{% block title %}{{ app_name }} — {% if standalone %}{{ standalone|capitalize }}{% else %}Admin{% endif %}{% endblock %}
 {% block body_class %}{% if standalone %}standalone-page {{ standalone }}-page{% endif %}{% endblock %}
 
 {# All page styles live in static/css/web_admin.css (loaded by base.html). #}
@@ -14,8 +14,13 @@
    role, and every animation is dropped under prefers-reduced-motion. #}
 <div id="loading">
     <div class="ss-boot" role="status" aria-live="polite">
-        <div class="ss-boot-logo" aria-hidden="true"><i class="bi bi-shield-check"></i></div>
-        <div class="ss-boot-name">ServiceSentry</div>
+        {# The mark alone, not the whole lockup: it sits inside a 96px ring, and a landscape
+           lockup shrunk into that is a wordmark nobody can read. Empty `alt` because the
+           element is decorative — the status text below carries the meaning. #}
+        <div class="ss-boot-logo" aria-hidden="true">
+            <img src="/static/img/logo-mark.png?v={{ asset_v }}" alt="" width="256" height="256">
+        </div>
+        <div class="ss-boot-name">{{ app_name }}</div>
         <div class="ss-boot-bar" aria-hidden="true"><span></span></div>
         <div class="ss-boot-text">{{ i18n.loading }}</div>
     </div>
@@ -38,7 +43,7 @@
     <div class="ss-topbar d-md-none">
         <button type="button" class="btn btn-sm btn-light" onclick="_openSidebar()"
                 aria-label="Open menu"><i class="bi bi-list"></i></button>
-        <span class="ss-topbar-brand"><i class="bi bi-shield-check me-1"></i>ServiceSentry</span>
+        <span class="ss-topbar-brand"><i class="bi bi-shield-check me-1"></i>{{ app_name }}</span>
     </div>
 
     <!-- Breadcrumb: the path you would follow in the sidebar to reach the active section
@@ -170,6 +175,7 @@
         {% if not standalone %}
         {% include "partials/audit/_pane.html" %}
         {% include "partials/backup/_pane.html" %}
+        {% include "partials/diagnostics/_pane.html" %}
         {% endif %}
 
         <!-- ======= Account (SPA pane on /admin + own page at /account) ====== -->

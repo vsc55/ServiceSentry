@@ -12,6 +12,12 @@ So the assertion here is not "the button is in the HTML". It is **"the browser r
 error"**: every page load collects `console.error` and uncaught `pageerror`, and any entry
 fails the test naming the page. Navigation is only how the JavaScript gets made to run.
 
+And since August 2026, a second kind: **geometry**. Two sidebar bugs were reported off
+screenshots — a column overflowing the page by 52px, and a collapse that blinked where the
+expand animated — on pages that loaded without a single console error. Sizes and positions are
+arithmetic the browser does from the whole cascade, so a guard that reads the stylesheet cannot
+see the result; these ask for the numbers instead, at rest and never mid-animation.
+
 Deliberately **opt-in and skipped by default**: Playwright needs a browser binary, so a
 checkout without one still gets a green suite. Install with::
 
@@ -439,6 +445,196 @@ class TestSavingOneCheckDoesNotSwitchOnEveryModule:
         assert written, 'a check the user enabled was not persisted'
 
 
+class TestTheLayoutFitsTheWindow:
+    """Geometry — the half of the frontend nothing else looks at.
+
+    Everything here loaded without a single console error, which is what the rest of this file
+    checks, and was still wrong on screen. Reported as *"a scrollbar appeared that drags the
+    rail"*: the first entry of the index was cut in half and the section's toolbar was off the
+    top of the window. The detail column of the rail shell was called `.ss-main`, which is also
+    the name of the app's content column — `height: 100vh`, the page's only scroll container —
+    and with equal specificity the later rule won only the properties it named, so the 100vh
+    stayed. A shell that begins under the breadcrumb holding a full-viewport child overflows the
+    page by exactly the height of the bars above it, and scrolling that overflow away is what
+    took the toolbar with it.
+
+    Nothing in the suite could see it. A text guard reads the stylesheet, not the cascade, and
+    the arithmetic that goes wrong here is done by the browser. So this asks the browser, in the
+    only unit that means anything: pixels.
+
+    Measured at REST, never mid-transition: a test that samples an animation is a test that
+    fails on a loaded CI machine for a reason that has nothing to do with the code.
+    """
+
+    # Every section built by `ssRailShell` — an index down the side, the section beside it.
+    # Named rather than discovered: a browser test that silently covers nothing is worse than
+    # one that says what it covers.
+    RAILED = ('#tab-config', '#tab-modules', '#tab-backup')
+
+    @staticmethod
+    def _open(page, pane):
+        page.evaluate('(pane) => _navTab(pane)', pane)
+        page.wait_for_selector(f'{pane} .ss-shell > .ss-rail', state='visible', timeout=10_000)
+
+    @staticmethod
+    def _overflow(page):
+        """How much taller than its own box the scrolling column's content is."""
+        return page.evaluate("""() => {
+            const m = document.getElementById('ss-main');
+            return { over: m.scrollHeight - m.clientHeight, top: m.scrollTop };
+        }""")
+
+    def test_no_railed_section_makes_the_page_scroll(self, page):
+        """One pixel of overflow here is a scrollbar, and a scrollbar here takes the toolbar
+        away. The tolerance is 1px for sub-pixel rounding — 52 was the bug."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        bad = []
+        for pane in self.RAILED:
+            self._open(page, pane)
+            over = self._overflow(page)['over']
+            if over > 1:
+                bad.append(f'{pane}: {over}px')
+        assert not bad, ('these sections push the content column past the window, so it '
+                         'scrolls and the toolbar goes with it: ' + ', '.join(bad))
+
+    def test_the_toolbar_survives_someone_scrolling(self, page):
+        """The symptom as it was reported, which is the part a person actually meets: the bar
+        carrying Reload and New is pinned to the top edge of the section, and it went missing.
+
+        So the column is SCROLLED as far as it will go before measuring. With nothing to
+        scroll that is a no-op and the bar stays put; with 52px of overflow it is exactly the
+        gesture that takes the bar off the top of the window — and the reason a screenshot of
+        this bug shows a section with no controls."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        for pane in self.RAILED:
+            self._open(page, pane)
+            box = page.evaluate("""(pane) => {
+                const m = document.getElementById('ss-main');
+                m.scrollTop = m.scrollHeight;          // as far down as it goes
+                const bar = document.querySelector(`${pane} [data-ss-pane-head]`);
+                if (!bar) return null;
+                const r = bar.getBoundingClientRect();
+                // The breadcrumb is sticky, so it stays while the content slides under it:
+                // "still on screen" means below ITS bottom edge, not merely above zero.
+                const crumb = document.getElementById('ss-sticky-top').getBoundingClientRect();
+                return { top: r.top, height: r.height, under: crumb.bottom,
+                         scrolled: m.scrollTop };
+            }""", pane)
+            assert box, f'{pane} has no pinned toolbar to check'
+            assert box['height'] > 0, f'{pane}: the toolbar has no height'
+            assert box['top'] >= box['under'] - 1, (
+                f'{pane}: scrolling slid the toolbar {box["under"] - box["top"]:.0f}px under the '
+                f'breadcrumb that stays pinned over it (the column scrolled '
+                f'{box["scrolled"]}px, and it had nothing to scroll)')
+
+    def test_the_rail_reaches_the_bottom_of_the_window(self, page):
+        """It is an index, so it is as tall as the section: a rail that stops short leaves a
+        strip of page background under it, which is how this shell was reported broken three
+        times before it was measured."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        short = []
+        for pane in self.RAILED:
+            self._open(page, pane)
+            gap = page.evaluate("""(pane) => {
+                const rail = document.querySelector(`${pane} .ss-shell > .ss-rail`);
+                return Math.round(window.innerHeight - rail.getBoundingClientRect().bottom);
+            }""", pane)
+            if gap > 1:
+                short.append(f'{pane}: {gap}px short')
+        assert not short, 'the index does not reach the foot of the window: ' + ', '.join(short)
+
+
+class TestCollapsingTheSidebarIsTheReverseOfExpandingIt:
+    """The second thing a text guard cannot see: whether the two directions match.
+
+    Reported twice — once about the artwork, once about the entries — as *"expanding does
+    something and collapsing just blinks"*. Both had the same cause: `display: none` cannot be
+    transitioned, so hiding a thing drops it in one frame while showing it lands it in a column
+    that is still growing and the .15s width appears to bring it in.
+
+    Asserted at rest, not mid-animation, on the three facts that make the two directions each
+    other's reverse: nothing in the navigation is hidden by `display`, the things that vanish
+    have a transition to vanish WITH, and the icon beside them does not move while they do.
+    """
+
+    @staticmethod
+    def _probe(page):
+        return page.evaluate("""() => {
+            const item  = document.querySelector('.ss-sb-nav .ss-sb-item');
+            const label = item.querySelector('.ss-sb-label');
+            const icon  = item.querySelector('.ss-sb-icon') || item.querySelector('i');
+            const art   = document.querySelector('.ss-sb-art');
+            const cs    = getComputedStyle(label);
+            return {
+                display: cs.display,
+                opacity: cs.opacity,
+                transition: cs.transitionProperty + ' ' + cs.transitionDuration,
+                icon_x: Math.round(icon.getBoundingClientRect().x * 10) / 10,
+                art_opacity: art ? getComputedStyle(art).opacity : null,
+                sidebar_w: Math.round(document.querySelector('.ss-sidebar').getBoundingClientRect().width),
+            };
+        }""")
+
+    def _settle(self, page):
+        """Let the .15s transition finish before measuring — the numbers this reads are the
+        two ENDS of it, and reading them early is the flake."""
+        page.wait_for_timeout(400)
+
+    def test_the_label_fades_instead_of_being_removed(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => document.getElementById('ss-layout').classList.remove('ss-mini')")
+        self._settle(page)
+        wide = self._probe(page)
+        assert wide['opacity'] == '1' and wide['display'] != 'none'
+
+        page.evaluate("() => _toggleSidebar()")
+        self._settle(page)
+        mini = self._probe(page)
+        assert mini['sidebar_w'] < wide['sidebar_w'], 'the sidebar did not collapse at all'
+        assert mini['display'] != 'none', \
+            'the label is hidden by `display`, which cannot be animated — collapsing will blink'
+        assert mini['opacity'] == '0', f'the label did not fade out: opacity {mini["opacity"]}'
+        assert 'opacity' in mini['transition'] and '0s' not in mini['transition'], \
+            f'nothing to animate with: transition is {mini["transition"]!r}'
+
+    def test_the_icon_does_not_move_while_the_label_goes(self, page):
+        """Re-centring the icon in the 56px rail moved it while the label beside it was still
+        fading. The padding it already has puts it within a pixel of that centre, so holding it
+        there costs nothing and removes the jump."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => document.getElementById('ss-layout').classList.remove('ss-mini')")
+        self._settle(page)
+        wide = self._probe(page)
+        page.evaluate("() => _toggleSidebar()")
+        self._settle(page)
+        mini = self._probe(page)
+        assert abs(mini['icon_x'] - wide['icon_x']) <= 1.5, (
+            f'the icon jumps {abs(mini["icon_x"] - wide["icon_x"]):.1f}px when the column '
+            'collapses, under a label that is fading at the same time')
+
+    def test_the_artwork_fades_with_it_and_comes_back(self, page):
+        """The lockup at the foot of the column, and the round trip: a state that only goes one
+        way is the other half of the same bug."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => document.getElementById('ss-layout').classList.remove('ss-mini')")
+        self._settle(page)
+        assert self._probe(page)['art_opacity'] == '1'
+        page.evaluate("() => _toggleSidebar()")
+        self._settle(page)
+        assert self._probe(page)['art_opacity'] == '0', 'the artwork stayed on in mini'
+        page.evaluate("() => _toggleSidebar()")
+        self._settle(page)
+        back = self._probe(page)
+        assert back['art_opacity'] == '1' and back['opacity'] == '1', \
+            'expanding did not undo the collapse'
+
+
 class TestTheSidebarFollowsTheModules:
     """Which module sections the sidebar offers, asked of the browser.
 
@@ -489,3 +685,124 @@ class TestTheSidebarFollowsTheModules:
         _ready(page)
         assert page.evaluate(
             "() => document.getElementById('nav-page-overview-li').style.display !== 'none'")
+
+
+class TestTheRestoreFormPicksTables:
+    """The advanced fold of the restore dialog, in a browser.
+
+    Read as text these guards say the markup is there and the request is shaped right; what no
+    amount of reading settles is whether the fold populates at all — it is built from an
+    endpoint, wired after the dialog is in the DOM, and its answer depends on which boxes a
+    person left ticked. The trap it is aimed at is the empty selection: `tables` absent means
+    "all of them" and `[]` means "none", so a fold nobody touched must send NO list.
+    """
+
+    NAME = 'e2e-restore'
+
+    def _copy(self, page):
+        """Take a copy through the panel's own API, as the form does, and wait for the job."""
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        job = page.evaluate("""async (name) => {
+            const res = await apiPost('/api/v1/backups',
+                {name, parts: ['core', 'history', 'audit', 'syslog'], secrets: true});
+            const id = (res.data || {}).job_id;
+            if (!id) return {error: 'no job id'};
+            for (let i = 0; i < 300; i++) {
+                const j = await apiGet(`/api/v1/backups/jobs/${id}`);
+                if (j && j.done) return j;
+                await new Promise(r => setTimeout(r, 100));
+            }
+            return {error: 'the job never finished'};
+        }""", self.NAME)
+        assert not job.get('error'), job
+        # `_backups` is what the dialog reads the copy out of, so the list has to be drawn
+        # before it is opened — exactly the order the section itself uses.
+        page.evaluate('async () => { await renderBackups(); }')
+
+    def _open(self, page):
+        self._copy(page)
+        page.evaluate('async (name) => { await openRestoreModal(name); }', self.NAME)
+        page.wait_for_selector('#backupModalBody details', timeout=10_000)
+
+    def test_the_fold_is_filled_from_the_archive(self, page):
+        """Not from a list in the template: the boxes are the tables the copy actually holds,
+        and `core` is decided by the rule the restore itself applies."""
+        self._open(page)
+        tables = page.evaluate("""() => Array.from(
+            document.querySelectorAll('[data-bk-table]')).map(el => el.dataset.bkTable)""")
+        assert 'users' in tables, tables
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_leaving_one_out_is_what_produces_a_list(self, page):
+        """The one that matters. An untouched fold asks for NO list, so an ordinary restore is
+        byte for byte the request it always was; leaving one box out is what produces a list,
+        and what stays in it is everything else — a picker that sent only the box somebody
+        clicked would restore one table and call it the selection."""
+        self._open(page)
+        assert page.evaluate('() => _bkChosenTables()') is None, \
+            'an untouched fold already asks for a narrowed restore'
+        left = page.evaluate("""() => {
+            const el = document.querySelector('[data-bk-table="users"]');
+            el.checked = false;
+            _bkTablePickChanged();
+            return _bkChosenTables();
+        }""")
+        assert isinstance(left, list) and 'users' not in left, left
+        assert len(left) > 0, 'leaving one table out emptied the whole selection'
+
+    def test_the_dialog_scrolls_instead_of_hiding_its_own_buttons(self, page):
+        """Reported from a screenshot: with the fold open the last group of tables sat under
+        the footer and the end of the list was unreachable.
+
+        Two scrollers for one form, and the outer one missing. The dialog is a flex column
+        with `overflow: hidden`, so a body that overflows is not a scrollbar — it is content
+        clipped behind the buttons — while the fold had a capped box of its own that hid where
+        the list ended. Exactly one scroller now, and it is the body.
+        """
+        # A short window on purpose, which is the reported case: the form is only too tall
+        # relative to the screen, and a full-height desktop viewport hides the whole bug.
+        page.set_viewport_size({'width': 1280, 'height': 520})
+        self._open(page)
+        # Open the fold — closed, its tables are in the DOM but laid out nowhere, and the
+        # dialog is the short one this bug never happened to.
+        page.evaluate("() => { document.querySelector('#backupModalBody details').open = true }")
+        box = page.evaluate("""() => {
+            const content = document.querySelector('#backupModal .modal-content');
+            const body = document.getElementById('backupModalBody');
+            const ok = document.getElementById('backupModalOk').getBoundingClientRect();
+            const inner = Array.from(body.querySelectorAll('*')).filter(el => {
+                const oy = getComputedStyle(el).overflowY;
+                return (oy === 'auto' || oy === 'scroll')
+                       && el.scrollHeight - el.clientHeight > 2;
+            }).length;
+            return {dialog: content.parentElement.className,
+                    over: Math.round(content.getBoundingClientRect().bottom
+                                     - window.innerHeight),
+                    okBelow: Math.round(ok.bottom - window.innerHeight),
+                    hidden: body.scrollHeight - body.clientHeight,
+                    scroller: getComputedStyle(body).overflowY, inner};
+        }""")
+        assert box['over'] <= 1, f'the dialog runs off the bottom of the window: {box}'
+        assert box['okBelow'] <= 1, f'the buttons are off screen: {box}'
+        assert box['hidden'] > 0, \
+            f'the form fits after all — this asserts nothing until it does not: {box}'
+        assert box['scroller'] in ('auto', 'scroll'), \
+            f'the body is not the scroller, so the overflow is clipped: {box}'
+        assert box['inner'] == 0, \
+            f'a second scrollbar inside the body hides where the list ends: {box}'
+
+    def test_a_part_that_is_not_ticked_dims_its_tables(self, page):
+        """Disabled rather than hidden: hiding it would make a tick above look like it had
+        cleared a choice made below."""
+        self._open(page)
+        state = page.evaluate("""() => {
+            const part = document.getElementById('bkRes_core');
+            part.checked = false;
+            part.dispatchEvent(new Event('change'));
+            const box = document.querySelector('[data-bk-table="users"]');
+            const group = document.querySelector('[data-bk-group="core"]');
+            return {disabled: box.disabled, dimmed: group.classList.contains('opacity-50'),
+                    shown: getComputedStyle(group).display !== 'none'};
+        }""")
+        assert state == {'disabled': True, 'dimmed': True, 'shown': True}, state

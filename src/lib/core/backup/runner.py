@@ -3,7 +3,10 @@
 """The thread that takes the automatic copies.
 
 Everything about WHEN lives in :mod:`lib.core.backup.schedule` and is a pure function; what is
-here is the part that cannot be one — a thread, a lease, and the calls that touch disk.
+here is the part that cannot be one — a thread, a lease, and the calls that touch disk. What a
+person starts by hand — a copy, a restore, "run this task now" — is
+:mod:`lib.core.backup.jobs`, inherited by the class below: none of it is scheduled, and it was
+half of a file whose docstring is this one.
 
 **Who runs this.** The thread is started by the WEB admin and nowhere else
 (`WebAdmin._start_backup_runner`), so in a multi-container deployment the scheduled copies are
@@ -29,14 +32,16 @@ means a copy started by hand and one started by the schedule cannot collide with
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import threading
 import time
-import uuid
 
 from lib import __version__
+from lib.core.backup import create as _create
 from lib.core.backup import schedule as _sched
 from lib.core.backup import service as _svc
-from lib.core.backup.service import _log
+from lib.core.backup.archive import _log
+from lib.core.backup.jobs import _connectors, _JobsMixin
 from lib.debug.debug_level import DebugLevel
 
 # How often to ask "is one due?". See the module docstring: the answer does not go stale.
@@ -51,31 +56,15 @@ LEASE_TTL = 900   # longer than a tick, so a slow copy does not lose the lease m
 # What the pre-task settings become the first time the scheduler runs without tasks.
 _LEGACY_TASK_NAME = 'default'
 
-# Runs started from the UI, by job id. In memory on purpose: a job is about THIS
-# process — it dies with it, and a browser polling a job whose process is gone gets
-# a 404, which is the truth.
-_JOBS: dict = {}
 
+class BackupRunner(_JobsMixin):
+    """Owns the thread. Started by the web admin; stops with it.
 
-def _connectors(wa) -> dict:
-    """The databases a copy has to reach beyond the system one.
-
-    Only `syslog` today, and only when `syslog_db|enabled` actually sent that feed somewhere
-    else — with it off the web admin hands back the main connector for both, and a map that
-    named it anyway would be true but noisy. Built HERE and not in the service, which is
-    Flask-free and is given its connectors rather than going looking for them.
+    The jobs a person starts by hand — a copy, a restore, "run this task now" — come from
+    :class:`~lib.core.backup.jobs._JobsMixin`. They share this class because "run now" has to
+    go through the schedule's own path (`run_now`) or it would produce a copy the task does
+    not own, and nothing else about them is scheduled at all.
     """
-    main = getattr(wa, '_db_connector', None)
-    syslog = getattr(wa, '_syslog_db_connector', None)
-    return {'syslog': syslog} if (syslog is not None and syslog is not main) else {}
-
-
-def job_status(job_id: str) -> dict | None:
-    return _JOBS.get(str(job_id or ''))
-
-
-class BackupRunner:
-    """Owns the thread. Started by the web admin; stops with it."""
 
     def __init__(self, wa):
         self._wa = wa
@@ -167,147 +156,6 @@ class BackupRunner:
                 self._prune_task(task, var_dir, backup_dir, out, profiles=profiles)
         return out
 
-    def _start_job(self, label: str, work, manual: bool = False,
-                   kind: str = 'backup') -> str:
-        """Begin a copy in the background and hand back a job id to ask about.
-
-        A copy of a large install takes minutes — the syslog table alone is six figures of rows
-        — and a request that holds the connection for that long is one the browser or a reverse
-        proxy eventually gives up on, leaving the operator with no idea whether it worked.
-
-        The job dict is the same shape the MIB compile already uses, so the browser's polling
-        loop is a shape this panel already has. ONE shape for both kinds of copy, too: a manual
-        one and a scheduled one differ in what they are named and who is told about them, not in
-        how long they take — and a hand-made copy that showed nothing until it finished was
-        exactly the complaint that made the scheduled one report at all.
-        """
-        job_id = uuid.uuid4().hex[:12]
-        job = _JOBS[job_id] = {
-            'done': False, 'task': label, 'manual': bool(manual), 'kind': kind,
-            'table': '', 'step': 0, 'total': 0, 'created': '', 'error': '',
-            # Per-part outcome, filled in as the copy goes. The bar says how far;
-            # this says what actually made it, which is the question afterwards.
-            'steps': [], 'status': '',
-        }
-
-        def _work():
-            _log(f'> Backup > job {job_id} >> {kind} {label!r} started')
-            try:
-                work(job)
-            except Exception as exc:      # pylint: disable=broad-except
-                job['error'] = str(exc)[:500]
-                _log(f'> Backup > job {job_id} >> {kind} {label!r} raised: {exc}',
-                     DebugLevel.error)
-            finally:
-                _log(f'> Backup > job {job_id} >> {kind} {label!r} finished'
-                     + (f' with an error: {job["error"]}' if job['error'] else ''),
-                     DebugLevel.warning if job['error'] else DebugLevel.info)
-                # Last, and always: `done` is what stops the browser polling, so a job that
-                # raised before setting it is one the screen waits on for an hour.
-                job['done'] = True
-
-        threading.Thread(target=_work, daemon=True, name='ss-backup-run').start()
-        return job_id
-
-    def start_run(self, task: dict) -> str:
-        """Start a scheduled task's copy in the background."""
-        def _work(job):
-            out = self.run_now(task, progress_cb=job.update)
-            job.update({'created': (out['created'] or [''])[0], 'pruned': out['pruned'],
-                        'status': out.get('status', '')})
-
-        return self._start_job(task.get('name', ''), _work)
-
-    def start_manual(self, name: str, parts, include_secrets: bool,
-                     actor: str, ip: str) -> str:
-        """Start a copy asked for by hand, with the parts the form chose.
-
-        Not `run_now`: there is no task, so there is no `auto-<task>-` name and no retention to
-        apply afterwards — a hand-made copy belongs to the person who made it and is deleted by
-        them.
-
-        `actor` and `ip` are read from the request and carried in, because the work happens on a
-        thread where there is none. Auditing it as `system` would be losing the one fact this
-        line exists to record.
-        """
-        wa = self._wa
-
-        def _work(job):
-            res = _svc.create_backup(
-                wa._db_connector, name,
-                var_dir=wa._var_dir or '', config_dir=getattr(wa, '_config_dir', '') or '',
-                backup_dir=str(getattr(wa, '_BACKUP_DIR', '') or ''),
-                parts=list(parts or []), include_secrets=bool(include_secrets),
-                actor=actor, app_version=__version__, progress_cb=job.update,
-                engine=str(getattr(wa._db_connector, 'driver', '') or ''),
-                connectors=_connectors(wa),
-            )
-            if not res.get('ok'):
-                job['error'] = str(res.get('message', ''))[:500]
-                wa._audit_write('backup_created', actor, ip,
-                                {'name': name, 'ok': False, 'message': job['error']})
-                return
-            man = res['manifest']
-            job.update({'created': name, 'status': man.get('status', 'ok'),
-                        'steps': man.get('steps', [])})
-            wa._audit_write('backup_created', actor, ip, {
-                'name': name, 'parts': man.get('parts', []), 'secrets': man.get('secrets'),
-                'tables': man.get('tables', {}), 'size': man.get('size', 0),
-                'status': man.get('status', 'ok'),
-            })
-
-        return self._start_job(name, _work, manual=True)
-
-    def start_restore(self, name: str, parts, actor: str, ip: str,
-                      after=None) -> str:
-        """Put a copy back in the background, reporting which table it is on.
-
-        The same treatment the copies get, and for a stronger reason: a restore rewrites every
-        table in one transaction, so it is the longest thing this section does — and the one
-        where a screen that says nothing is most alarming, because what it is silent about is
-        the install being overwritten.
-
-        `after` is run once it has worked: the caches this process holds describe rows that no
-        longer exist. Passed in rather than reached for, because what needs dropping is the web
-        admin's business and this file is not the place that knows it.
-        """
-        wa = self._wa
-
-        def _work(job):
-            res = _svc.restore_backup(
-                wa._db_connector, wa._var_dir or '', name,
-                parts=parts if isinstance(parts, list) else None,
-                config_dir=getattr(wa, '_config_dir', '') or '',
-                backup_dir=str(getattr(wa, '_BACKUP_DIR', '') or ''),
-                progress_cb=job.update, connectors=_connectors(wa),
-            )
-            job.update({'tables': res.get('tables', {}), 'skipped': res.get('skipped', {}),
-                        # The final word on the checklist. It was being filled in as the
-                        # restore went, but a run that failed leaves it half written and the
-                        # answer is the one the function returned.
-                        'steps': res.get('steps', []),
-                        'from_version': res.get('app_version', '')})
-            if not res.get('ok'):
-                job['error'] = str(res.get('message', ''))[:500]
-            # Audited either way, with the actor read in the request: a restore that failed
-            # half way is the most important line in the log, not the least.
-            wa._audit_write('backup_restored', actor, ip, {
-                'name': name, 'ok': bool(res.get('ok')),
-                'parts': sorted(parts) if isinstance(parts, list) else 'all',
-                'tables': res.get('tables', {}),
-                # Which build made the copy, and what this schema could not take from it. In
-                # the LOG and not only in the answer on screen: a restore is the moment nobody
-                # is looking ten minutes later, and "which columns went" is exactly the
-                # question that gets asked months afterwards.
-                'from_version': res.get('app_version', ''),
-                'skipped': res.get('skipped', {}),
-                'message': res.get('message', ''),
-            })
-            if res.get('ok') and after:
-                after()
-
-        return self._start_job(name, _work, manual=True, kind='restore')
-
     def run_now(self, task: dict, now_ts: float | None = None, progress_cb=None) -> dict:
         """Run one task immediately, exactly as the schedule would.
 
@@ -329,7 +177,7 @@ class BackupRunner:
                   out: dict, progress_cb=None, profiles=None) -> None:
         wa = self._wa
         name = _sched.auto_name(_dt.datetime.fromtimestamp(now), task.get('name'))
-        res = _svc.create_backup(
+        res = _create.create_backup(
             wa._db_connector, name,
             var_dir=var_dir, config_dir=getattr(wa, '_config_dir', '') or '',
             backup_dir=backup_dir,
@@ -489,19 +337,43 @@ class BackupRunner:
         return store.enabled_tasks()
 
     # ── The lease ────────────────────────────────────────────────────────────
+    def _instance(self) -> str:
+        """Who this process is, to the lease.
+
+        The same shape the health and certificate scanners use for theirs
+        (`lib/web_admin/mixins/scanners.py`) — job, host, pid — because the lease's whole
+        purpose is telling two processes apart, and two of them on one host differ only by the
+        pid. Computed once: a lease renewed under a NEW id every tick is not a renewal, it is
+        one process fighting itself for its own lease.
+        """
+        cached = getattr(self, '_inst_id', '')
+        if not cached:
+            from lib.services.heartbeat import hostname      # noqa: PLC0415
+            cached = f'backup-{hostname()}-{os.getpid()}'
+            self._inst_id = cached
+        return cached
+
     def _claim(self) -> bool:
         """Try to become the process that takes this copy.
 
         An install with no lease store — a single process, which is most of them — takes it:
         the lease exists to stop FOUR processes writing four archives a tick, and refusing to
         work without one would turn the common deployment into the broken one.
+
+        It had never once stopped anything. It asked for `_instance_id`, an attribute no
+        WebAdmin has, so `instance` was always `''` and the guard above returned True before
+        reaching the store — and had it got there, `acquire()` is not a method of
+        `ServiceLeaderStore` either (it is `try_acquire`), so the AttributeError would have been
+        swallowed by the catch-all below and returned True as well. Two ways of saying yes to
+        every process, on the one code path whose entire job is to say no to all but one.
         """
         store = getattr(self._wa, '_service_leader_store', None)
-        instance = str(getattr(self._wa, '_instance_id', '') or '')
-        if store is None or not instance:
+        if store is None:
             return True
+        from lib.services.heartbeat import hostname          # noqa: PLC0415
         try:
-            return bool(store.acquire(LEASE_KEY, instance, LEASE_TTL))
+            return bool(store.try_acquire(LEASE_KEY, self._instance(),
+                                          host=hostname(), ttl=LEASE_TTL))
         except Exception:      # pylint: disable=broad-except
             # A lease that cannot be asked for must not stop the copy: the worst case is a
             # duplicate archive, and the worst case of the other choice is no backups at all.

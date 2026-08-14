@@ -21,6 +21,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from lib import APP_NAME
+
 
 class PveError(Exception):
     """Proxmox API error carrying the HTTP status code (0 = connection error)."""
@@ -53,7 +55,7 @@ class PveClient:
         """
         body = urllib.parse.urlencode(data).encode() if data is not None else None
         req = urllib.request.Request(url, data=body, method=method)
-        req.add_header('User-Agent', 'ServiceSentry/1.0')
+        req.add_header('User-Agent', f'{APP_NAME}/1.0')
         req.add_header('Accept', 'application/json')
         for k, v in (headers or {}).items():
             req.add_header(k, v)

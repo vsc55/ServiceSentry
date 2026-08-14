@@ -1,0 +1,126 @@
+{# ================================================================
+   Binding a check to a host, and to several.
+
+   "Which host is this about" is not a field like the others: choosing one makes the check
+   inherit that host's address and credential profile, and the inline connection fields step
+   aside. The multi-picker is the same idea for a check that watches a set of them.
+
+   Kept apart from the field renderer because it is the one control that changes what the
+   REST of the form means.
+   ================================================================ #}
+
+/**
+ * Render the "bind to a host" picker for a host-capable item.  Selecting a host
+ * makes the check inherit that host's address + credential profile; the inline
+ * connection fields are hidden.  The empty option keeps the classic inline mode.
+ */
+function _renderHostPicker(itemPath, curUid, target) {
+    const opts = ['<option value="">' + esc(t('host_inline')) + '</option>'].concat(
+        hostsList().map(hh =>
+            `<option value="${escAttr(hh.uid)}"${hh.uid === curUid ? ' selected' : ''}>` +
+            `${esc(hh.name)}${hh.address ? ' (' + esc(hh.address) + ')' : ''}</option>`));
+    return `<div class="cfg-field-wrap mb-2">
+        <label class="form-label small fw-semibold">
+            <i class="bi bi-hdd-network me-1"></i>${esc(t('host_bind_label'))}</label>
+        <select class="form-select form-select-sm"
+                onchange="_onHostPick(${jsStr(itemPath)},this.value,${jsStr(target)})">${opts.join('')}</select>
+    </div>`;
+}
+
+/**
+ * Apply a host selection: store host_uid and show/hide the inline connection
+ * fields without a full re-render (preserves expand/scroll state).
+ */
+function _onHostPick(itemPath, uid, target) {
+    updateField(target, itemPath + '|host_uid', uid || '');
+    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
+        .forEach(el => { el.style.display = uid ? 'none' : ''; });
+    // When unbinding, restore each field's own show_when visibility.
+    if (!uid) _refreshConditionalFields(itemPath);
+}
+
+/**
+ * Multi-host picker for a __host_multiple_bind__ module (e.g. a Proxmox cluster):
+ * a check binds to SEVERAL hosts (host_uids) whose addresses form the failover
+ * list.  A checkbox per host; binding hides the inline connection fields.
+ */
+function _renderHostMultiPicker(itemPath, curUids, target) {
+    const sel = (curUids || []).map(String);
+    const hosts = hostsList();
+    // Selected hosts → removable chips (show the host NAME, store the UID).
+    const chips = sel.map(uid => {
+        const h = hosts.find(x => String(x.uid) === uid);
+        const name = h ? h.name : uid;
+        return `<span class="badge text-bg-primary d-inline-flex align-items-center gap-1 me-1 mb-1 ss-fs-2">
+            ${esc(name)}
+            <button type="button" class="btn-close btn-close-white ss-fs-1"
+                title="${escAttr(t('remove') || 'Remove')}"
+                onclick="_hostMultiRemove(${jsStr(itemPath)},${jsStr(uid)},${jsStr(target)})"></button>
+        </span>`;
+    }).join('');
+    // Unselected hosts → entries of an "Add" dropdown (searchable when many).
+    const available = hosts.filter(h => !sel.includes(String(h.uid)));
+    const opts = available.map(h =>
+        `<li><button type="button" class="dropdown-item small hpm-opt"
+            data-hpm-name="${escAttr((String(h.name) + ' ' + String(h.address || '')).toLowerCase())}"
+            onclick="_hostMultiAdd(${jsStr(itemPath)},${jsStr(String(h.uid))},${jsStr(target)})">
+            ${esc(h.name)}${h.address ? ` <span class="text-muted">(${esc(h.address)})</span>` : ''}</button></li>`).join('')
+        || `<li><span class="dropdown-item-text text-muted small">${esc(t('no_items') || '—')}</span></li>`;
+    return `<div class="cfg-field-wrap mb-2" data-hp-multi="${escAttr(itemPath)}">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <label class="form-label small fw-semibold mb-0">
+                <i class="bi bi-hdd-network me-1"></i>${esc(t('host_bind_multi_label') || t('host_bind_label'))}</label>
+            <span class="badge text-bg-secondary">${sel.length}</span>
+            <div class="dropdown ms-auto">
+                <button type="button" class="btn btn-sm btn-secondary dropdown-toggle" data-bs-toggle="dropdown"
+                        data-bs-auto-close="outside" ${available.length ? '' : 'disabled'}>
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('host_add') || t('add') || 'Add')}</button>
+                <div class="dropdown-menu dropdown-menu-end p-2" style="min-width:260px">
+                    ${available.length > 6 ? `<input type="search" class="form-control form-control-sm mb-2"
+                        placeholder="${escAttr((t('search') || 'Search') + '…')}"
+                        oninput="_hostMultiOptFilter(this)" onclick="event.stopPropagation()">` : ''}
+                    <ul class="list-unstyled mb-0" style="max-height:13rem;overflow:auto">${opts}</ul>
+                </div>
+            </div>
+        </div>
+        <div class="border rounded p-2 d-flex flex-wrap align-items-center" style="min-height:2.4rem;background:var(--bs-body-bg)">
+            ${chips || `<span class="text-muted small">${esc(t('host_inline'))}</span>`}
+        </div>
+    </div>`;
+}
+
+// Filter the "Add host" dropdown entries by name/address.
+function _hostMultiOptFilter(inp) {
+    const q = String(inp.value || '').trim().toLowerCase();
+    inp.closest('.dropdown-menu')?.querySelectorAll('.hpm-opt').forEach(o => {
+        o.closest('li').style.display = (!q || (o.dataset.hpmName || '').includes(q)) ? '' : 'none';
+    });
+}
+
+function _hostMultiVals(itemPath, target) {
+    const data = target === 'config' ? configData : modulesData;
+    const it = getPath(data, itemPath.split('|'));
+    return Array.isArray(it && it.host_uids) ? it.host_uids.map(String) : [];
+}
+function _hostMultiAdd(itemPath, uid, target) {
+    const arr = _hostMultiVals(itemPath, target);
+    if (!arr.includes(String(uid))) arr.push(String(uid));
+    _hostMultiCommit(itemPath, target, arr);
+}
+function _hostMultiRemove(itemPath, uid, target) {
+    _hostMultiCommit(itemPath, target, _hostMultiVals(itemPath, target).filter(u => u !== String(uid)));
+}
+function _hostMultiCommit(itemPath, target, arr) {
+    updateField(target, itemPath + '|host_uids', arr);
+    // Binding to ≥1 host hides the inline connection fields (host owns them).
+    const bound = arr.length > 0;
+    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
+        .forEach(el => { el.style.display = bound ? 'none' : ''; });
+    if (!bound) _refreshConditionalFields(itemPath);
+    // Re-render the picker in place (deferred so the current click cycle, incl.
+    // Bootstrap's dropdown handling, finishes before the node is replaced).
+    setTimeout(() => {
+        const el = document.querySelector(`[data-hp-multi="${CSS.escape(itemPath)}"]`);
+        if (el) el.outerHTML = _renderHostMultiPicker(itemPath, arr, target);
+    }, 0);
+}

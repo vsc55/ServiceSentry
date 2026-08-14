@@ -97,6 +97,7 @@ _permAutoRefresh();
 }
 document.getElementById('btn-tab-audit')?.addEventListener('shown.bs.tab', renderAudit);
 document.getElementById('btn-tab-backup')?.addEventListener('shown.bs.tab', renderBackups);
+document.getElementById('btn-tab-diagnostic')?.addEventListener('shown.bs.tab', renderDiagnostics);
 // Section render entry points come from the registry (each descriptor names its own JS
 // function), so a module-contributed section is wired without naming it here. The render
 // is resolved at CALL time: a module ships its function in web/_ui.html, and looking it

@@ -48,6 +48,8 @@ import json as _json
 from dataclasses import dataclass
 from datetime import timedelta
 
+from lib import APP_NAME
+
 # Default UI language.  Inlined (not imported from web_admin) to keep this
 # module dependency-free; lib.i18n.DEFAULT_LANG carries the same value.
 _DEFAULT_LANG = 'en_EN'
@@ -142,6 +144,21 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # an unattended copy that silently holds no credentials is discovered at restore time,
         # which is the worst moment to discover anything.
         env='SS_BACKUP_AUTO_SECRETS', card='backup'),
+    Cfg('web_admin|update_check_url', str,
+        'https://api.github.com/repos/vsc55/ServiceSentry/releases/latest',
+        no_rule=True, card='diagnostics',
+        # Where Diagnostics asks whether a newer release exists. The address lives HERE and not
+        # as a constant in `lib/core/diagnostics/update.py` — that module reads it from this
+        # registry — so the config screen can show it greyed behind an empty box like every
+        # other option, "restore default" has something to restore to, and the one address this
+        # panel is willing to contact is visible to whoever is deciding whether it may reach
+        # the internet at all. Left as a constant, the box was blank with nothing behind it.
+        # A field and not a fixed value so a fork, or an install that may only reach an
+        # internal mirror, points it elsewhere without a code change.
+        # The check NEVER runs on its own: no poll, nothing at boot, nothing while a page
+        # paints. It happens when somebody presses the button, which is why there is no
+        # separate on/off switch — a URL nobody clicks is already off.
+        env='SS_UPDATE_CHECK_URL'),
     Cfg('web_admin|pw_min_len', int, 8, attr='_PW_MIN_LEN',
         min=1, max=128, admin_only=True, card='pw_policy'),
     Cfg('web_admin|pw_max_len', int, 128, attr='_PW_MAX_LEN',
@@ -423,7 +440,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('email|smtp_username', str, '', no_rule=True),
     Cfg('email|smtp_password', str, '', no_rule=True),
     Cfg('email|from_email', str, '', no_rule=True),
-    Cfg('email|from_name', str, 'ServiceSentry', no_rule=True),
+    Cfg('email|from_name', str, APP_NAME, no_rule=True),
     # Global language for ALL notification content (Telegram/Email/Teams/webhook), resolved by
     # lib.core.notify.formatting.notify_lang.
     Cfg('notifications|lang', str, '', no_rule=True),

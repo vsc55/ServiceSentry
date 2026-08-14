@@ -23,6 +23,7 @@ Routes registered by this file:
 import uuid
 
 from flask import Response, jsonify, request, session
+from lib import APP_NAME
 from lib.config.spec import cfg_get
 from lib.security import secret_manager
 
@@ -200,4 +201,4 @@ def register(app, wa):
         if ref.get('service_url') and ref.get('conversation_id'):
             store_.save_reference(ref)
         return jsonify({'type': 'message',
-                        'text': 'ServiceSentry: you will now receive alerts here.'})
+                        'text': f'{APP_NAME}: you will now receive alerts here.'})

@@ -13,6 +13,7 @@ import ssl
 import urllib.error
 import urllib.request
 
+from lib import APP_NAME
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
@@ -176,7 +177,7 @@ class Watchful(ModuleBase):
             return 0, f'Blocked: {_reason}'
         try:
             req = urllib.request.Request(target, method=method.upper())
-            req.add_header('User-Agent', 'ServiceSentry/1.0')
+            req.add_header('User-Agent', f'{APP_NAME}/1.0')
             if auth_user:
                 token = base64.b64encode(
                     f'{auth_user}:{auth_password}'.encode()

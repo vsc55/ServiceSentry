@@ -1,0 +1,103 @@
+{# ================================================================
+   The shared field-control skeleton, and the adapter registry underneath it.
+
+   ONE implementation of "a switch / a select / a number box / a secret / a textarea", used by
+   the Modules tab and by the host edit modal alike. The two keep their data in different
+   places, so a widget reaching for one of them directly could only ever serve that one: an
+   ADAPTER (`registerFieldAdapter`) says how to read and write a value, and the widget is
+   written against that instead.
+
+   The rule this exists to keep: a visual change to a control is made once, here, and both
+   screens get it. Two implementations of the same box is how they drift.
+   ================================================================ #}
+
+// ── Field-value adapter registry ────────────────────────────────────────────
+// Maps a field key → {get,set} so stateful widgets (currently the removable
+// chips multi-field) bind to ANY data model.  The Modules tab registers an
+// adapter backed by modulesData/updateField; the host edit modal one backed by
+// _hostChecks/_setHostCheckField.  Both then drive ONE widget implementation,
+// so a change to the widget applies to both places.
+const _fieldAdapters = {};
+function registerFieldAdapter(key, get, set) { _fieldAdapters[key] = { get, set }; }
+function _faGet(key) { const a = _fieldAdapters[key]; return a ? (a.get() || '') : ''; }
+function _faSet(key, v) { const a = _fieldAdapters[key]; if (a) a.set(v); }
+
+
+// ── Shared field-control skeleton (single source for Modules + host modal) ────
+// Assembles the input-group markup for one control kind.  Data-model wiring
+// (onchange / oninput JS, options, value, placeholder, trailing buttons) is
+// computed by the caller and passed in, so the markup itself lives in one place
+// and any visual change applies to both the Modules tab and the host modal.
+//   spec = { kind:'switch'|'select'|'number'|'secret'|'textarea'|'multi'|'text',
+//            value, onChange, onInput, key, trailing, optionsHtml,
+//            inputType, inputCls, inputAttrs, rows, placeholder, textareaVal }
+/** The unit selector that belongs to an amount, as a control attached to its box.
+ *
+ *  Declared by the schema (`"unit_field": "free_unit"`), so the core pairs nothing by
+ *  guessing at names. Same `updateField` as any other select — it is the same field, drawn
+ *  in a better place.
+ */
+function _unitSelect(sch, obj, pathPrefix, target, unitKey) {
+    const meta = fieldMeta(sch, unitKey);
+    if (!meta || !Array.isArray(meta.options)) return '';
+    const cur = obj[unitKey];
+    const sp = jsStr(pathPrefix + '|' + unitKey);
+    const opts = meta.options.map(o =>
+        `<option value="${escAttr(o)}"${String(cur) === String(o) ? ' selected' : ''}>${esc(o)}</option>`).join('');
+    return `<select class="form-select ss-unit-sel"
+            onchange="updateField(${jsStr(target)},${sp},this.value)">${opts}</select>`;
+}
+
+function fieldCtl(spec) {
+    const tr = spec.trailing || '';
+    const oc = spec.onChange ? ` onchange="${spec.onChange}"` : '';
+    const oi = spec.onInput  ? ` oninput="${spec.onInput}"`   : '';
+    const at = spec.inputAttrs || '';
+    switch (spec.kind) {
+        case 'switch':
+            return `<div class="d-flex align-items-center gap-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" ${spec.value ? 'checked' : ''}${oc}>
+                </div>${tr}</div>`;
+        case 'select':
+            return `<div class="input-group input-group-sm">
+                <select class="form-select"${oc}>${spec.optionsHtml || ''}</select>${tr}</div>`;
+        case 'number':
+            return `<div class="input-group input-group-sm">
+                <input type="number" class="form-control"${at}${oi}${oc}>${tr}</div>`;
+        case 'secret':
+            return `<div class="input-group input-group-sm">
+                <input type="password" class="form-control"${at}${oi}${oc}>${tr}</div>`;
+        case 'textarea':
+            return `<textarea class="form-control form-control-sm" rows="${spec.rows || 4}"
+                style="font-family:var(--bs-font-monospace);font-size:.78rem;white-space:pre"
+                placeholder="${escAttr(spec.placeholder || '')}"${oc}>${spec.textareaVal || ''}</textarea>`;
+        case 'multi': {
+            // When empty, hint the default value + the add cue; once it has chips,
+            // just the add cue (renderChips() keeps this in sync on add/remove).
+            const _addPh = spec.suggest ? (t('notif_recipient_add') || t('multi_add')) : t('multi_add');
+            const _emptyPh = spec.placeholder ? `${spec.placeholder} — ${_addPh}` : _addPh;
+            const _ph = _multiList(spec.value).length ? _addPh : _emptyPh;
+            const _sug = spec.suggest ? ` data-multi-suggest="${escAttr(spec.suggest)}"` : '';
+            const _oninput = spec.suggest ? ` oninput="_multiSuggestInput(this)" onblur="setTimeout(_multiSuggestClose,150)" autocomplete="off"` : '';
+            return `<div class="input-group input-group-sm">
+                <div class="form-control d-flex flex-wrap align-items-center gap-1"
+                     style="height:auto;min-height:calc(1.5em + .5rem + 2px);cursor:text"
+                     data-multi-chips="${escAttr(spec.key)}"${_sug} data-multi-add-ph="${escAttr(_addPh)}" data-multi-empty-ph="${escAttr(_emptyPh)}" data-multi-validate="${escAttr(spec.validate || '')}"
+                     onclick="this.querySelector('input')?.focus()">${chipsHtml(spec.key, spec.value)}<input
+                    type="text" class="border-0 p-0 flex-grow-1 bg-transparent" style="outline:none;box-shadow:none;min-width:6rem"
+                    placeholder="${escAttr(_ph)}"${_oninput}
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();_multiEnter(this);}"></div>
+                ${tr}</div>`;
+        }
+        default:
+            return `<div class="input-group input-group-sm">
+                <input type="${spec.inputType || 'text'}" class="form-control${spec.inputCls || ''}"${at}${oi}${oc}>${tr}</div>`;
+    }
+}
+// Two-column field row (label + control), the Modules/Config layout.
+function _fieldRow(lblHtml, inner, hint) {
+    return `<div class="row mb-2 align-items-start">
+        <label class="col-sm-4 col-form-label col-form-label-sm">${lblHtml}</label>
+        <div class="col-sm-8">${inner}${hint || ''}</div></div>`;
+}

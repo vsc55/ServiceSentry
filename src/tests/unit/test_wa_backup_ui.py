@@ -18,6 +18,9 @@ import re
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup', '_render.html')
 ROUTES = os.path.join(SRC, 'lib', 'core', 'backup', 'routes.py')
+# The schedule's endpoints are their own module: they are their own decision, with their own
+# permission. A guard about a task or a profile reads THAT file.
+SCHED_ROUTES = os.path.join(SRC, 'lib', 'core', 'backup', 'routes_schedule.py')
 PICKER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
                       '_picker.html')
 TASKS  = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
@@ -28,6 +31,8 @@ DETAIL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup'
                       '_detail.html')
 RESTORE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
                        '_restore.html')
+RESTORE_TABLES = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
+                              '_restore_tables.html')
 RETENTION = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
                          '_retention.html')
 PROFILES = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
@@ -49,8 +54,8 @@ def _ui() -> str:
     it broke fifteen of these before this helper existed.
     """
     return (_read(RENDER) + _read(PICKER) + _read(TASKS) + _read(RUN)
-            + _read(DETAIL) + _read(RESTORE) + _read(RETENTION) + _read(PROFILES)
-            + _read(ACTIONS))
+            + _read(DETAIL) + _read(RESTORE) + _read(RESTORE_TABLES) + _read(RETENTION)
+            + _read(PROFILES) + _read(ACTIONS))
 
 
 class TestThePickerAnswersTheClick:
@@ -99,7 +104,7 @@ class TestItStartsWhereTheCopiesGo:
         that is always relevant. The drive roots are where you end up, not where you start."""
         src = _read(ROUTES)
         body = src[src.index('def api_browse_dirs'):src.index('/api/v1/backups\', methods=[\'POST\']')]
-        assert 'backup_svc.backups_dir(' in body, 'an empty path still answers with the roots'
+        assert 'backup_archive.backups_dir(' in body, 'an empty path still answers with the roots'
         assert '_var_dir()' in body, 'nothing to fall back to before the first copy exists'
 
     def test_the_wait_says_which_folder(self):
@@ -195,11 +200,16 @@ class TestTheTwoPanesStayInTheirLanes:
         """`.modal-lg > .modal-content` is `resize: both` on purpose — these dialogs are meant
         to be dragged bigger. A child with a FIXED height defeats that: the box grows and the
         content stays put, which is the empty half that was reported. It fills, with a floor so
-        it cannot collapse when the dialog is made small."""
+        it cannot collapse when the dialog is made small.
+
+        The rule excludes `.modal-dialog-scrollable`, which is the same modal in its other
+        shape — a long form whose body has to scroll, not hide what does not fit."""
         src = _ui()
         assert 'style="flex:1 1 auto;min-height:20rem"' in src,             'the picker measures the dialog instead of filling it'
         css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
-        assert '#backupModal .modal-lg > .modal-content > .modal-body' in css,             'the body is not a column, so nothing inside it can fill'
+        assert ('#backupModal .modal-lg:not(.modal-dialog-scrollable) > .modal-content'
+                ' > .modal-body') in css, \
+            'the body is not a column, so nothing inside it can fill'
         i = css.index('#backupModal .modal-lg')
         assert 'flex-direction: column' in css[i:css.index('}', i)]
 
@@ -688,7 +698,7 @@ class TestRestoringAcrossVersionsIsNotSilent:
     def test_the_log_carries_it_too(self):
         """A restore is the moment nobody is looking ten minutes later; "which columns went" is
         asked months afterwards, when the answer on screen is long gone."""
-        src = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'runner.py'))
+        src = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'jobs.py'))
         body = src[src.index("wa._audit_write('backup_restored'"):]
         # To the call's own closing line, not to the first `})` — several values in there are
         # `res.get(..., {})`, and slicing at one of those cuts the entry in half.
@@ -777,7 +787,7 @@ class TestTheRestoreDialogTicksItsPartsOff:
     def test_the_job_carries_the_final_word(self):
         """It is filled in as the restore goes, but a run that failed leaves it half written —
         the answer is the one the function returned."""
-        src = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'runner.py'))
+        src = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'jobs.py'))
         body = src[src.index('def start_restore'):]
         assert "'steps': res.get('steps'" in body
 
@@ -793,7 +803,7 @@ class TestTheScheduleAndTheVerifyHaveTheirOwnGrants:
         assert "'flag': 'backup_schedule'" in man and "'flag': 'backup_verify'" in man
 
     def test_the_task_routes_ask_for_it(self):
-        src = _read(ROUTES)
+        src = _read(SCHED_ROUTES)
         assert "schedule_req = wa._perm_required('backup_schedule')" in src
         for route in ("@app.route('/api/v1/backups/tasks', methods=['PUT'])",
                       "@app.route('/api/v1/backups/tasks/<uid>', methods=['DELETE'])"):
@@ -803,7 +813,7 @@ class TestTheScheduleAndTheVerifyHaveTheirOwnGrants:
     def test_running_a_task_is_still_making_a_copy(self):
         """It produces a copy exactly like the Create button; one grant should not be two ways
         to the same result."""
-        src = _read(ROUTES)
+        src = _read(SCHED_ROUTES)
         after = src[src.index("@app.route('/api/v1/backups/tasks/<uid>/run'"):]
         assert '@create_req' in after[:120]
 
@@ -938,16 +948,16 @@ class TestACopyCanBeKept:
         """A lock only the UI honoured protects nothing on the day it matters — and a `.lock`
         left behind would make a later copy of the same name born protected."""
         py = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'service.py'))
-        body = py[py.index('def delete_backup('):py.index('# ── Restoring')]
+        body = py[py.index('def delete_backup('):py.index('def archive_bytes(')]
         assert 'LOCK_SUFFIX' in body, 'delete_backup deletes a locked copy'
         assert '.sha256' in body, 'the sidecars outlive the archive'
 
     def test_the_flag_is_a_file_beside_the_archive_not_a_row(self):
         """`list_backups` reads the directory precisely so there is no second source of truth
         about files somebody can move with the panel stopped."""
-        py = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'service.py'))
+        py = _read(os.path.join(SRC, 'lib', 'core', 'backup', 'locks.py'))
         assert "LOCK_SUFFIX = '.lock'" in py
-        assert 'backup_locks' not in py, 'the lock went into a table after all'
+        assert 'reconcile_table' not in py and 'Store' not in py,             'the lock went into a table after all'
 
     def test_it_rides_on_the_delete_grant(self):
         """Unlocking is asking to be able to delete, so it cannot be a weaker grant."""
@@ -1010,7 +1020,7 @@ class TestOnePolicyManyTasks:
         src = _read(RETENTION)
         body = src[src.index('function _tkPolicySummary'):]
         assert '_backupPolicies[tk.id]' in body[:400], 'the row works the policy out on its own'
-        assert "'policies'" in _read(ROUTES), 'the server never resolves it'
+        assert "'policies'" in _read(SCHED_ROUTES), 'the server never resolves it'
 
     def test_the_boxes_disappear_behind_a_profile_but_are_not_discarded(self):
         """They are what the task goes back to when it is unlinked; re-reading them from the
@@ -1025,7 +1035,7 @@ class TestOnePolicyManyTasks:
         """The point of a shared policy is also its one hazard, and "3 tasks" is a number
         somebody needs before saving rather than afterwards in the audit log."""
         assert 'backup_profile_affects' in _read(PROFILES)
-        assert "'used_by'" in _read(ROUTES), 'the server never counts them'
+        assert "'used_by'" in _read(SCHED_ROUTES), 'the server never counts them'
 
     def test_a_profile_in_use_offers_no_delete_button(self):
         """The answer would be a 409, and a button whose only outcome is an error is an offer to
@@ -1033,7 +1043,7 @@ class TestOnePolicyManyTasks:
         src = _read(PROFILES)
         body = src[src.index('const btnDel'):]
         assert '!used.length' in body[:200]
-        routes = _read(ROUTES)
+        routes = _read(SCHED_ROUTES)
         after = routes[routes.index("@app.route('/api/v1/backups/profiles/<uid>'"):]
         assert '409' in after[:2000], 'the server would delete it anyway'
 
@@ -1050,9 +1060,100 @@ class TestOnePolicyManyTasks:
     def test_they_ride_on_the_schedule_grant(self):
         """Editing a profile is editing the retention of every task that follows it — the same
         decision `backup_schedule` already covers, not a new one."""
-        routes = _read(ROUTES)
+        routes = _read(SCHED_ROUTES)
         for route in ("@app.route('/api/v1/backups/profiles', methods=['PUT'])",
                       "@app.route('/api/v1/backups/profiles/<uid>', methods=['DELETE'])"):
             after = routes[routes.index(route):]
             assert '@schedule_req' in after[:120], route
         assert "perms.has('backup_schedule')" in _read(PROFILES)
+
+
+class TestTheRestoreFormCanGoTableByTable:
+    """The advanced fold: which TABLES come back, not only which parts.
+
+    The trap it is written against is the empty selection. `tables` absent means "all of
+    them" and `tables: []` means "none"; a form that sent an empty array for an untouched
+    fold would empty every table of every ticked part with nothing to put back.
+    """
+
+    def test_the_untouched_fold_sends_no_table_list_at_all(self):
+        """With nothing left out the request is the one it always was — an install restored
+        the ordinary way never travels the narrower path."""
+        src = _read(RESTORE_TABLES)
+        body = src[src.index('function _bkChosenTables'):]
+        assert 'leftOut ? chosen : null' in body, \
+            'the picker sends a list even when nothing was excluded'
+
+    def test_nothing_selected_is_refused_before_it_is_sent(self):
+        """Sending it would empty the tables of every ticked part with nothing to refill
+        them: the one outcome worse than not restoring."""
+        src = _read(RESTORE)
+        body = src[src.index('async function _restoreBackup'):]
+        assert '_bkNothingToRestore(parts, tables)' in body[:300]
+        assert 'backup_restore_nothing' in body[:400] and 'return;' in body[:400]
+
+    def test_a_files_only_restore_is_still_a_restore(self):
+        """config.json and a module's files come back without a single row being touched, so
+        "no table chosen" is not "nothing chosen" when one of those is ticked."""
+        src = _read(RESTORE)
+        body = src[src.index('function _bkNothingToRestore'):]
+        assert '_bkIsFilePart' in body[:400]
+
+    def test_the_list_only_travels_when_a_choice_was_made(self):
+        src = _read(RESTORE)
+        body = src[src.index('async function _restoreBackup'):]
+        assert 'if (Array.isArray(tables)) body.tables = tables' in body
+
+    def test_the_grouping_comes_from_the_server(self):
+        """`core` means "every table nobody else claimed" — the rule that decides what a copy
+        holds and what a restore applies. A third implementation in the browser would be right
+        until the day somebody adds a part."""
+        src = _read(RESTORE_TABLES)
+        assert '/tables' in src, 'the fold does not ask the API what the archive holds'
+        assert '_CLAIMED' not in src and 'claimed' not in src.split('####')[0].lower() \
+            or 'apiGet' in src, 'the claim rule looks reimplemented in JavaScript'
+        routes = _read(ROUTES)
+        after = routes[routes.index("@app.route('/api/v1/backups/<name>/tables'"):]
+        assert '@view_req' in after[:120], 'the catalogue is not behind backup_view'
+
+    def test_a_part_that_is_not_ticked_has_no_say_in_its_tables(self):
+        """Its group is disabled rather than hidden: hiding it would make a tick above look
+        like it had cleared a choice made below."""
+        src = _read(RESTORE_TABLES)
+        body = src[src.index('function _bkTablePickChanged'):]
+        assert 'disabled' in body and 'opacity-50' in body
+        assert "style.display" not in body, 'the group is hidden instead of dimmed'
+
+    def test_it_says_afterwards_that_the_rest_was_left_alone(self):
+        """"148 rows in 9 tables" reads as a full restore unless something says otherwise."""
+        assert 'backup_restored_tables_only' in _read(RESTORE)
+        assert "'partial'" in _read(os.path.join(SRC, 'lib', 'core', 'backup', 'jobs.py'))
+
+    def test_the_fold_warns_that_finer_is_not_safer(self):
+        """What is left out keeps whatever it holds today, and rows that point at it can end
+        up pointing at nothing. That is the feature, and it has to be said out loud."""
+        assert 'backup_restore_tables_warn' in _read(RESTORE_TABLES)
+
+    def test_the_dialog_asks_for_a_scrolling_body(self):
+        """Reported from a screenshot: the last group of tables sat under the footer. The
+        dialog is a flex column with `overflow: hidden`, so a body that overflows is not a
+        scrollbar — it is content clipped behind the buttons."""
+        assert "'scroll');" in _read(RESTORE), 'the restore dialog opens as a plain wide one'
+        src = _read(RENDER)
+        body = src[src.index('function _openBackupModal'):]
+        assert "classList.toggle('modal-dialog-scrollable', size === 'scroll')" in body[:1400]
+
+    def test_the_fold_has_no_scrollbar_of_its_own(self):
+        """One form, one scroller. A capped box inside a scrolling body is two bars for the
+        same list, and the inner one hides where the list ends."""
+        src = _read(RESTORE_TABLES)
+        assert 'overflow' not in src and 'max-height' not in src
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '#backupModal .modal-lg:not(.modal-dialog-scrollable)' in css, \
+            'the picker rule turns the scrolling body off again for every backup dialog'
+
+    def test_the_group_buttons_are_solid(self):
+        """The panel has no outline buttons — they read as disabled on both surfaces."""
+        src = _read(RESTORE_TABLES)
+        assert 'btn-outline' not in src
+        assert 'btn-secondary' in src

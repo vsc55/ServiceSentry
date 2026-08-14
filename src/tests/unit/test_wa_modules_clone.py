@@ -146,27 +146,27 @@ class TestTheAuditSaysNewOrClonedAndFromWhat:
     def test_the_mark_never_reaches_storage(self):
         """It answers a question about the WRITE. Persisted, it would become a permanent
         property of the item instead of a fact about the moment it was created."""
-        from lib.core.modules.service import take_clone_marks       # noqa: PLC0415
+        from lib.core.modules.items import take_clone_marks       # noqa: PLC0415
         data = {'ping': {'list': {'U2': {'uid': 'U2', '__cloned_from__': 'U1'}}}}
         marks = take_clone_marks(data)
         assert marks == {('ping', 'list', 'U2'): 'U1'}
         assert '__cloned_from__' not in data['ping']['list']['U2']
 
     def test_an_unmarked_item_yields_no_mark(self):
-        from lib.core.modules.service import take_clone_marks       # noqa: PLC0415
+        from lib.core.modules.items import take_clone_marks       # noqa: PLC0415
         data = {'ping': {'list': {'U1': {'uid': 'U1'}}}}
         assert take_clone_marks(data) == {}
         assert data == {'ping': {'list': {'U1': {'uid': 'U1'}}}}
 
     def test_a_new_item_is_reported_as_new(self):
-        from lib.core.modules.service import item_origin_rows       # noqa: PLC0415
+        from lib.core.modules.items import item_origin_rows       # noqa: PLC0415
         rows = item_origin_rows({}, {'ping': {'list': {'U1': {'label': 'web'}}}}, {})
         assert len(rows) == 1
         assert rows[0]['field'] == 'ping.list · new item'
         assert 'web' in rows[0]['new'] and 'U1' in rows[0]['new']
 
     def test_a_clone_names_its_source(self):
-        from lib.core.modules.service import item_origin_rows       # noqa: PLC0415
+        from lib.core.modules.items import item_origin_rows       # noqa: PLC0415
         old = {'ping': {'list': {'U1': {'label': 'web'}}}}
         new = {'ping': {'list': {'U1': {'label': 'web'},
                                  'U2': {'label': 'web_Copia1'}}}}
@@ -178,14 +178,14 @@ class TestTheAuditSaysNewOrClonedAndFromWhat:
 
     def test_an_untouched_item_produces_no_row(self):
         """Only items that APPEARED. An edit is already reported field by field."""
-        from lib.core.modules.service import item_origin_rows       # noqa: PLC0415
+        from lib.core.modules.items import item_origin_rows       # noqa: PLC0415
         same = {'ping': {'list': {'U1': {'label': 'web'}}}}
         assert item_origin_rows(same, same, {}) == []
 
     def test_the_name_comes_from_what_the_module_declares(self):
         """Modules do not all call it `label` — ups uses `ups_name`, process uses `process`.
         Guessing would silently print a uid for those."""
-        from lib.core.modules.service import item_origin_rows       # noqa: PLC0415
+        from lib.core.modules.items import item_origin_rows       # noqa: PLC0415
         rows = item_origin_rows(
             {}, {'ups': {'list': {'U1': {'ups_name': 'sai-1'}}}}, {},
             {'ups|list': {'__check_title_field__': 'ups_name'}})
@@ -194,14 +194,14 @@ class TestTheAuditSaysNewOrClonedAndFromWhat:
     def test_it_survives_discovery_being_unavailable(self):
         """Naming an item is a nicety; a module folder that fails to scan must not be why a
         save 500s. Empty, never an exception — and the caller then falls back to `label`."""
-        from lib.core.modules.service import item_schemas           # noqa: PLC0415
+        from lib.core.modules.items import item_schemas           # noqa: PLC0415
         assert item_schemas('/definitely/not/a/directory') == {}
         assert item_schemas(None), 'the real scan came back empty — the fallback hides that'
 
     def test_a_missing_schema_still_names_what_it_can(self):
         """With no schema at all the rows must still be readable: `label` is what the rest of
         the UI assumes, and the uid is always there."""
-        from lib.core.modules.service import item_origin_rows       # noqa: PLC0415
+        from lib.core.modules.items import item_origin_rows       # noqa: PLC0415
         rows = item_origin_rows({}, {'x': {'list': {'U9': {'label': 'thing'}}}}, {}, {})
         assert 'thing' in rows[0]['new'] and 'U9' in rows[0]['new']
         bare = item_origin_rows({}, {'x': {'list': {'U9': {}}}}, {}, {})

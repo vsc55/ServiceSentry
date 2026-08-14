@@ -117,6 +117,66 @@ class TestTheRoundTrip:
         assert client.post('/api/v1/backups/nope/restore', json={}).status_code == 400
 
 
+class TestRestoringOnlyTheTablesYouChose:
+    """The advanced half of the restore form, through the app.
+
+    The service covers what happens to the rows; what only the app can answer is that the form
+    is offered the archive's real contents, that the narrower request reaches the job, and that
+    the log says which tables somebody asked for — the rowcounts say what came back, and only
+    the request says what was deliberately left alone.
+    """
+
+    def test_the_archive_says_what_it_holds_by_part(self, client):
+        _login(client)
+        _create(client)
+        res = client.get('/api/v1/backups/copia/tables')
+        assert res.status_code == 200
+        parts = res.get_json()['parts']
+        core = next(p for p in parts if p['id'] == 'core')
+        assert 'users' in [tb['name'] for tb in core['tables']]
+        assert all('rows' in tb for tb in core['tables'])
+
+    def test_a_copy_that_is_not_there_answers_404(self, client):
+        _login(client)
+        assert client.get('/api/v1/backups/nope/tables').status_code == 404
+
+    def test_only_the_named_tables_come_back(self, client, admin):
+        """A probe table beside `users`, so what is left alone is left alone visibly: it is in
+        the copy, it changed afterwards, and the restore must not touch it."""
+        _login(client)
+        con = admin._db_connector
+        con.execute('CREATE TABLE probe (v TEXT)')
+        con.execute("INSERT INTO probe (v) VALUES ('before')")
+        con.commit()
+        _create(client)
+        con.execute("UPDATE probe SET v='after'")
+        con.execute('DELETE FROM users')
+        con.commit()
+
+        job = _restore(client, 'copia', tables=['users'])
+        assert not job.get('error'), job
+        assert con.fetchone('SELECT COUNT(*) FROM users')[0] > 0
+        assert con.fetchone('SELECT v FROM probe')[0] == 'after'
+
+    def test_the_audit_line_says_which_tables_were_asked_for(self, client, admin):
+        _login(client)
+        _create(client)
+        _restore(client, 'copia', tables=['users'])
+        line = next(e for e in admin._audit_store.get_all(newest_first=True)
+                    if e.get('event') == 'backup_restored')
+        assert 'users' in str(line.get('detail') or line)
+
+    def test_an_ordinary_restore_still_says_all(self, client, admin):
+        """The request without a table list is the one it always was, and the log has to read
+        as such — "all" and a list of every table are not the same sentence."""
+        _login(client)
+        _create(client)
+        _restore(client, 'copia')
+        line = next(e for e in admin._audit_store.get_all(newest_first=True)
+                    if e.get('event') == 'backup_restored')
+        assert "'only_tables': 'all'" in str(line.get('detail') or line)
+
+
 class TestEachOneHasItsOwnPermission:
     """A viewer may see that copies exist and nothing else — not fetch one, not apply one."""
 
@@ -139,6 +199,11 @@ class TestEachOneHasItsOwnPermission:
         assert viewer.get('/api/v1/backups/x/download').status_code == 403
         assert viewer.post('/api/v1/backups/x/restore', json={}).status_code == 403
         assert viewer.delete('/api/v1/backups/x').status_code == 403
+
+    def test_the_table_catalogue_rides_on_the_listing_grant(self, viewer):
+        """`backup_view`, and no weaker: it adds the grouping, not the contents — every
+        manifest already travels with its table names and row counts in the list."""
+        assert viewer.get('/api/v1/backups/x/tables').status_code == 403
 
 
 class TestItIsAllAudited:
@@ -229,11 +294,12 @@ class TestTheScheduleTakesCopies:
         worth having."""
         import os
         import time
+        from lib.core.backup import archive as bk_archive
         from lib.core.backup import service as svc
         self._task(admin, 'diaria', every_hours=24, keep=1)
         self._task(admin, 'mensual', every_hours=720, keep=1)
         r = self._runner(admin)
-        root = svc.backups_dir(admin._var_dir)
+        root = bk_archive.backups_dir(admin._var_dir)
         for i in range(3):
             r.tick(now_ts=time.time() + i)
             for fn in os.listdir(root):           # age everything so the next tick is due
@@ -295,6 +361,72 @@ class TestTheOldSettingsBecomeATask:
         r.tick()
         r.tick()
         assert admin._backup_tasks_store.count() == 1
+
+
+class TestOnlyOneProcessTakesTheScheduledCopy:
+    """Reported from a read of the code, not from a screen: the lease had never stopped
+    anything.
+
+    `_claim` asked the web admin for `_instance_id` — an attribute no WebAdmin has — so the
+    identity was always empty and the guard returned True before it ever reached the store. And
+    had it got there, `acquire()` is not a method of `ServiceLeaderStore` (it is `try_acquire`),
+    so the AttributeError would have been swallowed and answered True as well: two ways of
+    saying yes to every process, on the one code path whose whole job is to say no to all but
+    one. Four web replicas over one database meant four archives of the same install, every
+    tick, each one pruning against a folder the other three were writing into.
+    """
+
+    def _runner(self, admin):
+        from lib.core.backup.runner import BackupRunner
+        return BackupRunner(admin)
+
+    def _task(self, admin, name='diaria'):
+        admin._backup_tasks_store.upsert({'name': name, 'enabled': True, 'every_hours': 24,
+                                          'parts': ['core'], 'secrets': True, 'keep': 7})
+
+    def test_the_lease_is_actually_held(self, admin):
+        """The identity is the one its neighbours use — job, host, pid — because two processes
+        on one host differ by nothing else."""
+        r = self._runner(admin)
+        assert r._claim() is True
+        assert r._instance().startswith('backup-')
+        assert str(os.getpid()) in r._instance()
+        from lib.core.backup.runner import LEASE_KEY
+        holder = admin._service_leader_store.current_leader(LEASE_KEY)
+        assert holder and holder.get('instance_id') == r._instance()
+
+    def test_a_second_process_does_not_get_it(self, admin):
+        """Another replica, same database. It must be turned away while the first holds the
+        lease — and it is the lease that turns it away, not luck about who ticks first."""
+        first = self._runner(admin)
+        assert first._claim() is True
+        other = self._runner(admin)
+        other._inst_id = 'backup-other-host-999'          # a different process
+        assert other._claim() is False
+
+    def test_the_one_turned_away_takes_no_copy(self, admin):
+        self._task(admin)
+        first = self._runner(admin)
+        assert first._claim() is True
+        other = self._runner(admin)
+        other._inst_id = 'backup-other-host-999'
+        out = other.tick()
+        assert out['leader'] is False
+        assert out['created'] == [], 'the second replica wrote its own archive anyway'
+
+    def test_renewing_is_not_competing_with_itself(self, admin):
+        """The id is computed once. Rebuilt per tick it would be a new holder every time, so a
+        process would spend its ticks taking the lease off itself — which looks like it works
+        and gives the guarantee away."""
+        r = self._runner(admin)
+        assert r._claim() is True and r._claim() is True
+        assert r._instance() == self._runner(admin)._instance(), 'same process, same identity'
+
+    def test_an_install_with_no_lease_store_still_copies(self, admin, monkeypatch):
+        """Most installs are one process. Refusing to work without a lease would turn the
+        common deployment into the broken one."""
+        monkeypatch.setattr(admin, '_service_leader_store', None, raising=False)
+        assert self._runner(admin)._claim() is True
 
 
 class TestTheFolderPicker:

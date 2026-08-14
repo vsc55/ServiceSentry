@@ -6201,7 +6201,7 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 
 ## 133. Configuration — un índice lateral sobre un solo renderizador
 
-**Archivo:** `tests/unit/test_wa_config_views.py` — 73 tests
+**Archivo:** `tests/unit/test_wa_config_views.py` — 74 tests
 **Archivo:** `tests/meta/test_wa_config_views.py` — 3 tests
 
 Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar
@@ -6221,7 +6221,7 @@ divergen, y la divergencia es invisible — al segundo solo se le mira cuando al
 | `TestThereIsOneNavigator::*` (×4) | No queda registro de vistas, ni conmutador, ni sitio para él en la barra; `renderConfig` no vuelve a construir tira de pestañas ni paneles; el cuerpo son las tarjetas **en el orden del layout**; y el índice se carga después del renderizador que post-procesa | | un panel donde el índice no sabe mirar dentro — que es exactamente como falló tres veces |
 | `TestEverySectionIsACard::*` (×3) | Notificaciones son **ocho tarjetas** en el layout (ajustes, enrutamiento, eventos, Telegram, correo, Teams, webhooks, plantillas), cada una se dibuja bajo su propio `#cfgcol_<id>`, y en `cfg/notify/` no queda ningún nav propio | | una sección a la que solo se llega con dos clics y un nav que el índice tiene que esconder |
 | `TestTheIndex::*` (×7) | El índice sale del layout (ningún id de pestaña fijo); las tarjetas se muestran y ocultan, nunca se reconstruyen; una sección se encuentra por su id de layout; se cuenta lo que se aparta de fábrica —lo fijado por entorno incluido—; nunca se enseña un id crudo como nombre; se recuerda dónde estabas; y **una tarjeta que va a buscar sus datos declara su propio cargador** (`data-cfg-load`), que se llama una vez por render | | Plantillas en «Cargando…» para siempre en cuanto desaparece el botón del que colgaba |
-| `TestItSitsBesideTheSection::*` (×5) | El índice vive **al lado** de la sección, no dentro de su cuerpo (dentro empezaba donde empieza el cuerpo y acababa donde acaba: por eso se quedaba corto se calculase como se calculase su altura); llega al marco por los cuatro lados —cancela los gutters del contenedor y su `pb-3`, y la barra pierde su propio sangrado lateral porque cancelar dos veces el mismo gutter la saca del marco—; el detalle se **mueve**, no se copia; la columna se construye una sola vez; y el índice hace su propio scroll | `min-height: 0` en `.cfg-shell` | un segundo juego de los mismos inputs —de los que solo uno guarda—, una franja de fondo de página a su izquierda y bajo sus pies, y una pila de columnas tras cada guardado |
+| `TestItSitsBesideTheSection::*` (×6) | El índice vive **al lado** de la sección, no dentro de su cuerpo (dentro empezaba donde empieza el cuerpo y acababa donde acaba: por eso se quedaba corto se calculase como se calculase su altura); llega al marco por los cuatro lados —cancela los gutters del contenedor y su `pb-3`, y la barra pierde su propio sangrado lateral porque cancelar dos veces el mismo gutter la saca del marco—; el detalle se **mueve**, no se copia; la columna se construye una sola vez; y el índice hace su propio scroll. Y la columna de detalle **tiene nombre propio** (`.ss-shell-main`): se llamaba `.ss-main`, que es la columna de contenido de la aplicación —`height: 100vh`, el único contenedor con scroll de la página—, y con la misma especificidad el segundo bloque solo ganaba las propiedades que nombraba: el `100vh` sobrevivía, un shell que empieza bajo la miga de pan desbordaba la página justo por el alto de las barras de encima (52 px medidos), y desplazar ese desbordamiento se llevaba la barra de herramientas y la cabecera del rail fuera de pantalla | `min-height: 0` en `.cfg-shell`; el bloque `.ss-shell-main` sin `height` ni `overflow` | un segundo juego de los mismos inputs —de los que solo uno guarda—, una franja de fondo de página a su izquierda y bajo sus pies, una pila de columnas tras cada guardado, y una colisión de clases que no da error: da una herencia parcial en la que la regla más nueva parece haber ganado |
 | `TestItIsAPassNotARenderer::*` (×3) | No dibuja ningún campo, se aplica antes que el filtro, y cada pasada deshace la anterior | | dos pasadas componiendo una tercera que nadie diseñó |
 | `TestTheSearchAndTheIndexShareOneScreen::*` (×14) | Buscar alcanza **todas** las secciones (por eso las 34 tarjetas siguen en el DOM); vaciar la caja devuelve la pantalla al índice en vez de volcar las 34; y elegir una sección termina la búsqueda Y mientras se busca **el índice es la lista de resultados**: solo las secciones que han casado, cada una con cuántas de sus opciones —insignia de otro color, porque «ha casado aquí» y «se aparta de fábrica» son preguntas distintas—; un grupo vacío no sale, y una búsqueda sin resultados lo dice donde irían. Solo **un** pase decide qué filas se ven: el filtro de «solo lo modificado» se aparta mientras hay búsqueda, porque si no gana el último que corra. Y **«solo modificadas»** es un **interruptor** de la barra —un modo, no una búsqueda— que compone con el buscador dentro del **mismo** pase. Buscar reemplaza la navegación (la hoja pasa a ser lista de resultados); el modo **no**: se sigue navegando sección a sección desde el índice, y solo se estrecha lo que se lista —fuera del índice las secciones sin cambios, fuera de la sección las opciones de fábrica. Si la sección en la que estabas se queda sin nada, salta a la primera que tenga. Cerrar la caja de búsqueda **borra el término**: guardarla es cómo dices que has terminado, y un filtro corriendo desde un control que ya no está en pantalla deja el panel enseñando una fracción de sí mismo sin nada que lo explique —estado que antes se sobrellevaba con un punto de aviso en el botón, y que ahora no puede darse, así que el punto se fue con él. El filtro y el índice recorren la **misma** unidad (`_cfgCardNode`): recorrer `.cfg-card` dejaba fuera a Plantillas —dos cartas dentro de un wrapper, que es lo que el índice lista— y sobrevivía a todo filtro sin nada dentro. Y el orden del redibujado es **restaurar, filtrar, indexar**: restaurar después del filtro le devolvía la visibilidad a todo lo que el filtro acababa de ocultar. «Cambiada» se define **una vez** (`_cfgFieldIsChanged`, env-locked incluido): estaba escrita tres veces y coincidían de suerte. En una instalación de fábrica no casa nada, y eso lo dice en vez de dejar la pantalla en blanco. | | abrir una sección con la mitad de sus campos escondidos por un filtro cuya caja está plegada |
 | `TestASectionIsASheetNotACard::*` (×30) | Una sección es una **hoja**: sin marco, sin chevron, sin acento de color, y nada que recuerde un plegado que ya no puede ocurrir. La cabecera lleva título, contador y descripción; el contador lo calcula **el pase que dibuja el índice** (no la cabecera), filtra la hoja a lo modificado y deja pasar lo fijado por entorno; la descripción sale del layout (`desc_key`) y las 34 secciones tienen una; y **cada fila dice si es de fábrica, editada, o editada y sin guardar** —tres estados, no dos— —acento a la izquierda (inset shadow, no borde: un borde desplazaría la fila marcada) **más** el botón de restaurar, que se apaga cuando no hay nada que restaurar, porque un color por sí solo no es una señal. **Cuatro de los cinco selects escritos a mano ahora se declaran** (opciones, etiquetas por opción, default y `on_change` para el hermano que refrescar) y los dibuja el renderizador compartido: un control a mano se pierde en silencio lo que el compartido aprenda después, y estos cuatro se perdían el candado env/fichero —una opción fijada en `config.json` se veía editable y el guardado se descartaba sin decir nada. Y **el quinto también**: al renderizador le faltaba la palabra «lista de números» (`int_list`) —sabía listas de cadenas y arrays guardados como cadenas—, que es justo por lo que `page_sizes` estaba escrito a mano. Los recuentos de filas que ofrece el selector de una tabla se declaran **una sola vez, en el registro** (`web_admin|table_rows_options`) y llegan al panel por `CONFIG_REGISTRY_DEFAULTS` como cualquier otro default: estaban como literal en tres ficheros, y «una copia por lado» seguían siendo dos. Y el par se llama por lo que cuenta —`table_rows_default` / `table_rows_options`— porque «page size» se lee como algo del tamaño de la página y no nombra ni tablas ni registros. Una opción se llama por lo que **guarda**, no por cómo se almacena: `syslog|max_rows` era el mismo error que `page_size` —vocabulario de tabla para lo que un admin fija, que son **mensajes**— y pasa a `max_messages`; el store conserva `prune(max_rows=…)`, que ahí sí son filas. Y una etiqueta keyed solo por nombre pelado la hereda la siguiente sección que tenga ese campo, le encaje o no: `scim|token` heredaba «Token Bot» de Telegram, el `name` de un canal de Teams heredaba «Nombre de la BD», y cuatro proveedores compartían «Rol por defecto (nuevos elementos)», que no nombra ni a quién ni cuándo. Vaciar una opción de lista **significa su default**: al hacerla editable, vaciarla producía una lista vacía —lo único que podía producir— y el servidor la rechaza; y en su default la caja se dibuja vacía, que es lo que hace cierto el «bórralo para recuperar el de fábrica». Y **ninguna tabla lleva un default propio**: `_syslogPageSize = _tableRowsDefault || 50` se evaluaba en tiempo de parseo —antes de que la config cargara, así que la elección del admin no llegaba nunca— y el `|| 50` convertía el 0 («todas», una respuesta de verdad) en cincuenta. El núcleo no aprende el nombre de la función de nadie. Antes: cinco escribían su propio `<select>`/`<input>` y ninguna lo ponía —invisible al acento, a la cuenta, al filtro y al estado de su propio botón de restaurar, con la misma pinta que las demás—, y las dos de Auditoría escribían `configData` a espaldas de `updateField`. Y **una preferencia de UI también tiene default**: orden y tamaños de página no están en `spec.py` a propósito, así que mirar solo el registro las daba por editadas para siempre; a `audit_sort_dir` le faltaba en los dos mapas, y su botón de restaurar llamaba a una función que se salía sin hacer nada. Una fila que **no** es una opción del registro contesta igual vía `data-cfg-changed` —los servicios expuestos de fail2ban son registros con su propio endpoint: motivo para comportarse distinto en el **cable**, no en la pantalla— con su botón de volver al default y contados en los mismos totales. **Devolver un valor a su sitio deshace lo pendiente**: el conjunto de rutas pendientes ahora *mengua* además de crecer —una ruta que se queda dentro tras deshacer el cambio hace que el guardado escriba un valor que el servidor ya tenía—, y la línea base «tal como se cargó» recibe las claves que el render **siembra** (solo las que le faltan, nunca un valor que ya tiene): se tomaba antes de sembrar, así que desde el primer render difería en decenas de claves que nadie había tocado y el botón de guardar, una vez encendido, no podía apagarse. Y una opción que el servidor **nunca envió** —muchas solo se leen como `cfg.x || <default>` y no se guardan nunca— tiene a dónde volver: lo que usaría el servidor en ese caso es su default, comparar contra `undefined` no puede casar con nada que se pueda teclear; y al escribirla la clave existe en un lado y no en el otro, así que se copia también a la línea base, **solo** donde los dos valores ya coinciden. Un registro guardado por **su propio endpoint** (webhooks, canales de Teams, intervalo del planificador) es estado guardado, no pendiente: se sincronizaba solo la copia en memoria, así que crear un webhook encendía «cambios sin guardar» de algo ya escrito —y Guardar no enviaba nada, porque envía `_dirtyFields`, donde estos no entran nunca. Las marcas y los contadores se recalculan **al editar y al guardar** (`_cfgRefreshMarks`), sin re-renderizar ni re-filtrar: los campos conservan su DOM, así que foco, cursor y lo medio escrito sobreviven, y las filas no se mueven bajo las manos de quien está escribiendo. El tooltip se actualiza por la instancia de Bootstrap, no por `title`: Bootstrap se lo lleva a su almacén al inicializar y no vuelve a mirarlo. Una opción **en blanco no es una opción editada** —blanco es cómo se guarda «sin definir», y sin definir **es** el default, que es justo lo que dice el placeholder gris—; `0` y `false` sí se comparan. Y la marca de env/file-locked la pone `renderField`, por donde pasan **todos** los renderizadores: antes la añadía solo `renderScalarFields`, así que la misma opción salía marcada en una tarjeta a medida y sin marcar en una genérica | reglas bajo `.cfg-sheet` | que el marco de fail2ban —que sí muestra varias tarjetas a la vez— se lleve por delante los estilos, y que dos sitios cuenten lo mismo |
@@ -6462,7 +6462,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 19 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 29 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6490,6 +6490,51 @@ Pocos y de carga a propósito: aquí no se cubre la interacción caso por caso �
 tests hacen eso mucho más barato—. Existe para responder a la única pregunta que los demás no
 pueden: ¿esto arranca? Comprobado rompiendo a propósito un partial compartido y verificando que
 el fallo nombra la causa.
+
+**`TestTheLayoutFitsTheWindow` + `TestCollapsingTheSidebarIsTheReverseOfExpandingIt`** — la otra
+mitad del frontend que nadie miraba: la **geometría**. Las páginas de los dos bugs de agosto de
+2026 cargaban sin un solo error de consola y estaban mal en pantalla igualmente, así que «el
+navegador no se quejó» no las cubría.
+
+- **Ninguna sección con rail desborda su columna.** Un píxel de más ahí es una barra de scroll, y
+  esa barra se lleva la barra de herramientas: la columna de detalle del shell se llamaba
+  `.ss-main` —que es también la columna de contenido de la aplicación, `height: 100vh`— y con la
+  misma especificidad el bloque nuevo sólo ganaba las propiedades que nombraba. Se mide en las
+  tres secciones (Configuración, Módulos, Copias) y la tolerancia es 1 px de redondeo: **52 era
+  el bug**. Se comprueba además el síntoma tal como se reportó —se scrollea la columna a tope y
+  la barra tiene que seguir **por debajo** de la miga de pan, que es sticky y se queda encima— y
+  que el índice llegue al pie de la ventana.
+- **Plegar es la inversa de desplegar.** Nada de la navegación se esconde con `display`, que no
+  se puede animar: la etiqueta se desvanece (opacidad 0 con transición declarada), el icono de
+  al lado **no se mueve** mientras lo hace (±1,5 px), y el lockup del pie se va y vuelve. Se mide
+  **en reposo**, en los dos extremos y nunca a mitad de animación: un test que muestrea una
+  transición es un test que falla en CI por algo que no tiene que ver con el código.
+
+Ambas clases se validaron **reintroduciendo los bugs** en el CSS y comprobando que se ponen
+rojas (52 px en las tres secciones, y `display: none` en la etiqueta); una guarda de geometría
+que pasa con y sin el fallo no vale nada.
+
+**`TestTheRestoreFormPicksTables`** — el pliegue «avanzado» del diálogo de restauración, movido de
+verdad. Leído como texto se comprueba que el marcado está y que la petición tiene la forma
+correcta; lo que ninguna lectura resuelve es si el pliegue **se rellena**: se construye desde un
+endpoint, se cablea después de que el diálogo esté en el DOM, y su respuesta depende de qué
+casillas dejó marcadas una persona. Se toma una copia por la propia API del panel, se abre el
+diálogo y se comprueba lo único que no se puede leer: que las casillas son las tablas que el
+archivo lleva, que **sin tocar nada `_bkChosenTables()` devuelve `null`** —una restauración
+normal sigue siendo exactamente la petición de siempre, y una lista vacía ahí significa *ninguna
+tabla*—, que dejar una fuera produce la lista con todas las demás, y que destildar una parte
+**atenúa** su grupo en vez de ocultarlo.
+
+El cuarto es de **geometría**, y salió de una captura: con el pliegue abierto, el último grupo de
+tablas quedaba **debajo del pie** del diálogo. Dos scrolls para un formulario y el de fuera sin
+existir — el diálogo es una columna flex con `overflow: hidden`, así que un cuerpo que desborda
+no es una barra de scroll, es contenido recortado detrás de los botones, y el pliegue tenía
+además una caja con tope propia que escondía dónde acababa la lista. Se mide con la ventana
+**baja a propósito** (1280×520, que es el caso reportado: el formulario solo es demasiado alto
+*en relación con la pantalla*) y se exige que haya algo que desbordar, que el cuerpo sea quien
+scrollea, que **nada dentro** de él scrollee también, y que los botones sigan en pantalla.
+Validado reintroduciendo el bug: la regla `#backupModal .modal-lg …` sin su
+`:not(.modal-dialog-scrollable)` lo pone rojo.
 
 **`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
 Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe
@@ -6653,11 +6698,11 @@ cuando otra réplica no puede leer un secreto.
 
 ## 146. Copias de seguridad: hacer una, y volver a ponerla
 
-**Archivo:** `tests/unit/test_backup_service.py` — 67 tests
+**Archivo:** `tests/unit/test_backup_service.py` — 78 tests
 **Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
 **Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 76 tests
-**Archivo:** `tests/unit/test_wa_backup_ui.py` — 115 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 87 tests
+**Archivo:** `tests/unit/test_wa_backup_ui.py` — 126 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
 cuatro motores y la copia tiene que sobrevivir al salto: una instalación que creció en SQLite y se
@@ -6706,6 +6751,9 @@ almacena de verdad.
 | `TestKeepingOneCopyWhateverTheCounterSays::*` (5) | De punta a punta: sobrevive a una política que la habría borrado; borrarla se rechaza con 409 diciendo por qué; la lista dice quién la bloqueó y cuándo; se audita en ambos sentidos; y va con `backup_delete` |
 | `TestTheTaskFormFitsOnTheScreen::*` (3) | El editor de tarea va en **pestañas** (cuándo / retención / contenido), el nombre queda fuera de ellas, y el panel largo hace scroll **dentro** de la caja en vez de estirar el diálogo |
 | `TestOnePolicyManyTasks::*` (8) | Perfiles en el rail; el editor dibuja las **mismas** cinco casillas que una tarea; la fila muestra la política resuelta por el servidor; las casillas se ocultan tras un perfil pero no se descartan; el editor dice a cuántas tareas alcanza; sin botón de borrar si está en uso; las sugerencias vienen de la API; todo va con `backup_schedule` |
+| `TestChoosingWhichTablesComeBack::*` (10) | Restaurar **tabla a tabla**: el catálogo agrupa por parte con la misma regla que aplica la restauración, lo que se deja fuera conserva lo de hoy y **no se vacía**, `tables=[]` significa *ninguna* y no *todas*, una parte sin tablas elegidas no genera línea de checklist, las partes siguen acotando lo que las tablas pueden alcanzar, y el resultado dice que fue un subconjunto |
+| `TestRestoringOnlyTheTablesYouChose::*` (5) | Lo mismo por la API: el archivo dice qué lleva por parte y con filas, una copia inexistente responde 404, solo vuelven las tablas nombradas, y la auditoría registra **cuáles se pidieron** (`all` cuando no se pidió ninguna en concreto) |
+| `TestTheRestoreFormCanGoTableByTable::*` (10) | El pliegue avanzado: sin tocarlo **no se manda lista** (la petición es la de siempre), nada seleccionado se rechaza antes de enviarlo, una parte destildada se atenúa en vez de ocultarse, el aviso dice que más fino no es más seguro, el diálogo pide cuerpo con scroll y el pliegue **no lleva barra propia**, y después se dice que el resto se quedó como estaba |
 
 
 ---
@@ -6820,3 +6868,112 @@ comprobaciones de ese mismo servidor funcionaban, porque el camino de comprobaci
 | `test_a_missing_store_is_not_an_error` | Un proceso recortado puede no tener los almacenes: no puede convertir cada acción en un 500 |
 
 Sin guarda de Flask: la resolución es diccionarios entra, diccionarios salen.
+
+## 150. La marca: dos ficheros, un original, y lo que se rompe en silencio
+
+**Archivo:** `tests/unit/test_wa_brand_logo.py` — 19 tests
+
+El panel sirve **dos** derivados de un mismo original guardado en `assets/brand/`: el lockup
+completo en la tarjeta de login, encabezando Diagnóstico y al pie de la barra lateral, y solo el
+emblema dentro del anillo de carga. Son dos y no uno porque un lockup apaisado encogido a un
+círculo de 96 px es un nombre que nadie lee.
+
+Ningún test juzga cómo se ve. Lo que se fija son las tres propiedades que lo rompen sin que nada
+lo diga:
+
+- **La transparencia.** Es neón sobre nada, y tiene que caer sobre la tarjeta clara y sobre el
+  fondo oscurecido del arranque. Aplanarlo contra negro es justo lo que hace un optimizador si
+  nadie mira, y el resultado —un rectángulo negro sobre una tarjeta blanca— pasa todas las demás
+  comprobaciones.
+- **El peso.** El original son 2 MB y el login es lo primero que ve cualquiera. Bajar de tamaño
+  es el motivo entero de servir un derivado en vez del maestro.
+- **La caja declarada.** `width`/`height` en la etiqueta son lo que reserva el hueco antes de que
+  llegue la imagen; mal puestos, la tarjeta de login salta bajo el cursor mientras carga.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheFilesAreThereAndUsable::test_they_keep_their_transparency` | Alfa real (canal, o `tRNS` si va cuantizado a paleta) |
+| `TestTheFilesAreThereAndUsable::test_they_are_derived_and_not_the_master` | Techo de 200 KiB: que una reexportación no devuelva los 2 MB al login |
+| `TestTheFilesAreThereAndUsable::test_the_mark_is_square` | Va dentro de un anillo circular: cualquier otra proporción es un emblema con un lado plano |
+| `TestTheFilesAreThereAndUsable::test_the_lockup_is_the_landscape_one` | Si los dos ficheros se volvieran la misma imagen, el anillo tendría un nombre ilegible y nada lo diría |
+| `TestTheFilesAreThereAndUsable::test_the_master_is_kept_with_a_recipe` | Un binario servido sin fuente es un callejón sin salida (misma razón que `make_favicon.py`) |
+| `TestTheDiagnosticsSectionShowsItToo::*` (2) | El lockup encabeza también Diagnóstico, con **ancho propio**: una sola clase compartida haría que tocar uno cambiara el otro |
+| `TestThePagesUseThem::*` (6) | Login y arranque los referencian, el icono provisional ya no está, van cacheados con `asset_v`, la caja declarada es la del fichero, y ni el nombre se imprime dos veces bajo un lockup que ya lo lleva ni queda de subtítulo una etiqueta de la barra lateral («Sistema»), que bajo un logo es una palabra suelta que no describe nada |
+| `TestTheSidebarFootShowsTheLockup::*` (3) | El lockup a lo ancho en el pie de la barra lateral —la única columna con sitio de sobra y nada dentro—, **dentro** de la navegación que scrollea: entre la lista y el bloque de usuario sería una franja fija que la lista no recupera; ahí baja al pie mientras hay holgura (`margin-top: auto`, que sin espacio libre vale 0 y no puede empujar la primera entrada fuera de alcance) y scrollea bajo la última entrada cuando no la hay. Decorativo (`aria-hidden`) y fuera en modo mini, donde 56 px de un lockup apaisado no los lee nadie. Y la **cabecera** de esa columna conserva su glifo: se probó con el emblema y se retiró —con el lockup a lo ancho debajo, es la marca dos veces en la misma columna, y la que pierde es la copia pequeña, que es justo la que no se lee |
+| `TestTheStylesheetSizesThem::*` (2) | El lockup se limita por **ancho** (por alto quedaría estrecho con aire a los lados) y el emblema cabe **dentro** del anillo en vez de cruzarlo |
+
+Sin Flask ni Pillow: la cabecera IHDR son once bytes de `struct`, y un test que necesitara una
+librería de imagen sería un test que se salta justo en la máquina donde importa.
+
+---
+
+## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
+
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 32 tests
+**Archivo:** `tests/integration/test_wa_diagnostics.py` — 19 tests
+
+Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
+qué corre, dónde escribe y qué falta. Todas se podían contestar antes —leyendo un log, abriendo
+una shell en el contenedor, o sabiendo qué librería enciende qué función—: eso son tres tardes
+por pregunta.
+
+Los recolectores son funciones puras del proceso y del disco, así que se prueban como están
+escritos: se les da un directorio o un fichero de lock y se lee el diccionario. Dos propiedades
+importan más que cualquier campo suelto:
+
+- **Nada revienta.** Esta es la pantalla que alguien abre porque algo ya va mal. Un recolector
+  que lanza una excepción con un montaje ilegible se lleva por delante las otras cuarenta
+  respuestas, y la única página que podía explicar el fallo pasa a formar parte de él.
+- **«No se puede decidir» es una respuesta.** La comprobación de versión compara una versión
+  semántica contra una etiqueta de release, y la semántica de este proyecto no se mueve a
+  propósito — así que «estás al día» sería una suposición disfrazada de hecho, justo en la
+  pantalla cuyo trabajo entero es no hacer eso.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSystemBlockAlwaysAnswers::*` (3) | Intérprete y máquina siempre contestan; `_safe` convierte una excepción —y una respuesta vacía, que se lee peor— en un campo «desconocido» |
+| `TestDependenciesAreReadFromTheLock::*` (7) | Se lee del **lock** y no de `pip freeze`; ausente y versión distinta son veredictos separados, «más nueva» no es un veredicto, los problemas van primero, comentarios/flags/marcadores de entorno no son paquetes, la **barra de continuación** de `pip-compile --generate-hashes` no forma parte de la versión, y contra el lock real no puede salir «todo difiere» |
+| `TestOptionalFeaturesExplainWhatIsSwitchedOff::*` (3) | Cada entrada nombra su módulo y **qué enciende**, con etiqueta en los dos idiomas: el panel donde nunca aparece el botón de SSO casi nunca está mal configurado |
+| `TestStorageAsksTheOsAndWritesNothing::*` (3) | Existencia, permiso de escritura y sitio libre — preguntando al SO, sin crear nada en el directorio que alguien está mirando porque se comporta raro |
+| `TestTheReportRenders::*` (6) | Los tres formatos son funciones **puras** del payload —por eso salieron de la ruta—: un formato desconocido cae a texto, cada uno declara su mimetype, el texto lista TODAS las dependencias (no solo las malas), el XML escapa con `ElementTree` (un `&` en el nombre de host, rutas de Windows), una lista sale como hijos repetidos y no como `repr` de Python, y el JSON no toca el payload |
+| `TestTellingWhetherAReleaseIsNewer::*` (10) | Más nueva / vamos por delante / **no se puede decidir**; una etiqueta se lee venga como venga; se niega a preguntar por HTTP plano; un **404 no es un endpoint roto** (`/releases/latest` excluye borradores y prereleases, que es el estado de este repositorio hoy) y se reporta como «nada publicado todavía», mientras que un 403 sigue siendo un HTTP con su código; y la dirección tiene **un solo hogar** (el registro de `spec.py`), que es lo que permite que la pantalla de configuración la muestre en gris detrás de la casilla vacía |
+| `TestItIsBehindItsOwnPermission::*` (2) | `diagnostics_view` es propio: ver el panel no lo concede |
+| `TestWhatThePageAnswers::*` (6) | Los seis bloques viajan juntos, la base de datos se lee del **conector** y no de la config, el nivel de log se lee de la **configuración** (no hay atributo que lo espeje: pedirlo devolvía vacío y el campo salía «—» en toda instalación), y la página no escribe una sola línea de auditoría |
+| `TestTheReportIsMeantToBePasted::*` (7) | Texto plano `inline` —se lee antes de enviarlo—, todos los bloques presentes, y el de dependencias **nunca vacío**: lista las 41 con su veredicto, diferencias primero. La pantalla pliega las que coinciden porque se lee de un vistazo; un fichero que se pega en una incidencia no. **Tres formatos** (txt/json/xml) de los MISMOS recolectores —una segunda pasada por formato es como dos informes de la misma instalación acaban discrepando—, cada uno con su mimetype y su extensión, un formato desconocido cae a texto en vez de negarse, y el XML sale bien formado con rutas de Windows dentro (escapado por `ElementTree`, no a mano) y las listas como hijos repetidos |
+| `TestTheOneCallThatLeavesTheMachine::*` (4) | El GET es **incapaz** de salir a la red (se sustituye `fetch_latest` por algo que falla el test si lo llaman); un fallo es una respuesta y no un 500; y las dos salidas quedan auditadas |
+
+---
+
+## 152. El nombre del producto tiene un solo hogar
+
+**Archivo:** `tests/unit/test_app_name.py` — 6 tests
+
+`lib.APP_NAME` es ese hogar. Todo lo que **firma** algo con el nombre lo lee de ahí: los
+títulos de página, la cabecera de la barra lateral, la pantalla de arranque, los correos, las
+tarjetas de Teams, el `User-Agent`, el informe de diagnóstico. Estaba escrito a mano en unos
+cincuenta literales repartidos por veintiocho ficheros, y eso no es un renombrado: es una
+búsqueda, hecha a mano, en la que cada resultado hay que juzgarlo.
+
+Y como juzgarlos **es** el trabajo, la guarda no prohíbe la cadena sin más: la prohíbe donde el
+panel se firma a sí mismo, y lleva una lista explícita de lo que debe seguir siendo literal, con
+el motivo de cada entrada:
+
+- **Identificadores registrados en el sistema de otro** — los nombres de las apps de Entra ID
+  (`providers/entraid/declarations.py`, que ya era hogar único de los suyos) y el rol y el
+  usuario que se crean en Proxmox. Se buscan **por nombre** en un tenant que no es nuestro: si
+  salieran de `APP_NAME`, un renombrado dejaría de encontrar la app que registró el año pasado
+  y registraría otra al lado.
+- **La URL del repositorio** — la copia que GitHub tiene del nombre, que un renombrado del
+  producto no mueve.
+
+La prosa traducida (`lib/i18n/lang/*.py`) queda fuera a propósito: ahí el nombre vive dentro de
+frases que hay que releer en cada idioma cuando cambie, de todos modos.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheNameHasOneHome::test_the_constant_is_declared_where_the_version_is` | Declarado **encima** de los imports del paquete, como `__version__`: un módulo importado mientras `lib` aún se inicializa puede leerlo igual, y eso es lo que lo hace usable desde `config/spec.py` |
+| `TestTheNameHasOneHome::test_the_pages_are_handed_it` | Una clave de contexto (`app_name`) y una constante JS (`APP_NAME` en `core/_constants.html`), para que ninguna plantilla ni ningún script tenga que saber de dónde sale |
+| `TestTheNameHasOneHome::test_the_brand_places_read_it` | Los cuatro sitios donde cae la vista: la pestaña del navegador, la cabecera de la barra lateral, la pantalla de arranque y la página de estado |
+| `TestTheNameHasOneHome::test_no_code_spells_it_out` | Solo **literales de cadena**, leídos con `ast`: así un comentario o un docstring que explique la regla no hace saltar la guarda que la comprueba |
+| `TestTheNameHasOneHome::test_no_template_spells_it_out` | Igual en las plantillas, con los comentarios (Jinja, HTML y JS) retirados antes de mirar |
+| `TestTheNameHasOneHome::test_the_exceptions_are_still_real` | Una lista de excepciones que nadie poda es donde la regla se muere: cada entrada tiene que seguir existiendo y seguir conteniendo el nombre |

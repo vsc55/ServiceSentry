@@ -19,6 +19,8 @@ import json
 import struct
 import zlib
 
+from lib import APP_NAME
+
 _ACCENT = (0x4B, 0x53, 0xBC)          # Teams-purple, matches the config card accent
 
 
@@ -60,7 +62,7 @@ def _outline_icon() -> bytes:
     return _png(32, 32, px)
 
 
-def build_manifest(client_id: str, *, public_url: str = '', app_name: str = 'ServiceSentry') -> dict:
+def build_manifest(client_id: str, *, public_url: str = '', app_name: str = APP_NAME) -> dict:
     """The Teams app manifest wired to the Entra app *client_id*.
 
     Includes a **personal static tab**: an activity-feed-only app (just
@@ -84,15 +86,15 @@ def build_manifest(client_id: str, *, public_url: str = '', app_name: str = 'Ser
         'id': client_id,
         'packageName': 'com.servicesentry.notifications',
         'developer': {
-            'name': 'ServiceSentry',
+            'name': APP_NAME,
             'websiteUrl': tab_url,
             'privacyUrl': tab_url,
             'termsOfUseUrl': tab_url,
         },
-        'name': {'short': app_name[:30] or 'ServiceSentry',
+        'name': {'short': app_name[:30] or APP_NAME,
                  'full': f'{app_name} Notifications'[:100]},
-        'description': {'short': 'ServiceSentry monitoring alerts',
-                        'full': 'Receive ServiceSentry monitoring alerts as Teams activity-feed notifications.'},
+        'description': {'short': f'{APP_NAME} monitoring alerts',
+                        'full': f'Receive {APP_NAME} monitoring alerts as Teams activity-feed notifications.'},
         'icons': {'color': 'color.png', 'outline': 'outline.png'},
         'accentColor': '#4B53BC',
         'defaultInstallScope': 'personal',
@@ -100,7 +102,7 @@ def build_manifest(client_id: str, *, public_url: str = '', app_name: str = 'Ser
         # as "not available" and it cannot be installed for users).
         'staticTabs': [{
             'entityId': 'servicesentry-home',
-            'name': (app_name[:16] or 'ServiceSentry'),
+            'name': (app_name[:16] or APP_NAME),
             # The tab signs in via Teams SSO (Teams JS SDK) at /auth/msteams/tab; websiteUrl
             # opens the full panel in a normal browser (where a redirect login works).
             'contentUrl': tab_url.rstrip('/') + '/auth/msteams/tab',
@@ -114,7 +116,7 @@ def build_manifest(client_id: str, *, public_url: str = '', app_name: str = 'Ser
     }
 
 
-def build_package(client_id: str, *, public_url: str = '', app_name: str = 'ServiceSentry') -> bytes:
+def build_package(client_id: str, *, public_url: str = '', app_name: str = APP_NAME) -> bytes:
     """Return a zipped Teams app package (manifest.json + color.png + outline.png)."""
     import zipfile  # noqa: PLC0415
     manifest = build_manifest(client_id, public_url=public_url, app_name=app_name)
