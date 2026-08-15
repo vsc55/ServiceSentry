@@ -76,6 +76,15 @@ def register(app, wa):
                'checked_at': time.strftime('%Y-%m-%d %H:%M:%S'), **res}
         if res.get('ok'):
             out['compare'] = diag_update.compare(__version__, res.get('tag', ''))
+            # And the same verdict for every OTHER version running in this installation, so a
+            # worker left on an old image is told apart from one that is merely different from
+            # here. Computed on the server for the reason the local one is: comparing a
+            # semantic version against a release tag has one home, and a second copy in the
+            # browser is a second answer waiting to disagree with this one.
+            out['instance_versions'] = {
+                v: diag_update.compare(v, res.get('tag', ''))
+                for v in {str(i.get('version') or '') for i in diag_service.instances(wa)}
+                if v}
         # Audited either way: on a segregated network "who made this box reach out, and when"
         # is a question with an owner, and a check that failed still made the attempt.
         wa._audit('diagnostics_update_checked',

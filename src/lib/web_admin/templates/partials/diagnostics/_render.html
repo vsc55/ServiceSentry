@@ -104,6 +104,9 @@ function _dgVersionCard(rt) {
     return _dgCard('bi-tag', t('diag_card_version'), body, btn);
 }
 
+/** What the releases API said, once somebody asked — shared with the instances card. */
+let _dgUpdate = null;
+
 /** The one call on this page that leaves the machine, and only from here.
  *
  *  Never on load: a monitoring panel gets installed on segregated networks by people who would
@@ -135,6 +138,11 @@ async function _dgCheckUpdate() {
                </div>`;
         return;
     }
+    // Kept, not just painted: the instances card reads the same answer to say which OTHER
+    // containers are behind the published release. The server did the comparing — for every
+    // version running here, not only this process's — so there is one home for it.
+    _dgUpdate = {tag: d.tag || '', byVersion: d.instance_versions || {}};
+    _dgRedrawInstances();
     const cmp = d.compare || {};
     const tone = cmp.status === 'newer' ? 'warning' : 'secondary';
     const label = cmp.status === 'newer' ? t('diag_update_newer')

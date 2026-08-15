@@ -199,11 +199,31 @@ def elsewhere_rows(wa) -> list:
     for inst in instances(wa):
         if inst.get('is_self'):
             continue
-        for name, version in (inst.get('installed') or {}).items():
-            if version and (name, version) not in here:
-                extra.add((name, version))
+        for row in (inst.get('packages') or []):
+            pin = (collect.canonical_name(row.get('name')), str(row.get('version') or ''))
+            if pin[1] and pin not in here:
+                extra.add(pin)
     return [{'name': name, 'required': '', 'installed': version, 'status': 'elsewhere'}
             for name, version in sorted(extra)]
+
+
+def packages_of(env: dict) -> list:
+    """Everything one process runs, by name and version, saying which its lock pins.
+
+    Sorted, because it is read as a list. `pinned` is carried rather than left to be inferred
+    from a second lookup: over there `pip` is not drift and `flask` is, and that distinction is
+    the same one the local table draws — a reader should not have to hold two screens at once
+    to make it.
+    """
+    out = []
+    for row in list((env or {}).get('lock') or []):
+        out.append({'name': str(row.get('name') or ''),
+                    'version': str(row.get('installed') or ''), 'pinned': True})
+    for row in list((env or {}).get('extra') or []):
+        out.append({'name': str(row.get('name') or ''),
+                    'version': str(row.get('installed') or ''), 'pinned': False})
+    out.sort(key=lambda r: collect.canonical_name(r['name']))
+    return out
 
 
 def _versions(env: dict) -> dict:
@@ -271,14 +291,16 @@ def instances(wa) -> list:
             'os': str(env.get('os') or ''),
             'arch': str(env.get('arch') or ''),
             'features': list(env.get('features') or []),
-            'packages': len(env.get('lock') or []) + len(env.get('extra') or []),
+            # Everything that process runs, by name and version, saying which of them its
+            # lock pins. One shape for both readers: the screen lists them when somebody asks
+            # what "the same 42" actually are, and the remote check reads the same rows to
+            # work out the union — a second, flatter copy alongside is how the two come to
+            # disagree about what is installed over there.
+            'packages': packages_of(env),
             # An instance that has not published yet — an older build, or one whose first
             # beat landed before this column existed. Said, never guessed at.
             'known': bool(env),
             'diff': compare_environments(mine, env) if env else None,
-            # What only the web can settle, and the reason this is not four separate remote
-            # checks: the versions it runs, so the panel asks PyPI and OSV about the UNION.
-            'installed': _versions(env) if env else {},
         })
     return out
 

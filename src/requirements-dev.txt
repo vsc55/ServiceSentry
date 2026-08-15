@@ -14,9 +14,11 @@
 #
 # Bump deliberately: change the version here, run the full suite, commit both together.
 -r requirements.txt
-pytest==9.0.2
+# 9.0.2 carried PYSEC-2026-1845 (tmpdir handling), which the diagnostics page reports
+# because it runs on the machine like anything else installed here.
+pytest==9.1.1
 pytest-mock==3.15.1
-pytest-env==1.6.0
+pytest-env==1.7.0
 pytest-xdist==3.8.0
 flake8==7.3.0
 # Browser tests (tests/test_ui_playwright.py) - the ONLY ones that execute the panel's
@@ -25,5 +27,5 @@ flake8==7.3.0
 #   python -m playwright install chromium
 playwright==1.62.0
 # Dev auto-reload server (dev_watch.py): file watching + .env.dev loading.
-watchfiles==1.1.1
+watchfiles==1.2.0
 python-dotenv==1.2.2

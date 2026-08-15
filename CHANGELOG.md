@@ -8,6 +8,49 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.72] - 2026-08-15
+
+### Changed
+- **The instances card answers the two remote questions for the other containers as well.**
+  Neither needed a new call: the dependency check already asks about the union of every
+  process's packages in one round, and the release check returns one answer for the whole
+  installation. What was missing was saying which container a finding belongs to.
+  - A **CVE column** per instance, a pure join against the answer already on the page —
+    matched by name AND version, because the same package at two versions is two different
+    answers and reading one off the other is how a container gets reported clean because a
+    different one is. It opens the list, each advisory naming the package and its severity.
+  - The **version cell** now separates two claims that look alike: *different from this
+    process* (they are meant to come from one image) and *behind the newest published release*
+    (the whole installation can be perfectly consistent and perfectly out of date). The second
+    only exists once the release check has run, and the comparison is done on the server for
+    every version seen — a copy of it in the browser would be a second answer waiting to
+    disagree.
+  - Both checks refresh **the rows and nothing else**, the rule the dependency card already
+    learned.
+- **Fixed: a drifted container's answer could be drawn on this process's own row.** The
+  browser keyed the remote answer as `byName[r.name] = r`, so the last one won — and since the
+  check now covers what only another container runs, the same package can arrive twice at two
+  versions. Keyed by name and version now, with the local lists owning the name.
+- **"Same as here (42)" now opens too.** It was the one cell on the instances card with
+  nothing behind it, and it does not say WHICH 42 — a sentence that asks the reader to take
+  the interesting half on trust is what this page exists not to do. Both answers open a modal
+  now: the differing one its comparison, the matching one the list of what that process runs,
+  marking which of them its lock pins. One shape serves the screen and the remote check, so a
+  second flatter copy cannot drift from it.
+- **Dependencies refreshed**, off what the panel's own check reported.
+  - `requirements.lock` regenerated with the documented `pip-compile --generate-hashes
+    --strip-extras` pass. One pin moved of the forty-one: `charset-normalizer` 3.4.9 → 3.5.0.
+    Everything else the resolver held, which is the answer a lock is supposed to give.
+  - `requirements-dev.txt`: `pytest` 9.0.2 → **9.1.1**, which is a security bump —
+    PYSEC-2026-1845, tmpdir handling — and the reason the diagnostics page reported it at all:
+    it runs on the machine like anything else installed here, pinned or not. `pytest-env`
+    1.6.0 → 1.7.0 and `watchfiles` 1.1.1 → 1.2.0 alongside.
+  - The **image now upgrades `pip` and `setuptools`** before installing the lock. They are not
+    in it — pip-compile does not pin its own installer — so the container shipped whatever the
+    base image carried, and both were reported with advisories. The `.deb`/`.rpm` postinstall
+    and the Gentoo ebuild already did this; only Docker did not.
+
+
 ## [0.0.1+build.71] - 2026-08-15
 
 ### Added

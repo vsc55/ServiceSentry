@@ -6474,7 +6474,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 49 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 51 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -7007,7 +7007,7 @@ importan más que cualquier campo suelto:
 
 ## 151b. Diagnóstico: los otros procesos de la instalación
 
-**Archivo:** `tests/unit/test_diagnostics_instances.py` — 19 tests
+**Archivo:** `tests/unit/test_diagnostics_instances.py` — 22 tests
 
 Repartido en contenedores —web, worker, receptor syslog, procesador de eventos—, la pantalla de
 diagnóstico describe **el proceso que sirve la petición y nada más**. Los otros tres no
@@ -7022,6 +7022,7 @@ Lo que se prueba aquí es la **comparación**, que es la parte que puede mentir 
 | `TestTellingTwoProcessesApart::*` (7) | La respuesta es **la diferencia**, no cuatro copias de la misma lista: cuatro contenedores de una imagen traen listas idénticas y «iguales que aquí» es la respuesta entera cuando es cierta. Cubre que una versión distinta viaja **con los dos lados** («difieren» no es accionable; cuál y de qué a qué, sí), que faltar en un lado o en el otro son **hallazgos distintos** (un worker sin `paramiko` salta todos los checks SSH), que el lock y el resto de lo instalado son **una sola lista** aquí —`pip` también ejecuta allí—, que `charset-normalizer` y `charset_normalizer` no son una diferencia (PEP 503, o cada contenedor parecería haber derivado), que el orden es estable, y que una instancia que **no ha publicado** no se cuenta como diferencia: «desconocido» y «difiere» son frases distintas y solo una implica trabajo |
 | `TestWhatOnlyTheOtherProcessesRun::*` (6) | Los nombres extra que la consulta remota debe cubrir, **y ninguno más**: una sola tanda de peticiones para toda la instalación, porque cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a internet a preguntar casi lo mismo, justo en el despliegue donde peor sienta. Una imagen igual en todas partes **no añade nada**, este proceso no se pregunta dos veces, y dos contenedores con dos versiones del mismo paquete son **dos preguntas** —responder una por las dos es como un contenedor acaba informado como limpio porque otro lo está— |
 | `TestTheListDegradesInsteadOfFailing::*` (3) | Se llega desde la página que alguien abre porque algo ya va mal: sin registro y con un store que revienta, la tarjeta cuesta la tarjeta y nada más |
+| `TestListingWhatOneProcessRuns::*` (3) | «Iguales que aquí (42)» no dice **cuáles** 42, así que la celda abre la lista. Una sola forma para la pantalla y para la consulta remota —una segunda copia más plana al lado es como las dos acaban discrepando sobre qué hay instalado allí—, con las dos mitades dentro diciendo cuál fija el lock (allí `pip` no es desviación y `flask` sí) y ordenada por nombre |
 | `test_the_versions_of_one_process_are_read_from_both_halves` (3) | Las versiones salen del lock **y** de lo instalado alrededor, normalizadas |
 
 ---

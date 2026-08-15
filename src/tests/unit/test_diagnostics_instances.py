@@ -177,7 +177,7 @@ class TestTheListDegradesInsteadOfFailing:
                          'running': True, 'env': {}}]
 
         row = diag.instances(_WA())[0]
-        assert row['known'] is False and row['diff'] is None and row['installed'] == {}
+        assert row['known'] is False and row['diff'] is None and row['packages'] == []
 
 
 @pytest.mark.parametrize('env,expected', [
@@ -187,3 +187,26 @@ class TestTheListDegradesInsteadOfFailing:
 ])
 def test_the_versions_of_one_process_are_read_from_both_halves(env, expected):
     assert diag._versions(env) == expected
+
+
+class TestListingWhatOneProcessRuns:
+    """"Same as here (42)" does not say WHICH 42, so the cell opens the list.
+
+    One shape for the screen and for the remote check: a second, flatter copy of the same
+    versions beside it is how the two come to disagree about what is installed over there.
+    """
+
+    def test_both_halves_are_in_it_and_say_which_is_which(self):
+        rows = diag.packages_of({'lock': [{'name': 'flask', 'installed': '3.1.0'}],
+                                 'extra': [{'name': 'pip', 'installed': '26.1'}]})
+        assert rows == [{'name': 'flask', 'version': '3.1.0', 'pinned': True},
+                        {'name': 'pip', 'version': '26.1', 'pinned': False}]
+
+    def test_it_is_sorted_by_name_across_both(self):
+        """Read as a list, so the order is the reader's and not the lock's."""
+        rows = diag.packages_of({'lock': [{'name': 'zope', 'installed': '1'}],
+                                 'extra': [{'name': 'anyio', 'installed': '2'}]})
+        assert [r['name'] for r in rows] == ['anyio', 'zope']
+
+    def test_nothing_published_is_an_empty_list(self):
+        assert diag.packages_of({}) == [] and diag.packages_of(None) == []

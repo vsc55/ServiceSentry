@@ -899,6 +899,61 @@ class TestTheOtherProcessesOfTheInstallation:
         }""")
         assert mark and 'build.1' in mark, mark
 
+    def test_matching_packages_open_too(self, page, admin):
+        """Reported off the screen: "Same as here (42)" was the one cell with nothing behind
+        it, and it does not say WHICH 42. A sentence that asks the reader to take the
+        interesting half on trust is what this page exists not to do."""
+        # Seeded with THIS process's own environment, which is the case the cell is for: the
+        # containers are meant to be one image, so "same" is what a healthy install shows.
+        from lib.core.diagnostics import collect, service as diag_service   # noqa: PLC0415
+        env = collect.environment(diag_service.lock_path())
+        self._seed(admin, lock=env['lock'], extra=env['extra'])
+        self._open(page)
+        page.click('#diagnostic-container .card:has(.bi-diagram-3) td button')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        pairs = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => [tr.children[0].textContent.trim(),
+                        tr.children[1].textContent.trim()])""")
+        names = {k for k, _v in pairs}
+        assert 'flask' in names and 'pip' in names, sorted(names)[:8]
+        # What the lock pins over there and what merely runs there are different claims, and
+        # the same distinction the dependency table draws one card below.
+        assert any(k == 'pip' and 'lock' in v for k, v in pairs), pairs
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_advisories_of_another_container_are_shown_against_it(self, page, admin,
+                                                                      monkeypatch):
+        """The check already asks about what the other containers run — one round for the
+        whole installation. What was missing was saying WHICH container carries the finding,
+        and that is a join against an answer already on the page: no second call, and none
+        from the container itself, which has no way out and no HTTP for us to ask on."""
+        from lib.core.diagnostics import advisories as adv
+        self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0', 'installed': '0.0.1'}])
+        monkeypatch.setattr(adv, 'check', lambda rows, timeout=adv.TIMEOUT: {
+            'ok': True, 'behind': 0, 'unknown': 0, 'vulns_ok': True, 'vulns_error': '',
+            'vuln_total': 1, 'vuln_packages': 1, 'vuln_asked': 2,
+            'rows': [{'name': 'flask', 'installed': '0.0.1', 'latest': '3.1.0',
+                      'state': 'behind', 'error': '', 'url': '',
+                      'vulns': [{'id': 'GHSA-7', 'url': 'https://osv.dev/vulnerability/GHSA-7',
+                                 'severity': 'high', 'score': 8.0, 'published': True,
+                                 'vector': '', 'summary': ''}], 'vuln_count': 1}]})
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => { const b = document.querySelector('#dgInstBody td:last-child button');"
+            "        return !!b; }", timeout=15_000)
+        page.click('#dgInstBody td:last-child button')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        seen = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => [tr.children[0].textContent.trim(),
+                        tr.children[1].textContent.trim()])""")
+        assert seen and seen[0][0].startswith('GHSA-7'), seen
+        # Which package of that container's, and how bad — the count alone is not the answer.
+        assert 'flask' in seen[0][1] and '0.0.1' in seen[0][1], seen[0]
+        assert not page.console_problems.problems, page.console_problems.problems
+
     def test_the_difference_opens_package_by_package(self, page, admin):
         """"They differ" is not actionable. Which package, and from what to what, is."""
         self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0',

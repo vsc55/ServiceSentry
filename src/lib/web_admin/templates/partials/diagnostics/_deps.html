@@ -80,13 +80,17 @@ function _dgDependenciesCard(deps) {
  *  asked: an empty "Latest" column on every install is a column that looks broken. */
 function _dgDepsTables(deps) {
     const rows = (deps || {}).rows || [];
-    const rem = name => (_dgRemote && _dgRemote.byName[name]) || null;
+    // By name AND version: the answer can hold the same package twice when another container
+    // runs a different one, and this row knows which one it is.
+    const rem = r => (_dgRemote
+        && (_dgRemote.byPin[`${r.name}@${r.installed || ''}`] || _dgRemote.byName[r.name]))
+        || null;
     const line = r => `<tr>
         <td class="small font-monospace">${esc(r.name)}</td>
         <td class="small text-muted">${esc(r.required || '—')}</td>
         <td class="small">${esc(r.installed || '—')}</td>
-        ${_dgRemote ? `<td class="small">${_dgLatestCell(rem(r.name))}</td>
-        <td class="small text-center">${_dgVulnCell(rem(r.name))}</td>` : ''}
+        ${_dgRemote ? `<td class="small">${_dgLatestCell(rem(r))}</td>
+        <td class="small text-center">${_dgVulnCell(rem(r))}</td>` : ''}
         <td class="small">${_dgDepBadge(r.status)}</td></tr>`;
     const table = list => `<table class="table table-sm align-middle mb-0"><thead><tr>
             <th class="small py-1">${esc(t('diag_dep_name'))}</th>
@@ -255,9 +259,17 @@ async function _dgCheckDeps() {
         showToast(t('diag_deps_check_failed'), 'danger');
         return;
     }
-    const byName = {};
-    (data.rows || []).forEach(r => { byName[r.name] = r; });
-    _dgRemote = {byName, checkedAt: data.checked_at || '', behind: data.behind || 0,
+    // Keyed twice, and the pair is the one that is exact. Since the check also covers what
+    // only ANOTHER container runs, the same package can arrive twice at two versions — and a
+    // plain `byName[r.name] = r` let the last one win, so a drifted worker's answer was drawn
+    // on this process's own row. First-wins keeps the local lists (which come first) as the
+    // name's owner; `byPin` is what the tables actually read, because a row knows its version.
+    const byName = {}, byPin = {};
+    (data.rows || []).forEach(r => {
+        if (!(r.name in byName)) byName[r.name] = r;
+        byPin[`${r.name}@${r.installed || ''}`] = r;
+    });
+    _dgRemote = {byName, byPin, checkedAt: data.checked_at || '', behind: data.behind || 0,
                  vulnsOk: !!data.vulns_ok, vulnTotal: data.vuln_total || 0,
                  vulnPackages: data.vuln_packages || 0, asked: data.vuln_asked || 0,
                  // Which of the answers belong to no lock entry. The server says so by name:
@@ -281,6 +293,9 @@ async function _dgCheckDeps() {
     _dgSet('dgDepsResult', _dgRemoteSummary());
     _dgSet('dgDepsTables', _dgDepsTables((_diagData || {}).dependencies));
     _dgSet('dgDepsBadge', _dgRemoteBadge());
+    // The other card reads this same answer for its CVE column — the check asked about
+    // every process's packages in one round, so the containers are already covered.
+    _dgRedrawInstances();
     if (box) requestAnimationFrame(() => { box.scrollTop = at; });
     _dgBusy(false, t('diag_deps_recheck'));
 }

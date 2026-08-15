@@ -68,7 +68,12 @@ WORKDIR /app
 # next month contain the same dependency tree — requirements.txt (ranges) is only the
 # source the lock is compiled from.
 COPY src/requirements.lock .
-RUN pip install --no-cache-dir -r requirements.lock
+# `pip` and `setuptools` first, and on purpose. They are not in the lock — pip-compile does
+# not pin its own installer — so the image shipped whatever the base image happened to carry,
+# and the diagnostics page reported advisories against both. They run in this container like
+# everything else here, and the .deb/.rpm postinstall and the Gentoo ebuild already do this.
+RUN pip install --no-cache-dir --upgrade pip setuptools \
+    && pip install --no-cache-dir -r requirements.lock
 
 # Copy application source
 COPY src/ .
