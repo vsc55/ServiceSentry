@@ -1034,6 +1034,112 @@ class TestTheImplicitCompileIsBounded:
         assert target.stat().st_mtime_ns == before, 'identical content was rewritten'
 
 
+class TestItDoesNotAssumeItOwnsTheThread:
+    """SNMP is an asyncio API called from synchronous code, and the thread it is called on is
+    not ours to make assumptions about.
+
+    Reported by CI, and unreproducible on its own: five discovery tests failed only when the
+    browser tests had run first in the same worker. Playwright's sync API keeps an event loop
+    alive in the main thread, `asyncio.run` refuses to start a second one there, and
+    `discover` runs it inside `try/except: continue` — so every server was skipped, the list
+    came back empty, and it read as *this device has no OIDs*. Which is the exact symptom the
+    walk had already been rewritten once to fix, from an entirely different cause.
+
+    The lesson is not about the tests. The panel calls this from whatever thread is serving
+    the request, and a swallowed exception per server turns "we could not ask" into "there is
+    nothing here".
+    """
+
+    @staticmethod
+    def _on_thread(fn, *, with_loop):
+        """Run *fn* on a thread of this test's own, with or without a live event loop on it.
+
+        A thread of its own because the main one is not in a known state: the first version of
+        this helper called `asyncio.run` there, which is the very thing under test, and the
+        guard fell into its own trap the moment the browser tests ran first. A fresh thread has
+        no loop whatever the rest of the suite is doing, so both conditions are constructed
+        rather than assumed.
+        """
+        import asyncio                                       # noqa: PLC0415
+        import threading                                     # noqa: PLC0415
+        out = {}
+
+        async def _inside():
+            out['value'] = fn()
+
+        def _thread():
+            try:
+                if with_loop:
+                    asyncio.run(_inside())          # fn runs with this loop RUNNING
+                else:
+                    out['value'] = fn()
+            except BaseException as exc:            # noqa: BLE001  (re-raised below)
+                out['error'] = exc
+
+        worker = threading.Thread(target=_thread, name='snmp-guard')
+        worker.start()
+        worker.join()
+        if 'error' in out:
+            raise out['error']
+        return out['value']
+
+    @classmethod
+    def _loop_running(cls, fn):
+        return cls._on_thread(fn, with_loop=True)
+
+    @classmethod
+    def _no_loop(cls, fn):
+        return cls._on_thread(fn, with_loop=False)
+
+    def test_a_coroutine_still_runs_with_a_loop_already_going(self):
+        from watchfuls.snmp.client import run_coroutine
+
+        async def _answer():
+            return 42
+
+        assert self._loop_running(lambda: run_coroutine(_answer())) == 42
+
+    def test_it_still_runs_with_no_loop_at_all(self):
+        """The ordinary path, and the one the fix must not slow down or change."""
+        from watchfuls.snmp.client import run_coroutine
+
+        async def _answer():
+            return 42
+
+        assert self._no_loop(lambda: run_coroutine(_answer())) == 42
+
+    def test_what_the_coroutine_raises_reaches_the_caller(self):
+        """The point of the helper is to move the loop, not to become a second place that
+        swallows failures — the swallowing is what made this invisible for as long as it was."""
+        from watchfuls.snmp.client import run_coroutine
+
+        async def _boom():
+            raise ValueError('from inside')
+
+        with pytest.raises(ValueError, match='from inside'):
+            self._loop_running(lambda: run_coroutine(_boom()))
+
+    def test_discovery_walks_even_with_a_loop_already_going(self, tmp_path):
+        """The failure as CI saw it, in one test."""
+        seen = {}
+
+        async def fake_walk(*a, **kw):
+            seen.update(kw)
+            return [{'name': '1.3.6.1.2.1.1.1.0', 'display_name': 'up',
+                     'status': 'DisplayString', 'mib_category': 'string'}]
+
+        def _go():
+            with patch.object(Watchful, '_snmp_walk', side_effect=fake_walk):
+                return Watchful.discover({
+                    '__var_dir__': str(tmp_path),
+                    'servers': {'s': {'enabled': True, 'host': '10.0.0.1',
+                                      'version': '2c', 'community': 'public', 'checks': {}}}})
+
+        out = self._loop_running(_go)
+        assert seen, 'the walk was never reached — discover swallowed the loop error again'
+        assert out and out[0]['display_name'] == 'up'
+
+
 class TestDiscoveryUsesTheServersIdentity:
     """Reported as "you launch OID discovery against a server and get nothing back".
 

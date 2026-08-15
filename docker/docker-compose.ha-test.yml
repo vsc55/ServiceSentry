@@ -11,6 +11,9 @@
 #   docker compose -f docker/docker-compose.ha-test.yml up --build
 #   # open http://localhost:8080 (admin/admin) → Services tab
 #
+# Which published image it runs is one variable, `SS_IMAGE_TAG` (default `test`) — see the
+# anchor below.
+#
 # Scale differently on the fly:
 #   docker compose -f docker/docker-compose.ha-test.yml up --build \
 #     --scale worker=3 --scale events=2 --scale syslog=3
@@ -39,10 +42,19 @@ x-db-env: &db-env
 # while saying nothing about what people actually pull.
 #   published (default) : docker compose -f docker/docker-compose.ha-test.yml up -d
 #   local build         : add -f docker/docker-compose.ha-test-build.yml
-# `pull_policy: always` on purpose — the `test` tag MOVES, and a stale local copy of it
-# would quietly test the previous build.
+# `pull_policy: always` on purpose — these tags MOVE, and a stale local copy of one would
+# quietly test the previous build.
+#
+# WHICH published tag, in one place and without editing this file: CI publishes `:test`
+# (built beside the suite) and `:build` (built without running it), so pick with
+#   SS_IMAGE_TAG=build docker compose -f docker/docker-compose.ha-test.yml up -d
+#   SS_IMAGE_TAG=build ./docker/make_test.sh ha
+# or write it once in `docker/.env` (see docker/env.example) — Compose reads that file from
+# this directory whether it is called from here or from the repo root with `-f`. The shell
+# WINS over the file, which is the part worth knowing when a stack comes up on an image
+# nobody expected; `make_test.sh` prints the one it actually brought up rather than guessing.
 x-app-build: &app-build
-  image: ghcr.io/vsc55/servicesentry:test
+  image: ghcr.io/vsc55/servicesentry:${SS_IMAGE_TAG:-test}
   pull_policy: always
 
 x-app-env: &app-env

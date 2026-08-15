@@ -151,6 +151,7 @@ a pytest plugin that blocks `import flask` in `sys.meta_path` is how these were 
 | PR | tests + install check + image built, **never pushed** |
 | push to `main` | tests → image `:edge` |
 | tag `test` | image `:test` **beside** the tests (it claims nothing), plus packages built and installed but not published |
+| tag `build` | the same as `test` with the suite **not run at all** — image `:build`, packages built and installed |
 | tag `vX.Y.Z` | `:1.2.3`, `:1.2`, `:latest`, the `.deb`/`.rpm`/Gentoo overlay, and a GitHub Release whose body is that version's CHANGELOG section |
 
 - `:latest` is the newest **release**, not the newest commit. `:edge` is the tip of `main`.

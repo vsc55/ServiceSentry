@@ -843,6 +843,179 @@ class TestTheDiagnosticsPageSaysWhetherWeAreOnHttps:
         assert net['tls_terminated_here'] is False
 
 
+class TestTheOtherProcessesOfTheInstallation:
+    """The card that exists only when the panel is not the whole installation.
+
+    Everything else on the diagnostics page describes the process serving the request. Split
+    into web / worker / syslog / events, that is the web admin and nothing else — and the
+    question a support thread opens with is whether the other pods are on the same build.
+    """
+
+    def _seed(self, admin, **env):
+        store = getattr(admin, '_service_instances_store', None)
+        if store is None:
+            pytest.skip('this build has no instance registry')
+        store.heartbeat('rohan:9:syslog', 'syslog', mode='standalone', running=True,
+                        host='rohan', pid=9, version=env.pop('version', '0.0.1+build.1'))
+        store.set_env('rohan:9:syslog', {
+            'python': '3.11.2', 'os': 'Debian GNU/Linux 12', 'features': [],
+            'lock': [], 'extra': [], **env})
+
+    def _open(self, page):
+        page.goto(f'{page.panel_url}/admin')
+        _ready(page)
+        page.evaluate("() => _navTab('#tab-diagnostic')")
+        page.wait_for_selector('#btnDiagDeps', timeout=15_000)
+
+    def test_a_single_process_install_draws_no_card(self, page):
+        """A table of one row saying "same as this process" exists to be dismissed."""
+        self._open(page)
+        assert not page.evaluate(
+            "() => !!Array.from(document.querySelectorAll('#diagnostic-container .card'))"
+            "        .find(c => c.querySelector('.bi-diagram-3'))")
+
+    def test_another_container_is_listed_with_what_it_runs(self, page, admin):
+        self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0',
+                                 'installed': '3.1.0'}])
+        self._open(page)
+        text = page.evaluate("""() => {
+            const c = Array.from(document.querySelectorAll('#diagnostic-container .card'))
+                .find(x => x.querySelector('.bi-diagram-3'));
+            return c ? c.textContent.replace(/\\s+/g, ' ') : '';
+        }""")
+        assert 'syslog' in text and 'rohan' in text and '3.11.2' in text, text[:300]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_a_container_on_another_build_is_marked(self, page, admin):
+        """The whole reason the card exists: four containers are meant to be one image, and a
+        tag left behind shows up here before it shows up as a bug nobody can reproduce."""
+        self._seed(admin, version='0.0.1+build.1')
+        self._open(page)
+        mark = page.evaluate("""() => {
+            const c = Array.from(document.querySelectorAll('#diagnostic-container .card'))
+                .find(x => x.querySelector('.bi-diagram-3'));
+            const b = c && c.querySelector('td .badge.text-bg-warning');
+            return b ? b.textContent.trim() : null;
+        }""")
+        assert mark and 'build.1' in mark, mark
+
+    def test_matching_packages_open_too(self, page, admin):
+        """Reported off the screen: "Same as here (42)" was the one cell with nothing behind
+        it, and it does not say WHICH 42. A sentence that asks the reader to take the
+        interesting half on trust is what this page exists not to do."""
+        # Seeded with THIS process's own environment, which is the case the cell is for: the
+        # containers are meant to be one image, so "same" is what a healthy install shows.
+        from lib.core.diagnostics import collect, service as diag_service   # noqa: PLC0415
+        env = collect.environment(diag_service.lock_path())
+        self._seed(admin, lock=env['lock'], extra=env['extra'])
+        self._open(page)
+        page.click('#diagnostic-container .card:has(.bi-diagram-3) td button')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        rows = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        names = {r[0] for r in rows}
+        assert 'flask' in names and 'pip' in names, sorted(names)[:8]
+        # A column each, not one cell holding `3.5.0 → 3.5.1 · outside the lock`: a table
+        # written with separators lines nothing up, and the reader is the one joining it.
+        assert all(len(r) == 5 for r in rows), rows[:3]
+        # What the lock pins over there and what merely runs there are different claims, and
+        # the same distinction the dependency table draws one card below.
+        assert any(r[0] == 'pip' and 'lock' in r[4] for r in rows), rows[:6]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_package_list_carries_the_advisory_of_each_package(self, page, admin,
+                                                                    monkeypatch):
+        """Reported off the screen: the card gives a container a CVE total and its package
+        list said nothing about them, so "which of these 43 has it" was answered nowhere.
+
+        Five columns and the identifiers themselves, not a count: there is room inside a
+        dialog that a table row does not have, and a number in here would be a second thing
+        asking to be clicked on top of the modal it is already in."""
+        from lib.core.diagnostics import advisories as adv          # noqa: PLC0415
+        from lib.core.diagnostics import collect, service as diag_service   # noqa: PLC0415
+        env = collect.environment(diag_service.lock_path())
+        pin = next(r for r in env['lock'] if r['name'] == 'flask')
+        self._seed(admin, lock=env['lock'], extra=env['extra'])
+        monkeypatch.setattr(adv, 'check', lambda rows, timeout=adv.TIMEOUT: {
+            'ok': True, 'behind': 0, 'unknown': 0, 'vulns_ok': True, 'vulns_error': '',
+            'vuln_total': 1, 'vuln_packages': 1, 'vuln_asked': 2,
+            'rows': [{'name': 'flask', 'installed': pin['installed'], 'url': '',
+                      'latest': pin['installed'], 'state': 'current', 'error': '',
+                      'vuln_count': 1,
+                      'vulns': [{'id': 'GHSA-7', 'url': 'https://osv.dev/vulnerability/GHSA-7',
+                                 'severity': 'high', 'score': 8.0, 'published': True,
+                                 'vector': '', 'summary': ''}]}]})
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => !!document.querySelector('#dgInstBody td:last-child button')",
+            timeout=15_000)
+        page.click('#diagnostic-container .card:has(.bi-diagram-3) td button')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        rows = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        row = next((r for r in rows if r[0] == 'flask'), None)
+        assert row and 'GHSA-7' in row[3], row
+        # And the one package that has it, not every row: a column of identifiers repeated
+        # down the list would be the same claim as the total it replaced.
+        assert sum(1 for r in rows if 'GHSA-7' in r[3]) == 1, len(rows)
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_advisories_of_another_container_are_shown_against_it(self, page, admin,
+                                                                      monkeypatch):
+        """The check already asks about what the other containers run — one round for the
+        whole installation. What was missing was saying WHICH container carries the finding,
+        and that is a join against an answer already on the page: no second call, and none
+        from the container itself, which has no way out and no HTTP for us to ask on."""
+        from lib.core.diagnostics import advisories as adv
+        self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0', 'installed': '0.0.1'}])
+        monkeypatch.setattr(adv, 'check', lambda rows, timeout=adv.TIMEOUT: {
+            'ok': True, 'behind': 0, 'unknown': 0, 'vulns_ok': True, 'vulns_error': '',
+            'vuln_total': 1, 'vuln_packages': 1, 'vuln_asked': 2,
+            'rows': [{'name': 'flask', 'installed': '0.0.1', 'latest': '3.1.0',
+                      'state': 'behind', 'error': '', 'url': '',
+                      'vulns': [{'id': 'GHSA-7', 'url': 'https://osv.dev/vulnerability/GHSA-7',
+                                 'severity': 'high', 'score': 8.0, 'published': True,
+                                 'vector': '', 'summary': ''}], 'vuln_count': 1}]})
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => { const b = document.querySelector('#dgInstBody td:last-child button');"
+            "        return !!b; }", timeout=15_000)
+        page.click('#dgInstBody td:last-child button')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        seen = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        assert seen and seen[0][0].startswith('GHSA-7'), seen
+        # A column each: the identifier, how bad it is, and WHICH package of that container's
+        # carries it. The count on the card is a number and the next question is always "in
+        # what" — reported off the screen, and the reason this is a table and not a list.
+        assert '8' in seen[0][1], seen[0]          # its CVSS score, in whatever language
+        assert 'flask' in seen[0][2] and '0.0.1' in seen[0][2], seen[0]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_difference_opens_package_by_package(self, page, admin):
+        """"They differ" is not actionable. Which package, and from what to what, is.
+
+        A column per side, so which of the two versions is this process is read off a header
+        instead of inferred from the order an arrow was written in."""
+        self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0',
+                                 'installed': '0.0.1'}])
+        self._open(page)
+        page.click('#diagnostic-container .card:has(.bi-diagram-3) td button.text-bg-warning')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        rows = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        row = next((r for r in rows if r[0] == 'flask'), None)
+        assert row and row[2] == '0.0.1', rows[:6]
+        assert row[1] != row[2], row          # this process's own, and it is not that one
+        assert not page.console_problems.problems, page.console_problems.problems
+
+
 class TestTheDependencyCheckDrawsItsTwoColumns:
     """The button that asks PyPI and the advisory service, driven in a browser.
 
@@ -889,6 +1062,11 @@ class TestTheDependencyCheckDrawsItsTwoColumns:
             'ok': True, 'rows': self.ROWS + [self.EXTRA], 'behind': 2, 'unknown': 0,
             'vulns_ok': True, 'vulns_error': '', 'vuln_total': 3, 'vuln_packages': 2,
             'vuln_asked': 88})
+        # The counts are DERIVED from the rows that get drawn, matched by name AND version, so
+        # the two lists the server builds have to name the same pins the stub answers for.
+        monkeypatch.setattr('lib.core.diagnostics.service.dependency_rows',
+                            lambda _wa: [{'name': 'flask', 'required': '1.0.0',
+                                          'installed': '1.0.0', 'status': 'ok'}])
         monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows',
                             lambda _wa: [{'name': 'pip', 'required': '',
                                           'installed': '1.0.0', 'status': 'unpinned'}])

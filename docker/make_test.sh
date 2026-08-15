@@ -15,6 +15,10 @@
 #   ./docker/make_test.sh down       # stop + remove containers
 #   ./docker/make_test.sh clean      # + remove volumes (wipes the DB)
 #   ./docker/make_test.sh rebuild    # rebuild image + recreate containers
+#
+# Which published image the `ha` stack runs is one variable — CI publishes `:test` (built
+# beside the suite) and `:build` (built without running it):
+#   SS_IMAGE_TAG=build ./docker/make_test.sh ha
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,8 +44,15 @@ case "$STACK" in
   *)        FILES=("docker/docker-compose.microservices-test.yml") ;;
 esac
 # `--build` only where something can be built: the published-image stack has no build
-# section to act on and wants a fresh pull instead (the `test` tag moves).
+# section to act on and wants a fresh pull instead (the published tags move).
 if [ "$STACK" = "ha" ]; then UP_FLAGS=(--pull always); else UP_FLAGS=(--build); fi
+
+# Which published tag the `ha` stack runs — exported ONLY when it is actually set, and never
+# defaulted here. Compose takes it from three places in this order: the shell, `docker/.env`,
+# and the `${SS_IMAGE_TAG:-test}` default in the compose file. The shell WINS, so defaulting
+# it here would silently override a `docker/.env` somebody wrote — the exact failure this
+# variable exists to prevent.
+[ -n "${SS_IMAGE_TAG:-}" ] && export SS_IMAGE_TAG || true
 
 # Prefer Docker Compose v2 (`docker compose`), fall back to v1 (`docker-compose`).
 if docker compose version >/dev/null 2>&1; then
@@ -66,6 +77,13 @@ EOF
   HA      : 2 replicas of worker/events/syslog -> Services tab shows Leader/Standby.
             Prove failover: docker kill <worker Leader> -> a standby takes over in ~30s.
 EOF
+    if [ "$STACK" = "ha" ]; then
+      # Asked of Compose rather than rebuilt from the variable: the answer comes from three
+      # places with a precedence, and printing our own guess is how a line that exists to say
+      # WHICH image came up ends up naming a different one.
+      img="$("${DC[@]}" config --images 2>/dev/null | grep servicesentry | head -1 || true)"
+      echo "  Image   : ${img:-unknown}   (SS_IMAGE_TAG=build for the one built without the suite)"
+    fi
   else
     echo "  Syslog  : UDP/TCP 514, TLS 6514"
   fi

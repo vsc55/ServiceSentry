@@ -3465,7 +3465,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 89 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 135 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 
@@ -3579,7 +3579,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 69. Servicios — Registro de heartbeat / estado (ServiceInstancesStore)
 
-**Archivo:** `tests/unit/test_service_instances_store.py` — 6 tests
+**Archivo:** `tests/unit/test_service_instances_store.py` — 10 tests
 
 ### `TestServiceInstancesStore`
 
@@ -3591,6 +3591,18 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_mark_down` | `mark_down` marca una instancia como caída | La instancia queda con running=False | Sigue marcada como activa |
 | `test_clear_others_removes_same_host_restarts` | `clear_others` elimina reinicios previos del mismo proceso embebido en el host | Elimina 2 (PIDs viejos) y conserva la actual, la réplica de otro host y otro servicio | Borra réplicas ajenas o la instancia vigente |
 | `test_prune_drops_stale_rows` | `prune` elimina instancias con last_seen caducado | Elimina 1 (la antigua) y conserva 'new' | Poda la reciente o conserva la obsoleta |
+
+### `TestWhatTheProcessRunsOn`
+
+La columna `env`: intérprete, SO y paquetes de ese proceso, que es lo que permite responder por
+los contenedores en los que el panel **no** se está ejecutando.
+
+| Test | Qué comprueba | OK | Error |
+|---|---|---|---|
+| `test_it_is_stored_and_read_back_as_a_dict` | `set_env` guarda la huella y se lee ya parseada | El dict vuelve tal cual | Vuelve como texto o se pierde |
+| `test_an_instance_that_never_published_reads_as_empty` | Una instancia que nunca publicó lee `{}` | Dict vacío, ni `None` ni excepción | El panel no puede distinguir «no publicó» de «difiere» |
+| `test_the_beat_does_not_carry_it` | Un latido posterior **no** pisa lo que publicó el arranque | `env` intacto y el latido sí actualiza lo suyo | El latido lo borra —o lo reescribe cada pocos segundos, que es la razón de que tenga columna propia— |
+| `test_publishing_nothing_leaves_what_was_there` | Publicar vacío no borra una respuesta buena | Se conserva lo anterior | Un proceso que no pudo describirse borra el dato del que sí pudo |
 
 ---
 
@@ -6462,7 +6474,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 45 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 52 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6578,6 +6590,19 @@ porque es otra afirmación —no son desviación, no hay nada que reconciliar—
 «Fija», que vacía se leería como un paquete que perdió su pin; y el contador de la cabecera
 **no cuenta un `pytest` más nuevo como deuda del lock**, que es la única con una acción detrás,
 aunque lo diga aparte para que el pliegue no muestre flechas que la cabecera nunca contó.
+
+**`TestTheOtherProcessesOfTheInstallation`** — la tarjeta que solo existe cuando el panel no es
+toda la instalación, abierta en un navegador: que otro contenedor aparece con lo que ejecuta, que
+uno en otra compilación **se marca**, y que las tres celdas que abren algo abren lo que dicen. Las
+tres son tablas y ninguna un párrafo con separadores: la lista de paquetes lleva **una columna por
+cosa** —versión, la publicada, sus avisos y si el lock la fija—, porque `3.5.0 → 3.5.1 · 2 avisos ·
+fuera del lock` es una tabla escrita con puntos en la que nada se alinea y «cuál de estos 43 tiene
+el aviso» se responde leyendo hasta el final de cada línea; la comparación pone **una columna por
+lado** en vez de una flecha, que deja adivinar cuál de las dos versiones es este proceso; y los
+avisos de un contenedor dicen **en qué paquete suyo** caen, que es la pregunta siguiente al número
+de la columna y no se respondía en ningún sitio. Dentro del diálogo los avisos son los
+identificadores, no un contador: ahí hay sitio, y un número sería otra cosa pidiendo un clic
+encima del modal en el que ya se está.
 
 **`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
 Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe
@@ -6952,9 +6977,9 @@ librería de imagen sería un test que se salta justo en la máquina donde impor
 
 ## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
 
-**Archivo:** `tests/unit/test_diagnostics_collect.py` — 42 tests
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 47 tests
 **Archivo:** `tests/unit/test_diagnostics_advisories.py` — 68 tests
-**Archivo:** `tests/integration/test_wa_diagnostics.py` — 34 tests
+**Archivo:** `tests/integration/test_wa_diagnostics.py` — 40 tests
 
 Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
 qué corre, dónde escribe y qué falta. Todas se podían contestar antes —leyendo un log, abriendo
@@ -6993,6 +7018,28 @@ importan más que cualquier campo suelto:
 
 ---
 
+## 151b. Diagnóstico: los otros procesos de la instalación
+
+**Archivo:** `tests/unit/test_diagnostics_instances.py` — 22 tests
+
+Repartido en contenedores —web, worker, receptor syslog, procesador de eventos—, la pantalla de
+diagnóstico describe **el proceso que sirve la petición y nada más**. Los otros tres no
+responden HTTP salvo que se fije `SS_CONTROL_TOKEN`, que no es el valor por defecto, así que
+cada servicio publica qué ejecuta en su latido y el panel lo lee de la **base de datos
+compartida** — que es lo que el propio plano de control ya declara como su fuente de verdad.
+
+Lo que se prueba aquí es la **comparación**, que es la parte que puede mentir en silencio:
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTellingTwoProcessesApart::*` (7) | La respuesta es **la diferencia**, no cuatro copias de la misma lista: cuatro contenedores de una imagen traen listas idénticas y «iguales que aquí» es la respuesta entera cuando es cierta. Cubre que una versión distinta viaja **con los dos lados** («difieren» no es accionable; cuál y de qué a qué, sí), que faltar en un lado o en el otro son **hallazgos distintos** (un worker sin `paramiko` salta todos los checks SSH), que el lock y el resto de lo instalado son **una sola lista** aquí —`pip` también ejecuta allí—, que `charset-normalizer` y `charset_normalizer` no son una diferencia (PEP 503, o cada contenedor parecería haber derivado), que el orden es estable, y que una instancia que **no ha publicado** no se cuenta como diferencia: «desconocido» y «difiere» son frases distintas y solo una implica trabajo |
+| `TestWhatOnlyTheOtherProcessesRun::*` (6) | Los nombres extra que la consulta remota debe cubrir, **y ninguno más**: una sola tanda de peticiones para toda la instalación, porque cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a internet a preguntar casi lo mismo, justo en el despliegue donde peor sienta. Una imagen igual en todas partes **no añade nada**, este proceso no se pregunta dos veces, y dos contenedores con dos versiones del mismo paquete son **dos preguntas** —responder una por las dos es como un contenedor acaba informado como limpio porque otro lo está— |
+| `TestTheListDegradesInsteadOfFailing::*` (3) | Se llega desde la página que alguien abre porque algo ya va mal: sin registro y con un store que revienta, la tarjeta cuesta la tarjeta y nada más |
+| `TestListingWhatOneProcessRuns::*` (3) | «Iguales que aquí (42)» no dice **cuáles** 42, así que la celda abre la lista. Una sola forma para la pantalla y para la consulta remota —una segunda copia más plana al lado es como las dos acaban discrepando sobre qué hay instalado allí—, con las dos mitades dentro diciendo cuál fija el lock (allí `pip` no es desviación y `flask` sí) y ordenada por nombre |
+| `test_the_versions_of_one_process_are_read_from_both_halves` (3) | Las versiones salen del lock **y** de lo instalado alrededor, normalizadas |
+
+---
+
 ## 152. El nombre del producto tiene un solo hogar
 
 **Archivo:** `tests/unit/test_app_name.py` — 6 tests
@@ -7026,3 +7073,42 @@ frases que hay que releer en cada idioma cuando cambie, de todos modos.
 | `TestTheNameHasOneHome::test_no_code_spells_it_out` | Solo **literales de cadena**, leídos con `ast`: así un comentario o un docstring que explique la regla no hace saltar la guarda que la comprueba |
 | `TestTheNameHasOneHome::test_no_template_spells_it_out` | Igual en las plantillas, con los comentarios (Jinja, HTML y JS) retirados antes de mirar |
 | `TestTheNameHasOneHome::test_the_exceptions_are_still_real` | Una lista de excepciones que nadie poda es donde la regla se muere: cada entrada tiene que seguir existiendo y seguir conteniendo el nombre |
+
+---
+
+## 153. `docker/env.example` es la lista publicada de lo que se lee del entorno
+
+**Archivo:** `tests/meta/test_docker_env_example.py` — 6 tests
+
+Es el fichero que la gente copia a `docker/.env` y edita, y el único sitio donde toda una clase
+de ajustes es **descubrible**: un override que existe en el código y no aparece ahí, para quien
+despliega, no existe. Se pudrió en silencio —dieciséis variables soportadas faltaban cuando se
+contaron por primera vez, entre ellas **todos** los ajustes de copias de seguridad y la jaula
+fail2ban— porque nada conectaba `lib/config/spec.py` con un fichero de texto de otro directorio.
+
+Lo que cuenta como «soportada» se saca de las tres superficies que de verdad leen el entorno —el
+registro de configuración, el `entrypoint.sh` del contenedor y los `os.environ` del código—,
+nunca de una lista guardada aquí: una guarda con su propia copia de la respuesta es otra cosa
+más que mantener sincronizada.
+
+Las dos direcciones, y la asimetría entre ellas es deliberada:
+
+- **documentadas ⊇ soportadas.** Un `Cfg(…, env='SS_X')` nuevo es una línea, y acordarse de
+  escribirlo también aquí es justo lo que nadie recuerda. Basta con que el fichero la **nombre**:
+  las variables por topología (`SS_SERVICE_ROLE`, las puertas `*_EMBEDDED`) se explican en un
+  párrafo que manda al compose, que es documentación y es la forma que este fichero quiere para
+  ellas.
+- **documentadas ⊆ reales**, y aquí sólo cuentan las líneas que **asignan** (`SS_X=…`, comentadas
+  o no). La prosa escribe familias —`SS_DB_*`, `SS_SYSLOG_DB_*`— y ningún regex distingue un
+  comodín de un nombre una vez quitado el asterisco. Un nombre que ya no existe es peor que uno
+  que falta: se lee como soportado, se pone, y no hace nada — que es indistinguible de que el
+  ajuste no funcione.
+
+La lista de excepciones (`COMPOSE_ONLY`) es lo que Compose consume antes de que exista ningún
+contenedor —la etiqueta de imagen, las contraseñas root de MariaDB, el dominio y el correo de
+Let's Encrypt— más `SS_SECRET_KEY`, que se lee a través de una constante de módulo y el escaneo
+no puede ver. Cada entrada se comprueba **contra el árbol**: una excepción que sobrevive a su
+variable excusa un nombre que ya no significa nada.
+
+Validada por los dos lados quitando una variable del fichero (rojo, nombrándola) e inventando
+una que nadie lee (rojo también). Seis `def test_`, 73 al expandir los `parametrize`.

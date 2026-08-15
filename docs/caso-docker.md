@@ -185,8 +185,18 @@ docker pull ghcr.io/vsc55/servicesentry:latest
 | `latest` | la **última versión publicada** | al etiquetar `v1.2.3` |
 | `1.2.3` / `1.2` | una versión concreta | al etiquetar `v1.2.3` |
 | `edge` | la punta de `main` | en cada merge a `main` |
-| `test` | build manual | al mover el tag `test` |
+| `test` | build manual, **con la suite corriendo al lado** | al mover el tag `test` |
+| `build` | build manual **sin pasar la suite** | al mover el tag `build` |
 | `sha-<commit>` | ese commit exacto | **nunca** — es la única inmutable |
+
+`test` y `build` construyen exactamente lo mismo —imagen, `.deb`, `.rpm`, overlay de Gentoo, y
+los paquetes instalados de verdad en Debian, Ubuntu y Fedora— y se diferencian en una cosa: `test`
+lanza la suite en paralelo al build, `build` no la lanza en absoluto. Ninguno de los dos hace
+esperar a la imagen, así que la elección no es de velocidad sino de **qué afirma el tag**: `build`
+es para cuando la respuesta ya se conoce (la suite se acaba de pasar en local, o el cambio está en
+el `Dockerfile` y ningún test de Python lo ve) y evita el aspa roja contra un commit del que ya
+sabías el resultado. Cada uno publica bajo su propio nombre para que un `pull` diga cuál de las dos
+afirmaciones lleva la imagen.
 
 **`latest` es la última release, no el último commit.** `docker pull` sin etiqueta es lo que
 ejecuta casi todo el mundo, y debe entregar lo que ha pasado los tests, los paquetes y la
@@ -223,6 +233,15 @@ docker compose -f docker/docker-compose.microservices-test.yml up --build
 # se descarga, no solo que el Dockerfile compile.
 docker compose -f docker/docker-compose.ha-test.yml up -d --pull always
 #   (o escala en caliente: … --scale worker=3 --scale events=2 --scale syslog=3)
+
+# Qué imagen publicada corre esa pila se decide en UNA variable, `SS_IMAGE_TAG` (por
+# defecto `test`); vale para los cuatro servicios porque todos salen del mismo ancla:
+SS_IMAGE_TAG=build docker compose -f docker/docker-compose.ha-test.yml up -d --pull always
+SS_IMAGE_TAG=build ./docker/make_test.sh ha
+#   O una vez en `docker/.env` (está en env.example). Responden tres sitios y gana el
+#   primero: el shell, ese fichero, y el `${SS_IMAGE_TAG:-test}` del propio compose — así
+#   que un valor exportado pisa lo que escribas en el .env. `make_test.sh ha` imprime la
+#   imagen que ha levantado de verdad, preguntándosela a Compose en vez de deducirla.
 
 # La misma pila construida desde tu copia de trabajo (para probar cambios tuyos: el tag
 # `test` publicado no sabe nada de ellos). Es un override, no otra pila:

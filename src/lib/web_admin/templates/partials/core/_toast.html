@@ -103,3 +103,42 @@ function showLinksModal(title, items, lead) {
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
     bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
 }
+
+// ──────────────────────────── Generic table modal ─────────────────
+// The same modal once more, for what neither of the other two can hold: entries with SEVERAL
+// things to say about them.  `showInfoModal` is key/value and `showLinksModal` is label/note, so
+// a package carrying a version, a newer release, its advisories and whether the lock pins it had
+// to be crammed into a single cell as `3.5.0 → 3.5.1 · 2 advisories · outside the lock` — which
+// is a table written with separators, and read as one.
+//
+// `columns` is [{label, cls}] — `cls` styles the whole COLUMN, its header included, so alignment
+// is declared once — and `rows` is [[cell, …]].  A cell is a string, escaped here like
+// everywhere else — or `{html: '…'}`, which is NOT escaped and is the caller stating it composed
+// that markup itself.  Same escape hatch `showLinksModal` exists for, said once and reusable:
+// only ever hand it markup this panel built, never a value that arrived from outside.
+function showTableModal(title, columns, rows, lead, variant) {
+    document.getElementById('infoModalTitle').textContent = title || '';
+    const cols = columns || [];
+    const cell = (c, cls) =>
+        `<td class="small ${cls || ''}">${
+            (c && typeof c === 'object' && 'html' in c)
+                ? String(c.html)
+                : esc(c === null || c === undefined ? '' : String(c))}</td>`;
+    const head = `<thead><tr>${cols.map(c =>
+        `<th class="small py-1 ${c.cls || ''}">${esc(String(c.label || ''))}</th>`).join('')
+        }</tr></thead>`;
+    const body = (rows || []).map(r =>
+        `<tr>${(r || []).map((c, i) => cell(c, (cols[i] || {}).cls)).join('')}</tr>`).join('');
+    const _lv = { success: 'bi-check-circle', warning: 'bi-exclamation-triangle', danger: 'bi-x-circle' };
+    const _vc = _lv[variant] ? variant : 'success';
+    document.getElementById('infoModalBody').innerHTML =
+        (lead ? `<p class="small text-${_vc} mb-2"><i class="bi ${_lv[_vc]} me-1"></i>${esc(lead)}</p>` : '')
+        + ((rows || []).length
+            // A horizontal scroll of its own: five columns inside a dialog is exactly the case
+            // where the page itself must never be the thing that scrolls sideways.
+            ? `<div class="table-responsive"><table
+                 class="table table-sm table-striped align-middle mb-0 ss-fs-3"
+                 >${head}<tbody>${body}</tbody></table></div>`
+            : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+}

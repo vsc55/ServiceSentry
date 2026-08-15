@@ -74,6 +74,24 @@ def as_text(data: dict, stamp: str) -> str:
     lines += [f'  {r["name"]}: required={r["required"] or "-"} '
               f'installed={r["installed"] or "-"} ({r["status"]})'
               for r in deps['rows']] or ['  (no dependency information)']
+    # The other containers, when there are any. This is the one place the screen cannot go —
+    # a support thread — and "the worker is on an older image" is the answer to a whole class
+    # of "it works in the panel but the check never runs".
+    others = [i for i in (data.get('instances') or []) if not i.get('is_self')]
+    if others:
+        lines.append('')
+        lines.append(f'[Other processes] count={len(others)}')
+        for inst in others:
+            diff = inst.get('diff') or {}
+            same = ('same packages' if diff.get('same')
+                    else f'{diff.get("count", 0)} package differences' if inst.get('known')
+                    else 'environment not published yet')
+            lines.append(f'  {inst["service"]}/{inst["mode"]} at {inst["host"] or "-"}'
+                         f' pid={inst.get("pid") or "-"} version={inst.get("version") or "-"}'
+                         f' python={inst.get("python") or "-"} ({inst.get("state")}, {same})')
+            for row in (diff.get('rows') or []):
+                lines.append(f'    {row["name"]}: here={row["here"] or "-"} '
+                             f'there={row["there"] or "-"}')
     return '\n'.join(lines) + '\n'
 
 
@@ -116,5 +134,23 @@ def as_xml(data: dict, stamp: str) -> str:
         ET.SubElement(node, 'dependency', {
             'name': r['name'], 'required': r['required'],
             'installed': r['installed'], 'status': r['status']})
+    others = [i for i in (data.get('instances') or []) if not i.get('is_self')]
+    if others:
+        node = ET.SubElement(root, 'instances', {'count': str(len(others))})
+        for inst in others:
+            diff = inst.get('diff') or {}
+            child = ET.SubElement(node, 'instance', {
+                'service': str(inst.get('service') or ''),
+                'mode': str(inst.get('mode') or ''),
+                'host': str(inst.get('host') or ''),
+                'pid': str(inst.get('pid') or ''),
+                'version': str(inst.get('version') or ''),
+                'python': str(inst.get('python') or ''),
+                'state': str(inst.get('state') or ''),
+                'known': str(bool(inst.get('known'))).lower()})
+            # Repeated children rather than a stringified list — the whole reason to offer XML.
+            for row in (diff.get('rows') or []):
+                ET.SubElement(child, 'difference', {
+                    'name': row['name'], 'here': row['here'], 'there': row['there']})
     ET.indent(root, space='  ')
     return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(root, encoding='unicode') + '\n'

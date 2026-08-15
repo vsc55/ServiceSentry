@@ -76,6 +76,15 @@ def register(app, wa):
                'checked_at': time.strftime('%Y-%m-%d %H:%M:%S'), **res}
         if res.get('ok'):
             out['compare'] = diag_update.compare(__version__, res.get('tag', ''))
+            # And the same verdict for every OTHER version running in this installation, so a
+            # worker left on an old image is told apart from one that is merely different from
+            # here. Computed on the server for the reason the local one is: comparing a
+            # semantic version against a release tag has one home, and a second copy in the
+            # browser is a second answer waiting to disagree with this one.
+            out['instance_versions'] = {
+                v: diag_update.compare(v, res.get('tag', ''))
+                for v in {str(i.get('version') or '') for i in diag_service.instances(wa)}
+                if v}
         # Audited either way: on a segregated network "who made this box reach out, and when"
         # is a question with an owner, and a check that failed still made the attempt.
         wa._audit('diagnostics_update_checked',
@@ -97,29 +106,52 @@ def register(app, wa):
         could name the packages could make the panel query an outside service for anything it
         liked, and the server already has the only list that is correct.
 
-        It is TWO lists: what the lock pins, and everything else installed beside it. The
-        second exists because an advisory does not care whether a package was pinned — `pip`
-        and `setuptools` run in the container too — and the answer says which names came from
-        it, so the screen can keep the two apart without deciding it for itself.
+        It is THREE lists: what the lock pins, everything else installed beside it, and what
+        only the OTHER processes of this installation run. The second exists because an
+        advisory does not care whether a package was pinned — `pip` and `setuptools` run in
+        the container too. The third exists because, split across containers, this process is
+        the web admin and nothing else, and its packages are not the installation's.
+
+        One round for all three. Asking from each container would put four processes on
+        pypi.org for nearly the same question, in exactly the deployment where that is least
+        welcome — and the answer says which names came from which list, so the screen can keep
+        them apart without deciding it for itself.
         """
         import time                                          # noqa: PLC0415
         rows = diag_service.dependency_rows(wa)
         extra = diag_service.unpinned_rows(wa)
-        res = diag_advisories.check(rows + extra)
+        # And what only the OTHER processes of this installation run. Added to the same round
+        # rather than checked from each container: four processes reaching pypi.org to ask
+        # nearly the same question is the wrong shape in exactly the deployment where it
+        # happens. Contributes nothing when they all came from one image, which is the norm.
+        elsewhere = diag_service.elsewhere_rows(wa)
+        res = diag_advisories.check(rows + extra + elsewhere)
+
+        def _pins(items):
+            # Name AND version. Three lists can name the same package — this process at one
+            # version, another container at a different one — and counting by name alone
+            # attributes one of them to the wrong list.
+            return {(r['name'], str(r.get('installed') or '')) for r in items}
+
+        def _behind(pins):
+            return sum(1 for r in res['rows']
+                       if (r['name'], r.get('installed', '')) in pins
+                       and r.get('state') == 'behind')
+
         # By name, not by position: the browser holds the answer keyed by name, and a list of
         # indexes into a list it rebuilds is an association waiting to slip.
-        names = {r['name'] for r in extra}
         res['unpinned'] = [r['name'] for r in extra]
+        res['elsewhere'] = [{'name': r['name'], 'installed': r['installed']} for r in elsewhere]
         # "Behind" is split and the advisories are NOT, because they answer different
         # questions. A newer release of a package the lock pins is an action with an owner —
         # regenerate the lock — while a newer `pytest` in a developer's checkout is not, and
         # counting them together turns the one number into something nobody acts on. An
         # advisory has the same weight either way: it is code running on this machine.
-        res['behind_unpinned'] = sum(1 for r in res['rows']
-                                     if r['name'] in names and r['state'] == 'behind')
-        res['behind'] = int(res.get('behind') or 0) - res['behind_unpinned']
+        res['behind'] = _behind(_pins(rows))
+        res['behind_unpinned'] = _behind(_pins(extra))
         wa._audit('diagnostics_dependencies_checked',
                   detail={'packages': len(rows), 'unpinned': len(extra),
+                          'elsewhere': len(elsewhere),
                           'behind': res.get('behind', 0),
                           'vulnerable_packages': res.get('vuln_packages', 0),
                           'advisories': res.get('vuln_total', 0),

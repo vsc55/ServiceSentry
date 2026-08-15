@@ -189,6 +189,68 @@ class TestTheRestOfTheEnvironment:
         assert keys == sorted(keys)
 
 
+class TestWhatOneProcessPublishesAboutItself:
+    """The fingerprint each service writes beside its heartbeat.
+
+    Split into containers, the diagnostics page describes the web admin and nothing else: the
+    worker, the syslog receiver and the event processor answer no HTTP unless a control token
+    is set, which is not the default. So each process publishes what it runs on, once, into
+    the shared database the control plane already treats as its source of truth.
+    """
+
+    def _lock(self, tmp_path, body):
+        path = os.path.join(str(tmp_path), 'requirements.lock')
+        io.open(path, 'w', encoding='utf-8').write(body)
+        return path
+
+    def test_it_carries_what_the_comparison_needs(self, tmp_path):
+        env = diag.environment(self._lock(tmp_path, 'pytest==0.0.1\n'))
+        assert env['python'] and env['os']
+        assert [r['name'] for r in env['lock']] == ['pytest']
+        assert env['lock'][0]['installed'] and env['extra']
+        assert isinstance(env['features'], list)
+
+    def test_it_states_no_verdict(self, tmp_path):
+        """Names and versions, never `ok`/`mismatch`. The comparison belongs where both sides
+        are in hand — baked into each half separately, two processes would each be judging
+        against a lock the other one may not have."""
+        env = diag.environment(self._lock(tmp_path, 'pytest==0.0.1\n'))
+        assert set(env['lock'][0]) == {'name', 'required', 'installed'}
+        assert set(env['extra'][0]) == {'name', 'installed'}
+
+    def test_it_is_small_enough_to_sit_in_a_row(self, tmp_path):
+        """It goes in a database column, so its size is a fact and not a hope. Written once
+        per instance, never per beat."""
+        import json                                          # noqa: PLC0415
+        src = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+        lock = os.path.join(src, 'requirements.lock')
+        if not os.path.isfile(lock):
+            pytest.skip('no requirements.lock in this checkout')
+        blob = json.dumps(diag.environment(lock))
+        assert len(blob) < 64_000, f'{len(blob)} bytes per instance is too much for a beat'
+
+    def test_it_is_walked_once_and_kept(self, tmp_path, monkeypatch):
+        """The one thing on this page that IS cached, and the exception has a reason.
+
+        Everything else is recomputed per call on purpose — a diagnostics screen served from a
+        cache describes the problem you had before. None of this can change while the process
+        lives: a package cannot be installed into a running interpreter's view of itself. And
+        it is a full walk of every installed distribution, now on every render of the page as
+        well as once at start-up.
+        """
+        lock = self._lock(tmp_path, 'pytest==0.0.1\n')
+        first = diag.environment(lock)
+        monkeypatch.setattr(diag, 'dependencies',
+                            lambda _p: pytest.fail('it walked the tree again'))
+        assert diag.environment(lock) is first
+
+    def test_a_missing_lock_is_still_a_fingerprint(self, tmp_path):
+        """A service that cannot describe half of itself must still describe the other half —
+        and must still start, which is why the caller guards it too."""
+        env = diag.environment(os.path.join(str(tmp_path), 'nope.lock'))
+        assert env['lock'] == [] and env['python']
+
+
 class TestOptionalFeaturesExplainWhatIsSwitchedOff:
     """The list that answers most of what this page exists for: a panel where the SSO button
     never appears is almost never misconfigured — the library is not there."""

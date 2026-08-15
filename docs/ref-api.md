@@ -351,7 +351,7 @@ Ver [explica-seguridad.md](explica-seguridad.md#quién-aparece-en-la-columna-usu
 
 | Método | Ruta | Permiso | Propósito |
 |---|---|---|---|
-| GET | `/api/v1/diagnostics` | `diagnostics_view` | Todo lo que se responde **sin salir de la máquina**: runtime, sistema, red/TLS, base de datos, almacenamiento, dependencias y librerías opcionales |
+| GET | `/api/v1/diagnostics` | `diagnostics_view` | Todo lo que se responde **sin salir de la máquina**: runtime, sistema, red/TLS, base de datos, almacenamiento, dependencias, librerías opcionales y **los otros procesos** de la instalación |
 | GET | `/api/v1/diagnostics/report` | `diagnostics_view` | Lo mismo como documento — `?format=txt\|json\|xml`, `inline` para leerlo antes de pegarlo |
 | POST | `/api/v1/diagnostics/update-check` | `diagnostics_view` | Preguntar a la API de releases si hay una versión más nueva |
 | POST | `/api/v1/diagnostics/dependency-check` | `diagnostics_view` | Preguntar a PyPI la última versión publicada y a OSV.dev los avisos que afectan a la instalada |
@@ -365,6 +365,12 @@ cada una queda auditada (`diagnostics_update_checked`, `diagnostics_dependencies
 Son **POST para algo que lee**: no es la obtención de un recurso, es *hacer que esta máquina
 hable con el exterior*, y eso va detrás de un verbo que un navegador no emite solo desde un
 prefetch o un enlace.
+
+En modo multi-servicio `instances` trae los demás procesos (worker, syslog, eventos) con qué
+ejecutan y **en qué se diferencian de este**, leído del registro de latidos —no por HTTP: los
+servicios standalone no responden HTTP salvo que se fije `SS_CONTROL_TOKEN`, que no es el valor
+por defecto—. La comprobación remota cubre además lo que **solo ellos** ejecutan, en la misma
+tanda de peticiones.
 
 La lista de paquetes se construye **en el servidor** —lo que fija el lock más el resto de lo
 instalado—: un cliente que pudiera nombrarlos convertiría el panel en un proxy hacia un

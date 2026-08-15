@@ -1,0 +1,333 @@
+{# ================================================================
+   Diagnostics — the other processes of this installation.
+
+   Everything else on this page describes the process that served the request. On a single
+   container that is the whole installation; split into web / worker / syslog / events it is
+   the web admin and nothing else, and the other three are invisible from every screen —
+   while "is that pod on the same build?" is what a support thread opens with.
+
+   Read from the heartbeat registry, which each service already writes to, and never over
+   HTTP: the standalone services answer no HTTP unless `SS_CONTROL_TOKEN` is set, which is not
+   the default.
+
+   The card shows the DIFFERENCE, not four copies of the same list. Four containers built from
+   one image carry identical packages, and printing them four times is a screen nobody reads
+   to find the one row that matters.
+   ================================================================ #}
+
+/** The other processes, or nothing at all.
+ *
+ *  Absent on a single-process install — there is nothing to compare, and a table of one row
+ *  saying "same as this process" exists only to be dismissed. */
+function _dgInstancesCard(list) {
+    const rows = (list || []).filter(i => !i.is_self);
+    if (!rows.length) return '';
+    const drifted = rows.filter(i => i.diff && !i.diff.same).length;
+    const unknown = rows.filter(i => !i.known).length;
+    const state = drifted
+        ? `<span class="badge text-bg-warning">${esc(t('diag_inst_n_drift')
+              .replace('{}', drifted))}</span>`
+        : `<span class="badge text-bg-success">${esc(t('diag_inst_all_same'))}</span>`;
+    return _dgCard('bi-diagram-3', t('diag_card_instances'),
+        `<div class="small text-muted mb-2">${esc(t('diag_inst_lead'))}</div>`
+        + `<table class="table table-sm align-middle mb-0"><thead><tr>
+            <th class="small py-1">${esc(t('diag_inst_service'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_where'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_version'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_python'))}</th>
+            <th class="small py-1">${esc(t('diag_inst_packages'))}</th>
+            <th class="small py-1 text-center">${esc(t('diag_dep_vulns'))}</th>
+           </tr></thead><tbody id="dgInstBody"
+           >${rows.map(_dgInstanceRow).join('')}</tbody></table>`
+        + (unknown
+            ? `<div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"
+                 ></i>${esc(t('diag_inst_unknown_note').replace('{}', unknown))}</div>`
+            : ''),
+        state);
+}
+
+function _dgInstanceRow(inst) {
+    // The version is the first thing to look at and the reason this card exists: four
+    // containers are supposed to be one image, and a tag left behind shows up here before it
+    // shows up as a bug nobody can reproduce.
+    const mine = ((_diagData || {}).runtime || {}).version || '';
+    const drift = inst.version && mine && inst.version !== mine;
+    return `<tr>
+        <td class="small"><span class="font-monospace">${esc(inst.service)}</span>
+            <span class="badge text-bg-secondary ms-1">${esc(inst.mode)}</span>
+            ${_dgInstState(inst)}</td>
+        <td class="small text-muted">${esc(inst.host || '—')}${
+            inst.pid ? esc(` · ${inst.pid}`) : ''}</td>
+        <td class="small">${_dgInstVersion(inst, drift, mine)}</td>
+        <td class="small text-muted">${esc(inst.python || '—')}${
+            inst.os ? `<span class="ms-1">· ${esc(inst.os)}</span>` : ''}</td>
+        <td class="small">${_dgInstPackages(inst)}</td>
+        <td class="small text-center">${_dgInstVulns(inst)}</td></tr>`;
+}
+
+/** Redraw the rows, and only the rows.
+ *
+ *  Both remote checks feed cells in here — the release one fills "Version", the dependency
+ *  one fills "CVE" — and neither is going to rebuild a card the reader is looking at. Same
+ *  rule the dependency card learned the hard way: the answer is a table update, so the update
+ *  is the table. */
+function _dgRedrawInstances() {
+    const body = document.getElementById('dgInstBody');
+    if (!body) return;
+    body.innerHTML = (((_diagData || {}).instances) || [])
+        .filter(i => !i.is_self).map(_dgInstanceRow).join('');
+}
+
+/** How many advisories affect what THAT container runs.
+ *
+ *  A pure join against the answer already in hand: the check asked about the union of every
+ *  process's packages in one round, and each instance carries its own name/version pairs. No
+ *  second call, and none from the container itself — which is the whole point, because it has
+ *  no way out to the internet and no HTTP for us to ask on. */
+function _dgInstVulns(inst) {
+    if (!_dgRemote || !_dgRemote.vulnsOk || !inst.known) {
+        return `<span class="text-muted ss-help"
+            title="${escAttr(t('diag_inst_vulns_unchecked'))}">—</span>`;
+    }
+    const total = _dgInstAdvisories(inst).length;
+    if (!total) return `<span class="text-muted">0</span>`;
+    return `<button type="button" class="badge text-bg-danger border-0 ss-help"
+        onclick="_dgShowInstanceVulns('${escAttr(inst.service)}', '${escAttr(inst.host)}',
+                                      ${Number(inst.pid) || 0})"
+        title="${escAttr(t('diag_deps_vulns_open'))}">${total}</button>`;
+}
+
+/** `[{id, url, severity, where}]` for one instance — each advisory once, carrying its packages.
+ *
+ *  By name AND version, because that is what an advisory is about: the same package at two
+ *  versions is two different answers, and reading this one off the other is how a container
+ *  gets told it is clean because a different one is.
+ *
+ *  `where` is a LIST. One advisory routinely lands on several packages, and keeping only the
+ *  first one it was seen on is the count saying four while the screen names three. */
+function _dgInstAdvisories(inst) {
+    const seen = new Map();
+    (inst.packages || []).forEach(p => {
+        const row = _dgRemote.byPin[`${p.name}@${p.version || ''}`];
+        (row ? row.vulns || [] : []).forEach(v => {
+            const e = seen.get(v.id) || {...v, where: []};
+            e.where.push(`${p.name} ${p.version || ''}`.trim());
+            seen.set(v.id, e);
+        });
+    });
+    return Array.from(seen.values());
+}
+
+/** The advisories of one container — and WHICH of its packages each one lands on.
+ *
+ *  Reported off the screen: the column gives a container a number and stops there, so the next
+ *  question — *in which package* — had nowhere to be answered. It is a table for the same
+ *  reason the one in the dependency card is: identifier, how bad, and where. The severity badge
+ *  opens the same detail it opens there, because a word and a number are the summary of a
+ *  vector, and `AV:N` versus `AV:L` is the difference between patching tonight and next
+ *  release. */
+function _dgShowInstanceVulns(service, host, pid) {
+    const inst = _dgFindInstance(service, host, pid);
+    if (!inst) return;
+    const cols = [{label: t('diag_deps_adv_id'), cls: 'font-monospace'},
+                  {label: t('diag_deps_adv_severity')},
+                  {label: t('diag_dep_name'), cls: 'font-monospace'}];
+    const rows = _dgInstAdvisories(inst)
+        .sort((a, b) => _dgSevRank(b.severity) - _dgSevRank(a.severity)
+                        || a.id.localeCompare(b.id))
+        .map(v => [{html: _dgAdvLink(v)}, {html: _dgSevBadge(v)}, v.where.join(', ')]);
+    showTableModal(`${service} · ${host}`, cols, rows, t('diag_inst_vulns_lead'), 'danger');
+}
+
+/** The code that container is running, and the two different things that can be wrong with it.
+ *
+ *  **Different from here** is the one that matters day to day: they are meant to come from one
+ *  image, so a tag left behind shows up here before it shows up as a bug nobody can reproduce.
+ *  **Behind the published release** is a separate claim and only exists once somebody has
+ *  pressed the release check — the whole installation, this process included, can be perfectly
+ *  consistent and perfectly out of date.
+ *
+ *  Said with words and an icon, never colour alone: this is a table read at a glance. */
+function _dgInstVersion(inst, drift, mine) {
+    if (!inst.version) return `<span class="text-muted">—</span>`;
+    const behind = _dgUpdate && (_dgUpdate.byVersion[inst.version] || {}).status === 'newer';
+    const note = [drift ? t('diag_inst_version_drift').replace('{}', mine) : '',
+                  behind ? t('diag_inst_version_behind').replace('{}', _dgUpdate.tag) : '']
+        .filter(Boolean).join(' · ');
+    if (!note) return `<span class="text-muted">${esc(inst.version)}</span>`;
+    return `<span class="badge text-bg-warning ss-help" title="${escAttr(note)}"
+        ><i class="bi ${behind ? 'bi-arrow-up-circle-fill' : 'bi-exclamation-triangle-fill'}
+        me-1"></i>${esc(inst.version)}</span>`;
+}
+
+/** Alive / stale / stopped, in the words the Services tab already uses. */
+function _dgInstState(inst) {
+    const cls = {alive: 'text-bg-success', stale: 'text-bg-warning',
+                 stopped: 'text-bg-secondary'}[inst.state] || 'text-bg-danger';
+    return `<span class="badge ${cls} ms-1">${esc(t('svc_state_' + inst.state)
+        || inst.state)}</span>`;
+}
+
+/** How its packages compare with this process's — the whole point of the row.
+ *
+ *  Both answers open. A difference opens the comparison, because the useful question after
+ *  "they differ" is always *in what*. And "same as here (42)" opens the list, because it does
+ *  not say WHICH 42 — a sentence that asks the reader to take the interesting half on trust
+ *  is the thing this page exists not to do. */
+function _dgInstPackages(inst) {
+    if (!inst.known) {
+        return `<span class="text-muted ss-help"
+            title="${escAttr(t('diag_inst_unknown_tt'))}">—</span>`;
+    }
+    const at = `'${escAttr(inst.service)}', '${escAttr(inst.host)}', ${Number(inst.pid) || 0}`;
+    if (inst.diff && inst.diff.same) {
+        return `<button type="button" class="badge text-bg-secondary border-0 ss-help"
+            onclick="_dgShowInstancePackages(${at})"
+            title="${escAttr(t('diag_inst_same_open'))}"
+            >${esc(t('diag_inst_same').replace('{}', (inst.packages || []).length))}</button>`;
+    }
+    return `<button type="button" class="badge text-bg-warning border-0 ss-help"
+        onclick="_dgShowInstanceDiff(${at})"
+        title="${escAttr(t('diag_inst_diff_open'))}"
+        >${esc(t('diag_inst_n_diff').replace('{}', (inst.diff || {}).count || 0))}</button>`;
+}
+
+/** Everything that process runs, as the table it always was.
+ *
+ *  Read out of the answer already on the page: the row was drawn from it, and fetching the
+ *  same thing again to explain it is a second chance for the two to disagree.
+ *
+ *  Five columns, not one sentence per package. The first version wrote everything into a
+ *  second cell — `3.5.0 → 3.5.1 · 2 advisories · outside the lock` — which is a table drawn
+ *  with separators: nothing lines up, "which of these has the CVE" is answered by reading
+ *  forty lines to the end, and the arrow between two versions is a column boundary spelled
+ *  out. And the advisories are the identifiers themselves, because there is room here that a
+ *  table row does not have: a count in here would be the second number in a row asking to be
+ *  clicked, on top of the modal it is already in. */
+function _dgShowInstancePackages(service, host, pid) {
+    const inst = _dgFindInstance(service, host, pid);
+    if (!inst) return;
+    const pkgs = inst.packages || [];
+    const rem = p => (_dgRemote && _dgRemote.byPin[`${p.name}@${p.version || ''}`]) || null;
+    const cols = [{label: t('diag_dep_name'), cls: 'font-monospace'},
+                  {label: t('diag_dep_installed')},
+                  {label: t('diag_dep_latest')},
+                  {label: t('diag_dep_vulns')},
+                  {label: t('diag_inst_pkg_note'), cls: 'text-muted'}];
+    const rows = pkgs.map(p => [
+        p.name, p.version || '—',
+        // The same cell the dependency table draws, from the same answer: "there is a newer
+        // one" must not be two different badges depending on which screen is asking.
+        {html: _dgLatestCell(rem(p))},
+        {html: _dgInstPkgVulns(rem(p))},
+        p.pinned ? '' : t('diag_deps_unpinned_short')]);
+    showTableModal(`${service} · ${host}`, cols, rows,
+                   _dgInstPackagesLead(inst, pkgs),
+                   _dgInstFindings(pkgs).total ? 'warning' : 'success');
+}
+
+/** What that container's list adds up to, before the reader counts it themselves.
+ *
+ *  Whether the remote half is in here at all, said once at the top rather than left to be
+ *  inferred from a column of dashes — which is the same shape as "nothing found" and the
+ *  mistake this whole card was built to stop making. And, when it IS in here, the two numbers
+ *  somebody opened forty rows to find: how many are behind, and how many carry an advisory. */
+function _dgInstPackagesLead(inst, pkgs) {
+    const lead = [t('diag_inst_packages_lead').replace('{}', inst.version || '?')];
+    if (!_dgRemote) {
+        lead.push(t('diag_inst_packages_unchecked'));
+        return lead.join(' ');
+    }
+    lead.push(t('diag_inst_packages_checked'));
+    const f = _dgInstFindings(pkgs);
+    if (f.behind) lead.push('· ' + t('diag_deps_n_behind').replace('{}', f.behind));
+    if (f.total) {
+        lead.push('· ' + t('diag_deps_n_vulns').replace('{}', f.total)
+                                               .replace('{}', f.packages));
+    }
+    return lead.join(' ');
+}
+
+/** How many of one container's packages are behind, and how many advisories land on them. */
+function _dgInstFindings(pkgs) {
+    let behind = 0, total = 0, packages = 0;
+    if (_dgRemote) {
+        (pkgs || []).forEach(p => {
+            const x = _dgRemote.byPin[`${p.name}@${p.version || ''}`];
+            if (!x) return;
+            if (x.state === 'behind') behind++;
+            if (x.vuln_count) { total += x.vuln_count; packages++; }
+        });
+    }
+    return {behind, total, packages};
+}
+
+/** The advisories affecting ONE package of that container — as themselves, not as a count.
+ *
+ *  This is the answer to the question the card's CVE column raises and cannot settle: it says
+ *  a container carries four, and never which of its packages carries them. Here there is room
+ *  for the identifiers, so they are the cell — each one linking to its write-up on the service
+ *  that reported it, coloured by the severity that service published.
+ *
+ *  Read by name AND version: this container's copy is not this process's, and answering for
+ *  one with the other is how a container gets reported clean because a different one is. */
+function _dgInstPkgVulns(rem) {
+    if (!_dgRemote || !_dgRemote.vulnsOk) {
+        return `<span class="text-muted ss-help"
+            title="${escAttr(t('diag_inst_vulns_unchecked'))}">—</span>`;
+    }
+    const list = (rem && rem.vulns) || [];
+    if (!list.length) return `<span class="text-muted">0</span>`;
+    return list.map(v => {
+        const cls = _DG_SEV_CLASS[v.severity] || 'text-bg-danger';
+        const tip = [v.severity ? t('diag_sev_' + v.severity) : '', v.summary || '']
+            .filter(Boolean).join(' — ');
+        return v.url
+            ? `<a class="badge ${cls} text-decoration-none ss-help me-1"
+                  href="${escAttr(v.url)}" target="_blank" rel="noopener noreferrer"
+                  title="${escAttr(tip)}">${esc(v.id)}<i
+                  class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></a>`
+            : `<span class="badge ${cls} ss-help me-1"
+                  title="${escAttr(tip)}">${esc(v.id)}</span>`;
+    }).join('');
+}
+
+/** The instance a row belongs to, by service+host+pid.
+ *
+ *  Not by index: the card is redrawn whenever the page refreshes, and an index into a list
+ *  that was rebuilt points at whatever moved into that slot. */
+function _dgFindInstance(service, host, pid) {
+    return ((_diagData || {}).instances || []).find(
+        i => i.service === service && i.host === host && (Number(i.pid) || 0) === pid) || null;
+}
+
+/** What differs, package by package, against this process.
+ *
+ *  Identified by service+host+pid rather than by index: the card is redrawn whenever the page
+ *  refreshes, and an index into a list that was rebuilt points at whatever moved into that
+ *  slot.
+ *
+ *  A column per side rather than `1.0  →  2.0` in one cell: which of the two is this process
+ *  is the whole question here, and an arrow leaves it to be inferred from the order it was
+ *  written in. The advisories are the version THAT container runs — a drifted one is where
+ *  "and is the version it is stuck on a vulnerable one" stops being an academic question. */
+function _dgShowInstanceDiff(service, host, pid) {
+    const inst = _dgFindInstance(service, host, pid);
+    if (!inst || !inst.diff) return;
+    const label = {missing_there: t('diag_inst_absent_there'),
+                   missing_here: t('diag_inst_absent_here')};
+    const cols = [{label: t('diag_dep_name'), cls: 'font-monospace'},
+                  {label: t('diag_inst_col_here')},
+                  {label: t('diag_inst_col_there')},
+                  {label: t('diag_dep_vulns')}];
+    const rows = inst.diff.rows.map(r => [
+        r.name,
+        r.kind === 'missing_here' ? label.missing_here : (r.here || '—'),
+        r.kind === 'missing_there' ? label.missing_there : (r.there || '—'),
+        r.kind === 'missing_there'
+            ? '—'
+            : {html: _dgInstPkgVulns(
+                  _dgRemote ? _dgRemote.byPin[`${r.name}@${r.there || ''}`] : null)}]);
+    showTableModal(`${service} · ${host}`, cols, rows,
+                   t('diag_inst_diff_lead').replace('{}', inst.version || '?'), 'warning');
+}

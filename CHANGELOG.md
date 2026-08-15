@@ -8,6 +8,219 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.76] - 2026-08-15
+
+### Added
+- **`docker/env.example` documents every variable this app reads — sixteen were missing.**
+  Counted rather than eyeballed, against the three surfaces that actually read the
+  environment: the config registry, the container entrypoint and `os.environ` in the source.
+  Absent were every backup setting (`SS_BACKUP_DIR`, `_EVERY_HOURS`, `_KEEP`,
+  `_AUTO_SECRETS`), the fail2ban jail (`SS_IPBAN_ENABLED`, `SS_IPBAN_WHITELIST`), the three
+  autostart gates (`SS_MONITORING_AUTOSTART`, `SS_SYSLOG_AUTOSTART`, `SS_EVENTS_AUTOSTART`),
+  `SS_MONITORING_ENABLED`, the SQLite paths, `SS_AUDIT_DETAIL_MAX_ITEMS`,
+  `SS_UPDATE_CHECK_URL`, `SS_CONTROL_BIND` and `SS_PORT`. For anybody deploying, a setting
+  that appears nowhere in that file is a setting that does not exist.
+  - Two stale comments are corrected with them: monitoring's on/off and autostart, and the
+    event processor's autostart, were described as "web UI only, not env vars" — they are
+    env-overridable, and setting them LOCKS the value read-only in the panel, which is the
+    reason to do it.
+  - `SS_WEB_PORT` and `SS_PORT` are told apart, which the names do not do: the first is the
+    port this process binds, the second locks the port stored in the config.
+- **A guard so it cannot rot again** (`tests/meta/test_docker_env_example.py`). Both
+  directions, asymmetric on purpose: a supported variable must be NAMED there (the
+  per-topology ones are explained in prose that sends the reader to the compose file, which
+  is the right shape for them), while only lines that ASSIGN are checked for existing —
+  prose writes families like `SS_DB_*`, and no regex tells a wildcard from a name once the
+  star is gone. Validated by removing a variable and by inventing one; both go red.
+
+### Changed
+- **Which published image the HA test stack runs is one variable.** The tag was written into
+  the `x-app-build` anchor, which is already the single place the four services take it from
+  — but changing it meant editing a tracked file to run a stack, and that edit is the kind
+  that gets committed by accident. `SS_IMAGE_TAG` (default `test`) now names it:
+  `SS_IMAGE_TAG=build docker compose -f docker/docker-compose.ha-test.yml up -d`, or the same
+  in front of `make_test.sh ha`, or once in `docker/.env` — Compose reads that file from the
+  compose file's own directory, called from there or from the repo root with `-f`. The shell
+  WINS over the file, which is the part worth knowing when a stack comes up on an image
+  nobody expected.
+
+### Fixed
+- **`make_test.sh` no longer overrides a `docker/.env`.** It defaulted `SS_IMAGE_TAG` to
+  `test` and exported it, and the shell wins over that file — so writing `SS_IMAGE_TAG=build`
+  in `docker/.env` and running the script would have quietly come up on the other image,
+  which is the exact confusion the variable was added to prevent. It now exports the variable
+  only when it is already set, and asks Compose which image it actually brought up instead of
+  rebuilding the answer from it.
+
+
+## [0.0.1+build.75] - 2026-08-15
+
+### Added
+- **A `build` tag that does what `test` does without running the suite.** Same image, same
+  `.deb`/`.rpm`/Gentoo overlay, same install of those packages in Debian, Ubuntu and Fedora —
+  the one difference is that the tests are not started at all. `test` runs them beside the
+  build, which is what puts a red tick against a commit whose answer was already known: the
+  suite was just run locally, or the change is in the Dockerfile and no Python test can see
+  it. Skipped rather than made non-blocking, because a job that runs and is ignored still
+  costs ~13 minutes of runner and still marks the commit.
+  - The image publishes as `:build`, its own name, so a `pull` says which of the two claims
+    it carries.
+  - `packages` keeps `needs: tests` and admits `skipped` beside `success`: a plain `needs`
+    would take the packages down with the skipped suite, turning "do not run the tests" into
+    "do not build anything either", while dropping the dependency would let a red suite ship
+    packages on `v*` and `test`. `!cancelled()` rather than `always()` — a cancelled run is
+    somebody pressing stop, and it should stop.
+
+
+## [0.0.1+build.74] - 2026-08-15
+
+### Added
+- **`showTableModal`** beside the panel's other two dialog helpers. `showInfoModal` is
+  key/value and `showLinksModal` is label/note, so anything with a third thing to say had to
+  write it into a cell with separators. Cells are escaped like everywhere else; `{html: …}` is
+  the explicit opt-in a caller uses for markup it composed itself, which is the same escape
+  hatch `showLinksModal` exists for, now said once and reusable.
+
+### Changed
+- **A container's package list is a table, not a sentence per package.** It read
+  `3.5.0 → 3.5.1 · 2 advisories · outside the lock`, which is a table written with separators:
+  nothing lines up, and "which of these 43 has the advisory" is answered by reading every line
+  to its end. Five columns now — package, version, newest published, advisories, and whether
+  the lock pins it — with the lead adding how many are behind and how many carry an advisory.
+- **The advisories of a container say which of its packages carries them.** The column gives
+  an instance a number and the next question is always *in what*; the list behind it named one
+  package per advisory in a note, and only the first one it was seen on. It is a table now —
+  identifier, severity, and every package of that container it lands on — sorted worst first,
+  with the severity opening the same CVSS breakdown it opens in the dependency card.
+- **The comparison against this process puts a column per side.** `1.0 → 2.0` in one cell
+  leaves which of the two versions is this process to be inferred from the order it was
+  written in. It also carries the advisories of the version THAT container is on, which is
+  where "and is it stuck on a vulnerable one" stops being an academic question.
+- Inside a dialog the advisories are the **identifiers themselves**, linked to their write-up,
+  rather than a count: there is room here that a table row does not have, and a number in a
+  modal would be a second thing asking to be clicked on top of the one already open.
+
+
+## [0.0.1+build.73] - 2026-08-15
+
+### Changed
+- **The per-container package list carries the remote answer too.** It showed name and version
+  and nothing else, so the newest published version and the advisories — which the check
+  already covers for these containers — were only reachable from the card behind it. Each line
+  now reads `3.4.9 → 3.5.0 · 2 advisories · outside the lock`, matched by name AND version
+  because that container's copy is not this process's. The lead says whether the remote half
+  is in there at all: a column of bare versions and "nothing found" are the same picture, and
+  telling them apart is what this card exists for.
+- **`collect.environment()` is computed once per process and kept.** It is the one thing on
+  this page that is cached, and the exception has a reason: everything else is recomputed per
+  call on purpose — a diagnostics screen served from a cache describes the problem you had
+  before — while this cannot change while the process lives, and it is a full walk of every
+  installed distribution that now runs on every render of the page as well as at start-up.
+
+
+## [0.0.1+build.72] - 2026-08-15
+
+### Changed
+- **The instances card answers the two remote questions for the other containers as well.**
+  Neither needed a new call: the dependency check already asks about the union of every
+  process's packages in one round, and the release check returns one answer for the whole
+  installation. What was missing was saying which container a finding belongs to.
+  - A **CVE column** per instance, a pure join against the answer already on the page —
+    matched by name AND version, because the same package at two versions is two different
+    answers and reading one off the other is how a container gets reported clean because a
+    different one is. It opens the list, each advisory naming the package and its severity.
+  - The **version cell** now separates two claims that look alike: *different from this
+    process* (they are meant to come from one image) and *behind the newest published release*
+    (the whole installation can be perfectly consistent and perfectly out of date). The second
+    only exists once the release check has run, and the comparison is done on the server for
+    every version seen — a copy of it in the browser would be a second answer waiting to
+    disagree.
+  - Both checks refresh **the rows and nothing else**, the rule the dependency card already
+    learned.
+- **Fixed: a drifted container's answer could be drawn on this process's own row.** The
+  browser keyed the remote answer as `byName[r.name] = r`, so the last one won — and since the
+  check now covers what only another container runs, the same package can arrive twice at two
+  versions. Keyed by name and version now, with the local lists owning the name.
+- **"Same as here (42)" now opens too.** It was the one cell on the instances card with
+  nothing behind it, and it does not say WHICH 42 — a sentence that asks the reader to take
+  the interesting half on trust is what this page exists not to do. Both answers open a modal
+  now: the differing one its comparison, the matching one the list of what that process runs,
+  marking which of them its lock pins. One shape serves the screen and the remote check, so a
+  second flatter copy cannot drift from it.
+- **Dependencies refreshed**, off what the panel's own check reported.
+  - `requirements.lock` regenerated with the documented `pip-compile --generate-hashes
+    --strip-extras` pass. One pin moved of the forty-one: `charset-normalizer` 3.4.9 → 3.5.0.
+    Everything else the resolver held, which is the answer a lock is supposed to give.
+  - `requirements-dev.txt`: `pytest` 9.0.2 → **9.1.1**, which is a security bump —
+    PYSEC-2026-1845, tmpdir handling — and the reason the diagnostics page reported it at all:
+    it runs on the machine like anything else installed here, pinned or not. `pytest-env`
+    1.6.0 → 1.7.0 and `watchfiles` 1.1.1 → 1.2.0 alongside.
+  - The **image now upgrades `pip` and `setuptools`** before installing the lock. They are not
+    in it — pip-compile does not pin its own installer — so the container shipped whatever the
+    base image carried, and both were reported with advisories. The `.deb`/`.rpm` postinstall
+    and the Gentoo ebuild already did this; only Docker did not.
+
+
+## [0.0.1+build.71] - 2026-08-15
+
+### Added
+- **The diagnostics page can answer for the containers it is not running in.** Everything on
+  it described the process that served the request: on a single container that is the whole
+  installation, split into web / worker / syslog / events it is the web admin and nothing
+  else — and the other three were invisible from every screen, while "is that pod on the same
+  build?" is what a support thread opens with.
+  - Each service publishes its **interpreter, OS, packages and optional libraries** into a new
+    `env` column on `service_instances`, and the panel reads them from there. Not over HTTP:
+    the standalone services answer none unless `SS_CONTROL_TOKEN` is set, which is not the
+    default, and a diagnostics screen that works only on the installs that opted into a token
+    is a screen for somebody else. The shared database is what this control plane already
+    declares as its source of truth.
+  - Published **once, at start-up**, and deliberately not part of the beat: that row is
+    rewritten every few seconds by every instance, and none of this can change while the
+    process lives. A restart is a new instance row anyway.
+  - The card shows the **difference**, never four copies of one list. Four containers built
+    from one image carry identical packages, and "same as here" is the whole answer when it is
+    true; a count opens the list package by package when it is not, because "they differ" is
+    not actionable and "which one, and from what to what" is.
+  - A container on **another code version** is marked in amber. That is the real failure: they
+    are meant to come from one image, and a tag left behind shows up here before it shows up
+    as a bug nobody can reproduce.
+  - "Has not published yet" is said, never guessed at — an older build, or one whose first
+    beat has not landed, is a different sentence from "differs" and only one of them means
+    somebody has work.
+  - The remote check covers **what only the other processes run**, in the same round. Each
+    container asking PyPI and OSV about its own list would put four processes on the internet
+    for nearly the same question, in exactly the deployment where that is least welcome — and
+    it contributes nothing when they all came from one image, which is the norm.
+  - Packages are matched by **name and version**, not name alone: the web on 3.4.9 and a
+    worker on 3.5.0 are two questions for the advisory service, and answering one of them for
+    both is how a container gets reported clean because a different one is.
+  - The block travels in the **document** too (text and XML), which is the one place the
+    screen cannot go.
+
+### Fixed
+- **SNMP discovery gave up in silence on a thread that already had an event loop.** It ran
+  `asyncio.run` inside a per-server `try/except: continue`, and `asyncio.run` refuses to start
+  a loop where one is already going — so every server raised, every server was skipped, and the
+  empty list read as *this device has no OIDs*. Which is the exact symptom the walk had already
+  been rewritten once to fix, from an entirely different cause. The same call sat in
+  `snmp_get`, the path the checks take.
+  - `run_coroutine()` runs the coroutine on a thread of its own when the caller's already has a
+    loop, and plainly otherwise. Both call sites go through it.
+  - Found because CI failed five discovery tests that passed on their own, and passed beside
+    `unit`, beside `meta` and beside the whole watchful tree. The pointer was not the assertion
+    but a `RuntimeWarning` in the log — *coroutine was never awaited*, on the `continue` line.
+    Playwright's sync API keeps a loop alive in the main thread, so the pair that reproduces it
+    is `tests/e2e watchfuls/snmp`. The panel serves from whatever thread it is given, which is
+    the reason to fix it regardless of the tests.
+
+### Changed
+- `behind` and `behind_unpinned` are now **derived from the rows the answer carries**, matched
+  by name and version, instead of passed through from the check. Three lists feed one round
+  now, and a count the browser cannot reach by counting what it draws is a count that drifts
+  from the table under it.
+
+
 ## [0.0.1+build.70] - 2026-08-14
 
 ### Added

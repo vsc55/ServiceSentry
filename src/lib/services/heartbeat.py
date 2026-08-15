@@ -228,6 +228,28 @@ class _HeartbeatMixin:
             control_url=self._hb_control_url(), last_cycle_at=self._hb_last_cycle(),
             detail=detail)
 
+    def _publish_env(self) -> None:
+        """Publish this process's interpreter, OS and packages — once, at startup.
+
+        Split across containers, the diagnostics page describes the web admin and nothing
+        else: the worker, the syslog receiver and the event processor answer no HTTP at all
+        unless a control token is set, which is not the default. The shared database is the
+        contract this control plane already runs on, so the fingerprint travels the way
+        everything else here does — written once, read by whoever asks.
+
+        Gathering is lazy and guarded because it walks the installed distributions: a service
+        that cannot describe itself must still start and still beat.
+        """
+        store = self._hb_store()
+        if store is None or not self._hb_key():
+            return
+        try:
+            from lib.core.diagnostics import collect as _collect      # noqa: PLC0415
+            from lib.core.diagnostics import service as _diag         # noqa: PLC0415
+            store.set_env(self._hb_instance_id(), _collect.environment(_diag.lock_path()))
+        except Exception:  # pylint: disable=broad-except
+            pass
+
     # ── lifecycle ───────────────────────────────────────────────────────────────
     def start_heartbeat(self, *, key: str | None = None, mode: str | None = None,
                         every: int | None = None) -> None:
@@ -256,6 +278,7 @@ class _HeartbeatMixin:
                 pass
         self._renew_leadership()         # claim the lease before the first beat
         self._heartbeat_write()          # appear immediately, don't wait a full beat
+        self._publish_env()              # what this process runs on — once, after the row exists
         self._drain_commands()           # pick up anything already queued
 
         def _loop():
