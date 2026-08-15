@@ -13,8 +13,8 @@ keywords:
   - syslog
   - snmp
   - notifications
-home: https://github.com/
+home: https://github.com/vsc55/ServiceSentry
 sources:
-  - https://github.com/
+  - https://github.com/vsc55/ServiceSentry
 maintainers:
   - name: ServiceSentry

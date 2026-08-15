@@ -8,6 +8,25 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.77] - 2026-08-15
+
+### Fixed
+- **The Helm chart's syslog ports were a label and nothing else.** `syslog.ports.udp`/`.tcp`
+  set the container port and the Service, and never told the listener anything — so anything
+  other than the default produced a Service routing to a port nothing inside the pod was
+  listening on, which reads as a network problem and is not one. The chart now pins
+  `SS_SYSLOG_HOST`/`SS_SYSLOG_PORT` from those values, and refuses to render when udp and tcp
+  differ: the app takes ONE port for both, and two fields that must be equal will not stay
+  equal on their own. The TLS port stays a saved-config matter — it does not exist until a
+  certificate does — so that value only publishes it, which is now said in the chart's README.
+- **The chart pointed at two documents that no longer exist**, `docs/kubernetes.md` and
+  `docs/architecture.md`, in its README, its NOTES and its values — renamed to `caso-` /
+  `explica-` some time ago. A link that resolves to nothing is worse than no link: it reads
+  as documentation that was written.
+- `Chart.yaml` carried `https://github.com/` as both `home` and `sources`, which is the
+  placeholder, not the repository.
+
+
 ## [0.0.1+build.76] - 2026-08-15
 
 ### Added

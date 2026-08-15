@@ -37,6 +37,15 @@ spec:
             {{- include "servicesentry.envFrom" . | nindent 12 }}
           env:
             - { name: SS_SERVICE_ROLE, value: syslog }
+            # The listener is TOLD where to bind. Without this the ports below were a
+            # label and nothing else: the pod declared 1514, the Service routed to 1514,
+            # and the process went on binding whatever the saved config said — a Service
+            # pointing at a port nothing listens on, which looks like a network problem.
+            - { name: SS_SYSLOG_HOST, value: "0.0.0.0" }
+            {{- if ne (.Values.syslog.ports.udp | toString) (.Values.syslog.ports.tcp | toString) }}
+            {{- fail "syslog.ports.udp and syslog.ports.tcp must be equal: the app takes ONE port for both (SS_SYSLOG_PORT). Set them the same, or leave the ports out and configure them in the panel." }}
+            {{- end }}
+            - { name: SS_SYSLOG_PORT, value: {{ .Values.syslog.ports.udp | quote }} }
             {{- include "servicesentry.controlEnv" (dict "ctx" $ "role" "syslog") | nindent 12 }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

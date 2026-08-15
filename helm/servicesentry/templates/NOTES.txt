@@ -39,4 +39,4 @@ Roles:
 WARNING: database.host is empty. Point it at your MySQL/PostgreSQL.
 {{- end }}
 
-Docs: see docs/kubernetes.md and docs/architecture.md (distributed control plane).
+Docs: see docs/caso-kubernetes.md and docs/explica-arquitectura.md (distributed control plane).

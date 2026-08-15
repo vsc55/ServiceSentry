@@ -1,6 +1,6 @@
 # Default values for ServiceSentry.
 # -----------------------------------------------------------------------------
-# Topology: one Deployment per role sharing a database. See docs/kubernetes.md.
+# Topology: one Deployment per role sharing a database. See docs/caso-kubernetes.md.
 #   web    — admin panel / UI (does NOT host the services: *_EMBEDDED=0)
 #   worker — monitoring scheduler   (leader-gated → replicas>1 = hot standby)
 #   events — event/notification worker (leader-gated → replicas>1 = hot standby)
@@ -123,8 +123,14 @@ syslog:
   # active-active: behind the ingress Service the load balancer splits messages.
   replicas: 1
   ports:
+    # udp and tcp MUST match: the app takes one port for both (`SS_SYSLOG_PORT`), and
+    # the chart pins the listener to it — otherwise these numbers name a port on the
+    # pod that nothing inside it is listening on.
     udp: 514
     tcp: 514
+    # TLS is NOT pinned from here: it keeps the port saved in the config, because it
+    # only exists once a certificate has been configured in the panel. This value only
+    # publishes it.
     tls: 6514
   ingress:
     enabled: true

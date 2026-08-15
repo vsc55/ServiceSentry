@@ -3,8 +3,8 @@
 Despliega ServiceSentry en Kubernetes con la topología por roles (web / worker /
 events / syslog) sobre una BD compartida, el **plano de control distribuido**
 (heartbeat + cola de comandos + poke HTTP) y **elección de líder** para alta
-disponibilidad. Ver [docs/kubernetes.md](../../docs/kubernetes.md) y
-[docs/architecture.md](../../docs/architecture.md) para el modelo completo.
+disponibilidad. Ver [docs/caso-kubernetes.md](../../docs/caso-kubernetes.md) y
+[docs/explica-arquitectura.md](../../docs/explica-arquitectura.md) para el modelo completo.
 
 ## Requisitos
 
@@ -44,6 +44,8 @@ helm install ss ./helm/servicesentry -n servicesentry --create-namespace -f mis-
 | `worker.replicas` | `1` | Monitor. **>1 = hot-standby** (failover por lease de líder) |
 | `events.replicas` | `1` | Eventos. **>1 = hot-standby** |
 | `syslog.enabled` / `syslog.replicas` | `true` / `1` | Receptor syslog. **>1 = active-active** (scale-out) |
+| `syslog.ports.udp` / `.tcp` | `514` / `514` | Puerto en el que **escucha** el receptor (`SS_SYSLOG_PORT`, uno para ambos: si difieren, el chart falla al renderizar). Fijarlo aquí lo deja en **solo-lectura** en el panel, que es lo correcto: en Kubernetes el puerto es parte del manifiesto |
+| `syslog.ports.tls` | `6514` | Sólo se **publica**; el puerto TLS sale de la config guardada, porque no existe hasta que hay certificado |
 | `syslog.ingress.type` | `LoadBalancer` | Service de ingreso UDP/TCP |
 | `networkPolicy.enabled` | `false` | Restringe el puerto de control (`:8765`) a los pods `web` |
 | `netRaw` | `true` | Concede `CAP_NET_RAW` (módulo ping) |
