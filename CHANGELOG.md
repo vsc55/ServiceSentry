@@ -8,6 +8,35 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.74] - 2026-08-15
+
+### Added
+- **`showTableModal`** beside the panel's other two dialog helpers. `showInfoModal` is
+  key/value and `showLinksModal` is label/note, so anything with a third thing to say had to
+  write it into a cell with separators. Cells are escaped like everywhere else; `{html: …}` is
+  the explicit opt-in a caller uses for markup it composed itself, which is the same escape
+  hatch `showLinksModal` exists for, now said once and reusable.
+
+### Changed
+- **A container's package list is a table, not a sentence per package.** It read
+  `3.5.0 → 3.5.1 · 2 advisories · outside the lock`, which is a table written with separators:
+  nothing lines up, and "which of these 43 has the advisory" is answered by reading every line
+  to its end. Five columns now — package, version, newest published, advisories, and whether
+  the lock pins it — with the lead adding how many are behind and how many carry an advisory.
+- **The advisories of a container say which of its packages carries them.** The column gives
+  an instance a number and the next question is always *in what*; the list behind it named one
+  package per advisory in a note, and only the first one it was seen on. It is a table now —
+  identifier, severity, and every package of that container it lands on — sorted worst first,
+  with the severity opening the same CVSS breakdown it opens in the dependency card.
+- **The comparison against this process puts a column per side.** `1.0 → 2.0` in one cell
+  leaves which of the two versions is this process to be inferred from the order it was
+  written in. It also carries the advisories of the version THAT container is on, which is
+  where "and is it stuck on a vulnerable one" stops being an academic question.
+- Inside a dialog the advisories are the **identifiers themselves**, linked to their write-up,
+  rather than a count: there is room here that a table row does not have, and a number in a
+  modal would be a second thing asking to be clicked on top of the one already open.
+
+
 ## [0.0.1+build.73] - 2026-08-15
 
 ### Changed

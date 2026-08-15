@@ -911,15 +911,56 @@ class TestTheOtherProcessesOfTheInstallation:
         self._open(page)
         page.click('#diagnostic-container .card:has(.bi-diagram-3) td button')
         page.wait_for_selector('#infoModal.show', timeout=10_000)
-        pairs = page.evaluate("""() => Array.from(
+        rows = page.evaluate("""() => Array.from(
             document.querySelectorAll('#infoModalBody tbody tr'))
-            .map(tr => [tr.children[0].textContent.trim(),
-                        tr.children[1].textContent.trim()])""")
-        names = {k for k, _v in pairs}
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        names = {r[0] for r in rows}
         assert 'flask' in names and 'pip' in names, sorted(names)[:8]
+        # A column each, not one cell holding `3.5.0 → 3.5.1 · outside the lock`: a table
+        # written with separators lines nothing up, and the reader is the one joining it.
+        assert all(len(r) == 5 for r in rows), rows[:3]
         # What the lock pins over there and what merely runs there are different claims, and
         # the same distinction the dependency table draws one card below.
-        assert any(k == 'pip' and 'lock' in v for k, v in pairs), pairs
+        assert any(r[0] == 'pip' and 'lock' in r[4] for r in rows), rows[:6]
+        assert not page.console_problems.problems, page.console_problems.problems
+
+    def test_the_package_list_carries_the_advisory_of_each_package(self, page, admin,
+                                                                    monkeypatch):
+        """Reported off the screen: the card gives a container a CVE total and its package
+        list said nothing about them, so "which of these 43 has it" was answered nowhere.
+
+        Five columns and the identifiers themselves, not a count: there is room inside a
+        dialog that a table row does not have, and a number in here would be a second thing
+        asking to be clicked on top of the modal it is already in."""
+        from lib.core.diagnostics import advisories as adv          # noqa: PLC0415
+        from lib.core.diagnostics import collect, service as diag_service   # noqa: PLC0415
+        env = collect.environment(diag_service.lock_path())
+        pin = next(r for r in env['lock'] if r['name'] == 'flask')
+        self._seed(admin, lock=env['lock'], extra=env['extra'])
+        monkeypatch.setattr(adv, 'check', lambda rows, timeout=adv.TIMEOUT: {
+            'ok': True, 'behind': 0, 'unknown': 0, 'vulns_ok': True, 'vulns_error': '',
+            'vuln_total': 1, 'vuln_packages': 1, 'vuln_asked': 2,
+            'rows': [{'name': 'flask', 'installed': pin['installed'], 'url': '',
+                      'latest': pin['installed'], 'state': 'current', 'error': '',
+                      'vuln_count': 1,
+                      'vulns': [{'id': 'GHSA-7', 'url': 'https://osv.dev/vulnerability/GHSA-7',
+                                 'severity': 'high', 'score': 8.0, 'published': True,
+                                 'vector': '', 'summary': ''}]}]})
+        self._open(page)
+        page.click('#btnDiagDeps')
+        page.wait_for_function(
+            "() => !!document.querySelector('#dgInstBody td:last-child button')",
+            timeout=15_000)
+        page.click('#diagnostic-container .card:has(.bi-diagram-3) td button')
+        page.wait_for_selector('#infoModal.show', timeout=10_000)
+        rows = page.evaluate("""() => Array.from(
+            document.querySelectorAll('#infoModalBody tbody tr'))
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        row = next((r for r in rows if r[0] == 'flask'), None)
+        assert row and 'GHSA-7' in row[3], row
+        # And the one package that has it, not every row: a column of identifiers repeated
+        # down the list would be the same claim as the total it replaced.
+        assert sum(1 for r in rows if 'GHSA-7' in r[3]) == 1, len(rows)
         assert not page.console_problems.problems, page.console_problems.problems
 
     def test_the_advisories_of_another_container_are_shown_against_it(self, page, admin,
@@ -947,26 +988,31 @@ class TestTheOtherProcessesOfTheInstallation:
         page.wait_for_selector('#infoModal.show', timeout=10_000)
         seen = page.evaluate("""() => Array.from(
             document.querySelectorAll('#infoModalBody tbody tr'))
-            .map(tr => [tr.children[0].textContent.trim(),
-                        tr.children[1].textContent.trim()])""")
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
         assert seen and seen[0][0].startswith('GHSA-7'), seen
-        # Which package of that container's, and how bad — the count alone is not the answer.
-        assert 'flask' in seen[0][1] and '0.0.1' in seen[0][1], seen[0]
+        # A column each: the identifier, how bad it is, and WHICH package of that container's
+        # carries it. The count on the card is a number and the next question is always "in
+        # what" — reported off the screen, and the reason this is a table and not a list.
+        assert '8' in seen[0][1], seen[0]          # its CVSS score, in whatever language
+        assert 'flask' in seen[0][2] and '0.0.1' in seen[0][2], seen[0]
         assert not page.console_problems.problems, page.console_problems.problems
 
     def test_the_difference_opens_package_by_package(self, page, admin):
-        """"They differ" is not actionable. Which package, and from what to what, is."""
+        """"They differ" is not actionable. Which package, and from what to what, is.
+
+        A column per side, so which of the two versions is this process is read off a header
+        instead of inferred from the order an arrow was written in."""
         self._seed(admin, lock=[{'name': 'flask', 'required': '3.1.0',
                                  'installed': '0.0.1'}])
         self._open(page)
         page.click('#diagnostic-container .card:has(.bi-diagram-3) td button.text-bg-warning')
         page.wait_for_selector('#infoModal.show', timeout=10_000)
-        pairs = page.evaluate("""() => Array.from(
+        rows = page.evaluate("""() => Array.from(
             document.querySelectorAll('#infoModalBody tbody tr'))
-            .map(tr => [tr.children[0].textContent.trim(),
-                        tr.children[1].textContent.trim()])""")
-        row = next((p for p in pairs if p[0] == 'flask'), None)
-        assert row and '0.0.1' in row[1], pairs[:6]
+            .map(tr => Array.from(tr.children).map(td => td.textContent.trim()))""")
+        row = next((r for r in rows if r[0] == 'flask'), None)
+        assert row and row[2] == '0.0.1', rows[:6]
+        assert row[1] != row[2], row          # this process's own, and it is not that one
         assert not page.console_problems.problems, page.console_problems.problems
 
 

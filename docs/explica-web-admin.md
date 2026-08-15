@@ -834,6 +834,14 @@ todos de la misma imagen. La comprobación remota cubre además lo que **solo el
 la misma tanda: cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a
 internet a preguntar casi lo mismo.
 
+Las tres celdas que abren algo abren **una tabla**, no una lista de frases: los paquetes de un
+contenedor traen columna de versión, de la última publicada, de sus avisos y de si el lock los
+fija; la comparación pone **una columna por lado** en lugar de una flecha entre dos versiones; y
+los avisos de un contenedor dicen **en qué paquete suyo** caen, que es la pregunta siguiente al
+número de la columna. Dentro del diálogo los avisos son los identificadores enlazados a su ficha
+y no un contador: ahí hay sitio, y un contador sería otra cosa pidiendo un clic encima del modal
+en el que ya se está.
+
 **Dependencias.** Las dos columnas remotas —última versión y avisos— **no existen hasta que
 alguien pulsa**: una columna vacía en toda instalación parece rota, y una página que contacta
 con pypi.org porque la han abierto es un informe de bug indiscutible en una red segregada. La

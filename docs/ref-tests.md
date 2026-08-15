@@ -6474,7 +6474,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 51 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 52 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -6590,6 +6590,19 @@ porque es otra afirmación —no son desviación, no hay nada que reconciliar—
 «Fija», que vacía se leería como un paquete que perdió su pin; y el contador de la cabecera
 **no cuenta un `pytest` más nuevo como deuda del lock**, que es la única con una acción detrás,
 aunque lo diga aparte para que el pliegue no muestre flechas que la cabecera nunca contó.
+
+**`TestTheOtherProcessesOfTheInstallation`** — la tarjeta que solo existe cuando el panel no es
+toda la instalación, abierta en un navegador: que otro contenedor aparece con lo que ejecuta, que
+uno en otra compilación **se marca**, y que las tres celdas que abren algo abren lo que dicen. Las
+tres son tablas y ninguna un párrafo con separadores: la lista de paquetes lleva **una columna por
+cosa** —versión, la publicada, sus avisos y si el lock la fija—, porque `3.5.0 → 3.5.1 · 2 avisos ·
+fuera del lock` es una tabla escrita con puntos en la que nada se alinea y «cuál de estos 43 tiene
+el aviso» se responde leyendo hasta el final de cada línea; la comparación pone **una columna por
+lado** en vez de una flecha, que deja adivinar cuál de las dos versiones es este proceso; y los
+avisos de un contenedor dicen **en qué paquete suyo** caen, que es la pregunta siguiente al número
+de la columna y no se respondía en ningún sitio. Dentro del diálogo los avisos son los
+identificadores, no un contador: ahí hay sitio, y un número sería otra cosa pidiendo un clic
+encima del modal en el que ya se está.
 
 **`TestTheSidebarFollowsTheModules`** — qué módulos ofrece el lateral, preguntado al navegador.
 Dos mitades de una regla, y la segunda es la que muerde: un módulo que no se ha añadido no debe

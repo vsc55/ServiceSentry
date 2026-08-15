@@ -49,10 +49,7 @@ function _dgAdvisorySection() {
         _dgSevRank(b.severity) - _dgSevRank(a.severity)
         || b.where.length - a.where.length || a.id.localeCompare(b.id));
     const line = a => `<tr>
-        <td class="small font-monospace">${a.url
-            ? `<a href="${escAttr(a.url)}" target="_blank" rel="noopener noreferrer"
-                 >${esc(a.id)}<i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></a>`
-            : esc(a.id)}</td>
+        <td class="small font-monospace">${_dgAdvLink(a)}</td>
         <td class="small">${_dgSevBadge(a)}</td>
         <td class="small text-center"><span class="badge text-bg-danger"
             >${a.where.length}</span></td>
@@ -66,6 +63,18 @@ function _dgAdvisorySection() {
             <th class="small py-1 text-center">${esc(t('diag_deps_adv_count'))}</th>
             <th class="small py-1">${esc(t('diag_deps_adv_where'))}</th>
         </tr></thead><tbody>${list.map(line).join('')}</tbody></table></div>`;
+}
+
+/** The identifier, leading to the write-up that is the actual answer.
+ *
+ *  One function because two tables print it — this one and the per-container list — and the
+ *  identifier without its link is the half nobody wanted. The URL comes from the server, which
+ *  is the side that knows how the advisory service addresses its pages. */
+function _dgAdvLink(a) {
+    return a.url
+        ? `<a href="${escAttr(a.url)}" target="_blank" rel="noopener noreferrer"
+             >${esc(a.id)}<i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></a>`
+        : esc(a.id);
 }
 
 /** The bands, worst last — so index is order and an unknown one sorts below all of them. */
