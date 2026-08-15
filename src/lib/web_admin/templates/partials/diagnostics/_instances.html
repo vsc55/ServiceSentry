@@ -184,12 +184,33 @@ function _dgInstPackages(inst) {
 function _dgShowInstancePackages(service, host, pid) {
     const inst = _dgFindInstance(service, host, pid);
     if (!inst) return;
-    // Which ones its lock pins, marked. Over there `pip` is not drift and `flask` is, and
-    // that is the same distinction the dependency table draws one card below.
-    const pairs = (inst.packages || []).map(p => [
-        p.name, p.pinned ? p.version : `${p.version}  ·  ${t('diag_deps_unpinned_short')}`]);
-    showInfoModal(`${service} · ${host}`, pairs,
-                  t('diag_inst_packages_lead').replace('{}', inst.version || '?'));
+    const pairs = (inst.packages || []).map(p => [p.name, _dgInstPackageLine(p)]);
+    // Whether the remote half is in here at all, said once at the top rather than left to be
+    // inferred from a column of bare versions — which is the same claim as "nothing found"
+    // and the mistake this whole card was built to stop making.
+    const lead = t('diag_inst_packages_lead').replace('{}', inst.version || '?')
+        + ' ' + t(_dgRemote ? 'diag_inst_packages_checked' : 'diag_inst_packages_unchecked');
+    showInfoModal(`${service} · ${host}`, pairs, lead);
+}
+
+/** One package of another container, with everything known about it in one line.
+ *
+ *  The version it runs; whether its lock pins it — over there `pip` is not drift and `flask`
+ *  is; and, once somebody has pressed the check, the newest published version and how many
+ *  advisories affect THAT version. The remote half is read by name AND version: this
+ *  container's copy is not this process's, and answering for one with the other is how a
+ *  container gets reported clean because a different one is. */
+function _dgInstPackageLine(p) {
+    const out = [p.version || '—'];
+    const rem = _dgRemote ? _dgRemote.byPin[`${p.name}@${p.version || ''}`] : null;
+    if (rem && rem.state === 'behind' && rem.latest) {
+        out.push(`→ ${rem.latest}`);
+    }
+    if (rem && rem.vuln_count) {
+        out.push(t('diag_deps_n_vulns_short').replace('{}', rem.vuln_count));
+    }
+    if (!p.pinned) out.push(t('diag_deps_unpinned_short'));
+    return out.join('  ·  ').replace('  ·  →', '  →');
 }
 
 /** The instance a row belongs to, by service+host+pid.

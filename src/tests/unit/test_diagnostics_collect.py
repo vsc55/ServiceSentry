@@ -229,6 +229,21 @@ class TestWhatOneProcessPublishesAboutItself:
         blob = json.dumps(diag.environment(lock))
         assert len(blob) < 64_000, f'{len(blob)} bytes per instance is too much for a beat'
 
+    def test_it_is_walked_once_and_kept(self, tmp_path, monkeypatch):
+        """The one thing on this page that IS cached, and the exception has a reason.
+
+        Everything else is recomputed per call on purpose — a diagnostics screen served from a
+        cache describes the problem you had before. None of this can change while the process
+        lives: a package cannot be installed into a running interpreter's view of itself. And
+        it is a full walk of every installed distribution, now on every render of the page as
+        well as once at start-up.
+        """
+        lock = self._lock(tmp_path, 'pytest==0.0.1\n')
+        first = diag.environment(lock)
+        monkeypatch.setattr(diag, 'dependencies',
+                            lambda _p: pytest.fail('it walked the tree again'))
+        assert diag.environment(lock) is first
+
     def test_a_missing_lock_is_still_a_fingerprint(self, tmp_path):
         """A service that cannot describe half of itself must still describe the other half —
         and must still start, which is why the caller guards it too."""

@@ -238,8 +238,18 @@ def installed_outside_lock(lock_path: str) -> list:
     return out
 
 
+_ENV_CACHE: dict = {}
+
+
 def environment(lock_path: str) -> dict:
     """What this PROCESS is running on, small enough to publish beside a heartbeat.
+
+    Computed once and kept. Unlike everything else on this page — which is recomputed on every
+    call on purpose, because a diagnostics screen served from a cache describes the problem you
+    had before — none of this can change while the process lives: a package cannot be installed
+    into a running interpreter's view of itself, and the lock is read from the source tree. It
+    is a full walk of every installed distribution, and it now runs on every render of the page
+    (to compare against the other containers) as well as once at start-up.
 
     The diagnostics page describes the process that served the request. On a single-container
     install that is the whole installation; split across containers it is the web admin and
@@ -254,8 +264,11 @@ def environment(lock_path: str) -> dict:
     verdicts. Whoever reads it compares against their own — the comparison belongs where both
     sides are in hand, not baked into each half separately.
     """
+    cached = _ENV_CACHE.get(lock_path)
+    if cached is not None:
+        return cached
     info = system_info()
-    return {
+    out = {
         'python': info.get('python', ''),
         'python_impl': info.get('python_impl', ''),
         'os': info.get('distribution') or info.get('os', ''),
@@ -269,6 +282,8 @@ def environment(lock_path: str) -> dict:
         # SSH check as "skipped", and nothing on any screen said so.
         'features': sorted(f['module'] for f in optional_features() if f.get('available')),
     }
+    _ENV_CACHE[lock_path] = out
+    return out
 
 
 # ── Optional features ────────────────────────────────────────────────────────

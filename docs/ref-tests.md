@@ -6964,7 +6964,7 @@ librería de imagen sería un test que se salta justo en la máquina donde impor
 
 ## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
 
-**Archivo:** `tests/unit/test_diagnostics_collect.py` — 46 tests
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 47 tests
 **Archivo:** `tests/unit/test_diagnostics_advisories.py` — 68 tests
 **Archivo:** `tests/integration/test_wa_diagnostics.py` — 40 tests
 

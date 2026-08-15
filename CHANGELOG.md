@@ -8,6 +8,23 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.73] - 2026-08-15
+
+### Changed
+- **The per-container package list carries the remote answer too.** It showed name and version
+  and nothing else, so the newest published version and the advisories — which the check
+  already covers for these containers — were only reachable from the card behind it. Each line
+  now reads `3.4.9 → 3.5.0 · 2 advisories · outside the lock`, matched by name AND version
+  because that container's copy is not this process's. The lead says whether the remote half
+  is in there at all: a column of bare versions and "nothing found" are the same picture, and
+  telling them apart is what this card exists for.
+- **`collect.environment()` is computed once per process and kept.** It is the one thing on
+  this page that is cached, and the exception has a reason: everything else is recomputed per
+  call on purpose — a diagnostics screen served from a cache describes the problem you had
+  before — while this cannot change while the process lives, and it is a full walk of every
+  installed distribution that now runs on every render of the page as well as at start-up.
+
+
 ## [0.0.1+build.72] - 2026-08-15
 
 ### Changed
