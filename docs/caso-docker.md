@@ -234,6 +234,15 @@ docker compose -f docker/docker-compose.microservices-test.yml up --build
 docker compose -f docker/docker-compose.ha-test.yml up -d --pull always
 #   (o escala en caliente: … --scale worker=3 --scale events=2 --scale syslog=3)
 
+# Qué imagen publicada corre esa pila se decide en UNA variable, `SS_IMAGE_TAG` (por
+# defecto `test`); vale para los cuatro servicios porque todos salen del mismo ancla:
+SS_IMAGE_TAG=build docker compose -f docker/docker-compose.ha-test.yml up -d --pull always
+SS_IMAGE_TAG=build ./docker/make_test.sh ha
+#   O una vez en `docker/.env` (está en env.example). Responden tres sitios y gana el
+#   primero: el shell, ese fichero, y el `${SS_IMAGE_TAG:-test}` del propio compose — así
+#   que un valor exportado pisa lo que escribas en el .env. `make_test.sh ha` imprime la
+#   imagen que ha levantado de verdad, preguntándosela a Compose en vez de deducirla.
+
 # La misma pila construida desde tu copia de trabajo (para probar cambios tuyos: el tag
 # `test` publicado no sabe nada de ellos). Es un override, no otra pila:
 docker compose -f docker/docker-compose.ha-test.yml \

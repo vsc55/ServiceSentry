@@ -7073,3 +7073,42 @@ frases que hay que releer en cada idioma cuando cambie, de todos modos.
 | `TestTheNameHasOneHome::test_no_code_spells_it_out` | Solo **literales de cadena**, leídos con `ast`: así un comentario o un docstring que explique la regla no hace saltar la guarda que la comprueba |
 | `TestTheNameHasOneHome::test_no_template_spells_it_out` | Igual en las plantillas, con los comentarios (Jinja, HTML y JS) retirados antes de mirar |
 | `TestTheNameHasOneHome::test_the_exceptions_are_still_real` | Una lista de excepciones que nadie poda es donde la regla se muere: cada entrada tiene que seguir existiendo y seguir conteniendo el nombre |
+
+---
+
+## 153. `docker/env.example` es la lista publicada de lo que se lee del entorno
+
+**Archivo:** `tests/meta/test_docker_env_example.py` — 6 tests
+
+Es el fichero que la gente copia a `docker/.env` y edita, y el único sitio donde toda una clase
+de ajustes es **descubrible**: un override que existe en el código y no aparece ahí, para quien
+despliega, no existe. Se pudrió en silencio —dieciséis variables soportadas faltaban cuando se
+contaron por primera vez, entre ellas **todos** los ajustes de copias de seguridad y la jaula
+fail2ban— porque nada conectaba `lib/config/spec.py` con un fichero de texto de otro directorio.
+
+Lo que cuenta como «soportada» se saca de las tres superficies que de verdad leen el entorno —el
+registro de configuración, el `entrypoint.sh` del contenedor y los `os.environ` del código—,
+nunca de una lista guardada aquí: una guarda con su propia copia de la respuesta es otra cosa
+más que mantener sincronizada.
+
+Las dos direcciones, y la asimetría entre ellas es deliberada:
+
+- **documentadas ⊇ soportadas.** Un `Cfg(…, env='SS_X')` nuevo es una línea, y acordarse de
+  escribirlo también aquí es justo lo que nadie recuerda. Basta con que el fichero la **nombre**:
+  las variables por topología (`SS_SERVICE_ROLE`, las puertas `*_EMBEDDED`) se explican en un
+  párrafo que manda al compose, que es documentación y es la forma que este fichero quiere para
+  ellas.
+- **documentadas ⊆ reales**, y aquí sólo cuentan las líneas que **asignan** (`SS_X=…`, comentadas
+  o no). La prosa escribe familias —`SS_DB_*`, `SS_SYSLOG_DB_*`— y ningún regex distingue un
+  comodín de un nombre una vez quitado el asterisco. Un nombre que ya no existe es peor que uno
+  que falta: se lee como soportado, se pone, y no hace nada — que es indistinguible de que el
+  ajuste no funcione.
+
+La lista de excepciones (`COMPOSE_ONLY`) es lo que Compose consume antes de que exista ningún
+contenedor —la etiqueta de imagen, las contraseñas root de MariaDB, el dominio y el correo de
+Let's Encrypt— más `SS_SECRET_KEY`, que se lee a través de una constante de módulo y el escaneo
+no puede ver. Cada entrada se comprueba **contra el árbol**: una excepción que sobrevive a su
+variable excusa un nombre que ya no significa nada.
+
+Validada por los dos lados quitando una variable del fichero (rojo, nombrándola) e inventando
+una que nadie lee (rojo también). Seis `def test_`, 73 al expandir los `parametrize`.

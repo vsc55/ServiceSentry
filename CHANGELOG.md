@@ -8,6 +8,51 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.76] - 2026-08-15
+
+### Added
+- **`docker/env.example` documents every variable this app reads — sixteen were missing.**
+  Counted rather than eyeballed, against the three surfaces that actually read the
+  environment: the config registry, the container entrypoint and `os.environ` in the source.
+  Absent were every backup setting (`SS_BACKUP_DIR`, `_EVERY_HOURS`, `_KEEP`,
+  `_AUTO_SECRETS`), the fail2ban jail (`SS_IPBAN_ENABLED`, `SS_IPBAN_WHITELIST`), the three
+  autostart gates (`SS_MONITORING_AUTOSTART`, `SS_SYSLOG_AUTOSTART`, `SS_EVENTS_AUTOSTART`),
+  `SS_MONITORING_ENABLED`, the SQLite paths, `SS_AUDIT_DETAIL_MAX_ITEMS`,
+  `SS_UPDATE_CHECK_URL`, `SS_CONTROL_BIND` and `SS_PORT`. For anybody deploying, a setting
+  that appears nowhere in that file is a setting that does not exist.
+  - Two stale comments are corrected with them: monitoring's on/off and autostart, and the
+    event processor's autostart, were described as "web UI only, not env vars" — they are
+    env-overridable, and setting them LOCKS the value read-only in the panel, which is the
+    reason to do it.
+  - `SS_WEB_PORT` and `SS_PORT` are told apart, which the names do not do: the first is the
+    port this process binds, the second locks the port stored in the config.
+- **A guard so it cannot rot again** (`tests/meta/test_docker_env_example.py`). Both
+  directions, asymmetric on purpose: a supported variable must be NAMED there (the
+  per-topology ones are explained in prose that sends the reader to the compose file, which
+  is the right shape for them), while only lines that ASSIGN are checked for existing —
+  prose writes families like `SS_DB_*`, and no regex tells a wildcard from a name once the
+  star is gone. Validated by removing a variable and by inventing one; both go red.
+
+### Changed
+- **Which published image the HA test stack runs is one variable.** The tag was written into
+  the `x-app-build` anchor, which is already the single place the four services take it from
+  — but changing it meant editing a tracked file to run a stack, and that edit is the kind
+  that gets committed by accident. `SS_IMAGE_TAG` (default `test`) now names it:
+  `SS_IMAGE_TAG=build docker compose -f docker/docker-compose.ha-test.yml up -d`, or the same
+  in front of `make_test.sh ha`, or once in `docker/.env` — Compose reads that file from the
+  compose file's own directory, called from there or from the repo root with `-f`. The shell
+  WINS over the file, which is the part worth knowing when a stack comes up on an image
+  nobody expected.
+
+### Fixed
+- **`make_test.sh` no longer overrides a `docker/.env`.** It defaulted `SS_IMAGE_TAG` to
+  `test` and exported it, and the shell wins over that file — so writing `SS_IMAGE_TAG=build`
+  in `docker/.env` and running the script would have quietly come up on the other image,
+  which is the exact confusion the variable was added to prevent. It now exports the variable
+  only when it is already set, and asks Compose which image it actually brought up instead of
+  rebuilding the answer from it.
+
+
 ## [0.0.1+build.75] - 2026-08-15
 
 ### Added
