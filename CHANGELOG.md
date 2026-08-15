@@ -8,6 +8,25 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.75] - 2026-08-15
+
+### Added
+- **A `build` tag that does what `test` does without running the suite.** Same image, same
+  `.deb`/`.rpm`/Gentoo overlay, same install of those packages in Debian, Ubuntu and Fedora —
+  the one difference is that the tests are not started at all. `test` runs them beside the
+  build, which is what puts a red tick against a commit whose answer was already known: the
+  suite was just run locally, or the change is in the Dockerfile and no Python test can see
+  it. Skipped rather than made non-blocking, because a job that runs and is ignored still
+  costs ~13 minutes of runner and still marks the commit.
+  - The image publishes as `:build`, its own name, so a `pull` says which of the two claims
+    it carries.
+  - `packages` keeps `needs: tests` and admits `skipped` beside `success`: a plain `needs`
+    would take the packages down with the skipped suite, turning "do not run the tests" into
+    "do not build anything either", while dropping the dependency would let a red suite ship
+    packages on `v*` and `test`. `!cancelled()` rather than `always()` — a cancelled run is
+    somebody pressing stop, and it should stop.
+
+
 ## [0.0.1+build.74] - 2026-08-15
 
 ### Added

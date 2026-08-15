@@ -10,6 +10,12 @@ name: Docker
 #                     — the rehearsal for a release. Its image build starts BESIDE the suite
 #                     rather than after it: that tag claims nothing, it exists to get an
 #                     image out fast
+#   tag build       → :build, the same as `test` with the suite NOT RUN AT ALL. `test` still
+#                     runs it beside the build, which is what makes a red tick appear against
+#                     an image somebody is already pulling; this one is for the case where the
+#                     answer is already known — the suite was just run locally, or the change
+#                     is in the Dockerfile and no Python test can see it. The image is the
+#                     only claim it makes, and the tag name says so
 #   pull request    → BUILT but never pushed: proof the Dockerfile still builds, and the
 #                     one case where a fork could otherwise reach the registry
 #   manual dispatch → the same, on demand
@@ -19,7 +25,7 @@ name: Docker
 on:
   push:
     branches: [main]
-    tags: ["v*", "test"]
+    tags: ["v*", "test", "build"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -32,12 +38,20 @@ concurrency:
 
 jobs:
   # ── Gate 1: the suite. Nothing is built or published until this passes ──────────────
+  # Except on `build`, which is the tag that says "do not run it". Skipped rather than made
+  # non-blocking: a job that runs and is ignored still costs ~13 minutes of runner and still
+  # puts a red tick on the commit, which is the whole thing this tag is for.
   tests:
+    if: github.ref != 'refs/tags/build'
     uses: ./.github/workflows/tests.yml
 
   # ── Gate 2: installing on a clean machine, the half pytest cannot see ───────────────
   # A sibling of the image build, not a step before it: both only need the suite to be
   # green, and serialising them would add its matrix to every publish for nothing.
+  #
+  # Skipped on `build` without saying so: a skipped dependency skips the job that waits for
+  # it, and that is the right answer here rather than an oversight — this is a check, `build`
+  # is the tag that asks for none, and the packages still get installed for real further down.
   install:
     needs: tests
     uses: ./.github/workflows/install-tests.yml
@@ -69,14 +83,14 @@ jobs:
   # for more than its caller was given, and this one defaults to `packages: read`. Declaring
   # `packages: write` inside build-image.yml alone fails the whole file as invalid.
   build-fast:
-    if: github.ref == 'refs/tags/test'
+    if: github.ref == 'refs/tags/test' || github.ref == 'refs/tags/build'
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/build-image.yml
 
   build-gated:
-    if: github.ref != 'refs/tags/test'
+    if: github.ref != 'refs/tags/test' && github.ref != 'refs/tags/build'
     needs: tests
     permissions:
       contents: read
@@ -92,20 +106,30 @@ jobs:
   # Deliberately NOT `needs: changelog`: that gate is skipped on `test`, and a skipped
   # dependency skips the job that waits for it. The release is what needs the notes, and it
   # asks for them itself.
+  #
+  # And that same rule is why the condition is spelled out instead of left as `needs: tests`:
+  # on `build` the suite is skipped, and a plain `needs` would take the packages down with it
+  # — turning "do not run the tests" into "do not build anything either". So the dependency is
+  # kept (a red suite must still stop the packages on `v*` and `test`) and `skipped` is
+  # admitted alongside `success`. `!cancelled()` rather than `always()`: a cancelled run is
+  # somebody pressing stop, and it should stop.
   packages:
     needs: tests
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      !cancelled()
+      && startsWith(github.ref, 'refs/tags/')
+      && (needs.tests.result == 'success' || needs.tests.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
       - name: Decide the version to build
         id: ver
-        # `test` is not a version, so the packages take the one the application reports.
-        # Naming a package after the moving tag would produce a servicesentry-test.rpm that
-        # means something different every week.
+        # `test` and `build` are not versions, so the packages take the one the application
+        # reports. Naming a package after a moving tag would produce a servicesentry-test.rpm
+        # that means something different every week.
         run: |
-          if [ "${GITHUB_REF_NAME}" = "test" ]; then
+          if [ "${GITHUB_REF_NAME}" = "test" ] || [ "${GITHUB_REF_NAME}" = "build" ]; then
             value="$(sed -n "s/^__version__ = '\(.*\)'/\1/p" src/lib/__init__.py)"
             [ -n "${value}" ] || { echo "could not read __version__" >&2; exit 1; }
           else

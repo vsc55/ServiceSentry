@@ -185,8 +185,18 @@ docker pull ghcr.io/vsc55/servicesentry:latest
 | `latest` | la **última versión publicada** | al etiquetar `v1.2.3` |
 | `1.2.3` / `1.2` | una versión concreta | al etiquetar `v1.2.3` |
 | `edge` | la punta de `main` | en cada merge a `main` |
-| `test` | build manual | al mover el tag `test` |
+| `test` | build manual, **con la suite corriendo al lado** | al mover el tag `test` |
+| `build` | build manual **sin pasar la suite** | al mover el tag `build` |
 | `sha-<commit>` | ese commit exacto | **nunca** — es la única inmutable |
+
+`test` y `build` construyen exactamente lo mismo —imagen, `.deb`, `.rpm`, overlay de Gentoo, y
+los paquetes instalados de verdad en Debian, Ubuntu y Fedora— y se diferencian en una cosa: `test`
+lanza la suite en paralelo al build, `build` no la lanza en absoluto. Ninguno de los dos hace
+esperar a la imagen, así que la elección no es de velocidad sino de **qué afirma el tag**: `build`
+es para cuando la respuesta ya se conoce (la suite se acaba de pasar en local, o el cambio está en
+el `Dockerfile` y ningún test de Python lo ve) y evita el aspa roja contra un commit del que ya
+sabías el resultado. Cada uno publica bajo su propio nombre para que un `pull` diga cuál de las dos
+afirmaciones lleva la imagen.
 
 **`latest` es la última release, no el último commit.** `docker pull` sin etiqueta es lo que
 ejecuta casi todo el mundo, y debe entregar lo que ha pasado los tests, los paquetes y la

@@ -6,6 +6,7 @@ name: Build image
 #   tag `test`  → started AT THE SAME TIME as the suite. That tag exists to get an image in
 #                 front of someone quickly; making it wait ~13 minutes for tests it is not
 #                 claiming to have passed only costs time.
+#   tag `build` → the same, with the suite not run at all.
 #   everything  → after the suite. `:latest` and a version tag DO claim it, so they wait.
 #
 # See docker.yml, which calls it once as `build-fast` and once as `build-gated`.
@@ -57,8 +58,11 @@ jobs:
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             # Named on purpose rather than through type=ref,event=tag, for the reason above.
-            # `test` is the only literal tag.
+            # `test` and `build` are the only literal tags — one built beside the suite, the
+            # other built without it, and each publishes under its own name so a pull says
+            # which of the two claims it carries.
             type=raw,value=test,enable=${{ github.ref == 'refs/tags/test' }}
+            type=raw,value=build,enable=${{ github.ref == 'refs/tags/build' }}
             type=sha
 
       - name: Build and push
