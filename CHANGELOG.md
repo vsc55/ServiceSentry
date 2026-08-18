@@ -8,6 +8,28 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.83] - 2026-08-18
+
+### Added
+- **The WebAuthn ceremonies** (`lib/core/mfa/webauthn.py`) — registration and authentication
+  verified as arithmetic over bytes the browser posted, with no Flask, no store and no clock.
+  Six checks, and each is the whole feature when it is missing: the challenge (constant-time,
+  or an assertion captured once is replayable forever), the origin (exact equality — a
+  substring test is how `https://panel.example.com.attacker.net` becomes a valid login), the
+  RP ID hash, user presence, a signature over `authData ‖ SHA-256(clientDataJSON)` and nothing
+  else, and a signature counter that moved forward.
+- **The RP ID comes from `web_admin|public_url`, never from the request.** Behind a reverse
+  proxy the request says whatever the proxy last said, and a credential registered against the
+  wrong name is one that silently never works again — the browser scopes it and it cannot be
+  moved. Nothing usable answers empty, and the caller declines to offer WebAuthn rather than
+  guessing.
+- **Attestation is deliberately not verified**, and that is a choice rather than an omission:
+  the statement says which model of authenticator was used, and checking it means shipping and
+  maintaining vendor roots to answer a question this panel does not ask. A second factor here
+  is "something the person has", not "something from a manufacturer we approve".
+- 53 tests. The happy path is one class; the other eight each take a ceremony that would
+  verify and break exactly one thing.
+
 ## [0.0.1+build.82] - 2026-08-18
 
 ### Added

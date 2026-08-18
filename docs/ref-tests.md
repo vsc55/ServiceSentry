@@ -7281,3 +7281,28 @@ un «firma inválida» para todos los usuarios cuando está mal.
 | `TestTheThreeAlgorithmsAuthenticatorsActuallySend::*` (7) | ES256 (todas las llaves de seguridad), RS256 (lo que produjo Windows Hello durante años y lo que sigue mandando mucho hardware instalado) y EdDSA. Ida y vuelta de los tres, más que una firma sobre otros datos o de otra clave **no** verifica |
 | `TestTheAlgorithmIsTheOneRegistered::*` (3) | Lo que **no** es un viaje de ida y vuelta y es lo que más importa: el algoritmo es el que se guardó al **registrar**, nunca el que la clave declara cuando llega la aserción. Una clave que elige su propio algoritmo al verificar es el fallo del `alg` de JWT con otras palabras. Una clave que discrepa de lo registrado se rechaza; un algoritmo no soportado se rechaza en vez de adivinarse (uno que no se puede comprobar es uno cuya firma habría que creerse); y una clave sin etiqueta `alg` se acepta bajo el registrado, porque no todos los autenticadores la rellenan |
 | `TestAKeyThatIsNotOneIsRefused::*` (13) | Formas que no son una clave COSE, curva o tipo equivocados para el algoritmo, coordenadas del tamaño o tipo equivocados, un módulo RSA **lo bastante pequeño como para factorizarlo** (lo eligió el autenticador, así que el suelo se comprueba en vez de suponerse), y que `verify` no lanza nunca: cada forma de fallar tiene que verse igual desde fuera |
+
+---
+
+## 157. WebAuthn: las ceremonias, desmontadas comprobación a comprobación
+
+**Archivo:** `tests/unit/test_mfa_webauthn.py` — 53 tests
+
+No hay vector publicado de una ceremonia entera como el RFC 6238 publica códigos, así que aquí
+están **fabricadas**: una clave P-256 real, un blob de datos del autenticador montado byte a
+byte con la disposición que fija la norma, y una firma real. Eso por sí solo sólo demuestra que
+el camino feliz se pone de acuerdo consigo mismo — por eso la forma del fichero es la contraria:
+cada clase coge una ceremonia que **sí** verificaría y rompe exactamente una cosa, porque cada
+una de esas cosas es la función entera cuando falta.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheHappyPathAgreesWithItself::*` (3) | Registro → credencial que guardar (id, clave, algoritmo, contador), y una aserción de esa credencial verifica. Una sola clase, a propósito |
+| `TestTheChallengeIsTheOneThisServerIssued::*` (3) | Sin esto, una aserción capturada una vez es replicable para siempre, que es justo lo que un segundo factor existe para impedir. Comparado en **tiempo constante**, y sin challenge no pasa nunca |
+| `TestTheOriginIsCompareExactly::*` (6) | Igualdad exacta y no «termina en»: `https://panel.example.com.attacker.net` pasa cualquier prueba que no lo sea. El esquema y el puerto forman parte de él |
+| `TestTheCredentialIsScopedToThisSite::*` (2) | El hash del RP ID dentro de los datos del autenticador, contra SHA-256 del dominio que sirve el panel — en el registro y en la aserción |
+| `TestSomebodyHasToHaveBeenThere::*` (3) | Sin el flag de presencia, una credencial que se puede ejercer sin que nadie toque nada es un fichero, no un factor. La **verificación de usuario** (PIN/huella) sólo se exige cuando se pide |
+| `TestTheSignatureCoversTheCeremonyAndNotSomethingElse::*` (3) | La firma cubre `authData ‖ SHA-256(clientDataJSON)`, en ese orden: los datos del cliente son donde viven el challenge y el origen, así que una firma que no cubre su hash es una firma sobre una ceremonia que eligió otro. Y una respuesta de **registro** replicada en el login no es un login |
+| `TestACounterThatStopsMoving::*` (5) | La única señal del protocolo que dice que dos dispositivos responden por una credencial. Un cero en cualquiera de los dos lados significa que el autenticador no lleva contador —permitido, y común en los de plataforma—: sólo uno que **existe** y va hacia atrás es prueba |
+| `TestWhereTheRpIdComesFrom::*` (14) | De `public_url` y nunca de la petición: detrás de un proxy inverso la petición dice lo que dijera el proxy, y una credencial registrada contra el nombre equivocado es una que **en silencio no vuelve a funcionar**. Dominio registrable y nada más; una IP o algo inservible da vacío, y el llamante no ofrece WebAuthn en vez de adivinar. El **origen** sí conserva el puerto, porque es lo que manda el navegador |
+| `TestMalformedInputIsARefusalAndNotACrash::*` (14) | Todo llega del navegador por una ruta alcanzable sin sesión: datos más cortos que su cabecera fija, un blob que dice llevar credencial y no la lleva, una longitud de id que se sale del buffer, datos de cliente que no son un objeto, y base64url que no lo es |
