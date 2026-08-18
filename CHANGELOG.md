@@ -8,6 +8,26 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.84] - 2026-08-18
+
+### Added
+- **The panel now decides whether it can offer a security key at all**, before offering one.
+  Three things have to hold, and when one does not the answer is *do not offer it* rather than
+  try: a credential is scoped by the browser to the RP ID and **cannot be moved**, so
+  registering against a guess produces a key that silently never works again and nothing on
+  screen that says why. No public URL, an IP address (not a registrable domain) or plain HTTP
+  each mean the option is not shown — refusing here is an explanation instead of an opaque
+  browser error.
+- `web_admin|webauthn_rp_id`, the escape for a deployment where the public URL and the domain
+  the keys should belong to differ — several names in front of one panel, or a public URL on a
+  subdomain. An override the origin does not sit under is refused here, because the browser
+  would refuse it somewhere worse.
+- **A reverse proxy the panel is not reading is reported as a warning, not a refusal.** With
+  `proxy_count` at 0 behind a proxy terminating TLS the panel believes it serves plain HTTP —
+  but the ceremony would still work, and what breaks first is the session cookie. Blocking
+  WebAuthn there would name the wrong problem and send somebody to the wrong setting.
+- Eight tests.
+
 ## [0.0.1+build.83] - 2026-08-18
 
 ### Added

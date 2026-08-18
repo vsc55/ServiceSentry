@@ -244,6 +244,17 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # sign-in, and an attribute is a second copy that a save has to remember to refresh.
     Cfg('web_admin|mfa_required', str, 'off', env='SS_MFA_REQUIRED',
         admin_only=True, no_rule=True, card='login_security'),
+    # The domain security keys are registered against. Normally derived from `public_url` and
+    # left empty here — this is the escape for a deployment where the two differ: several
+    # names in front of one panel, or a public URL on a subdomain of the domain the keys
+    # should be scoped to.
+    #
+    # It is worth being blunt about the cost of changing it: a credential is scoped to this by
+    # the BROWSER and cannot be moved. Change it and every key already registered stops
+    # working, with nothing on screen to say why — which is also why it is not derived from
+    # the request, where a reverse proxy gets to decide it per call.
+    Cfg('web_admin|webauthn_rp_id', str, '', env='SS_WEBAUTHN_RP_ID',
+        admin_only=True, no_rule=True, card='login_security'),
     # Internal fail2ban — progressive per-IP jail shared by every exposed service
     # (web + syslog). Offenses accumulate per IP; crossing a threshold jails the IP
     # for an escalating term. Two tracks: 'auth' (anonymous/login/CSRF/SCIM/401/anon-403)

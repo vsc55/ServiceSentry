@@ -145,6 +145,53 @@ class _MfaMixin:
             return False
         return self._mfa_enrolled(username) or self._mfa_must_enrol(username, source)
 
+    # ── Where security keys are registered ───────────────────────────────────
+
+    def _webauthn_scope(self) -> dict:
+        """`{'ok', 'rp_id', 'origin', 'reason'}` — can this install offer a security key?
+
+        Three things have to be true, and when one is not the answer is **do not offer it**
+        rather than try: a credential is scoped by the browser to the RP ID and CANNOT be
+        moved, so registering one against a guess produces a key that silently never works
+        again and nothing on screen that says why.
+
+        * `public_url` (or the `webauthn_rp_id` escape) names a domain. An IP address is not a
+          registrable domain and neither is an empty setting.
+        * the origin is **https**. The browser refuses a ceremony outside a secure context, and
+          refusing here instead means an explanation instead of an opaque browser error.
+        `proxy_warning` comes back beside them for the case that bites behind a reverse proxy
+        terminating TLS: with `proxy_count` at 0 the panel never reads `X-Forwarded-Proto`, so
+        it serves an install that IS on https while believing it is not — the state the
+        diagnostics network block calls `ignored`. It is a warning and not a refusal, because
+        the ceremony would work; what breaks first is the session cookie, and naming WebAuthn
+        as the problem would send somebody to the wrong setting.
+        """
+        from lib.core.mfa import webauthn                # noqa: PLC0415
+        section = self._config_section('web_admin') if hasattr(self, '_config_section') else {}
+        section = section or {}
+        public_url = str(section.get('public_url') or getattr(self, '_PUBLIC_URL', '') or '')
+        override = str(section.get('webauthn_rp_id') or '').strip().lower()
+        rp_id = override or webauthn.rp_id_from(public_url)
+        origin = webauthn.origin_from(public_url)
+        if not rp_id:
+            return {'ok': False, 'rp_id': '', 'origin': '', 'reason': 'no_public_url'}
+        if not origin.startswith('https://'):
+            return {'ok': False, 'rp_id': rp_id, 'origin': origin, 'reason': 'not_https'}
+        # An override that the origin does not sit under would be rejected by the browser,
+        # which is a worse place to find out. The RP ID must be the origin's host or a parent
+        # of it — `example.com` for a panel on `panel.example.com`, never the other way round.
+        host = origin.split('://', 1)[1].split(':', 1)[0]
+        if host != rp_id and not host.endswith('.' + rp_id):
+            return {'ok': False, 'rp_id': rp_id, 'origin': origin, 'reason': 'rp_id_mismatch'}
+        # A WARNING and not a refusal. `public_url` says https, so the browser will reach a
+        # secure context and the ceremony will work — but with `proxy_count` at 0 behind a
+        # proxy that terminates TLS the panel believes it is serving plain http, and that
+        # breaks the SESSION (a Secure cookie the panel will not set) long before WebAuthn is
+        # reached. Blocking here would name the wrong problem; saying it is the useful part.
+        trusting = int(getattr(self, '_PROXY_COUNT', 0) or 0) > 0
+        return {'ok': True, 'rp_id': rp_id, 'origin': origin, 'reason': '',
+                'proxy_warning': not trusting}
+
     # ── The half-finished login ──────────────────────────────────────────────
 
     def _mfa_hold(self, username: str, source: str, remember: bool) -> None:

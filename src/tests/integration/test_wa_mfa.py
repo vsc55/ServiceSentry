@@ -423,3 +423,63 @@ class TestTrustingADirectoryThatAlreadyAsks:
         assert admin._mfa_required('admin', 'oidc') is False
         self._trust(admin, 'oidc', False)
         assert admin._mfa_required('admin', 'oidc') is True
+
+
+class TestWhereASecurityKeyWouldBeRegistered:
+    """A credential is scoped by the BROWSER to the RP ID and cannot be moved, so registering
+    one against a guess produces a key that silently never works again. When the install
+    cannot say where it lives, the answer is not to offer WebAuthn at all."""
+
+    def _url(self, admin, public_url='', rp_id=''):
+        cfg = admin._read_config_file(admin._CONFIG_FILE) or {}
+        cfg.setdefault('web_admin', {})['public_url'] = public_url
+        cfg['web_admin']['webauthn_rp_id'] = rp_id
+        admin._write_config(cfg)
+
+    def test_no_public_url_means_it_is_not_offered(self, admin):
+        self._url(admin, '')
+        out = admin._webauthn_scope()
+        assert out['ok'] is False and out['reason'] == 'no_public_url'
+
+    def test_an_ip_address_is_not_a_registrable_domain(self, admin):
+        self._url(admin, 'https://10.0.0.5')
+        assert admin._webauthn_scope()['reason'] == 'no_public_url'
+
+    def test_plain_http_is_refused_here_rather_than_by_the_browser(self, admin):
+        """Refusing here means an explanation instead of an opaque browser error."""
+        self._url(admin, 'http://panel.example.com')
+        out = admin._webauthn_scope()
+        assert out['ok'] is False and out['reason'] == 'not_https'
+
+    def test_a_public_url_over_https_gives_the_domain_and_the_origin(self, admin):
+        self._url(admin, 'https://panel.example.com')
+        out = admin._webauthn_scope()
+        assert out['ok'] is True
+        assert out['rp_id'] == 'panel.example.com'
+        assert out['origin'] == 'https://panel.example.com'
+
+    def test_the_escape_can_scope_keys_to_a_parent_domain(self, admin):
+        """Several names in front of one panel, or a public URL on a subdomain of the domain
+        the keys should belong to."""
+        self._url(admin, 'https://panel.example.com', rp_id='example.com')
+        out = admin._webauthn_scope()
+        assert out['ok'] is True and out['rp_id'] == 'example.com'
+
+    def test_an_escape_the_origin_does_not_sit_under_is_refused(self, admin):
+        """The browser would reject it, which is a worse place to find out."""
+        self._url(admin, 'https://panel.example.com', rp_id='somewhere-else.net')
+        assert admin._webauthn_scope()['reason'] == 'rp_id_mismatch'
+
+    def test_a_child_of_the_origin_is_not_a_valid_scope_either(self, admin):
+        self._url(admin, 'https://example.com', rp_id='panel.example.com')
+        assert admin._webauthn_scope()['reason'] == 'rp_id_mismatch'
+
+    def test_a_proxy_the_panel_is_not_reading_is_a_warning_and_not_a_refusal(self, admin):
+        """The ceremony would work — what breaks first is the session cookie, and naming
+        WebAuthn as the problem would send somebody to the wrong setting."""
+        self._url(admin, 'https://panel.example.com')
+        admin._PROXY_COUNT = 0
+        out = admin._webauthn_scope()
+        assert out['ok'] is True and out['proxy_warning'] is True
+        admin._PROXY_COUNT = 1
+        assert admin._webauthn_scope()['proxy_warning'] is False
