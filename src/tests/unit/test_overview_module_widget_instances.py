@@ -190,3 +190,33 @@ class TestTheLabelExists:
         for lang in ('en_EN', 'es_ES'):
             src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', f'{lang}.py'))
             assert "'dw_mw_chart':" in src, f'{lang} does not name the ring toggle'
+
+
+class TestEveryWidgetDeclaresItsPermissionGate:
+    """`widget_allowed` treats a widget with no declared gate as open to any logged-in user.
+
+    That is a fail-OPEN default on the one endpoint that serves widget data
+    (`/api/v1/overview/widget/<id>`), and the gate is declared by the widget itself — core
+    or module. Today all of them declare one, which is why this is a guard and not a fix:
+    the next widget to forget it would be readable by everybody, and nothing would say so.
+
+    Found while auditing `lib/core` on 2026-08-15. The default is left alone deliberately —
+    changing it would break a module mid-upgrade with a blank card and no explanation, while
+    a red test names the widget and the file.
+    """
+
+    def test_no_widget_is_served_without_a_gate(self):
+        from lib.core.overview.discovery import discover_overview_widgets   # noqa: PLC0415
+        naked = []
+        for w in discover_overview_widgets():
+            perms = w.get('perms') or {}
+            if not (perms.get('any') or perms.get('prefix')):
+                naked.append(w.get('id'))
+        assert not naked, (
+            f'these widgets declare no permission gate, so any logged-in user can read '
+            f'their data: {naked}. Add perms.any or perms.prefix to the descriptor.')
+
+    def test_the_scan_actually_sees_widgets(self):
+        """Guard the guard: an empty discovery would make the test above pass vacuously."""
+        from lib.core.overview.discovery import discover_overview_widgets   # noqa: PLC0415
+        assert len(discover_overview_widgets()) > 10

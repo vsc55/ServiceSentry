@@ -21,9 +21,15 @@ properties matter:
 Flask-free and database-free: the functions take dicts.
 """
 
+import os
+
 import pytest
 
 from lib.core.diagnostics import service as diag
+
+# From this file's own position, not from its depth: `dirname(dirname(...))` points one level
+# short from a subfolder and does it silently.
+SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 
 
 def _env(lock=None, extra=None, **kw):
@@ -149,6 +155,53 @@ class TestWhatOnlyTheOtherProcessesRun:
                       {'flask': '3.1.0'})
         assert diag.elsewhere_rows(wa) == []
 
+    def test_the_row_carries_the_name_that_container_uses(self, monkeypatch):
+        """Compared canonically, REPORTED as spelt over there — and the difference is not
+        academic: eight of the packages installed here are spelt one way and canonicalise to
+        another (`PyYAML`, `typing_extensions`, `CacheControl`…).
+
+        The screen joins this answer back onto the instance's own package list by name and
+        version. Canonicalising the reported name broke that join in silence: the row WAS
+        asked about, the answer came back under `pyyaml`, the modal looked for `PyYAML` and
+        found nothing — so a package carrying an advisory was drawn with an empty "Latest"
+        and no CVEs, which is the failure this whole list exists to prevent."""
+        wa = self._wa(monkeypatch,
+                      [{'service_key': 'monitoring', 'env': _env({'PyYAML': '6.0.1'})}],
+                      {'flask': '3.1.0'})
+        assert [r['name'] for r in diag.elsewhere_rows(wa)] == ['PyYAML']
+
+    def test_the_same_package_spelt_two_ways_here_is_not_extra(self, monkeypatch):
+        """The comparison stays canonical, which is the half that must NOT use the raw name:
+        `typing_extensions` over there and `typing-extensions` here are one package, and
+        asking about it again would report this process's own environment as another
+        container's finding."""
+        wa = self._wa(monkeypatch,
+                      [{'service_key': 'monitoring',
+                        'env': _env({'typing_extensions': '4.12.0'})}],
+                      {'typing-extensions': '4.12.0'})
+        assert diag.elsewhere_rows(wa) == []
+
+    def test_the_caller_can_hand_over_what_it_already_walked(self, monkeypatch):
+        """Working out what only the others run means subtracting what this process runs — a
+        walk of every installed distribution, which the one caller had just done twice to build
+        the two lists this is subtracted from. Three walks of `site-packages` for one answer,
+        on the request that is already the slowest on the page."""
+        wa = self._wa(monkeypatch, [{'service_key': 'monitoring',
+                                     'env': _env({'flask': '3.0.0'})}], {'flask': '3.1.0'})
+        for name in ('dependency_rows', 'unpinned_rows'):
+            monkeypatch.setattr(diag, name, lambda _wa: pytest.fail('it walked anyway'))
+        local = [{'name': 'flask', 'required': '3.1.0', 'installed': '3.1.0', 'status': 'ok'}]
+        assert diag.elsewhere_rows(wa, local) == [
+            {'name': 'flask', 'required': '', 'installed': '3.0.0', 'status': 'elsewhere'}]
+
+    def test_the_handed_list_is_the_one_subtracted(self, monkeypatch):
+        """Not a hint: what the caller says it runs is what is taken off, so a package it
+        already asked about is never asked about a second time as somebody else's."""
+        wa = self._wa(monkeypatch, [{'service_key': 'monitoring',
+                                     'env': _env({'flask': '3.0.0'})}], {})
+        local = [{'name': 'Flask', 'required': '', 'installed': '3.0.0', 'status': 'ok'}]
+        assert diag.elsewhere_rows(wa, local) == [], 'compared canonically, as always'
+
 
 class TestTheListDegradesInsteadOfFailing:
     """It is reached from the page somebody opened because something is already wrong."""
@@ -210,3 +263,35 @@ class TestListingWhatOneProcessRuns:
 
     def test_nothing_published_is_an_empty_list(self):
         assert diag.packages_of({}) == [] and diag.packages_of(None) == []
+
+
+class TestTheScreenKeepsTheVersionsApartToo:
+    """The same invariant, on the other side of the wire.
+
+    This file's whole premise is that a package is a name AND a version, and the answer now
+    honours it — but the last step is a click, and the click carried the name alone. The
+    partials are read as text because that is where the two halves meet: the row knows its
+    version and the handler has to be given it.
+    """
+
+    def _read(self, name):
+        path = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                            'diagnostics', name)
+        with open(path, encoding='utf-8') as fh:
+            return fh.read()
+
+    def test_the_count_opens_the_advisories_of_the_version_it_is_on(self):
+        """One package can be on screen twice — this process's and another container's — and
+        each has its own advisories. Opened by name it showed whichever row came first, under a
+        heading naming the version that was clicked."""
+        assert "_dgShowVulns('${escAttr(x.name)}', '${escAttr(x.installed || '')}')" \
+            in self._read('_deps.html')
+
+    def test_the_handler_looks_the_pin_up_first(self):
+        assert '_dgRemote.byPin[`${name}@${installed' in self._read('_advisories.html')
+
+    def test_an_advisory_names_each_package_once(self):
+        """Both versions carrying one flaw is one package affected. Pushed per row it read
+        "urllib3, urllib3" and counted two."""
+        assert 'if (!e.where.includes(r.name)) e.where.push(r.name);' \
+            in self._read('_advisories.html')

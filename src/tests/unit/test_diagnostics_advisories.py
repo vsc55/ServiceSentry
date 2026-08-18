@@ -349,7 +349,7 @@ class TestAskingTheAdvisoryService:
         monkeypatch.setattr(adv.urllib.request, 'urlopen', _one)
         out = adv.vulnerabilities([('a', '1.0'), ('b', '2.0')])
         assert len(calls) == 1 and len(calls[0]['queries']) == 2
-        assert out['by_name'] == {'a': ['GHSA-1'], 'b': []}
+        assert out['by_pin'] == {('a', '1.0'): ['GHSA-1'], ('b', '2.0'): []}
 
     def test_a_package_that_is_not_installed_is_not_asked_about(self, monkeypatch):
         """The question is about what is RUNNING, and a missing package cannot be vulnerable."""
@@ -370,7 +370,7 @@ class TestAskingTheAdvisoryService:
             {'results': [{'vulns': [{'id': 'GHSA-ok1'}, {'id': 'javascript:alert(1)'},
                                     {'id': '../../etc/passwd'}, {'id': ''}]}]}))
         out = adv.vulnerabilities([('a', '1.0')])
-        assert out['by_name']['a'] == ['GHSA-ok1']
+        assert out['by_pin'][('a', '1.0')] == ['GHSA-ok1']
 
     def test_a_reply_of_the_wrong_length_is_refused_not_aligned(self, monkeypatch):
         """The batch is positional. Lining up a short reply as best we can would name the
@@ -429,3 +429,85 @@ class TestTheTwoHalvesMerged:
         out = adv.check([{'name': 'a', 'installed': '1.0.0'}])
         assert out['ok'] is True and out['rows'][0]['latest'] == ''
         assert out['unknown'] == 1
+
+
+class TestOnePackageAtTwoVersions:
+    """The check covers three lists, and the third one exists precisely to carry what ANOTHER
+    container runs — including a different version of a package this process also has. Keyed by
+    name, the answers for the two versions were the same answer."""
+
+    def _osv(self, monkeypatch, vulnerable):
+        """OSV, answering per QUERY: only *vulnerable* (a version string) carries an advisory."""
+        def _call(req, *_a, **_kw):
+            if req.full_url == adv.OSV_BATCH_URL:
+                asked = json.loads(req.data.decode('utf-8'))['queries']
+                return _Resp({'results': [{'vulns': [{'id': 'GHSA-OLD'}]}
+                                          if q['version'] == vulnerable else {}
+                                          for q in asked]})
+            if 'osv.dev/v1/vulns' in req.full_url:
+                return _Resp({'id': 'GHSA-OLD', 'database_specific': {'severity': 'HIGH'}})
+            return _Resp({'info': {'version': '2.2.1'}})
+
+        monkeypatch.setattr(adv.urllib.request, 'urlopen', _call)
+
+    def _rows(self):
+        return [{'name': 'urllib3', 'required': '2.2.1', 'installed': '2.2.1', 'status': 'ok'},
+                {'name': 'urllib3', 'required': '', 'installed': '1.26.0',
+                 'status': 'elsewhere'}]
+
+    def test_each_version_gets_its_own_advisories(self, monkeypatch):
+        """The old one is the one with the flaw. Keyed by name the second answer overwrote the
+        first, and since the other containers are asked LAST, what overwrote this process's own
+        row was always somebody else's — a clean 2.2.1 drawn carrying 1.26.0's advisory."""
+        self._osv(monkeypatch, vulnerable='1.26.0')
+        rows = {(r['name'], r['installed']): r for r in adv.check(self._rows())['rows']}
+        assert [v['id'] for v in rows[('urllib3', '1.26.0')]['vulns']] == ['GHSA-OLD']
+        assert rows[('urllib3', '2.2.1')]['vulns'] == [], 'this process is clean and says so'
+
+    def test_the_clean_one_cannot_clear_the_vulnerable_one(self, monkeypatch):
+        """The same bug with the worse ending: the version that IS vulnerable reported clean
+        because a newer container answered after it."""
+        self._osv(monkeypatch, vulnerable='2.2.1')
+        rows = {(r['name'], r['installed']): r for r in adv.check(self._rows())['rows']}
+        assert [v['id'] for v in rows[('urllib3', '2.2.1')]['vulns']] == ['GHSA-OLD']
+        assert rows[('urllib3', '1.26.0')]['vulns'] == []
+
+    def test_pypi_is_asked_about_the_name_once(self, monkeypatch):
+        """"What is the newest release" has one answer for both versions. Asked per row it was
+        two requests to pypi.org for one cell."""
+        asked = []
+
+        def _call(req, *_a, **_kw):
+            if req.full_url == adv.OSV_BATCH_URL:
+                return _Resp({'results': [{}, {}]})
+            asked.append(req.full_url)
+            return _Resp({'info': {'version': '2.2.1'}})
+
+        monkeypatch.setattr(adv.urllib.request, 'urlopen', _call)
+        adv.check(self._rows())
+        assert len(asked) == 1, asked
+
+    def test_one_flaw_in_one_package_is_counted_once(self, monkeypatch):
+        """Both versions carrying it is one advisory in one package. Summed over the rows the
+        header said two — the complaint `collapse_aliases` exists for, by the other door."""
+        def _call(req, *_a, **_kw):
+            if req.full_url == adv.OSV_BATCH_URL:
+                asked = json.loads(req.data.decode('utf-8'))['queries']
+                return _Resp({'results': [{'vulns': [{'id': 'GHSA-BOTH'}]} for _q in asked]})
+            if 'osv.dev/v1/vulns' in req.full_url:
+                return _Resp({'id': 'GHSA-BOTH'})
+            return _Resp({'info': {'version': '2.2.1'}})
+
+        monkeypatch.setattr(adv.urllib.request, 'urlopen', _call)
+        out = adv.check(self._rows())
+        assert out['vuln_total'] == 1 and out['vuln_packages'] == 1
+
+    def test_a_record_it_could_not_read_carries_the_same_keys(self, monkeypatch):
+        """A dict whose shape depends on whether the request worked is one the reader tests
+        twice — and the half that forgets reads a missing `published` as "computed by us"."""
+        self._osv(monkeypatch, vulnerable='1.26.0')
+        monkeypatch.setattr(adv, 'advisory_details_many',
+                            lambda _ids, _t=None: {'GHSA-OLD': {'ok': False, 'error': 'http'}})
+        found = adv.check(self._rows())['rows']
+        vuln = [v for r in found for v in r['vulns']][0]
+        assert vuln['severity'] == '' and vuln['published'] is False and vuln['vector'] == ''

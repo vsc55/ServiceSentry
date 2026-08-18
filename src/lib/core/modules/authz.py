@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from lib.core.users.service import AdminOpError
 
-from .items import is_item_collection, item_host_uid
+from .items import is_item_collection
 
 
 def has_any_module_write(perms) -> bool:
@@ -35,6 +35,15 @@ def has_any_module_write(perms) -> bool:
         any(p.startswith('cluster.') and (p.endswith('.add') or p.endswith('.edit') or p.endswith('.delete'))
             for p in perms)
     )
+
+
+def _item_host_uid(it) -> str:
+    """The host binding of ONE side of an item change (items can be non-dict shorthands).
+
+    Deliberately not :func:`items.item_host_uid`, which answers for the pair and prefers the
+    new value: authorising a rebind needs the two bindings apart, not whichever exists.
+    """
+    return str(it.get('host_uid') or '').strip() if isinstance(it, dict) else ''
 
 
 def _is_cluster_item(o, n) -> bool:
@@ -118,10 +127,25 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
                 if not _cluster_authorized(perms, c_action, cl_uid):
                     return False
                 continue
-            hu = item_host_uid(o, n)
-            action = 'add' if o is None else 'edit'        # add new / modify|remove
-            if not _server_authorized(perms, action, hu):
-                return False
+            # BOTH bindings, when there are two. A modification that moves a check from
+            # one host to another is an edit of the host it is taken FROM as much as of the
+            # one it lands on, and authorising only the destination let a `server.<mine>.edit`
+            # holder rebind any other host's check onto their own — which takes the check off
+            # that host. The permission exists to confine them to their host; this was the
+            # one write that reached outside it. (Verified: the same edit made in place is
+            # refused, so only the rebind got through.)
+            old_hu, new_hu = _item_host_uid(o), _item_host_uid(n)
+            if o is None:
+                if not _server_authorized(perms, 'add', new_hu):
+                    return False
+            elif n is None:
+                if not _server_authorized(perms, 'edit', old_hu):
+                    return False
+            else:
+                if not _server_authorized(perms, 'edit', old_hu):
+                    return False
+                if new_hu != old_hu and not _server_authorized(perms, 'edit', new_hu):
+                    return False
     # A change with no authorizable host-bound item diff (whole-module add/remove
     # with no host-bound items, or only scalar churn) is not server-authorizable.
     return saw_change

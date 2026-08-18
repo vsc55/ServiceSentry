@@ -410,6 +410,8 @@ LANG = {
     'diag_inst_packages_unchecked': 'Pulsa «Comprobar versiones y CVE» en la tarjeta de dependencias para ver también aquí la última versión y los avisos: cubre lo que ejecutan estos contenedores.',
     'diag_inst_packages_lead': 'Todo lo que ejecuta esa instancia. Versión de código: {}.',
     'diag_deps_unpinned_short': 'fuera del lock',
+    'cfg_beta': 'BETA',
+    'cfg_beta_tt': 'Todavía en pruebas: entrega, pero le faltan validaciones que los otros canales sí tienen. Úsalo sabiéndolo — y avisa de lo que falle.',
     'diag_inst_pkg_note': 'Notas',
     'diag_inst_col_here': 'Este proceso',
     'diag_inst_col_there': 'Esa instancia',

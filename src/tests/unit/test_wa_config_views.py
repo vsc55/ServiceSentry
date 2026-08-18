@@ -25,6 +25,7 @@ SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CFG = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'cfg')
 VIEWS = os.path.join(CFG, '_views.html')
 RENDER = os.path.join(CFG, '_render.html')
+CARD = os.path.join(CFG, '_card.html')
 PANE = os.path.join(CFG, '_pane.html')
 # The four concepts that came out of `_render.html` when it went over the size guard: the
 # seeding pass, the search filter, the declared actions and the localStorage inspector.
@@ -47,9 +48,11 @@ def _cfg_js() -> str:
 
 
 def _card_open() -> str:
-    """`cfgCardOpen` is nested inside `renderConfig`, so it has no closing brace at column 0
-    for `_fn` to stop at. Read it up to the sibling it is always followed by."""
-    src = _read(RENDER)
+    """The card's chrome moved OUT of the section shell into `cfg/_card.html` when the shell
+    hit its size limit — what a card is made of is not part of the rendering flow. Read up to
+    the sibling it is always followed by: `cfgCardClose` is a const, so `_fn` has no closing
+    brace at column 0 to stop at."""
+    src = _read(CARD)
     i = src.index('function cfgCardOpen')
     return src[i:src.index('const cfgCardClose', i)]
 

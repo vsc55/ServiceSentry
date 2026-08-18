@@ -34,7 +34,10 @@ function _dgAdvisories() {
     if (!_dgRemote || !_dgRemote.vulnsOk) return seen;
     _dgRemote.rowList.forEach(r => (r.vulns || []).forEach(v => {
         const e = seen.get(v.id) || {...v, where: []};
-        e.where.push(r.name);
+        // Once per PACKAGE, not once per row. The answer holds the same package twice when
+        // another container runs a different version of it, and both rows carrying the flaw is
+        // one package affected — printed straight it read "urllib3, urllib3" and counted 2.
+        if (!e.where.includes(r.name)) e.where.push(r.name);
         seen.set(v.id, e);
     }));
     return seen;
@@ -150,8 +153,9 @@ function _dgShowSeverity(id) {
  *  Read out of the answer already in hand rather than fetched again: the click is on a number
  *  that is already on screen, and asking the network a second time to show what was asked the
  *  first is a second way for the two to disagree. */
-function _dgShowVulns(name) {
-    const row = (_dgRemote && _dgRemote.byName[name]) || null;
+function _dgShowVulns(name, installed) {
+    const row = (_dgRemote && (_dgRemote.byPin[`${name}@${installed || ''}`]
+                               || _dgRemote.byName[name])) || null;
     if (!row || !row.vuln_count) return;
     showLinksModal(t('diag_deps_vulns_title').replace('{}', name),
                    (row.vulns || []).map(v => ({

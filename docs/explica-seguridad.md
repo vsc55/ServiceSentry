@@ -485,9 +485,16 @@ Además de los flags globales existen **tres familias dinámicas**, cada una con
 - `server.<uid>.*` — por host/servidor concreto (`is_server_perm`).
 - `cluster.<uid>.*` — por cluster multi-bind concreto (`is_cluster_perm`).
 
-La autorización por-servidor/cluster se resuelve en `lib/core/modules/routes.py` a partir del
+La autorización por-servidor/cluster se resuelve en `lib/core/modules/authz.py` a partir del
 `host_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden acceso a
-todos. Definidas en `lib/core/permissions/` (el catálogo; la resolución efectiva vive en
+todos.
+
+**Cambiar la atadura es cambiar dos hosts.** Un alta se autoriza contra el host destino y una
+baja contra el de origen, pero una **modificación** que mueve el check de un host a otro exige
+permiso sobre **los dos**. Autorizar sólo el destino —lo que se hacía hasta la auditoría del
+2026-08-15— convertía `server.<uid>.edit` en la única escritura que alcanzaba fuera de sus
+hosts: se podía traer el check de cualquier otro al propio, y el que se quedaba sin monitorizar
+era el otro. Guardas en `tests/unit/test_modules_authz.py` (8). Definidas en `lib/core/permissions/` (el catálogo; la resolución efectiva vive en
 `lib/core/permissions/mixin.py`).
 
 ### Escalada de privilegios bloqueada
@@ -508,24 +515,55 @@ todos. Definidas en `lib/core/permissions/` (el catálogo; la resolución efecti
 ### Reglas de integridad
 
 - Un usuario **no puede eliminarse a sí mismo** → 400 `"own account"`.
-- El **último administrador no puede ser degradado** → 400 `"admin must exist"`.
+- El **último administrador no puede ser degradado, deshabilitado ni borrado** → 400
+  `"admin must exist"` / `cannot_disable_last_admin`. «Administrador» aquí significa lo mismo
+  que en el resto del panel: **por rol propio o por pertenecer a un grupo habilitado que lleve
+  el rol admin** (`users_svc.user_is_admin` / `count_admins`). Contarlo sólo por el rol propio
+  dejaba sin protección a las cuentas administradoras por grupo —lo normal en cuanto hay más de
+  dos personas—: se podían degradar, deshabilitar y borrar una tras otra hasta dejar la
+  instalación sin ningún administrador (auditoría del 2026-08-15). La misma definición gobierna
+  el guard de jerarquía: sólo un administrador puede editar o borrar la cuenta de otro.
 - Los roles integrados están en una lista cerrada (`admin`, `editor`, `viewer`, `none` —este último con cero permisos); cualquier valor que no sea un rol integrado o personalizado válido → 400.
 
-### `_role_is_admin()` — comparación robusta de rol admin
+### `_is_admin_role()` — «es el rol admin» se decide por UID, nunca por nombre
 
-Los roles pueden almacenarse en el registro del usuario (tabla `users`) como nombre de cadena (`"admin"`) o como UUID (`"00000000-..."`), dependiendo de cuándo fue creado el usuario. La función `_role_is_admin(role_val)` en `lib/core/users/routes.py` normaliza ambas formas para que los guards de seguridad no sean eludidos por usuarios cuyo campo `role` no fue migrado al formato UID.
+Los roles pueden estar almacenados en el registro del usuario como la clave heredada
+(`"admin"`) o como UUID, según cuándo se creó la cuenta. `_is_admin_role(role_ref)`
+(`lib/core/permissions/mixin.py`) normaliza ambas formas, y es el **único** sitio donde se
+decide; `_is_admin_requester()` y el `_role_is_admin()` de las rutas de usuarios lo llaman.
 
 ```python
-def _role_is_admin(role_val: str) -> bool:
-    admin_uid = wa._role_name_to_uid('admin')
-    if role_val == admin_uid:
+def _is_admin_role(self, role_ref: str) -> bool:
+    if not role_ref:
+        return False
+    if role_ref == BUILTIN_ROLE_UIDS.get('admin'):
         return True
-    if wa._is_uid(role_val):
-        return wa._uid_to_role_name(role_val) == 'admin'
-    return role_val == 'admin'
+    # La clave heredada, sólo mientras ningún rol personalizado esté indexado por ella.
+    return role_ref == 'admin' and role_ref not in self._custom_roles
 ```
 
-Usar `_role_is_admin()` **en lugar de** `== admin_uid` en todos los guards que comprueban si el usuario objetivo es administrador.
+**Por qué no se resuelve el nombre** (auditoría del 2026-08-15): la versión anterior preguntaba
+`_uid_to_role_name(role) == 'admin'`, y ese método devuelve la **clave interna** para un rol
+integrado y el **nombre visible** para uno personalizado. Un rol personalizado llamado `admin`
+—sin un solo permiso— contestaba que sí, y eso vale por todo: `_perms_grantable`,
+`_role_grantable` y `_groups_grantable` devuelven `True` para un admin sin mirar nada más.
+Bastaban `roles_add` y `users_edit`, dos concesiones delegables. Lo que lo mantenía cerrado era
+un accidente —mientras el rol integrado se muestra como `Admin`, el nombre `admin` está cogido
+sin distinguir mayúsculas— y el panel permite renombrar los roles integrados.
+
+Dos cerraduras, porque fallan de forma distinta: la comprobación decide por UID, y
+`role_name_taken()` reserva además las **claves** integradas (`admin`, `editor`, `viewer`,
+`none`) como nombres, pase lo que pase con los nombres visibles. Regresión en
+`tests/integration/test_wa_admin_check.py::TestARoleNAMEDAdminIsNotTheAdminRole` (5) y
+`tests/unit/test_wa_roles.py::TestTheBuiltinRoleKeysAreReservedNames` (3).
+
+**El mismo error, en otro sitio:** el guard de las páginas de sección (`/overview`, `/history`,
+`/syslog`) resolvía los permisos desde `session['role']`, que guarda un **nombre visible**. Un
+rol personalizado se quedaba sin permisos (a su titular lo echaban de una sección que su rol sí
+concede) y uno llamado `admin` casaba con la clave integrada y recogía el juego completo de
+permisos de administrador. Ahora usa `_get_session_permissions()`, la misma resolución que el
+resto del panel. Regresión en
+`tests/integration/test_wa_standalone_pages.py::TestTheGateReadsTheStoredRole` (3).
 
 ### Jerarquía de roles (protecciones IDOR)
 
@@ -539,6 +577,7 @@ Protecciones adicionales para evitar escalada de privilegios mediante manipulaci
 | Crear/editar roles con permisos que el requester no posee | ✅ |
 | Crear grupo con rol `admin` | ✅ |
 | Modificar un grupo que tiene el rol `admin` | ✅ |
+| **Borrar** un grupo que tiene el rol `admin` | ✅ (y además se rechaza, incluso siendo admin, si dejaría la instalación sin ningún administrador) |
 | Asignar el rol `admin` a un grupo | ✅ |
 | Editar secciones de config con credenciales externas (`ldap`, `oidc`, `saml2`, `email`, `telegram`) | ✅ |
 | Invalidar **todas** las sesiones del sistema | ✅ |

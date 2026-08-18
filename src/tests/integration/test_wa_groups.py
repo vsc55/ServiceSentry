@@ -505,3 +505,68 @@ class TestGroupInputValidation:
         resp = client.put(f"/api/v1/groups/{uid}", json={"members": []})
         assert resp.status_code == 200
         assert uid not in admin._users["admin"].get("groups", [])
+
+
+class TestDeletingAGroupThatCarriesAdmin:
+    """Found by audit, 2026-08-15. The requester-context guard was on the PUT only: a
+    non-admin refused permission to *edit* a group carrying the admin role could *delete*
+    it — which strips that role from every member at once. Measured before the fix: PUT 403,
+    DELETE 200, and the members' `groups` list emptied.
+
+    Two rules now. Who may ask (the same one the PUT has), and — for everyone, admins
+    included — that the installation is not left without an administrator.
+    """
+
+    @staticmethod
+    def _seed(admin, *, with_direct_admin=True):
+        from werkzeug.security import generate_password_hash    # noqa: PLC0415
+        admin_uid = admin._role_name_to_uid('admin')
+        viewer_uid = admin._role_name_to_uid('viewer') or 'viewer'
+        admin._groups['g-adm'] = {'uid': 'g-adm', 'name': 'Admins',
+                                  'roles': [admin_uid], 'enabled': True}
+        admin._custom_roles['r-op'] = {
+            'uid': 'r-op', 'name': 'Op', 'enabled': True,
+            'permissions': ['groups_view', 'groups_edit', 'groups_delete']}
+        admin._users['ana'] = {
+            'uid': 'u-ana', 'role': viewer_uid, 'groups': ['g-adm'], 'enabled': True,
+            'password_hash': generate_password_hash('x')}
+        admin._users['op'] = {
+            'uid': 'u-op', 'role': 'r-op', 'groups': [], 'enabled': True,
+            'password_hash': generate_password_hash('opsecret')}
+        if not with_direct_admin:
+            admin._users.pop('admin', None)
+        admin.app.config['TESTING'] = True
+        c = admin.app.test_client()
+        c.post('/login', data={'username': 'op', 'password': 'opsecret'},
+               follow_redirects=True)
+        return c
+
+    def test_a_non_admin_cannot_delete_it(self, admin):
+        c = self._seed(admin)
+        assert c.delete('/api/v1/groups/g-adm').status_code == 403
+        assert 'g-adm' in admin._groups
+        assert admin._users['ana']['groups'] == ['g-adm']
+
+    def test_and_still_cannot_edit_it(self, admin):
+        """The guard that already existed, kept — and now decided on the role UID."""
+        c = self._seed(admin)
+        assert c.put('/api/v1/groups/g-adm', json={'description': 'x'}).status_code == 403
+
+    def test_an_admin_may_delete_it_while_another_admin_remains(self, client, admin):
+        from tests.conftest import _login                        # noqa: PLC0415
+        self._seed(admin)
+        _login(client)
+        assert client.delete('/api/v1/groups/g-adm').status_code == 200
+
+    def test_not_when_it_is_the_only_source_of_admin(self, client, admin):
+        """The integrity rule binds the admin too: there must always be one."""
+        from tests.conftest import _login                        # noqa: PLC0415
+        self._seed(admin)
+        _login(client)
+        # The requester is the only DIRECT admin; make them an admin through the group too,
+        # so deleting it would leave the installation with none.
+        admin._users['admin']['role'] = admin._role_name_to_uid('viewer') or 'viewer'
+        admin._users['admin']['groups'] = ['g-adm']
+        resp = client.delete('/api/v1/groups/g-adm')
+        assert resp.status_code == 400
+        assert 'g-adm' in admin._groups

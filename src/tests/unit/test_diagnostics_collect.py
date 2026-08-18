@@ -50,6 +50,38 @@ class TestTheSystemBlockAlwaysAnswers:
         assert diag._safe(lambda: '') == diag.UNKNOWN
 
 
+class TestWhetherThisIsAContainer:
+    """The row the rest of the page is read against: a path that "exists" is inside an image
+    that may be recreated tomorrow, and free disk is the layer's and not the host's."""
+
+    @pytest.mark.parametrize('marker', ['/.dockerenv', '/run/.containerenv'])
+    def test_each_runtime_leaves_its_own_marker(self, marker, monkeypatch):
+        """Podman writes `/run/.containerenv` and not Docker's file — and under cgroup v2 the
+        cgroup line inside the container is a bare `0::/` naming no runtime at all. Both
+        signals missing, a rootless Podman container reported itself as bare metal."""
+        monkeypatch.setattr(diag.os.path, 'exists', lambda p: p == marker)
+        assert diag._in_container() is True
+
+    def test_the_cgroup_line_still_answers_for_the_rest(self, monkeypatch):
+        monkeypatch.setattr(diag.os.path, 'exists', lambda _p: False)
+        monkeypatch.setattr('builtins.open',
+                            lambda *_a, **_kw: io.StringIO('12:pids:/kubepods/burstable\n'))
+        assert diag._in_container() is True
+
+    def test_no_signal_at_all_is_not_a_container(self, monkeypatch):
+        monkeypatch.setattr(diag.os.path, 'exists', lambda _p: False)
+        monkeypatch.setattr('builtins.open',
+                            lambda *_a, **_kw: io.StringIO('0::/user.slice\n'))
+        assert diag._in_container() is False
+
+    def test_a_machine_without_the_file_is_not_a_container(self, monkeypatch):
+        """Windows and macOS have no `/proc` at all, and an unreadable one is not a verdict."""
+        monkeypatch.setattr(diag.os.path, 'exists', lambda _p: False)
+        monkeypatch.setattr('builtins.open',
+                            lambda *_a, **_kw: (_ for _ in ()).throw(OSError('no /proc')))
+        assert diag._in_container() is False
+
+
 class TestDependenciesAreReadFromTheLock:
     """From the lock and not from `pip freeze`: the lock is what the install was built from, so
     "installed 3.1 where the lock says 3.4" is a fact about this deployment rather than a list

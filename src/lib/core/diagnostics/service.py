@@ -179,7 +179,7 @@ def unpinned_rows(wa) -> list:
     return list(collect.installed_outside_lock(lock_path()) or [])
 
 
-def elsewhere_rows(wa) -> list:
+def elsewhere_rows(wa, local: list | None = None) -> list:
     """Packages the OTHER processes run that this one does not, or runs at another version.
 
     So the remote check covers the whole installation while still being **one** round of
@@ -189,22 +189,38 @@ def elsewhere_rows(wa) -> list:
 
     Only what is new is added. Four containers from one image contribute nothing here, which
     is the common case and costs nothing to confirm.
+
+    *local* is what this process runs, when the caller already has it. Working it out means
+    walking every installed distribution, and the one caller had just done that twice to build
+    the two lists this one is subtracted from — three walks of `site-packages` for one answer,
+    on the request that is already the slowest on the page.
     """
     # By name AND version. The same package at two versions is two questions for the advisory
     # service, and answering one of them for both is how a container gets reported clean
     # because a different one is.
+    #
+    # Compared canonically (PEP 503) and reported with the name THAT CONTAINER USES. The two
+    # are not the same string for eight of the packages installed here — `PyYAML`,
+    # `typing_extensions`, `CacheControl`… — and the screen joins this answer back onto the
+    # instance's own package list by name and version. Canonicalising the reported name broke
+    # that join silently: the row was asked about, the answer came back under `pyyaml`, the
+    # modal looked for `PyYAML` and found nothing, so a package with an advisory was drawn
+    # with an empty "Latest" and no CVEs — which is the exact failure this list exists to
+    # prevent, one level down.
+    mine = dependency_rows(wa) + unpinned_rows(wa) if local is None else list(local)
     here = {(collect.canonical_name(r.get('name')), str(r.get('installed') or ''))
-            for r in dependency_rows(wa) + unpinned_rows(wa)}
-    extra = set()
+            for r in mine}
+    extra: dict = {}
     for inst in instances(wa):
         if inst.get('is_self'):
             continue
         for row in (inst.get('packages') or []):
-            pin = (collect.canonical_name(row.get('name')), str(row.get('version') or ''))
+            name = str(row.get('name') or '')
+            pin = (collect.canonical_name(name), str(row.get('version') or ''))
             if pin[1] and pin not in here:
-                extra.add(pin)
-    return [{'name': name, 'required': '', 'installed': version, 'status': 'elsewhere'}
-            for name, version in sorted(extra)]
+                extra.setdefault(pin, name)
+    return [{'name': extra[pin], 'required': '', 'installed': pin[1], 'status': 'elsewhere'}
+            for pin in sorted(extra)]
 
 
 def packages_of(env: dict) -> list:

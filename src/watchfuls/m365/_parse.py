@@ -60,23 +60,6 @@ def _csv_sum(text: str, column: str) -> int:
     return sum(_csv_int(r, idx) for r in rows[1:])
 
 
-def _csv_count(text: str, column: str = '', value: str = '') -> int:
-    """How many data rows the report has — or how many carry *value* in *column*.
-
-    Used for "how many sites" and "how many of them are deleted": a site in the recycle bin
-    still occupies the tenant's storage until it is purged, so it belongs in the total AND is
-    worth counting separately.
-    """
-    rows, idx = _csv_col(text, column) if column else (
-        list(csv.reader(io.StringIO(text or ''))), -1)
-    if len(rows) < 2:
-        return 0
-    data = rows[1:]
-    if not column or idx < 0:
-        return sum(1 for r in data if any((c or '').strip() for c in r))
-    return sum(1 for r in data if idx < len(r) and str(r[idx]).strip().lower() == value.lower())
-
-
 def _csv_max(text: str, column: str) -> int:
     """Largest integer value of *column* across a report CSV's data rows (0 if
     absent).  Tolerant of a BOM / slight header variations.

@@ -140,8 +140,14 @@ def register(app, wa):
         spec = page['standalone']
 
         def _view(view: str = ''):
-            perms = set(wa._get_effective_permissions(
-                session.get('username', ''), session.get('role', '')) or [])
+            # Resolved from the STORED role, never from `session['role']`. That key holds a
+            # display name — the built-in key for a built-in role, the role's own name for a
+            # custom one — and feeding it to the resolver got both directions wrong: a custom
+            # role resolved to no permissions at all (its holder was bounced off a section
+            # their role grants), while a role NAMED `admin` matched the built-in key and
+            # collected the whole admin set. `_get_session_permissions` reads the user record
+            # and merges their groups, which is what every other gate in the panel uses.
+            perms = set(wa._get_session_permissions() or [])
             if spec.get('perm') and spec['perm'] not in perms:
                 return redirect(url_for('dashboard'))
             # A view is a sub-path of its section, not a page: same shell, same pane, same

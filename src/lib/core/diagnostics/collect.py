@@ -57,10 +57,15 @@ def _in_container() -> bool:
     """Is this a container? Worth knowing before anything else on the page.
 
     It changes what every other answer means: a path that "exists" is inside an image that may
-    be recreated tomorrow, and free disk is the layer's, not the host's. Two signals, because
-    neither is universal — Docker's marker file, and a cgroup line naming a container runtime.
+    be recreated tomorrow, and free disk is the layer's, not the host's. Three signals, because
+    none is universal — Docker's marker file, Podman's, and a cgroup line naming a runtime.
+
+    Podman needs its own: it writes `/run/.containerenv` and not `/.dockerenv`, and under
+    cgroup v2 the cgroup line inside the container is a bare `0::/` that names no runtime at
+    all. Both signals missing, a rootless Podman container reported itself as bare metal — on
+    the row the rest of the page is read against.
     """
-    if os.path.exists('/.dockerenv'):
+    if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
         return True
     try:
         with open('/proc/1/cgroup', encoding='utf-8') as fh:

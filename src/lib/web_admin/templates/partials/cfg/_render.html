@@ -94,19 +94,6 @@ function renderConfig() {
     // The count and the description are left EMPTY here and filled by the same pass that
     // draws the index (`_cfgApplyView`): the count is a number that pass already computes
     // for every section, and computing it twice is how the two start disagreeing.
-    function cfgCardOpen(id, icon, title) {
-        return `<div class="cfg-card">
-            <div class="ss-sheet-head">
-                <div class="cfg-sheet-titlerow">
-                    <span class="cfg-sheet-title">${icon}${esc(title)}</span>
-                    <button type="button" class="cfg-sheet-count d-none" data-card="${escAttr(id)}"
-                            onclick="toggleConfigChangedOnly()"></button>
-                </div>
-                <div class="cfg-sheet-desc d-none" data-card="${escAttr(id)}"></div>
-            </div>
-            <div class="cfg-fields" id="${id}">`;
-    }
-    const cfgCardClose = `</div></div>`;
 
     // The seeding above filled in options the server never sent, so the card can render before
     // the option was ever saved. That is NOT an edit, and the baseline has to say so.

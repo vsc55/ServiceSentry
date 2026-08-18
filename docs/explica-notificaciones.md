@@ -2,7 +2,7 @@
 
 El subsistema de notificaciones (`lib/core/notify`, **sin Flask** y **sin dependencia de
 `web_admin`**) es la capa de **entrega**: dado un evento, lo enruta a los canales
-configurados — **Telegram**, **Email**, **Webhook** y **Microsoft Teams**. Lo usan el
+configurados — **Telegram**, **Email**, **Webhook** (BETA) y **Microsoft Teams** (BETA). Lo usan el
 monitor, el worker de eventos, el receptor syslog, la autenticación, el ipban y la
 auto-monitorización de la plataforma (`lib/core/health`), y también corre en los procesos
 de fondo (daemons); por eso vive en la librería general y no bajo el web.
@@ -77,8 +77,17 @@ Cada canal es un subpaquete `lib/core/notify/<canal>/` con un `channel.py` que d
 |---|---|---|---|---|
 | **Telegram** | Bot API | `telegram` | mensaje **HTML** (icono + título traducido + target + cuerpo en cita) | líneas emoji; con `group_messages` → secciones ⚠️/✅ en tarjetas `<blockquote>`, troceadas bajo el tope de 4096 |
 | **Email** | SMTP · Microsoft 365 (Graph) · Gmail | `email` | `render_alert` (una alerta) | `render_summary` (digest, dos zonas agrupadas por item) |
-| **Webhook** | HTTP POST | `webhooks` (lista) | POST con plantilla + HMAC opcional | **una llamada por alerta** (eventos discretos), no agrupado |
-| **Microsoft Teams** | Incoming Webhook · Graph · Bot Framework | `msteams` + `msteams_channels` (lista) | tarjeta (a canal) y/o directo a usuario | una llamada por alerta |
+| **Webhook** 🅱 | HTTP POST | `webhooks` (lista) | POST con plantilla + HMAC opcional | **una llamada por alerta** (eventos discretos), no agrupado |
+| **Microsoft Teams** 🅱 | Incoming Webhook · Graph · Bot Framework | `msteams` + `msteams_channels` (lista) | tarjeta (a canal) y/o directo a usuario | una llamada por alerta |
+
+> 🅱 **En BETA.** Entregan, y les faltan validaciones que los otros dos canales sí tienen. La
+> tarjeta de configuración de cada uno lo dice con una insignia, declarada una sola vez
+> (`beta: True` en la tarjeta de `lib/config/layout.py`) y dibujada por `cfgCardOpen`, que es la
+> función con la que se abre **toda** tarjeta — así una tarjeta a medida la hereda sin que nadie
+> se lo diga, y salir de beta es una línea en un fichero. Lo que hoy les falta, con su detalle,
+> está en [ref-pendiente.md](ref-pendiente.md#seguridad): el guard de «credenciales externas =
+> sólo admin» no cubre sus rutas propias, y la `url` y las `headers` de un webhook no se tratan
+> como secreto aunque para media Internet la URL **sea** la credencial.
 
 Añadir un canal = un nuevo `channel.py` que llame a `register_channel(...)`. Nada en el
 router ni en el monitor cambia.

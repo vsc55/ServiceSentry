@@ -84,6 +84,34 @@ def role_is_admin(role_uid: str) -> bool:
     return role_uid == BUILTIN_ROLE_UIDS['admin']
 
 
+def user_is_admin(user: dict, groups: dict | None = None) -> bool:
+    """Is this account an administrator — by its own role, or through a group?
+
+    The panel has always answered "either" (`_is_admin_requester` resolves group membership
+    the same way), and the guards that protect the LAST administrator answered "by its own
+    role" — which is not the same question and left a real way to lock everyone out. Make
+    every admin an admin through the built-in *Administrators* group, which is exactly what
+    that group is for, and none of them was protected: they could be demoted, disabled and
+    deleted one after another until the installation had no administrator at all.
+
+    A disabled group grants nothing, here as everywhere else.
+    """
+    if role_is_admin((user or {}).get('role', '')):
+        return True
+    for g_ref in (user or {}).get('groups') or []:
+        g = (groups or {}).get(g_ref)
+        if isinstance(g, dict) and g.get('enabled', True) and any(
+                role_is_admin(r) for r in (g.get('roles') or [])):
+            return True
+    return False
+
+
+def count_admins(users: dict, groups: dict | None = None, *, active_only: bool = False) -> int:
+    """How many administrators this installation has, counted the way it defines one."""
+    return sum(1 for u in (users or {}).values()
+               if user_is_admin(u, groups) and (not active_only or u.get('enabled', True)))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -217,14 +245,18 @@ def set_password(user: dict, password: str, policy: PasswordPolicy, *, actor: st
 
 
 def set_role(users: dict, username: str, role: str, custom_roles: dict, *,
-             actor: str = SYSTEM_USER) -> str:
-    """Set a user's role (guards against demoting the last admin). Returns the new UID."""
+             groups: dict | None = None, actor: str = SYSTEM_USER) -> str:
+    """Set a user's role (guards against demoting the last admin). Returns the new UID.
+
+    *groups* is what makes the guard true rather than nearly true: an account can be an
+    administrator through a group, and changing its role takes nothing away from it — while
+    another account's group membership may be the only administrator left."""
     user = users[username]
     new_uid = resolve_role_uid(role, custom_roles)
     if not new_uid:
         raise AdminOpError('invalid_role')
-    if role_is_admin(user.get('role', '')) and not role_is_admin(new_uid):
-        if sum(1 for u in users.values() if role_is_admin(u.get('role', ''))) <= 1:
+    if user_is_admin(user, groups) and not user_is_admin({**user, 'role': new_uid}, groups):
+        if count_admins(users, groups) <= 1:
             raise AdminOpError('must_have_admin')
     user['role'] = new_uid
     user['updated_by'] = actor
@@ -232,31 +264,20 @@ def set_role(users: dict, username: str, role: str, custom_roles: dict, *,
     return new_uid
 
 
-def set_enabled(users: dict, username: str, enabled: bool, *, actor: str = SYSTEM_USER) -> bool:
+def set_enabled(users: dict, username: str, enabled: bool, *, groups: dict | None = None,
+                actor: str = SYSTEM_USER) -> bool:
     """Enable/disable a user (guards against disabling the last active admin).
     Returns True if the state actually changed."""
     user = users[username]
     if user.get('enabled', True) == enabled:
         return False
-    if not enabled and role_is_admin(user.get('role', '')):
-        active_admins = sum(1 for u in users.values()
-                            if role_is_admin(u.get('role', '')) and u.get('enabled', True))
-        if active_admins <= 1:
+    if not enabled and user_is_admin(user, groups):
+        if count_admins(users, groups, active_only=True) <= 1:
             raise AdminOpError('cannot_disable_last_admin')
     user['enabled'] = enabled
     user['updated_by'] = actor
     user['updated_at'] = _now()
     return True
-
-
-def set_groups(user: dict, group_uids: list, groups: dict, *, actor: str = SYSTEM_USER) -> None:
-    """Replace a user's group membership (validated against *groups*)."""
-    unknown = [g for g in group_uids if g not in groups]
-    if unknown:
-        raise AdminOpError('invalid_groups', ', '.join(unknown))
-    user['groups'] = list(group_uids)
-    user['updated_by'] = actor
-    user['updated_at'] = _now()
 
 
 def add_group(user: dict, group_uid: str, groups: dict, *, actor: str = SYSTEM_USER) -> bool:
@@ -310,10 +331,12 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
         new_role_uid = resolve_role_uid(data['role'], custom_roles)
         if not new_role_uid:
             raise AdminOpError('invalid_role')
-        # Prevent demoting the last admin.
-        if role_is_admin(user.get('role', '')) and not role_is_admin(new_role_uid):
-            if sum(1 for u in users.values() if role_is_admin(u.get('role', ''))) <= 1:
-                raise AdminOpError('must_have_admin')
+        # Prevent demoting the last admin — counted the way the panel defines one, which
+        # includes membership of a group carrying the admin role.
+        if (user_is_admin(user, groups)
+                and not user_is_admin({**user, 'role': new_role_uid}, groups)
+                and count_admins(users, groups) <= 1):
+            raise AdminOpError('must_have_admin')
         old_role_uid = user.get('role', '')
         if old_role_uid != new_role_uid:   # compare uid-to-uid, not name-to-uid
             changes.append({
@@ -396,11 +419,9 @@ def update_user(users: dict, username: str, data: dict, *, policy: PasswordPolic
         if old_enabled != new_enabled:
             # Guard against disabling the last active admin (can't-disable-self is a
             # requester-context guard and stays with the caller).
-            if not new_enabled and role_is_admin(user.get('role', '')):
-                active = sum(1 for d in users.values()
-                             if role_is_admin(d.get('role', '')) and d.get('enabled', True))
-                if active <= 1:
-                    raise AdminOpError('cannot_disable_last_admin')
+            if (not new_enabled and user_is_admin(user, groups)
+                    and count_admins(users, groups, active_only=True) <= 1):
+                raise AdminOpError('cannot_disable_last_admin')
             changes.append({'field': 'enabled', 'old': old_enabled, 'new': new_enabled})
             user['enabled'] = new_enabled
             if not new_enabled:

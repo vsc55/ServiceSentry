@@ -443,8 +443,9 @@ class TestAskingTheWorldAboutTheVersionsInstalled:
         question, in exactly the deployment where that is least welcome."""
         seen = self._stub(monkeypatch)
         monkeypatch.setattr('lib.core.diagnostics.service.elsewhere_rows',
-                            lambda _wa: [{'name': 'flask', 'required': '',
-                                          'installed': '0.0.1', 'status': 'elsewhere'}])
+                            lambda _wa, _local=None: [{'name': 'flask', 'required': '',
+                                                       'installed': '0.0.1',
+                                                       'status': 'elsewhere'}])
         _login(client)
         body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
         assert ('flask', '0.0.1') in {(r['name'], r['installed']) for r in seen['rows']}
@@ -464,8 +465,9 @@ class TestAskingTheWorldAboutTheVersionsInstalled:
                                           'installed': '3.1.0', 'status': 'ok'}])
         monkeypatch.setattr('lib.core.diagnostics.service.unpinned_rows', lambda _wa: [])
         monkeypatch.setattr('lib.core.diagnostics.service.elsewhere_rows',
-                            lambda _wa: [{'name': 'flask', 'required': '',
-                                          'installed': '0.0.1', 'status': 'elsewhere'}])
+                            lambda _wa, _local=None: [{'name': 'flask', 'required': '',
+                                                       'installed': '0.0.1',
+                                                       'status': 'elsewhere'}])
         _login(client)
         body = client.post('/api/v1/diagnostics/dependency-check', json={}).get_json()
         # Counted by name AND version: by name alone both rows would land in the lock's count.

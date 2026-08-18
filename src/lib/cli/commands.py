@@ -117,7 +117,8 @@ def cmd_user_disable(ctx, args) -> int:
 def _set_enabled(ctx, username: str, enabled: bool) -> int:
     try:
         _require_user(ctx, username)
-        changed = users_svc.set_enabled(ctx.users, username, enabled, actor='cli')
+        changed = users_svc.set_enabled(ctx.users, username, enabled,
+                                        groups=ctx.groups, actor='cli')
     except AdminOpError as e:
         return _err(_t(ctx, e.key, *e.args))
     if changed:
@@ -153,7 +154,8 @@ def cmd_user_role(ctx, args) -> int:
     """
     try:
         _require_user(ctx, args.username)
-        new_uid = users_svc.set_role(ctx.users, args.username, args.role, ctx.roles, actor='cli')
+        new_uid = users_svc.set_role(ctx.users, args.username, args.role, ctx.roles,
+                                     groups=ctx.groups, actor='cli')
     except AdminOpError as e:
         return _err(_t(ctx, e.key, *e.args))
     ctx.persist_users()
