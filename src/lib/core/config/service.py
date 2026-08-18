@@ -169,6 +169,13 @@ def validate_config(new_data: dict) -> None:
         if not ok:
             raise AdminOpError('invalid_config_int', field, rule['min'], rule['max'])
 
+    # Who must carry a second factor: one of three words. A typo here would otherwise be
+    # stored and read as "not one of the values I check for", which fails OPEN — the one
+    # direction a policy field must never fail in.
+    _mfa = (new_data.get('web_admin') or {}).get('mfa_required')
+    if _mfa is not None and str(_mfa) not in ('off', 'admins', 'all'):
+        raise AdminOpError('invalid_config_value', 'mfa_required', str(_mfa))
+
     # JSON-dict fields (ldap|group_role_map, oidc|group_role_map).
     for path in JSON_DICT_FIELDS:
         section, field = path.split('|')
@@ -272,6 +279,15 @@ def build_config_schema() -> dict:
     # `on_change` is the one thing a select could need that the registry could not say: a
     # sibling to refresh when the value changes. The name of the function belongs to whoever
     # needs it, not to the core — same rule as a module naming its own action.
+    # Who must carry a second factor. A select and not a switch: "everybody" and "the
+    # accounts that can change everything" are different decisions, and offering only on/off
+    # makes the answer to "protect the dangerous accounts" be "make forty people enrol".
+    schema['web_admin|mfa_required'] = {
+        'options': ['off', 'admins', 'all'],
+        'options_i18n': _opt_labels({'off': 'mfa_req_off', 'admins': 'mfa_req_admins',
+                                     'all': 'mfa_req_all'}),
+        'default': cfg_default('web_admin|mfa_required'),
+    }
     schema['web_admin|audit_sort'] = {
         'options': ['time', 'event', 'user', 'ip'],
         'options_i18n': _opt_labels({'time': 'col_time', 'event': 'col_event',

@@ -230,6 +230,20 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=0, max=1000, admin_only=True, card='login_security'),
     Cfg('web_admin|login_ratelimit_window_secs', int, 300, attr='_LOGIN_RATELIMIT_WINDOW_SECS',
         min=10, max=3600, admin_only=True, card='login_security'),
+    # Who has to carry a second factor. Three values and not a switch, because "everybody"
+    # and "the accounts that can change everything" are different decisions with different
+    # costs: `admins` is the one most installs actually want, and offering only on/off means
+    # the answer to "protect the dangerous accounts" is "make forty people enrol".
+    #
+    # `off` is the default and stays it: turning this on is a policy an operator chooses, not
+    # something an upgrade does to an installation overnight. Somebody who must have one and
+    # does not is not locked out — they enrol on the way in, which is what makes it safe to
+    # switch on with everybody already signed up to nothing.
+    #
+    # Read at the point of use rather than mirrored on an attribute: it is consulted once per
+    # sign-in, and an attribute is a second copy that a save has to remember to refresh.
+    Cfg('web_admin|mfa_required', str, 'off', env='SS_MFA_REQUIRED',
+        admin_only=True, no_rule=True, card='login_security'),
     # Internal fail2ban — progressive per-IP jail shared by every exposed service
     # (web + syslog). Offenses accumulate per IP; crossing a threshold jails the IP
     # for an escalating term. Two tracks: 'auth' (anonymous/login/CSRF/SCIM/401/anon-403)

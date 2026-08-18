@@ -8,6 +8,41 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.80] - 2026-08-18
+
+### Added
+- **`web_admin|mfa_required` — the installation can now make accounts carry a second factor**:
+  `off` (the default, unchanged behaviour), `admins`, or `all`. Three values and not a switch,
+  because "everybody" and "the accounts that can change everything" are different decisions
+  with different costs, and offering only on/off makes the answer to "protect the dangerous
+  accounts" be "make forty people enrol".
+  - **Switching it on locks nobody out**, which is the only reason a policy like this is safe
+    to turn on at all. Somebody it covers who has no factor enrols ON THE WAY IN, at
+    `/login/mfa/enrol` — still with no session, exactly like the code step. Refusing the
+    sign-in instead would shut out everybody who has not enrolled, which the moment the policy
+    is switched on is everybody, the last administrator included.
+  - `admins` counts an administrator **however they became one** — their own role or a group
+    carrying it. Asking only the account's own role is the bug the August audit found in four
+    other guards, and repeating it here would have left the accounts the policy exists to
+    protect as the ones it skipped. It reuses `users_svc.user_is_admin`, which that audit
+    added.
+  - **A policy that cannot be honoured gives way rather than the installation.** `MfaStore`
+    refuses to write a seed it cannot encrypt, so on an install with no key a policy demanding
+    a factor would demand something nobody can enrol. `_mfa_policy()` reads `off` in that case
+    whatever the config says, and logs why — the alternative is a panel nobody can open and a
+    setting that looks correct.
+  - A value that is not one of the three is refused at save. Stored, it would be read as "not
+    one of the values I check for", which fails OPEN — the one direction a policy field must
+    never fail in.
+  - A factor somebody already set up is still asked for when the policy is `off`: turning the
+    policy off must not silently stop honouring what people opted into.
+  - The enrolment screen will not mint a secret for an account that already has a factor.
+    Without that, a password alone would replace a working one.
+- Nine tests for the policy, and the honest note that goes with forced enrolment: the account
+  is one password away from that page, so whoever has the password can enrol THEIR
+  authenticator. It is the exposure a password-reset flow already carries, it is audited, and
+  the alternative — an out-of-band enrolment step — is a feature nobody would switch on.
+
 ## [0.0.1+build.79] - 2026-08-16
 
 ### Added

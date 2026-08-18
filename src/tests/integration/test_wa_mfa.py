@@ -253,3 +253,111 @@ class TestResettingSomebodyElses:
         _login(client)
         uid = admin._users['admin']['uid']
         assert client.delete(f'/api/v1/users/{uid}/mfa').status_code == 400
+
+
+def _set_policy(admin, value):
+    """Set `web_admin|mfa_required` the way a config save would."""
+    cfg = admin._read_config_file(admin._CONFIG_FILE) or {}
+    cfg.setdefault('web_admin', {})['mfa_required'] = value
+    admin._write_config(cfg)
+
+
+class TestRequiringIt:
+    """Phase two: the installation can make accounts carry one. The property that matters is
+    that switching it ON never locks anybody out — the enrolment happens on the way in, which
+    is the only reason a policy like this is safe to turn on with nobody signed up."""
+
+    def test_off_by_default_and_nothing_is_asked(self, admin, client):
+        assert admin._mfa_policy() == 'off'
+        _login(client)
+        with client.session_transaction() as s:
+            assert s.get('logged_in')
+
+    def test_all_sends_an_unenrolled_account_to_enrol(self, admin, client):
+        _set_policy(admin, 'all')
+        assert admin._mfa_must_enrol('admin') is True
+        res = _login(client)
+        assert b'csrf' in res.data or res.status_code == 200
+        with client.session_transaction() as s:
+            assert not s.get('logged_in'), 'no session until a factor exists'
+            assert s.get('mfa_pending')
+
+    def test_the_enrolment_page_finishes_the_sign_in(self, admin, client):
+        """Refusing instead of enrolling would lock out everybody who has not — which the
+        moment the policy is switched on is everybody, the last administrator included."""
+        _set_policy(admin, 'all')
+        _login(client)
+        page = client.get('/login/mfa/enrol')
+        assert page.status_code == 200
+        # The secret it just stored is the one the code has to match: the page draws from it.
+        uid = admin._users['admin']['uid']
+        secret = admin._mfa_store.factor(uid, decrypt=True)['secret']
+        with client.session_transaction() as s:
+            tok = s.get('_csrf')
+        res = client.post('/login/mfa/enrol',
+                          data={'code': totp.code_at(secret, totp.current_step()),
+                                'csrf_token': tok or ''})
+        assert res.status_code == 200
+        with client.session_transaction() as s:
+            assert s.get('logged_in'), 'enrolling finished the sign-in'
+        assert admin._mfa_status('admin')['enrolled'] is True
+        assert admin._mfa_status('admin')['recovery_left'] == 10
+
+    def test_admins_covers_an_administrator_by_GROUP(self, admin, client):
+        """`admins` means an administrator however they became one. Asking only the account's
+        own role is the bug the August audit found in four other guards."""
+        from lib.core.constants import BUILTIN_ROLE_UIDS
+        _set_policy(admin, 'admins')
+        admin._users['byrole'] = {'uid': 'u-role', 'role': BUILTIN_ROLE_UIDS['admin'],
+                                  'enabled': True, 'groups': []}
+        admin._groups['g-adm'] = {'uid': 'g-adm', 'name': 'Admins', 'enabled': True,
+                                  'roles': [BUILTIN_ROLE_UIDS['admin']]}
+        admin._users['bygroup'] = {'uid': 'u-grp', 'role': BUILTIN_ROLE_UIDS['viewer'],
+                                   'enabled': True, 'groups': ['g-adm']}
+        admin._users['plain'] = {'uid': 'u-plain', 'role': BUILTIN_ROLE_UIDS['viewer'],
+                                 'enabled': True, 'groups': []}
+        assert admin._mfa_policy_applies('byrole') is True
+        assert admin._mfa_policy_applies('bygroup') is True, 'admin by group is an admin'
+        assert admin._mfa_policy_applies('plain') is False
+
+    def test_a_factor_is_honoured_even_with_the_policy_off(self, admin, client):
+        """Turning the policy off must not silently stop honouring what people set up."""
+        secret, _codes = _enrol(admin)
+        _set_policy(admin, 'off')
+        _login(client)
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+        assert _post_mfa(client, _code(secret)).status_code == 302
+
+    def test_the_enrol_page_will_not_mint_a_secret_for_somebody_who_has_one(self, admin, client):
+        """Otherwise a password alone would replace a working factor."""
+        _enrol(admin)
+        _set_policy(admin, 'all')
+        _login(client)
+        res = client.get('/login/mfa/enrol', follow_redirects=False)
+        assert res.status_code == 302 and '/login/mfa' in res.headers['Location']
+
+    def test_it_needs_a_parked_sign_in_like_the_other_half(self, admin, client):
+        _set_policy(admin, 'all')
+        res = client.get('/login/mfa/enrol', follow_redirects=False)
+        assert res.status_code == 302 and '/login' in res.headers['Location']
+
+    def test_a_policy_that_cannot_be_honoured_is_ignored_rather_than_locking_everybody_out(
+            self, admin, client, monkeypatch):
+        """`MfaStore` refuses to write a seed it cannot encrypt, so a policy demanding one on
+        an install without a key would demand what nobody can enrol — every account that had
+        not already enrolled, shut out, the last administrator included."""
+        _set_policy(admin, 'all')
+        monkeypatch.setattr(admin._mfa_store, '_fernet', None)
+        assert admin._mfa_policy() == 'off'
+        _login(client)
+        with client.session_transaction() as s:
+            assert s.get('logged_in'), 'the policy gave way rather than the installation'
+
+    def test_a_value_that_is_not_one_of_the_three_is_refused_on_save(self, admin, client):
+        """Stored, it would be read as "not one of the values I check for", which fails OPEN —
+        the one direction a policy field must never fail in."""
+        _login(client)
+        res = client.put('/api/v1/config', json={'web_admin': {'mfa_required': 'sometimes'}})
+        assert res.status_code >= 400
+        assert admin._mfa_policy() == 'off'

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} — {{ i18n.mfa_enrol_forced_title }}{% endblock %}
+
+{# Enrolment ON THE WAY IN, for an account the installation's policy covers and that has no
+   factor yet. Its own page rather than a redirect into /account, because there is no session
+   to open /account with: the password was accepted and nothing was created.
+
+   This is what makes the policy safe to switch on. The alternative — refuse the sign-in until
+   they have enrolled — locks out everybody who has not, which on a fresh policy is everybody,
+   the last administrator included. #}
+
+{% block body %}
+<div class="login-wrap">
+    <div class="card login-card shadow-sm">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <img src="/static/img/logo.png?v={{ asset_v }}" alt="{{ app_name }}"
+                     class="login-logo" width="640" height="427">
+            </div>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} py-2 small">{{ message }}</div>
+            {% endfor %}
+            {% endwith %}
+
+            {% if recovery %}
+            {# Done. The codes are shown ONCE and there is no way back from the stored form,
+               so this page does not move on by itself: the reader closes it by pressing
+               Continue, having had the chance to write them down. #}
+            <div class="alert alert-warning py-2 small">{{ i18n.mfa_enrol_forced_saved }}</div>
+            <div class="border rounded p-2 mb-3 font-monospace small ss-secret">
+                {% for code in recovery %}<div class="user-select-all">{{ code }}</div>{% endfor %}
+            </div>
+            <a href="{{ landing }}" class="btn btn-primary w-100">{{ i18n.mfa_enrol_continue }}</a>
+            {% else %}
+            <div class="small text-muted mb-3">
+                <i class="bi bi-shield-lock me-1"></i>{{ i18n.mfa_enrol_forced_lead }}
+            </div>
+            <div class="small mb-2">{{ i18n.mfa_enrol_scan }}</div>
+            {# Both ways in, the same as the voluntary enrolment: the square for whoever has a
+               camera, the key for whoever does not — or for when the square came out wrong,
+               which is a possibility this project takes seriously because the encoder is
+               written here. The SVG is built by the server from module coordinates only. #}
+            {% if svg %}
+            <div class="mb-2 ss-qr">{{ svg | safe }}</div>
+            {% else %}
+            <div class="alert alert-warning py-2 small">{{ i18n.mfa_enrol_no_qr }}</div>
+            {% endif %}
+            <div class="small mb-1">{{ i18n.mfa_enrol_manual }}</div>
+            <div class="font-monospace user-select-all border rounded px-2 py-1 mb-3 small ss-secret"
+                >{{ secret_groups }}</div>
+            <form method="post" action="/login/mfa/enrol">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold" for="mfaEnrolCode"
+                        >{{ i18n.mfa_enrol_confirm }}</label>
+                    <input type="text" name="code" id="mfaEnrolCode"
+                           class="form-control text-center" inputmode="numeric"
+                           autocomplete="one-time-code" maxlength="6" required autofocus>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">{{ i18n.mfa_step_verify }}</button>
+            </form>
+            <form method="post" action="/logout" class="mt-3 text-center">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-link btn-sm text-muted p-0"
+                    >{{ i18n.mfa_step_cancel }}</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

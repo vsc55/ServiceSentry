@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4913 tests** (4913 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5060 tests** (5060 recolectados entre `unit`, `meta` e `integration`; los e2e piden motores o navegador aparte. Medido el 2026-08-18). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -7223,7 +7223,7 @@ por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta
 
 ## 155. Segundo factor: el escalón que pone delante de un login
 
-**Archivo:** `tests/integration/test_wa_mfa.py` — 21 tests
+**Archivo:** `tests/integration/test_wa_mfa.py` — 30 tests
 
 Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
 lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
@@ -7242,3 +7242,4 @@ código verifica, la petición es anónima **por no tener sesión**.
 | `TestACodeIsSpentWhenItIsUsed::*` (3) | El mismo código no abre una segunda sesión (treinta segundos es mucho tiempo para tener el código de otro), un código de recuperación sirve una vez, y usar uno deja los otros |
 | `TestManagingYourOwn::*` (5) | El estado **nunca lleva el secreto**, ni siquiera cifrado; darse de alta dos veces se rechaza (sobrescribir en silencio un factor que funciona desde una sesión prestada es el ataque entero que este endpoint sería); y desactivarlo o regenerar los códigos **exigen un código actual** — una sesión es exactamente lo que tiene un atacante que ha robado una |
 | `TestResettingSomebodyElses::*` (4) | Detrás de su propio permiso, que no tiene nadie por defecto (es también lo que haría un atacante con `users_edit` para quitar la protección antes de ir a por la contraseña); un administrador puede retirarlo y la cuenta vuelve a entrar solo con contraseña; **se lleva los códigos de recuperación con él**; y retirárselo a quien no tiene contesta que no lo tiene |
+| `TestRequiringIt::*` (9) | La política (`web_admin\|mfa_required`: `off` / `admins` / `all`). Lo que importa es que **activarla no deja fuera a nadie**: quien le aplique y no tenga factor lo configura *al entrar*, que es la única razón por la que una política así se puede encender con nadie dado de alta. `admins` cuenta a quien lo sea **por grupo** —preguntar solo por el rol propio es el fallo que la auditoría de agosto encontró en otras cuatro guardas—; un factor ya configurado se sigue exigiendo aunque la política se apague; la pantalla de alta **no acuña un secreto para quien ya tiene uno** (si no, una contraseña sola reemplazaría un factor que funciona); una política que **no se puede honrar** —sin clave de cifrado— cede ella en vez de la instalación; y un valor que no es uno de los tres se rechaza al guardar, porque almacenado se leería como «ninguno de los que compruebo», que falla ABIERTO |
