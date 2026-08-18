@@ -307,8 +307,13 @@ def latest_version(name: str, timeout: float = TIMEOUT) -> dict:
 
 
 def latest_versions(names, timeout: float = TIMEOUT) -> dict:
-    """`{name: {...}}` for every name, asked in parallel and bounded."""
-    names = [str(n) for n in (names or [])]
+    """`{name: {...}}` for every DISTINCT name, asked in parallel and bounded.
+
+    Distinct because the caller's rows can name one package twice — this process's version and
+    another container's — and "what is the newest release" has one answer for both. Asked twice
+    it was two requests to pypi.org for one cell.
+    """
+    names = sorted({str(n) for n in (names or []) if n})
     if not names:
         return {}
     out: dict = {}
@@ -336,19 +341,27 @@ def vulnerabilities(pairs, timeout: float = TIMEOUT) -> dict:
     something an operator can look up; a severity this panel decided on its own is something
     they would have to trust.
 
-    Answers `{'ok': bool, 'by_name': {name: [ids]}, …}`. A package with no installed version is
-    not asked about: the question is about what is RUNNING, and a missing package cannot be
-    vulnerable.
+    Answers `{'ok': bool, 'by_pin': {(name, version): [ids]}, …}`. A package with no installed
+    version is not asked about: the question is about what is RUNNING, and a missing package
+    cannot be vulnerable.
+
+    Keyed by the PIN and not by the name, because the caller asks about three lists and the
+    third one exists precisely to carry the packages another container runs at a *different*
+    version. Keyed by name, the second answer for `urllib3` overwrote the first — and since the
+    other containers' list is asked last, what overwrote this process's own row was always
+    somebody else's. A clean 2.2.1 was drawn carrying 1.26.0's advisory, and the reverse (the
+    vulnerable one reported clean because a newer container answered after it) is the same bug
+    with the worse ending.
     """
-    queries, names = [], []
+    queries, pins = [], []
     for name, version in (pairs or []):
         if not name or not version:
             continue
         queries.append({'package': {'name': str(name), 'ecosystem': 'PyPI'},
                         'version': str(version)})
-        names.append(str(name))
+        pins.append((str(name), str(version)))
     if not queries:
-        return {'ok': True, 'by_name': {}, 'asked': 0}
+        return {'ok': True, 'by_pin': {}, 'asked': 0}
     payload = json.dumps({'queries': queries}).encode('utf-8')
     req = urllib.request.Request(OSV_BATCH_URL, data=payload,
                                  headers={**_headers(), 'Content-Type': 'application/json'})
@@ -365,19 +378,19 @@ def vulnerabilities(pairs, timeout: float = TIMEOUT) -> dict:
     results = (data or {}).get('results')
     if not isinstance(results, list):
         return {'ok': False, 'error': 'not_json'}
-    by_name: dict = {}
+    by_pin: dict = {}
     # Positional: the batch answers in the order it was asked. A reply of a different length is
     # not something to line up as best we can — the association would be silently wrong, and
     # naming the wrong package as vulnerable is worse than saying the check could not be done.
-    if len(results) != len(names):
+    if len(results) != len(pins):
         return {'ok': False, 'error': 'length_mismatch'}
-    for name, res in zip(names, results):
+    for pin, res in zip(pins, results):
         ids = [str(v.get('id') or '') for v in ((res or {}).get('vulns') or [])
                if isinstance(v, dict)]
         # Filtered to what an identifier can be, here rather than where it is rendered: it
         # arrives from the network and it ends up in a URL and on a screen.
-        by_name[name] = sorted(i for i in ids if _ID_RE.match(i))
-    return {'ok': True, 'by_name': by_name, 'asked': len(queries)}
+        by_pin[pin] = sorted(i for i in ids if _ID_RE.match(i))
+    return {'ok': True, 'by_pin': by_pin, 'asked': len(queries)}
 
 
 def collapse_aliases(ids, details) -> dict:
@@ -421,11 +434,13 @@ def _grade(detail) -> dict:
     """The three fields a row carries about how bad one advisory is.
 
     Empty when the record could not be read: an unknown severity is a dash on the screen, and
-    guessing one would be this panel grading a vulnerability it never saw.
+    guessing one would be this panel grading a vulnerability it never saw. Empty, but the SAME
+    five keys — a dict whose shape depends on whether the request worked is one the reader has
+    to test twice, and the half that forgets reads `undefined` as "computed by us".
     """
     got = detail or {}
     if not got.get('ok'):
-        return {'severity': '', 'score': None, 'summary': ''}
+        return {'severity': '', 'score': None, 'published': False, 'vector': '', 'summary': ''}
     return {'severity': str(got.get('severity') or ''),
             'score': got.get('score'),
             # Whether the word came from the database or from its own vector. The screen says
@@ -441,18 +456,26 @@ def check(rows, timeout: float = TIMEOUT) -> dict:
 
     Takes the rows the local collector produced — name, required, installed — so the two halves
     of the table cannot disagree about which packages exist. The answer carries only what the
-    network added, and the browser merges it by name: the page keeps working with the local
-    half alone, which is what it shows before anybody presses the button.
+    network added, and the browser merges it back on by name AND version: the page keeps
+    working with the local half alone, which is what it shows before anybody presses the
+    button.
+
+    The rows may hold one package twice — this process's version and another container's — so
+    every association in here is by the pin. The row it lands on is not the only thing that
+    depends on it: the totals count DISTINCT advisories and packages, because one flaw on two
+    versions of one package is one finding.
     """
     rows = [r for r in (rows or []) if isinstance(r, dict) and r.get('name')]
     names = [r['name'] for r in rows]
     latest = latest_versions(names, timeout)
     vulns = vulnerabilities([(r['name'], r.get('installed') or '') for r in rows], timeout)
     out_rows, behind, unknown = [], 0, 0
-    by_name = (vulns.get('by_name') or {}) if vulns.get('ok') else {}
-    # One more round, over the DISTINCT identifiers rather than the rows: the batch answers
-    # names only, and the same advisory routinely lands on several packages.
-    every_id = {i for ids in by_name.values() for i in ids}
+    # By name AND version, the way it was asked: the rows can hold the same package twice when
+    # another container of this installation runs a different one of it.
+    by_pin = (vulns.get('by_pin') or {}) if vulns.get('ok') else {}
+    # One more round, over the DISTINCT identifiers rather than the rows: the same advisory
+    # routinely lands on several packages.
+    every_id = {i for ids in by_pin.values() for i in ids}
     details = advisory_details_many(every_id, timeout)
     # One vulnerability, one entry: the batch reports every identifier it knows, and a GHSA
     # plus a PYSEC entry for the same flaw is the norm.
@@ -463,9 +486,10 @@ def check(rows, timeout: float = TIMEOUT) -> dict:
             also.setdefault(keeper, []).append(vid)
     for row in rows:
         name = row['name']
+        installed = str(row.get('installed') or '')
         got = latest.get(name) or {}
         newest = str(got.get('latest') or '') if got.get('ok') else ''
-        state = compare(row.get('installed') or '', newest) if newest else 'unknown'
+        state = compare(installed, newest) if newest else 'unknown'
         if state == 'behind':
             behind += 1
         elif state == 'unknown':
@@ -474,7 +498,7 @@ def check(rows, timeout: float = TIMEOUT) -> dict:
         # lists — ids here, links there — is the same positional association the batch reply
         # already taught us not to make: one of them gets filtered somewhere and the row points
         # at the wrong advisory.
-        kept = sorted({under.get(i, i) for i in (by_name.get(name) or [])})
+        kept = sorted({under.get(i, i) for i in (by_pin.get((name, installed)) or [])})
         ids = [{'id': i, 'url': advisory_url(i), 'aliases': sorted(also.get(i) or []),
                 **_grade(details.get(i))} for i in kept]
         out_rows.append({'name': name,
@@ -484,7 +508,7 @@ def check(rows, timeout: float = TIMEOUT) -> dict:
                          # The version this row was ASKED about, carried back beside the
                          # answer: the screen says "3.4.9 → 3.5.0", and pairing the two in the
                          # browser from a second list is how they come to disagree.
-                         'installed': str(row.get('installed') or ''),
+                         'installed': installed,
                          'latest': newest, 'state': state,
                          'error': '' if got.get('ok') else str(got.get('error') or ''),
                          'vulns': ids, 'vuln_count': len(ids)})
@@ -502,6 +526,10 @@ def check(rows, timeout: float = TIMEOUT) -> dict:
         # nobody checked look identical, and "no advisories" is exactly the answer somebody
         # should be able to disbelieve until the screen says how it was reached.
         'vuln_asked': int(vulns.get('asked') or 0) if vulns.get('ok') else 0,
-        'vuln_total': sum(r['vuln_count'] for r in out_rows),
-        'vuln_packages': sum(1 for r in out_rows if r['vuln_count']),
+        # DISTINCT, not a sum over the rows. The same flaw affecting two versions of one package
+        # — this process's and another container's — is one advisory in one package, and adding
+        # the rows up says twice as much is wrong as there is. Which is the complaint
+        # `collapse_aliases` exists for, arriving by the other door.
+        'vuln_total': len({v['id'] for r in out_rows for v in r['vulns']}),
+        'vuln_packages': len({r['name'] for r in out_rows if r['vuln_count']}),
     }

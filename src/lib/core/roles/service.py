@@ -38,8 +38,19 @@ def _now() -> str:
 def role_name_taken(name: str, custom_roles: dict, builtin_role_names: dict, *,
                     exclude_uid: str | None = None) -> bool:
     """True if *name* (case-insensitive) is already used by another role — built-in
-    display name or custom role name — skipping the role identified by *exclude_uid*."""
+    display name or custom role name — skipping the role identified by *exclude_uid*.
+
+    The built-in KEYS (`admin`, `editor`, `viewer`, `none`) are reserved as well, and that
+    is not tidiness: those keys are what several checks compare a role against, so a custom
+    role carrying one as its name has been mistaken for the built-in role. It held while the
+    display names were the defaults — `Admin` collides with `admin` here, case-insensitively
+    — and stopped holding the moment somebody renamed the built-in role, which the panel
+    lets them do. The checks themselves were fixed to decide on the UID; this is the second
+    lock, so a name that reads as a built-in role never gets stored in the first place.
+    """
     name_lc = (name or '').lower()
+    if name_lc in ROLES:
+        return True
     for key in ROLES:
         if BUILTIN_ROLE_UIDS.get(key, '') == exclude_uid:
             continue

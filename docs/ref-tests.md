@@ -2850,7 +2850,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 52. Panel Web — Comprobación de rol admin
 
-**Archivo:** `tests/integration/test_wa_admin_check.py` — 4 tests
+**Archivo:** `tests/integration/test_wa_admin_check.py` — 8 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2858,6 +2858,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_admin_via_enabled_group` | Admin via enabled group |
 | `test_not_admin_via_disabled_group` | Not admin via disabled group |
 | `test_plain_non_admin` | Plain non admin |
+| `TestARoleNAMEDAdminIsNotTheAdminRole::*` (5) | **Escalada de privilegios**, hallada auditando `lib/core` el 2026-08-15. La comprobación preguntaba `_uid_to_role_name(role) == 'admin'`, y ese método devuelve la **clave** interna para un rol integrado y el **nombre visible** para uno personalizado: un rol llamado `admin`, sin un solo permiso, respondía que sí. Y eso vale por todo, porque `_perms_grantable`, `_role_grantable` y `_groups_grantable` devuelven True para un admin sin mirar nada más. Bastan dos concesiones delegables —`roles_add` para crear el rol y `users_edit` para asignarlo— y ninguna es la de administrador. Lo que lo mantenía cerrado era un accidente: mientras el rol integrado se muestra como `Admin`, el nombre `admin` está cogido sin distinguir mayúsculas; el panel permite renombrarlo. Se cubren las tres formas de llegar (rol directo, grupo que lo lleva, los guards de concesión) y que la clave heredada `'admin'` de instalaciones antiguas siga funcionando |
 
 ## 53. Panel Web — LDAP
 
@@ -4455,7 +4456,7 @@ a llamar al cargar, al guardar módulos y al revertir. Lo que fija el test de in
 **etiqueta** (sin ella el cliente no tiene de qué tirar); la conducta visible es cosa del
 navegador y se pregunta en [§142](#142-los-únicos-tests-que-ejecutan-el-javascript-del-panel).
 
-**Archivo:** `tests/integration/test_wa_standalone_pages.py` — 17 tests
+**Archivo:** `tests/integration/test_wa_standalone_pages.py` — 20 tests
 **Archivo:** `tests/unit/test_wa_standalone_pages.py` — 3 tests
 
 Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el mismo shell SPA**.
@@ -5700,7 +5701,7 @@ nada, así que la sección simplemente no se abre y no hay error que seguir.
 
 ## 121. Un widget de módulo, añadido varias veces y configurado por instancia
 
-**Archivo:** `tests/unit/test_overview_module_widget_instances.py` — 17 tests
+**Archivo:** `tests/unit/test_overview_module_widget_instances.py` — 19 tests
 **Archivo:** `tests/meta/test_overview_module_widget_instances.py` — 3 tests
 
 Una sola tarjeta no puede contestar «cómo va Microsoft 365»: esa pregunta son varias —cuánto
@@ -6293,6 +6294,52 @@ tiempo, porque nadie busca un nombre que ya no existe.
 > Al escribirlo apareció la primera divergencia: `msteams_channels` se describía en prosa
 > («misma forma que `webhooks`») en vez de con su tabla de columnas. Era exacto, pero no
 > comprobable — y una afirmación así caduca sola el día que `webhooks` gane una columna.
+
+---
+
+## 135a. Un canal en BETA lo dice en su propia tarjeta
+
+**Archivo:** `tests/unit/test_cfg_beta_badge.py` — 5 tests
+
+Webhook y Microsoft Teams entregan, y les faltan validaciones que los canales viejos sí tienen.
+La insignia se declara **una vez** —`beta: True` en la tarjeta de `lib/config/layout.py`— y la
+dibuja `cfgCardOpen`, que es la función con la que se abre **toda** tarjeta: por eso una tarjeta
+a medida (las dos lo son) la hereda sin que nadie se lo diga, y salir de beta es una línea en un
+fichero.
+
+Se fijan las dos mitades que se pueden separar sola: la **declaración** —que las dos tarjetas la
+llevan, que **ninguna otra** la lleva (una marca que se propaga copiando y pegando deja de
+significar algo) y que viaja al navegador dentro de `config_layout()`— y que la **plantilla la
+lee**, resolviéndola dentro del abridor compartido y no en cada sitio que abre una tarjeta.
+
+Al añadirla, `cfg/_render.html` pasó de 450 líneas y saltó su guarda de tamaño. La respuesta no
+fue recortar el comentario: el cromo de la tarjeta —abrir, cerrar, la insignia— se fue a
+`cfg/_card.html`, que es lo que esa guarda pide cuando un *shell* de sección crece.
+
+---
+
+## 135b. Quién puede escribir qué check: el confín del permiso por servidor
+
+**Archivo:** `tests/unit/test_modules_authz.py` — 8 tests
+
+El guardado de módulos es la única escritura del panel que **cruza dominios**: un check
+pertenece a un módulo y está **atado a un host**, así que «¿esta persona puede escribir aquí?»
+no la contesta el flag del módulo. Un permiso por servidor (`server.<uid>.edit`) existe
+justamente para confinar a alguien a sus propias máquinas, y el fallo de autorización que se
+esconde ahí no se ve en pantalla: se guarda igual.
+
+La frontera se fija en las dos direcciones, y la última salió de auditar `lib/core` el
+2026-08-15: la atadura se leía **sólo del ítem nuevo**, así que un cambio de host se autorizaba
+por dónde **aterriza** el check. Con `server.mine.edit` se podía coger el check de cualquier otro
+host y traérselo al propio —mientras editarlo en su sitio estaba prohibido—, y el daño no está en
+el host del atacante: el check **se va** del otro, que deja de estar monitorizado. Ahora un
+cambio de atadura exige permiso sobre **las dos**: de dónde sale y a dónde va. Validado
+reintroduciendo la regla vieja, que deja el test en rojo nombrando el caso.
+
+Se cubre además lo que **sí** debe seguir permitido —editar y añadir en el host propio, y que un
+`servers_edit` global sí pueda mover un check entre dos hosts, porque ese permiso no está
+confinado— y que un check **sin host** no lo puede tocar ningún permiso por servidor: sin
+atadura no hay quien hable por él.
 
 ---
 
@@ -6977,8 +7024,8 @@ librería de imagen sería un test que se salta justo en la máquina donde impor
 
 ## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
 
-**Archivo:** `tests/unit/test_diagnostics_collect.py` — 47 tests
-**Archivo:** `tests/unit/test_diagnostics_advisories.py` — 68 tests
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 52 tests
+**Archivo:** `tests/unit/test_diagnostics_advisories.py` — 73 tests
 **Archivo:** `tests/integration/test_wa_diagnostics.py` — 40 tests
 
 Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
@@ -7001,6 +7048,7 @@ importan más que cualquier campo suelto:
 | Test | Qué comprueba |
 |---|---|
 | `TestTheSystemBlockAlwaysAnswers::*` (3) | Intérprete y máquina siempre contestan; `_safe` convierte una excepción —y una respuesta vacía, que se lee peor— en un campo «desconocido» |
+| `TestWhetherThisIsAContainer::*` (5) | La fila contra la que se lee todo lo demás: una ruta que «existe» está dentro de una imagen que mañana puede rehacerse, y el disco libre es el de la capa y no el del host. **Tres señales, porque ninguna es universal**: el fichero marca de Docker, el de Podman y una línea de cgroup que nombre un runtime. Podman escribe `/run/.containerenv` y no el de Docker, y bajo cgroup v2 la línea de dentro del contenedor es un `0::/` pelado que no nombra runtime alguno — sin las dos señales, un contenedor rootless de Podman se reportaba como hierro desnudo. Sin `/proc` (Windows, macOS) o con él ilegible no hay veredicto: no es un contenedor |
 | `TestDependenciesAreReadFromTheLock::*` (7) | Se lee del **lock** y no de `pip freeze`; ausente y versión distinta son veredictos separados, «más nueva» no es un veredicto, los problemas van primero, comentarios/flags/marcadores de entorno no son paquetes, la **barra de continuación** de `pip-compile --generate-hashes` no forma parte de la versión, y contra el lock real no puede salir «todo difiere» |
 | `TestTheRestOfTheEnvironment::*` (10) | Lo que el lock **no** fija y aun así corre aquí. Se reportó «todas las dependencias con 0 CVE»: era cierto de los cuarenta y un paquetes del lock, y `pip`, `setuptools` y `pytest` sumaban cinco avisos sin que nadie los preguntara — un aviso no distingue si el paquete estaba fijado. Deliberadamente **no** es un cuarto estado de `dependencies`: no son desviación y no hay nada que reconciliar, y meterlos en la misma lista reportaría una instalación correcta como cincuenta problemas. Cubre que las dos listas no se solapan, que las filas tienen la **misma forma** (una sola lista que consumir), que `charset-normalizer` y `charset_normalizer` son un solo paquete (PEP 503, o un paquete fijado sale como no fijado), que cada distribución aparece una vez (dos `site-packages` en la ruta) y que sin lock no revienta |
 | `TestOptionalFeaturesExplainWhatIsSwitchedOff::*` (3) | Cada entrada nombra su módulo y **qué enciende**, con etiqueta en los dos idiomas: el panel donde nunca aparece el botón de SSO casi nunca está mal configurado |
@@ -7014,13 +7062,14 @@ importan más que cualquier campo suelto:
 | `TestHowBadEachOneIs::*` (25) | La columna de gravedad, y por qué no es una opinión. O la base de datos publicó una calificación —esa es la palabra que se muestra— o publicó un vector CVSS, y la puntuación base es la **aritmética que define la especificación** para él; una nota inventada aquí sería un número que hay que creerse, en la página cuyo trabajo es no producirlos. Diez vectores de referencia **derivados a mano**, métrica a métrica (tres de los primeros «valores esperados» puestos de memoria estaban mal y la implementación bien: una referencia que nadie ha derivado no es una referencia), las dos ramas de `S:U`/`S:C`, las bandas de la especificación, y que un vector ilegible puntúa `None` y no `0.0` —cero es la nota de algo sin impacto, y esa diferencia es la columna entera—. Además: la ficha se pide **una vez por identificador distinto** (el mismo aviso cae en varios paquetes), con techo de conexiones; y `GHSA-…` y `PYSEC-…` del mismo fallo se **cuentan una sola vez** —salió con datos reales: `pip` traía los dos y el panel decía seis avisos donde había tres—, quedando el que publicó gravedad, de forma estable entre ejecuciones y no según qué hilo contestó antes |
 | `TestTellingWhetherAVersionIsBehind::*` + `TestAskingPyPI::*` + `TestAskingTheAdvisoryService::*` + `TestTheTwoHalvesMerged::*` + `TestWhereToReadAboutARelease::*` + `TestSayingHowManyWereAsked::*` + `TestWhereToReadAboutAnAdvisory::*` (43) | La comprobación remota de dependencias, **sin tocar la red** (`urlopen` sustituido en todos): comparar versiones no es PEP 440 a propósito —«no se puede decir» es la respuesta honesta y nunca se pinta como «al día»—; un paquete que PyPI no publica cuesta **su celda y nada más**; un nombre que no es un nombre no llega a construir la URL; una respuesta del lote de longitud distinta se **rechaza** en vez de alinearse como se pueda (señalaría el paquete equivocado como vulnerable); y las dos mitades informan por separado, porque «PyPI contestó y OSV no» es un estado real y una columna de ceros afirmaría algo que nadie comprobó. Además: el enlace de una versión nueva es la **página del paquete en PyPI** para esa versión, construida en el servidor a partir de dos cadenas — PyPI también trae un `project_urls` con lo que cada proyecto haya querido poner, y renderizar uno de esos como enlace que se pulsa dentro del panel dejaría al paquete elegir el destino |
 | `TestAskingTheWorldAboutTheVersionsInstalled::*` (8) | Por la app: el GET **sigue sin poder** salir a la red, la lista de paquetes es la del **servidor** (un cliente que pudiera nombrarlos convertiría el panel en un proxy hacia un servicio externo), los contadores llegan como los pinta la tarjeta, la llamada saliente se audita **con lo que encontró**, y arranca con el permiso propio de la página. Además pregunta por **todo el entorno** y no solo por el lock —que es de dónde salían los ceros—, dice **por nombre** cuáles no fija el lock (el navegador no debe deducirlo de una fila local que falta: el día que el lock no cargue, todos serían «no fijados») y separa el contador de «desactualizadas», que sí tiene una acción detrás —regenerar el lock— de un `pytest` más nuevo en un checkout, que no; los avisos **no** se separan, porque el código corre en la máquina de las dos formas |
+| `TestOnePackageAtTwoVersions::*` (5) | La consulta cubre **tres listas**, y la tercera existe precisamente para llevar lo que ejecuta OTRO contenedor —incluida una versión distinta de un paquete que este proceso también tiene—. Indexadas por nombre, las respuestas de las dos versiones eran la misma respuesta: la segunda pisaba a la primera y, como los otros contenedores se preguntan los ÚLTIMOS, lo que pisaba la fila de este proceso era siempre de otro. Un `urllib3` 2.2.1 limpio se pintaba cargando el aviso de 1.26.0 — y al revés (el vulnerable informado como limpio porque un contenedor más nuevo contestó después) es el mismo fallo con el final peor. Además: PyPI se pregunta **una vez por nombre** (la versión más nueva es la misma para las dos filas), un fallo en un paquete es **un aviso en un paquete** por muy repetido que esté en las filas, y una ficha que no se pudo leer trae **las mismas cinco claves** —un diccionario cuya forma depende de si la petición funcionó hay que comprobarlo dos veces, y la mitad que se olvida lee un `published` ausente como «lo calculamos nosotros»— |
 | `TestTheOneCallThatLeavesTheMachine::*` (4) | El GET es **incapaz** de salir a la red (se sustituye `fetch_latest` por algo que falla el test si lo llaman); un fallo es una respuesta y no un 500; y las dos salidas quedan auditadas |
 
 ---
 
 ## 151b. Diagnóstico: los otros procesos de la instalación
 
-**Archivo:** `tests/unit/test_diagnostics_instances.py` — 22 tests
+**Archivo:** `tests/unit/test_diagnostics_instances.py` — 29 tests
 
 Repartido en contenedores —web, worker, receptor syslog, procesador de eventos—, la pantalla de
 diagnóstico describe **el proceso que sirve la petición y nada más**. Los otros tres no
@@ -7033,10 +7082,11 @@ Lo que se prueba aquí es la **comparación**, que es la parte que puede mentir 
 | Test | Qué comprueba |
 |---|---|
 | `TestTellingTwoProcessesApart::*` (7) | La respuesta es **la diferencia**, no cuatro copias de la misma lista: cuatro contenedores de una imagen traen listas idénticas y «iguales que aquí» es la respuesta entera cuando es cierta. Cubre que una versión distinta viaja **con los dos lados** («difieren» no es accionable; cuál y de qué a qué, sí), que faltar en un lado o en el otro son **hallazgos distintos** (un worker sin `paramiko` salta todos los checks SSH), que el lock y el resto de lo instalado son **una sola lista** aquí —`pip` también ejecuta allí—, que `charset-normalizer` y `charset_normalizer` no son una diferencia (PEP 503, o cada contenedor parecería haber derivado), que el orden es estable, y que una instancia que **no ha publicado** no se cuenta como diferencia: «desconocido» y «difiere» son frases distintas y solo una implica trabajo |
-| `TestWhatOnlyTheOtherProcessesRun::*` (6) | Los nombres extra que la consulta remota debe cubrir, **y ninguno más**: una sola tanda de peticiones para toda la instalación, porque cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a internet a preguntar casi lo mismo, justo en el despliegue donde peor sienta. Una imagen igual en todas partes **no añade nada**, este proceso no se pregunta dos veces, y dos contenedores con dos versiones del mismo paquete son **dos preguntas** —responder una por las dos es como un contenedor acaba informado como limpio porque otro lo está— |
+| `TestWhatOnlyTheOtherProcessesRun::*` (8) | Los nombres extra que la consulta remota debe cubrir, **y ninguno más**: una sola tanda de peticiones para toda la instalación, porque cada contenedor preguntando por su cuenta serían cuatro procesos saliendo a internet a preguntar casi lo mismo, justo en el despliegue donde peor sienta. Una imagen igual en todas partes **no añade nada**, este proceso no se pregunta dos veces, y dos contenedores con dos versiones del mismo paquete son **dos preguntas** —responder una por las dos es como un contenedor acaba informado como limpio porque otro lo está—. Y el llamante puede **entregar** lo que ya recorrió: restar lo que este proceso ejecuta es un recorrido de todas las distribuciones instaladas, y quien lo llama acababa de hacerlo dos veces para construir las dos listas de las que se resta —tres recorridos de `site-packages` para una respuesta, en la petición que ya es la más lenta de la página— |
 | `TestTheListDegradesInsteadOfFailing::*` (3) | Se llega desde la página que alguien abre porque algo ya va mal: sin registro y con un store que revienta, la tarjeta cuesta la tarjeta y nada más |
 | `TestListingWhatOneProcessRuns::*` (3) | «Iguales que aquí (42)» no dice **cuáles** 42, así que la celda abre la lista. Una sola forma para la pantalla y para la consulta remota —una segunda copia más plana al lado es como las dos acaban discrepando sobre qué hay instalado allí—, con las dos mitades dentro diciendo cuál fija el lock (allí `pip` no es desviación y `flask` sí) y ordenada por nombre |
 | `test_the_versions_of_one_process_are_read_from_both_halves` (3) | Las versiones salen del lock **y** de lo instalado alrededor, normalizadas |
+| `TestTheScreenKeepsTheVersionsApartToo::*` (3) | La misma invariante **al otro lado del cable**, leyendo los parciales como texto: el último paso es un clic, y el clic llevaba solo el nombre. Un paquete puede estar dos veces en pantalla —el de este proceso y el de otro contenedor—, cada uno con sus propios avisos: abierto por nombre mostraba la fila que estuviera primero, bajo un título que nombraba la versión pulsada. Y un aviso nombra cada paquete **una vez**: empujado por fila se leía «urllib3, urllib3» y contaba dos |
 
 ---
 

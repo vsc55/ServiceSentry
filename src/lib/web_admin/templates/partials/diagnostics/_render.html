@@ -261,7 +261,7 @@ function _dgStorageCard(rows) {
                          style="width:${pct}%"></div>
                 </div>
                 <span class="text-muted">${esc(t('diag_free')
-                    .replace('{}', _dgBytes(r.free_bytes)))}</span>
+                    .replace('{}', fmtBytes(r.free_bytes)))}</span>
             </div>` : ''}
         </div>`;
     }).join('') + '</div>';
@@ -292,16 +292,6 @@ function _dgFeaturesCard(features) {
               .replace('{}', missing))}</span>`
         : '';
     return _dgCard('bi-plugin', t('diag_card_features'), body, extra);
-}
-
-/** Bytes as a person reads them, in 1024s like the server's own `fmt_bytes` — the two
- *  disagreeing would print a different size for the same disk depending on who formatted it. */
-function _dgBytes(n) {
-    let v = Number(n) || 0;
-    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-    let i = 0;
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
 }
 
 /** An uptime nobody has to divide. "9214" is not an answer anybody reads. */

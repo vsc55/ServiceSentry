@@ -109,10 +109,15 @@ CARDS: tuple[dict, ...] = (
      'renderer': 'notif_provider'},
     {'tab': 'notifs', 'id': 'email',           'icon': 'bi-envelope',  'section': 'email',
      'renderer': 'email'},
+    # `beta`: the card says so on screen. Both channels deliver, and both are still short of
+    # validations the older ones have — so the badge is the honest state, and it is declared
+    # HERE because the layout is already what the browser reads to draw the card. Written on
+    # the card rather than in the template of each renderer: a second place to remember is a
+    # second place to forget when the beta ends.
     {'tab': 'notifs', 'id': 'msteams',         'icon': 'bi-microsoft-teams', 'section': 'msteams',
-     'renderer': 'msteams'},
+     'renderer': 'msteams', 'beta': True},
     {'tab': 'notifs', 'id': 'webhook',         'icon': 'bi-link-45deg', 'section': 'webhooks',
-     'renderer': 'webhook'},
+     'renderer': 'webhook', 'beta': True},
     {'tab': 'notifs', 'id': 'notif_templates', 'icon': 'bi-file-text',
      'title_key': 'cfg_notif_subtab_templates', 'renderer': 'notif_templates'},
 

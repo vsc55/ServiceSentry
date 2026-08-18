@@ -80,6 +80,3 @@ def channels() -> dict[str, Channel]:
     return dict(_REGISTRY)
 
 
-def get_channel(name: str) -> Channel | None:
-    load_builtin_channels()
-    return _REGISTRY.get(name)

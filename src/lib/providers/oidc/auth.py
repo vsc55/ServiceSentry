@@ -23,10 +23,6 @@ except Exception:
     OAuth = None
 
 
-class OidcUnavailableError(RuntimeError):
-    """Raised when authlib is not installed."""
-
-
 def is_available() -> bool:
     """Return True when the optional ``authlib`` package is installed; when False,
     the OIDC SSO routes are not registered."""

@@ -124,7 +124,10 @@ def register(app, wa):
         # rather than checked from each container: four processes reaching pypi.org to ask
         # nearly the same question is the wrong shape in exactly the deployment where it
         # happens. Contributes nothing when they all came from one image, which is the norm.
-        elsewhere = diag_service.elsewhere_rows(wa)
+        # Handed the two lists it would otherwise rebuild: working out what only the others run
+        # means subtracting what this process runs, and that is the walk of every installed
+        # distribution the two lines above have just done.
+        elsewhere = diag_service.elsewhere_rows(wa, rows + extra)
         res = diag_advisories.check(rows + extra + elsewhere)
 
         def _pins(items):

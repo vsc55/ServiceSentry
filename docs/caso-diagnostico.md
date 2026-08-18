@@ -19,6 +19,237 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un paquete a dos versiones tenía los avisos de la otra
+
+**Fecha:** 2026-08-16 · **Área:** `lib/core/diagnostics/advisories.py` (`vulnerabilities`)
+
+**Síntoma** — Ninguno visible: la tabla se pinta igual acierte o no. Salió leyendo
+`lib/core/diagnostics` en la auditoría, y la sospecha vino del comentario de la propia ruta
+—«nombre Y versión: tres listas pueden nombrar el mismo paquete»— aplicado a los contadores pero
+no a la respuesta.
+
+**Diagnóstico** — Reproducido en 30 líneas: `check()` con dos filas del mismo paquete a dos
+versiones (`urllib3` 2.2.1 local y 1.26.0 de otro contenedor) y un OSV simulado que sólo marca
+la vieja como vulnerable. OSV recibe **las dos preguntas correctas** —se comprueba imprimiendo
+el cuerpo del lote— y aun así las dos filas vuelven con `GHSA-OLD`. Con el aviso puesto en la
+versión nueva, el resultado es el simétrico: la vulnerable sale limpia.
+
+**Causa raíz** — `vulnerabilities()` devolvía `by_name`, un diccionario indexado sólo por
+nombre; la segunda respuesta pisaba a la primera. Y como la lista de los otros contenedores se
+pregunta la **última** (`rows + extra + elsewhere`), lo que pisaba la fila de este proceso era
+siempre de otro. La invariante estaba escrita en tres sitios —el docstring del test de
+instancias, los contadores `behind` de la ruta y el `byPin` del navegador— y no en el escalón
+que hay entre ellos.
+
+Debajo había un segundo defecto del mismo origen: el clic que abre la lista de avisos de una
+fila llevaba **sólo el nombre**, así que abría la primera coincidencia bajo un título que
+nombraba la versión pulsada.
+
+**Solución** — `by_pin`, indexado por `(nombre, versión)`, leído igual en `check()`. Los totales
+van detrás: `vuln_total` y `vuln_packages` cuentan avisos y paquetes **distintos** en vez de
+sumar filas, que es la misma queja que existe para `collapse_aliases` entrando por la otra
+puerta. En el navegador, el badge pasa el pin y un aviso nombra cada paquete una vez. Cinco
+tests, los cuatro fijables validados reintroduciendo la conducta.
+
+**Lección** — Cuando una lista deja de tener una fila por entidad, **todo lo que la indexe por
+el nombre de la entidad pasa a estar mal**, en silencio y sin excepción. La invariante nueva
+—«un paquete es un nombre Y una versión»— se había escrito en los sitios donde se estaba
+trabajando; el paso intermedio, que nadie tocó, siguió con la vieja. Al ampliar la clave de una
+colección, la revisión no es del código que se cambia sino de **todos** sus índices.
+
+---
+
+## El check se autorizaba por dónde aterriza, no por de dónde sale
+
+**Fecha:** 2026-08-15 · **Área:** `lib/core/modules/authz.py` (`authorize_module_write`)
+
+**Síntoma** — Ninguno; leyendo `lib/core/modules` detrás de `hosts`. Un guardado así se ve
+idéntico en pantalla salga bien o mal.
+
+**Diagnóstico** — El guardado de módulos autoriza **ítem a ítem**, y un check atado a un host se
+autoriza con el permiso de ese host. La atadura se obtenía con `item_host_uid(o, n)`, que
+recorre `(n, o)` y devuelve **la primera que encuentre**: la del ítem nuevo. Para un alta y una
+baja eso es correcto —sólo hay una—; para una **modificación** hay dos, y sólo se miraba la de
+destino. Comprobado con las tres variantes seguidas, con `server.mine.edit` como único permiso:
+mover el check de `victim` a `mine` → **autorizado**; moverlo de `mine` a `victim` → denegado;
+editarlo en su sitio → denegado.
+
+**Causa raíz** — Un cambio de atadura es una edición de **dos** hosts: del que pierde el check y
+del que lo recibe. Preguntar sólo por el destino convierte el permiso por servidor —que existe
+para confinar a alguien a sus máquinas— en la única escritura del panel que alcanzaba fuera de
+ellas. Y el daño no está donde uno lo busca: en el host del atacante no pasa nada raro; el que
+se queda **sin monitorizar** es el otro.
+
+**Solución** — Las dos ataduras por separado (`_item_host_uid`, sobre un lado cada vez, en vez
+del helper que responde por el par y prefiere el nuevo): un alta autoriza el destino, una baja el
+origen, y una modificación **ambos** cuando difieren. Ocho tests en
+`tests/unit/test_modules_authz.py`, con el caso validado reintroduciendo la regla vieja, y
+control positivo para lo que sí debe seguir permitido: `servers_edit` global sí puede mover un
+check entre hosts, porque ese permiso no está confinado a ninguno.
+
+**Lección** — Cuando un permiso se resuelve a partir de un **atributo del dato**, cambiar ese
+atributo es parte de lo que hay que autorizar. La forma general: en toda modificación,
+comprobar el estado **antes y después**, y desconfiar de cualquier helper que «resuelva» dos
+valores en uno — que es justo lo que hacía el que había aquí, y por eso se dejó de usar en este
+punto.
+
+---
+
+## El guard estaba en la acción pequeña y no en la grande
+
+**Fecha:** 2026-08-15 · **Área:** `lib/core/groups/routes.py`
+
+**Síntoma** — Ninguno; leyendo `lib/core/groups` detrás de `users`.
+
+**Diagnóstico** — `PUT /api/v1/groups/<uid>` lleva un guard explícito: si el grupo tiene el rol
+admin y quien pide no es administrador, **403**. `DELETE` del mismo grupo no llevaba ninguno.
+Medido con las dos peticiones seguidas y el mismo solicitante —un titular de `groups_delete` sin
+más—: `PUT → 403`, `DELETE → 200`, y la lista de grupos de los miembros vacía.
+
+**Causa raíz** — Borrar el grupo hace más que editarlo: le quita el rol a **todos** sus miembros
+de golpe. El guard se escribió donde se estaba trabajando (la edición) y no donde el efecto es
+mayor. `delete_group` sólo se negaba con los grupos integrados, así que un grupo *personalizado*
+que concede admin —que es como se concede en cuanto hay más de dos personas— quedaba a merced de
+cualquiera con `groups_delete`.
+
+**Solución** — El mismo guard de contexto en el DELETE, decidido por UID de rol
+(`_carries_admin`, sobre `_is_admin_role`); y además una regla de integridad que ata también al
+administrador: si borrar ese grupo dejaría la instalación **sin ningún administrador**, se
+rechaza. Se cuenta contra el mapa de grupos *sin* ese grupo, que es exactamente lo que el borrado
+provoca. Cuatro tests.
+
+**Lección** — Cuando una operación tiene hermanas (crear / editar / borrar), el guard hay que
+escribirlo para **la familia**, no para la que se está tocando; y la que más daño hace casi nunca
+es la que se está escribiendo en ese momento. Un repaso barato: por cada `if not admin: 403` de
+un PUT, buscar el DELETE correspondiente.
+
+---
+
+## Los administradores por grupo no contaban como administradores
+
+**Fecha:** 2026-08-15 · **Área:** `lib/core/users/service.py`, `lib/core/users/routes.py`
+
+**Síntoma** — Ninguno, otra vez: encontrado leyendo `lib/core/users` seguido después de la
+escalada de los roles.
+
+**Diagnóstico** — El panel hace administrador de dos maneras: por el rol de la cuenta o por
+pertenecer a un grupo que lleva el rol admin —el grupo integrado *Administrators* existe para
+eso, y `_is_admin_requester()` resuelve las dos—. Pero **todas** las protecciones del «último
+administrador» preguntaban por la primera: `role_is_admin(u.get('role'))`, sobre el rol propio y
+nada más. Igual el guard de jerarquía de las rutas de usuarios, que decidía con
+`requester.get('role')` en lugar de con el método unificado.
+
+**Causa raíz** — Dos preguntas distintas con el mismo nombre: «¿esta cuenta tiene el rol admin?»
+y «¿esta cuenta es administradora?». En una instalación donde el acceso de administrador se
+concede por grupo —lo normal en cuanto hay más de dos personas— el resultado es que **ninguna
+de esas cuentas estaba protegida**: un titular de `users_delete` podía borrarlas, y los
+contadores de «tiene que quedar un admin» no las veían, así que se podían deshabilitar o degradar
+una detrás de otra hasta dejar el panel sin ningún administrador. Verificado ejecutando las
+peticiones.
+
+**Solución** — `user_is_admin(user, groups)` y `count_admins(users, groups)` en el servicio, que
+responden la pregunta como la define el panel (rol propio **o** grupo habilitado que lleve el
+rol admin), y los cuatro guards pasan por ahí: `set_role`, `set_enabled`, el `update_user` y el
+borrado. La CLI les pasa `ctx.groups`. El guard de jerarquía de las rutas usa
+`wa._is_admin_requester()`, y el envoltorio local que duplicaba la comprobación desaparece.
+Ocho tests, y el del conteo validado reintroduciendo la versión vieja.
+
+**Lección** — Cuando un sistema concede un privilegio por dos caminos, cada comprobación que
+sólo mira uno es un agujero esperando a que alguien use el otro — y el que se olvida es siempre
+el indirecto, porque el directo es el que se escribió primero. La forma de no repetirlo es que
+la pregunta tenga **una sola implementación** con nombre propio: aquí `user_is_admin`, del mismo
+modo que `_is_admin_requester` ya lo era para la sesión.
+
+---
+
+## Un rol llamado «admin» era admin
+
+**Fecha:** 2026-08-15 · **Área:** `lib/core/permissions/mixin.py` (`_is_admin_requester`),
+`lib/web_admin/routes/pages.py`, `lib/core/roles/service.py`
+
+**Síntoma** — Ninguno. No lo reportó nadie: salió leyendo `lib/core` línea a línea, que es
+justamente lo que un barrido de patrones no encuentra.
+
+**Diagnóstico** — `_is_admin_requester()` preguntaba
+`self._uid_to_role_name(role) == 'admin'`. Ese método devuelve la **clave interna** cuando el
+UID es de un rol integrado, y el **nombre visible** cuando es de uno personalizado. Se comprobó
+ejecutándolo: un rol personalizado llamado `admin`, con la lista de permisos **vacía**, daba
+`_is_admin_requester() → True`, `_perms_grantable(['users_delete', 'config_edit']) → True` y
+`_get_session_permissions() → []`. Es decir, admin a todos los efectos y con la pantalla de
+permisos diciendo que no tiene ninguno.
+
+Faltaba saber si ese nombre se podía registrar. `role_name_taken()` compara contra los
+**nombres visibles** de los roles integrados, y por defecto el de admin es `Admin`, que colisiona
+con `admin` sin distinguir mayúsculas. Pero el panel permite renombrar los roles integrados
+(`update_builtin_role`), y en cuanto pasa a `Administrador` —lo primero que hace una instalación
+en español— el nombre `admin` queda libre. Verificado también ejecutándolo.
+
+**Causa raíz** — Se decidía «es el rol admin» comparando **cadenas de presentación** en vez del
+UID. El coste es total: `_perms_grantable`, `_role_grantable` y `_groups_grantable` devuelven
+`True` para un admin sin mirar nada más, así que responder que sí a esa pregunta salta todas las
+barreras de escalada a la vez. Y el camino de entrada son dos concesiones **delegables**:
+`roles_add` para acuñar el rol y `users_edit` para asignarlo. Ninguna de las dos es la de
+administrador.
+
+El mismo error, con otra forma, en el guard de las páginas de sección: resolvía los permisos
+desde `session['role']` —otro nombre visible— y se equivocaba en las dos direcciones. Un rol
+personalizado no resolvía a nada (`_custom_roles` está indexado por UID, no por nombre) y a su
+titular lo echaban de una sección que su rol concede; y uno llamado `admin` casaba con la clave
+integrada en `BUILTIN_ROLE_PERMISSIONS` y recogía **el juego completo** de permisos de admin.
+
+**Solución** — `_is_admin_role(role_ref)`, un único sitio que decide por UID (y acepta la clave
+heredada `'admin'` sólo mientras ningún rol personalizado esté indexado por ella);
+`_is_admin_requester` y el `_role_is_admin` de las rutas de usuarios lo llaman. El guard de
+secciones pasa a `_get_session_permissions()`. Y una segunda cerradura independiente:
+`role_name_taken()` reserva las claves integradas (`admin`, `editor`, `viewer`, `none`) como
+nombres, pase lo que pase con los visibles. Ocho tests de regresión, todos validados
+reintroduciendo el fallo.
+
+**Lección** — Un identificador y una etiqueta no son la misma cosa, y una función que devuelve
+«la clave si es integrado, el nombre si no» convierte esa diferencia en un detalle que se olvida
+en la siguiente llamada. Cuando una decisión de autorización se toma sobre una cadena, hay que
+preguntarse quién puede escribir esa cadena — aquí, cualquiera con permiso para crear roles. Y
+las dos cerraduras no son redundancia: la comprobación es una regla que alguien puede volver a
+romper refactorizando, y el nombre reservado es una fila que ya no existe en la base de datos.
+
+---
+
+## Un paquete de otro contenedor preguntado por su nombre y respondido por otro
+
+**Fecha:** 2026-08-15 · **Área:** `lib/core/diagnostics/service.py` (`elsewhere_rows`)
+
+**Síntoma** — Ninguno visible, que es lo peor: en la lista de paquetes de un contenedor,
+algunos salían con la columna «Última» vacía y **0 avisos**, exactamente igual que un paquete
+sano. Nada fallaba, nada se registraba, y el número de CVE del contenedor salía más bajo de lo
+que era.
+
+**Diagnóstico** — Salió de una auditoría de código, no de un reporte. La comprobación remota
+pregunta por la unión de los paquetes de todos los procesos en una sola tanda, y `elsewhere_rows`
+construye esa lista comparando **canónicamente** (PEP 503) para no preguntar dos veces por lo
+mismo. Al mirar qué nombre viajaba en la respuesta se vio que era el canónico, mientras la
+pantalla vuelve a unir esa respuesta con la lista del contenedor por **nombre y versión**, y esa
+lista lleva el nombre tal cual lo publica el proceso. Contado en el entorno real: **ocho** de los
+paquetes instalados aquí se escriben de una forma y canonicalizan a otra — `PyYAML` → `pyyaml`,
+`typing_extensions` → `typing-extensions`, `CacheControl` → `cachecontrol`…
+
+**Causa raíz** — `elsewhere_rows` devolvía la tupla canónica *(nombre, versión)* como fila. El
+paquete **sí** se preguntaba y la respuesta **sí** llegaba, pero bajo una clave que el navegador
+no buscaba: `byPin['PyYAML@6.0.1']` no encuentra la respuesta guardada en `pyyaml@6.0.1`. Un
+`undefined` se dibuja igual que «no hay nada que decir».
+
+**Solución** — Comparar en canónico y **reportar con el nombre que usa ese contenedor**: la
+deduplicación sigue siendo insensible a la forma de escribirlo, y la fila que sale conserva el
+nombre con el que la pantalla la va a buscar. Dos tests nuevos fijan las dos mitades, y el
+primero se validó reintroduciendo el fallo.
+
+**Lección** — Normalizar es correcto para **comparar** y peligroso para **devolver**. Cuando dos
+lados se juntan por una clave, el que responde tiene que hablar en el idioma del que pregunta;
+si en medio hay una normalización, o viaja con el dato o la unión se pierde en silencio. Y el
+modo de fallo elegido importa: una clave que no casa produce «sin hallazgos», que es la misma
+imagen que «está limpio» — el único caso en que un fallo silencioso se lee como buena noticia.
+
+---
+
 ## Cinco tests que solo fallaban con el navegador delante, y un descubrimiento SNMP que se rendía en silencio
 
 **Fecha:** 2026-08-15 · **Área:** `watchfuls/snmp/client.py` (`run_coroutine`),

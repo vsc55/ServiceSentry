@@ -69,9 +69,34 @@ class _PermissionsMixin:
                 return uid
         return None
 
+    def _is_admin_role(self, role_ref: str) -> bool:
+        """Is *role_ref* the built-in admin role? Decided on the UID, never on a name.
+
+        This used to read ``self._uid_to_role_name(role) == 'admin'``, and that method
+        returns the built-in KEY for a built-in UID **and the display NAME for a custom
+        role** — so a custom role called ``admin`` answered the admin check. With no
+        permissions of its own it made its holder an admin everywhere this is asked, which
+        is every escalation guard in the panel: `_perms_grantable`, `_role_grantable` and
+        `_groups_grantable` all return True for an admin without looking further.
+
+        The built-in display names are renameable, and that is what opens it: while `Admin`
+        is the display name, `role_name_taken` refuses a custom role called `admin`
+        case-insensitively. Rename it — to `Administrador`, the first thing a Spanish
+        install does — and the name is free.
+
+        The legacy literal ``'admin'`` is still honoured, because early installs stored the
+        key rather than a UID in ``user['role']``; it is only accepted when no custom role
+        is keyed by it, so a row that took that id cannot inherit the meaning.
+        """
+        if not role_ref:
+            return False
+        if role_ref == BUILTIN_ROLE_UIDS.get('admin'):
+            return True
+        return role_ref == 'admin' and role_ref not in self._custom_roles
+
     def _is_admin_requester(self) -> bool:
         """True if the logged-in user is an admin — directly (role stored as the
-        admin UID or the legacy 'admin' name) or via membership in an enabled
+        admin UID or the legacy 'admin' key) or via membership in an enabled
         group mapped to the admin role.
 
         Single source for the admin check; previously each route group defined
@@ -79,13 +104,12 @@ class _PermissionsMixin:
         legacy-name cases).
         """
         user = self._users.get(session.get('username', '')) or {}
-        role = user.get('role', '')
-        admin_uid = self._role_name_to_uid('admin')
-        if role == admin_uid or self._uid_to_role_name(role) == 'admin':
+        if self._is_admin_role(user.get('role', '')):
             return True
         for g_ref in user.get('groups', []):
             g = self._groups.get(g_ref)
-            if g and g.get('enabled', True) and admin_uid in (g.get('roles') or []):
+            if g and g.get('enabled', True) and any(
+                    self._is_admin_role(r) for r in (g.get('roles') or [])):
                 return True
         return False
 

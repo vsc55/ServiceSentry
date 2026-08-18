@@ -29,15 +29,6 @@ def register(app, wa):
     users_edit_req   = wa._perm_required('users_edit')
     users_delete_req = wa._perm_required('users_delete')
 
-    def _role_is_admin(role_val: str) -> bool:
-        """Return True if *role_val* (UID or name) resolves to the admin role."""
-        admin_uid = wa._role_name_to_uid('admin')
-        if role_val == admin_uid:
-            return True
-        if wa._is_uid(role_val):
-            return wa._uid_to_role_name(role_val) == 'admin'
-        return role_val == 'admin'
-
     def _role_to_uid(role_val: str) -> str:
         """Return the UID for a role value (UID or name). Falls back to val itself."""
         if wa._is_uid(role_val):
@@ -185,9 +176,11 @@ def register(app, wa):
         # Role-hierarchy guard: only admins may edit other admin accounts.
         # A user with users_edit on a custom/operator role must not be able to
         # change the role, password, or settings of any admin user.
-        requester         = wa._users.get(session.get('username', '')) or {}
-        is_admin_requester = _role_is_admin(requester.get('role', ''))
-        if not is_admin_requester and _role_is_admin(user.get('role', '')):
+        # `_is_admin_requester()` and not the stored role alone: an account that is an
+        # administrator through a group is an administrator, and the copy that read only
+        # `user['role']` is the same divergence that method was written to end.
+        is_admin_requester = wa._is_admin_requester()
+        if not is_admin_requester and users_svc.user_is_admin(user, wa._groups):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         # A non-admin may only assign a role whose permissions they hold (blocks granting
         # the admin role OR any higher-privilege custom role to another account).
@@ -260,16 +253,16 @@ def register(app, wa):
             return jsonify({'error': wa._t('user_not_found')}), 404
         if username == session.get('username'):
             return jsonify({'error': wa._t('cannot_delete_self')}), 400
-        requester     = wa._users.get(session.get('username', '')) or {}
-        requester_uid = requester.get('role', '')
-        target_role   = wa._users[username].get('role', '')
-        if not _role_is_admin(requester_uid) and _role_is_admin(target_role):
+        # Administrator means "by role OR through a group", which is what the panel means
+        # everywhere else and what the built-in Administrators group is for. Counting only
+        # direct roles left group-derived admins unprotected: on an install where that is
+        # how admins are made, they could be deleted one after another until none was left.
+        target = wa._users[username]
+        if (not wa._is_admin_requester()
+                and users_svc.user_is_admin(target, wa._groups)):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
-        if _role_is_admin(target_role):
-            admin_count = sum(
-                1 for u in wa._users.values() if _role_is_admin(u.get('role', ''))
-            )
-            if admin_count <= 1:
+        if users_svc.user_is_admin(target, wa._groups):
+            if users_svc.count_admins(wa._users, wa._groups) <= 1:
                 return jsonify({'error': wa._t('must_have_admin')}), 400
         wa._revoke_user_sessions(username)
         del wa._users[username]

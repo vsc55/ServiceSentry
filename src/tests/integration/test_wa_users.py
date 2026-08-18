@@ -715,3 +715,53 @@ class TestServiceAccountsCannotSignIn:
             wrong = c2.post('/login', data={'username': 'svc', 'password': 'nope'},
                             follow_redirects=True)
             assert r.data == wrong.data
+
+
+class TestAnAdminByGroupIsAnAdmin:
+    """Found by audit, 2026-08-15. Every last-administrator guard counted admins **by their
+    own role**, while the panel makes an administrator either way — the built-in
+    *Administrators* group exists for exactly that. On an installation where admin is granted
+    through a group, none of those accounts was protected: the role hierarchy let a mere
+    `users_delete` holder remove them, and the "there must be one admin" counters never saw
+    them at all.
+
+    Both halves are checked here: that the hierarchy guard now recognises them, and that the
+    guard still lets a real admin do the work.
+    """
+
+    @staticmethod
+    def _seed(admin):
+        from werkzeug.security import generate_password_hash    # noqa: PLC0415
+        admin_uid = admin._role_name_to_uid('admin')
+        viewer_uid = admin._role_name_to_uid('viewer') or 'viewer'
+        admin._groups['g-adm'] = {'uid': 'g-adm', 'name': 'Admins',
+                                  'roles': [admin_uid], 'enabled': True}
+        admin._custom_roles['r-op'] = {
+            'uid': 'r-op', 'name': 'Operador', 'enabled': True,
+            'permissions': ['users_view', 'users_edit', 'users_delete'],
+        }
+        admin._users['ana'] = {
+            'uid': 'u-ana', 'role': viewer_uid, 'groups': ['g-adm'], 'enabled': True,
+            'password_hash': generate_password_hash('x')}
+        admin._users['op'] = {
+            'uid': 'u-op', 'role': 'r-op', 'groups': [], 'enabled': True,
+            'password_hash': generate_password_hash('opsecret')}
+        admin.app.config['TESTING'] = True
+        c = admin.app.test_client()
+        c.post('/login', data={'username': 'op', 'password': 'opsecret'},
+               follow_redirects=True)
+        return c
+
+    def test_a_users_delete_holder_cannot_delete_an_admin_by_group(self, admin):
+        c = self._seed(admin)
+        assert c.delete('/api/v1/users/ana').status_code == 403
+        assert 'ana' in admin._users
+
+    def test_nor_edit_one(self, admin):
+        c = self._seed(admin)
+        assert c.put('/api/v1/users/ana', json={'display_name': 'x'}).status_code == 403
+
+    def test_a_real_admin_still_can(self, client, admin):
+        self._seed(admin)
+        _login(client)
+        assert client.delete('/api/v1/users/ana').status_code == 200

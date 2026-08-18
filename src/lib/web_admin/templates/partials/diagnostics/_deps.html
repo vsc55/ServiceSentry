@@ -197,8 +197,11 @@ function _dgLatestCell(x) {
 function _dgVulnCell(x) {
     if (!x || !_dgRemote || !_dgRemote.vulnsOk) return `<span class="text-muted">—</span>`;
     if (!x.vuln_count) return `<span class="text-muted">0</span>`;
+    // The PIN opens it, not the name. The same package can be on screen twice at two versions —
+    // this process's and another container's — and each has its own advisories: opening by name
+    // showed whichever row came first, under a heading naming the version that was clicked.
     return `<button type="button" class="badge text-bg-danger border-0 ss-help"
-        onclick="_dgShowVulns('${escAttr(x.name)}')"
+        onclick="_dgShowVulns('${escAttr(x.name)}', '${escAttr(x.installed || '')}')"
         title="${escAttr(t('diag_deps_vulns_open'))}">${x.vuln_count}</button>`;
 }
 

@@ -17,11 +17,17 @@ Routes registered by this file:
 from flask import jsonify, session
 
 from lib.core.groups import service as groups_svc
+from lib.core.users import service as users_svc
 from lib.core.constants import BUILTIN_GROUP_UID_SET, BUILTIN_ROLE_UIDS, SYSTEM_USER
 from lib.web_admin.constants import home_page_ids
 
 
 def register(app, wa):
+
+    def _carries_admin(group) -> bool:
+        """Does this group hand its members the built-in admin role?"""
+        return any(wa._is_admin_role(r) for r in ((group or {}).get('roles') or []))
+
     groups_view_req   = wa._perm_required('groups_view')
     groups_add_req    = wa._perm_required('groups_add')
     groups_edit_req   = wa._perm_required('groups_edit')
@@ -120,8 +126,10 @@ def register(app, wa):
         if err:
             return err
         group = wa._groups[uid]
-        current_role_names = [wa._uid_to_role_name(r) or r for r in group.get('roles', [])]
-        if not is_admin_req and 'admin' in current_role_names:
+        # Decided on the role UID, not on a display name: `_uid_to_role_name` answers with a
+        # CUSTOM role's own name, so this comparison used to be answerable by a role that
+        # merely calls itself `admin` (see `_is_admin_role`).
+        if not is_admin_req and _carries_admin(group):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         if not is_admin_req and not all(
                 wa._role_grantable(_normalize_role_uid(r) or r)
@@ -150,7 +158,24 @@ def register(app, wa):
     @app.route('/api/v1/groups/<uid>', methods=['DELETE'])
     @groups_delete_req
     def api_delete_group(uid: str):
-        """Delete a group and remove it from all users (via the shared core service)."""
+        """Delete a group and remove it from all users (via the shared core service).
+
+        The same requester-context guard the PUT above carries, for a reason found by audit
+        on 2026-08-15: it was on the smaller action only. A non-admin refused permission to
+        *edit* a group carrying the admin role could *delete* it — which strips that role
+        from every member at once, and is how an installation whose admins are made through
+        a group ends up with none.
+        """
+        group = wa._groups.get(uid) or {}
+        if not wa._is_admin_requester() and _carries_admin(group):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # And the integrity rule, which binds admins too: whoever asks, the installation may
+        # not be left without an administrator. Counted against the map WITHOUT this group,
+        # which is exactly what the deletion does to every member's effective role.
+        if _carries_admin(group):
+            rest = {k: v for k, v in wa._groups.items() if k != uid}
+            if users_svc.count_admins(wa._users, rest) < 1:
+                return jsonify({'error': wa._t('must_have_admin')}), 400
         label = wa._groups.get(uid, {}).get('name', uid)
         try:
             affected = groups_svc.delete_group(wa._groups, wa._users, uid)

@@ -123,35 +123,3 @@ def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, 
     return out
 
 
-def cap_audit_lists(detail: dict, max_items: int) -> dict:
-    """Bound every list a module put in its audit entry, in one place.
-
-    A module's ``audit_detail`` hook decides WHAT is worth recording; how much of it one
-    entry may hold is not its call.  The detail is stored as JSON in a single row and
-    painted whole when the entry is opened, and what a module lists is unbounded by
-    anything — the SNMP MIB import names every file it fetched, and a large repository has
-    hundreds.  Without a ceiling here every module would have to remember one, and they
-    would each pick a different number.
-
-    Honours ``web_admin|audit_detail_max_items``, the same setting the database-maintenance
-    entry uses, and says what it dropped: a list silently cut at N reads as a complete list
-    of N, which is worse than no list at all.  ``max_items=0`` drops the lists and keeps
-    everything else — the counts and the summary line are what say the action ran.
-
-    Returns a new dict; the caller's is untouched.
-    """
-    try:
-        cap = max(0, int(max_items))
-    except (TypeError, ValueError):
-        return dict(detail)
-    out = {}
-    for key, val in (detail or {}).items():
-        if not isinstance(val, list):
-            out[key] = val
-            continue
-        if not cap:
-            continue
-        out[key] = val[:cap]
-        if len(val) > cap:
-            out[f'{key}_truncated'] = len(val) - cap
-    return out

@@ -323,3 +323,35 @@ class TestEveryPermissionIsExplainedToTheAdmin:
         known = set(self._flags())
         stale = [k for k in es_ES.LANG['permission_labels'] if k not in known]
         assert not stale, f'labels for permissions that do not exist: {stale}'
+
+
+class TestTheBuiltinRoleKeysAreReservedNames:
+    """A custom role may not be NAMED after a built-in role key.
+
+    Second lock on the escalation found by audit on 2026-08-15: several checks compared a
+    role against the literal `admin`, so a custom role carrying that name was mistaken for
+    the built-in one. Those checks now decide on the UID — and this makes sure the name
+    never reaches the store either, because the two locks fail differently: one is a rule
+    somebody can reintroduce while refactoring, the other is a row that already exists.
+
+    It held by accident before: `Admin` is the built-in display name and the comparison is
+    case-insensitive. The panel lets that name be changed, and then it did not hold.
+    """
+
+    def test_the_keys_are_refused_whatever_the_display_names_are(self):
+        from lib.core.roles import service as roles_svc
+        for key in ('admin', 'editor', 'viewer', 'none'):
+            assert roles_svc.role_name_taken(key, {}, {}), key
+            assert roles_svc.role_name_taken(key.upper(), {}, {}), key
+
+    def test_renaming_the_builtin_does_not_free_its_key(self):
+        """The precondition of the escalation: rename `Admin` and the name `admin` used to
+        become available, because only the DISPLAY names were compared."""
+        from lib.core.roles import service as roles_svc
+        renamed = {'admin': 'Administrador', 'editor': 'Editor', 'viewer': 'Lector',
+                   'none': 'Ninguno'}
+        assert roles_svc.role_name_taken('admin', {}, renamed)
+
+    def test_an_ordinary_name_is_still_free(self):
+        from lib.core.roles import service as roles_svc
+        assert not roles_svc.role_name_taken('Auditoría', {}, {})

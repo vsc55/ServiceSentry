@@ -1,7 +1,7 @@
 {# ================================================================
    Utility functions: uid, deepClone, escaping, path helpers,
    collapse toggle, humanizeKey, fieldLabel, modulePrettyName, moduleIcon,
-   copyToClipboard.
+   copyToClipboard, fmtBytes.
    ================================================================ #}
 
 // ──────────────────────────── Utilities ───────────────────────────
@@ -898,4 +898,18 @@ function _copyToClipboard(text) {
     } else {
         showToast(t('copy_failed'), 'danger');
     }
+}
+
+/** Bytes as a person reads them, in 1024s like the server's own `fmt_bytes`.
+ *
+ *  One home, because there were two identical copies of it — `_bkBytes` in the backup
+ *  retention screen and `_dgBytes` in diagnostics — and a size formatter that exists twice is
+ *  two answers waiting to disagree about the same disk. Most sizes arrive already formatted
+ *  from the server; this is for the ones computed in the browser. */
+function fmtBytes(n) {
+    let v = Number(n) || 0;
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
 }

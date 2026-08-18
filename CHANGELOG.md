@@ -8,6 +8,155 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.78] - 2026-08-16
+
+### Security
+- **A custom role NAMED `admin` was treated as the admin role.** `_is_admin_requester()`
+  asked `_uid_to_role_name(role) == 'admin'`, and that method returns the built-in KEY for a
+  built-in UID and the **display name** for a custom role — so a role called `admin`, with an
+  empty permission list, answered the admin check. That answer is worth everything:
+  `_perms_grantable`, `_role_grantable` and `_groups_grantable` all return True for an admin
+  without looking further, so it clears every escalation guard at once. The way in is two
+  **delegable** grants — `roles_add` to mint the role, `users_edit` to assign it — and neither
+  is the admin role.
+  - What kept it shut was an accident: while the built-in role is displayed as `Admin`, the
+    name `admin` is taken case-insensitively. The panel lets built-in roles be renamed, and
+    `Administrador` — the first thing a Spanish install does — frees it.
+  - Fixed at the decision: `_is_admin_role(role_ref)` compares the **UID**, and accepts the
+    legacy `'admin'` key only while no custom role is keyed by it. `_is_admin_requester` and
+    the users routes' own copy both call it.
+  - Second lock, because the two fail differently: `role_name_taken()` now reserves the
+    built-in keys (`admin`, `editor`, `viewer`, `none`) as names whatever the display names
+    say. One is a rule a refactor can break again; the other is a row that never exists.
+- **The section-page gate resolved permissions from `session['role']`**, which holds a display
+  name, and got both directions wrong: a **custom** role resolved to no permissions at all —
+  its holder bounced off a section their role grants — while a role named `admin` matched the
+  built-in key and collected the entire admin set. It now asks `_get_session_permissions()`,
+  the resolution every other gate uses.
+- **An administrator by GROUP was not counted as an administrator.** The panel grants admin
+  two ways — the account's own role, or membership of a group carrying the admin role, which
+  is what the built-in *Administrators* group is for — and every last-administrator guard
+  asked only the first. So on an installation that grants admin through a group, none of
+  those accounts was protected: a `users_delete` holder could remove them, and the "there
+  must be one admin" counters never saw them, so they could be demoted, disabled and deleted
+  one after another until the panel had no administrator at all.
+  - `users_svc.user_is_admin(user, groups)` and `count_admins(users, groups)` answer it the
+    way the panel defines it (a disabled group grants nothing, here as everywhere), and the
+    four guards go through them: `set_role`, `set_enabled`, `update_user` and the delete
+    route. The CLI passes its own group map.
+  - The users routes' role-hierarchy guard now calls `_is_admin_requester()` instead of
+    reading `requester['role']` — the same divergence that method exists to end — and the
+    local wrapper that duplicated the admin check is gone.
+- **Deleting a group that carries the admin role had no requester guard**, while editing the
+  same group had one. Measured with the two requests back to back as the same non-admin
+  `groups_delete` holder: `PUT → 403`, `DELETE → 200`, and every member's group list emptied.
+  Deleting is the bigger action — it strips that role from all of them at once — and it was
+  the unguarded one.
+  - The same guard now applies, decided on the role UID; and an integrity rule that binds
+    admins too: a deletion that would leave the installation with **no administrator** is
+    refused, counted against the group map without that group, which is what the deletion
+    does to every member.
+  - The group-edit guard stops comparing display names (`'admin' in current_role_names`) and
+    asks `_is_admin_role` as well.
+- **A host-bound check was authorized by where it LANDS, not by where it comes from.** The
+  module save authorizes item by item, and a check bound to a host is authorized with that
+  host's permission — read from the new item only. Adding and removing have one binding;
+  a **modification** has two, and only the destination was checked. With `server.mine.edit`
+  as the sole permission: moving another host's check onto mine → allowed; moving mine onto
+  theirs → denied; editing theirs in place → denied. So the one permission whose purpose is
+  to confine somebody to their own machines was also the one write that reached outside
+  them — and the damage lands on the other host, which quietly stops being monitored.
+  - Both bindings are now resolved separately: an add authorizes the destination, a removal
+    the origin, and a modification **both** when they differ. A global `servers_edit` holder
+    may still move a check between hosts, which is what a permission not confined to one
+    host means.
+- **A guard for a fail-open default**: `widget_allowed` treats an Overview widget that
+  declares no permission gate as open to any logged-in user, and the gate is declared by the
+  widget itself — core or module. All 22 shipped widgets declare one, so nothing is wrong
+  today; the next one to forget would be readable by everybody with nothing to say so. The
+  default is deliberately left alone (changing it would blank a module's card mid-upgrade
+  with no explanation) and a test now names any widget that arrives without a gate.
+- Thirty regression tests, and the ones that could be pinned to the old behaviour were each
+  validated by reintroducing it.
+
+### Added
+- **Webhooks and Microsoft Teams are marked BETA on their own configuration card.** Both
+  deliver, and both are short of validations the older channels have — so the badge is the
+  honest state rather than a note in a document nobody opens while configuring. Declared once
+  (`beta: True` on the card in `lib/config/layout.py`) and drawn by `cfgCardOpen`, the single
+  function every card opens with, so the two bespoke renderers inherit it without being told
+  and leaving beta is one line in one file. What has to be closed before the badge comes off
+  is written down in `docs/ref-pendiente.md`, not left as a feeling.
+  - Adding it pushed `cfg/_render.html` past its size guard. The answer was not a shorter
+    comment: the card's chrome — open, close, badge — moved to `cfg/_card.html`, which is
+    what that guard asks for when a section shell grows.
+
+### Fixed
+- **A package only another container runs was asked about under one name and answered under
+  another.** `elsewhere_rows` compares canonically (PEP 503) so the same package is not asked
+  about twice — and it also *reported* the canonical name, while the screen joins that answer
+  back onto the instance's own package list by name and version, where the name is spelt as
+  that process publishes it. Eight of the packages installed here differ between the two
+  forms (`PyYAML`, `typing_extensions`, `CacheControl`…), so those rows were asked about,
+  answered, and then drawn with an empty "Latest" and no CVEs — indistinguishable from a
+  package with nothing to report, which is the failure the whole list exists to prevent.
+  Compared canonically, reported as spelt over there; two tests, the first validated by
+  reintroducing the bug.
+- **The advisories of one package at two versions were the same advisories.** The dependency
+  check asks about three lists, and the third exists precisely to carry what only ANOTHER
+  container runs — including a different version of a package this process also has. The
+  answer came back keyed by NAME, so the second `urllib3` overwrote the first; and since the
+  other containers' list is asked last, what overwrote this process's own row was always
+  somebody else's. A clean 2.2.1 was drawn carrying 1.26.0's advisory, and the reverse — the
+  vulnerable one reported clean because a newer container answered after it — is the same bug
+  with the worse ending. The reasoning for keying by name and version was already written into
+  the route (which splits its "behind" counters that way) and into the browser (which keys the
+  answer by pin); the one step between them did not.
+  - `vulnerabilities()` answers `by_pin` and `check()` reads it by pin. The totals go with it:
+    `vuln_total` and `vuln_packages` are now DISTINCT advisories and packages rather than sums
+    over the rows, so one flaw affecting two versions of one package is one finding — which is
+    the complaint `collapse_aliases` exists for, arriving by the other door.
+  - The click was still by name: opening the count on either row showed whichever came first,
+    under a heading naming the version that was clicked. It carries the pin now, and an
+    advisory names each package once instead of listing "urllib3, urllib3".
+  - Five regression tests, all validated by reintroducing the behaviour.
+- **A rootless Podman container reported itself as bare metal.** Podman writes
+  `/run/.containerenv` and not Docker's marker, and under cgroup v2 the cgroup line inside the
+  container is a bare `0::/` that names no runtime — both signals this looked for, missing. It
+  is the row the rest of the page is read against: a path that "exists" is inside an image that
+  may be recreated tomorrow, and free disk is the layer's and not the host's.
+- **PyPI was asked twice for one package** whenever two containers ran two versions of it.
+  "What is the newest release" has one answer for both rows.
+
+### Removed
+- **Dead code found by an audit sweep**: `notify.registry.get_channel`,
+  `core.users.service.set_groups`, `providers.oidc.auth.OidcUnavailableError` (defined,
+  never raised) and `watchfuls.m365._parse._csv_count` — each named exactly once in the whole
+  tree, at its own definition.
+- **A verbatim second copy of `cap_audit_lists`** in `core/modules/service.py`, docstring
+  included — the one the routes and the tests use lives in `core/modules/actions.py`, whose
+  module docstring already claimed it. A function whose own documentation says "in one place"
+  existed in two.
+
+### Changed
+- **The dependency check walks `site-packages` once instead of three times.** Working out what
+  only the other processes run means subtracting what this one runs — the same full walk of
+  every installed distribution the route had just done twice to build the two lists it is
+  subtracted from. The route hands them over; the fallback that computes them is kept for
+  every other caller.
+- `_grade()` answers the same five keys whether or not the advisory record could be read. A
+  dict whose shape depends on the request working is one the reader has to test twice, and the
+  half that forgets reads a missing `published` as "computed by us" — which is precisely the
+  claim that screen must not make on its own.
+- **One `fmtBytes` in `core/_utils.html`** instead of `_bkBytes` and `_dgBytes`, which were
+  character-for-character identical in the backup and diagnostics screens. A size formatter
+  that exists twice is two answers waiting to disagree about the same disk.
+- `docs/ref-pendiente.md` records what the audit found and did NOT act on, with the reason:
+  the route `register()` functions that have grown into the file (six of them over 290 lines,
+  entraid at 646), and the 474 i18n keys that no code names literally — mostly built by
+  concatenation, so any pruning before that list is separated is pruning blind.
+
+
 ## [0.0.1+build.77] - 2026-08-15
 
 ### Fixed

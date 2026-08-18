@@ -1,0 +1,39 @@
+{# ================================================================
+   The chrome of a configuration card: how one is opened, closed, and what it
+   says about itself.
+
+   Its own partial because `_render.html` is a section SHELL with a size limit, and this is
+   not part of the rendering flow — it is what every card is made of. Two kinds of card call
+   it: the generic ones the shell builds from the layout, and the bespoke renderers, which
+   receive `cfgCardOpen`/`cfgCardClose` as arguments. Top-level declarations, so both get the
+   same one (function declarations hoist across the single script bundle; `cfgCardClose` is a
+   const, which is why this file is included BEFORE the renderer that reads it).
+   ================================================================ #}
+
+/** The BETA badge of a card, read from the layout registry by the card's own id.
+ *
+ *  Resolved HERE, inside the one function every card opens with, so a bespoke renderer
+ *  gets it without being told: `beta: True` on the card in `lib/config/layout.py` is the
+ *  whole declaration, and the day a channel leaves beta it is one line in one file. The
+ *  DOM id is `cfgcol_<card id>`, which is the same pairing the index navigates by. */
+function _cfgBetaBadge(domId) {
+    const cid = String(domId || '').replace(/^cfgcol_/, '');
+    const card = ((CONFIG_LAYOUT && CONFIG_LAYOUT.cards) || []).find(c => c.id === cid);
+    if (!card || !card.beta) return '';
+    return `<span class="badge text-bg-warning ms-2 ss-help align-middle"
+                  title="${escAttr(t('cfg_beta_tt'))}">${esc(t('cfg_beta'))}</span>`;
+}
+
+function cfgCardOpen(id, icon, title) {
+    return `<div class="cfg-card">
+        <div class="ss-sheet-head">
+            <div class="cfg-sheet-titlerow">
+                <span class="cfg-sheet-title">${icon}${esc(title)}${_cfgBetaBadge(id)}</span>
+                <button type="button" class="cfg-sheet-count d-none" data-card="${escAttr(id)}"
+                        onclick="toggleConfigChangedOnly()"></button>
+            </div>
+            <div class="cfg-sheet-desc d-none" data-card="${escAttr(id)}"></div>
+        </div>
+        <div class="cfg-fields" id="${id}">`;
+}
+const cfgCardClose = `</div></div>`;

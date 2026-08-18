@@ -149,3 +149,60 @@ class TestCliCommands:
         d = str(tmp_path)
         assert _run('status', None, d) == 0
         assert _run('reload', None, d) == 0
+
+
+class TestTheLastAdminCanBeOneThroughAGroup:
+    """The data-side of the same audit finding (2026-08-15): the guards that refuse to leave
+    an installation without an administrator counted only accounts whose OWN role is admin.
+
+    These run against the service directly, which is where the counting lives — and where
+    the CLI reaches it too, with no session and no route in the way.
+    """
+
+    @staticmethod
+    def _install():
+        from lib.core.constants import BUILTIN_ROLE_UIDS
+        admin_uid = BUILTIN_ROLE_UIDS['admin']
+        viewer_uid = BUILTIN_ROLE_UIDS['viewer']
+        groups = {'g-adm': {'uid': 'g-adm', 'name': 'Admins',
+                            'roles': [admin_uid], 'enabled': True}}
+        users = {'ana': {'uid': 'u-ana', 'role': viewer_uid, 'groups': ['g-adm'],
+                         'enabled': True}}
+        return users, groups, viewer_uid
+
+    def test_it_counts_as_an_admin(self):
+        from lib.core.users import service as users_svc
+        users, groups, _ = self._install()
+        assert users_svc.user_is_admin(users['ana'], groups) is True
+        assert users_svc.count_admins(users, groups) == 1
+
+    def test_a_disabled_group_grants_nothing(self):
+        from lib.core.users import service as users_svc
+        users, groups, _ = self._install()
+        groups['g-adm']['enabled'] = False
+        assert users_svc.user_is_admin(users['ana'], groups) is False
+
+    def test_the_last_one_cannot_be_disabled(self):
+        from lib.core.users import service as users_svc
+        users, groups, _ = self._install()
+        with pytest.raises(users_svc.AdminOpError) as exc:
+            users_svc.set_enabled(users, 'ana', False, groups=groups)
+        assert exc.value.key == 'cannot_disable_last_admin'
+
+    def test_changing_the_role_of_a_group_admin_takes_nothing_away(self):
+        """The role is not where their admin comes from, so the guard must not fire."""
+        from lib.core.users import service as users_svc
+        from lib.core.constants import BUILTIN_ROLE_UIDS
+        users, groups, _ = self._install()
+        users_svc.set_role(users, 'ana', BUILTIN_ROLE_UIDS['editor'], {}, groups=groups)
+        assert users['ana']['role'] == BUILTIN_ROLE_UIDS['editor']
+        assert users_svc.count_admins(users, groups) == 1
+
+    def test_the_last_admin_by_role_still_cannot_be_demoted(self):
+        from lib.core.users import service as users_svc
+        from lib.core.constants import BUILTIN_ROLE_UIDS
+        users = {'root': {'uid': 'u-root', 'role': BUILTIN_ROLE_UIDS['admin'],
+                          'groups': [], 'enabled': True}}
+        with pytest.raises(users_svc.AdminOpError) as exc:
+            users_svc.set_role(users, 'root', BUILTIN_ROLE_UIDS['viewer'], {}, groups={})
+        assert exc.value.key == 'must_have_admin'

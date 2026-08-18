@@ -217,3 +217,58 @@ class TestFrontendWiring:
         _login(client)
         html = client.get('/admin').data.decode('utf-8', 'replace')
         assert 'window.SS_STANDALONE_PAGE = ""' in html
+
+
+class TestTheGateReadsTheStoredRole:
+    """Found by audit, 2026-08-15. The permission check resolved the section's permission
+    from ``session['role']``, which holds a DISPLAY NAME — the built-in key for a built-in
+    role, the role's own name for a custom one — and got both directions wrong at once:
+
+    * a **custom** role resolved to no permissions at all, so its holder was bounced off a
+      section their role explicitly grants (the `_custom_roles` map is keyed by UID, and a
+      name is not one);
+    * a role **named** `admin` matched the built-in key and collected the entire admin
+      permission set, which is the escalation the admin check had in its own form.
+
+    It now asks `_get_session_permissions()`, which reads the user record and merges their
+    groups — the same resolution every other gate in the panel uses.
+    """
+
+    # A UUID, because that is what `new_uid()` mints and the bug lives behind `_is_uid`:
+    # with a non-UUID id the login stores the id itself in the session and the old lookup
+    # found the role by accident. A test that cannot see the bug is not a guard.
+    ROLE_UID = '11111111-2222-3333-4444-555555555555'
+
+    @classmethod
+    def _user_with(cls, admin, username, perms, password='pass', role_name='Secciones'):
+        from werkzeug.security import generate_password_hash    # noqa: PLC0415
+        admin._custom_roles[cls.ROLE_UID] = {
+            'uid': cls.ROLE_UID, 'name': role_name,
+            'permissions': list(perms), 'enabled': True,
+        }
+        admin._users[username] = {
+            'uid': f'u-{username}', 'password_hash': generate_password_hash(password),
+            'role': cls.ROLE_UID, 'groups': [], 'enabled': True, 'display_name': username,
+        }
+        admin.app.config['TESTING'] = True
+        c = admin.app.test_client()
+        c.post('/login', data={'username': username, 'password': password},
+               follow_redirects=True)
+        return c
+
+    def test_a_custom_role_that_grants_the_section_opens_it(self, admin):
+        c = self._user_with(admin, 'nora', ['history_view'])
+        assert c.get('/history').status_code == 200
+
+    def test_a_custom_role_that_does_not_is_still_turned_away(self, admin):
+        c = self._user_with(admin, 'nick', ['history_view'])
+        resp = c.get('/syslog')
+        assert resp.status_code in (301, 302)
+
+    def test_a_role_named_admin_does_not_collect_the_admin_set(self, admin):
+        # Named BEFORE the login, because the session takes the name at that moment: the
+        # exploit is a person logging in with the role already minted, not one renamed
+        # under a session that is already open.
+        c = self._user_with(admin, 'mallory3', [], role_name='admin')
+        resp = c.get('/syslog')
+        assert resp.status_code in (301, 302), 'a role NAMED admin is not the admin role'

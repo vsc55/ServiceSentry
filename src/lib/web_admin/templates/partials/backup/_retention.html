@@ -126,7 +126,7 @@ function _bkPolicyWords(rules) {
         .map(([n, suffix]) => n + suffix);
     if (!bits.length) return t('backup_keep_all');
     const cap = Number(rules.max_size) || 0;
-    return bits.join(' + ') + (cap ? ' · ≤ ' + _bkBytes(cap) : '');
+    return bits.join(' + ') + (cap ? ' · ≤ ' + fmtBytes(cap) : '');
 }
 
 /** The line under a task's name in the list: the rules that ACTUALLY apply to it, named by
@@ -177,19 +177,9 @@ async function _tkPreviewNow() {
         <div>${esc(t('backup_preview_keep')
                     .replace('{}', (d.keep || []).length)
                     .replace('{}', d.total)
-                    .replace('{}', _bkBytes(d.keep_bytes)))}</div>
+                    .replace('{}', fmtBytes(d.keep_bytes)))}</div>
         ${gone ? `<details class="mt-1"><summary>${esc(t('backup_preview_delete')
                         .replace('{}', gone))}</summary>${rows}</details>` : ''}
     </div>`;
 }
 
-/** Bytes as a person reads them. The server formats the sizes it sends; this one is a sum
- *  computed there and formatted here, so it counts in 1024s like `fmt_bytes` does — the two
- *  disagreeing would print a different size for the same set of files. */
-function _bkBytes(n) {
-    let v = Number(n) || 0;
-    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-    let i = 0;
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
-}

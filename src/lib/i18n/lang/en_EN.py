@@ -404,6 +404,8 @@ LANG = {
     'diag_inst_packages_unchecked': 'Press "Check versions and CVEs" on the dependency card to see the newest version and the advisories here too: it covers what these containers run.',
     'diag_inst_packages_lead': 'Everything that instance runs. Code version: {}.',
     'diag_deps_unpinned_short': 'outside the lock',
+    'cfg_beta': 'BETA',
+    'cfg_beta_tt': 'Still being tested: it delivers, but it is short of validations the other channels have. Use it knowing that — and report what breaks.',
     'diag_inst_pkg_note': 'Notes',
     'diag_inst_col_here': 'This process',
     'diag_inst_col_there': 'That instance',
