@@ -371,6 +371,16 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('ldap|use_ssl', bool, False),
     Cfg('ldap|ssl_verify', bool, True),   # validate the LDAPS server certificate (MITM guard)
     Cfg('ldap|fallback_to_local', bool, True),
+    # Does this directory already ask for a second factor of its own? When it does, asking
+    # again here is friction with no gain — the account proved two things before the panel
+    # ever saw it. Default False, which is the conservative direction: the panel keeps asking
+    # for what it can verify itself until an operator says the IdP is doing it.
+    #
+    # It skips BOTH halves for sign-ins through this provider — the code step and the forced
+    # enrolment — because both exist to establish the same fact, and the IdP has established
+    # it. A factor the account enrolled here stays enrolled and is still asked for on a LOCAL
+    # sign-in; trusting a provider is a statement about that door, not about the account.
+    Cfg('ldap|mfa_trusted', bool, False, admin_only=True, no_rule=True),
     Cfg('ldap|allow_email_login', bool, False),
     Cfg('ldap|port', int, 389, min=1, max=65535),
     Cfg('ldap|timeout', int, 5, min=1, max=60),
@@ -391,6 +401,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ OIDC ═════════════════════════════════════════════════════════════════
     Cfg('oidc|enabled', bool, False),
     Cfg('oidc|auto_create_users', bool, True),
+    Cfg('oidc|mfa_trusted', bool, False, admin_only=True, no_rule=True),
     Cfg('oidc|group_role_map', dict, '{}'),
     Cfg('oidc|group_display_names', dict),
     Cfg('oidc|provider_url', str, '', no_rule=True),
@@ -415,6 +426,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ SAML2 ════════════════════════════════════════════════════════════════
     Cfg('saml2|enabled', bool, False),
     Cfg('saml2|auto_create_users', bool, True),
+    Cfg('saml2|mfa_trusted', bool, False, admin_only=True, no_rule=True),
     Cfg('saml2|group_role_map', dict, '{}'),
     Cfg('saml2|group_display_names', dict),
     Cfg('saml2|sp_entity_id', str, '', no_rule=True),

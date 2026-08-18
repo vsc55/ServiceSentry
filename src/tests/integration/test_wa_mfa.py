@@ -361,3 +361,65 @@ class TestRequiringIt:
         res = client.put('/api/v1/config', json={'web_admin': {'mfa_required': 'sometimes'}})
         assert res.status_code >= 400
         assert admin._mfa_policy() == 'off'
+
+
+class TestTrustingADirectoryThatAlreadyAsks:
+    """Phase three. "Does this IdP enforce MFA" is a fact about somebody else's system that
+    only its operator can state, so it is a switch per provider rather than a rule here.
+
+    Trusting one is a statement about that DOOR, not about the account: the same person using
+    their password still meets the panel's own policy."""
+
+    def _trust(self, admin, section, value=True):
+        cfg = admin._read_config_file(admin._CONFIG_FILE) or {}
+        cfg.setdefault(section, {})['mfa_trusted'] = value
+        admin._write_config(cfg)
+
+    def test_untrusted_by_default(self, admin):
+        """The conservative direction: the panel keeps asking for what it can verify itself
+        until an operator says the directory is doing it."""
+        for source in ('ldap', 'oidc', 'saml2'):
+            assert admin._mfa_provider_trusted(source) is False
+
+    @pytest.mark.parametrize('source', ['ldap', 'oidc', 'saml2'])
+    def test_a_trusted_provider_skips_both_halves(self, admin, source):
+        """The code step AND the forced enrolment: both exist to establish the same fact, and
+        the directory established it."""
+        _enrol(admin)
+        _set_policy(admin, 'all')
+        self._trust(admin, source)
+        assert admin._mfa_required('admin', source) is False
+        assert admin._mfa_must_enrol('admin', source) is False
+
+    def test_it_says_nothing_about_a_local_sign_in(self, admin, client):
+        """Somebody who also has a password here still meets the panel's own policy when they
+        use it — otherwise trusting one directory would quietly disarm every other door."""
+        secret, _codes = _enrol(admin)
+        self._trust(admin, 'oidc')
+        assert admin._mfa_required('admin', 'local') is True
+        _login(client)
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+        assert _post_mfa(client, _code(secret)).status_code == 302
+
+    def test_trusting_one_does_not_trust_the_others(self, admin):
+        _enrol(admin)
+        self._trust(admin, 'ldap')
+        assert admin._mfa_required('admin', 'ldap') is False
+        for other in ('oidc', 'saml2'):
+            assert admin._mfa_required('admin', other) is True
+
+    def test_a_source_with_no_section_is_never_trusted(self, admin):
+        """A Teams tab sign-in has no config section of its own, so there is nowhere to say
+        it enforces MFA — and the answer to "no setting" is the safe one."""
+        _enrol(admin)
+        for source in ('entraid', 'local', '', 'made-up'):
+            assert admin._mfa_provider_trusted(source) is False
+            assert admin._mfa_required('admin', source) is True
+
+    def test_turning_the_trust_back_off_asks_again(self, admin):
+        _enrol(admin)
+        self._trust(admin, 'oidc')
+        assert admin._mfa_required('admin', 'oidc') is False
+        self._trust(admin, 'oidc', False)
+        assert admin._mfa_required('admin', 'oidc') is True

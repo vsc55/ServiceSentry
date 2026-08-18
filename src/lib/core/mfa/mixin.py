@@ -98,6 +98,28 @@ class _MfaMixin:
         user = self._users.get(str(username or '')) or {}
         return bool(user) and users_svc.user_is_admin(user, self._groups)
 
+    # Which config section backs which sign-in source. Only the three that HAVE one: a Teams
+    # tab sign-in (`entraid`) has no section of its own, so it is never trusted — the safe
+    # direction, and the panel asks for what it can verify itself.
+    _TRUSTED_SECTIONS = {'ldap': 'ldap', 'oidc': 'oidc', 'saml2': 'saml2'}
+
+    def _mfa_provider_trusted(self, source: str) -> bool:
+        """Has the operator said this directory already asks for a second factor?
+
+        When it has, asking again is friction with no gain: the account proved two things
+        before the panel ever saw it. It skips BOTH halves — the code step and the forced
+        enrolment — because both exist to establish the same fact and the IdP established it.
+
+        A local sign-in is never trusted, whatever any provider says. Trusting a provider is a
+        statement about that DOOR, not about the account: somebody who also has a password
+        here still meets the panel's own policy when they use it.
+        """
+        section = self._TRUSTED_SECTIONS.get(str(source or ''))
+        if not section:
+            return False
+        cfg = self._config_section(section) if hasattr(self, '_config_section') else {}
+        return bool((cfg or {}).get('mfa_trusted'))
+
     def _mfa_must_enrol(self, username: str, source: str = 'local') -> bool:
         """The policy covers this account and it has no factor — enrol on the way in.
 
@@ -105,7 +127,8 @@ class _MfaMixin:
         who has not enrolled yet, which on a fresh policy is everybody. The forced enrolment IS
         the way in, and it is what makes this safe to turn on.
         """
-        _ = source
+        if self._mfa_provider_trusted(source):
+            return False
         return self._mfa_policy_applies(username) and not self._mfa_enrolled(username)
 
     def _mfa_required(self, username: str, source: str = 'local') -> bool:
@@ -114,10 +137,12 @@ class _MfaMixin:
         An account with a factor always verifies it, whatever the policy says: turning the
         policy off must not silently stop honouring the ones people already set up.
 
-        *source* is already threaded through so that per-provider policy has one place to land:
-        an account that arrived through an IdP which enforces MFA itself should not be asked
-        twice, and that is a switch per provider rather than a rule written here.
+        Unless the sign-in came through a directory the operator has marked as already asking
+        for one. That is a switch per provider and not a rule written here, because "does this
+        IdP enforce MFA" is a fact about somebody else's system that only they can state.
         """
+        if self._mfa_provider_trusted(source):
+            return False
         return self._mfa_enrolled(username) or self._mfa_must_enrol(username, source)
 
     # ── The half-finished login ──────────────────────────────────────────────

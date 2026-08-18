@@ -117,12 +117,13 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
             'base_dn', 'user_filter',
             'email_attr', 'name_attr', 'username_attr', 'group_attr',
             'fallback_to_local', 'allow_email_login', 'auto_create_users',
+            'mfa_trusted',
         ],
         oidc: [
             'enabled', 'button_label',
             'provider_url', 'client_id', 'client_secret', 'scopes',
             'username_claim', 'email_claim', 'name_claim', 'groups_claim',
-            'auto_create_users',
+            'auto_create_users', 'mfa_trusted',
             // Client-secret lifecycle (secret_expires_at is shown read-only above —
             // the app writes it, it is not hand-edited).
             'secret_notify_expiry', 'secret_warn_days',
@@ -133,7 +134,7 @@ function _renderAuthSection(sec, data, cfgId, lbl, cfgCardOpen, cfgCardClose) {
             'idp_entity_id', 'idp_sso_url', 'idp_cert',
             'sp_key', 'sp_cert',   // sp_entity_id / sp_acs_url shown read-only above
             'username_attr', 'email_attr', 'name_attr', 'groups_attr',
-            'auto_create_users',
+            'auto_create_users', 'mfa_trusted',
         ],
     };
     if (_FIELD_ORDER[sec]) {

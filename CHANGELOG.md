@@ -8,6 +8,27 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.81] - 2026-08-18
+
+### Added
+- **`ldap|mfa_trusted`, `oidc|mfa_trusted`, `saml2|mfa_trusted` — "this directory already
+  requires MFA".** Where it does, asking again is friction with no gain: the account proved two
+  things before the panel ever saw it. It is a switch per provider and not a rule in the code,
+  because whether an IdP enforces MFA is a fact about somebody else's system that only its
+  operator can state.
+  - **Off by default**, which is the conservative direction: the panel keeps asking for what it
+    can verify itself until an operator says the directory is doing it.
+  - Trusting one skips **both halves** for sign-ins through it — the code step and the forced
+    enrolment — because both exist to establish the same fact.
+  - It says nothing about a **local** sign-in. Trusting a provider is a statement about that
+    door, not about the account: somebody who also has a password here still meets the panel's
+    own policy when they use it, or trusting one directory would quietly disarm every other.
+  - A sign-in source with no config section of its own — the Microsoft Teams tab — is never
+    trusted. There is nowhere to say it enforces MFA, and the answer to "no setting" is the
+    safe one.
+  - Eight tests, including the two that would matter if this were got backwards: trusting one
+    provider does not trust the others, and turning the trust back off asks again.
+
 ## [0.0.1+build.80] - 2026-08-18
 
 ### Added
