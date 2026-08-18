@@ -7244,3 +7244,40 @@ código verifica, la petición es anónima **por no tener sesión**.
 | `TestResettingSomebodyElses::*` (4) | Detrás de su propio permiso, que no tiene nadie por defecto (es también lo que haría un atacante con `users_edit` para quitar la protección antes de ir a por la contraseña); un administrador puede retirarlo y la cuenta vuelve a entrar solo con contraseña; **se lleva los códigos de recuperación con él**; y retirárselo a quien no tiene contesta que no lo tiene |
 | `TestRequiringIt::*` (9) | La política (`web_admin\|mfa_required`: `off` / `admins` / `all`). Lo que importa es que **activarla no deja fuera a nadie**: quien le aplique y no tenga factor lo configura *al entrar*, que es la única razón por la que una política así se puede encender con nadie dado de alta. `admins` cuenta a quien lo sea **por grupo** —preguntar solo por el rol propio es el fallo que la auditoría de agosto encontró en otras cuatro guardas—; un factor ya configurado se sigue exigiendo aunque la política se apague; la pantalla de alta **no acuña un secreto para quien ya tiene uno** (si no, una contraseña sola reemplazaría un factor que funciona); una política que **no se puede honrar** —sin clave de cifrado— cede ella en vez de la instalación; y un valor que no es uno de los tres se rechaza al guardar, porque almacenado se leería como «ninguno de los que compruebo», que falla ABIERTO |
 | `TestTrustingADirectoryThatAlreadyAsks::*` (8) | Fase 3: `ldap\|oidc\|saml2` pueden declarar `mfa_trusted` — «este directorio ya lo exige». **Sin confiar por defecto**, que es la dirección conservadora: el panel sigue pidiendo lo que puede verificar él hasta que un operador diga que lo hace el directorio. Confiar salta **las dos mitades** —el código y el alta obligatoria—, porque ambas existen para establecer el mismo hecho y el IdP lo estableció. Y no dice nada de un inicio de sesión **local**: quien además tenga contraseña aquí sigue cumpliendo la política del panel al usarla, o confiar en un directorio desarmaría en silencio todas las demás puertas. Confiar en uno no confía en los otros, una fuente sin sección (la pestaña de Teams) **nunca** se confía, y quitar la confianza vuelve a pedirlo |
+
+---
+
+## 156. WebAuthn: las dos piezas que hay que escribir antes de tocar el navegador
+
+**Archivo:** `tests/unit/test_mfa_cbor.py` — 57 tests
+**Archivo:** `tests/unit/test_mfa_cose.py` — 23 tests
+
+WebAuthn habla **CBOR**: el objeto de atestación es uno, y la clave pública de la credencial es
+otro anidado dentro de una cadena de bytes del primero. No hay librería de CBOR en el proyecto
+y meter una para leer dos estructuras no compensaba —el mismo razonamiento que el codificador
+de QR—, así que se escriben y se validan igual: contra lo que publica la norma.
+
+`cbor.py` es **solo decodificación** (el navegador lo manda y el servidor lo lee; un codificador
+serían cien líneas que solo ejecutarían los tests) y se prueba contra la tabla del **Apéndice A
+del RFC 8949**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTableTheRfcPrints::*` (32) | Las entradas de la tabla que importan: enteros en todos los anchos, negativos (`-1 - n`), cadenas de bytes y de texto, arrays, mapas anidados y los tres valores simples. Y que un negativo **no** se lee como su magnitud: las claves COSE usan etiquetas negativas (`-1`, `-2`, `-3`) para el material de la clave, así que equivocar el signo buscaría el campo equivocado en vez de fallar |
+| `TestItRefusesWhatTheCanonicalFormDoesNotUse::*` (6) | WebAuthn exige la forma **definida** (CTAP2 §6). Aceptar también la de longitud indefinida sería aceptar dos codificaciones del mismo valor, que es cómo una firma se calcula sobre una y se comprueba contra la otra. Una clave repetida se **rechaza** en vez de resolverse —las dos codificaciones discrepan sobre lo que dice el mapa, y elegir una es elegir por quien lo mandó— y los bytes sobrantes de un documento completo son un error |
+| `TestItSaysHowMuchItConsumed::*` (3) | Los datos del autenticador llevan la clave pública como CBOR **seguido** de las extensiones, así que dónde termina la clave es una pregunta con respuesta; un parser que ignora lo que viene detrás no distingue una clave de una clave con algo pegado |
+| `TestEveryMalformedInputIsARefusalAndNotACrash::*` (16) | Corre en la ruta de login sobre bytes que compuso otro: truncados, reservados, texto que no es UTF-8, un campo de longitud que pide un gigabyte **antes de reservar memoria**, y anidamiento profundo acotado —unos pocos bytes de `[[[[…` están si no a un límite de recursión de ser una denegación de servicio en la única ruta alcanzable sin sesión— |
+
+`cose.py` convierte el mapa de etiquetas enteras que devuelve el autenticador en un objeto de
+clave que `cryptography` puede verificar. **No hay tabla publicada** contra la que contrastarlo
+como en los dos casos anteriores, así que los vectores están **fabricados**: se genera un par
+real, se exporta al mapa COSE que mandaría un autenticador, y su firma se comprueba a través de
+este módulo. Es un viaje de ida y vuelta y el fichero lo dice — lo que prueba es que las
+etiquetas se leen con los números que les da la norma, que es la mitad que produce en silencio
+un «firma inválida» para todos los usuarios cuando está mal.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheThreeAlgorithmsAuthenticatorsActuallySend::*` (7) | ES256 (todas las llaves de seguridad), RS256 (lo que produjo Windows Hello durante años y lo que sigue mandando mucho hardware instalado) y EdDSA. Ida y vuelta de los tres, más que una firma sobre otros datos o de otra clave **no** verifica |
+| `TestTheAlgorithmIsTheOneRegistered::*` (3) | Lo que **no** es un viaje de ida y vuelta y es lo que más importa: el algoritmo es el que se guardó al **registrar**, nunca el que la clave declara cuando llega la aserción. Una clave que elige su propio algoritmo al verificar es el fallo del `alg` de JWT con otras palabras. Una clave que discrepa de lo registrado se rechaza; un algoritmo no soportado se rechaza en vez de adivinarse (uno que no se puede comprobar es uno cuya firma habría que creerse); y una clave sin etiqueta `alg` se acepta bajo el registrado, porque no todos los autenticadores la rellenan |
+| `TestAKeyThatIsNotOneIsRefused::*` (13) | Formas que no son una clave COSE, curva o tipo equivocados para el algoritmo, coordenadas del tamaño o tipo equivocados, un módulo RSA **lo bastante pequeño como para factorizarlo** (lo eligió el autenticador, así que el suelo se comprueba en vez de suponerse), y que `verify` no lanza nunca: cada forma de fallar tiene que verse igual desde fuera |

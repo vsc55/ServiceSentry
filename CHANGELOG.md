@@ -8,6 +8,31 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.82] - 2026-08-18
+
+### Added
+- **The two pieces WebAuthn needs before any of it can touch a browser**, both written here
+  because there is no CBOR library in this project and adding one to read two structures was
+  not a trade worth making — the same reasoning as the QR encoder, and the same discipline:
+  checked against what the standard publishes rather than against themselves.
+  - `lib/core/mfa/cbor.py` — decoding only, against RFC 8949's own Appendix A table. It
+    **refuses the indefinite-length form** WebAuthn's canonical encoding does not use, because
+    accepting two encodings of one value is how a signature comes to be computed over one and
+    checked against the other; it refuses a repeated map key rather than picking one for
+    whoever sent it; and it **says how much it consumed**, since the credential's public key is
+    CBOR followed by extensions and a parser that ignores the remainder cannot tell a key from
+    a key with something appended.
+  - `lib/core/mfa/cose.py` — the authenticator's key map as something `cryptography` can verify
+    with: ES256, RS256 and EdDSA, and nothing else guessed at. **The algorithm is the one
+    recorded at registration, never the one the key claims when the assertion arrives** — a key
+    that picks its own is the JWT `alg` flaw with different words. An RSA modulus below 2048
+    bits is refused: the authenticator chose the size, so the floor is checked rather than
+    assumed.
+  - 82 tests. The CBOR ones sit on a published table; the COSE ones are an honest round trip
+    (a real key pair exported into the COSE map an authenticator would send) and the file says
+    so, because what they prove is that the labels are read as the standard numbers them —
+    the half that silently produces "invalid signature" for every user when it is wrong.
+
 ## [0.0.1+build.81] - 2026-08-18
 
 ### Added
