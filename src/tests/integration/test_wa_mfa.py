@@ -483,3 +483,43 @@ class TestWhereASecurityKeyWouldBeRegistered:
         assert out['ok'] is True and out['proxy_warning'] is True
         admin._PROXY_COUNT = 1
         assert admin._webauthn_scope()['proxy_warning'] is False
+
+
+class TestTheUsersTableSaysWhoHasOne:
+    """A column read at a glance down forty rows, so "which of these is unprotected" is a
+    question the screen answers instead of one an admin has to open forty modals for."""
+
+    def test_the_listing_reports_it_per_account(self, admin, client):
+        _login(client)
+        body = client.get('/api/v1/users').get_json()
+        assert body['admin']['mfa'] is False
+        _enrol(admin)
+        body = client.get('/api/v1/users').get_json()
+        assert body['admin']['mfa'] is True
+
+    def test_it_is_a_boolean_and_carries_nothing_else(self, admin, client):
+        """The users list has no business knowing WHICH kind of factor, let alone anything
+        about it."""
+        _login(client)                       # sign in FIRST: enrolling parks the next one
+        secret, _codes = _enrol(admin)
+        blob = str(client.get('/api/v1/users').get_json()['admin'])
+        assert secret not in blob and 'credential' not in blob and 'recovery' not in blob
+
+    def test_a_store_that_cannot_answer_leaves_the_column_empty_rather_than_failing(
+            self, admin, client, monkeypatch):
+        """The users table is not the place an MFA problem takes the page down."""
+        _login(client)
+        _enrol(admin)
+        def _boom():
+            raise RuntimeError('database gone')
+        monkeypatch.setattr(admin._mfa_store, 'enrolled_user_uids', _boom)
+        res = client.get('/api/v1/users')
+        assert res.status_code == 200 and res.get_json()['admin']['mfa'] is False
+
+    def test_resetting_from_the_admin_screen_clears_the_column(self, admin, client):
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(secret))
+        uid = admin._users['admin']['uid']
+        assert client.delete(f'/api/v1/users/{uid}/mfa').status_code == 200
+        assert client.get('/api/v1/users').get_json()['admin']['mfa'] is False

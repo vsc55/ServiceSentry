@@ -73,6 +73,28 @@
                                 <label class="form-label small fw-semibold">{{ i18n.landing_page }}</label>
                                 <select class="form-select form-select-sm" id="umLandingPage"></select>
                             </div>
+                            {# The second factor sits in the half of this row that was already
+                               empty, rather than on a line of its own: it is one badge and one
+                               button, and a full-width band for that pushed everything below it
+                               down a row for nothing.
+
+                               Shown only when editing an existing account that HAS one, and
+                               only to a holder of `mfa_reset_others` — hidden rather than
+                               disabled, because a control nobody can use is noise on a modal
+                               that already has four tabs. There is no counterpart that turns it
+                               ON for somebody else: only the owner can enrol an authenticator
+                               they are holding, and a button implying otherwise would be a lie
+                               about what an administrator can do. #}
+                            <div class="col-sm-6 d-none" id="umMfaGroup">
+                                <label class="form-label small fw-semibold">{{ i18n.mfa_section }}</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge text-bg-success"><i class="bi bi-shield-check me-1"></i>{{ i18n.mfa_state_on }}</span>
+                                    <button type="button" class="btn btn-sm btn-warning" id="umMfaReset"
+                                            onclick="_umResetMfa()">
+                                        <i class="bi bi-shield-slash me-1"></i>{{ i18n.mfa_reset_other }}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
                             <div class="col-sm-6">

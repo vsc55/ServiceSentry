@@ -242,6 +242,14 @@ async function openUserModal(username, mode = 'edit') {
         _umSessionsSortDir = 'desc';
         _umRenderSessions(username);                // toggles umSessionsGroup visibility
     }
+    // The second factor row: only for a real account that HAS one, and only for somebody who
+    // may take it off. Hidden rather than disabled — a control nobody can use is noise on a
+    // modal that already has four tabs.
+    const _umMfa = document.getElementById('umMfaGroup');
+    if (_umMfa) {
+        _umMfa.classList.toggle('d-none',
+            isNew || !u.mfa || !(currentUser.permissions || []).includes('mfa_reset_others'));
+    }
 
     document.getElementById('umRoleSearch').value = '';
     document.getElementById('umGroupSearch').value = '';
@@ -357,4 +365,29 @@ async function saveUserModal() {
     bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
     renderUsers();
     renderGroups();
+}
+
+
+/** Take another account's second factor off.
+ *
+ *  Confirmed first, and the confirmation says what it COSTS rather than asking "are you sure":
+ *  that account goes back to signing in with its password alone until it sets a new one up.
+ *  There is no counterpart that turns MFA on for somebody else — only the owner can enrol an
+ *  authenticator they are holding. */
+function _umResetMfa() {
+    const username = _editingUser;
+    const u = (username && usersData[username]) || {};
+    if (!u.uid) return;
+    showConfirmModal(t('mfa_reset_other_q').replace('{}', username), async () => {
+        const res = await apiDelete(`/api/v1/users/${encodeURIComponent(u.uid)}/mfa`);
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(t('mfa_reset_other_ok'), 'success');
+        u.mfa = false;
+        document.getElementById('umMfaGroup')?.classList.add('d-none');
+        // The list carries the column, so it has to hear about this too.
+        if (typeof renderUsers === 'function') renderUsers();
+    });
 }

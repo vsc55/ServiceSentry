@@ -4482,7 +4482,7 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 | `TestOpensLikeTheOtherPages::test_user_menu_opens_it_spa_on_every_url` | Se abre igual desde cualquier URL |
 | `TestDarkModeMovedToUserMenu::*` (2) | El control de modo oscuro ya no está ni en la página ni en el panel |
 
-**Archivo:** `tests/meta/test_wa_partials_convention.py` — 15 tests
+**Archivo:** `tests/meta/test_wa_partials_convention.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -7223,7 +7223,7 @@ por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta
 
 ## 155. Segundo factor: el escalón que pone delante de un login
 
-**Archivo:** `tests/integration/test_wa_mfa.py` — 46 tests
+**Archivo:** `tests/integration/test_wa_mfa.py` — 50 tests
 
 Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
 lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
@@ -7245,6 +7245,7 @@ código verifica, la petición es anónima **por no tener sesión**.
 | `TestRequiringIt::*` (9) | La política (`web_admin\|mfa_required`: `off` / `admins` / `all`). Lo que importa es que **activarla no deja fuera a nadie**: quien le aplique y no tenga factor lo configura *al entrar*, que es la única razón por la que una política así se puede encender con nadie dado de alta. `admins` cuenta a quien lo sea **por grupo** —preguntar solo por el rol propio es el fallo que la auditoría de agosto encontró en otras cuatro guardas—; un factor ya configurado se sigue exigiendo aunque la política se apague; la pantalla de alta **no acuña un secreto para quien ya tiene uno** (si no, una contraseña sola reemplazaría un factor que funciona); una política que **no se puede honrar** —sin clave de cifrado— cede ella en vez de la instalación; y un valor que no es uno de los tres se rechaza al guardar, porque almacenado se leería como «ninguno de los que compruebo», que falla ABIERTO |
 | `TestTrustingADirectoryThatAlreadyAsks::*` (8) | Fase 3: `ldap\|oidc\|saml2` pueden declarar `mfa_trusted` — «este directorio ya lo exige». **Sin confiar por defecto**, que es la dirección conservadora: el panel sigue pidiendo lo que puede verificar él hasta que un operador diga que lo hace el directorio. Confiar salta **las dos mitades** —el código y el alta obligatoria—, porque ambas existen para establecer el mismo hecho y el IdP lo estableció. Y no dice nada de un inicio de sesión **local**: quien además tenga contraseña aquí sigue cumpliendo la política del panel al usarla, o confiar en un directorio desarmaría en silencio todas las demás puertas. Confiar en uno no confía en los otros, una fuente sin sección (la pestaña de Teams) **nunca** se confía, y quitar la confianza vuelve a pedirlo |
 | `TestWhereASecurityKeyWouldBeRegistered::*` (8) | Dónde se registrarían las llaves de seguridad. El navegador ata una credencial al RP ID y **no se puede mover**, así que registrar contra una suposición produce una llave que en silencio no vuelve a funcionar: sin `public_url`, con una IP, o en HTTP plano **no se ofrece** —negarse aquí es una explicación en vez de un error opaco del navegador—. El escape `webauthn_rp_id` permite atarlas a un dominio padre, y se rechaza si el origen no cuelga de él (el navegador lo rechazaría, que es peor sitio para enterarse). Un proxy que el panel no está leyendo es un **aviso y no un rechazo**: la ceremonia funcionaría, lo que se rompe antes es la cookie de sesión, y culpar a WebAuthn mandaría a alguien al ajuste equivocado |
+| `TestTheUsersTableSaysWhoHasOne::*` (4) | La columna MFA de la tabla de usuarios: **una sola consulta** para toda la tabla (el store responde un conjunto de uids justo para que cuarenta cuentas no sean cuarenta viajes), un **booleano y nada más** —la lista de usuarios no tiene por qué saber de qué tipo es el factor, mucho menos nada sobre él—, un store que no puede contestar deja la columna en «no» en vez de tumbar la página, y restablecer desde la pantalla de admin la limpia |
 
 ---
 

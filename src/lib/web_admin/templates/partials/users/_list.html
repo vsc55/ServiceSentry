@@ -33,6 +33,7 @@ const _USR_COLS = [
     { id: 'display_name', label: () => t('col_display_name')||'Display Name',       sortKey: 'display_name', always: false },
     { id: 'role',         label: () => t('col_role'),                              sortKey: 'role',         always: false },
     { id: 'sessions',     label: () => t('col_sessions'),                          sortKey: 'sessions',     always: false, resizable: false },
+    { id: 'mfa',          label: () => t('mfa_col'),                                sortKey: 'mfa',          always: false, resizable: false },
     ..._META_TAIL,
 ];
 const _USERS_DEFAULT_COLS = new Set(['display_name', 'role', 'sessions']);
@@ -116,7 +117,8 @@ createListTable({
     key: 'users', containerId: 'users-container', tableId: 'users-table',
     accent: 'amber', icon: 'bi-people', title: () => t('user_management'),
     columns: _USR_COLS, defaultVisible: _USERS_DEFAULT_COLS,
-    thClass: { role: 'text-center', sessions: 'text-center ss-th-narrow' },
+    thClass: { role: 'text-center', sessions: 'text-center ss-th-narrow',
+               mfa: 'text-center ss-th-narrow' },
     persist: true, clearLabelKey: 'subtab_users',
     // Filter strip (shared design — see createListTable's spec.filters). `q` searches the
     // two name columns at once, since which one a user is looking for is not worth a choice.
@@ -167,6 +169,7 @@ createListTable({
             case 'display_name': return (usersData[uname].display_name || uname).toLowerCase();
             case 'role':         return usersData[uname].role || 'viewer';
             case 'sessions':     return ctx.sessionCounts[uname] || 0;
+            case 'mfa':          return (usersData[uname] || {}).mfa ? 1 : 0;
             default:             return uname.toLowerCase();
         }
     },
@@ -201,6 +204,16 @@ createListTable({
                 return `<td class="text-center text-nowrap">${sc > 0
                     ? `<span class="badge bg-primary bg-opacity-75 rounded-pill">${sc}</span>`
                     : `<span class="text-muted small">—</span>`}</td>`;
+            }
+            case 'mfa': {
+                // A tick or a dash, never colour alone: this is a column read at a glance
+                // down forty rows, and "which of these is unprotected" has to survive a
+                // colour-vision deficiency. The title says it in words.
+                const on = !!u.mfa;
+                return `<td class="text-center text-nowrap"><span class="ss-help ${
+                    on ? 'text-success' : 'text-muted'}" title="${escAttr(
+                    on ? t('mfa_state_on') : t('mfa_state_off'))}"><i class="bi ${
+                    on ? 'bi-shield-check' : 'bi-shield-slash'}"></i></span></td>`;
             }
             default: return '<td></td>';
         }

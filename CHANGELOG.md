@@ -8,6 +8,41 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.86] - 2026-08-18
+
+### Added
+- **An MFA column in the users table.** "Which of these accounts is unprotected" is a question
+  the screen answers now, instead of one an administrator opens forty modals for. It is a tick
+  or a dash with the state in its tooltip — never colour alone, because it is read at a glance
+  down a long list and has to survive a colour-vision deficiency.
+  - **One query for the whole table.** The store answers a set of uids precisely so a page of
+    forty accounts does not become forty round trips, and a store that cannot answer leaves the
+    column reading "no" rather than taking the page down with it.
+  - A boolean and nothing else: the users list has no business knowing which KIND of factor an
+    account has, let alone anything about it.
+- **Resetting somebody's second factor from Admin › System › Edit user.** Shown only for an
+  existing account that HAS one and only to a holder of `mfa_reset_others` — hidden rather than
+  disabled, because a control nobody can use is noise on a modal that already has four tabs.
+  - The confirmation says what it COSTS rather than asking whether you are sure: that account
+    goes back to signing in with its password alone until it sets a new one up.
+  - There is no counterpart that turns MFA on for somebody else. Only the owner can enrol an
+    authenticator they are holding, and a button implying otherwise would be a lie about what
+    an administrator can do.
+
+### Fixed
+- **The account page showed "not set up" for an account that HAS a second factor**, and the
+  Set-up button then failed. One mistake with two symptoms: `apiGet` answers the parsed BODY
+  while `apiPost`/`apiDelete` answer `{status, data}`, and reading `.data` off the GET yielded
+  `undefined`, so the card fell to its default and the button posted an enrolment the server
+  correctly refused with 409. Neither symptom said what was wrong — which is the argument for
+  the guard rather than the one-line fix: `tests/meta/test_wa_partials_convention.py` now
+  refuses `.data` read straight off an awaited `apiGet` anywhere in the templates, and checks
+  the two helpers still have the shapes it assumes so it becomes wrong rather than merely
+  unnecessary if they change. Validated by reintroducing the bug.
+  - `r.data` after an `apiGet` stays legal where the endpoint genuinely returns a body with a
+    `data` key — `/api/v1/modules/page/<m>` does — so the guard matches only the form that
+    cannot be right.
+
 ## [0.0.1+build.85] - 2026-08-18
 
 ### Added

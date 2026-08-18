@@ -18,8 +18,13 @@
 let _accMfa = null;
 
 async function _accMfaLoad() {
-    const res = await apiGet('/api/v1/account/mfa');
-    _accMfa = (res && res.data) || {enrolled: false, pending: false, recovery_left: 0};
+    // `apiGet` answers the parsed BODY; `apiPost`/`apiDelete` answer `{status, data}`. Two
+    // shapes in one module, and reading the wrong one here did not fail loudly — it fell to
+    // the default, so an account with a factor was drawn as "not set up" and the button then
+    // POSTed an enrolment the server correctly refused with 409. One mistake, two symptoms,
+    // and neither of them said what was wrong.
+    const body = await apiGet('/api/v1/account/mfa');
+    _accMfa = body || {enrolled: false, pending: false, recovery_left: 0};
     _accMfaDraw();
 }
 
