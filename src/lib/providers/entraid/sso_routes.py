@@ -17,7 +17,7 @@ Routes registered by this file:
     POST /auth/msteams/sso       validate a Teams SSO token → establish a session
 """
 
-from flask import jsonify, render_template
+from flask import jsonify, render_template, url_for
 
 from lib.debug import DebugLevel
 from lib.providers.entraid import tab_sso
@@ -117,7 +117,10 @@ def register(app, wa):
         if user.get('enabled') is False:
             return jsonify({'ok': False, 'error': wa._t('msteams_sso_no_user')}), 403
 
-        wa._establish_session(username, user)
+        # False means the account owes a second factor. This endpoint answers JSON to an
+        # embedded Teams tab, so it hands back the URL instead of redirecting.
+        if not wa._establish_session(username, user, source='entraid'):
+            return jsonify({'ok': True, 'redirect': url_for('login_mfa')})
         wa._audit('msteams_sso_login', detail={'user': username})
         wa._dbg(f"> Auth/Teams >> SSO session established user={username!r}", DebugLevel.info)
         return jsonify({'ok': True, 'redirect': wa._landing_url(user)})

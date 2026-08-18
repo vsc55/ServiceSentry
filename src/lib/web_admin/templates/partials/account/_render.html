@@ -58,6 +58,9 @@ function initAccountPage() {
                 `<option value="${escAttr(p.id)}">${esc(_homePageLabel(p))}</option>`).join('');
         _landSel.value = currentUser.pref_landing_page || '';
     }
+    // The second factor draws itself from the server — it is not a preference this form
+    // holds, and asking on open is what keeps the badge honest after a reset from elsewhere.
+    _accMfaLoad();
     document.getElementById('settingsPwCurrent').value = '';
     document.getElementById('settingsPwNew').value     = '';
     const spConf = document.getElementById('settingsPwConfirm');

@@ -5516,9 +5516,9 @@ página que se auto-refresca, un redibujado que pide datos además compite con s
 
 ## 117. Marcado que no hace lo que sugiere el nombre de la clase
 
-**Archivo:** `tests/meta/test_wa_css_traps.py` — 9 tests
+**Archivo:** `tests/meta/test_wa_css_traps.py` — 12 tests
 
-Tres trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
+Cuatro trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
 
 **Una clase que ignora el tema.** El panel se sirve en claro y oscuro y recuerda cuál elegiste, así que un componente que
 decide sus propios colores acierta la mitad de las veces. El que cayó fue una cabecera de
@@ -5568,6 +5568,20 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 | `TestATableCellStaysATableCell::test_no_cell_is_turned_into_a_flex_container` | **La segunda trampa**: `d-flex` en un `<td>` lo saca de `display:table-cell`, deja de contar para la altura de la fila y su borde se dibuja a la altura del contenido — el separador se parte justo en esa columna |
 
 ---
+
+**Un SVG sin tamaño llena lo que le den.** El QR se sirve con `viewBox` y **sin** `width` ni
+`height` a propósito —un cuadrado del tamaño que eligió el servidor es uno que no cabe en el
+móvil de alguien con el brazo estirado—, y el precio de esa decisión es que hereda su
+contenedor. Sin acotar, el contenedor es el diálogo entero: en `modal-lg` se dibujaba a 800px
+y empujaba la clave y el campo de confirmación fuera de vista, así que lo único que la pantalla
+existe para enseñar era lo único que no se veía. Reportado en pantalla, que es donde se
+encuentra siempre esta familia.
+
+La guarda es sobre la **clase** y no sobre el marcado, porque el arreglo tiene que valer para
+el siguiente sitio que enseñe uno: `.ss-qr` acota el ancho y lo hace con `min()` (un móvil más
+estrecho que el tope debe llevarse el ancho que tiene, no un cuadrado más ancho que el
+diálogo), `.ss-qr svg` le dice al SVG que lo tome, y ningún `${d.svg}` del árbol se dibuja sin
+la clase.
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
@@ -7162,3 +7176,69 @@ variable excusa un nombre que ya no significa nada.
 
 Validada por los dos lados quitando una variable del fichero (rojo, nombrándola) e inventando
 una que nadie lee (rojo también). Seis `def test_`, 73 al expandir los `parametrize`.
+
+---
+
+## 154. Segundo factor: la aritmética que decide quién entra
+
+**Archivo:** `tests/unit/test_mfa_totp.py` — 35 tests
+**Archivo:** `tests/unit/test_mfa_qr.py` — 53 tests
+
+Las dos piezas puras sobre las que se apoya el MFA, y las dos se prueban contra **números
+publicados fuera de este repositorio** en vez de contra sí mismas. Es la diferencia entre un
+test y un comentario: un TOTP que coincide consigo mismo no coincide con el teléfono de nadie.
+
+`totp.py` son treinta líneas de aritmética que deciden si alguien entra, y **RFC 6238 Apéndice B
+imprime una tabla** de códigos esperados para un secreto conocido en instantes conocidos. Esa
+tabla es la primera clase del fichero. El resto es lo que el RFC no cubre y de lo que vive o
+muere un login.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheNumbersTheRfcPublishes::*` (7) | Los seis instantes del Apéndice B, a ocho dígitos y a seis (el de seis es la última mitad del de ocho: el truncamiento es el mismo, el módulo no), y que el contador es `floor(unix/30)` — sin eso los vectores no son reproducibles |
+| `TestACodeIsGoodExactlyOnce::*` (3) | El verificador responde **el paso**, no un booleano: un código vive treinta segundos, así que uno leído por encima del hombro —o en una página de phishing— sirve hasta que caduca. El mismo código no vale dos veces, y **tampoco el anterior**, que es donde caería un replay del de hace medio minuto |
+| `TestTheClockToleranceIsOneStep::*` (5) | Un paso a cada lado y ni uno más: cero se lee como «esto está roto» en cualquier máquina medio minuto desfasada, y dos es un código válido durante minuto y medio |
+| `TestEverythingThatIsNotACodeSaysNo::*` (13) | Se llega desde un formulario de login, así que llega toda forma de disparate y **ninguna puede reventar**: vacío, letras, longitud equivocada, `None`. Y falla cerrado — un secreto ilegible no verifica nada, y el código correcto del secreto equivocado sigue siendo incorrecto |
+| `TestReadingASecretTheWayAPersonTypesIt::*` (3) | Minúsculas, espacios y relleno son el mismo secreto: la pantalla lo imprime en grupos de cuatro y alguien lo teclea así |
+| `TestTheLinkTheAppReads::*` (4) | El emisor va **dos veces** a propósito (en el prefijo de la etiqueta, que es lo que leen las apps anteriores a la especificación, y como parámetro, que es lo que define) o la entrada sale como un usuario suelto entre cuarenta; y una cuenta que es un correo sobrevive al viaje — `@` y `:` sin escapar en un segmento de ruta son cómo el enlace llega truncado al teléfono |
+
+`qr.py` es ISO/IEC 18004 escrito a mano porque **no hay ninguna librería de QR en el proyecto ni
+en el entorno**, así que nada se puede comparar contra una segunda implementación. Lo que sí se
+puede comparar es el ejemplo resuelto de la propia norma.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheArithmeticAgainstThePublishedExample::*` (3) | Los diez códigos de corrección que la norma imprime para los dieciséis de datos de su ejemplo (`01234567`, versión 1-M). Y que un byte cambiado cambia el resultado: un polinomio generador mal construido puede seguir devolviendo la **longitud** correcta |
+| `TestTheFormatInformation::*` (13) | Las ocho cadenas publicadas de quince bits para nivel L, que ninguna sale todo a cero (para eso existe la máscara XOR: un área sin escribir no puede leerse como una configuración válida) y que la información de versión lleva la versión en sus bits altos |
+| `TestTheCapacityTableAddsUp::*` (13) | La tabla está transcrita de la norma, y un error al copiarla da un símbolo del tamaño correcto con el número de códigos equivocado — que se lee como una cámara que no enfoca. Datos + corrección = el total de cada versión, la capacidad crece, se elige la versión **más pequeña** que quepa, y lo que no cabe es «ninguna versión» en vez de una excepción |
+| `TestTheSymbolIsShapedLikeAQrCode::*` (10) | Cuadrado, los tres localizadores donde la norma los fija —y **el cuarto ángulo sin localizador**, que es cómo un lector deduce la orientación—, temporización alternando, el módulo oscuro fijo, patrones de alineación desde la versión 2, y que no sale todo de un color |
+| `TestEveryVersionRenders::*` (11) | Las diez versiones, cada una con su estructura de bloques —que es la parte que difiere— y el entrelazado devolviendo el recuento completo de códigos |
+| `TestTheSvg::*` (4) | Autocontenido, con `viewBox` y **sin `width`** (un QR al tamaño que eligió el servidor es uno que no cabe en el móvil de alguien con el brazo estirado), zona de silencio de cuatro módulos, y **nada de la carga llega al marcado**: se construye sólo con enteros, que es lo que permite meterlo en la página como HTML |
+
+Lo que ningún test hace es **acercar un móvil a la pantalla**. Por eso el alta no se fía de esto:
+el secreto en base32 se imprime al lado, y el factor no se enciende hasta que un código generado
+por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta.
+
+---
+
+## 155. Segundo factor: el escalón que pone delante de un login
+
+**Archivo:** `tests/integration/test_wa_mfa.py` — 21 tests
+
+Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
+lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
+
+La propiedad sobre la que descansa todo, y la primera clase del fichero: un inicio de sesión que
+debe un segundo factor **no es una sesión**. Ni fila en la tabla de sesiones, ni `logged_in`, ni
+nada que `_login_required` deje pasar. La alternativa evidente —crear la sesión y marcarla— le
+entrega una sesión real y utilizable por API a quien tenga la contraseña, y hace a cada puerta
+del panel responsable de recordar un campo más. Aquí no hay nada que recordar: hasta que el
+código verifica, la petición es anónima **por no tener sesión**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestAPasswordAloneStopsBeingEnough::*` (5) | Sin factor, nada cambia —lo que permite desplegarlo en una instalación que no ha oído hablar de esto—; con factor, la contraseña aterriza en el segundo paso sin crear sesión; **el aparcamiento no es sesión** (`/api/v1/me` y `/api/v1/users` siguen rechazando y la tabla de sesiones sigue vacía); el código correcto termina, el incorrecto no |
+| `TestTheSecondStepCannotBeWalkedAround::*` (4) | La página exige un inicio aparcado (llegar a la URL a pelo es el login, no una pista de qué falta); un código sin nada aparcado no concede nada; **el código se comprueba contra la cuenta que está a medias**, no contra quien tenga uno que verifique; y una cuenta deshabilitada entre las dos mitades no entra — esto es la segunda mitad de una autenticación, así que relee en vez de fiarse de lo que vio la primera |
+| `TestACodeIsSpentWhenItIsUsed::*` (3) | El mismo código no abre una segunda sesión (treinta segundos es mucho tiempo para tener el código de otro), un código de recuperación sirve una vez, y usar uno deja los otros |
+| `TestManagingYourOwn::*` (5) | El estado **nunca lleva el secreto**, ni siquiera cifrado; darse de alta dos veces se rechaza (sobrescribir en silencio un factor que funciona desde una sesión prestada es el ataque entero que este endpoint sería); y desactivarlo o regenerar los códigos **exigen un código actual** — una sesión es exactamente lo que tiene un atacante que ha robado una |
+| `TestResettingSomebodyElses::*` (4) | Detrás de su propio permiso, que no tiene nadie por defecto (es también lo que haría un atacante con `users_edit` para quitar la protección antes de ir a por la contraseña); un administrador puede retirarlo y la cuenta vuelve a entrar solo con contraseña; **se lleva los códigos de recuperación con él**; y retirárselo a quien no tiene contesta que no lo tiene |

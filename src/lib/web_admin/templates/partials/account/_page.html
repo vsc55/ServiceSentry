@@ -57,6 +57,20 @@
         </div>
     </div>
 
+    {# Two-factor authentication. Its own card, below the password and above the buttons:
+       it is not a preference that the Save button writes — every action here talks to the
+       server on its own, because each one either creates a secret or asks for a code. A
+       field in this form would have made "Save" mean two very different things. #}
+    <div class="card mb-3">
+        <div class="card-header py-2 fw-semibold d-flex align-items-center">
+            <i class="bi bi-shield-check me-1"></i>{{ i18n.mfa_section }}
+            <span class="ms-auto" id="accMfaState"></span>
+        </div>
+        <div class="card-body" id="accMfaBody">
+            <div class="text-muted small">{{ i18n.mfa_desc }}</div>
+        </div>
+    </div>
+
     <div class="d-flex justify-content-end gap-2">
         <button type="button" class="btn btn-sm btn-secondary" onclick="_accountCancel()" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
         <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk" onclick="saveAccountPreferences()" title="{{ i18n.save }}">

@@ -388,6 +388,31 @@
    table body wants none of it, which is why this is a separate class and not part of
    .ss-vscroll. */
 .ss-scroll-pad { padding: .75rem .5rem 1rem 0; }
+/* .ss-qr : a QR code drawn to be READ OFF A SCREEN, not to fill one.
+   The SVG is deliberately shipped with a viewBox and no width or height — a square sized by
+   the server is one that does not fit somebody's phone at arm's length — which means it
+   inherits its box, and an unconstrained box is the whole modal. Capped here rather than on
+   the element so every place that shows one agrees, and in `min()` so a narrow phone gets the
+   width it has instead of a square wider than the dialog.
+   `background:#fff` because the modules are drawn black on the SVG's own white ground: in dark
+   mode a transparent surround would put a dark frame around a light square, which is exactly
+   the contrast a camera fails on. */
+.ss-qr {
+    width: min(15rem, 100%);
+    margin-inline: auto;
+    background: #fff;
+    padding: .5rem;
+    border-radius: .375rem;
+}
+.ss-qr svg { display: block; width: 100%; height: auto; }
+/* .ss-secret : a shared secret meant to be typed into a phone. It breaks between the groups
+   of four it is printed in — `break-all` would split a group and put half of it on the next
+   line, which is how somebody reads it back wrong. */
+.ss-secret {
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    line-height: 1.6;
+}
 /* .ss-bleed-top : a pinned header that belongs to the top EDGE of its section instead of
    floating inside the content padding. It cancels the content container's gutters and its
    top padding (.container-fluid pt-2 + .tab-content pt-1 = .75rem, guarded by

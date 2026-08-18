@@ -142,3 +142,21 @@ function showTableModal(title, columns, rows, lead, variant) {
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
     bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
 }
+
+// ──────────────────────────── Modal with a body the caller composed ──────
+// The fourth shape, and the one the other three cannot express: a modal with a CONTROL in
+// it — an input to type a code into, a button that acts on what was typed. `showInfoModal`
+// escapes its lead and `showTableModal` takes cells, both on purpose; neither can carry a
+// form, and building a bespoke modal per case is how a panel ends up with six of them that
+// look almost alike.
+//
+// The caller owns the escaping here — that is the trade, and it is why this is named for
+// what it does rather than looking like the safe ones. Everything passed in must already
+// have been through `esc()`, except markup the SERVER composed from values it controls.
+function showHtmlModal(title, html, variant) {
+    document.getElementById('infoModalTitle').textContent = title || '';
+    const cls = ['success', 'warning', 'danger', 'primary'].includes(variant) ? variant : 'primary';
+    document.getElementById('infoModalBody').innerHTML =
+        `<div class="ss-modal-${cls}">${html || ''}</div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+}

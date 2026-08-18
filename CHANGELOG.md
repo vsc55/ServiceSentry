@@ -8,6 +8,71 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.79] - 2026-08-16
+
+### Added
+- **Two-factor authentication for local accounts (TOTP)** — phase one: anybody can turn it on
+  from `/account`, nothing forces it yet, and an account that has not enrolled signs in exactly
+  as before. Which is what makes it safe to deploy on an installation that has never heard of
+  it.
+  - **RFC 6238 from the standard library** — `hmac`, `hashlib`, `struct`, `base64` and nothing
+    else. A dependency for thirty lines of arithmetic that has not changed since 2011 is a
+    dependency in a panel people install on segregated networks and count what it pulls in. It
+    is tested against the table of expected codes the RFC itself publishes (Appendix B), which
+    is the difference between a test and a comment: a TOTP that agrees with itself agrees with
+    nobody's phone.
+  - **A code is good exactly once.** The verifier answers the time STEP rather than a boolean,
+    and the step is stored, so a code read over a shoulder — or off a phishing page — stops
+    working the moment it is used instead of at the end of its thirty seconds. The counter
+    lives in the database because "already used" has to hold between processes: two web
+    replicas with a local counter each would accept the same code twice.
+  - **A QR code and the base32 key, always both.** There is no QR library in this project and
+    adding one to draw a square was not a trade worth making, so `lib/core/mfa/qr.py` is
+    ISO/IEC 18004 in two hundred lines (byte mode, level L, versions 1–10, smallest that
+    fits). It is checked against the error-correction codewords the standard prints for its
+    own worked example and the published table of format strings — but no test can hold a
+    phone up to a screen, so the key is printed beside the square and the factor is not
+    switched on until a code the app produced verifies. A wrong QR costs one manual entry.
+  - **Ten single-use recovery codes**, shown once, hashed with the account hasher — nothing
+    ever needs to read one back. Plus `main.py user mfa-reset <user>` on the machine, which is
+    the way back for somebody who lost the phone AND the codes; without it the last
+    administrator can lock the installation permanently.
+- **The half-finished sign-in is not a session.** A password accepted but not yet seconded
+  writes no session row and sets no `logged_in`; it is a short note in the signed cookie that
+  expires in five minutes. The alternative — create the session and flag it — hands a real,
+  API-usable session to whoever has the password and makes every gate responsible for one more
+  field. The check sits in `_establish_session`, the one place in the panel where a session is
+  born, so the three SSO callbacks inherit it rather than walking around it.
+- Its own tables (`mfa_factors`, `mfa_recovery`) and not a column on `users`: that record is
+  merged into what the users API serialises, so a TOTP seed there would be one
+  `GET /api/v1/users` away from everybody with `users_view`. The seed is encrypted at rest, and
+  **enrolment is refused outright when it cannot be** — the one place in this project that
+  will not fall back to plaintext, because a seed is a generator and one read out of a database
+  produces valid codes for as long as the factor exists.
+- `mfa_reset_others`, granted to nobody by default. Taking another account's factor off is the
+  supported way back in for a lost phone, and it is also what an attacker with `users_edit`
+  would do before going after the password.
+- `showHtmlModal` — the fourth dialog shape, for a modal with a CONTROL in it. The other three
+  cannot carry a form, and a bespoke modal per case is how a panel ends up with six that look
+  almost alike.
+- `.ss-qr` caps the square. The SVG ships with a `viewBox` and no width or height on purpose —
+  one sized by the server does not fit somebody's phone at arm's length — and the cost of that
+  is that it inherits its container. Unconstrained, the container is the dialog: at `modal-lg`
+  it drew 800px wide and pushed the key and the confirmation field below the fold, so the one
+  thing the screen exists to show was the one thing off it. Capped with `min()` so a narrow
+  phone gets the width it has rather than a square wider than the dialog, and guarded on the
+  class rather than the markup so the next place that shows one inherits the fix.
+
+### Fixed
+- **Secrets saved during the very first run of a fresh install were stored in clear text.**
+  `_get_fernet()` caches what it finds, the stores capture that value rather than the method,
+  and `_init_entity_store()` runs *before* `_create_app()` writes the key file — so on an
+  install with no `SS_SECRET_KEY` and no `.flask_secret` yet, the hosts, credentials and
+  (now) MFA stores were all built with no encryption. It corrected itself on the next restart,
+  which is exactly what kept it invisible: the only affected install is the one nobody has
+  restarted. The key is now minted before the stores are built. Found because MFA fails closed
+  rather than storing a seed in the clear, so it was the first store to report it.
+
 ## [0.0.1+build.78] - 2026-08-16
 
 ### Security

@@ -46,6 +46,11 @@ class _StoresMixin:
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Second factors and their recovery codes. Its own tables rather than a column on
+        # `users`: that record is merged into what the users API serialises, and a TOTP seed
+        # there would be one `GET /api/v1/users` away from everybody with `users_view`.
+        from lib.core.mfa.store import MfaStore  # noqa: PLC0415
+        self._mfa_store = MfaStore(self._db_connector, fernet=self._get_fernet())
         # Reusable named credentials (SSH identities referenced by hosts/checks).
         from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
         self._credentials_store = CredentialsStore(

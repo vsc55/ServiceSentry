@@ -235,9 +235,29 @@ class _AuthMixin:
             return notify_text(cfg, lang, key)
         return src.upper()
 
-    def _establish_session(self, username: str, user: dict, remember: bool = False) -> None:
+    def _establish_session(self, username: str, user: dict, remember: bool = False,
+                           source: str = 'local', second_factor_done: bool = False) -> bool:
         """Populate the Flask session after a successful authentication (local or any SSO
-        provider), reset the per-IP login throttle and forward an ``auth_login`` notification."""
+        provider), reset the per-IP login throttle and forward an ``auth_login`` notification.
+
+        Answers **True when a session now exists** and False when the sign-in still owes a
+        second factor — in which case nothing has been created: no row in the sessions table,
+        no ``logged_in``, nothing any gate accepts. The caller sends the browser to the second
+        step, and until it passes the request is anonymous by having no session rather than by
+        every gate remembering to check a flag.
+
+        The check lives HERE and not in the login route because this method is the only place
+        in the panel where a session is born — the local form and the OIDC, SAML and Entra
+        callbacks all end up on this line. A gate in the route would be a gate three providers
+        walk around.
+        """
+        # *second_factor_done* is the second step calling back in once the code verified — it
+        # is the ONE caller allowed to say so, and it says it explicitly rather than by
+        # passing a source value this method would have to recognise. Without it the check
+        # would fire again on the way through and park the sign-in it just finished.
+        if not second_factor_done and self._mfa_required(username, source):
+            self._mfa_hold(username, source, remember)
+            return False
         # A successful auth clears the per-IP login throttle (legit users on a shared
         # NAT are never penalised by earlier failures).
         rl = getattr(self, '_login_ratelimit', None)
@@ -281,3 +301,6 @@ class _AuthMixin:
         user_dm = user.get('dark_mode')
         if user_dm is not None:
             session['dark_mode'] = user_dm
+        # Whatever brought us here, the half-finished sign-in is over.
+        self._mfa_clear()
+        return True

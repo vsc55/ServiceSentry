@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} — {{ i18n.mfa_step_title }}{% endblock %}
+
+{# The second half of a sign-in. Its own page and not a second field on the login form,
+   because the password has already been accepted by the time this is drawn — and what has
+   NOT happened is a session: there is no row, no `logged_in`, and nothing here that a gate
+   would let through. The browser is anonymous until the code verifies.
+
+   One field, and it takes both kinds of answer: six digits from the app, or a recovery code.
+   Two boxes would make somebody choose which of their two problems they are having before
+   they are allowed to describe it. #}
+
+{% block body %}
+<div class="login-wrap">
+    <div class="card login-card shadow-sm">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <img src="/static/img/logo.png?v={{ asset_v }}" alt="{{ app_name }}"
+                     class="login-logo" width="640" height="427">
+            </div>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} py-2 small">{{ message }}</div>
+            {% endfor %}
+            {% endwith %}
+            <div class="small text-muted mb-3">
+                <i class="bi bi-shield-lock me-1"></i>{{ i18n.mfa_step_lead }}
+            </div>
+            <form method="post" action="/login/mfa">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold" for="mfaCode"
+                        >{{ i18n.mfa_step_code }}</label>
+                    {# `inputmode numeric` brings up the number pad on a phone without
+                       refusing the letters a recovery code has; `autocomplete one-time-code`
+                       is what makes iOS and Android offer the code from the notification.
+                       `autocomplete off` here would be a feature switched off by hand. #}
+                    <input type="text" name="code" id="mfaCode" class="form-control text-center"
+                           inputmode="numeric" autocomplete="one-time-code"
+                           autocapitalize="off" spellcheck="false"
+                           maxlength="16" required autofocus>
+                    <div class="form-text small">{{ i18n.mfa_step_hint }}</div>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">{{ i18n.mfa_step_verify }}</button>
+            </form>
+            {# The way out of a half-finished sign-in. A POST because it drops server state,
+               and the only thing on this page that is not the code. #}
+            <form method="post" action="/logout" class="mt-3 text-center">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-link btn-sm text-muted p-0"
+                    >{{ i18n.mfa_step_cancel }}</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

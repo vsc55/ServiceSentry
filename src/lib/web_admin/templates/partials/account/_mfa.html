@@ -1,0 +1,138 @@
+{# ================================================================
+   Account — the second factor: setting one up, turning it off, and the recovery codes.
+
+   Its own partial because it is the one part of this page that does not go through Save.
+   Every action here talks to the server on its own, because each one either mints a secret
+   or spends a code — and a field in the preferences form would have made one button mean
+   "change my language" and "replace my second factor" at the same time.
+
+   Two ways to enrol are always drawn: the QR, which is what anybody actually uses, and the
+   base32 key beside it. The key is the half somebody can read back and check, and the only
+   one left when the camera will not focus, the phone has no camera, or the square came out
+   wrong — which is a possibility this project takes seriously, because the QR encoder is
+   written here and no test can hold a phone up to a screen.
+   ================================================================ #}
+
+/** What the server says about this account's second factor. Held so the card can redraw
+ *  after an action without asking again for what it just changed. */
+let _accMfa = null;
+
+async function _accMfaLoad() {
+    const res = await apiGet('/api/v1/account/mfa');
+    _accMfa = (res && res.data) || {enrolled: false, pending: false, recovery_left: 0};
+    _accMfaDraw();
+}
+
+function _accMfaDraw() {
+    const body = document.getElementById('accMfaBody');
+    const state = document.getElementById('accMfaState');
+    if (!body || !_accMfa) return;
+    state.innerHTML = _accMfa.enrolled
+        ? `<span class="badge text-bg-success">${esc(t('mfa_state_on'))}</span>`
+        : `<span class="badge text-bg-secondary">${esc(t('mfa_state_off'))}</span>`;
+    if (!_accMfa.enrolled) {
+        body.innerHTML = `<div class="text-muted small mb-3">${esc(t('mfa_desc'))}</div>
+            <button type="button" class="btn btn-sm btn-primary" onclick="_accMfaBegin()"
+                ><i class="bi bi-shield-plus me-1"></i>${esc(t('mfa_enable'))}</button>`;
+        return;
+    }
+    body.innerHTML = `<div class="text-muted small mb-3">${esc(t('mfa_desc'))}</div>
+        <div class="small mb-3"><i class="bi bi-key me-1"></i>${
+            esc(t('mfa_recovery_left').replace('{}', _accMfa.recovery_left))}</div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button type="button" class="btn btn-sm btn-secondary" onclick="_accMfaRegen()"
+            ><i class="bi bi-arrow-repeat me-1"></i>${esc(t('mfa_recovery_new'))}</button>
+          <button type="button" class="btn btn-sm btn-warning" onclick="_accMfaDisable()"
+            ><i class="bi bi-shield-slash me-1"></i>${esc(t('mfa_disable'))}</button>
+        </div>`;
+}
+
+/** Start an enrolment and show both ways in.
+ *
+ *  The secret is drawn from what the server just stored, so the square and the string are
+ *  the SAME secret the confirmation will verify — building the URI in the browser would be a
+ *  second place that decides what is being enrolled. */
+async function _accMfaBegin() {
+    const res = await apiPost('/api/v1/account/mfa/begin', {});
+    const d = (res && res.data) || {};
+    if (!d.ok) {
+        showToast(d.error === 'no_key' ? t('mfa_no_key') : t('save_error'), 'danger');
+        return;
+    }
+    // The SVG comes from the server as markup built only from integers — module coordinates —
+    // so there is nothing in it that came from a user. Empty when the link did not fit, and
+    // then the key on its own is the whole answer rather than a broken box.
+    const square = d.svg
+        ? `<div class="mb-2 ss-qr">${d.svg}</div>`
+        : `<div class="alert alert-warning py-2 small">${esc(t('mfa_enrol_no_qr'))}</div>`;
+    showHtmlModal(t('mfa_enrol_title'), `
+        <div class="small mb-2">${esc(t('mfa_enrol_scan'))}</div>
+        ${square}
+        <div class="small mb-1">${esc(t('mfa_enrol_manual'))}</div>
+        <div class="font-monospace user-select-all border rounded px-2 py-1 mb-3 small ss-secret"
+             >${esc(d.secret_groups || d.secret || '')}</div>
+        <div class="small mb-1">${esc(t('mfa_enrol_confirm'))}</div>
+        <input type="text" id="accMfaCode" class="form-control form-control-sm text-center"
+               inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+        <div class="mt-3 text-end">
+          <button type="button" class="btn btn-sm btn-primary" onclick="_accMfaConfirm()"
+            >${esc(t('mfa_step_verify'))}</button>
+        </div>`, 'primary');
+}
+
+async function _accMfaConfirm() {
+    const code = (document.getElementById('accMfaCode') || {}).value || '';
+    const res = await apiPost('/api/v1/account/mfa/confirm', {code});
+    const d = (res && res.data) || {};
+    if (!d.ok) { showToast(t('mfa_bad_code'), 'danger'); return; }
+    showToast(t('mfa_enrol_done'), 'success');
+    _accMfaShowCodes(d.recovery, false);
+    _accMfaLoad();
+}
+
+/** The recovery codes, once. There is no way back from the stored form — a panel that could
+ *  print somebody's codes a second time is one where reading the database is enough. */
+function _accMfaShowCodes(codes, replaced) {
+    const list = (codes || []).map(c =>
+        `<div class="font-monospace user-select-all">${esc(c)}</div>`).join('');
+    showHtmlModal(t('mfa_recovery_title'), `
+        <div class="alert alert-warning py-2 small">${esc(t('mfa_recovery_lead'))}${
+            replaced ? ' ' + esc(t('mfa_recovery_replaced')) : ''}</div>
+        <div class="border rounded p-2">${list}</div>`, 'warning');
+}
+
+/** Both of these ask for a current code, and neither is a formality: a session is exactly
+ *  what an attacker has when they have borrowed one, and without the code the first thing
+ *  they would do is take the factor off — or mint ten permanent ways back in. */
+function _accMfaAskCode(title, variant, onCode) {
+    showHtmlModal(title, `
+        <div class="small mb-2">${esc(t('mfa_ask_code'))}</div>
+        <input type="text" id="accMfaAsk" class="form-control form-control-sm text-center"
+               inputmode="numeric" autocomplete="one-time-code" maxlength="16">
+        <div class="mt-3 text-end">
+          <button type="button" class="btn btn-sm btn-${variant}" id="accMfaAskGo"
+            >${esc(t('mfa_step_verify'))}</button>
+        </div>`, variant);
+    const go = document.getElementById('accMfaAskGo');
+    if (go) go.onclick = () => onCode((document.getElementById('accMfaAsk') || {}).value || '');
+}
+
+function _accMfaRegen() {
+    _accMfaAskCode(t('mfa_recovery_new'), 'primary', async code => {
+        const res = await apiPost('/api/v1/account/mfa/recovery', {code});
+        const d = (res && res.data) || {};
+        if (!d.ok) { showToast(t('mfa_bad_code'), 'danger'); return; }
+        _accMfaShowCodes(d.recovery, true);
+        _accMfaLoad();
+    });
+}
+
+function _accMfaDisable() {
+    _accMfaAskCode(t('mfa_disable'), 'warning', async code => {
+        const res = await apiPost('/api/v1/account/mfa/disable', {code});
+        const d = (res && res.data) || {};
+        if (!d.ok) { showToast(t('mfa_bad_code'), 'danger'); return; }
+        showToast(t('mfa_disabled_ok'), 'success');
+        _accMfaLoad();
+    });
+}

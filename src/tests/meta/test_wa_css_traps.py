@@ -184,3 +184,45 @@ class TestNoTemplatePinsALightSurface:
             src = _read(os.path.join(TPL, *rel.split('/')))
             assert re.search(r'<thead class="ss-thead(-sticky)?"', src), \
                 f'{rel} no longer uses the theme-aware header'
+
+
+class TestAnSvgWithNoSizeFillsWhateverItIsGiven:
+    """The QR is shipped with a `viewBox` and no width or height on purpose — a square sized
+    by the server is one that does not fit somebody's phone at arm's length. The cost of that
+    decision is that it inherits its container, and an unconstrained container is the whole
+    dialog: at `modal-lg` it drew 800px wide and pushed the key and the confirmation field
+    below the fold, so the one thing the screen exists to show was the one thing off it.
+
+    Reported on screen, which is where this class of thing is always found. The guard is on
+    the CLASS rather than on the markup, because the fix has to hold for the next place that
+    shows one."""
+
+    def test_the_qr_class_caps_its_width(self):
+        css = _read(CSS)
+        m = re.search(r'\.ss-qr\s*\{([^}]*)\}', css)
+        assert m, '.ss-qr is gone — the QR would fill whatever box it lands in'
+        body = m.group(1)
+        assert 'width' in body, '.ss-qr sets no width, which is the bug it exists to prevent'
+        # `min(...)` and not a flat width: a phone narrower than the cap must get the width it
+        # has rather than a square wider than the dialog it is in.
+        assert 'min(' in body, '.ss-qr must cap the width WITHOUT overflowing a narrow screen'
+
+    def test_the_svg_inside_it_is_told_to_scale(self):
+        """Capping the box does nothing on its own: an SVG with no width is not laid out by
+        its parent's width unless it is told to take it."""
+        css = _read(CSS)
+        m = re.search(r'\.ss-qr\s+svg\s*\{([^}]*)\}', css)
+        assert m, '.ss-qr svg has no rule — the box would be capped and the square would not'
+        assert 'width' in m.group(1) and 'height' in m.group(1)
+
+    def test_every_qr_in_the_markup_goes_through_it(self):
+        """A second place that drops an SVG into a dialog without the class inherits the bug
+        rather than the fix."""
+        loose = []
+        for path in _templates():
+            src = _read(path)
+            for m in re.finditer(r'\$\{\s*(?:d|out|res)\.svg\s*\}', src):
+                window = src[max(0, m.start() - 200):m.start()]
+                if 'ss-qr' not in window:
+                    loose.append(os.path.relpath(path, TPL))
+        assert not loose, ('a QR is drawn without .ss-qr in: ' + ', '.join(sorted(set(loose))))
