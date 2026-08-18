@@ -194,10 +194,26 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 | confirmed | INTEGER | no | `0` | un alta empezada y no demostrada no concede nada |
 | last_step | INTEGER | no | `-1` | anti-replay: el último paso TOTP aceptado |
 | label | TEXT | no | `''` | |
+| credential_id | TEXT | no | `''` | **WebAuthn**: la credencial que presentará el navegador, base64url |
+| public_key | TEXT | no | `''` | **WebAuthn**: la clave COSE tal como la mandó el autenticador (base64url del CBOR) |
+| alg | INTEGER | no | `0` | **WebAuthn**: el algoritmo, grabado al **registrar** |
+| sign_count | INTEGER | no | `0` | **WebAuthn**: el contador del autenticador; 0 = no lleva |
 | created | TEXT | no | `''` | |
 | updated | TEXT | no | `''` | |
 
 Índices: `idx_mfa_factors_user(user_uid)`.
+
+**Las cuatro columnas de WebAuthn son propias y no reutilizan `secret`**: una clave pública no
+es un secreto, y meterla ahí haría que dar de alta una llave de seguridad fallara en una
+instalación sin clave de cifrado —por un valor que no tiene nada que proteger—. La clave COSE se
+guarda **en la forma en que llegó** y se vuelve a parsear con el decodificador que está probado
+contra la norma: una sola representación y ningún segundo sitio que pueda discrepar sobre qué
+es la clave. Y `alg` se graba al registrar porque una clave que nombra su propio algoritmo
+cuando llega la aserción es el fallo del `alg` de JWT con otras palabras.
+
+`sign_count` avanza con un `UPDATE … WHERE sign_count < ?`, monótono igual que `last_step`: dos
+aserciones compitiendo no pueden dejar que la posterior baje el listón para la anterior, que es
+justo el estado que intentaría producir un autenticador clonado.
 
 **Tabla propia y no una columna en `users`**: el `extra` de `users` se fusiona en el diccionario
 que devuelve el store, y ese diccionario es el que serializa la API de usuarios — un secreto

@@ -15,12 +15,15 @@ file. A shared database with a per-process key would make every OTHER process un
 
 Schema::
 
-    mfa_factors(uid PK, user_uid, method, secret, confirmed, last_step, label, created, updated)
+    mfa_factors(uid PK, user_uid, method, secret, confirmed, last_step, label,
+                credential_id, public_key, alg, sign_count, created, updated)
     mfa_recovery(uid PK, user_uid, code_hash, used_at, created)
 
-Two tables and not one column, because of what comes next: a user may end up with a TOTP app
-and a security key, and ``method`` is what tells them apart. Phase one only ever writes
-``totp``, and the shape is already the one WebAuthn needs.
+Two tables and not one column, because a user may end up with a TOTP app AND a security key —
+``method`` is what tells them apart, and it was there from the first commit for exactly this.
+The four WebAuthn columns are their own and do not reuse ``secret``: a public key is not a
+secret, and putting it there would make enrolling a security key fail on an install with no
+encryption key, for a value that has nothing to protect.
 
 ``last_step`` is the anti-replay counter and the reason this is a store rather than a cache: a
 code lives thirty seconds, and "already used" has to hold across processes. Two web replicas
@@ -51,6 +54,22 @@ _FACTORS = TableSpec(
         # The last time step accepted, so a code cannot be replayed inside its own window.
         Column('last_step', 'INTEGER', nullable=False, default='-1'),
         Column('label',     'TEXT', nullable=False, default="''"),
+        # ── WebAuthn only ────────────────────────────────────────────────────
+        # The credential the browser will present, base64url. Its own column and not the
+        # `secret` one: a public key is not a secret, and putting it there would make
+        # enrolling a security key fail on an install with no encryption key — for a value
+        # that has nothing to protect.
+        Column('credential_id', 'TEXT', nullable=False, default="''"),
+        # The COSE key exactly as the authenticator sent it, base64url of the CBOR. Kept in
+        # the form it arrived in rather than unpacked into columns: it is re-parsed by the
+        # decoder that is tested against the standard, so there is one representation and no
+        # second place that can disagree about what the key is.
+        Column('public_key',    'TEXT', nullable=False, default="''"),
+        # Recorded at REGISTRATION and used for every assertion after it. A key that names
+        # its own algorithm when the assertion arrives is the JWT `alg` flaw in other words.
+        Column('alg',           'INTEGER', nullable=False, default='0'),
+        # The authenticator's own counter. Zero means it keeps none, which is allowed.
+        Column('sign_count',    'INTEGER', nullable=False, default='0'),
         Column('created',   'TEXT', nullable=False, default="''"),
         Column('updated',   'TEXT', nullable=False, default="''"),
     ),
@@ -125,14 +144,17 @@ class MfaStore(BaseStore):
         that a factor EXISTS, and none of them needs what it is.
         """
         row = self._db.fetchone(
-            f'SELECT uid, user_uid, method, secret, confirmed, last_step, label, created, updated'
-            f' FROM {_F} WHERE user_uid = ? AND method = ?', (str(user_uid or ''), str(method)))
+            'SELECT uid, user_uid, method, secret, confirmed, last_step, label, created,'
+            f' updated, credential_id, public_key, alg, sign_count FROM {_F}'
+            ' WHERE user_uid = ? AND method = ?', (str(user_uid or ''), str(method)))
         if not row:
             return None
         return {'uid': row[0], 'user_uid': row[1], 'method': row[2],
                 'secret': self._open(row[3]) if decrypt else '',
                 'confirmed': bool(row[4]), 'last_step': int(row[5] if row[5] is not None else -1),
-                'label': row[6] or '', 'created': row[7] or '', 'updated': row[8] or ''}
+                'label': row[6] or '', 'created': row[7] or '', 'updated': row[8] or '',
+                'credential_id': row[9] or '', 'public_key': row[10] or '',
+                'alg': int(row[11] or 0), 'sign_count': int(row[12] or 0)}
 
     def enrolled_user_uids(self, *, confirmed_only: bool = True) -> set:
         """Every user with a factor — one query, because the users list draws a column from it.
@@ -276,3 +298,54 @@ class MfaStore(BaseStore):
             return changed > 0
         except Exception:      # pylint: disable=broad-except
             return False
+
+    # ── WebAuthn ─────────────────────────────────────────────────────────────
+
+    def save_credential(self, user_uid: str, *, credential_id: str, public_key: str,
+                        alg: int, sign_count: int, label: str = '') -> bool:
+        """Store a registered security key, replacing whatever was there.
+
+        Confirmed on arrival, unlike a TOTP enrolment: the ceremony IS the proof. A registration
+        response that verified was signed by the authenticator over a challenge this server
+        issued, so there is nothing left for a second step to establish.
+        """
+        who, now = str(user_uid or ''), self._now()
+        if not who or not credential_id or not public_key:
+            return False
+        try:
+            with self._db.transaction():
+                self._db.execute(f"DELETE FROM {_F} WHERE user_uid = ? AND method = 'webauthn'",
+                                 (who,))
+                self._db.execute(
+                    f'INSERT INTO {_F}(uid, user_uid, method, secret, confirmed, last_step,'
+                    ' label, created, updated, credential_id, public_key, alg, sign_count)'
+                    " VALUES(?,?,'webauthn','',1,-1,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), who, str(label or ''), now, now,
+                     str(credential_id), str(public_key), int(alg), int(sign_count)))
+            return True
+        except Exception:      # pylint: disable=broad-except
+            return False
+
+    def note_sign_count(self, user_uid: str, count: int) -> bool:
+        """Move the authenticator's counter forward.
+
+        Monotonic in the SQL (`sign_count < ?`), the same way `note_step` is: two assertions
+        racing must not let the later one lower the bar for the earlier, which is precisely
+        the state a cloned authenticator would try to produce.
+        """
+        try:
+            with self._db.transaction():
+                changed = self._db.execute(
+                    f'UPDATE {_F} SET sign_count = ?, updated = ?'
+                    " WHERE user_uid = ? AND method = 'webauthn' AND sign_count < ?",
+                    (int(count), self._now(), str(user_uid or ''), int(count)))
+            return changed > 0
+        except Exception:      # pylint: disable=broad-except
+            return False
+
+    def methods_of(self, user_uid: str) -> list:
+        """Which kinds of factor this account has, confirmed. Ordered, so the screen is."""
+        rows = self._db.fetchall(
+            f'SELECT method FROM {_F} WHERE user_uid = ? AND confirmed = 1 ORDER BY method',
+            (str(user_uid or ''),))
+        return [r[0] for r in rows if r[0]]

@@ -8,6 +8,28 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.85] - 2026-08-18
+
+### Added
+- **`mfa_factors` can hold a security key**: `credential_id`, `public_key`, `alg` and
+  `sign_count`. The `method` column was there from the first MFA commit for exactly this, so a
+  user can end up with a TOTP app and a key and the two are told apart rather than replacing
+  each other.
+  - The four are **their own columns and do not reuse `secret`**: a public key is not a secret,
+    and putting it there would make enrolling a key fail on an install with no encryption key —
+    for a value that has nothing to protect.
+  - The COSE key is stored **in the form it arrived in** (base64url of the CBOR) and re-parsed
+    by the decoder that is tested against the standard: one representation, and no second place
+    that can disagree about what the key is.
+  - `alg` is recorded at REGISTRATION, because a key that names its own algorithm when the
+    assertion arrives is the JWT `alg` flaw in other words.
+  - `note_sign_count` moves the counter forward in the SQL (`WHERE sign_count < ?`), monotonic
+    the same way `note_step` is: two assertions racing must not let the later one lower the bar
+    for the earlier, which is precisely the state a cloned authenticator would try to produce.
+  - A registered key is stored **confirmed**: unlike a TOTP enrolment, the ceremony IS the
+    proof — the response was signed by the authenticator over a challenge this server issued,
+    so there is nothing left for a second step to establish.
+
 ## [0.0.1+build.84] - 2026-08-18
 
 ### Added
