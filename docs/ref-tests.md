@@ -7729,7 +7729,7 @@ ganar—. De ahí que casi todos estos tests vayan sobre la bandera.
 
 ## 163. Un widget que detecta un problema lo dice con el fondo
 
-**Archivo:** `tests/meta/test_wa_overview_state.py` — 9 tests
+**Archivo:** `tests/meta/test_wa_overview_state.py` — 13 tests
 
 La barra de acento que ya tenía cada tarjeta son 3 px arriba de una baldosa entre veinte, y un
 dashboard se **barre con la vista**, no se lee. Pedido desde el panel: «que los widget que
@@ -7753,7 +7753,40 @@ en silencio.
 | Test | Qué comprueba |
 |---|---|
 | `TestTheStateComesFromTheData::*` (4) | La tarjeta se tiñe de su **propio contenido**; una tabla solo si declara que sus filas son el problema —y una tabla vacía **limpia** el tinte en vez de conservar el último—; los estados son exactamente dos (`ok` **no** es un estado: verde es la ausencia de problema, y veinte tarjetas pintándose por estar bien es un dashboard sin señal); y ninguna de las dos funciones nombra un widget |
-| `TestTheTintSurvivesARedraw::*` (2) | Un arrastre, un cambio de tamaño o un filtro reconstruyen la rejilla desde caché: sin esto el tinte desaparece a la primera interacción y vuelve en el siguiente poll —un parpadeo sin causa, peor que no teñir—. Y preguntarle el estado a un espaciador (sin `view`) no puede lanzar una excepción en mitad del render, que dejaría el dashboard en blanco |
+| `TestTheTintSurvivesARedraw::*` (3) | Un arrastre, un cambio de tamaño o un filtro reconstruyen la rejilla desde caché: sin esto el tinte desaparece a la primera interacción y vuelve en el siguiente poll —un parpadeo sin causa, peor que no teñir—. Tres caminos reescriben `.dw-content` sin tocar las clases del contenedor —el auto-refresco, el cambio de ámbito de un widget de módulo y su filtro de nivel—, y los tres vuelven a pintar el estado. Y preguntarle el estado a un espaciador (sin `view`) no puede lanzar una excepción en mitad del render, que dejaría el dashboard en blanco |
+| `TestAModulesWidgetTintsItselfToo::*` (3) | Un widget que trae un módulo se tiñe igual, y **no es un segundo mecanismo**: el módulo ya publica un `state` por entrada —es lo que ordena sus filas de peor a mejor y colorea su anillo—, así que el tinte es el peor de los que **esa instancia** está mostrando, ámbito y filtro de nivel incluidos. Una tarjeta acotada a un tipo no puede ponerse roja por otro que no enseña, o el tinte deja de describir la tarjeta sobre la que está |
 | `TestTheCssTouchesNoCardMarkup::*` (3) | Las dos reglas van por la variable, y son **clases**, nunca CSS por id |
+
+---
+
+## 164. Un enlace a una sección tiene que caer en una sección que existe
+
+**Archivo:** `tests/meta/test_docs_anchors.py` — 5 tests
+
+§88d guarda los enlaces que apuntan **al código** con número de línea, con el argumento de que
+son los más útiles de la doc y lo más frágil que hay en ella. Los enlaces **entre documentos**
+—`[explica-mfa.md](explica-mfa.md#el-alta)`, y el índice entero de este fichero— son igual de
+frágiles y no los guardaba nadie: renombras una cabecera y todos los enlaces que la nombraban se
+quedan mudos. No falla nada, no hay 404; el lector aterriza arriba de la página y da por hecho
+que leyó mal la referencia.
+
+Al escribirlo había **tres rotos**: `explica-web-admin.md` apuntando a un `#sistema-de-permisos`
+que ya no existe, el índice enlazando la sección 81 por un título que perdió, y un enlace a
+`azure` en `ref-modulos.md` al que le faltaba el **selector de variación invisible** (U+FE0F) que
+su cabecera con emoji sí lleva.
+
+**La regla del slug es la de GitHub, y aproximarla es peor que no escribir la guarda** — las dos
+equivocaciones se cometieron construyéndola y las dos son silenciosas: colapsar los espacios
+seguidos (GitHub convierte **cada** espacio en un guion, así que `## SCIM 2.0 — [routes.py](…)`
+lleva dos guiones donde estaba la raya; colapsarlos daba 129 falsos positivos, o sea una guarda
+que nadie mantiene) y tirar el texto de un enlace en vez de desenvolverlo (el slug sale de lo
+**renderizado**).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::*` (3) | Que la guarda no pasa en vacío —más de 100 enlaces con ancla tienen que casar— y la regla del slug pinchada con ejemplos, incluidas las dos equivocaciones |
+| `TestEveryAnchorLands::test_the_target_document_exists` | Un enlace a un `.md` que no está |
+| `TestEveryAnchorLands::test_every_anchor_names_a_real_heading` | El ancla nombra una cabecera real del documento destino |
+
 
 

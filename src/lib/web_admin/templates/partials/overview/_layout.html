@@ -481,6 +481,7 @@ function _dwSetModuleScope(sel) {
     if (sel.value === '') delete dw.dataset.mws; else dw.dataset.mws = sel.value;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwRefreshState(dw);                  // a different kind can be in a different state
     _dwApplyModuleShape(dw);              // stat-collapse at 'sum': height/resize + level filter
     _dwSave();
 }
@@ -493,6 +494,7 @@ function _dwSetModuleLevel(sel) {
     if (sel.value === '') delete dw.dataset.mwlvl; else dw.dataset.mwlvl = sel.value;
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwRefreshState(dw);                  // filtering rows away changes what is being reported
     _dwSave();
 }
 

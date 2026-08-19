@@ -1288,11 +1288,17 @@
    with it. Repainting the card from here would mean one selector per card shape, and a
    new shape would silently stay grey.
 
-   The tints are Bootstrap's own subtle backgrounds, which the dark theme already
-   redefines further up: one rule, both themes, and the same colour language the rest of
-   the panel uses for "this is in that state". */
-.dw-state-warn  { --ss-surface-bg: var(--bs-warning-bg-subtle); }
-.dw-state-error { --ss-surface-bg: var(--bs-danger-bg-subtle); }
+   The tints are the dashboard's OWN amber and red — the same two the accent bar and the
+   icon tile of every card are painted from — at the same alpha. Translucent on purpose:
+   one value composes correctly over the light surface and the dark one, so the signal is
+   the same strength in both themes.
+
+   Bootstrap's `--bs-*-bg-subtle` was the obvious choice and was wrong for exactly that
+   reason: the dark theme redefines those to around .08 alpha, tuned for tinting one row of
+   a table, while the light values are opaque pastels. The same rule would have shouted in
+   one theme and whispered in the other. */
+.dw-state-warn  { --ss-surface-bg: rgba(245, 158, 11, .12); }
+.dw-state-error { --ss-surface-bg: rgba(239, 68, 68, .12); }
 
 /* Click-through widgets jump to their tab — only outside edit mode. The card
    sits inside .dw-content, so the affordance is applied there; interactive

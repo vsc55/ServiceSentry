@@ -13,8 +13,11 @@ breaks them:
 serves; a table says `state_rows` in its view, meaning "having rows IS the problem". The core
 never holds a list of which widgets are allowed to go red — which matters because a
 module-contributed widget has to be able to do this by saying the same word, and because the
-accent colour is NOT a usable proxy: the fail2ban card is amber when the jail is *enabled*, so
-tinting by accent would paint a permanent warning over a service working exactly as intended.
+accent colour is NOT a usable proxy for it: at the time this was written the fail2ban card was
+amber when the jail was *enabled*, so tinting by accent would have painted a permanent warning
+over a service working exactly as intended. That accent has since been corrected — but the
+argument stands, because an accent is chosen to make a card readable and a state says whether
+something is wrong, and nothing keeps those two in step.
 
 **The tint is applied through the variable the cards already paint themselves from.**
 `--ss-surface-bg` is redefined on the widget wrapper, so the CSS knows nothing about any card's
@@ -74,14 +77,46 @@ class TestTheTintSurvivesARedraw:
         vanishes on the first interaction and returns at the next poll — a flicker with no
         cause, which is worse than never having tinted."""
         assert '_dwStateClass(' in _read(RENDER), 'the rebuilt grid drops the state class'
-        src = _js('_dwStateClass')
+        src = _js('_dwState')
         assert '_dwStatContent[id]' in src and '_dwTableRows[id]' in src, (
-            'the class is not derived from what was last fetched')
+            'the state is not derived from what was last fetched')
 
-    def test_it_answers_nothing_for_a_widget_with_no_view(self):
-        """Spacers and module widgets have no `view`; asking them for a state must be a
-        no-op rather than an exception thrown mid-render, which would blank the dashboard."""
-        assert "if (!view) return ''" in _js('_dwStateClass')
+    def test_content_swapped_in_place_is_re_stated(self):
+        """Three paths rewrite `.dw-content` and never touch the wrapper's classes: the
+        soft auto-refresh, a module widget's scope change, and its level filter. Each one
+        can change what the card is reporting."""
+        assert '_dwRefreshState(dw)' in _read(RENDER), 'the auto-refresh leaves a stale tint'
+        layout = _read(os.path.join(TPL, '_layout.html'))
+        assert layout.count('_dwRefreshState(dw)') >= 2, (
+            'changing a module widget scope or level leaves the previous state painted')
+
+    def test_a_spacer_is_never_asked(self):
+        """A spacer has no data and no view. Asking it must be a no-op rather than an
+        exception thrown mid-render, which would blank the whole dashboard."""
+        src = _js('_dwState')
+        assert '_dwIsSpacer(id)' in src
+        assert "if (!view) return ''" in src
+
+
+class TestAModulesWidgetTintsItselfToo:
+    """Not a second mechanism: a module already publishes a `state` per entry — it is what
+    sorts its rows worst-first and colours its usage ring — so the tint is the worst of the
+    ones that instance is actually showing."""
+
+    def test_it_reuses_the_rank_the_rows_are_sorted_by(self):
+        src = _js('_dwModuleState')
+        assert '_dwMwRank(' in src, 'a second severity scale for the same states'
+        assert '_dwMwSortFilter(' in src, 'the level filter is ignored'
+
+    def test_it_only_looks_at_what_that_instance_shows(self):
+        """A card scoped to one kind must not go red for a kind it is not displaying, or
+        the tint stops describing the card it is painted on."""
+        src = _js('_dwModuleState')
+        for token in ('mws', 'mwlvl', 'def.scope'):
+            assert token in src, f'{token} is not taken into account'
+
+    def test_the_dispatcher_sends_module_widgets_there(self):
+        assert '_dwIsModuleWidget(id)' in _js('_dwState')
 
 
 class TestTheCssTouchesNoCardMarkup:

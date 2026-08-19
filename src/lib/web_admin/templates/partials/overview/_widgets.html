@@ -101,18 +101,50 @@ function _dwApplyState(dw, state) {
     dw.classList.toggle('dw-state-error', state === 'error');
     dw.classList.toggle('dw-state-warn', state === 'warn');
 }
-// The state as of the last fetch, for a re-render (a drag, a filter, a resize) that rebuilds
-// the grid from cache. Without this the tint would vanish on the first interaction and come
-// back at the next poll, which reads as a flicker with no cause.
-function _dwStateClass(id) {
-    const def = _DW_DEFS[id] || {};
-    const view = def.view;
+// The state of a widget brought by a module. Not a second mechanism: the module already
+// publishes a `state` per entry (that is what sorts its rows worst-first and colours its
+// ring), and this is the worst of the ones THIS INSTANCE is showing — scope and level
+// filter included. A card scoped to one kind must not go red for a different kind it is
+// not displaying, or the tint stops describing the card it is on.
+function _dwModuleState(id, data, item) {
+    const def = _dwModuleDef(id) || {};
+    const wd = ((data || _lastOverviewData || {}).module_widgets || {})[def.module] || {};
+    const entries = wd.entries || [];
+    const dw = item ? null : document.querySelector(
+        `.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+    const scope = item ? (item.mws || '')   : (dw?.dataset.mws || '');
+    const level = item ? (item.mwlvl || '') : (dw?.dataset.mwlvl || '');
+    let list = entries;
+    if (def.view === 'table' && scope && scope !== 'sum')
+        list = (entries.find(e => e.id === scope) || {}).rows || [];
+    else if (def.view !== 'table' && def.scope)
+        list = entries.filter(e => e.id === def.scope);
+    // A level filter hides rows; what it hides cannot be what the card is reporting.
+    const worst = Math.max(0, ..._dwMwSortFilter(list, level).map(x => _dwMwRank(x && x.state)));
+    return worst >= 3 ? 'error' : (worst === 2 ? 'warn' : '');
+}
+// The state of any widget, whoever it belongs to.
+function _dwState(id, data, item) {
+    if (_dwIsSpacer(id)) return '';
+    if (_dwIsModuleWidget(id)) return _dwModuleState(id, data, item);
+    const view = (_DW_DEFS[id] || {}).view;
     if (!view) return '';
-    let state = '';
-    if (view.kind === 'stat') state = (_dwStatContent[id] || {}).state || '';
-    else if (view.kind === 'table' && view.state_rows)
-        state = (_dwTableRows[id] || []).length ? view.state_rows : '';
+    if (view.kind === 'stat') return (_dwStatContent[id] || {}).state || '';
+    if (view.kind === 'table' && view.state_rows)
+        return (_dwTableRows[id] || []).length ? view.state_rows : '';
+    return '';
+}
+// The same answer as a class, for a re-render (a drag, a filter, a resize) that rebuilds the
+// grid from cache. Without this the tint would vanish on the first interaction and come back
+// at the next poll, which reads as a flicker with no cause.
+function _dwStateClass(id, data, item) {
+    const state = _dwState(id, data, item);
     return state === 'error' ? ' dw-state-error' : (state === 'warn' ? ' dw-state-warn' : '');
+}
+// Re-apply after content was swapped in place (a scope change, a level filter, the soft
+// refresh) — those paths rewrite `.dw-content` and never touch the wrapper's classes.
+function _dwRefreshState(dw) {
+    if (dw) _dwApplyState(dw, _dwState(dw.dataset.wid, _lastOverviewData, null));
 }
 // Dispatch a data-driven widget by its `view.kind`.
 function _dwRenderView(id, view, content, item) {

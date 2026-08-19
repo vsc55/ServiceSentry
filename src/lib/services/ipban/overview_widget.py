@@ -25,7 +25,16 @@ def _fail2ban_stat(enabled, banned, watchlist, whitelist) -> dict:
     if whitelist:
         badges.append({'style': 'teal', 'icon': 'bi-shield-check',
                        'key': 'overview_ipban_whitelist', 'args': [whitelist]})
-    return {'value': banned, 'accent': 'amber' if enabled else 'grey', 'badges': badges}
+    # Amber used to mean "the jail is on", which is the card saying "attention" for working
+    # exactly as intended — and on a dashboard where colour now carries state, that reads as
+    # a problem that is not there. Grey when it is off (nothing is running), green when it is
+    # on with nobody banned, amber when addresses are currently locked out.
+    #
+    # Deliberately no `state`, so the card is not TINTED for it: a ban is the jail doing its
+    # job, and an installation facing the internet would sit permanently amber — which is how
+    # a signal stops being read at all.
+    accent = 'grey' if not enabled else ('amber' if banned else 'green')
+    return {'value': banned, 'accent': accent, 'badges': badges}
 
 
 def fail2ban_stat(wa) -> dict:

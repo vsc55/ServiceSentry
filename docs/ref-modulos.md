@@ -1172,7 +1172,7 @@ añade el dato a Graph.
 **Sección propia:** declara `__page__`, así que aporta la sección **`/module/m365`** con su entrada en la
 barra lateral: salud de servicios, licencias y almacenamiento, seguridad (Secure Score, usuarios de
 riesgo) y caducidad de secretos, agrupado por tipo de check, con un botón que consulta Graph en el
-momento. A diferencia de [azure](#-azure--estado-de-servicio-de-azure), **trae su propio
+momento. A diferencia de [azure](#️-azure--estado-de-servicio-de-azure), **trae su propio
 renderizador** (`web/_ui.html`) en vez de usar el genérico del core.
 
 **Flujo:** token *client-credentials* (`.default` de Graph) → una consulta por check activo →

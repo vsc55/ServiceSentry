@@ -8,6 +8,40 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.92] - 2026-08-19
+
+### Added
+- **A widget brought by a module tints itself too.** Not a second mechanism: a module already
+  publishes a `state` per entry — it is what sorts its rows worst-first and colours its usage
+  ring — so the tint is the worst of the ones **that instance is showing**, scope and level
+  filter included. A card scoped to one kind must not go red for a kind it is not displaying,
+  or the tint stops describing the card it is painted on.
+  - Three paths swap a widget's content in place without touching the wrapper (the soft
+    auto-refresh, a scope change, a level filter). All three re-state it now; otherwise the
+    tint would describe the data before last.
+- **Links between documents are guarded.** A section link that no longer lands is silent —
+  no error, no 404, the reader arrives at the top of the page and assumes they misread the
+  reference. Three were already broken: a `#sistema-de-permisos` that no longer exists, an
+  index entry naming section 81 by a title it lost, and a link to an emoji heading missing
+  the invisible variation selector its anchor carries.
+  - The slug rule is GitHub's, and approximating it is worse than not writing the guard.
+    Collapsing runs of whitespace (GitHub maps EACH space to a hyphen) reported 129 false
+    positives — a guard nobody would keep — and dropping a markdown link's text instead of
+    unwrapping it misses that the slug comes from what is rendered.
+
+- The tint is the dashboard's **own** amber and red, at the alpha the accent bar and icon
+  tiles already use, rather than Bootstrap's `--bs-*-bg-subtle`. Those are opaque pastels in
+  the light theme and about .08 alpha in the dark one — tuned for a table row — so the same
+  rule would have shouted in one theme and whispered in the other.
+
+### Fixed
+- **The fail2ban card was amber for working.** Amber meant "the jail is enabled", which is a
+  card saying *attention* about a service doing exactly its job — and on a dashboard where
+  colour now carries state, that reads as a problem that is not there. Grey when off, green
+  when on with nobody banned, amber when addresses are currently locked out. Deliberately no
+  `state`, so it is not tinted for a ban: an installation facing the internet would sit
+  permanently amber, which is how a signal stops being read at all.
+
 ## [0.0.1+build.91] - 2026-08-19
 
 ### Added
