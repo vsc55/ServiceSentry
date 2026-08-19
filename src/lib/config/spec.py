@@ -100,6 +100,16 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=1, max=365, env='SS_REMEMBER_ME_DAYS', admin_only=True,
         flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
         card='login_security'),
+    Cfg('web_admin|api_token_log_max', int, 200, attr='_API_TOKEN_LOG_MAX',
+        # How many recent calls are kept PER TOKEN. A ring, not a log: the questions it answers
+        # ("what has this been doing", "where is it calling from") are about the recent past,
+        # and a table that grows with API traffic is the one thing an API's own bookkeeping
+        # must not be. Per token rather than globally, so a chatty token cannot evict the
+        # history of a quiet one — and the quiet one is where a single unexpected call is the
+        # whole signal.
+        # 0 switches it off entirely, for an installation that reads its access log off a
+        # proxy and does not want the rows here.
+        min=0, max=10000, env='SS_API_TOKEN_LOG_MAX', card='api_tokens'),
     Cfg('web_admin|audit_max_entries', int, 500, attr='_AUDIT_MAX_ENTRIES',
         # The 'audit' card is bespoke, so this has no `card=` to be placed by; the card draws
         # it explicitly. It said the same thing before and the card did not — an option nobody

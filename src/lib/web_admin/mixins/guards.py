@@ -18,7 +18,7 @@ four that says out loud what it is protecting.
 import functools
 from urllib.parse import urlparse
 
-from flask import jsonify, redirect, request, url_for
+from flask import g, jsonify, redirect, request, url_for
 
 
 class _GuardsMixin:
@@ -57,6 +57,29 @@ class _GuardsMixin:
             denied = self._deny_unauthenticated()
             if denied is not None:
                 return denied
+            return f(*args, **kwargs)
+        return wrapper
+
+    def _session_required(self, f):
+        """Like ``_login_required``, but refuses a request authenticated by an API token.
+
+        For the handful of routes that manage CREDENTIALS — minting and revoking tokens,
+        changing a password, enrolling or removing a second factor. Everything else an
+        account may do, a token of that account may do; these are the exception because each
+        one lets a caller widen or replace the access it already has.
+
+        A narrow token that can mint a wide one is not narrow. A token that can revoke its
+        owner\'s other tokens, or change their password, is a foothold that locks the owner
+        out and cleans up after itself. The value of a scoped credential comes entirely from
+        it being unable to escape its scope, and this is the door it would escape through.
+        """
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            denied = self._deny_unauthenticated()
+            if denied is not None:
+                return denied
+            if getattr(g, 'api_token', None):
+                return jsonify({'error': self._t('api_token_not_allowed')}), 403
             return f(*args, **kwargs)
         return wrapper
 

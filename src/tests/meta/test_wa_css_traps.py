@@ -291,6 +291,73 @@ class TestASettingsPageThatFillsItsPane:
     def test_it_is_not_a_centred_column(self):
         assert 'mx-auto' not in self._account_page(),             'the account page centres itself again — the shell has to fill the pane'
 
+    def test_a_list_section_can_ask_out_of_the_reading_width(self):
+        """Reported from the screen, with an arrow drawn at the empty band: the tokens table
+        was capped at the same 76rem as the forms, so it squeezed its own columns while a
+        strip of page sat unused to its right.
+
+        The escape is generic and driven by the ACTIVE pane — the body is shared by every
+        section and only one is on screen at a time — so the next wide section opts in with
+        the same class and no new rule. A `#acctab-tokens` selector here would be per-id CSS
+        for layout, which is the thing this file exists to stop."""
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        m = re.search(r'\.ss-account-body:has\([^)]*\.ss-wide\)\s*\{([^}]*)\}', css)
+        assert m, 'no escape from the reading width — a table section squeezes for nothing'
+        assert 'max-width' in m.group(1) and 'none' in m.group(1)
+        assert '#acctab' not in css, 'per-id CSS decides an account section layout'
+        assert 'ss-wide' in self._account_page(), 'no section claims it'
+
+    def test_a_list_section_drops_the_card_frame_as_well(self):
+        """Reported from the screen: "the other tables are not in a card, and they have a
+        filter section". The reading-width escape above was only half of it — a list boxed in
+        a card inside a settings page is a frame drawn inside a frame, while every other list
+        in the panel IS its section and runs to all four edges.
+
+        `.ss-fullbleed` is already that class everywhere else, and it flattens the cards
+        inside it on its own. What is shell-specific is the gutter: here it is padding on the
+        scroll box rather than `.container-fluid`'s, so the shell drops it at the source
+        instead of cancelling it a second time with the negative margins."""
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        m = re.search(r'\.ss-shell-main\s*>\s*\.ss-vscroll:has\([^)]*\.ss-fullbleed[^)]*\)\s*\{([^}]*)\}', css)
+        assert m, 'a full-bleed pane inside the shell still sits in the shell gutter'
+        assert 'padding: 0' in m.group(1)
+        assert re.search(r'\.ss-shell-main\s+\.ss-fullbleed\s*\{[^}]*margin:\s*0', css), (
+            'the container-fluid gutters are cancelled a second time inside the shell')
+        assert 'ss-fullbleed' in self._account_page(), 'no account section claims it'
+
+    def test_a_full_bleed_list_reaches_the_bottom_of_the_pane(self):
+        """Reported from the screen: "in the other tables the bottom stretches down to the
+        foot of the page".
+
+        `.ss-vfill` only grows when its parent is a flex column, and between the shell and the
+        pane sit two plain boxes — the reading-width body and the `.tab-content`. So the card
+        stopped at the height of its rows and left the rest of the pane empty, which is the one
+        thing full-bleed was supposed to fix. The chain is rebuilt only while a full-bleed pane
+        is the open one, because those same boxes carry the form sections, which have to keep
+        flowing and scrolling."""
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        chain = [m for m in re.finditer(r'([^{}]+)\{([^}]*)\}', css)
+                 if '.ss-fullbleed' in m.group(1) and '> * > .tab-content' in m.group(1)]
+        assert chain, 'nothing makes the boxes between the shell and a full-bleed pane fill'
+        sel, body = chain[0].group(1), chain[0].group(2)
+        assert 'display: flex' in body and 'flex: 1 1 auto' in body and 'min-height: 0' in body
+        # The pane itself is part of the chain and NOT covered by its own `.ss-vfill`:
+        # Bootstrap's `.tab-content > .active { display: block }` outranks a single class, so
+        # a pane that carries the class still lays out as a block and nothing inside it grows.
+        # Every list section outside the shell names the active pane explicitly for the same
+        # reason.
+        assert '> .tab-content > .tab-pane.active' in sel, (
+            'the active pane is left out of the chain, so Bootstrap keeps it display:block')
+        box = re.search(r'\.ss-shell-main\s*>\s*\.ss-vscroll:has\([^)]*\.ss-fullbleed[^)]*\)\s*\{([^}]*)\}', css)
+        assert box and 'overflow: hidden' in box.group(1), (
+            'the shell box still scrolls around a card that scrolls — two scrollbars, and a '
+            'table header that scrolls away')
+        # The first link, and the one that was missing: `.ss-vscroll` is `flex: 1 1 auto`
+        # WITHOUT being a flex container, so telling its child to grow was a no-op — right in
+        # the stylesheet, wrong on the screen, which is the only kind of bug this file catches.
+        assert 'display: flex' in box.group(1), (
+            'the shell scroll box is not a flex column, so nothing inside it can grow')
+
     def test_the_cards_are_capped_without_being_centred(self):
         """A cap so two cards of form fields sit side by side and no further — past that a
         password box a metre wide is not more readable. Left-aligned, which is the half the
@@ -300,3 +367,27 @@ class TestASettingsPageThatFillsItsPane:
         assert m, '.ss-account-body is gone — the cards stretch to whatever the monitor is'
         assert 'max-width' in m.group(1)
         assert 'margin' not in m.group(1), 'a margin here is how it gets centred again'
+class TestACardCannotAskForAnAccentThatDoesNotExist:
+    """Reported from the screen as "you are adding a gap between the filter bar and the title".
+
+    There was no gap. The card's accent strip is 3px tall and `ss-accent-violet` had no colour
+    rule, so it painted 3px of card background between the filter bar's hairline and the
+    header's own band — a seam that reads as dead space, next to sections where the same 3px
+    is a coloured line tying the two together.
+
+    The stylesheet already has a fallback for an accent with no variant at all, written for
+    exactly this ("an invisible strip reads as a broken card rather than as a missing rule").
+    It cannot catch this one: the element DOES carry an `ss-accent-*` class, it just names a
+    colour nobody defined. A typo in a variant name is not something CSS can refuse, so it is
+    refused here instead."""
+
+    def test_every_accent_a_template_asks_for_is_defined(self):
+        used = set()
+        for root, _dirs, files in os.walk(TPL):
+            for f in files:
+                if f.endswith('.html'):
+                    used |= set(re.findall(r"accent:\s*'([a-z]+)'", _read(os.path.join(root, f))))
+        defined = set(re.findall(r'\.ss-accent-([a-z]+)\s*\{', _read(CSS)))
+        assert used, 'no card asks for an accent — the scan is looking in the wrong place'
+        missing = used - defined
+        assert not missing, f'accents named by a card but never given a colour: {missing}'

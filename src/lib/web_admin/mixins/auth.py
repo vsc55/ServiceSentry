@@ -271,6 +271,20 @@ class _AuthMixin:
         session['session_id']    = uid
         session['logged_in']     = True
         session['username']      = username
+        # When this account last signed in. Written HERE for the same reason the MFA gate is
+        # here: this method is the only place in the panel where a session is born, and the
+        # local form, OIDC, SAML and Entra all end up on this line.
+        #
+        # It exists because the audit log could not answer it. `login_ok` is in there, but the
+        # audit is capped by NUMBER OF ROWS, so a burst of anything evicts it — and "which
+        # accounts have nobody behind them any more" is the question an access review opens
+        # with. A field on the record answers it however long ago the last sign-in was.
+        #
+        # A token being used is deliberately NOT a sign-in: it does not touch this, it touches
+        # the token's own `last_used`. An account whose only activity is a script has a
+        # dormant PERSON behind it, which is exactly the distinction a review is looking for.
+        user['last_login'] = datetime.now(timezone.utc).isoformat()
+        self._persist_users()
         # Forward a successful login (any source: local/LDAP/OIDC/SAML/Teams) to the
         # notification router — opt-in per channel via the routing matrix (default off).
         # The auth method (Local / LDAP / SSO provider) is carried in both the status and

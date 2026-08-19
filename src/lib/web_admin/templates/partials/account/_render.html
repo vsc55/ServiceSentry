@@ -187,6 +187,9 @@ function _accSection(id) {
         p.classList.toggle('show', p.id === id);
         p.classList.toggle('active', p.id === id);
     });
+    // Fetched, so it loads when the section is actually opened. A tab nobody clicks should
+    // not cost a request on every visit to this page.
+    if (id === 'acctab-tokens' && typeof _accTokensLoad === 'function') _accTokensLoad();
 }
 
 /** Throw away what is typed and ask the server again.

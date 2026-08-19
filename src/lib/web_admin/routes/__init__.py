@@ -13,6 +13,9 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     sessions         /api/v1/sessions*
     mfa              /api/v1/account/mfa*        (own second factor; + DELETE
                                                 /api/v1/users/<uid>/mfa to reset another's)
+    apitokens        /api/v1/account/tokens*     (own API tokens; + DELETE
+                                                /api/v1/users/<username>/tokens to cut
+                                                off another's)
     audit            /api/v1/audit*
     backup           /api/v1/backups*
     diagnostics      /api/v1/diagnostics*       (read-only; the update check is the one call
@@ -82,6 +85,7 @@ from lib.core.users.routes import register as _users
 from lib.core.roles.routes import register as _roles
 from lib.core.groups.routes import register as _groups
 from lib.core.sessions.routes import register as _sessions
+from lib.core.apitokens.routes import register as _apitokens
 from lib.core.mfa.routes import register as _mfa
 from lib.core.audit.routes import register as _audit
 from lib.core.backup.routes import register as _backup
@@ -129,6 +133,7 @@ def register_all(app, wa):
     _users(app, wa)
     _sessions(app, wa)
     _mfa(app, wa)
+    _apitokens(app, wa)
     _audit(app, wa)
     _backup(app, wa)
     _diagnostics(app, wa)

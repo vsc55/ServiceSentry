@@ -117,6 +117,8 @@
    ================================================================ #}
 {% include "partials/account/_render.html" %}
 {% include "partials/account/_mfa.html" %}
+{% include "partials/account/_token_views.html" %}
+{% include "partials/account/_tokens.html" %}
 {# Access — the user/group/role graph the four sub-sections all describe (must load before them). #}
 {% include "partials/access/_views.html" %}
 {# ================================================================
@@ -171,6 +173,12 @@
    Sessions tab — active sessions list and revoke actions.
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
+{# ================================================================
+   API tokens (administration) — every token in the installation.
+   After the account's own tokens partial: it reuses the permission picker from there.
+   ================================================================ #}
+{% include "partials/apitokens/_views.html" %}
+{% include "partials/apitokens/_list.html" %}
 {% include "partials/sessions/_views.html" %}
 {% include "partials/sessions/_list.html" %}
 {% include "partials/sessions/_view_users.html" %}

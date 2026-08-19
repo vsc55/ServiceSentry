@@ -110,6 +110,31 @@
                                 </div>
                             </div>
                         </div>
+                        {# The failed-attempt lockout. Drawn for every EXISTING account in one
+                           of two states, like the second factor above it and for the same
+                           reason: the question this answers is "why can this person not get
+                           in", and a row that appears only when the answer is yes cannot be
+                           used to rule it out.
+
+                           Until this existed the state was invisible AND unclearable — the
+                           only thing that lifted a lockout was a successful sign-in, which is
+                           what the lockout prevents. So an administrator had nothing to see
+                           and nothing to offer but "wait", for up to a day.
+
+                           Painted from JS on every open (_umLockPaint). #}
+                        <div class="row g-3 mb-2 flex-shrink-0 d-none" id="umLockGroup">
+                            <div class="col-sm-6">
+                                <label class="form-label small fw-semibold">{{ i18n.user_locked_label }}</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge text-bg-secondary" id="umLockState"></span>
+                                    <span class="text-muted ss-fs-2" id="umLockUntil"></span>
+                                    <button type="button" class="btn btn-sm btn-warning d-none" id="umUnlockBtn"
+                                            onclick="_umUnlock()">
+                                        <i class="bi bi-unlock me-1"></i>{{ i18n.user_unlock_btn }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
                             <div class="col-sm-6">
                                 <label class="form-label small fw-semibold">{{ i18n.password }}</label>

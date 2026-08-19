@@ -78,14 +78,26 @@ function renderField(key, value, pathStr, target = 'modules') {
     const _meta0 = fieldMeta(ITEM_SCHEMAS[_schemaKeyOf(_parentRaw0) || pathStr.split('|').slice(0, 2).join('|')] || null, key);
     const _term0 = _fieldTermFor(key, _meta0, pathStr, target);
     const _hint = (_term0 && _term0.hint) || fieldHint(pathStr);
-    const _hintId = _hint ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
-    const _infoIcon = _hint
+    // The env var goes in the hint panel, and the panel opens for it even when the option has
+    // no prose: "what do I set in the compose file" is the same question as "what does this
+    // do", asked by somebody who is not looking at the panel while they answer it.
+    const _envName = (target === 'config' && typeof ENV_NAMES !== 'undefined')
+        ? ENV_NAMES[pathStr] : '';
+    const _hintId = (_hint || _envName) ? 'fhint_' + pathStr.replace(/\W/g, '_') : '';
+    const _infoIcon = (_hint || _envName)
         ? `<button type="button" class="btn btn-link p-0 border-0 text-muted cfg-info-btn"
                 data-bs-toggle="collapse" data-bs-target="#${_hintId}"
                 aria-expanded="false" aria-controls="${_hintId}"><i class="bi bi-info-circle"></i></button>`
         : '';
-    const _hintPanel = _hint
-        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">${esc(_hint)}</div></div>`
+    // The KEY is in there too, and it is the string that identifies this option everywhere
+    // else: in the API, in `config.json`, in the docs and in a bug report. The panel showed
+    // only its translated label, which is the one name it cannot be looked up by.
+    const _hintPanel = (_hint || _envName)
+        ? `<div class="collapse" id="${_hintId}"><div class="small text-muted mt-1 py-1 px-2 cfg-hint-panel">
+            ${_hint ? esc(_hint) : ''}
+            ${target === 'config' ? `<div class="mt-1 ss-fs-2 font-monospace text-body-tertiary">
+                ${esc(pathStr)}${_envName ? ` · ${esc(_envName)}` : ''}</div>` : ''}
+        </div></div>`
         : '';
     let _fhtml = _renderFieldInner(key, value, pathStr, target, _infoIcon, _hintPanel);
     if (!_fhtml) return _fhtml;

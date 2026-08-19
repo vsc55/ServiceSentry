@@ -33,6 +33,7 @@ instancia en marcha, así que se pueden lanzar en caliente. Las opciones globale
 | `user role <username> <role>` | Cambiar el rol (no puede quitarse el rol al último admin) |
 | `user group-add <username> <group>` | Añadir el usuario a un grupo (por nombre o uid) |
 | `user group-del <username> <group>` | Quitar el usuario de un grupo |
+| `user unlock <username>` | Levantar el **bloqueo por intentos fallidos**. Aquí además de en el panel porque la cuenta bloqueada puede ser la única que habría podido pulsar el botón |
 | `user mfa-reset <username>` | Quitar el **segundo factor** y sus códigos de recuperación. Ver [explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta) |
 | `user mfa-status` | Qué cuentas llevan segundo factor, y cuántos códigos de recuperación les quedan |
 
@@ -41,6 +42,7 @@ python3 main.py user add alice -P 'S3cret!' --role editor --email alice@example.
 python3 main.py user role alice admin
 python3 main.py user disable bob
 python3 main.py user passwd bob            # pide la contraseña de forma oculta
+python3 main.py user unlock bob            # se equivocó cinco veces
 python3 main.py user mfa-reset bob         # perdió el móvil Y los códigos
 python3 main.py user mfa-status
 ```

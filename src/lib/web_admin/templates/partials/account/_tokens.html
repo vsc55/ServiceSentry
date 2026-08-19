@@ -1,0 +1,565 @@
+{# ================================================================
+   API tokens for the signed-in account: list, create, rotate, clone, revoke.
+
+   The list is built by `createListTable`, the same factory every entity table in the panel
+   uses, and not by hand. It WAS hand-written first and the difference showed on the screen
+   immediately: no sorting, no column chooser, and a two-line header where every other table
+   in the panel has one. None of that is something this screen should be implementing —
+   sorting, pagination, column widths, reordering, the filter strip and the per-user
+   persistence of all of it come with the factory.
+
+   The pane is FULL-BLEED (`ss-fullbleed` in _page.html) for the same reason every other list
+   in the panel is: a list is the section, so a card around it draws a frame inside a frame and
+   leaves a strip of page background where rows should be.
+
+   The token itself exists exactly once — in the response that creates it — so the create and
+   rotate flows end in a dialog that shows it and says so. Anything else (a list that could
+   show it again, a "copy" that re-fetches) would make the stored row as good as the token,
+   which is the whole reason only its hash is kept.
+   ================================================================ #}
+
+let _accTokens = [];
+let _accTokensByUid = {};
+let _accTokenMax = 20;
+
+const _TOK_COLS = [
+    { id: 'name',        label: () => t('api_token_col_name'),      sortKey: 'name',        always: true  },
+    { id: 'token_id',    label: () => t('audit_f_token_id'),        sortKey: 'token_id',    always: false },
+    { id: 'permissions', label: () => t('api_token_col_perms'),     sortKey: 'permissions', always: false },
+    { id: 'expires_at',  label: () => t('api_token_col_expires'),   sortKey: 'expires_at',  always: false },
+    { id: 'last_used',   label: () => t('api_token_col_last_used'), sortKey: 'last_used',   always: false },
+    { id: 'created',     label: () => t('col_created_at'),          sortKey: 'created',     always: false },
+];
+const _TOK_DEFAULT_COLS = new Set(['token_id', 'permissions', 'expires_at', 'last_used']);
+
+let _tokVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_apitokens_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_TOK_DEFAULT_COLS);
+})();
+let _tokColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_apitokens_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
+    return _TOK_COLS.map(c => c.id);
+})();
+/** Show the revoked ones — off by default, so the list is what still works.
+ *
+ *  A revoked token is KEPT on purpose ("it stopped working" and "it was never here" are
+ *  different answers, and only one of them is actionable), but it is history, and history
+ *  mixed into a list of live credentials is what makes the list hard to read: rotate a few
+ *  times and the working token is outnumbered by its own past.
+ *
+ *  So the default answers the question the screen is opened with — what can be used right
+ *  now — and the record is one click away rather than gone. A standing preference, not a
+ *  filter you set each visit, so it is remembered per user like the columns are.
+ */
+let _tokShowRevoked = (() => {
+    try { return localStorage.getItem('ss_apitokens_show_revoked') === '1'; } catch (_) { return false; }
+})();
+function _tokSetShowRevoked(on) {
+    _tokShowRevoked = !!on;
+    try { localStorage.setItem('ss_apitokens_show_revoked', _tokShowRevoked ? '1' : '0'); } catch (_) {}
+    _tokPage = 1;                 // a shorter list invalidates whatever page you were on
+    _persistTableConfig();        // rides the per-user registry, like the columns
+    _accTokensRender();
+}
+
+let _tokPage = 1;
+let _tokPageSize = null;
+let _tokSort = 'created';
+let _tokSortDir = 'desc';
+let _selectedTokens = new Set();
+let _tokCurrentPage = [];
+
+createListTable({
+    key: 'apitokens', containerId: 'accTokensList', tableId: 'apitokens-table',
+    accent: 'purple', icon: 'bi-code-slash', title: () => esc(t('settings_tokens')),
+    columns: _TOK_COLS, defaultVisible: _TOK_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'settings_tokens',
+    // Filter strip (shared design — see createListTable's spec.filters). Three fields for the
+    // three questions this list is opened with: which token is this, is it still working, and
+    // what can it do. The bar lives outside the re-rendered body, so typing never loses focus.
+    filters: {
+        // Hiding the revoked ones is the DEFAULT, and it is not a field in the bar, so
+        // `match()` has to run with the bar empty — otherwise the factory skips it (a fair
+        // shortcut for a list nothing is filtering) and the rule never applies at all.
+        always: () => !_tokShowRevoked,
+        fields: [
+            { key: 'q', label: () => t('api_token_col_name'), type: 'search', grow: true,
+              placeholder: () => t('api_token_name_ph') },
+            { key: 'state', label: () => t('col_status'), type: 'select', minWidth: '140px',
+              options: () => [
+                  { value: '',        label: t('all') },
+                  { value: 'active',  label: t('api_token_state_active') },
+                  { value: 'expired', label: t('api_token_expired_badge') },
+                  { value: 'revoked', label: t('api_token_revoked_badge') },
+              ] },
+            { key: 'perm', label: () => t('api_token_col_perms'), type: 'search', minWidth: '180px',
+              placeholder: () => t('api_token_perm_filter_ph') },
+        ],
+        match: (tk, f) => {
+            const has = (v, needle) => (v || '').toLowerCase().includes(needle.toLowerCase());
+            // Hiding them is a standing default; asking for them in the bar is an explicit
+            // request, and an explicit request beats a standing default. Without this, picking
+            // "Revoked" would empty the list and say nothing about why.
+            if (!_tokShowRevoked && tk.revoked && f.state !== 'revoked') return false;
+            if (f.q && !has(tk.name, f.q)) return false;
+            if (f.state && (tk.revoked ? 'revoked' : (tk.expired ? 'expired' : 'active')) !== f.state)
+                return false;
+            // A token with '*' matches ANY permission asked for, because it has it: '*' is
+            // "whatever the owner has", so answering "no" for one of them would be a lie the
+            // request layer contradicts.
+            if (f.perm && tk.permissions !== '*'
+                && !(tk.permissions || []).some(p => has(p, f.perm) || has(_permLabel(p), f.perm)))
+                return false;
+            return true;
+        },
+    },
+    rows: () => _accTokens.map(tk => tk.uid), rowKey: uid => uid,
+    record: uid => _accTokensByUid[uid] || {},
+    prepare: () => ({ atMax: _accTokens.filter(tk => !tk.revoked).length >= _accTokenMax }),
+    actionsVisible: () => true,
+    // A revoked or expired token stays on screen rather than being hidden: "it stopped
+    // working" and "it was never here" are different answers, and only one is actionable.
+    rowAttrs: uid => {
+        const tk = _accTokensByUid[uid] || {};
+        return (tk.revoked || tk.expired) ? ' style="opacity:.5"' : '';
+    },
+    sortValue: (uid, sortKey) => {
+        const tk = _accTokensByUid[uid] || {};
+        switch (sortKey) {
+            // "Never expires" and "never used" sort as the extreme they are, rather than as
+            // an empty string landing wherever '' happens to fall.
+            case 'expires_at':   return tk.expires_at || '9999';
+            case 'last_used':    return tk.last_used || '0000';
+            case 'permissions':  return tk.permissions === '*' ? '*' : (tk.permissions || []).join(',');
+            case 'token_id':     return tk.token_id || '';
+            case 'created':      return tk.created || '';
+            default:             return (tk.name || '').toLowerCase();
+        }
+    },
+    cell: (uid, colId) => {
+        const tk = _accTokensByUid[uid] || {};
+        switch (colId) {
+            case 'name': {
+                const state = tk.revoked
+                    ? `<span class="badge text-bg-secondary fw-normal ms-1 ss-fs-1">${esc(t('api_token_revoked_badge'))}</span>`
+                    : (tk.expired ? `<span class="badge text-bg-warning fw-normal ms-1 ss-fs-1">${esc(t('api_token_expired_badge'))}</span>` : '');
+                return `<td class="text-nowrap"><code>${esc(tk.name || '')}</code>${state}</td>`;
+            }
+            case 'token_id':
+                return `<td class="text-nowrap"><code class="text-muted ss-fs-2">sst_${esc(tk.token_id || '')}…</code></td>`;
+            case 'permissions':
+                return `<td class="ss-fs-2">${_accTokenPermsHtml(tk)}</td>`;
+            case 'expires_at':
+                return `<td class="text-nowrap small">${tk.expires_at
+                    ? esc(_fmtDateTime(tk.expires_at))
+                    : `<span class="text-muted">${esc(t('api_token_never'))}</span>`}</td>`;
+            case 'last_used':
+                return `<td class="text-nowrap small">${tk.last_used
+                    ? esc(_fmtDateTime(tk.last_used))
+                    : `<span class="text-muted">${esc(t('api_token_unused'))}</span>`}</td>`;
+            case 'created':
+                return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created))}</td>`;
+            default: return '<td></td>';
+        }
+    },
+    actions: uid => _accTokenRowActions(uid),
+    persistExtra: () => ({ show_revoked: _tokShowRevoked, view: _tokView.id() }),
+    applyExtra: cfg => {
+        _tokShowRevoked = !!(cfg && cfg.show_revoked);
+        _tokView.apply(cfg && cfg.view);
+    },
+    bodyMode: () => _tokView.mode(),
+    showChooser: mode => mode === 'table',
+    cardsBody: (uids, ctx, all) => _tokView.body(uids, ctx, all),
+    // The switch leads the strip. It decides WHAT the list shows — it is a filter wearing a
+    // toggle — and the rest of the header is controls that act ON what is shown. Reading left
+    // to right, "which rows" comes before "do something to them"; sitting between the view
+    // buttons and the column chooser it read as a third button that happened to be a switch.
+    headerLead: () => `<div class="d-flex align-items-center gap-2 me-2">
+        <div class="form-check form-switch mb-0 d-flex align-items-center gap-2">
+            <input class="form-check-input mt-0" type="checkbox" role="switch" id="tokShowRevoked"
+                   ${_tokShowRevoked ? 'checked' : ''}
+                   onchange="_tokSetShowRevoked(this.checked)">
+            <label class="form-check-label small text-nowrap mb-0" for="tokShowRevoked"
+                   >${esc(t('api_token_show_revoked'))}</label>
+        </div>
+        ${_tokView.switcher('setAccountTokensView')}</div>`,
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_accTokensLoad()" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`,
+    // The cap is a real answer, not a disabled button with no explanation: 20 live tokens is
+    // where a list stops being a list, and saying so on the control is where somebody looks.
+    headerButtons: ctx => ctx.atMax
+        ? `<button class="btn btn-sm btn-success ms-1" disabled title="${escAttr(t('api_token_too_many'))}"><i class="bi bi-plus-lg me-1"></i>${t('api_token_new')}</button>`
+        : `<button class="btn btn-sm btn-success ms-1" onclick="_accTokenNew()"><i class="bi bi-plus-lg me-1"></i>${t('api_token_new')}</button>`,
+    // "No tokens" is a lie when the switch is what emptied the list, and the way out has to
+    // be on the screen that is empty rather than in the control that did it.
+    emptyBody: () => (!_tokShowRevoked && _accTokens.some(tk => tk.revoked))
+        ? `<div class="text-center py-5 text-muted">
+                <i class="bi bi-eye-slash ss-empty-icon"></i>
+                <span>${esc(t('api_token_all_revoked'))}</span>
+                <div class="mt-3"><button class="btn btn-sm btn-secondary"
+                    onclick="_tokSetShowRevoked(true)"><i class="bi bi-eye me-1"></i>${
+                    esc(t('api_token_show_revoked'))}</button></div>
+            </div>`
+        : `<div class="text-center py-5 text-muted">
+                <i class="bi bi-code-slash ss-empty-icon"></i>
+                <span>${esc(t('api_token_none'))}</span>
+                <div class="small mt-2">${esc(t('api_token_intro'))}</div>
+            </div>`,
+    state: {
+        visible: { get: () => _tokVisibleCols, set: s => { _tokVisibleCols = s; } },
+        order:   { get: () => _tokColOrder,    set: o => { _tokColOrder = o; } },
+        page:    { get: () => _tokPage,        set: p => { _tokPage = p; } },
+        pageSize:{ get: () => _tokPageSize,    set: v => { _tokPageSize = v; } },
+        sort:    { get: () => _tokSort,        set: v => { _tokSort = v; } },
+        sortDir: { get: () => _tokSortDir,     set: v => { _tokSortDir = v; } },
+        selected: () => _selectedTokens,
+        currentPage: { get: () => _tokCurrentPage, set: a => { _tokCurrentPage = a; } },
+    },
+    globalPrefix: {
+        render: '_accTokensRender', goPage: '_goTokensPage', changePageSize: '_changeTokensPageSize',
+        sort: '_sortTokens', toggleCol: '_tokensToggleCol', resetCols: '_resetTokensCols',
+        saveOrder: '_tokSaveColOrder', selectAll: '_tokensSelectAll', toggleOne: '_tokensToggleOne',
+        initFeatures: '_initTokensTableFeatures',
+    },
+});
+
+/** A row's buttons. One function because the table and the grouped views both draw them, and
+ *  a set of buttons that differs by view is a view free to offer an action the other refuses. */
+function _accTokenRowActions(uid) {
+    const tk = _accTokensByUid[uid] || {};
+    // The history button survives revocation, and that is the point: "what did this do before
+    // we cut it off" is asked precisely about the tokens that were cut off.
+    const hist = `<button class="btn btn-sm btn-secondary py-0 px-2" title="${escAttr(t('api_token_access'))}"
+                onclick="_tokenHistory('/api/v1/account/tokens/${encodeURIComponent(uid)}/access', ${jsStr(tk.name || '')})"
+                ><i class="bi bi-clock-history"></i></button>`;
+    if (tk.revoked) return hist;
+    return `${hist}<button class="btn btn-sm btn-secondary py-0 px-2 ms-1" title="${escAttr(t('api_token_edit'))}"
+                onclick="_accTokenEdit(${jsStr(uid)})"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-secondary py-0 px-2 ms-1" title="${escAttr(t('api_token_rotate'))}"
+                onclick="_accTokenRotate(${jsStr(uid)}, ${jsStr(tk.name || '')})"><i class="bi bi-arrow-repeat"></i></button>
+            <button class="btn btn-sm btn-secondary py-0 px-2 ms-1" title="${escAttr(t('api_token_clone'))}"
+                onclick="_accTokenClone(${jsStr(uid)})"><i class="bi bi-files"></i></button>
+            <button class="btn btn-sm btn-warning py-0 px-2 ms-1" title="${escAttr(t('api_token_revoke'))}"
+                onclick="_accTokenRevoke(${jsStr(uid)}, ${jsStr(tk.name || '')})"><i class="bi bi-slash-circle"></i></button>`;
+}
+
+/** What a token has been doing — its recent calls, newest first.
+ *
+ *  One dialog for both screens (`url` is the only difference), because "what has this
+ *  credential been doing" is one question asked at two scopes, and a second copy is a second
+ *  place for the status colours and the empty state to drift.
+ *
+ *  The REFUSED calls are the ones worth finding — "this token asked for something it may not
+ *  have" — so they are coloured rather than filtered out, and the empty state says the ring is
+ *  empty rather than that nothing happened: an installation with the log switched off would
+ *  otherwise read as a token that has never been used.
+ */
+async function _tokenHistory(url, name, max) {
+    const data = await apiGet(url);
+    if (!data) return;
+    const rows = data.access || [];
+    const cap = data.max != null ? data.max : max;
+    const body = !rows.length
+        ? `<div class="text-center py-4 text-muted">${esc(cap ? t('api_token_access_none')
+                                                              : t('api_token_access_off'))}</div>`
+        : `<div class="ss-vscroll" style="max-height:24rem">
+            <table class="table table-sm mb-0 align-middle">
+                <thead><tr>
+                    <th>${esc(t('col_time'))}</th><th>${esc(t('col_ip'))}</th>
+                    <th>${esc(t('api_token_access_call'))}</th><th class="text-end">${esc(t('col_status'))}</th>
+                </tr></thead>
+                <tbody>${rows.map(r => `<tr>
+                    <td class="text-nowrap small">${esc(_fmtDateTime(r.ts))}</td>
+                    <td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(r.ip || '—')}</code></td>
+                    <td class="ss-fs-2"><span class="badge bg-body-secondary text-body-secondary border me-1"
+                        >${esc(r.method)}</span><code>${esc(r.path)}</code></td>
+                    <td class="text-end"><span class="badge ${
+                        r.status >= 500 ? 'text-bg-danger'
+                        : r.status === 403 || r.status === 401 ? 'text-bg-warning'
+                        : r.status >= 400 ? 'text-bg-secondary' : 'text-bg-success'
+                    }">${r.status || '—'}</span></td>
+                </tr>`).join('')}</tbody>
+            </table>
+           </div>
+           <div class="form-text ss-fs-2 mt-2">${esc(t('api_token_access_cap').replace('{}', cap))}</div>`;
+    showHtmlModal(`${t('api_token_access')} — ${name || ''}`, body, 'primary');
+}
+
+// The permission badges, named through the panel's own catalog. Raw flags are what the API
+// speaks; `permission_labels` is what a person reads, and the flag stays as the tooltip so the
+// two never disagree about what a permission is called.
+function _accTokenPermsHtml(tk, ofOwner) {
+    if (tk.permissions === '*')
+        return `<span class="badge text-bg-danger fw-normal">${
+            esc(t(ofOwner ? 'api_token_perms_all_owner' : 'api_token_perms_all'))}</span>`;
+    const list = tk.permissions || [];
+    if (!list.length) return '<span class="text-muted">—</span>';
+    return list.map(p => `<span class="badge bg-body-secondary text-body-secondary fw-normal border me-1"
+        title="${escAttr(p)}">${esc(_permLabel(p))}</span>`).join('');
+}
+
+async function _accTokensLoad() {
+    if (!document.getElementById('accTokensList')) return;
+    const data = await apiGet('/api/v1/account/tokens');
+    _accTokens = (data && data.tokens) || [];
+    _accTokensByUid = Object.fromEntries(_accTokens.map(tk => [tk.uid, tk]));
+    _accTokenMax = (data && data.max) || 20;
+    _accTokensRender();
+}
+
+/** The permission picker: the checkbox grid plus the "all of mine" switch.
+ *
+ *  One function because the create dialog and the edit dialog are the same decision made at
+ *  two different moments, and two copies of a list this long is two lists to keep grouped,
+ *  named and in step with the catalog.
+ */
+function _accTokenPermPicker(preset) {
+    preset = preset || {};
+    // ONLY the caller's own permissions, and grouped and named the way Access › Permissions
+    // names them — the same `PERM_GROUPS` catalog and the same `permission_labels`. A raw flag
+    // list is what the API speaks, not what a person picking from it reads; the flag is kept
+    // beside the name because it IS what the token will carry and what the list shows.
+    // What may be offered. Mine by default; for a token being minted FOR another account it
+    // is the INTERSECTION with that account's own set, because a permission its owner does not
+    // have is one the token could never use — the request-time intersection drops it, so
+    // offering it would put something on the screen that says the token can do what it cannot.
+    // The one exception is the built-in identity, which has no set to intersect with (see
+    // service.effective) and is therefore bounded by the caller alone.
+    const own = new Set([...(currentUser.permissions || [])].filter(p => !p.includes('.')));
+    const mine = preset.limitTo
+        ? new Set([...own].filter(p => preset.limitTo.has(p)))
+        : own;
+    const groups = (typeof PERM_GROUPS !== 'undefined' ? PERM_GROUPS : [])
+        .map(([key, perms]) => [key, (perms || []).filter(p => mine.has(p))])
+        .filter(([, perms]) => perms.length)
+        .sort((a, b) => (t(a[0]) || a[0]).localeCompare(t(b[0]) || b[0]));
+    // Anything the catalog does not group (a flag added without a group) still has to be
+    // pickable, or a token could not be given it at all.
+    const grouped = new Set(groups.flatMap(([, perms]) => perms));
+    const orphans = [...mine].filter(p => !grouped.has(p)).sort();
+    if (orphans.length) groups.push(['other', orphans]);
+    const _pre = new Set(Array.isArray(preset.permissions) ? preset.permissions : []);
+    const _box = p => `<div class="col-sm-6"><div class="form-check" title="${escAttr(_permHint(p))}">
+        <input class="form-check-input acc-tok-perm" type="checkbox" id="tokp_${esc(p)}" value="${escAttr(p)}"
+               ${_pre.has(p) ? 'checked' : ''}>
+        <label class="form-check-label small" for="tokp_${esc(p)}">${esc(_permLabel(p))}
+            <span class="text-body-tertiary font-monospace ss-fs-2">${esc(p)}</span></label>
+        </div></div>`;
+    const rows = groups.map(([key, perms]) =>
+        `<div class="col-12 mt-2 mb-1"><span class="fw-semibold ss-fs-2 text-uppercase text-body-secondary"
+           >${esc(t(key) || key)}</span></div>` + perms.map(_box).join('')).join('');
+    // `'*'` is not one statement but two, depending on whose token it is. On your own it is
+    // "all of MINE" and concedes nothing — you cannot exceed yourself. On somebody else's it
+    // is "all of THEIRS, as it changes", which is the useful reading and also the one that
+    // grows without anybody deciding, so the server allows it only for an administrator.
+    // `noAll` is for the cases the server refuses (the built-in identity, or a caller who is
+    // not an administrator): a switch that 400s is worse than no switch.
+    const _allLabel = preset.forOther ? 'api_token_perms_all_other_label' : 'api_token_perms_all_label';
+    const _allHint  = preset.forOther ? 'api_token_perms_all_other_hint'  : 'api_token_perms_all_hint';
+    return `
+        ${preset.noAll ? '' : `<div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="accTokAll"
+                   ${preset.permissions === '*' ? 'checked' : ''}
+                   onchange="document.getElementById('accTokPerms').classList.toggle('d-none', this.checked)">
+            <label class="form-check-label small fw-semibold text-danger" for="accTokAll">
+                ${esc(t(_allLabel))}</label>
+            <div class="form-text ss-fs-2">${esc(t(_allHint))}</div>
+        </div>`}
+        <div id="accTokPerms" class="${preset.permissions === '*' && !preset.noAll ? 'd-none' : ''}">
+            <label class="form-label small fw-semibold">${esc(t('api_token_col_perms'))}</label>
+            <span class="ms-2">
+                <button type="button" class="btn btn-sm btn-secondary py-0 px-2"
+                        onclick="_accTokPermsAll(true)">${esc(t('select_all'))}</button>
+                <button type="button" class="btn btn-sm btn-secondary py-0 px-2 ms-1"
+                        onclick="_accTokPermsAll(false)">${esc(t('none'))}</button>
+            </span>
+            <div class="row g-1 ss-vscroll" style="max-height:14rem">${rows}</div>
+        </div>`;
+}
+
+/** Tick or clear every box currently on offer.
+ *
+ *  This is what stands in for "all of mine" on the administrator's dialog, and the difference
+ *  is the whole point. `'*'` is DYNAMIC — "whatever the owner has, forever" — so a token minted
+ *  that way for somebody else keeps pace with an account the minter does not control, and the
+ *  minter has seen the secret. Grant the account a permission next year and the token they are
+ *  holding grows with it, with nobody deciding that.
+ *
+ *  Ticking the boxes writes the same set down as a LIST: the token says what it may do, it
+ *  stays where it was put, and the intersection still narrows it if the owner is demoted. The
+ *  convenience without the standing channel.
+ */
+function _accTokPermsAll(on) {
+    document.querySelectorAll('.acc-tok-perm').forEach(cb => { cb.checked = !!on; });
+}
+
+/** Read the picker back: `'*'`, the ticked flags, or null when nothing is ticked. */
+function _accTokenReadPerms() {
+    if (document.getElementById('accTokAll')?.checked) return '*';
+    const picked = [...document.querySelectorAll('.acc-tok-perm:checked')].map(cb => cb.value);
+    return picked.length ? picked : null;
+}
+
+/** The create dialog: a name, an expiry, and an explicit choice of permissions.
+ *
+ *  Nothing is pre-selected unless a clone asked for it. A default of "everything" would make
+ *  the scope decorative, which is the one thing a scoped credential cannot afford.
+ */
+function _accTokenNew(preset) {
+    preset = preset || {};
+    showHtmlModal(t('api_token_new'), `
+        <div class="mb-2">
+            <label class="form-label small fw-semibold">${esc(t('api_token_col_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="accTokName" maxlength="64"
+                   value="${escAttr(preset.name || '')}"
+                   placeholder="${escAttr(t('api_token_name_ph'))}">
+        </div>
+        <div class="mb-2">
+            <label class="form-label small fw-semibold">${esc(t('api_token_col_expires'))}</label>
+            <select class="form-select form-select-sm" id="accTokDays">
+                ${[30, 90, 365].map(d => `<option value="${d}"${
+                    (preset.days != null ? preset.days === d : d === 90) ? ' selected' : ''}>${d}</option>`).join('')}
+                <option value="0"${preset.days === 0 ? ' selected' : ''}>${escAttr(t('api_token_never'))}</option>
+            </select>
+        </div>
+        ${_accTokenPermPicker(preset)}`, 'primary',
+        `<button type="button" class="btn btn-sm btn-primary" id="btnAccTokCreate"
+                 onclick="_accTokenCreate()"><i class="bi bi-plus-lg me-1"></i>${esc(t('create'))}</button>`);
+}
+
+/** Edit what an existing token may do — the picker again, over the token already out there.
+ *
+ *  Without this, a scope that turns out to be one permission short costs a rotation: a new
+ *  secret redeployed everywhere it is configured, to fix a decision that has nothing to do
+ *  with the secret. That is the cost that gets paid once and then avoided by minting the wide
+ *  token instead — the outcome this screen exists to make unnecessary.
+ *
+ *  It applies to the token that is already deployed, on its next request: the row is read and
+ *  intersected with the owner's permissions on every call, so there is no cached grant.
+ */
+function _accTokenEdit(uid) {
+    const tk = _accTokensByUid[uid];
+    if (!tk) return;
+    showHtmlModal(`${t('api_token_edit')} — ${tk.name || ''}`, `
+        <p class="small text-muted mb-2">${esc(t('api_token_edit_hint'))}</p>
+        ${_accTokenPermPicker({permissions: tk.permissions})}`, 'primary',
+        `<button type="button" class="btn btn-sm btn-primary" id="btnAccTokSave"
+                 onclick="_accTokenSave(${jsStr(uid)})"><i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+async function _accTokenSave(uid) {
+    const perms = _accTokenReadPerms();
+    if (!perms) { showToast(t('api_token_perms_required'), 'danger'); return; }
+    const done = ssBtnBusy(document.getElementById('btnAccTokSave'));
+    const res = await apiPut(`/api/v1/account/tokens/${encodeURIComponent(uid)}`,
+                             {permissions: perms});
+    done();
+    if (!res || !(res.data || {}).ok) {
+        showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+        return;
+    }
+    // Only on success: a scope that was refused has to leave the picker on screen with the
+    // ticks still in it, or the fix is "open it again and redo the choice".
+    hideInfoModal();
+    showToast(t('api_token_edited_ok'), 'success');
+    _accTokensLoad();
+}
+
+async function _accTokenCreate() {
+    const name = (document.getElementById('accTokName')?.value || '').trim();
+    if (!name) { showToast(t('api_token_name_required'), 'danger'); return; }
+    const perms = _accTokenReadPerms();
+    if (!perms) { showToast(t('api_token_perms_required'), 'danger'); return; }
+    const days = parseInt(document.getElementById('accTokDays')?.value || '90', 10);
+    const done = ssBtnBusy(document.getElementById('btnAccTokCreate'));
+    const res = await apiPost('/api/v1/account/tokens',
+                              {name, permissions: perms, expires_days: days});
+    done();
+    if (!res || !(res.data || {}).ok) {
+        showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+        return;
+    }
+    _accTokenShow(res.data.token);
+    _accTokensLoad();
+}
+
+/** Clone: the create dialog, pre-filled from an existing token.
+ *
+ *  Reassembling a permission set by hand is how a second token ends up subtly different from
+ *  the one it was meant to mirror — and nobody notices until the difference is a 403 in
+ *  something that runs at night. The name gets a suffix because two live tokens may not share
+ *  one, and it stays editable because "(copy)" is a placeholder, not a decision.
+ */
+function _accTokenClone(uid) {
+    const tk = _accTokensByUid[uid];
+    if (!tk) return;
+    let days = null;
+    if (!tk.expires_at) {
+        days = 0;
+    } else {
+        // The original SPAN, not what is left of it: a clone of a 90-day token is another
+        // 90-day token, and copying the remaining three days would be a different decision
+        // made on the clonee's behalf.
+        const span = Math.round((new Date(tk.expires_at) - new Date(tk.created)) / 86400000);
+        days = [30, 90, 365].includes(span) ? span : null;
+    }
+    _accTokenNew({name: `${tk.name} ${t('api_token_copy_suffix')}`.slice(0, 64),
+                  permissions: tk.permissions, days});
+}
+
+/** Rotate: a new secret for the same setup, with the old one still working.
+ *
+ *  The alternative — revoke, then create — costs two things that only hurt in production: the
+ *  permission set has to be rebuilt from memory, and everything using the token is broken from
+ *  the revoke until the new one is deployed. Here the old one is renamed "(previous)" and keeps
+ *  working, so the changeover has a window instead of an outage.
+ */
+function _accTokenRotate(uid, name) {
+    showConfirmModal(t('api_token_rotate_q').replace('{}', name), async () => {
+        const res = await apiPost(`/api/v1/account/tokens/${encodeURIComponent(uid)}/rotate`, {});
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(t('api_token_rotated_ok'), 'success');
+        _accTokenShow(res.data.token);
+        _accTokensLoad();
+    });
+}
+
+/** Show the token, once, and say that this is the only time.
+ *
+ *  No "copy again" and no way back to it: the row holds a hash, so there is nothing to come
+ *  back to. Saying so here is the difference between somebody storing it now and somebody
+ *  discovering tomorrow that the token they did not write down is gone.
+ */
+function _accTokenShow(raw) {
+    showHtmlModal(t('api_token_created_title'), `
+        <p class="small mb-2">${esc(t('api_token_created_warn'))}</p>
+        <div class="input-group input-group-sm">
+            <input type="text" class="form-control font-monospace" id="accTokRaw" readonly value="${escAttr(raw)}">
+            <button class="btn btn-secondary" type="button" onclick="_accTokenCopy()"
+                    title="${escAttr(t('copy'))}"><i class="bi bi-clipboard"></i></button>
+        </div>`, 'warning');
+}
+
+function _accTokenCopy() {
+    const el = document.getElementById('accTokRaw');
+    if (!el) return;
+    el.select();
+    navigator.clipboard?.writeText(el.value).then(
+        () => showToast(t('copied'), 'success'),
+        () => { /* the field is selected; the manual copy still works */ });
+}
+
+function _accTokenRevoke(uid, name) {
+    showConfirmModal(t('api_token_revoke_q').replace('{}', name), async () => {
+        const res = await apiDelete(`/api/v1/account/tokens/${encodeURIComponent(uid)}`);
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(t('api_token_revoked_ok'), 'success');
+        _accTokensLoad();
+    });
+}

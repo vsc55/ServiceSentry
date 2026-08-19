@@ -68,6 +68,21 @@ Además del [bloqueo por cuenta](#bloqueo-de-cuenta-por-intentos-fallidos), hay 
 - Si se activa, `session.permanent = True` (duración configurable).
 - La `secret_key` de Flask se genera aleatoriamente la primera vez y se persiste en disco (`.flask_secret`); las instancias posteriores reutilizan la misma clave — las sesiones no se invalidan al reiniciar el proceso.
 
+### Último acceso (`last_login`)
+
+Cada cuenta guarda cuándo inició sesión por última vez, estampado en `_establish_session` — el
+único punto del panel donde nace una sesión, así que cubre el formulario local y las tres puertas
+SSO por igual. Vacío significa **nunca**.
+
+Existe porque la auditoría no podía contestarlo: `login_ok` está ahí, pero el registro está
+limitado **por número de filas**, así que una racha de cualquier otra cosa lo desaloja — y
+entonces «qué cuentas ya no tienen a nadie detrás» deja de poder contestarse. Un campo en el
+registro lo contesta por lejos que quede el último acceso.
+
+**Usar un token de API no cuenta como iniciar sesión**: eso queda en el `last_used` del token.
+Una cuenta cuya única actividad es un script tiene a una persona inactiva detrás, que es justo lo
+que una revisión de accesos está buscando.
+
 ### Campo `auth_source` en usuarios
 
 Cada usuario en el almacén de la base de datos (tabla `users`) tiene un campo `auth_source` que determina cómo se autentica:
@@ -100,6 +115,21 @@ Los usuarios locales llevan `auth_source: "local"`; los autenticados por LDAP/SS
 ### Bloqueo de cuenta por intentos fallidos
 
 Tras `_LOCKOUT_MAX_ATTEMPTS` (por defecto **5**) intentos de login fallidos con la contraseña incorrecta, la cuenta queda bloqueada durante `_LOCKOUT_DURATION_SECS` (por defecto **900 s = 15 min**). Mientras está bloqueada, incluso la contraseña correcta es rechazada. El mensaje mostrado al usuario es siempre el genérico "Invalid credentials" para no revelar que la cuenta existe y está bloqueada (anti-enumeración). El log de auditoría sí registra `reason: 'account_locked'`.
+
+**Levantar un bloqueo.** Hasta build.93 lo único que lo limpiaba era **un inicio de sesión
+correcto** — que es justo lo que el bloqueo impide—, así que la única salida era esperar a que
+caducara, y `lockout_duration_secs` llega a un día. Y era **invisible**: a quien administraba le
+decían «no puedo entrar» y no tenía forma de ver que la cuenta estaba bloqueada.
+
+Ahora el estado viaja en el listado de usuarios (`locked_until`, **solo mientras esté en
+vigor**), se pinta en la lista y en el modal de edición, y se levanta desde ahí o con
+`main.py user unlock <usuario>`.
+
+Va con `users_edit` y no con un permiso propio, a diferencia de quitarle el segundo factor a
+alguien: **no concede acceso** —la contraseña sigue teniendo que ser la correcta—, solo levanta
+un límite de intentos. Se audita como `user_unlocked`, y **solo cuando había un bloqueo en
+vigor**: limpiar las claves de uno ya caducado es mantenimiento, y registrarlo pondría en el
+único registro que alguien consulta después algo que no pasó.
 
 Configuración en `config.json → web_admin`:
 
@@ -322,6 +352,182 @@ La UI separa **configuración** (ajustes + «Servicios expuestos», en Config �
 fail2ban se registra como un **servicio embebido** más (`lib/services/ipban/`), igual que el monitor, el receptor syslog o el procesador de eventos. En la pestaña **Services** aparece con su **estado** (on/off), su **interruptor start/stop** (que conmuta `ipban_enabled` y lo persiste, reconfigurando el jail en caliente) y un **latido (heartbeat) por contenedor**: cada réplica publica su estado y sus contadores (baneadas / en vigilancia / lista blanca) en `service_instances`, así en microservicios se ve **qué pods están aplicando el jail**. A diferencia de los demás, no es un bucle de fondo sino un **gate en línea** en cada request; el start/stop no arranca un hilo, sino que activa/desactiva el interruptor maestro compartido.
 
 Todo el código del servicio vive unificado en `lib/services/ipban/`: `jail.py` (`IpBanManager`, motor sin framework), `exposed.py` (registro de servicios expuestos + acciones de bloqueo), `manager.py` (`_IpBanMixin`, la cola Flask del host: gate + captura de ofensas) y `embedded.py` (superficie Services + heartbeat). La persistencia se agrupa en `lib/services/ipban/store/`, con **una clase y un archivo por tabla** (`bans.py`, `offense_counters.py`, `offense_log.py`, `service_actions.py`, `history.py`, `whitelist.py`) y una fachada `IpBanStore` (`store.py`) que los compone y coordina las operaciones cross-tabla (`clear_offenses`, `prune`). Los routes (`lib/services/ipban/routes.py`) y las plantillas siguen su ubicación estándar, como el resto de servicios.
+
+---
+
+## Tokens de API
+
+Todo menos SCIM se autentica con **cookie de sesión + CSRF**, lo que obliga a cualquier
+automatización a guardar una contraseña real. Y desde que existe el segundo factor, una
+contraseña **ya no completa un inicio de sesión**: encender `mfa_required` deja sin funcionar
+todos los scripts, y el único apaño es una cuenta deliberadamente sin proteger.
+
+Un token de API es la respuesta a las dos cosas: 192 bits aleatorios, sin segundo factor que
+completar, sin cookie, y revocable por su cuenta sin tocar el acceso de la persona.
+
+```
+Authorization: Bearer sst_<id>_<secreto>
+```
+
+### Lo que sostiene el diseño
+
+**La intersección.** Un token lleva o una lista de permisos o `'*'`, y en **cada petición** se
+cruza con los permisos efectivos actuales de su dueño ([`service.effective`](../src/lib/core/apitokens/service.py)).
+De ahí salen dos cosas que no se pueden separar: un token nunca puede hacer más que la cuenta a
+la que pertenece, y quitarle un rol a esa cuenta lo estrecha en el mismo instante. La
+alternativa —congelar los permisos al crearlo— es una concesión permanente que sobrevive a la
+degradación de su dueño. Por eso `'*'` significa **«lo que tenga el dueño»** y no «todo»: es la
+misma frase escrita de forma que siga siendo verdad.
+
+**Las rutas que gestionan credenciales rechazan un token** (`_session_required`): mintear,
+revocar, cambiar la contraseña, dar de alta o quitar un segundo factor. Un token estrecho que
+puede mintear uno ancho no es estrecho, y uno que puede cambiar la contraseña de su dueño es un
+punto de apoyo que se queda con la cuenta dentro de la cual estaba acotado. Todo lo demás que
+puede hacer una cuenta, puede hacerlo un token suyo.
+
+**El estado de la cuenta manda.** Desactivarla, o marcarla sin inicio de sesión, deja sus
+tokens sin efecto. Borrarla los borra. Si no, dar de baja a alguien dejaría abierta una puerta
+que nadie piensa en cerrar.
+
+**No es una sesión.** No hay fila en la tabla de sesiones, no sale en esa pantalla y «revocar
+todas las sesiones» no lo toca: tiene su propia lista, su propia caducidad y su propia
+revocación. Y la respuesta a una llamada con token **no lleva cookie**: el cliente no pidió una
+sesión, y dársela convierte una llamada sin estado en una segunda credencial en el disco de
+alguien.
+
+### Qué ha hecho un token
+
+`last_used` dice que un token sigue vivo. No dice para qué es, si lo que hace es lo que montaste
+ni desde dónde llama — y la auditoría tampoco: registra la **cuenta**, así que lo que escribe un
+token se lee como lo que escribió su dueño, y las lecturas no se auditan para nadie.
+
+Cada llamada autenticada por token queda con fecha, IP, método, **patrón** de ruta y **código de
+respuesta**, y se lee desde el botón de historial de su fila. Las **negadas** están ahí a
+propósito: «este token pidió algo que no puede tener» es la línea que busca una revisión, y un
+historial de las que funcionaron es el historial de la mitad que salió como se esperaba.
+
+Es un **anillo por token** —`web_admin|api_token_log_max`, 200 por defecto, 0 lo apaga— y no un
+log: una tabla que crece con el tráfico de la API es lo que la contabilidad de una API no puede
+ser. Sobrevive a la revocación, que es cuando más se pregunta por él, y se borra con la cuenta.
+
+### `'*'` no es una frase, son dos
+
+`'*'` se resuelve **contra el dueño** en cada petición, así que lo que dice depende de quién sea
+el dueño:
+
+- **En tu propia configuración** dice «todos los **míos**», y no concede nada: un token tuyo
+  nunca puede más de lo que puedes tú, hoy y cada día siguiente.
+- **Creado para otra cuenta** dice «todos los **suyos**, según vayan cambiando». Es la lectura
+  útil —así un token para una cuenta sigue encajando con la cuenta en vez de quedarse viejo— y
+  es también lo único aquí que **crece sin que nadie lo decida**: quien lo creó vio el secreto
+  una vez, y un permiso que esa cuenta reciba el año que viene ensancha una credencial que
+  quizá siga teniendo apuntada.
+
+Por eso es una decisión **de administrador** y de nadie más. Un administrador ya tiene todos los
+permisos, así que un token que sigue a una cuenta nunca puede llevarle más allá de su propio
+techo; a un gestor de usuarios delegado sí podría, y esa es una escalada que llega sola.
+
+Para la identidad interna sigue rechazado, y no por política: no hay conjunto del dueño contra
+el que resolverlo, así que `service.effective` devuelve el conjunto vacío. Sería un token que no
+puede hacer nada mientras afirma poder todo.
+
+La etiqueta cambia con el significado —«Todos mis permisos» / «Todos sus permisos»— y en la
+lista de administración y en la auditoría se lee «Todos los de la cuenta»: quién es el dueño al
+que sigue **es** el valor. Y junto a las casillas hay **Todos / Ninguno**, que escribe el mismo
+conjunto como lista fija para cuando lo que quieres es una foto y no un seguimiento.
+
+### Tokens de `system`: dónde deja de valer la intersección
+
+`system` es una identidad interna: nombre, UID estable y fila en la lista de usuarios, pero sin
+contraseña, sin sesión y **sin permisos** — actúa con la autoridad del panel precisamente porque
+nunca pasa por una comprobación de permisos. Un token suyo existe porque la automatización que
+cuelga de una persona se cae con la cuenta de esa persona, que es el fallo que esto viene a
+evitar.
+
+Lo que hay que saber, dicho sin adornos: **el invariante que gobierna a todos los demás tokens no
+aplica aquí**. «Intersecado con los del dueño, en cada petición» necesita un dueño con permisos, y
+este no los tiene; intersecar con el conjunto vacío haría que el token no pudiera hacer nada. Así
+que su alcance es el que se le dio y **nada lo estrecha después salvo revocarlo**.
+
+A cambio, el techo se mueve en vez de desaparecer:
+
+- **Solo un administrador puede crear uno.** La identidad propia del panel no es algo que reparta
+  un gestor de usuarios delegado.
+- **Nadie puede dar lo que no tiene.** Los permisos se validan contra los de quien llama, así que
+  un token de `system` nunca sale más ancho que el administrador que lo creó.
+- **`'*'` se rechaza.** Sin dueño contra el que resolverlo significaría *todo, para siempre*, que
+  es justo lo que este diseño existe para no tener. Falla cerrado: si llegara almacenado, el
+  cálculo devuelve el conjunto vacío en vez de todos.
+- **Sale en la lista de administración** como cualquier otro y se revoca igual.
+
+`anonymous` —la otra identidad interna— no puede tener tokens: es el nombre que el registro usa
+para «no sabemos quién», y un token es una identificación.
+
+### Editar el alcance no es rotar
+
+El secreto y el alcance son dos cosas distintas, y cuando un token resulta necesitar un permiso
+más, solo una de ellas está mal. Sin poder editarlo, cambiar el alcance costaba una rotación:
+un secreto nuevo redesplegado allá donde esté configurado, para arreglar una decisión que no
+tiene nada que ver con el secreto. Ese es el coste que se paga una vez y luego se evita
+minteando el token ancho — justo lo que esta pantalla existe para hacer innecesario.
+
+El cambio se aplica en la **siguiente petición** del token que ya está desplegado: los permisos
+se leen de la fila y se intersecan con los del dueño en cada llamada, así que no hay concesión
+cacheada que invalidar. Se valida contra los permisos **de quien llama**, igual que al mintear
+—un alcance que no puedes crear no es uno al que puedas llegar editando—, y un token **revocado**
+no se edita: ya no es un token, y un alcance sobre él sería una promesa que nadie cumple.
+
+La entrada de auditoría lleva **los dos lados**, antes y después: «qué puede hacer ahora» sin
+«qué podía hacer antes» no contesta la única pregunta que se le hace a un registro así.
+
+### Rotar en vez de revocar y volver a crear
+
+Rotar un token con lo que había —revocar, crear otro— cuesta dos cosas que solo duelen en
+producción: hay que rehacer el juego de permisos de memoria, y todo lo que usa el token está
+roto desde la revocación hasta que el nuevo está desplegado.
+
+**Rotar** crea el sustituto con el mismo nombre, los mismos permisos y el mismo **plazo** —el
+original, no la fecha original: un token de 90 días rota a otros 90, mientras que copiar la fecha
+devolvería algo que caduca mañana—, y deja el actual **funcionando**. El viejo pasa a llamarse
+«(anterior)» y el nuevo hereda el nombre, así que los nombres siguen siendo únicos, quien lea la
+lista encuentra el nombre que conoce en el token vigente, y el que hay que retirar es el que lo
+dice. Se revoca cuando el cambio está hecho, no antes.
+
+**Clonar** abre el diálogo de creación relleno con los permisos del token elegido. Rehacer un
+juego de permisos a mano es como un segundo token acaba siendo sutilmente distinto del que
+pretendía imitar, y nadie lo nota hasta que la diferencia es un 403 en algo que corre de noche.
+
+### CSRF
+
+Una petición autenticada por *bearer* está **exenta**, y no por comodidad: el doble-envío
+defiende de que una página cross-site haga que **el navegador** emita una petición con sus
+cookies puestas. Ninguna página puede añadir una cabecera `Authorization` sin el consentimiento
+de este origen, así que aquí no hay ataque que prevenir — y exigirlo rechazaría cada escritura
+de un cliente de API. Por eso el hook que resuelve el token corre **antes** que el de CSRF: para
+juzgar una petición hay que saber cómo se autenticó (ver [explica-web-admin.md](explica-web-admin.md)).
+
+### Qué se guarda
+
+Solo el **hash SHA-256** del secreto, más un `token_id` en claro que es lo que busca el índice.
+El token completo existe una sola vez, en la respuesta que lo crea. Detalles de la tabla y el
+porqué de SHA-256 y no scrypt, en
+[ref-esquema-bd.md](ref-esquema-bd.md#api_tokens--tokens-de-api-por-usuario).
+
+### Límites y auditoría
+
+Un máximo de **20 tokens activos** por cuenta y una caducidad de como mucho **730 días**;
+ninguno de los dos es una frontera de seguridad —el dueño puede mintear más mañana—, están para
+que la lista siga siendo una lista y «no caduca» siga siendo una decisión y no la forma que toma
+todo token porque nadie tocó el campo.
+
+Se auditan `api_token_created`, `api_token_revoked` y `api_tokens_revoked_by_admin`. El detalle
+nombra el token y lo que puede hacer, **nunca el token**: un registro que lleva una credencial
+viva es un segundo sitio del que robarla.
+
+Revocar los tokens de **otra** cuenta va con `sessions_revoke`, que es exactamente de lo que
+trata ese permiso —acceso permanente a este panel—; inventar un flag aparte para el mismo acto
+dejaría instalaciones que conceden uno y no el otro y se sorprenden de qué clase de acceso no
+acaban de cortar.
 
 ---
 

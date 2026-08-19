@@ -483,6 +483,9 @@ def args_init() -> argparse.Namespace:
     _p = up.add_parser('passwd', help="change a user's password")
     _p.add_argument('username')
     _p.add_argument('-P', '--password', help='new password (prompted if omitted)')
+    # A lockout used to be cleared only by a successful sign-in, which is the one thing it
+    # prevents — so the only cure was waiting out `lockout_duration_secs`, up to a day.
+    up.add_parser('unlock', help='lift a failed-attempt lockout').add_argument('username')
     _p = up.add_parser('role', help="set a user's role")
     _p.add_argument('username')
     _p.add_argument('role', help='admin|editor|viewer|none or a custom role')

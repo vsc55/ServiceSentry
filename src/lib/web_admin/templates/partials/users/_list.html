@@ -34,6 +34,7 @@ const _USR_COLS = [
     { id: 'role',         label: () => t('col_role'),                              sortKey: 'role',         always: false },
     { id: 'sessions',     label: () => t('col_sessions'),                          sortKey: 'sessions',     always: false, resizable: false },
     { id: 'mfa',          label: () => t('mfa_col'),                                sortKey: 'mfa',          always: false, resizable: false },
+    { id: 'last_login',   label: () => t('col_last_login'),                        sortKey: 'last_login',   always: false },
     ..._META_TAIL,
 ];
 const _USERS_DEFAULT_COLS = new Set(['display_name', 'role', 'sessions']);
@@ -87,6 +88,12 @@ function _usersRowActions(uname, ctx) {
  *  chip row and the access review — because a mark that means "protected" in one of them and
  *  something slightly different in another is worse than not having it in two of them.
  */
+function _usrLockBadge(u) {
+    if (!u || !u.locked_until) return '';
+    return `<span class="badge text-bg-danger fw-normal ms-1 ss-fs-1"
+        title="${escAttr(t('user_locked_until').replace('{}', _fmtDateTime(u.locked_until)))}"
+        ><i class="bi bi-lock-fill me-1"></i>${esc(t('user_locked_state'))}</span>`;
+}
 function _usrMfaMark(u) {
     const on = !!(u || {}).mfa;
     return `<span class="ss-help ${on ? 'text-success' : 'text-muted'}" title="${escAttr(
@@ -112,6 +119,7 @@ function _usersCardsBody(unames, ctx) {
             (u.auth_source && u.auth_source !== 'local' && _sso[u.auth_source]) ? `<span class="badge text-bg-secondary fw-normal ss-fs-1">${_sso[u.auth_source]}</span>` : '',
             (!u.builtin && u.login_enabled === false) ? `<span class="badge text-bg-dark fw-normal ss-fs-1" title="${escAttr(t('login_enabled_hint'))}"><i class="bi bi-door-closed me-1"></i>${t('no_login_badge')}</span>` : '',
             u.enabled === false ? `<span class="badge bg-secondary fw-normal ss-fs-1">${t('status_disabled')}</span>` : '',
+            _usrLockBadge(u),
         ].join('');
         const chips = [
             `<span class="badge ${roleBadgeClass(role)}">${esc(roleLabel)}</span>`,
@@ -193,6 +201,9 @@ createListTable({
             case 'role':         return usersData[uname].role || 'viewer';
             case 'sessions':     return ctx.sessionCounts[uname] || 0;
             case 'mfa':          return (usersData[uname] || {}).mfa ? 1 : 0;
+            // Never signed in sorts as older than any date: those are the accounts a review
+            // is looking for, and an empty string would sort them wherever '' happens to land.
+            case 'last_login':   return (usersData[uname] || {}).last_login || '0000';
             default:             return uname.toLowerCase();
         }
     },
@@ -214,7 +225,7 @@ createListTable({
                 // the setting exists to avoid.
                 const noLoginBadge = (!u.builtin && u.login_enabled === false)
                     ? ` <span class="badge text-bg-dark fw-normal ms-1 ss-fs-1" title="${escAttr(t('login_enabled_hint'))}"><i class="bi bi-door-closed me-1"></i>${t('no_login_badge')}</span>` : '';
-                return `<td class="text-nowrap"><code>${esc(uname)}</code>${builtinBadge}${isSelf?`<span class="badge text-bg-info fw-normal ms-1 ss-fs-1">${t('you_badge')}</span>`:''}${authBadge}${noLoginBadge}${disabledBadge}</td>`;
+                return `<td class="text-nowrap"><code>${esc(uname)}</code>${builtinBadge}${isSelf?`<span class="badge text-bg-info fw-normal ms-1 ss-fs-1">${t('you_badge')}</span>`:''}${authBadge}${noLoginBadge}${disabledBadge}${_usrLockBadge(u)}</td>`;
             }
             case 'display_name': return `<td class="text-muted small">${esc(u.display_name || uname)}</td>`;
             case 'role': {
@@ -230,6 +241,10 @@ createListTable({
             }
             case 'mfa':
                 return `<td class="text-center text-nowrap">${_usrMfaMark(u)}</td>`;
+            case 'last_login':
+                return `<td class="text-nowrap small">${u.last_login
+                    ? esc(_fmtDateTime(u.last_login))
+                    : `<span class="text-muted fst-italic">${esc(t('never_signed_in'))}</span>`}</td>`;
             default: return '<td></td>';
         }
     },

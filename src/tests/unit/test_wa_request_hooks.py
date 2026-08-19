@@ -39,6 +39,11 @@ EXPECTED = (
     '_hook_ipban_gate',
     '_hook_trace_start',
     '_hook_refresh_caches',
+    # Before CSRF, and that is the design rather than a detail: judging a request for CSRF
+    # means knowing HOW it authenticated. A bearer call is not a browser being tricked into
+    # posting — no cross-site page can attach an Authorization header — so the CSRF hook
+    # returns early for one, and it can only do that if this one has already run.
+    '_hook_api_token',
     '_hook_csrf_protect',
     '_hook_enforce_fqdn',
 )

@@ -258,6 +258,15 @@ async function openUserModal(username, mode = 'edit') {
                     u.mfa_methods || []);
     }
 
+    // The lockout row: same rule as the second factor — every existing account, in one of
+    // two states. "Not locked" is what rules the lockout out as the reason somebody cannot
+    // get in, which is the whole question this row exists to answer.
+    const _umLock = document.getElementById('umLockGroup');
+    if (_umLock) {
+        _umLock.classList.toggle('d-none', isNew);
+        _umLockPaint(u.locked_until || '');
+    }
+
     document.getElementById('umRoleSearch').value = '';
     document.getElementById('umGroupSearch').value = '';
     _umSelectedRole   = (mode === 'new') ? _defaultUserRole() : (u.role || (clone ? _defaultUserRole() : 'viewer'));
@@ -417,6 +426,43 @@ function _umMfaPaint(on, canReset, methods) {
  *  that account goes back to signing in with its password alone until it sets a new one up.
  *  There is no counterpart that turns MFA on for somebody else — only the owner can enrol an
  *  authenticator they are holding. */
+// `until` is the ISO expiry while the lockout is in force, or '' — the server decides
+// which, so the screen never has to reason about an expired lock or a skewed clock.
+function _umLockPaint(until) {
+    const locked = !!until;
+    const badge = document.getElementById('umLockState');
+    if (badge) {
+        badge.className = 'badge ' + (locked ? 'text-bg-danger' : 'text-bg-success');
+        badge.innerHTML = `<i class="bi ${locked ? 'bi-lock-fill' : 'bi-unlock'} me-1"></i>`
+            + esc(t(locked ? 'user_locked_state' : 'user_unlocked_state'));
+    }
+    // WHEN it lifts by itself, so "wait" stays a real option and the administrator can say
+    // how long. Empty when there is nothing to wait for.
+    const when = document.getElementById('umLockUntil');
+    if (when) when.textContent = locked ? t('user_locked_until').replace('{}', _fmtDateTime(until)) : '';
+    document.getElementById('umUnlockBtn')?.classList.toggle('d-none', !locked);
+}
+
+function _umUnlock() {
+    const username = _editingUser;
+    if (!username) return;
+    showConfirmModal(t('user_unlock_q').replace('{}', username), async () => {
+        const done = ssBtnBusy(document.getElementById('umUnlockBtn'));
+        const res = await apiPost(`/api/v1/users/${encodeURIComponent(username)}/unlock`, {});
+        done();
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(t('user_unlock_ok'), 'success');
+        const u = usersData[username];
+        if (u) u.locked_until = '';
+        _umLockPaint('');
+        // The list marks locked accounts, so it has to hear about this too.
+        if (typeof renderUsers === 'function') renderUsers();
+    });
+}
+
 function _umResetMfa() {
     const username = _editingUser;
     const u = (username && usersData[username]) || {};

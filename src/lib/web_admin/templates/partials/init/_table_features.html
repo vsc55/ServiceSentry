@@ -147,6 +147,13 @@ if (accessLi) accessLi.style.display = hasAnyAccess ? '' : 'none';
 // Sub-tabs
 const stSessions = document.getElementById('subtab-sessions-li');
 if (stSessions) stSessions.style.display = hasAnySessions ? '' : 'none';
+// API tokens rides the SESSIONS permissions: a token is standing access to this panel,
+// which is exactly what that pair is about, and an installation that grants "see who is
+// signed in" without "see what runs without signing in" would be answering half the question.
+// Minting for another account needs users_edit on top, checked on the button and again in
+// the route.
+const stTokens = document.getElementById('subtab-apitokens-li');
+if (stTokens) stTokens.style.display = hasAnySessions ? '' : 'none';
 const stUsers = document.getElementById('subtab-users-li');
 if (stUsers) stUsers.style.display = hasAnyUser ? '' : 'none';
 const stGroups = document.getElementById('subtab-groups-li');
@@ -166,7 +173,7 @@ const _savedSubtabBtn = _savedSubtabTarget
 const _activeSubtab = (
     _savedSubtabBtn && _savedSubtabBtn.closest('li')?.style.display !== 'none'
         ? _savedSubtabBtn
-        : ['btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-permissions','btn-subtab-sessions']
+        : ['btn-subtab-users','btn-subtab-groups','btn-subtab-roles','btn-subtab-permissions','btn-subtab-sessions','btn-subtab-apitokens']
             .map(id => document.getElementById(id))
             .find(btn => btn && btn.closest('li')?.style.display !== 'none')
 );

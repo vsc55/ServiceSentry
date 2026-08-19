@@ -229,8 +229,23 @@ sesión. Ver [explica-mfa.md](explica-mfa.md#la-propiedad-de-la-que-cuelga-todo)
 | POST | `/api/v1/users` | `users_add` | Crear usuario |
 | PUT | `/api/v1/users/<username>` | `users_edit` | Actualizar (rol/nombre/contraseña/grupos) |
 | DELETE | `/api/v1/users/<username>` | `users_delete` | Borrar usuario |
+| POST | `/api/v1/users/<username>/unlock` | `users_edit` | Levantar el **bloqueo por intentos fallidos**. Responde `{ok, cleared}`: `cleared` es si había uno **en vigor** —una cuenta que no estaba bloqueada no es un error, el que llama pidió que no lo estuviera y no lo está—. No concede acceso: la contraseña sigue teniendo que ser correcta, por eso va con `users_edit` y no con un permiso propio. Ver [explica-seguridad.md](explica-seguridad.md#bloqueo-de-cuenta-por-intentos-fallidos) |
 | PUT | `/api/v1/users/me/preferences` | sesión | Preferencias propias (lang/dark/landing/table_config/layout) |
 | PUT | `/api/v1/users/me/password` | sesión | Cambiar contraseña propia (requiere `current_password`) |
+
+Cada registro lleva `last_login`: cuándo inició sesión esa cuenta por última vez, o cadena
+vacía si **nunca** lo hizo —que es una respuesta real y la primera que busca una revisión de
+accesos—. Se estampa en `_establish_session`, el único sitio del panel donde nace una sesión, así
+que vale igual para el formulario local que para OIDC, SAML o Entra. **Usar un token de API no
+es iniciar sesión** y no lo toca: eso queda en el `last_used` del propio token, porque una cuenta
+cuya única actividad es un script tiene a una persona inactiva detrás, que es justo la distinción
+que busca una revisión.
+
+Cada registro lleva `locked_until`: la caducidad del bloqueo por intentos fallidos **mientras
+siga en vigor**, o cadena vacía. Uno caducado no se reporta —la ruta de inicio de sesión lo
+limpia en el siguiente intento, así que enseñarlo sería mostrar un candado que ya no retiene a
+nadie— y el contador de intentos no sale nunca: cuántos le quedan a alguien no es algo que se le
+pregunte a una lista.
 
 Cada registro lleva `login_enabled`: `false` es una **cuenta de servicio** —activa, propietaria y
 destinataria de avisos, pero sin inicio de sesión por ninguna vía (formulario, LDAP, OIDC o
@@ -266,6 +281,47 @@ una sesión prestada bastaría para dejar la cuenta en la contraseña que alguie
 `DELETE` se lleva **todos** los factores y los códigos en una transacción; dejar medio factor en
 pie es peor que ninguno, porque se lee como protección que no está. Ver
 [explica-mfa.md](explica-mfa.md).
+
+## Tokens de API — [lib/core/apitokens/routes.py](../src/lib/core/apitokens/routes.py)
+
+| Método | Ruta | Permiso | Propósito |
+|---|---|---|---|
+| GET | `/api/v1/account/tokens` | sesión | Los tokens de esta cuenta. Nunca el hash, nunca el token |
+| POST | `/api/v1/account/tokens` | sesión | Mintear uno. **La única vez que el token existe entero** es esta respuesta. Cuerpo: `{name, permissions, expires_days}` — `permissions` es una lista de flags o `'*'` |
+| GET | `/api/v1/account/tokens/<uid>/access` | sesión | **Historial**: las llamadas recientes de un token propio (fecha, IP, método, patrón de ruta y código), las negadas incluidas |
+| POST | `/api/v1/account/tokens/<uid>/rotate` | sesión | **Rotar**: un secreto nuevo con el mismo nombre, permisos y plazo, **sin que el actual pare** — pasa a llamarse «(anterior)» y sigue funcionando hasta que lo revoques. Devuelve el token nuevo una vez |
+| PUT | `/api/v1/account/tokens/<uid>` | sesión | **Editar el alcance** sin tocar el secreto. Cuerpo: `{permissions}` (lista de flags o `'*'`). Se aplica en la siguiente petición del token que ya está desplegado; un token revocado no se edita |
+| DELETE | `/api/v1/account/tokens/<uid>` | sesión | Revocar uno propio |
+| GET | `/api/v1/tokens` | `sessions_view` | **Todos** los tokens de la instalación, con la cuenta de cada uno. Un token cuya cuenta ya no existe sale igual, con la cuenta vacía |
+| POST | `/api/v1/users/<username>/tokens` | `users_edit` | Mintear un token **para esa cuenta**. Los permisos tienen que ser de **quien llama** y se aplica la jerarquía de cuentas; `'*'` se rechaza aquí. `username` puede ser `system` (solo administradores) |
+| GET | `/api/v1/tokens/access` | `sessions_view` | **Todas** las llamadas de **todos** los tokens, la más nueva primero (tope 500). Cada fila lleva el token y la cuenta a la que pertenece |
+| GET | `/api/v1/tokens/<uid>/access` | `sessions_view` | El mismo historial, de cualquier token — incluido uno cuya cuenta ya no existe |
+| GET | `/api/v1/users/<username>/permissions` | `users_edit` | Lo que esa cuenta puede llegar a tener — el conjunto que acota las casillas del diálogo. `unbounded: true` para la identidad interna, que no tiene ninguno y a la que no acota nadie salvo quien llama |
+| PUT | `/api/v1/tokens/<uid>` | `users_edit` | Cambiar el alcance de un token cualquiera. Acotado por los permisos de quien llama **y** por los del dueño; `'*'` rechazado; un token sin cuenta no se reescala |
+| POST | `/api/v1/tokens/<uid>/rotate` | `users_edit` | Rotar un token cualquiera. No cambia el alcance, así que solo interviene la jerarquía de cuentas |
+| DELETE | `/api/v1/tokens/<uid>` | `sessions_revoke` | Revocar un token cualquiera |
+| DELETE | `/api/v1/users/<username>/tokens` | `sessions_revoke` | Cortar **todos** los de otra cuenta (baja, o una fuga) |
+
+**Ninguna de las cuatro acepta un token**: gestionar credenciales se queda detrás de un inicio
+de sesión real. Un token estrecho que puede mintear uno ancho no es estrecho, y uno que puede
+revocar a sus hermanos es un punto de apoyo que borra su rastro. Por lo mismo,
+`PUT /api/v1/users/me/password` y todas las rutas de segundo factor rechazan un token.
+
+Dos tokens **vivos** de la misma cuenta no pueden llamarse igual (`409`), sin distinguir
+mayúsculas ni espacios: el nombre es lo único de la lista que dice para qué es un token, y dos
+iguales convierten revocar el correcto en cara o cruz. El de uno revocado sí se reutiliza.
+
+Para usar uno:
+
+```bash
+curl -H 'Authorization: Bearer sst_<id>_<secreto>' https://panel.ejemplo/api/v1/users
+```
+
+Lo que puede hacer es la **intersección** de lo que se le dio con lo que su dueño puede hacer
+**ahora**: quitarle un rol a la cuenta estrecha el token en el mismo instante, y `'*'` significa
+«lo que tenga el dueño», no «todo». No necesita token CSRF —ninguna página cross-site puede
+poner una cabecera `Authorization`— y la respuesta no lleva cookie de sesión. Ver
+[explica-seguridad.md](explica-seguridad.md#tokens-de-api).
 
 ## Roles — [lib/core/roles/routes.py](../src/lib/core/roles/routes.py)
 
@@ -662,3 +718,4 @@ curl https://sentry.example.com/api/v1/health     # {"startup_id": "..."}
 - [explica-notificaciones.md](explica-notificaciones.md) — canales y routing de notificaciones
 - [ref-esquema-bd.md](ref-esquema-bd.md) — tablas de la BD que respaldan estos endpoints
 - [explica-mfa.md](explica-mfa.md) — el segundo factor: política, alta, verificación y reset
+- [explica-seguridad.md](explica-seguridad.md#tokens-de-api) — tokens de API: alcance, CSRF y qué se guarda

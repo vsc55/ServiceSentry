@@ -765,3 +765,148 @@ class TestAnAdminByGroupIsAnAdmin:
         self._seed(admin)
         _login(client)
         assert client.delete('/api/v1/users/ana').status_code == 200
+
+
+class TestALockedAccountCanBeLetBackIn:
+    """A failed-attempt lockout used to be a dead end.
+
+    `_locked_until` was written by the sign-in path and cleared by exactly one thing: a
+    SUCCESSFUL sign-in — which is what the lockout prevents. So the only cure was waiting it
+    out, and `lockout_duration_secs` goes up to a day. It was invisible on top of that: an
+    administrator told "I cannot get in" could not even see that this was why.
+
+    Unlocking grants no access — the password still has to be right — which is why it rides
+    on `users_edit` rather than a flag of its own.
+    """
+
+    @staticmethod
+    def _lock(admin, username='ana', *, minutes=15):
+        from datetime import datetime, timedelta, timezone
+        admin._users[username] = {
+            'uid': 'u-ana', 'role': 'viewer', 'enabled': True,
+            'password_hash': generate_password_hash('anasecret'),
+            '_locked_until': (datetime.now(timezone.utc)
+                              + timedelta(minutes=minutes)).isoformat(),
+            '_failed_attempts': 5,
+        }
+
+    def test_the_listing_reports_the_lockout(self, client, admin):
+        self._lock(admin)
+        _login(client)
+        assert client.get('/api/v1/users').get_json()['ana']['locked_until']
+
+    def test_an_expired_lockout_is_not_reported(self, client, admin):
+        """The sign-in path clears it on the next attempt, so reporting one would show a
+        lock nobody is behind any more."""
+        self._lock(admin, minutes=-15)
+        _login(client)
+        assert client.get('/api/v1/users').get_json()['ana']['locked_until'] == ''
+
+    def test_the_response_never_carries_the_attempt_counter(self, client, admin):
+        """How many tries somebody has left is not something the list is asked."""
+        self._lock(admin)
+        _login(client)
+        row = client.get('/api/v1/users').get_json()['ana']
+        assert '_failed_attempts' not in row and '_locked_until' not in row
+
+    def test_unlocking_lifts_it(self, client, admin):
+        self._lock(admin)
+        _login(client)
+        assert client.post('/api/v1/users/ana/unlock').status_code == 200
+        assert '_locked_until' not in admin._users['ana']
+
+    def test_the_counter_goes_with_it(self, client, admin):
+        """Leaving `_failed_attempts` behind relocks the account on the very next mistake,
+        which from the outside is an unlock that did not work."""
+        self._lock(admin)
+        _login(client)
+        client.post('/api/v1/users/ana/unlock')
+        assert '_failed_attempts' not in admin._users['ana']
+
+    def test_it_is_audited(self, client, admin):
+        self._lock(admin)
+        _login(client)
+        client.post('/api/v1/users/ana/unlock')
+        assert any(e.get('event') == 'user_unlocked' for e in admin._audit_log)
+
+    def test_unlocking_an_account_that_was_not_locked_is_not_an_error(self, client, admin):
+        """The caller asked for the account not to be locked, and it is not. Reporting that
+        as a failure would make an expired lock look like a bug."""
+        self._lock(admin, minutes=-15)
+        _login(client)
+        r = client.post('/api/v1/users/ana/unlock')
+        assert r.status_code == 200 and r.get_json()['cleared'] is False
+
+    def test_it_does_not_let_anybody_in(self, client, admin):
+        """The point of the guard: it lifts a rate limit, it does not accept a password."""
+        self._lock(admin)
+        _login(client)
+        client.post('/api/v1/users/ana/unlock')
+        assert admin._users['ana']['password_hash']
+        assert admin._authenticate('ana', 'wrong') == (None, 'invalid_credentials')
+
+    def test_an_unknown_user_is_a_404(self, client, admin):
+        _login(client)
+        assert client.post('/api/v1/users/nope/unlock').status_code == 404
+
+    def test_a_builtin_identity_is_refused(self, client, admin):
+        _login(client)
+        assert client.post('/api/v1/users/system/unlock').status_code == 403
+
+    def test_it_needs_users_edit(self, admin):
+        from lib.core.constants import BUILTIN_ROLE_UIDS
+        admin._users['viewer'] = {
+            'uid': 'u-v', 'role': BUILTIN_ROLE_UIDS['viewer'], 'enabled': True,
+            'password_hash': generate_password_hash('vsecret')}
+        self._lock(admin)
+        admin.app.config['TESTING'] = True
+        c = admin.app.test_client()
+        c.post('/login', data={'username': 'viewer', 'password': 'vsecret'},
+               follow_redirects=True)
+        assert c.post('/api/v1/users/ana/unlock').status_code == 403
+
+
+class TestWhenAnAccountLastSignedIn:
+    """`last_login` exists because the audit log could not answer the question.
+
+    `login_ok` is in there, but the audit is capped by NUMBER OF ROWS — a burst of anything
+    evicts it — and "which accounts have nobody behind them any more" is what an access review
+    opens with. A field on the record answers it however long ago the last sign-in was.
+    """
+
+    def test_signing_in_records_it(self, client, admin):
+        _login(client)
+        assert admin._users['admin'].get('last_login')
+
+    def test_the_listing_reports_it(self, client, admin):
+        _login(client)
+        assert client.get('/api/v1/users').get_json()['admin']['last_login']
+
+    def test_an_account_that_never_signed_in_says_so(self, client, admin):
+        """Empty is a real and useful answer: a provisioned account nobody has ever used is
+        the first thing a review wants to see."""
+        admin._users['ana'] = {'uid': 'u-ana', 'role': 'viewer', 'enabled': True,
+                               'password_hash': generate_password_hash('anasecret')}
+        _login(client)
+        assert client.get('/api/v1/users').get_json()['ana']['last_login'] == ''
+
+    def test_it_is_written_wherever_a_session_is_born(self, admin):
+        """The stamp lives in `_establish_session`, which is the single funnel every sign-in
+        path ends on — the local form, OIDC, SAML and Entra. A stamp in the login route would
+        be one three providers walk around."""
+        import inspect
+        assert 'last_login' in inspect.getsource(admin._establish_session)
+
+    def test_using_an_api_token_is_not_a_sign_in(self, client, admin):
+        """An account whose only activity is a script has a dormant PERSON behind it, which
+        is exactly the distinction a review is looking for. The token has its own `last_used`."""
+        _login(client)
+        raw = client.post('/api/v1/account/tokens',
+                          json={'name': 'ci', 'permissions': ['users_view']}).get_json()['token']
+        before = admin._users['admin']['last_login']
+        admin._users['admin']['last_login'] = '2020-01-01T00:00:00+00:00'
+        c = admin.app.test_client()
+        c.environ_base['HTTP_AUTHORIZATION'] = f'Bearer {raw}'
+        c.get('/api/v1/users')
+        assert admin._users['admin']['last_login'] == '2020-01-01T00:00:00+00:00'
+        assert before   # the real sign-in did stamp it

@@ -280,6 +280,46 @@ def set_enabled(users: dict, username: str, enabled: bool, *, groups: dict | Non
     return True
 
 
+def locked_until(user: dict, *, now: str = '') -> str:
+    """The failed-attempt lockout still in force, as its ISO expiry — or `''`.
+
+    An expired lockout is not a lockout: the sign-in path clears it on the next attempt, so
+    reporting one would show a lock nobody is behind any more. Answered here rather than by
+    each caller so the screen, the CLI and the API cannot disagree about who is locked out.
+    """
+    raw = str(user.get('_locked_until') or '')
+    if not raw:
+        return ''
+    try:
+        until = datetime.fromisoformat(raw)
+    except ValueError:
+        return ''                      # unparseable is not a lock we can honour or report
+    ref = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    return raw if ref < until else ''
+
+
+def unlock(user: dict, *, actor: str = SYSTEM_USER) -> bool:
+    """Clear a failed-attempt lockout. Returns whether anything was actually cleared.
+
+    The counter goes with the expiry. Leaving `_failed_attempts` behind would relock the
+    account on the very next mistake, which from the outside is an unlock that did not work.
+
+    This grants no access: the password still has to be right. It undoes a rate limit, which
+    is why it rides on `users_edit` rather than a flag of its own — unlike taking somebody's
+    second factor off, it removes no protection.
+    """
+    had = user.pop('_locked_until', None) is not None
+    had = user.pop('_failed_attempts', None) is not None or had
+    if had:
+        user['updated_by'] = actor
+        user['updated_at'] = _now()
+    return had
+
+
 def add_group(user: dict, group_uid: str, groups: dict, *, actor: str = SYSTEM_USER) -> bool:
     """Add a group to a user's membership. Returns True if it was added."""
     if group_uid not in groups:

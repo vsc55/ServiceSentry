@@ -1,0 +1,225 @@
+{# ================================================================
+   API tokens (administration) — the view registry.
+
+   The table answers "what standing access exists" a row at a time, which is the right shape
+   for acting on one of them. It answers two other questions badly, and they are the questions
+   an access review is actually asking:
+
+   • **By account** — whose automation is this? A person leaves and what has to be cut is
+     everything their name owns, and the table only shows that if you sort by the right column
+     and count the rows yourself. The grouped view puts the account in the subject position and
+     the count beside it, which is the same information arranged as the question.
+
+   • **By permission** — who can write configuration without signing in? That is the question
+     a review opens with, and no ordering of the table answers it: a token's permissions are a
+     LIST inside a cell, so the flag you are looking for is scattered across rows. Inverting
+     it — a block per permission, the tokens that carry it underneath — is the only shape in
+     which "nobody should still have this" is a thing you can see.
+
+   Both grouped views are `summary` mode: they are handed every row the filters left standing
+   rather than the page on screen, because a count over one page is a statement about the
+   pagination ("3 tokens can edit users" when there are ten, and a different three next page).
+
+   THE SHAPE IS A RAIL, not a stack of cards. The first version drew one card per group down
+   the page, which put the answer to "how many groups are there" above the fold and the answer
+   to "what is in this one" three screens down — and made every group compete for the same
+   width. The panel already owns this shape: an index down the side and the open thing beside
+   it, filling everything left, is what Configuration and Modules do. One group on screen at a
+   time, the whole list of them always visible, and the counts where they can be compared.
+   ================================================================ #}
+
+const APITOKEN_VIEWS = [
+    { id: 'table', label_key: 'api_token_view_table', icon: 'bi-table',       render: null,              mode: 'table'   },
+    { id: 'users', label_key: 'api_token_view_users', icon: 'bi-people',      render: '_atkViewUsers',   mode: 'summary' },
+    { id: 'perms', label_key: 'api_token_view_perms', icon: 'bi-shield-lock', render: '_atkViewPerms',   mode: 'summary' },
+    { id: 'activity', label_key: 'api_token_view_activity', icon: 'bi-activity', render: '_atkViewActivity', mode: 'summary' },
+];
+
+const _atkView = createViewState('ss_alltokens_view', APITOKEN_VIEWS, () => {
+    _persistTableConfig();
+    // `true`: the activity view has its own fetch, and arriving at it with nothing loaded is a
+    // view that opens empty and stays empty until somebody presses Refresh.
+    renderAllTokens(true);
+});
+function setAllTokensView(id) { _atkView.set(id); }
+
+// ── Activity: the calls, not the tokens ──────────────────────────────────────────────────
+// The other three views answer questions about CREDENTIALS. This one answers the question
+// nobody could ask at all: what has been reaching this panel without anybody signing in, in
+// order, across every token there is. A burst of 403s from a credential nobody was thinking
+// about is a thing you see here and nowhere else.
+//
+// It is a `summary`, so it is handed every token the filter strip left standing — and it shows
+// the calls OF THOSE. That is what keeps the strip meaning the same thing in every view:
+// filter to one account and this is that account's API traffic, without a second set of
+// filters that would have to be kept in step with the first.
+let _atkActivity = [];
+
+function _atkViewActivity(uids) {
+    const allowed = new Set(uids);
+    const rows = _atkActivity.filter(r => allowed.has(r.token_uid));
+    if (!rows.length)
+        return `<div class="text-center py-5 text-muted">
+            <i class="bi bi-activity ss-empty-icon"></i>
+            <span>${esc(t('api_token_access_none_all'))}</span>
+        </div>`;
+    return `<div class="ss-vscroll">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="ss-thead-sticky"><tr>
+                <th>${esc(t('col_time'))}</th>
+                <th>${esc(t('api_token_col_name'))}</th>
+                <th>${esc(t('api_token_owner'))}</th>
+                <th>${esc(t('col_ip'))}</th>
+                <th>${esc(t('api_token_access_call'))}</th>
+                <th class="text-end">${esc(t('col_status'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(r => `<tr>
+                <td class="text-nowrap small">${esc(_fmtDateTime(r.ts))}</td>
+                <td class="text-nowrap"><code>${esc(r.name || '')}</code></td>
+                <td class="text-nowrap">${_atkOwner(r)}</td>
+                <td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(r.ip || '—')}</code></td>
+                <td class="ss-fs-2"><span class="badge bg-body-secondary text-body-secondary border me-1"
+                    >${esc(r.method)}</span><code>${esc(r.path)}</code></td>
+                <td class="text-end"><span class="badge ${
+                    r.status >= 500 ? 'text-bg-danger'
+                    : r.status === 403 || r.status === 401 ? 'text-bg-warning'
+                    : r.status >= 400 ? 'text-bg-secondary' : 'text-bg-success'
+                }">${r.status || '—'}</span></td>
+            </tr>`).join('')}</tbody>
+        </table>
+    </div>
+    <div class="form-text ss-fs-2 px-3 py-2">${esc(t('api_token_access_feed_cap').replace('{}', rows.length))}</div>`;
+}
+
+
+// ── The rail body, shared by every grouped view of tokens ────────────────────────────────
+// One index, one detail, and a selection that survives the re-render — the body is rebuilt on
+// every render() call, so the choice cannot live inside it. Stored per view key, and validated
+// against the groups that exist now: filter the list down and a stale selection would leave the
+// detail empty with the rail showing nothing selected.
+const _TOK_RAIL_SEL = {};
+function _tokRailSel(key, groups) {
+    let cur = _TOK_RAIL_SEL[key];
+    if (cur === undefined) { try { cur = localStorage.getItem('ss_tokrail_' + key); } catch (_) {} }
+    return groups.some(g => g.id === cur) ? cur : (groups[0] || {}).id;
+}
+function _tokRailSelect(key, id, render) {
+    _TOK_RAIL_SEL[key] = id;
+    try { localStorage.setItem('ss_tokrail_' + key, id); } catch (_) {}
+    const fn = window[render];
+    if (typeof fn === 'function') fn();
+}
+
+/** `groups` = [{id, label (HTML), count, rows}] — `rows` is the token list of that group. */
+function _tokRailBody(key, render, groups, rowsHtml) {
+    if (!groups.length) return '';
+    const sel = _tokRailSel(key, groups);
+    const open = groups.find(g => g.id === sel) || groups[0];
+    return `<div class="ss-railbox">
+        <nav class="ss-rail">
+            <div class="ss-rail-group">${groups.map(g => `
+                <button type="button" class="ss-rail-item${g.id === sel ? ' active' : ''}"
+                        onclick="_tokRailSelect(${jsStr(key)}, ${jsStr(g.id)}, ${jsStr(render)})">
+                    <span class="text-truncate">${g.label}</span>
+                    <span class="badge bg-secondary rounded-pill ms-auto">${g.count}</span>
+                </button>`).join('')}</div>
+        </nav>
+        <div class="ss-railbox-main">${rowsHtml(open)}</div>
+    </div>`;
+}
+
+/** The tokens of the open group, as rows. The same facts the table shows, minus the column
+ *  that IS the group — repeating the account down a block headed by that account is noise. */
+function _tokRailRows(tokens, opts) {
+    const o = opts || {};
+    return `<table class="table table-sm mb-0 align-middle"><tbody>${tokens.map(tk => `
+        <tr${tk.revoked || tk.expired ? ' style="opacity:.5"' : ''}>
+            <td class="text-nowrap"><code>${esc(tk.name || '')}</code>${
+                tk.revoked ? `<span class="badge text-bg-secondary fw-normal ms-1 ss-fs-1">${esc(t('api_token_revoked_badge'))}</span>`
+                : (tk.expired ? `<span class="badge text-bg-warning fw-normal ms-1 ss-fs-1">${esc(t('api_token_expired_badge'))}</span>` : '')}</td>
+            ${o.withOwner ? `<td class="text-nowrap">${_atkOwner(tk)}</td>` : ''}
+            ${o.withPerms ? `<td class="ss-fs-2">${_accTokenPermsHtml(tk, !!o.ofOwner)}</td>` : ''}
+            <td class="text-nowrap small text-muted">${tk.last_used
+                ? esc(_fmtDateTime(tk.last_used)) : esc(t('api_token_unused'))}</td>
+            <td class="text-end text-nowrap">${o.actions ? o.actions(tk.uid) : ''}</td>
+        </tr>`).join('')}</tbody></table>`;
+}
+
+
+/** The owner as a chip. `system` is not a person and is not drawn as one: it is the panel's
+ *  own identity, and a token of its own is the one thing on this screen that no account's
+ *  permissions bound. An owner the store cannot name is drawn too — see the list. */
+function _atkOwner(tk) {
+    if (!tk.username)
+        return `<span class="badge text-bg-warning fw-normal">${esc(t('api_token_orphan'))}</span>`;
+    if (tk.username === 'system')
+        return `<span class="badge text-bg-danger fw-normal"><i class="bi bi-gear-fill me-1"></i>system</span>`;
+    return `<code>${esc(tk.username)}</code>`;
+}
+
+/** By account: the index is who owns tokens, the detail is what they own. */
+function _atkViewUsers(uids) {
+    const groups = new Map();
+    for (const uid of uids) {
+        const tk = _allTokensByUid[uid] || {};
+        const key = tk.username || '';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(tk);
+    }
+    // The unnamed ones first: a token whose account is gone is the leftover this screen exists
+    // to surface, and sorting it alphabetically would bury it under the letter A.
+    const names = [...groups.keys()].sort((a, b) =>
+        (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
+    return _tokRailBody('alltokens-users', '_atkRender',
+        names.map(n => ({
+            id: n || '\u0000',
+            label: _atkOwner(groups.get(n)[0]),
+            count: groups.get(n).filter(tk => !tk.revoked && !tk.expired).length,
+            rows: groups.get(n),
+        })),
+        g => _tokRailRows(g.rows, {withPerms: true, ofOwner: true, actions: _atkRowActions}));
+}
+
+/** A block per permission, with the tokens that carry it underneath.
+ *
+ *  ONE function for both screens — this section's list of everybody's, and an account's list
+ *  of its own (partials/account/_token_views.html). It is the same question asked at two
+ *  scopes, and two implementations of it would be two answers to "what can run here": the one
+ *  that stopped drawing `'*'` specially would be the dangerous one, and it would be the copy
+ *  nobody was looking at.
+ *
+ *  A token with `'*'` gets a block of its own rather than appearing under every permission its
+ *  owner has. Listing it once is honest — its scope is "whatever the owner has", which is not
+ *  a set this view can enumerate — and putting it FIRST is what stops the broadest credential
+ *  in the installation being the one the reader scrolls past.
+ *
+ *  `withOwner` adds the account chip: on the account's own screen every row is the same
+ *  person, so the chip would be the same word repeated down the block.
+ */
+function _tokPermGroups(key, render, tokens, withOwner, actions) {
+    const groups = new Map();
+    for (const tk of tokens) {
+        const perms = tk.permissions === '*' ? ['*'] : (tk.permissions || []);
+        for (const p of (perms.length ? perms : ['\u2014'])) {
+            if (!groups.has(p)) groups.set(p, []);
+            groups.get(p).push(tk);
+        }
+    }
+    // Widest first: the blocks worth reading are the ones with the most tokens behind them.
+    const order = [...groups.keys()].sort((a, b) =>
+        (a === '*' ? -1 : b === '*' ? 1 : groups.get(b).length - groups.get(a).length
+            || _permLabel(a).localeCompare(_permLabel(b))));
+    return _tokRailBody(key, render, order.map(p => ({
+        id: p,
+        label: p === '*'
+            ? `<span class="badge text-bg-danger fw-normal">${esc(t('api_token_perms_all_owner'))}</span>`
+            : esc(p === '\u2014' ? '\u2014' : _permLabel(p)),
+        count: groups.get(p).length,
+        rows: groups.get(p),
+    })), g => _tokRailRows(g.rows, {withOwner, actions}));
+}
+
+function _atkViewPerms(uids) {
+    return _tokPermGroups('alltokens-perms', '_atkRender',
+                          uids.map(uid => _allTokensByUid[uid] || {}), true, _atkRowActions);
+}

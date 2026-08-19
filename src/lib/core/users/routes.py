@@ -9,6 +9,7 @@ Routes registered by this file:
     POST   /api/v1/users                     create a new user
     PUT    /api/v1/users/<username>          update a user (role/name/password)
     DELETE /api/v1/users/<username>          delete a user account
+    POST   /api/v1/users/<username>/unlock   lift a failed-attempt lockout
     PUT    /api/v1/users/me/preferences      save own appearance preferences
     PUT    /api/v1/users/me/password         change own password
 """
@@ -103,6 +104,10 @@ def register(app, wa):
                 'email':       udata.get('email', ''),
                 'landing_page': udata.get('landing_page', ''),
                 'auth_source': udata.get('auth_source', 'local'),
+                # Empty means "never signed in", which is a real and useful answer — a
+                # provisioned account nobody has ever used is the first thing an access
+                # review wants to see.
+                'last_login':  udata.get('last_login', ''),
                 'created_at':  udata.get('created_at', ''),
                 'updated_at':  udata.get('updated_at', ''),
                 'updated_by':  udata.get('updated_by', ''),
@@ -119,6 +124,11 @@ def register(app, wa):
                 # and where taking the factor off ALSO unregisters a security key the person
                 # is probably still carrying. A screen that removes something without naming
                 # it is the part that was missing.
+                # A failed-attempt lockout, and only while it is still in force. Absent
+                # from this response, the state was invisible: an administrator told "I
+                # cannot get in" had no way to see that the account was locked, let alone
+                # that waiting was the only thing that would fix it.
+                'locked_until': users_svc.locked_until(udata),
                 'mfa': bool(udata.get('uid') and _mfa_methods.get(udata.get('uid'))),
                 'mfa_methods': list(_mfa_methods.get(udata.get('uid')) or ()),
                 'modal_config': udata.get('modal_config') if isinstance(udata.get('modal_config'), dict) else {},
@@ -285,10 +295,53 @@ def register(app, wa):
             if users_svc.count_admins(wa._users, wa._groups) <= 1:
                 return jsonify({'error': wa._t('must_have_admin')}), 400
         wa._revoke_user_sessions(username)
+        # And its tokens. A session dies with the account by itself; a token is a row keyed
+        # by a uid that is about to stop existing, and leaving those behind is how a deleted
+        # account keeps calling the API.
+        _uid = wa._users[username].get('uid', '')
+        if _uid:
+            wa._api_token_store.delete_for_user(_uid)
         del wa._users[username]
         wa._persist_users()
         wa._audit('user_deleted', detail={'username': username})
         return jsonify({'ok': True})
+
+    @app.route('/api/v1/users/<username>/unlock', methods=['POST'])
+    @users_edit_req
+    def api_unlock_user(username: str):
+        """Lift a failed-attempt lockout.
+
+        Until this existed the only thing that cleared one was a SUCCESSFUL sign-in — which
+        is precisely what the lockout prevents. So the state was: wait for it to expire, and
+        `lockout_duration_secs` goes up to a day. An administrator watching somebody locked
+        out of their own panel had nothing to offer them.
+
+        It grants no access — the password still has to be right — so it rides on
+        `users_edit` rather than a flag of its own: it lifts a rate limit, it does not remove
+        a protection the way taking a second factor off does.
+        """
+        if err := _refuse_builtin(username):
+            return err
+        if username not in wa._users:
+            return jsonify({'error': wa._t('user_not_found')}), 404
+        # The same hierarchy guard the rest of this file applies: an editor may not act on an
+        # administrator's account, here as anywhere else.
+        target = wa._users[username]
+        if (not wa._is_admin_requester()
+                and users_svc.user_is_admin(target, wa._groups)):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # Whether a lock was actually IN FORCE, read before clearing. An expired one still
+        # leaves its keys behind and `unlock` tidies them up — but auditing that as an
+        # administrator lifting a lockout would put a thing that did not happen in the one
+        # record anybody consults later.
+        was_locked = bool(users_svc.locked_until(target))
+        if users_svc.unlock(target, actor=session.get('username', SYSTEM_USER)):
+            wa._persist_users()
+        if was_locked:
+            wa._audit('user_unlocked', detail={'username': username})
+        # `ok` either way: the caller asked for the account not to be locked, and it is not.
+        # Reporting "nothing to do" as a failure would make an expired lock look like a bug.
+        return jsonify({'ok': True, 'cleared': was_locked})
 
     @app.route('/api/v1/users/me/preferences', methods=['PUT'])
     @login_required
@@ -358,8 +411,10 @@ def register(app, wa):
             wa._audit('user_preferences_changed', detail={'username': uname, 'changes': changes})
         return jsonify({'ok': True})
 
+    # A real sign-in, never a token: a token that can change its owner's password is a
+    # foothold that locks the owner out and takes over the account it was scoped inside.
     @app.route('/api/v1/users/me/password', methods=['PUT'])
-    @login_required
+    @wa._session_required
     def api_change_own_password():
         """Allow any logged-in user to change their own password."""
         data, err = wa._require_json()

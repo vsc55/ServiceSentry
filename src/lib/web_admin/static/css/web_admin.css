@@ -1979,7 +1979,16 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
    Two cards of form fields side by side is what the width is for; past that a password field
    a metre wide is not more readable, it is just wider. It used to be `max-width: 640px` with
    `mx-auto`, which on a wide screen left more empty page than page. */
+/* A reading width for /account: 76rem keeps a form's labels and inputs near each other
+   instead of stretching one field across a 27-inch screen.
+
+   A section that is a LIST wants the opposite, and says so with `.ss-wide` on its pane —
+   a table capped at 76rem leaves a band of empty page to its right while its own columns
+   squeeze. Driven by the ACTIVE pane rather than by a class on the body, because the body
+   is shared by every section and only one of them is on screen at a time. Generic on
+   purpose: the next wide section opts in with the same class and no new rule. */
 .ss-account-body { max-width: 76rem; }
+.ss-account-body:has(> .tab-content > .tab-pane.active.ss-wide) { max-width: none; }
 .ss-sb-flyout .ss-sb-subsub { padding-left: 1rem; }
 /* The flyout always shows full items (icon + label) left-aligned, even in mini mode —
    otherwise the mini rule (centred icon, no gap) leaves a big gap before the icon. */
@@ -2025,6 +2034,49 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 /* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
    the index's border and the first card rather than a strip of page background. */
 .ss-shell-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
+/* …and goes away again for a section that is a LIST (/account › API tokens). Such a pane
+   says `.ss-fullbleed`, the same class the list sections outside the shell use, which already
+   flattens every card inside it (see the .ss-card rules). What is left is the shell's own
+   gutter: a list IS its section, so a frame of page background around it reads as the panel
+   having failed to fill — the same reasoning that made the shell bleed in the first place.
+   The negative margins in `.ss-fullbleed` cancel `.container-fluid`'s gutters and would be a
+   second cancellation here, so they come off and the padding is dropped at its source. The
+   top fade goes too: it softens rows sliding under a pinned bar, and the card header that
+   pins here is opaque, so it was only fading itself. */
+.ss-shell-main .ss-fullbleed { margin: 0; }
+.ss-shell-main > .ss-vscroll:has(.tab-pane.active.ss-fullbleed) {
+    padding: 0;
+    -webkit-mask-image: none;
+            mask-image: none;
+    /* The TABLE BODY is the scroller, the way it is in every other list section: a scroll box
+       around a card that scrolls gives two scrollbars and a header that scrolls away. */
+    overflow: hidden;
+    /* And the box itself is the first link of the chain below. `.ss-vscroll` is `flex: 1 1
+       auto` WITHOUT being a flex container — it is a scroll box, not a column — so its child
+       being told to grow meant nothing and the card kept stopping at the height of its rows.
+       A flex-item property on a block parent's child is a no-op, which is exactly how this
+       looked right in the stylesheet and wrong on the screen. */
+    display: flex;
+    flex-direction: column;
+}
+/* …and the rest of the chain that lets it reach the bottom. `.ss-vfill` only grows if its
+   parent is a flex column, and between the shell and the card sit three boxes that are not:
+   the reading-width body, the `.tab-content`, and the pane itself — Bootstrap's
+   `.tab-content > .active { display: block }` outranks `.ss-vfill` and wins, which is why the
+   class on the pane was not enough and every list section outside the shell names the active
+   pane explicitly too. So the card stopped at the height of its rows and left the rest of the
+   pane empty, which is the one thing full-bleed was for.
+
+   Only while a full-bleed pane is the open one: the form sections share these boxes and have
+   to keep flowing and scrolling as they do. */
+.ss-shell-main > .ss-vscroll:has(.tab-pane.active.ss-fullbleed) > *,
+.ss-shell-main > .ss-vscroll:has(.tab-pane.active.ss-fullbleed) > * > .tab-content,
+.ss-shell-main > .ss-vscroll:has(.tab-pane.active.ss-fullbleed) > * > .tab-content > .tab-pane.active {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
 
 /* ── Configuration — the detail is a SHEET, not a card ──────────────────────────────────
    The frame, the chevron and the colour accent were right when seven tabs showed several
@@ -2206,6 +2258,30 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 @media (max-width: 991.98px) {
     .ss-shell { flex-direction: column; }
     .ss-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
+                border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
+}
+/* .ss-railbox : the same rail + detail, INSIDE a body rather than as a pane's own frame.
+   `.ss-shell` is the page-level version and carries the negative margins that make a section
+   bleed to the pane's edges — inside a card those pull it out of its own box. Everything else
+   is shared: same rail, same items, same breakpoint below. Generic on purpose, so the next
+   grouped view is markup and no new rule. */
+.ss-railbox { display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0; }
+/* …and the box it sits in has to be a COLUMN for that `flex: 1 1 auto` to mean anything. The
+   list-table factory hands a view's body to a plain `.ss-vscroll`, which is a flex ITEM without
+   being a flex CONTAINER — so the rail grew to the height of its own items and left the rest of
+   the card empty, exactly as the account pane did before it. Same trap, same fix, and the
+   overflow moves too: the rail and its detail scroll on their own, so a scrollbar out here
+   would be a second one around them. */
+.ss-vscroll:has(> .ss-railbox) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ss-railbox > .ss-rail { background: var(--bs-body-bg); }
+.ss-railbox-main { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; }
+@media (max-width: 991.98px) {
+    .ss-railbox { flex-direction: column; }
+    .ss-railbox > .ss-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
                 border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
 }
 

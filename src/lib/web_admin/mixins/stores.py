@@ -51,6 +51,10 @@ class _StoresMixin:
         # there would be one `GET /api/v1/users` away from everybody with `users_view`.
         from lib.core.mfa.store import MfaStore  # noqa: PLC0415
         self._mfa_store = MfaStore(self._db_connector, fernet=self._get_fernet())
+        # API tokens: how an account is scripted without handing over its password — and
+        # the only way to reach the API at all once that account carries a second factor.
+        from lib.core.apitokens.store import ApiTokenStore  # noqa: PLC0415
+        self._api_token_store = ApiTokenStore(self._db_connector)
         # Reusable named credentials (SSH identities referenced by hosts/checks).
         from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
         self._credentials_store = CredentialsStore(

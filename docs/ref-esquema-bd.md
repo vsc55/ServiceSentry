@@ -24,12 +24,12 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **37 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **39 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 | Grupo | Tablas |
 | ----- | ------ |
-| Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `mfa_factors`, `mfa_recovery` |
+| Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `mfa_factors`, `mfa_recovery`, `api_tokens`, `api_token_access` |
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
@@ -242,6 +242,82 @@ Hasheados y no cifrados: nada necesita leer un código de recuperación, sólo c
 el mismo hasher que las contraseñas, así el coste se mueve con él en vez de ser una segunda
 decisión que nadie revisa. Gastar uno es un `UPDATE … WHERE used_at = ''`, que es lo que hace
 que dos peticiones con el mismo código sólo cambien una fila.
+
+---
+
+### `api_tokens` — tokens de API por usuario
+[lib/core/apitokens/store.py:32](../src/lib/core/apitokens/store.py#L32) · el porqué, en
+[explica-seguridad.md](explica-seguridad.md#tokens-de-api)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | **PK** |
+| user_uid | TEXT | no | `''` | → `users.uid` |
+| name | TEXT | no | `''` | Lo que su dueño le llamó |
+| token_id | TEXT | no | `''` | La mitad **pública**: es la que busca el índice |
+| token_hash | TEXT | no | `''` | **SHA-256** del secreto. Nunca el token |
+| permissions | TEXT | no | `'[]'` | Lista JSON de flags, o `'*'` = «lo que tenga el dueño» |
+| expires_at | TEXT | no | `''` | Vacío = no caduca |
+| last_used | TEXT | no | `''` | Escrito como mucho una vez por minuto |
+| revoked | INTEGER | no | `0` | |
+| created | TEXT | no | `''` | |
+| created_by | TEXT | no | `''` | |
+
+Índices: `idx_api_tokens_user(user_uid)`, `idx_api_tokens_tid(token_id)`.
+
+---
+
+### `api_token_access` — qué ha hecho cada token
+[lib/core/apitokens/store.py](../src/lib/core/apitokens/store.py) · el porqué, en
+[explica-seguridad.md](explica-seguridad.md#tokens-de-api)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | **PK** |
+| token_uid | TEXT | no | `''` | → `api_tokens.uid` |
+| ts | TEXT | no | `''` | |
+| ip | TEXT | no | `''` | Desde dónde llamó |
+| method | TEXT | no | `''` | |
+| path | TEXT | no | `''` | El **patrón** de la ruta, no la URL |
+| status | INTEGER | no | `0` | El código de respuesta: las **negadas** son las que importan |
+
+Índices: `idx_api_token_access_tok(token_uid)`.
+
+Es un **anillo por token**, no un log: se guardan las N llamadas más recientes de cada uno
+(`web_admin|api_token_log_max`, 200 por defecto; 0 lo apaga) y las viejas se descartan. Una
+tabla que crece con el tráfico de la API es justo lo que la contabilidad de una API no puede
+ser, y las preguntas que esto contesta —qué ha estado haciendo, desde dónde llama— son sobre
+el pasado reciente. Quien necesite «para siempre» tiene un proxy inverso delante.
+
+**Por token y no global**: un token hablador desalojaría el historial de uno tranquilo, y el
+tranquilo es donde una sola llamada inesperada es toda la señal.
+
+Se guarda el **patrón** de la ruta (`/api/v1/users/<username>`) y no la URL: un anillo lleno de
+un nombre por fila contesta «qué endpoints usa este token» con un muro de cadenas casi iguales,
+y la URL cruda es además donde acaban un id o un correo en una tabla que ve cualquiera que pueda
+leer la lista de tokens. Una petición sin regla (un 404) no tiene patrón, así que ahí se guarda
+la ruta tal cual —que es exactamente cuando la URL es el dato—.
+
+Se borra con su token cuando se borra la cuenta; **sobrevive a la revocación**, que es cuando
+más se pregunta por él.
+
+---
+
+**Solo se guarda el hash**, como un código de recuperación y a diferencia de todos los secretos
+cifrados del proyecto. La diferencia es qué haría con él quien lea la base de datos: un valor
+cifrado existe porque algo tiene que **usarlo** después (una contraseña SMTP, un token de bot),
+así que tiene que poder recuperarse. Un token no lo necesita nadie de vuelta —alguien lo
+presenta y se comprueba—, así que dejarlo recuperable sería guardar una credencial sin motivo.
+
+`token_id` es la mitad en claro, y es lo que convierte la verificación en **una búsqueda
+indexada** en vez de hashear el candidato contra cada fila. No lleva secreto: nombra al token
+como un nombre de usuario nombra a una cuenta.
+
+El hash es **SHA-256 y a propósito no scrypt**. Un KDF de contraseñas es lento adrede, para
+encarecer adivinar un secreto elegido por una persona; aquí el secreto son 192 bits aleatorios,
+donde adivinar no es un modelo de amenaza. Lo que sí es real es que esto corre en **cada
+petición de API**, y un hash lento ahí es una denegación de servicio que cualquiera dispara
+mandando basura.
 
 ---
 

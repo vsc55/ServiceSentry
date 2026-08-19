@@ -8,7 +8,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from flask import request, session
+from flask import g, request, session
 
 # Stdlib logging, as in lib/db/base.py and lib/security/secret_manager.py.
 _log = logging.getLogger(__name__)
@@ -142,7 +142,18 @@ class _SessionsMixin:
         return token, uid
 
     def _check_session(self) -> bool:
-        """Validate the current request's session against the registry."""
+        """Validate the current request against the session registry — or accept the API
+        token that already authenticated it.
+
+        A token request has no row here and must not have one: a token is not a session, it
+        does not belong in the screen that lists who is signed in, and "revoke all sessions"
+        must not quietly mean something different depending on how somebody connected. It was
+        already checked whole by the before_request hook — token valid, not revoked, not
+        expired, account enabled and allowed to sign in — so there is nothing left to verify
+        and no registry to verify it against.
+        """
+        if getattr(g, 'api_token', None):
+            return True
         if not session.get('logged_in'):
             return False
         token = session.get('session_token')

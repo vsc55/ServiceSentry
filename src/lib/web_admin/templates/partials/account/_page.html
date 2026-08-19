@@ -34,6 +34,11 @@
                 <i class="bi bi-shield-lock me-1"></i>
                 <span class="text-truncate">{{ i18n.settings_security }}</span>
             </button>
+            <button type="button" class="ss-rail-item" id="btn-acctab-tokens"
+                    data-acc-section="acctab-tokens" onclick="_accSection('acctab-tokens')">
+                <i class="bi bi-code-slash me-1"></i>
+                <span class="text-truncate">{{ i18n.settings_tokens }}</span>
+            </button>
         </div>
     </nav>
 
@@ -155,6 +160,25 @@
                         </div>
                         </div>
                       </div>
+                    </div>
+
+                    {# API tokens. Their own section rather than a card under Security: this is
+                       a list that grows, with a create dialog and a per-row action, and it has
+                       nothing to do with the two forms next door.
+
+                       Everything here is drawn from JS (_accTokensRender) because the list is
+                       fetched — what the page ships is the shape. #}
+                    {# `ss-vfill` chained from the pane to the card body: this is a LIST,
+                       and a list that stops halfway down leaves the rest of the screen empty
+                       while its own rows scroll inside a short box. The other two sections
+                       are forms, which is why they do not do this. #}
+                    {# Only the container: the card, its header, the column chooser, the
+                       pagination and the refresh button are the shared list-table factory's,
+                       the same one every other entity table in the panel is built from. The
+                       first version of this section drew its own card and got a table with no
+                       sorting and no column picker — which is what writing one by hand costs. #}
+                    <div class="tab-pane fade ss-vfill ss-wide ss-fullbleed" id="acctab-tokens" role="tabpanel">
+                      <div id="accTokensList" class="ss-vfill"></div>
                     </div>
                 </div>
             </div>

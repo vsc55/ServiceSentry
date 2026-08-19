@@ -983,3 +983,60 @@ class TestAnOptionThatDoesNotApplyIsNotCounted:
             'switching the database engine leaves the count one change behind'
         assert 'config-container' in body, \
             'it fires for module items too, whose panel has no index to keep in step'
+
+
+class TestAnOptionIsFindableByItsRealName:
+    """Asked for from the panel: search by the config KEY (`api_token_log_max`), and show the
+    env var of the options that have one.
+
+    Both are the same gap. An option has three names — its key, its env var and its label —
+    and only the label was on screen. The label is the translated one: it is the name it
+    CANNOT be looked up by from a config file, a docs page, a bug report or an API call, which
+    is where somebody arrives from when they come here to find a setting. And the env var was
+    answerable only by reading `spec.py`.
+    """
+
+    _FIELD = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
+                          '_field_render.html')
+    _CONST = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
+                          '_constants.html')
+
+    def _search(self) -> str:
+        return _read(SEARCH)
+
+    def _field(self) -> str:
+        return _read(self._FIELD)
+
+    def test_the_search_matches_the_key(self):
+        src = self._search()
+        assert 'wrap.dataset.cfgPath' in src, 'the key is not searched'
+        assert 'pathTxt.includes(q)' in src
+
+    def test_the_search_matches_the_env_var(self):
+        assert 'envTxt.includes(q)' in self._search()
+
+    def test_neither_is_behind_the_descriptions_switch(self):
+        """That switch is about PROSE. A key and an env var are identifiers, and hiding an
+        identifier behind a preference about descriptions is how a search says "no results"
+        for a string that is on the screen."""
+        src = self._search()
+        i = src.index('const pathTxt')
+        assert '_cfgSearchInHints' not in src[i:src.index('const hit', i)]
+
+    def test_the_env_var_is_shown_with_the_option(self):
+        src = self._field()
+        assert 'ENV_NAMES[pathStr]' in src, 'the option does not say what pins it'
+        assert '_hint || _envName' in src, (
+            'an option with an env var but no prose keeps its panel shut, so the name is '
+            'there and unreachable')
+
+    def test_the_map_reaches_the_page(self):
+        """`ENV_LOCKED` says what IS pinned; this says what WOULD pin it, which is the question
+        somebody writing a compose file has."""
+        assert 'ENV_NAMES' in _read(self._CONST)
+
+    def test_every_option_with_an_env_var_is_in_the_map(self):
+        from lib.config.spec import CONFIG_FIELDS
+        names = {f.path: f.env for f in CONFIG_FIELDS if f.env}
+        assert names, 'no option declares an env var — the scan is looking in the wrong place'
+        assert all(n.startswith('SS_') for n in names.values())

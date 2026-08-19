@@ -125,3 +125,39 @@ class TestEveryWordThePanelWroteHasWords:
         es = {k for k in es_ES.LANG if k.startswith(('audit_v_', 'audit_f_'))}
         en = {k for k in en_EN.LANG if k.startswith(('audit_v_', 'audit_f_'))}
         assert es == en, f'only in one language: {sorted(es ^ en)}'
+
+
+class TestAPermissionReadsTheSameEverywhere:
+    """Reported from the panel: the audit entry for a new token showed `audit_view`.
+
+    A third kind of value turned up with the tokens, and it is neither data nor vocabulary the
+    panel chose: a PERMISSION FLAG. Sending those through `audit_v_*` would mean a second name
+    for each of the 75 flags, kept in a different file from the one Access › Permissions reads
+    — two names for one thing, drifting from the day they are written.
+
+    So the detail renderer reads the same catalog everything else reads. By FIELD again, never
+    by value: somebody's chosen name that happens to look like a flag must not turn into a
+    permission label.
+    """
+
+    def test_the_renderer_has_a_field_rule_for_permissions(self):
+        src = io.open(DETAIL, encoding='utf-8-sig').read()
+        assert '_AUDIT_PERM_FIELDS' in src, 'permission flags reach the screen raw again'
+        assert '_permLabel(' in src, 'a second set of names instead of the shared catalog'
+
+    def test_it_is_by_field_and_not_by_value(self):
+        """The rule this whole file is about: a value-driven match would translate a host
+        called `local` or a module whose id happens to be a flag."""
+        src = io.open(DETAIL, encoding='utf-8-sig').read()
+        assert '_AUDIT_PERM_FIELDS.has(k)' in src
+
+    def test_the_all_sentinel_is_not_treated_as_a_flag(self):
+        """`'*'` means "whatever the owner has". It is not in the catalog and has no label,
+        so looking it up there would print an asterisk and call it a permission."""
+        assert "v === '*'" in io.open(DETAIL, encoding='utf-8-sig').read()
+
+    def test_the_new_fields_have_names(self):
+        for key in ('audit_f_token_id', 'audit_f_permissions', 'audit_f_expires_at',
+                    'audit_f_count', 'audit_v_never'):
+            for lang, name in ((es_ES, 'es_ES'), (en_EN, 'en_EN')):
+                assert lang.LANG.get(key), f'{key} missing in {name}'

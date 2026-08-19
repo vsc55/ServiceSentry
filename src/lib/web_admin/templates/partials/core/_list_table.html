@@ -53,9 +53,10 @@ function createListTable(spec) {
     const cardClass = spec.cardClass || 'ss-card';
 
     // ── Optional filter bar ────────────────────────────────────────────────────────────
-    // A table opts in with spec.filters = { fields, match }: `fields` is the shared
+    // A table opts in with spec.filters = { fields, match, always? }: `fields` is the shared
     // buildFilterBar schema and `match(record, values, ctx, row) -> bool` is the only
-    // domain-specific part. The bar lives OUTSIDE the re-rendered body (see the shell in
+    // domain-specific part. `always` (bool or fn) makes match() run even when no bar field is
+    // set — for a control outside the bar that still filters. The bar lives OUTSIDE the re-rendered body (see the shell in
     // render()), so typing in it never loses focus — the same reason fail2ban's Ban history
     // keeps its bar out of its body. Values live here, in the factory closure, so they
     // survive every re-render (and a data reload) without touching localStorage.
@@ -212,7 +213,16 @@ function createListTable(spec) {
             // `rows` may be keys rather than records (users are usernames), so hand match()
             // the resolved record — and the raw row too, for the rare case it needs it.
             const n = _fbActive();
-            if (n) rows = rows.filter(r =>
+            // Skipping match() on an empty bar keeps a big list from walking every row for
+            // nothing. But a table may filter on something that is NOT a field in the bar —
+            // the API tokens' "hide revoked" switch sits beside the header buttons — and for
+            // those the shortcut is exactly wrong: the bar is empty, so the rule never ran and
+            // the control did nothing at all, silently. `spec.filters.always` is how such a
+            // table says so; the BADGE still counts only the bar, because that is what the
+            // clear button clears.
+            const extra = typeof spec.filters.always === 'function'
+                ? spec.filters.always(ctx) : !!spec.filters.always;
+            if (n || extra) rows = rows.filter(r =>
                 spec.filters.match(spec.record ? spec.record(r) : r, fbVals, ctx, r));
             setFilterBarCount(fbKey, n);
         }

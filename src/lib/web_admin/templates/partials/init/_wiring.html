@@ -248,7 +248,10 @@ window.addEventListener('beforeunload', e => {
     }
 });
 // Persist the active Access sub-tab across reloads
-['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles'].forEach(id => {
+document.getElementById('btn-subtab-apitokens')?.addEventListener(
+    'shown.bs.tab', () => renderAllTokens(true));
+['btn-subtab-sessions','btn-subtab-users','btn-subtab-groups','btn-subtab-roles',
+ 'btn-subtab-apitokens'].forEach(id => {
     document.getElementById(id)?.addEventListener('shown.bs.tab', e => {
         localStorage.setItem('ss_active_subtab_access', e.target.dataset.bsTarget);
     });

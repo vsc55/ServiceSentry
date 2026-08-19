@@ -37,5 +37,6 @@ AUDIT_EVENTS = [
     {'key': 'user_created', 'severity': 'success'},
     {'key': 'user_deleted', 'severity': 'danger'},
     {'key': 'user_preferences_changed', 'severity': 'muted'},
+    {'key': 'user_unlocked', 'severity': 'warning'},
     {'key': 'user_updated', 'severity': 'info'},
 ]

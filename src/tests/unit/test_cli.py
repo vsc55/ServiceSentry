@@ -83,6 +83,53 @@ class TestUsersService:
             U.add_group(user, 'ghost', groups)
 
 
+class TestTheLockoutHelpers:
+    """`_locked_until` is written by the sign-in path and was read by nobody else. These two
+    helpers are what let the screen, the API and the CLI agree on who is locked out."""
+
+    @staticmethod
+    def _at(minutes):
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+
+    def test_a_lockout_in_force_is_reported(self):
+        assert U.locked_until({'_locked_until': self._at(10)})
+
+    def test_an_expired_one_is_not(self):
+        """The sign-in path clears it on the next attempt. Reporting it would show a lock
+        nobody is behind any more."""
+        assert U.locked_until({'_locked_until': self._at(-10)}) == ''
+
+    def test_no_lockout_at_all(self):
+        assert U.locked_until({}) == ''
+
+    def test_a_naive_timestamp_is_read_as_utc(self):
+        """Everything this project writes is timezone-aware, but a hand-edited store or an
+        older record is not — and comparing naive to aware raises, which would take the whole
+        users listing down rather than one field."""
+        from datetime import datetime, timedelta
+        naive = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+        assert U.locked_until({'_locked_until': naive})
+
+    def test_something_that_is_not_a_date_is_not_a_lock(self):
+        """It cannot be honoured or reported, and raising here would be a users list that
+        500s because one record has a bad string in it."""
+        assert U.locked_until({'_locked_until': 'yesterday'}) == ''
+
+    def test_unlock_clears_the_counter_too(self):
+        """Leaving `_failed_attempts` behind relocks the account on the very next mistake,
+        which from the outside is an unlock that did not work."""
+        u = {'_locked_until': self._at(10), '_failed_attempts': 5}
+        assert U.unlock(u, actor='cli') is True
+        assert '_locked_until' not in u and '_failed_attempts' not in u
+        assert u['updated_by'] == 'cli'
+
+    def test_unlocking_nothing_changes_nothing(self):
+        u = {}
+        assert U.unlock(u) is False
+        assert u == {}          # no updated_at stamp for a no-op
+
+
 class TestGroupsService:
 
     def test_create_and_delete(self):
@@ -132,6 +179,32 @@ class TestCliCommands:
         assert _run('group', 'del', d, name='devs') == 0
         ctx2 = CliContext(d, d)
         assert ctx2.group_uid('devs') is None
+
+    def test_unlock_lets_a_locked_account_back_in(self, tmp_path):
+        """Here as well as in the panel because the account that is locked out may be the
+        only one that could have pressed the button."""
+        from datetime import datetime, timedelta, timezone
+        from lib.cli.context import CliContext
+        d = str(tmp_path)
+        _run('user', 'add', d, username='bob', password='Abcd1234', role='none',
+             display='', email='', group=None, disabled=False)
+        ctx = CliContext(d, d)
+        ctx.users['bob']['_locked_until'] = (datetime.now(timezone.utc)
+                                             + timedelta(minutes=15)).isoformat()
+        ctx.users['bob']['_failed_attempts'] = 5
+        ctx.persist_users()
+        assert _run('user', 'unlock', d, username='bob') == 0
+        after = CliContext(d, d).users['bob']
+        assert '_locked_until' not in after and '_failed_attempts' not in after
+
+    def test_unlocking_an_account_that_is_not_locked_is_not_a_failure(self, tmp_path):
+        d = str(tmp_path)
+        _run('user', 'add', d, username='bob', password='Abcd1234', role='none',
+             display='', email='', group=None, disabled=False)
+        assert _run('user', 'unlock', d, username='bob') == 0
+
+    def test_unlocking_an_unknown_user_fails(self, tmp_path):
+        assert _run('user', 'unlock', str(tmp_path), username='nope') == 1
 
     def test_invalid_inputs_fail(self, tmp_path):
         d = str(tmp_path)

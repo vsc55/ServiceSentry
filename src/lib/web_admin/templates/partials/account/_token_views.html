@@ -1,0 +1,72 @@
+{# ================================================================
+   The account's own API tokens — the view registry.
+
+   The table is a row per token, which is the shape for acting on one. The two other questions
+   it answers badly are the ones you open the list with once there is more than a handful:
+
+   • **Cards** — a token is a small object with five facts, and four of them are hidden behind
+     column choices by default. A card shows the lot without choosing, which is what you want
+     while deciding whether a name from six months ago is still the pipeline you think it is.
+
+   • **By permission** — "what can be done with the tokens I have out there" is a question
+     about permissions, not about tokens, and no ordering of a table answers it: the
+     permissions are a LIST inside one cell, so the flag you are hunting is scattered across
+     rows. A block per permission with its tokens underneath is the same data as the answer.
+
+   Both extra views are drawn through the factory's `cardsBody` hook, so filters, sorting and
+   pagination stay the SAME machinery — no view re-implements them, and none of them can
+   disagree about which rows are on screen. `perms` is a summary: it is handed every row the
+   filters left standing rather than the page, because a count over one page is a statement
+   about the pagination.
+   ================================================================ #}
+
+const ACCOUNT_TOKEN_VIEWS = [
+    { id: 'table', label_key: 'api_token_view_table', icon: 'bi-table',        render: null,             mode: 'table'   },
+    { id: 'cards', label_key: 'api_token_view_cards', icon: 'bi-grid-3x3-gap', render: '_tokViewCards',  mode: 'cards'   },
+    { id: 'perms', label_key: 'api_token_view_perms', icon: 'bi-shield-lock',  render: '_tokViewPerms',  mode: 'summary' },
+];
+
+const _tokView = createViewState('ss_apitokens_view', ACCOUNT_TOKEN_VIEWS, () => {
+    _persistTableConfig();
+    _accTokensRender();
+});
+function setAccountTokensView(id) { _tokView.set(id); }
+
+/** A card per token: every fact at once, and the same three actions the row offers. */
+function _tokViewCards(uids) {
+    return `<div class="p-3" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:.7rem">
+    ${uids.map(uid => {
+        const tk = _accTokensByUid[uid] || {};
+        const dead = tk.revoked || tk.expired;
+        const state = tk.revoked
+            ? `<span class="badge text-bg-secondary fw-normal ss-fs-1">${esc(t('api_token_revoked_badge'))}</span>`
+            : (tk.expired ? `<span class="badge text-bg-warning fw-normal ss-fs-1">${esc(t('api_token_expired_badge'))}</span>` : '');
+        return `<div class="ss-card" style="${dead ? 'opacity:.5' : ''}">
+            <div class="ss-card-header">
+                <h6 class="mb-0 me-auto"><code>${esc(tk.name || '')}</code> ${state}</h6>
+                ${_accTokenRowActions(uid)}
+            </div>
+            <div class="p-2">
+                <div class="mb-2"><code class="text-muted ss-fs-2">sst_${esc(tk.token_id || '')}…</code></div>
+                <div class="ss-fs-2 mb-2">${_accTokenPermsHtml(tk)}</div>
+                <div class="d-flex gap-3 ss-fs-2 text-body-secondary">
+                    <span><i class="bi bi-hourglass me-1"></i>${tk.expires_at
+                        ? esc(_fmtDateTime(tk.expires_at)) : esc(t('api_token_never'))}</span>
+                    <span><i class="bi bi-activity me-1"></i>${tk.last_used
+                        ? esc(_fmtDateTime(tk.last_used)) : esc(t('api_token_unused'))}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('')}</div>`;
+}
+
+/** A block per permission, with the tokens that carry it underneath.
+ *
+ *  Shares its shape with the administrator's view of the same question (see
+ *  partials/apitokens/_views.html) rather than reimplementing the grouping: one of them
+ *  drawing `'*'` differently from the other would be two answers to "what can run here". */
+function _tokViewPerms(uids) {
+    return _tokPermGroups('apitokens-perms', '_accTokensRender',
+                          uids.map(uid => _accTokensByUid[uid] || {}), false,
+                          _accTokenRowActions);
+}

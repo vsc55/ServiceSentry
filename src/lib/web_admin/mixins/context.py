@@ -22,7 +22,7 @@ from flask import session
 
 from lib import APP_NAME
 from lib.config.layout import config_layout
-from lib.config.spec import registry_defaults
+from lib.config.spec import CONFIG_FIELDS as _CONFIG_FIELDS, registry_defaults
 from lib.core.audit.events import audit_severity as _audit_severity
 from lib.core.constants import BUILTIN_ROLE_UIDS, ROLES
 from lib.core.permissions import PERMISSIONS, PERMISSION_GROUPS
@@ -147,6 +147,11 @@ class _ContextMixin:
             'wa_status_lang': self._STATUS_LANG,
             'wa_web_port': self._PORT,
             'wa_env_locked_fields': sorted(self._env_locked),
+            # Which env var pins each option — the NAME, whether or not it is set. The locked
+            # list above says "this one is pinned right now"; this says "this is what you would
+            # pin it with", which is the question somebody writing a compose file has, and it
+            # was answerable only by reading spec.py.
+            'wa_env_names': {f.path: f.env for f in _CONFIG_FIELDS if f.env},
             'wa_file_locked_fields': sorted(getattr(self, '_file_locked', frozenset())),
             'wa_proxy_count': self._PROXY_COUNT,
             'wa_public_url': self._PUBLIC_URL,

@@ -13,9 +13,9 @@ one domain short.
 
 import re
 
-from flask import session
+from flask import g, has_request_context, session
 
-from lib.core.constants import BUILTIN_ROLE_UIDS
+from lib.core.constants import BUILTIN_ROLE_UIDS, is_reserved_username
 from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, filter_valid_permissions
 
 _UUID_RE = re.compile(
@@ -249,11 +249,32 @@ class _PermissionsMixin:
         return perms
 
     def _get_session_permissions(self) -> frozenset:
-        """Return the permissions for the currently logged-in user."""
+        """Return the permissions in force for this request.
+
+        For a request authenticated by an API token that is the token's set INTERSECTED with
+        the owner's — computed here, in the one function every guard already asks, so a token
+        cannot reach anything by way of a check that forgot about tokens.
+
+        The intersection is what stops a token becoming a standing grant: take a role away
+        from the account and every token it ever minted narrows at the same instant. Without
+        it, a token minted last year keeps the permissions its owner had last year.
+        """
         username = session.get('username', '')
+        # A built-in identity (`system`, `anonymous`) is not a row in the users store, so the
+        # lookup below would miss it and fall back to the VIEWER default — handing the panel's
+        # own actor a viewer's permissions. It holds none by construction: `system` acts with
+        # the panel's authority precisely because it never passes a permission check.
+        if is_reserved_username(username):
+            perms = frozenset()
+            if has_request_context() and getattr(g, 'api_token', None):
+                return self._api_token_permissions(perms)
+            return perms
         user     = self._users.get(username) or {}
         role_ref = user.get('role', BUILTIN_ROLE_UIDS.get('viewer', 'viewer'))
-        return self._get_effective_permissions(username, role_ref)
+        perms = self._get_effective_permissions(username, role_ref)
+        if has_request_context() and getattr(g, 'api_token', None):
+            return self._api_token_permissions(perms)
+        return perms
 
     def _has_module_permission(self, module_name: str, action: str) -> bool:
         """Return True if the current user may perform *action* on *module_name*."""

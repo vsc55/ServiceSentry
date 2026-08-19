@@ -133,6 +133,10 @@ CARDS: tuple[dict, ...] = (
     {'tab': 'auth', 'id': 'login_security', 'title_key': 'login_security_section', 'icon': 'bi-shield-exclamation'},
     # Default roles assigned to newly-created users / groups (authorization concern).
     {'tab': 'auth', 'id': 'default_roles', 'title_key': 'default_roles_section', 'icon': 'bi-person-check'},
+    # API tokens are a way to authenticate, so they belong under Authentication and not
+    # under Audit — the setting is a retention cap, but what it retains is what a
+    # credential did, which is where somebody goes looking for it.
+    {'tab': 'auth', 'id': 'api_tokens', 'title_key': 'api_tokens_section', 'icon': 'bi-code-slash'},
     {'tab': 'auth', 'id': 'ldap',  'section': 'ldap',  'icon': 'bi-person-badge',       'renderer': 'auth'},
     {'tab': 'auth', 'id': 'oidc',  'section': 'oidc',  'icon': 'bi-box-arrow-in-right', 'renderer': 'auth'},
     {'tab': 'auth', 'id': 'saml2', 'section': 'saml2', 'icon': 'bi-shield-check',       'renderer': 'auth'},

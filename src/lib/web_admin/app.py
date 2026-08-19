@@ -40,6 +40,7 @@ from lib.services.monitoring.checks_mixin import _ChecksMixin
 # inherited here just like the mixins above.
 from lib.core.permissions.mixin import _PermissionsMixin
 from lib.core.sessions.mixin import _SessionsMixin
+from lib.core.apitokens.mixin import _ApiTokenMixin
 from lib.core.mfa.mixin import _MfaMixin
 from lib.core.mfa.policy import _MfaPolicyMixin
 from lib.core.users.mixin import _UsersMixin
@@ -56,7 +57,7 @@ __all__ = ['WebAdmin']
 # built in __init__ and exposed via ``self._embedded_services``.  _ServicesMixin
 # discovers + controls them.
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _MfaMixin, _MfaPolicyMixin, _AuditMixin, _AuthMixin,
+               _SessionsMixin, _MfaMixin, _MfaPolicyMixin, _ApiTokenMixin, _AuditMixin, _AuthMixin,
                _ChecksMixin, _ServicesMixin,
                _IpBanMixin, _FreshnessMixin, _StoresMixin, _ConfigMixin,
                _ScannersMixin, _EmbedMixin, _ContextMixin, _ServerMixin,

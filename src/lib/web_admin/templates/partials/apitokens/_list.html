@@ -1,0 +1,457 @@
+{# ================================================================
+   API tokens (administration): every token in the installation, and minting one for an
+   account that is not yours.
+
+   THE QUESTION THIS SCREEN EXISTS FOR. The account list says who exists; the sessions screen
+   says who is signed in. A token is standing access that appears in neither — a string that
+   runs against this panel with nobody at a keyboard — and until this screen there was no way
+   to ask what of it exists. Asking account by account is how the answer ends up depending on
+   which accounts somebody remembered to open.
+
+   Built with the same `createListTable` as every other list, so filters, sorting, the column
+   chooser, pagination and per-user persistence are the shared machinery and not a second
+   implementation. The permission picker is the account screen's own function — minting for
+   somebody else is the same decision, and two copies of that list is two lists to keep in
+   step with the catalog.
+   ================================================================ #}
+
+let _allTokens = [];
+let _allTokensByUid = {};
+let _allTokensUsers = [];
+
+const _canRevokeTokens = () => new Set(currentUser.permissions || []).has('sessions_revoke');
+const _canMintForOthers = () => new Set(currentUser.permissions || []).has('users_edit');
+
+const _ATK_COLS = [
+    { id: 'username',    label: () => t('api_token_owner'),         sortKey: 'username',    always: true  },
+    { id: 'name',        label: () => t('api_token_col_name'),      sortKey: 'name',        always: true  },
+    { id: 'token_id',    label: () => t('audit_f_token_id'),        sortKey: 'token_id',    always: false },
+    { id: 'permissions', label: () => t('api_token_col_perms'),     sortKey: 'permissions', always: false },
+    { id: 'expires_at',  label: () => t('api_token_col_expires'),   sortKey: 'expires_at',  always: false },
+    { id: 'last_used',   label: () => t('api_token_col_last_used'), sortKey: 'last_used',   always: false },
+    { id: 'created',     label: () => t('col_created_at'),          sortKey: 'created',     always: false },
+    { id: 'created_by',  label: () => t('col_created_by'),          sortKey: 'created_by',  always: false },
+];
+const _ATK_DEFAULT_COLS = new Set(['permissions', 'expires_at', 'last_used']);
+
+/** Revoked ones are out by default, for the same reason they are on the account screen: they
+ *  are history, and history mixed into a list of live credentials is what makes it unreadable.
+ *  Here it matters more — this list holds everybody's. */
+let _atkShowRevoked = (() => {
+    try { return localStorage.getItem('ss_alltokens_show_revoked') === '1'; } catch (_) { return false; }
+})();
+function _atkSetShowRevoked(on) {
+    _atkShowRevoked = !!on;
+    try { localStorage.setItem('ss_alltokens_show_revoked', _atkShowRevoked ? '1' : '0'); } catch (_) {}
+    _atkPage = 1;
+    _persistTableConfig();
+    renderAllTokens();
+}
+
+let _atkVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_alltokens_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_ATK_DEFAULT_COLS);
+})();
+let _atkColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_alltokens_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
+    return _ATK_COLS.map(c => c.id);
+})();
+let _atkPage = 1;
+let _atkPageSize = null;
+let _atkSort = 'created';
+let _atkSortDir = 'desc';
+let _atkSelected = new Set();
+let _atkCurrentPage = [];
+
+createListTable({
+    key: 'alltokens', containerId: 'apitokens-container', tableId: 'alltokens-table',
+    accent: 'purple', icon: 'bi-code-slash',
+    title: () => `${esc(t('subtab_apitokens'))} (${_allTokens.filter(tk => !tk.revoked).length})`,
+    columns: _ATK_COLS, defaultVisible: _ATK_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'subtab_apitokens',
+    persistExtra: () => ({ show_revoked: _atkShowRevoked, view: _atkView.id() }),
+    applyExtra: cfg => {
+        _atkShowRevoked = !!(cfg && cfg.show_revoked);
+        _atkView.apply(cfg && cfg.view);
+    },
+    filters: {
+        always: () => !_atkShowRevoked,
+        fields: [
+            { key: 'q',    label: () => t('api_token_col_name'), type: 'search', grow: true,
+              placeholder: () => t('api_token_name_ph') },
+            { key: 'user', label: () => t('api_token_owner'),    type: 'search', minWidth: '160px',
+              placeholder: () => t('api_token_owner') },
+            { key: 'state', label: () => t('col_status'), type: 'select', minWidth: '140px',
+              options: () => [
+                  { value: '',        label: t('all') },
+                  { value: 'active',  label: t('api_token_state_active') },
+                  { value: 'expired', label: t('api_token_expired_badge') },
+                  { value: 'revoked', label: t('api_token_revoked_badge') },
+              ] },
+            { key: 'perm', label: () => t('api_token_col_perms'), type: 'search', minWidth: '180px',
+              placeholder: () => t('api_token_perm_filter_ph') },
+        ],
+        match: (tk, f) => {
+            const has = (v, needle) => (v || '').toLowerCase().includes(needle.toLowerCase());
+            if (!_atkShowRevoked && tk.revoked && f.state !== 'revoked') return false;
+            if (f.q && !has(tk.name, f.q)) return false;
+            if (f.user && !has(tk.username, f.user)) return false;
+            if (f.state && (tk.revoked ? 'revoked' : (tk.expired ? 'expired' : 'active')) !== f.state)
+                return false;
+            if (f.perm && tk.permissions !== '*'
+                && !(tk.permissions || []).some(p => has(p, f.perm) || has(_permLabel(p), f.perm)))
+                return false;
+            return true;
+        },
+    },
+    rows: () => _allTokens.map(tk => tk.uid), rowKey: uid => uid,
+    record: uid => _allTokensByUid[uid] || {},
+    actionsVisible: () => _canRevokeTokens(),
+    bodyMode: () => _atkView.mode(),
+    showChooser: mode => mode === 'table',
+    cardsBody: (uids, ctx, all) => _atkView.body(uids, ctx, all),
+    // The switch leads the strip. It decides WHAT the list shows — it is a filter wearing a
+    // toggle — and the rest of the header is controls that act ON what is shown. Reading left
+    // to right, "which rows" comes before "do something to them"; sitting between the view
+    // buttons and the column chooser it read as a third button that happened to be a switch.
+    headerLead: () => `<div class="d-flex align-items-center gap-2 me-2">
+            <div class="form-check form-switch mb-0 d-flex align-items-center gap-2">
+                <input class="form-check-input mt-0" type="checkbox" role="switch" id="atkShowRevoked"
+                       ${_atkShowRevoked ? 'checked' : ''}
+                       onchange="_atkSetShowRevoked(this.checked)">
+                <label class="form-check-label small text-nowrap mb-0" for="atkShowRevoked"
+                       >${esc(t('api_token_show_revoked'))}</label>
+            </div>
+            ${_atkView.switcher('setAllTokensView')}
+        </div>`,
+    rowAttrs: uid => {
+        const tk = _allTokensByUid[uid] || {};
+        return (tk.revoked || tk.expired) ? ' style="opacity:.5"' : '';
+    },
+    sortValue: (uid, sortKey) => {
+        const tk = _allTokensByUid[uid] || {};
+        switch (sortKey) {
+            case 'expires_at':   return tk.expires_at || '9999';
+            case 'last_used':    return tk.last_used || '0000';
+            case 'permissions':  return tk.permissions === '*' ? '*' : (tk.permissions || []).join(',');
+            case 'token_id':     return tk.token_id || '';
+            case 'created':      return tk.created || '';
+            case 'created_by':   return (tk.created_by || '').toLowerCase();
+            case 'name':         return (tk.name || '').toLowerCase();
+            default:             return (tk.username || '').toLowerCase();
+        }
+    },
+    cell: (uid, colId) => {
+        const tk = _allTokensByUid[uid] || {};
+        switch (colId) {
+            case 'username':    return `<td class="text-nowrap">${_atkOwner(tk)}</td>`;
+            case 'name': {
+                const state = tk.revoked
+                    ? `<span class="badge text-bg-secondary fw-normal ms-1 ss-fs-1">${esc(t('api_token_revoked_badge'))}</span>`
+                    : (tk.expired ? `<span class="badge text-bg-warning fw-normal ms-1 ss-fs-1">${esc(t('api_token_expired_badge'))}</span>` : '');
+                return `<td class="text-nowrap"><code>${esc(tk.name || '')}</code>${state}</td>`;
+            }
+            case 'token_id':
+                return `<td class="text-nowrap"><code class="text-muted ss-fs-2">sst_${esc(tk.token_id || '')}…</code></td>`;
+            // "All of mine" is the account screen's wording and wrong here: this row is
+            // about somebody else's account, and whose permissions `'*'` follows is the whole
+            // meaning of the value.
+            case 'permissions': return `<td class="ss-fs-2">${_accTokenPermsHtml(tk, true)}</td>`;
+            case 'expires_at':
+                return `<td class="text-nowrap small">${tk.expires_at
+                    ? esc(_fmtDateTime(tk.expires_at))
+                    : `<span class="text-muted">${esc(t('api_token_never'))}</span>`}</td>`;
+            case 'last_used':
+                return `<td class="text-nowrap small">${tk.last_used
+                    ? esc(_fmtDateTime(tk.last_used))
+                    : `<span class="text-muted">${esc(t('api_token_unused'))}</span>`}</td>`;
+            case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created))}</td>`;
+            case 'created_by': return `<td class="text-nowrap small text-muted">${esc(tk.created_by || '—')}</td>`;
+            default: return '<td></td>';
+        }
+    },
+    actions: uid => _atkRowActions(uid),
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="renderAllTokens(true)" title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${t('refresh')}</button>`,
+    headerButtons: () => _canMintForOthers()
+        ? `<button class="btn btn-sm btn-success ms-1" onclick="_atkNewForUser()"><i class="bi bi-plus-lg me-1"></i>${t('api_token_new')}</button>`
+        : '',
+    emptyBody: () => (!_atkShowRevoked && _allTokens.some(tk => tk.revoked))
+        ? `<div class="text-center py-5 text-muted">
+                <i class="bi bi-eye-slash ss-empty-icon"></i>
+                <span>${esc(t('api_token_all_revoked'))}</span>
+                <div class="mt-3"><button class="btn btn-sm btn-secondary"
+                    onclick="_atkSetShowRevoked(true)"><i class="bi bi-eye me-1"></i>${
+                    esc(t('api_token_show_revoked'))}</button></div>
+            </div>`
+        : `<div class="text-center py-5 text-muted">
+                <i class="bi bi-code-slash ss-empty-icon"></i>
+                <span>${esc(t('api_token_none_system'))}</span>
+                <div class="small mt-2">${esc(t('api_token_admin_intro'))}</div>
+            </div>`,
+    state: {
+        visible: { get: () => _atkVisibleCols, set: s => { _atkVisibleCols = s; } },
+        order:   { get: () => _atkColOrder,    set: o => { _atkColOrder = o; } },
+        page:    { get: () => _atkPage,        set: p => { _atkPage = p; } },
+        pageSize:{ get: () => _atkPageSize,    set: v => { _atkPageSize = v; } },
+        sort:    { get: () => _atkSort,        set: v => { _atkSort = v; } },
+        sortDir: { get: () => _atkSortDir,     set: v => { _atkSortDir = v; } },
+        selected: () => _atkSelected,
+        currentPage: { get: () => _atkCurrentPage, set: a => { _atkCurrentPage = a; } },
+    },
+    globalPrefix: {
+        render: '_atkRender', goPage: '_goAtkPage', changePageSize: '_changeAtkPageSize',
+        sort: '_sortAtk', toggleCol: '_atkToggleCol', resetCols: '_resetAtkCols',
+        saveOrder: '_atkSaveColOrder', selectAll: '_atkSelectAll', toggleOne: '_atkToggleOne',
+        initFeatures: '_initAtkTableFeatures',
+    },
+});
+
+/** A row's buttons — the same four the account screen offers, minus what the caller may not
+ *  do. Editing, rotating and cloning need `users_edit` (they change or mint a credential for
+ *  an account); revoking needs `sessions_revoke`. An ORPHAN — a token whose account is gone —
+ *  gets only Revoke: there is nobody to bound a new scope by, and rotating one keeps a
+ *  leftover credential alive rather than cleaning it up.
+ *
+ *  One function because the table and the grouped views both draw them, and a set of buttons
+ *  that differs by view is a view free to offer an action the other one refuses.
+ */
+function _atkRowActions(uid) {
+    const tk = _allTokensByUid[uid] || {};
+    // Survives revocation on purpose: "what did this do before we cut it off" is asked
+    // precisely about the tokens that were cut off — and about the orphans nobody owns.
+    const hist = `<button class="btn btn-sm btn-secondary py-0 px-2" title="${escAttr(t('api_token_access'))}"
+            onclick="_tokenHistory('/api/v1/tokens/${encodeURIComponent(uid)}/access', ${jsStr(tk.name || '')})"
+            ><i class="bi bi-clock-history"></i></button>`;
+    if (tk.revoked) return hist;
+    const manage = _canMintForOthers() && tk.username;
+    return `${hist}${manage ? `
+        <button class="btn btn-sm btn-secondary py-0 px-2 ms-1" title="${escAttr(t('api_token_edit'))}"
+            onclick="_atkEdit(${jsStr(uid)})"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-sm btn-secondary py-0 px-2 ms-1" title="${escAttr(t('api_token_rotate'))}"
+            onclick="_atkRotate(${jsStr(uid)}, ${jsStr(tk.name || '')})"><i class="bi bi-arrow-repeat"></i></button>
+        <button class="btn btn-sm btn-secondary py-0 px-2 ms-1" title="${escAttr(t('api_token_clone'))}"
+            onclick="_atkClone(${jsStr(uid)})"><i class="bi bi-files"></i></button>` : ''}
+        ${_canRevokeTokens() ? `
+        <button class="btn btn-sm btn-warning py-0 px-2 ms-1" title="${escAttr(t('api_token_revoke'))}"
+            onclick="_atkRevoke(${jsStr(uid)}, ${jsStr(tk.name || '')})"><i class="bi bi-slash-circle"></i></button>` : ''}`;
+}
+
+/** Load and draw. Called on entering the sub-tab and by Refresh; `force` re-fetches. */
+async function renderAllTokens(force) {
+    if (!document.getElementById('apitokens-container')) return;
+    if (force || !_allTokens.length) {
+        const data = await apiGet('/api/v1/tokens');
+        if (data) {
+            _allTokens = data.tokens || [];
+            _allTokensByUid = Object.fromEntries(_allTokens.map(tk => [tk.uid, tk]));
+        }
+    }
+    // Only for the view that needs it: the feed is the biggest thing this section fetches, and
+    // three of the four views never look at it.
+    if (_atkView.is('activity') && (force || !_atkActivity.length)) {
+        const acc = await apiGet('/api/v1/tokens/access');
+        if (acc) _atkActivity = acc.access || [];
+    }
+    _atkRender();
+}
+
+/** Mint a token for an account that is not mine.
+ *
+ *  The account is a choice, not a field: typing a username here would make a token for
+ *  `admni` a token that exists and belongs to nobody. `system` is offered separately and with
+ *  its own warning — it is the panel's own identity, so nothing narrows such a token
+ *  afterwards, and only an administrator may mint one (the server refuses the rest).
+ */
+let _atkPreset = {};
+
+function _atkNewForUser(preset) {
+    _atkPreset = preset || {};
+    // The same test the Overview uses. Only a cosmetic gate: the route refuses a non-admin
+    // asking for `system` anyway, and this stops the option being offered to somebody who
+    // would get a 403 for choosing it.
+    const isAdmin = currentUser.role === 'admin';
+    // `/api/v1/users` ALREADY carries the built-in identities — they have a name, a UID and a
+    // row in that listing on purpose — so appending `system` here listed it twice. One entry
+    // per account, filtered by who may actually own a token:
+    //   • `anonymous` never can. It is the name the log uses for "we do not know who", and a
+    //     token is an identification; the route refuses it, so offering it is an option that
+    //     400s when chosen.
+    //   • `system` only for an administrator, for the same reason the route says so.
+    const names = Object.keys(usersData || {})
+        .filter(n => n !== 'anonymous' && (isAdmin || n !== 'system'))
+        .sort();
+    showHtmlModal(t('api_token_new_for'), `
+        <div class="mb-2">
+            <label class="form-label small fw-semibold">${esc(t('api_token_owner'))}</label>
+            <select class="form-select form-select-sm" id="atkOwner" onchange="_atkOwnerChanged()">
+                ${names.map(n => {
+                    // An account that cannot sign in cannot use a token either — the hook
+                    // refuses one whose owner is disabled or marked no-login. Saying so on the
+                    // option is the difference between a decision and a token that is minted,
+                    // handed over and then does nothing for reasons nobody can see.
+                    const u = usersData[n] || {};
+                    const dead = u.enabled === false ? t('user_disabled')
+                        : (u.login_enabled === false ? t('login_disabled') : '');
+                    return `<option value="${escAttr(n)}"${
+                        n === _atkPreset.username ? ' selected' : ''}>${esc(n)}${
+                        dead ? ` — ${esc(dead)}` : ''}</option>`;
+                }).join('')}
+            </select>
+            <div class="form-text ss-fs-2 d-none text-warning" id="atkSystemHint"
+                >${esc(t('api_token_system_hint'))}</div>
+            <div class="form-text ss-fs-2">${esc(t('api_token_perms_of'))}</div>
+        </div>
+        <div class="mb-2">
+            <label class="form-label small fw-semibold">${esc(t('api_token_col_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="accTokName" maxlength="64"
+                   value="${escAttr(_atkPreset.name || '')}"
+                   placeholder="${escAttr(t('api_token_name_ph'))}">
+        </div>
+        <div class="mb-2">
+            <label class="form-label small fw-semibold">${esc(t('api_token_col_expires'))}</label>
+            <select class="form-select form-select-sm" id="accTokDays">
+                <option value="30">30</option><option value="90" selected>90</option>
+                <option value="365">365</option><option value="0">${escAttr(t('api_token_never'))}</option>
+            </select>
+        </div>
+        <div id="atkPerms">${_accTokenPermPicker({noAll: true, forOther: true})}</div>`, 'primary',
+        `<button type="button" class="btn btn-sm btn-primary" id="btnAtkCreate"
+                 onclick="_atkCreate()"><i class="bi bi-plus-lg me-1"></i>${esc(t('create'))}</button>`);
+    _atkOwnerChanged();
+}
+
+/** Redraw the checkboxes for the account that is now selected.
+ *
+ *  The dialog used to offer the CALLER's permissions whoever the token was for, so minting one
+ *  for a viewer showed all seventy-five and let you tick sixty the viewer does not have.
+ *  Nothing broke — the request-time intersection drops them — which is precisely the problem:
+ *  the list claimed the token could do things it could never do, and the first evidence
+ *  otherwise was a 403 in something scripted.
+ *
+ *  The set comes from the SERVER, resolved by the same function every guard uses. Roles, group
+ *  membership and disabled groups decide it, and computing that a second time in the browser
+ *  would be a second implementation of the permission system — with the drawing of the
+ *  checkboxes riding on whichever copy drifted.
+ */
+async function _atkOwnerChanged() {
+    const owner = (document.getElementById('atkOwner') || {}).value || '';
+    const hint = document.getElementById('atkSystemHint');
+    if (hint) hint.classList.toggle('d-none', owner !== 'system');
+    const host = document.getElementById('atkPerms');
+    if (!host || !owner) return;
+    // First draw after a clone has nothing ticked yet, so the preset is what carries the
+    // permissions across — the whole point of cloning is not reassembling them by hand.
+    const isAdmin = currentUser.role === 'admin';
+    const wasAll = !!document.getElementById('accTokAll')?.checked;
+    const ticked = new Set(
+        [...document.querySelectorAll('.acc-tok-perm')].length
+            ? [...document.querySelectorAll('.acc-tok-perm:checked')].map(cb => cb.value)
+            : (_atkPreset.permissions || []));
+    const data = await apiGet(`/api/v1/users/${encodeURIComponent(owner)}/permissions`);
+    if (!data) return;
+    // `unbounded` is the built-in identity: nothing narrows its tokens, so the caller's own
+    // set is the only ceiling and no intersection applies.
+    const limitTo = data.unbounded ? null : new Set(data.permissions || []);
+    host.innerHTML = _accTokenPermPicker({
+        // The switch is offered exactly where the server would take it: an administrator, and
+        // an account that HAS a permission set for `'*'` to resolve against.
+        noAll: !isAdmin || !!data.unbounded, forOther: true, limitTo,
+        // Keep what was ticked and still on offer. Silently dropping a choice the new account
+        // cannot have is the point; silently dropping the ones it CAN have would make changing
+        // the account mean starting over.
+        permissions: wasAll ? '*' : [...ticked].filter(p => !limitTo || limitTo.has(p)),
+    });
+}
+
+async function _atkCreate() {
+    const owner = (document.getElementById('atkOwner') || {}).value || '';
+    const name = (document.getElementById('accTokName')?.value || '').trim();
+    if (!owner) return;
+    if (!name) { showToast(t('api_token_name_required'), 'danger'); return; }
+    const perms = _accTokenReadPerms();
+    if (!perms) { showToast(t('api_token_perms_required'), 'danger'); return; }
+    const days = parseInt(document.getElementById('accTokDays')?.value || '90', 10);
+    const done = ssBtnBusy(document.getElementById('btnAtkCreate'));
+    const res = await apiPost(`/api/v1/users/${encodeURIComponent(owner)}/tokens`,
+                              {name, permissions: perms, expires_days: days});
+    done();
+    if (!res || !(res.data || {}).ok) {
+        showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+        return;
+    }
+    // The same one-time dialog the account screen uses: the token exists in this response and
+    // nowhere else, and whoever it is for has to be handed it from here.
+    _accTokenShow(res.data.token);
+    renderAllTokens(true);
+}
+
+/** Edit somebody else's token: the same picker, bounded by that account and by mine. */
+async function _atkEdit(uid) {
+    const tk = _allTokensByUid[uid];
+    if (!tk || !tk.username) return;
+    const data = await apiGet(`/api/v1/users/${encodeURIComponent(tk.username)}/permissions`);
+    if (!data) return;
+    const limitTo = data.unbounded ? null : new Set(data.permissions || []);
+    const isAdmin = currentUser.role === 'admin';
+    showHtmlModal(`${t('api_token_edit')} — ${tk.name || ''}`, `
+        <p class="small text-muted mb-2">${esc(t('api_token_edit_hint'))}</p>
+        <p class="small text-muted mb-2">${esc(t('api_token_perms_of'))}</p>
+        ${_accTokenPermPicker({
+            noAll: !isAdmin || !!data.unbounded, forOther: true, limitTo,
+            permissions: tk.permissions,
+        })}`, 'primary',
+        `<button type="button" class="btn btn-sm btn-primary" id="btnAtkSave"
+                 onclick="_atkSave(${jsStr(uid)})"><i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+async function _atkSave(uid) {
+    const perms = _accTokenReadPerms();
+    if (!perms) { showToast(t('api_token_perms_required'), 'danger'); return; }
+    const done = ssBtnBusy(document.getElementById('btnAtkSave'));
+    const res = await apiPut(`/api/v1/tokens/${encodeURIComponent(uid)}`, {permissions: perms});
+    done();
+    if (!res || !(res.data || {}).ok) {
+        showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+        return;
+    }
+    hideInfoModal();
+    showToast(t('api_token_edited_ok'), 'success');
+    renderAllTokens(true);
+}
+
+/** Rotate somebody else's: a new secret, the old one still working under "(previous)". */
+function _atkRotate(uid, name) {
+    showConfirmModal(t('api_token_rotate_q').replace('{}', name), async () => {
+        const res = await apiPost(`/api/v1/tokens/${encodeURIComponent(uid)}/rotate`, {});
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(t('api_token_rotated_ok'), 'success');
+        _accTokenShow(res.data.token);
+        renderAllTokens(true);
+    });
+}
+
+/** Clone: the create dialog, pre-filled from an existing token AND its account. */
+function _atkClone(uid) {
+    const tk = _allTokensByUid[uid];
+    if (!tk) return;
+    _atkNewForUser({
+        username: tk.username,
+        name: `${tk.name} ${t('api_token_copy_suffix')}`.slice(0, 64),
+        permissions: tk.permissions,
+    });
+}
+
+function _atkRevoke(uid, name) {
+    showConfirmModal(t('api_token_revoke_any_q').replace('{}', name), async () => {
+        const res = await apiDelete(`/api/v1/tokens/${encodeURIComponent(uid)}`);
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(t('api_token_revoked_ok'), 'success');
+        renderAllTokens(true);
+    });
+}

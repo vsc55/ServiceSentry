@@ -112,3 +112,26 @@ def test_every_config_option_has_a_label(lang_mod, lang):
                if f.path not in _LABELLED_ELSEWHERE
                and f.path not in labels and f.path.split('|', 1)[1] not in labels]
     assert not missing, f'{lang}: {len(missing)} config options have no label: ' + ', '.join(missing)
+
+
+@pytest.mark.parametrize('lang_mod,lang', [(en_EN, 'en_EN'), (es_ES, 'es_ES')])
+def test_every_config_section_has_a_title(lang_mod, lang):
+    """Reported from the panel: a new section shipped with its title key defined and the title
+    still missing — because it was defined in the wrong dictionary.
+
+    The language file has a nested `labels` dict for the OPTIONS and a flat top level for
+    everything else, and a section's `title_key` is read from the top level. Put it in `labels`
+    and every check passes: the key exists, the option beside it has a label, nothing raises.
+    The section is simply drawn with its key as its name, which reads like a label until you
+    look twice.
+
+    Both halves are checked here, and both directions matter: the option labels are covered
+    above, and this is the card the option sits in.
+    """
+    from lib.config.layout import CARDS
+    top = lang_mod.LANG
+    missing = [c['id'] for c in CARDS if c.get('title_key') and c['title_key'] not in top]
+    assert not missing, (
+        f'{lang}: config sections whose title is not in the top-level dictionary '
+        f'(a nested one does not count — that is not where a card reads it): '
+        + ', '.join(missing))

@@ -38,7 +38,11 @@ WEBAUTHN_CHALLENGE_SECONDS = 300
 
 
 def register(app, wa):
-    login_required = wa._login_required
+    # `_session_required`, not `_login_required`: managing a second factor is managing a
+    # credential, and an API token must not be able to turn off the protection that stands
+    # between a stolen password and this account. A token IS the scripted way in — letting it
+    # disable MFA would make every token a way to permanently widen its own access.
+    login_required = wa._session_required
     reset_req = wa._perm_required('mfa_reset_others')
 
     def _me() -> tuple:
@@ -246,6 +250,7 @@ def register(app, wa):
         return jsonify({'ok': True, 'method': 'webauthn'})
 
     @app.route('/api/v1/users/<uid>/mfa', methods=['DELETE'])
+    @wa._session_required
     @reset_req
     def api_user_mfa_reset(uid):
         """Take another account's second factor off — the supported way back in.

@@ -8,6 +8,324 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.93] - 2026-08-19
+
+### Added
+- **An option in Configuration is findable by its real name.** It has three — its key, its env
+  var and its label — and only the label was on screen. That is the translated one: it is the
+  name an option CANNOT be looked up by from a config file, a docs page, a bug report or an API
+  call, which is where somebody arrives from when they come here to find a setting.
+  - The search box now matches the **key** (`api_token_log_max`) and the **env var**
+    (`SS_API_TOKEN_LOG_MAX`) as well as the label and the description. Neither is behind the
+    "look in the descriptions" switch: that switch is about prose, and hiding an identifier
+    behind a preference about descriptions is how a search says "no results" for a string that
+    is on the screen.
+  - The info panel of an option shows its key and, for the 49 that have one, the env var that
+    pins it — whether or not it is currently set. The lock badge already said "this is pinned
+    right now"; what was missing is "this is what you would pin it with", which is the question
+    somebody writing a compose file has, and it was answerable only by reading `spec.py`. An
+    option with an env var but no description now gets a panel too, since otherwise the name
+    would be there and unreachable.
+- **API tokens**: a way for an account to be scripted without handing over its password.
+  Everything but SCIM authenticated by session cookie plus CSRF, so automation had to store a
+  real password — and once an account carries a second factor, a password no longer completes
+  a sign-in at all. Turning on `mfa_required` therefore broke every script in the building,
+  and the only workaround was an account deliberately left unprotected.
+  - `Authorization: Bearer sst_<id>_<secret>` — 192 random bits, no second factor to
+    complete, no cookie, revocable on its own without touching the person's access.
+  - **The permissions are intersected with the owner's on every request.** That is the whole
+    security model: a token can never outgrow the account it belongs to, and taking a role
+    away narrows every token that account ever minted at the same instant. Freezing them at
+    creation would have been simpler and would have left standing grants that survive a
+    demotion. `'*'` therefore means "whatever the owner has", not "everything" — the same
+    statement written so that it keeps being true.
+  - **The routes that manage credentials refuse a token** — minting, revoking, changing a
+    password, enrolling or removing a second factor. A narrow token that can mint a wide one
+    is not narrow, and one that can change its owner's password is a foothold that takes over
+    the account it was scoped inside. Everything else an account may do, a token of that
+    account may do.
+  - **The account's state still governs**: disabling it, or marking it no-login, stops its
+    tokens; deleting it deletes them. Otherwise offboarding leaves a door nobody thinks to
+    close. An administrator with `sessions_revoke` can cut off all of somebody's at once —
+    a token is standing access to this panel, which is what that permission is about.
+  - **It is not a session.** No row in the sessions table, absent from that screen, untouched
+    by "revoke all sessions", and the response carries **no cookie**: the client did not ask
+    for a session, and handing it one turns a stateless call into a second credential on
+    somebody's disk.
+  - **Exempt from CSRF, on the merits**: the double-submit token defends against a cross-site
+    page making the *browser* issue a request with its cookies attached, and no such page can
+    attach an `Authorization` header. This is why the token hook runs before the CSRF hook —
+    judging a request means knowing how it authenticated.
+  - Only a **SHA-256 hash** is stored, plus a public `token_id` that makes verification one
+    indexed lookup. Not a password KDF: the secret is 192 random bits, where slow buys nothing
+    and would put a denial of service on every API request. The token exists once, in the
+    response that creates it, and the screen says so.
+  - **Rotate**, instead of revoke-then-create. That pair costs two things that only hurt in
+    production: the permission set has to be rebuilt from memory, and everything using the
+    token is broken from the revoke until the replacement is deployed. Rotating mints the
+    replacement with the same name, permissions and lifetime while the current one **keeps
+    working** — the old one is renamed "(previous)" and the new one inherits the name, so
+    names stay unique, whatever reads the list finds the name it knows on the token that is
+    current, and the one to retire is the one that says so. The lifetime carried over is the
+    original SPAN, not the original date: copying the date would hand back something expiring
+    tomorrow and call it a rotation.
+  - **The scope can be edited**, without minting anything. The secret and the scope are two
+    different things, and when a token turns out to need one permission more, only one of them
+    is wrong. Without this, changing a scope meant a rotation: a new secret redeployed
+    everywhere it is configured, to fix a decision that has nothing to do with the secret —
+    the cost that gets paid once and then avoided by minting the wide token instead, which is
+    the outcome this whole screen exists to make unnecessary. It applies to the token already
+    deployed, on its next request: the row is read and intersected with the owner's
+    permissions on every call, so there is no cached grant to invalidate. Validated against
+    the caller's own permissions like minting is — a scope you may not create is not one you
+    may edit your way into — and a revoked token is not edited, since a scope on it would be a
+    promise nothing keeps. The audit entry carries **both sides**: "what may it do now"
+    without "what could it do before" cannot answer the only question asked of an entry like
+    that.
+  - **Clone** opens the create dialog pre-filled from an existing token. Reassembling a
+    permission set by hand is how a second token ends up subtly different from the one it was
+    meant to mirror, and nobody notices until the difference is a 403 in something that runs
+    at night.
+  - **Two live tokens of one account may no longer share a name** (409), case- and
+    padding-insensitive: the name is the only thing in the list that says what a token is
+    for, and two of them wearing it makes revoking the right one a coin flip. A revoked
+    token's name is reusable — refusing the name of something that stopped working months ago
+    would be a rule with no purpose.
+  - The list is built by the shared list-table factory, like every other entity table:
+    sorting, a column chooser, pagination, column widths and reordering, and the per-user
+    persistence of all of it. It was hand-written first and the screen showed exactly what
+    that costs — no sorting, no chooser, and a two-line header where the rest of the panel
+    has one.
+  - **Revoked tokens are not shown by default**, and a switch beside the header buttons
+    brings them back — remembered per user like the columns are. A revoked token is kept on
+    purpose ("it stopped working" and "it was never here" are different answers, and only one
+    is actionable), but it is history, and history mixed into a list of live credentials is
+    what makes the list hard to read: rotate a few times and the working token is outnumbered
+    by its own past. So the default answers the question the screen is opened with — what can
+    be used right now — and the record is one click away rather than gone. Asking for the
+    revoked ones in the filter bar **beats** the default — an explicit request beats a
+    standing one — and when every token is revoked the empty state says exactly that instead
+    of claiming there are none.
+  - The list-table factory grew `spec.filters.always` for it. It skips `match()` when no
+    field in the filter bar is set — a fair shortcut for a list nobody is filtering, and
+    exactly wrong for a control that filters from outside the bar: the switch did nothing at
+    all, silently, because the bar was empty. The badge still counts only the bar, since that
+    is what the clear button clears.
+  - It also carries the shared **filter strip** — name, state (active / expired / revoked)
+    and permission, the three questions the list is opened with. `spec.filters` is the same
+    collapsible bar every list section has, so the only thing this screen writes is `match()`;
+    without it, finding one token among twenty meant reading twenty rows. The permission
+    field matches the NAME as well as the flag, because the list shows one and the API speaks
+    the other, and a token with `'*'` matches whatever is asked for — it has it.
+  - The pane goes **full-bleed** like every other list section (`.ss-fullbleed`), instead of
+    being a card inside a settings page: a list IS its section, so a card around it is a frame
+    drawn inside a frame. Inside the rail shell the gutter is padding on the scroll box rather
+    than `.container-fluid`'s, so the shell drops it at the source instead of cancelling it a
+    second time with the class's negative margins. It reaches the bottom of the pane as well —
+    reported from a screenshot beside a section that does: `.ss-vfill` only grows inside a flex
+    column, and three boxes between the shell and the card were not one. The scroll box is
+    `flex: 1 1 auto` without being a flex CONTAINER, and the pane loses its own `.ss-vfill` to
+    Bootstrap's `.tab-content > .active { display: block }` — which is why every list section
+    outside the shell names the active pane explicitly too. So the card stopped at the height
+    of its rows and left the rest of the pane empty, which is the one thing full-bleed was for.
+    The chain is rebuilt only while a full-bleed pane is the open one, since the form sections
+    share those boxes and must keep flowing.
+- **A card can no longer ask for an accent colour that does not exist.** The tokens card named
+  `violet`, which nothing defines, so its 3px accent strip painted card background between the
+  filter bar and the header — a seam that reads as a gap, next to sections where the same 3px
+  is a coloured line tying the two together. The stylesheet's existing fallback is for an
+  accent with no variant at all and cannot catch this: the element does carry an `ss-accent-*`
+  class, it just names a colour nobody wrote. A typo in a variant name is not something CSS
+  can refuse, so a guard refuses it instead.
+  - Managed from a third section in `/account`, which fills its pane — it is a list, and a
+    list that stops halfway down leaves the screen empty while its own rows scroll in a short
+    box. Nothing is pre-selected in the create dialog: a default of "everything" would make
+    the scope decorative.
+  - The audit entry names them too. A permission flag is a third kind of detail value —
+    neither data nor vocabulary the panel chose — so the detail renderer reads the same
+    catalog rather than growing a second name for each of the 75 flags in another file. The
+    token fields (`token_id`, `permissions`, `expires_at`, `count`) got their labels, and
+    `never` its word.
+  - The dialog names the permissions through the panel's own catalog (`PERM_GROUPS` +
+    `permission_labels`), grouped the way Access › Permissions groups them, instead of listing
+    raw flags. The flag stays beside the name because it is what the token carries and what
+    the API speaks — hiding it would leave two screens disagreeing about what a permission is
+    called. Only the caller's own permissions are offered: the server refuses the rest anyway,
+    so offering them would be a list of things that 403 when ticked.
+- **System › Access › API tokens** — every token in the installation, on one screen.
+  The account list says who exists and the sessions screen says who is signed in; a token is
+  standing access that appears in neither, and asking account by account is how the answer ends
+  up depending on which accounts somebody remembered to open.
+  - It rides the **sessions** permissions, because it is the sessions question: `sessions_view`
+    to read the list, `sessions_revoke` to cut a single token. Minting one for somebody else is
+    account administration and needs `users_edit` on top. Three permissions and not one, because
+    they are three different acts — an installation that grants one and not the others gets
+    exactly what it asked for.
+  - **A token whose account no longer exists is still listed**, with no name beside it. It
+    cannot authenticate (the hook refuses an owner it cannot resolve), but a row nobody can
+    name is exactly the leftover an access review is looking for, and hiding it answers the
+    question wrongly.
+  - The grouped views are a **rail and a detail**, not a wall of cards: an index down the
+    side and the open group beside it, which is the shape Configuration and Modules already
+    use. One card per group put "how many groups are there" above the fold and "what is in
+    this one" three screens down, and made every group compete for the same width. The rail is
+    the panel's own component; what is new is `.ss-railbox`, a generic box for a rail inside a
+    body — `.ss-shell` is the page-level version and carries the negative margins that bleed a
+    section to the pane's edges, which inside a card pull it out of its own box. The selection
+    lives outside the body (which is rebuilt on every render) and falls back when the filters
+    remove the group that was open. The box a view's body lands in is a plain `.ss-vscroll` —
+    a flex ITEM that is not a flex CONTAINER — so the rail first grew to the height of its own
+    items and left the rest of the card empty, the same trap the /account pane hit; the fix
+    lives with the box rather than with this view.
+  - Two grouped views beside the table: **by account** (whose automation is this — what has to
+    be cut when somebody leaves) and **by permission** (who can write configuration without
+    signing in, which no ordering of a table can answer, because the permissions are a list
+    inside one cell). The account's own token list gains the same **by permission** view plus a
+    card grid; the grouping is one function used by both, since two implementations would be
+    two answers to "what can run here".
+- **What a token has been doing.** `last_used` says a credential is alive; it cannot say
+  what it is for, whether what it is doing is what it was set up to do, or where it is calling
+  from. The audit log answers none of those either: it records the ACCOUNT, so a token's writes
+  read as the person's own, and reads are not audited for anybody.
+  - Every token-authenticated call is recorded with its date, IP, method, route **pattern** and
+    **status**, readable from a history button on the row — on both screens, through one
+    dialog. The **refused** calls are in it on purpose: "this token asked for something it may
+    not have" is the line an access review is looking for, and a history of the calls that
+    worked is a history of the half that went as expected.
+  - A **ring per token** (`web_admin|api_token_log_max`, 200 by default, `0` switches it off),
+    not a log: a table that grows with API traffic is the one thing an API's own bookkeeping
+    must not be, and the questions this answers are about the recent past. Per token rather
+    than globally, so a chatty token cannot evict the history of a quiet one — and the quiet
+    one is where a single unexpected call is the whole signal.
+  - The route **pattern** is stored, not the URL: a ring filled with one username per row
+    answers "which endpoints does this token use" with a wall of near-identical strings, and a
+    raw path is where an id or an email would end up in a table shown to whoever may read the
+    token list. An unmatched request (a 404) has no pattern, so the path is kept as-is — which
+    is exactly when the URL is the point.
+  - And a fourth view in the administration section, **Activity**: every call of every
+    token, newest first. The per-token history answers "is this credential doing what I set it
+    up to do"; this answers the one nothing could ask at all — what has been reaching this
+    panel without anybody signing in, in order, across every token there is. A burst of 403s
+    from a credential nobody was thinking about is a thing you see there and nowhere else. It
+    is a summary, so it is handed every token the filter strip left standing and shows the
+    calls of THOSE: filter to one account and it is that account's API traffic, with no second
+    set of filters to keep in step with the first.
+  - It **survives revocation**, because "what did this do before we cut it off" is asked
+    precisely about the tokens that were cut off, and it goes with the account when the account
+    goes.
+- **The administrator's row does what the account screen's row does** — edit the scope,
+  rotate, clone, revoke. It shipped revoke-only, which made the screen a place to cut access
+  rather than to manage it: every other operation meant asking the owner to do it, which is
+  exactly what does not work for a token whose owner has left. Each action sits behind the
+  permission it needs, and an **orphan offers only revoke** — there is nobody to bound a new
+  scope by, and rotating one keeps a leftover credential alive instead of cleaning it up.
+- **The create dialog follows the account it is for.** It offered the CALLER's permissions
+  whoever the token was for, so minting one for a viewer showed all seventy-five and let you
+  tick sixty that viewer does not have. Nothing broke — the request-time intersection drops
+  them — which is precisely the problem: the list claimed the token could do things it could
+  never do, and the first evidence otherwise was a 403 in something scripted. The set now comes
+  from the server (`GET /api/v1/users/<u>/permissions`), resolved by the same function every
+  guard uses, because roles, group membership and disabled groups decide it and a second
+  implementation in the browser would leave the checkboxes riding on whichever copy drifted. It
+  redraws when the account changes, keeping what is still on offer; the built-in identity has
+  nothing to intersect with, so there the caller's own set is the only bound.
+  - **"All of that account's permissions"** is offered here too, and it means what it says:
+    `'*'` resolves against the OWNER on every request, so a token minted that way for an
+    account keeps matching that account as it changes instead of going stale. It is an
+    **administrator's** call and nobody else's — it is the one value that grows without anybody
+    deciding, since whoever minted it saw the secret and a permission granted to that account
+    next year widens a credential they may still hold. An administrator already holds
+    everything, so it cannot carry them past their own ceiling; a delegated user-manager it
+    could. Refused for the built-in identity, and not as policy: with no owner set to resolve
+    against, the effective set is empty — a token that can do nothing while claiming to do
+    everything.
+  - The owner dropdown listed `system` **twice**: `/api/v1/users` already carries the
+    built-in identities — they have a name, a UID and a row in that listing on purpose — and
+    the dialog appended it on top. It is built from that response alone now, filtered by who
+    may own a token: `anonymous` never may (it is the name the log uses for "we do not know
+    who", and a token is an identification), and `system` only for an administrator. An
+    account that is disabled or marked no-login says so on its option, because the hook
+    refuses a token whose owner cannot sign in — otherwise it is a credential that is minted,
+    handed over, and then does nothing for reasons nobody can see from that screen.
+  - The own-account hint was rewritten to match, because it told half the story: it said the
+    token narrows the day you can do less and never said it also **widens** the day you can do
+    more. Both halves are the same sentence — the scope follows the account — and the half it
+    left out is the one worth knowing before ticking the box.
+  - The label follows the meaning ("all my permissions" / "all of that account's"), and the
+    admin list and the audit entry read "all of the account's": whose permissions it follows
+    IS the value. Beside the checkboxes there is also **All / None**, which writes the same set
+    down as a fixed list for when a snapshot is what you want rather than a tracker.
+  - The server now refuses a permission **the owner does not have**, matching what the account's
+    own screen has always done. Not a security rule — the intersection drops it anyway — but a
+    permission that silently does nothing makes the list say something it does not mean.
+- **A token can be minted for another account**, and the two rules that keep that from being an
+  escalation: the permissions must be ones the **caller** holds — without that, anybody who may
+  edit users could mint a token for an administrator and then hold it — and the account
+  hierarchy applies, so a non-admin cannot act on an administrator's account at all. `'*'` is
+  refused here although it is allowed on your own tokens: it means "whatever the owner has",
+  which for somebody else is a promise about a set the caller does not control. Its own audit
+  event, because handing out a credential that is not yours is a different act from minting
+  your own.
+- **Tokens owned by `system`**, so automation does not hang off a person's account and die with
+  it. This is the one place where the invariant the rest of the feature rests on does not
+  apply, and it is worth stating plainly: `system` is a built-in identity with no permissions —
+  it acts with the panel's own authority precisely because it never passes a permission check —
+  so there is nothing to intersect its tokens with, and intersecting with the empty set would
+  make such a token able to do nothing at all. Its scope is therefore what it was given, and
+  nothing narrows it afterwards except revoking it.
+  - The ceiling moves rather than disappearing: **only an administrator may mint one**, nobody
+    may grant a permission they do not hold themselves, and `'*'` is refused — with no owner to
+    resolve it against it would mean everything, forever. It fails closed: a stored `'*'` on an
+    unbounded owner resolves to the empty set, not to everything.
+  - `anonymous`, the other built-in identity, may not own tokens at all. It is the name the log
+    uses for "we do not know who", and a token is an identification.
+  - A reserved identity in a session now resolves to **no permissions** instead of falling
+    through to the viewer default — the lookup misses it, because it is deliberately not a row
+    in the users store, and the fallback would have handed the panel's own actor a viewer's
+    permissions.
+- **Every account records when it last signed in.** The audit log could not answer it: it
+  holds `login_ok`, but it is capped by NUMBER OF ROWS, so a burst of anything evicts the
+  evidence — and "which accounts have nobody behind them any more" is what an access review
+  opens with.
+  - Stamped in `_establish_session`, the single place in the panel where a session is born, so
+    it covers the local form, OIDC, SAML and Entra alike. A stamp in the login route would be
+    one three providers walk around.
+  - **Using an API token is deliberately not a sign-in** and does not touch it — that belongs
+    to the token's own `last_used`. An account whose only activity is a script has a dormant
+    PERSON behind it, which is exactly the distinction a review is looking for.
+  - A sortable column in the users table, where "never" sorts as older than any date so those
+    accounts land at the top rather than under a blank; and in the effective-access view,
+    beside the second factor, with a **dormant (90d)** count. Accounts that cannot sign in are
+    excluded from it: a service account is not dormant, it is a script.
+- **A locked-out account can be let back in.** The failed-attempt lockout was a dead end:
+  `_locked_until` was written by the sign-in path and cleared by exactly one thing — a
+  SUCCESSFUL sign-in, which is what the lockout prevents. The only cure was waiting it out,
+  and `lockout_duration_secs` goes up to a day.
+  - It was also invisible. An administrator told "I cannot get in" had no way to see that
+    the account was locked, so they could not even confirm the diagnosis before telling
+    somebody to wait.
+  - The listing now carries `locked_until`, and **only while the lockout is in force**: an
+    expired one is cleared by the next sign-in attempt anyway, so reporting it would show a
+    padlock holding nobody. The attempt counter never travels — how many tries somebody has
+    left is not a question a list is asked.
+  - A locked account is marked beside its name in both the table and the card view, and the
+    edit modal states it, says when it lifts by itself, and offers **Unlock**. The row is
+    drawn for every existing account in one of its two states, like the second-factor row
+    above it: the question it answers is "why can this person not get in", and a row that
+    appears only when the answer is yes cannot be used to rule it out.
+  - `POST /api/v1/users/<username>/unlock`, and `main.py user unlock <username>` for when
+    the locked account is the only one that could have pressed the button.
+  - It rides on `users_edit` rather than a flag of its own, unlike taking somebody's second
+    factor off: it lifts a rate limit and grants no access — the password still has to be
+    right. Same hierarchy guard as the rest of the file: an editor may not act on an
+    administrator's account.
+  - The counter is cleared with the expiry. Leaving `_failed_attempts` behind would relock
+    the account on the very next mistake, which from the outside is an unlock that did not
+    work.
+  - Audited as `user_unlocked`, and **only when a lockout was actually in force**: tidying
+    up the keys of an expired one is housekeeping, and recording it would put something that
+    did not happen in the one log anybody consults afterwards.
+
 ## [0.0.1+build.92] - 2026-08-19
 
 ### Added

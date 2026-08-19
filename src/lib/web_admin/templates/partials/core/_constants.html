@@ -148,6 +148,10 @@ const HOST_OS_OPTIONS = {{ host_os_options | default([]) | tojson }};
 const LOCAL_OS = {{ local_os | default('other') | tojson }};
 const HINTS = I18N.hints || {};
 const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
+// `path -> SS_NAME` for every option an env var can pin, set or not: ENV_LOCKED says
+// what IS pinned, this says what WOULD pin it — which is the question somebody writing a
+// compose file has, and it used to be answerable only by reading spec.py.
+const ENV_NAMES = {{ wa_env_names | tojson }};
 // Fields pinned in config.json (read-only override): editable everywhere else lives in the DB.
 const FILE_LOCKED = new Set({{ wa_file_locked_fields | default([]) | tojson }});
 const LDAP_AVAILABLE  = {{ ldap_available  | tojson }};

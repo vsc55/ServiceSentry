@@ -59,7 +59,16 @@ function _cfgFilterPass(container) {
             const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
             const hintEl   = _cfgSearchInHints ? wrap.querySelector('[id^="fhint_"]') : null;
             const hintTxt  = hintEl ? hintEl.textContent.trim().toLowerCase() : '';
-            const hit      = !q || labelTxt.includes(q) || hintTxt.includes(q);
+            // …and by the KEY, and by the env var that pins it. The label is a translation: it
+            // is the one name this option cannot be looked up by from a config file, a docs
+            // page, a bug report or an API call — which is where somebody arrives from when
+            // they come here to find a setting. Always searched, never behind the "look in the
+            // descriptions" switch: that switch is about prose, and neither of these is prose.
+            const pathTxt  = (wrap.dataset.cfgPath || '').toLowerCase();
+            const envTxt   = ((typeof ENV_NAMES !== 'undefined'
+                               && ENV_NAMES[wrap.dataset.cfgPath]) || '').toLowerCase();
+            const hit      = !q || labelTxt.includes(q) || hintTxt.includes(q)
+                             || pathTxt.includes(q) || envTxt.includes(q);
             // A row with no `data-cfg-path` is a button or a list, not an option — it cannot
             // have been "changed", so it steps aside with the rest under that filter.
             const match    = hit && (!changedOnly || _cfgFieldIsChanged(wrap));

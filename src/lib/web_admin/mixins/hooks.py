@@ -17,7 +17,11 @@ Two of them are not merely ordered but ORDERED-CRITICAL:
   not a redirect, not a login form;
 * ``csrf`` runs after the caches so a rejection is audited against fresh users, and BEFORE the
   FQDN redirect, so a state-changing request that arrived on the wrong hostname is judged on
-  its token rather than bounced to a URL that would drop its body.
+  its token rather than bounced to a URL that would drop its body;
+* ``api_token`` runs before ``csrf`` because CSRF has to know how the request authenticated.
+  A bearer call is not a browser being tricked into posting — no cross-site page can attach an
+  ``Authorization`` header — so it is exempt, and deciding that afterwards would mean rejecting
+  every write an API client makes.
 """
 
 import time
@@ -42,6 +46,9 @@ class _HooksMixin:
         '_hook_ipban_gate',        # first: a banned address reaches nothing
         '_hook_trace_start',       # start the clock before any work is done
         '_hook_refresh_caches',    # fresh roles/users/groups for whatever authorises next
+        '_hook_api_token',         # BEFORE csrf: how a request authenticated decides whether
+                                   # CSRF applies to it at all (a bearer call is not a browser
+                                   # being tricked — no cross-site page can set that header)
         '_hook_csrf_protect',      # judged on the token, before any redirect can move it
         '_hook_enforce_fqdn',      # last: only a request that survived everything is bounced
     )
@@ -50,6 +57,11 @@ class _HooksMixin:
         """Wire the lifecycle onto *app*, in the declared order."""
         for name in self._BEFORE_REQUEST:
             app.before_request(getattr(self, name))
+        # Before `_hook_trace_end` is irrelevant, but before Flask's `save_session` is not:
+        # after_request handlers all run ahead of it, which is the only window in which a
+        # token request can be stopped from being handed a session cookie.
+        app.after_request(self._hook_api_token_access)
+        app.after_request(self._hook_api_token_no_cookie)
         app.after_request(self._hook_trace_end)
         app.teardown_request(self._hook_close_thread_db)
         app.register_error_handler(Exception, self._hook_unhandled_error)
@@ -98,6 +110,14 @@ class _HooksMixin:
         if enabled is None:
             enabled = not app.config.get('TESTING', False)
         if not enabled:
+            return None
+        # A bearer-authenticated request is exempt, and not as a convenience: the
+        # double-submit token defends against a cross-site page making the BROWSER issue a
+        # request with its cookies attached. No such page can attach an `Authorization`
+        # header — it would need CORS consent from this origin — so there is no attack for
+        # the token to prevent here, and requiring one would reject every write an API
+        # client makes. This is why `_hook_api_token` runs before this hook.
+        if getattr(g, 'api_token', None):
             return None
         if not _csrf.needs_check(request.method, request.path, self._csrf_exempt_prefixes):
             return None

@@ -114,6 +114,25 @@ def cmd_user_disable(ctx, args) -> int:
     return _set_enabled(ctx, args.username, False)
 
 
+def cmd_user_unlock(ctx, args) -> int:
+    """Lift a failed-attempt lockout (``user unlock``).
+
+    Here as well as in the panel because the account that is locked out may be the only one
+    that could have pressed the button. It grants nothing: the password still has to be
+    right, and whoever can run this can already read the database.
+    """
+    username = args.username
+    try:
+        _require_user(ctx, username)
+    except AdminOpError as e:
+        return _err(_t(ctx, e.key, *e.args))
+    user = ctx.users[username]
+    if not users_svc.unlock(user, actor='cli'):
+        return _ok(f"user '{username}' was not locked")
+    ctx.persist_users()
+    return _ok(f"user '{username}' unlocked")
+
+
 def _set_enabled(ctx, username: str, enabled: bool) -> int:
     try:
         _require_user(ctx, username)
@@ -330,6 +349,7 @@ _HANDLERS = {
     ('user', 'enable'):     cmd_user_enable,
     ('user', 'disable'):    cmd_user_disable,
     ('user', 'passwd'):     cmd_user_passwd,
+    ('user', 'unlock'):     cmd_user_unlock,
     ('user', 'role'):       cmd_user_role,
     ('user', 'mfa-reset'):  cmd_user_mfa_reset,
     ('user', 'mfa-status'): cmd_user_mfa_status,

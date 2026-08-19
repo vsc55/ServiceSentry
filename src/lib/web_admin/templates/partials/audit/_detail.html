@@ -151,9 +151,28 @@ function formatHostTestDetail(d) {
 // host called `local` or a module whose id happens to match one of these words. And every
 // lookup falls back to the word itself, so an entry a module wrote — or one from a build newer
 // than the language file — still reads, just untranslated.
-const _AUDIT_ENUM_FIELDS = new Set(['stage', 'error', 'method', 'source', 'result', 'kind']);
+const _AUDIT_ENUM_FIELDS = new Set(['stage', 'error', 'method', 'source', 'result', 'kind',
+                                    'expires_at']);
 const _auditWord = v => I18N['audit_v_' + String(v)] || String(v);
 const _auditFieldLabel = k => I18N['audit_f_' + String(k)] || String(k);
+
+// A third kind of value, and the reason it needs its own rule: these are not vocabulary the
+// panel chose, they are PERMISSION FLAGS — the same catalog Access › Permissions and the token
+// dialog read. Sending them through `audit_v_*` would mean maintaining a second name for every
+// one of the 75, and they would drift.
+//
+// By field again, never by value: `users_view` as somebody's chosen name for something else
+// must not turn into a permission label because it looks like one.
+const _AUDIT_PERM_FIELDS = new Set(['permissions', 'permissions_before']);
+function _auditPerms(v) {
+    // `'*'` is the sentinel for "whatever the owner has" — it is not a flag and has no label.
+    // The OWNER's, not "mine": an entry is read by somebody who is not necessarily the
+    // account it is about, and whose permissions `'*'` follows is the whole meaning of it.
+    if (v === '*') return `<span class="badge text-bg-danger">${esc(t('api_token_perms_all_owner'))}</span>`;
+    const list = Array.isArray(v) ? v : [v];
+    return list.map(p => `<span class="badge bg-secondary-subtle text-secondary-emphasis border me-1"
+        title="${escAttr(String(p))}">${esc(_permLabel(String(p)))}</span>`).join('');
+}
 
 // Recursive pretty renderer for any value
 function renderReadable(v) {
@@ -179,9 +198,11 @@ function renderReadable(v) {
     if (typeof v === 'object') {
         const rows = Object.entries(v).map(([k, val]) =>
             `<tr><td class="pe-3 text-muted small text-nowrap">${esc(_auditFieldLabel(k))}</td><td>${
-                (typeof val === 'string' && _AUDIT_ENUM_FIELDS.has(k))
-                    ? esc(_auditWord(val))
-                    : renderReadable(val)}</td></tr>`
+                _AUDIT_PERM_FIELDS.has(k)
+                    ? _auditPerms(val)
+                    : (typeof val === 'string' && _AUDIT_ENUM_FIELDS.has(k))
+                        ? esc(_auditWord(val))
+                        : renderReadable(val)}</td></tr>`
         ).join('');
         return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
     }

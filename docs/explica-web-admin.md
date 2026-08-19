@@ -632,6 +632,20 @@ renderiza en el sub-tab Providers (`_renderMsTeamsSection`). Cómo funciona el c
 | `PUT` | `/api/v1/users/me/password` | auth | Cambiar la contraseña propia |
 | `PUT` | `/api/v1/users/me/preferences` | auth | Guardar preferencias propias: `lang`, `dark_mode`, `table_config` y `dashboard_layout` (sin permiso especial) |
 
+**Último acceso:** la tabla de usuarios lleva una columna **Último acceso** (ordenable; «nunca»
+ordena como lo más antiguo, para que esas cuentas queden arriba en vez de enterradas bajo un
+hueco), y la vista de **acceso efectivo** la muestra junto al segundo factor y cuenta las
+**inactivas (90 d)** entre sus resúmenes. Se excluyen las cuentas que no pueden iniciar sesión:
+una cuenta de servicio no está inactiva, es un script, y engordar el número con ellas hace el que
+importa más difícil de creer.
+
+**Bloqueo por intentos fallidos:** una cuenta bloqueada lleva una insignia roja junto a su
+nombre —en tabla y en tarjetas—, y el modal de edición dice el estado, hasta cuándo dura y
+ofrece **Desbloquear** a quien tenga `users_edit`. La fila se dibuja para toda cuenta existente
+en uno de sus dos estados, por la misma razón que la del segundo factor: la pregunta que
+contesta es «¿por qué no puede entrar esta persona?», y una fila que solo aparece cuando la
+respuesta es que sí no sirve para descartarlo.
+
 **Segundo factor en la vista de usuarios:** la tabla lleva una columna **MFA** (sí/no), y las
 tarjetas y la vista de **acceso efectivo** contestan lo mismo, para que la pregunta «¿quién no
 está protegido?» no dependa de en qué vista estés. El modal de edición añade, para una cuenta
@@ -941,6 +955,12 @@ medidor de fuerza incluido.
 La tarjeta del segundo factor —alta con QR y clave, códigos de recuperación, llaves de
 seguridad, desactivar— se documenta en **[explica-mfa.md](explica-mfa.md#el-alta)**; sus
 endpoints, en [ref-api.md](ref-api.md#segundo-factor-mfa--libcoremfaroutespy).
+
+Una tercera sección, **Tokens de API**, lista los de la cuenta y permite crear y revocar. La
+lista se pide al abrir la sección y no antes: una pestaña que nadie pulsa no debería costar una
+petición. Al crear uno, el diálogo enseña el token **una sola vez** y lo dice — no hay «volver a
+copiar» porque la fila solo guarda su hash, y decirlo ahí es la diferencia entre guardarlo hoy y
+descubrir mañana que ya no está. Ver [explica-seguridad.md](explica-seguridad.md#tokens-de-api).
 
 ---
 
@@ -1311,6 +1331,10 @@ Todos los eventos auditados:
 | `user_deleted` | Eliminación de usuario |
 | `password_changed` | Usuario cambia su propia contraseña |
 | `password_reset` | Admin resetea la contraseña de otro usuario |
+| `api_token_created` | Se creó un token de API. El detalle nombra el token y lo que puede hacer, **nunca el token** |
+| `api_token_revoked` | Su dueño revocó uno |
+| `api_tokens_revoked_by_admin` | Un administrador cortó **todos** los de otra cuenta |
+| `user_unlocked` | Un administrador levantó el bloqueo por intentos fallidos de una cuenta. Solo se registra si el bloqueo **estaba en vigor** |
 | `mfa_enrolled` | Una cuenta activó su segundo factor |
 | `mfa_disabled` | Una cuenta lo desactivó |
 | `mfa_recovery_regenerated` | Juego nuevo de códigos de recuperación (el anterior queda inservible) |

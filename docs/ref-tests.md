@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~5.190 tests** (5364 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-19). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5.360 tests** (5454 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-19). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -1064,6 +1064,37 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 | `test_set_own_landing` | Fijar landing propio | `200`; `landing_page='overview'`; `/me` lo refleja | Si no aplica |
 | `test_invalid_landing_rejected` | Landing inválido | `400` | Si acepta |
 | `test_empty_landing_inherits` | Landing vacío tras fijarlo | Se elimina del usuario (hereda global) | Si persiste |
+
+### `TestWhenAnAccountLastSignedIn`
+
+`last_login` existe porque la auditoría no podía contestarlo: `login_ok` está ahí, pero el
+registro está limitado **por número de filas** —una racha de cualquier otra cosa lo desaloja— y
+«qué cuentas ya no tienen a nadie detrás» es con lo que empieza una revisión de accesos.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_signing_in_records_it` · `test_the_listing_reports_it` | Se estampa y viaja |
+| `test_an_account_that_never_signed_in_says_so` | Vacío es una respuesta real: una cuenta aprovisionada que nadie ha usado nunca es lo primero que busca una revisión |
+| `test_it_is_written_wherever_a_session_is_born` | Va en `_establish_session`, el único embudo por el que pasan el formulario local, OIDC, SAML y Entra. En la ruta de login sería una guarda que tres proveedores rodean |
+| `test_using_an_api_token_is_not_a_sign_in` | Un token no lo toca —eso es el `last_used` del token—: una cuenta cuya única actividad es un script tiene a una **persona** inactiva detrás |
+
+### `TestALockedAccountCanBeLetBackIn`
+
+El bloqueo por intentos fallidos era un callejón sin salida: `_locked_until` lo escribía la ruta
+de inicio de sesión y lo limpiaba **una sola cosa**, un inicio de sesión correcto — que es justo
+lo que el bloqueo impide. La única cura era esperar, y `lockout_duration_secs` llega a un día.
+Encima era invisible: a quien administraba le decían «no puedo entrar» y no podía ni ver que era
+eso.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_the_listing_reports_the_lockout` | `locked_until` viaja en el listado |
+| `test_an_expired_lockout_is_not_reported` | Uno caducado no se reporta: la ruta de login lo limpia al siguiente intento, así que sería un candado que ya no retiene a nadie |
+| `test_the_response_never_carries_the_attempt_counter` | Cuántos intentos le quedan a alguien no es algo que se le pregunte a una lista |
+| `test_unlocking_lifts_it` · `test_the_counter_goes_with_it` | Levanta el bloqueo **y** el contador: dejar `_failed_attempts` relockearía la cuenta al siguiente error, que por fuera es un desbloqueo que no funcionó |
+| `test_it_is_audited` · `test_unlocking_an_account_that_was_not_locked_is_not_an_error` | Se audita `user_unlocked`; y desbloquear algo no bloqueado responde `ok` con `cleared: false` —el que llama pidió que no estuviera bloqueada y no lo está— |
+| `test_it_does_not_let_anybody_in` | **La razón de que vaya con `users_edit`**: levanta un límite de intentos, no acepta una contraseña |
+| `test_an_unknown_user_is_a_404` · `test_a_builtin_identity_is_refused` · `test_it_needs_users_edit` | 404, identidades sintéticas rechazadas, y la guarda de permiso |
 
 ---
 
@@ -3993,6 +4024,19 @@ Lo más cómodo es un fichero **`src/tests/.env.test`** (está en `.gitignore` �
 | `test_bad_role_and_group` | Rol desconocido → `invalid_role`; grupo desconocido → `invalid_groups` |
 | `test_password_policy` | (param.) `'a'`→`password_too_short`; `'abcd'`→`None` (válida) |
 | `test_last_admin_guards` | Degradar último admin → `must_have_admin`; deshabilitarlo → `cannot_disable_last_admin` |
+
+### `TestTheLockoutHelpers`
+
+`_locked_until` lo escribía la ruta de inicio de sesión y no lo leía nadie más. Estos dos
+helpers son lo que permite que la pantalla, la API y el CLI coincidan sobre quién está
+bloqueado.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_a_lockout_in_force_is_reported` · `test_an_expired_one_is_not` · `test_no_lockout_at_all` | Un bloqueo caducado no es un bloqueo |
+| `test_a_naive_timestamp_is_read_as_utc` | Un registro sin zona horaria (editado a mano, o antiguo) no puede tumbar el listado entero: comparar naive con aware lanza |
+| `test_something_that_is_not_a_date_is_not_a_lock` | Ni se puede honrar ni reportar, y lanzar aquí sería una lista de usuarios que da 500 por una cadena mala en un registro |
+| `test_unlock_clears_the_counter_too` · `test_unlocking_nothing_changes_nothing` | El contador se va con la caducidad, y un no-op no estampa `updated_at` |
 | `test_set_role_and_enabled_ok` | `set_role` devuelve uid editor; `set_enabled` `True` luego `False` sin cambio |
 | `test_group_membership` | `add_group` `True` luego `False` (idempotente); `remove_group` `True`; grupo desconocido lanza |
 
@@ -4662,7 +4706,7 @@ Ver también §88b y §89.
 | `TestPerModuleHeaders::test_headers_use_the_real_parameter_names` | Una cabecera con `<ip>` para una ruta declarada `<path:ip>` se lee bien pero deja de casar — así empezó la deriva |
 | `TestSurfaceIndex::test_every_route_falls_under_an_indexed_prefix` | El índice lista **prefijos**: un dominio nuevo tiene que aparecer, un endpoint dentro de uno conocido no |
 
-**Archivo:** `tests/unit/test_i18n_keys_exist.py` — 4 tests
+**Archivo:** `tests/unit/test_i18n_keys_exist.py` — 5 tests
 **Archivo:** `tests/meta/test_i18n_keys_exist.py` — 3 tests
 
 | Test | Qué comprueba |
@@ -4672,6 +4716,7 @@ Ver también §88b y §89.
 | `test_the_regression_that_motivated_this` | `insufficient_permissions` la devuelven 6 módulos de rutas en sus 403 |
 | `test_audit_actually_finds_keys` | **Guard del guard**: si las expresiones regulares dejaran de casar, el test pasaría sin comprobar nada |
 | `test_every_config_option_has_a_label` (×2 idiomas) | Toda opción de `CONFIG_FIELDS` tiene etiqueta, por ruta o por nombre. `fieldLabel()` **humaniza** la clave que falta en vez de fallar, así que 44 opciones llevaban «Landing Page», «Allowed Sources», «Retention Days» o «Max Rows» en mitad de un panel en castellano, con pinta suficiente de etiqueta como para pasar revisión. Las 11 exentas están listadas: ids internos que los renderizadores ocultan, y las filas que el editor de webhooks o el selector de Teams etiquetan por su cuenta |
+| `test_every_config_section_has_a_title` (×2 idiomas) | Reportado desde el panel: una sección nueva salió con su clave de título **definida** y el título igualmente ausente — porque estaba en el diccionario equivocado. El fichero de idioma tiene un `labels` anidado para las **opciones** y un nivel superior plano para todo lo demás, y el `title_key` de una tarjeta se lee del nivel superior. Metida en `labels`, todas las comprobaciones pasan: la clave existe, la opción de al lado tiene etiqueta, nada revienta. La sección se pinta con su clave por nombre, que se lee como una etiqueta hasta que miras dos veces |
 
 ---
 
@@ -5572,7 +5617,32 @@ página que se auto-refresca, un redibujado que pide datos además compite con s
 
 ## 117. Marcado que no hace lo que sugiere el nombre de la clase
 
-**Archivo:** `tests/meta/test_wa_css_traps.py` — 18 tests
+**Archivo:** `tests/meta/test_wa_apitokens_admin.py` — 30 tests
+
+**Sistema › Acceso › Tokens de API**: la pantalla, y el cableado que una sección necesita para
+existir. Una sección de este panel no es un fichero: es un panel en el marcado de su padre, una
+entrada en la barra lateral, una línea en el filtrado por permisos, dos `include` en el bundle de
+JS y un *listener* que la carga al abrirla. Sáltate el filtrado y la ve todo el mundo; sáltate el
+listener y abre vacía y se queda vacía; sáltate el `include` y el panel está pero no hay nada que
+lo llene. Los cinco fallan **en silencio** y ninguno de una forma que un test de Python notara
+por su cuenta.
+
+La otra mitad son las dos reglas que impiden que esta pantalla sea una escalada. Se aplican en la
+ruta (ver `tests/integration/test_wa_api_tokens.py`) y aquí son **forma**: el selector ofrece solo
+los permisos de quien llama y no ofrece `'*'` en absoluto, así que la pantalla no puede pedirle al
+servidor algo que el servidor va a rechazar.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSectionIsWiredEndToEnd::*` (6) | Panel, barra lateral, filtrado por permisos (va con los de **sesiones**: un token es acceso permanente al panel, que es justo de lo que va ese par), orden de respaldo de sub-pestañas, los dos `include` y el `listener` que la carga |
+| `TestItIsTheSharedMachinery::*` (9) | Sale de `createListTable` con persistencia y franja de filtro; toda columna ordenable tiene valor de orden; el **selector de permisos es el de la pantalla de cuenta** (mintear para otro es la misma decisión, y dos copias de una lista de 75 flags son dos listas que mantener); y la vista **por permiso es una sola función** para los dos ámbitos —dos implementaciones serían dos respuestas a «qué puede correr aquí», y la que dejara de pintar `'*'` aparte sería la peligrosa y la que nadie mira— |
+| `TestTheRowOffersWhatTheAccountScreenDoes::*` (3) | La fila salió **solo con revocar**, lo que convertía esta pantalla en un sitio para *cortar* acceso y no para gestionarlo: cualquier otra operación había que pedírsela a su dueño, que es justo lo que no funciona para un token del que ya no queda dueño. Ahora lleva las cuatro, cada una tras el permiso que le toca, y un **huérfano solo ofrece revocar** —no hay contra quién acotar un alcance nuevo, y rotarlo es mantener viva una credencial de resto en vez de limpiarla— |
+| `TestTheDialogFollowsTheAccount::*` (4) | Reportado desde la pantalla: «al crear salen todos los permisos». Ofrecía los de **quien llama** fuera para quien fuera el token, así que minteando para un *viewer* salían los setenta y cinco y podías marcar sesenta que ese viewer no tiene. No se rompía nada —la intersección en cada petición los tira—, que es exactamente el problema: la lista afirmaba que el token podía hacer cosas que no podría, y la primera prueba en contra era un 403 en algo automatizado. El conjunto lo da el **servidor** (rol, grupos, grupos deshabilitados: calcularlo otra vez en el navegador sería una segunda implementación del sistema de permisos, con las casillas colgando de la copia que se desviara), se redibuja al cambiar de cuenta, y la identidad interna —que no tiene con qué intersecar— queda acotada solo por quien llama |
+| `TestTheScreenCannotAskForWhatTheServerRefuses::*` (8) | `'*'` no se ofrece para otra cuenta ni se envía; la identidad `system` solo se ofrece a un administrador; y la pantalla **dice** lo que significa un token de `system` en vez de dejar que se descubra después |
+
+---
+
+**Archivo:** `tests/meta/test_wa_css_traps.py` — 22 tests
 
 Cuatro trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
 
@@ -5628,6 +5698,10 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 | `TestASettingsPageThatFillsItsPane::test_it_hangs_on_the_shared_shell` | `/account` cuelga del raíl compartido y no de una maqueta propia |
 | `TestASettingsPageThatFillsItsPane::test_it_is_not_a_centred_column` | `mx-auto` es lo que la ponía en una columna por el medio de un marco que hay que llenar |
 | `TestASettingsPageThatFillsItsPane::test_the_cards_are_capped_without_being_centred` | Tope para que quepan dos tarjetas de campos y no más; sin margen, que es como vuelve a centrarse |
+| `TestASettingsPageThatFillsItsPane::test_a_list_section_can_ask_out_of_the_reading_width` | Reportado desde la pantalla, con una flecha dibujada en la banda vacía: la tabla de tokens estaba topada a los mismos 76rem que los formularios, así que estrujaba sus columnas mientras sobraba página a la derecha. El escape es **genérico y lo decide el panel activo** —el cuerpo lo comparten todas las secciones y solo una está a la vista—, así que la siguiente sección ancha se apunta con la misma clase y sin regla nueva. Un selector `#acctab-tokens` sería CSS por id para maquetar, justo lo que este fichero impide |
+| `TestASettingsPageThatFillsItsPane::test_a_list_section_drops_the_card_frame_as_well` | La otra mitad del mismo reporte: «el resto de tablas no están en un card». Una lista metida en un card dentro de una página de ajustes es un marco dentro de otro, mientras que las demás listas del panel **son** la sección y llegan a los cuatro bordes. `.ss-fullbleed` ya es esa clase en todas partes y aplana sola los cards de dentro; lo propio del shell es el canalón, que aquí es padding de la caja de scroll y no de `.container-fluid`, así que se quita **en su origen** en vez de cancelarlo dos veces |
+| `TestASettingsPageThatFillsItsPane::test_a_full_bleed_list_reaches_the_bottom_of_the_pane` | Reportado desde la pantalla: «en las demás tablas la parte de abajo se expande hasta el pie de la página». `.ss-vfill` solo crece si su padre es una columna flex, y entre el shell y el panel hay dos cajas planas —el cuerpo de anchura de lectura y el `.tab-content`—, así que el card se quedaba a la altura de sus filas y dejaba vacío el resto del panel, que es justo lo que la sangre venía a arreglar. La cadena se rehace **solo mientras el panel abierto va a sangre**: esas cajas las comparten las secciones de formulario, que tienen que seguir fluyendo y desplazándose |
+| `TestACardCannotAskForAnAccentThatDoesNotExist::test_every_accent_a_template_asks_for_is_defined` | Reportado desde la pantalla como «estás añadiendo un espacio entre el filtro y el título». No había espacio: la franja de acento del card mide 3px y `ss-accent-violet` no tenía regla de color, así que pintaba 3px de fondo de card entre el pelo del filtro y la banda de la cabecera — una costura que se lee como hueco muerto, al lado de secciones donde esos mismos 3px son una línea de color que une las dos. La hoja de estilos ya tiene un respaldo para un acento **sin variante**, escrito justo para esto, y no puede cazar este caso: el elemento **sí** lleva una clase `ss-accent-*`, solo que nombra un color que nadie definió |
 
 ---
 
@@ -6323,7 +6397,7 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 
 ## 133. Configuration — un índice lateral sobre un solo renderizador
 
-**Archivo:** `tests/unit/test_wa_config_views.py` — 74 tests
+**Archivo:** `tests/unit/test_wa_config_views.py` — 80 tests
 **Archivo:** `tests/meta/test_wa_config_views.py` — 3 tests
 
 Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar
@@ -7547,7 +7621,7 @@ un disparador **es** —`[data-bs-toggle="tab"]`— no puede.
 
 ## 159. Una fila que informa de un estado, no un control que se va de la pantalla
 
-**Archivo:** `tests/meta/test_wa_user_modal_mfa.py` — 14 tests
+**Archivo:** `tests/meta/test_wa_user_modal_mfa.py` — 26 tests
 
 Admin › Sistema › Editar usuario lleva una fila de segundo factor: una insignia que dice si la
 cuenta tiene uno y un botón que se lo quita. Son dos preguntas distintas, y confundirlas es lo
@@ -7576,6 +7650,19 @@ después de un clic no es algo que conteste una petición.
 |---|---|
 | `TestTheScanItself::test_the_two_functions_are_found` | |
 | `TestTheRowStaysAfterAReset::test_the_reset_does_not_hide_the_row` | **La regresión**: ocultar `umMfaGroup` ahí es lo que hacía desaparecer la sección justo cuando tenía algo que decir |
+
+**Y la lista de tokens sale de la factoría compartida** (4 tests). Reportado desde la pantalla: «usa el mismo diseño de tabla que el resto; la cabecera de Último uso son dos líneas, y falta ordenar y elegir columnas» y, después, «el resto de tablas no están en un card y tienen una sección de filtro». Las tres cosas las hace ya `createListTable` para todas las demás tablas, y faltaban las tres porque esta estaba escrita a mano — así que el arreglo no son tres arreglos, es entrar en la factoría, que además trae paginación, anchos, reordenación y la persistencia por usuario de todo eso. Se guarda también que **toda columna ordenable tenga su valor de orden**: una con `sortKey` y sin `case` parece ordenable y ordena en silencio por el nombre. Se guarda igualmente que la lista lleve la **franja de filtro** compartida —`spec.filters`, con `match()` como única parte propia; sin ella, encontrar un token entre veinte era leerse veinte filas— y que su panel vaya **a sangre**, como las demás secciones de lista.
+
+**Y el diálogo de token nuevo habla el mismo idioma que Acceso › Permisos** (5 tests).
+Reportado desde el panel: «no se están traduciendo los permisos». El diálogo montaba su propia
+lista a partir de `currentUser.permissions` y enseñaba los flags crudos. El panel ya tiene **un**
+catálogo con **un** juego de nombres (`PERM_GROUPS` + `permission_labels`), y una segunda lista
+de lo mismo es una segunda lista que traducir, agrupar y mantener al día. El flag se queda al
+lado del nombre a propósito: es lo que el token lleva de verdad y lo que hablan la API y la
+lista, así que esconderlo haría que las dos pantallas discrepen sobre cómo se llama un permiso.
+Se guarda que **los tokens revocados no se muestran por defecto** y que el interruptor —al lado de los botones, no en la barra de filtros, que va plegada— es el que los saca. Un token revocado se conserva a propósito («dejó de funcionar» y «nunca estuvo» son respuestas distintas, y solo una es accionable), pero es historia, y la historia mezclada en una lista de credenciales vivas es lo que la vuelve ilegible: rota tres veces y el token que funciona queda en minoría frente a su propio pasado. Así que la lista contesta *qué se puede usar ahora* y el registro queda a un clic. Viaja en el registro por usuario, como las columnas, junto con las dos cosas que lo hacen honesto: que pedir «Revocado» en la barra **gana** a la preferencia permanente, y que el estado vacío diga que los está ocultando en vez de «no hay tokens». Y que **un filtro de fuera de la barra siga ejecutándose**: la factoría se salta `match()` cuando no hay ningún campo de la barra puesto —atajo razonable para una lista que nadie está filtrando, y justo lo contrario de lo que hace falta para un control que filtra desde fuera— así que el interruptor no hacía nada, en silencio; `spec.filters.always` es como una tabla declara que su filtrado no vive solo en la barra. Se guarda también que **las dos ventanas comparten un solo selector** —crear un token y editar su alcance son la misma decisión en dos momentos, y la copia que se desvía es la que nadie está mirando—, que un flag **sin grupo** siga siendo elegible —si no, un permiso nuevo sería
+imposible de dar a un token— y que solo se ofrezcan los permisos **de quien llama**, porque
+ofrecer más es una lista de cosas que dan 403 al marcarlas.
 | `TestTheRowStaysAfterAReset::test_it_repaints_to_the_off_state_instead` | |
 | `TestTheRowStaysAfterAReset::test_the_repaint_happens_only_after_the_server_agreed` | Pintar «sin configurar» antes de la llamada es una pantalla que discrepa de la base de datos mientras dure la petición, y para siempre si falla |
 | `TestTheTwoStatesAreBothDrawn::test_it_paints_either_state` | La insignia lleva sus propias palabras: el estado no va por color solo |
@@ -7674,7 +7761,7 @@ el campo y el motivo se escribe al lado, tomado del error del servidor y no supu
 
 ## 161. Una entrada de auditoría no puede estar mitad en tu idioma y mitad en identificadores
 
-**Archivo:** `tests/meta/test_audit_detail_words.py` — 5 tests
+**Archivo:** `tests/meta/test_audit_detail_words.py` — 9 tests
 
 El detalle de una entrada guarda dos clases de cadena muy distintas, y la pantalla las trataba
 igual. La mayoría son **datos** —un host, un fichero, algo que alguien escribió— y traducirlos
@@ -7694,6 +7781,7 @@ cuando falta una palabra: el síntoma es silencioso, y está a un grep de distan
 | `TestEveryWordThePanelWroteHasWords::test_the_stages_and_reasons_are_translated` | Cada valor literal escrito en un `detail=` y cada `error` que el servicio devuelve tiene su `audit_v_*` en los dos idiomas |
 | `TestEveryWordThePanelWroteHasWords::test_the_field_names_are_translated` | |
 | `TestEveryWordThePanelWroteHasWords::test_the_two_languages_carry_the_same_set` | Una palabra traducida en un idioma y no en el otro es el mismo fallo, encontrado más tarde |
+| `TestAPermissionReadsTheSameEverywhere::*` (4) | Reportado desde el panel: la entrada de un token nuevo enseñaba `audit_view`. Con los tokens apareció un **tercer** tipo de valor, que no es ni dato ni vocabulario del panel: un **flag de permiso**. Pasarlos por `audit_v_*` sería un segundo nombre para cada uno de los 75, en otro fichero distinto del que lee Acceso › Permisos — dos nombres para una cosa, divergiendo desde el día que se escriben. Así que el detalle lee **el mismo catálogo**, por campo y nunca por valor, y el centinela `'*'` («lo que tenga el dueño») no se busca ahí: no está en el catálogo y saldría un asterisco llamándose permiso |
 
 ---
 
@@ -7787,6 +7875,54 @@ que nadie mantiene) y tirar el texto de un enlace en vez de desenvolverlo (el sl
 | `TestTheScanItself::*` (3) | Que la guarda no pasa en vacío —más de 100 enlaces con ancla tienen que casar— y la regla del slug pinchada con ejemplos, incluidas las dos equivocaciones |
 | `TestEveryAnchorLands::test_the_target_document_exists` | Un enlace a un `.md` que no está |
 | `TestEveryAnchorLands::test_every_anchor_names_a_real_heading` | El ancla nombra una cabecera real del documento destino |
+
+---
+
+## 165. Tokens de API: cómo se automatiza una cuenta sin entregar su contraseña
+
+**Archivo:** `tests/unit/test_api_tokens.py` — 26 tests
+**Archivo:** `tests/integration/test_wa_api_tokens.py` — 104 tests
+
+Todo menos SCIM se autenticaba con cookie de sesión + CSRF, así que automatizar algo obligaba a
+guardar una contraseña **real** — y en cuanto una cuenta lleva segundo factor, una contraseña ya
+no completa un inicio de sesión. O sea que encender `mfa_required` rompía en silencio todos los
+scripts de la casa, y el único apaño era una cuenta deliberadamente sin proteger.
+
+Dos propiedades sostienen el diseño, y casi todos estos tests van sobre ellas:
+
+- **la intersección**: el token se cruza con los permisos **actuales** de su dueño en cada
+  petición, así que no puede crecer por encima de la cuenta, y degradar la cuenta degrada el
+  token en el mismo instante. Un token minteado el año pasado con permisos congelados sería una
+  concesión permanente que sobrevive a quitarle el rol a su dueño;
+- **las rutas que gestionan credenciales rechazan un token** —mintear, revocar, contraseña,
+  segundo factor—. Un token estrecho que puede mintear uno ancho no es estrecho, y uno que puede
+  cambiar la contraseña de su dueño es un punto de apoyo que se queda con la cuenta dentro de la
+  cual estaba acotado.
+
+El fichero unitario prueba las primitivas sin Flask por medio: la forma (`sst_<id>_<secreto>`,
+con marcador para que un token filtrado en un log sea reconocible), que lo que **no** es un token
+cuesta una comprobación de cadena y no una consulta, que una fecha ilegible cuenta como
+**caducada** —fallar cerrado es la única dirección segura: al revés, un token con la caducidad
+mal escrita vive para siempre—, y que `'*'` significa «lo que tenga el dueño» y no «todo».
+
+| Test | Qué comprueba |
+|---|---|
+| `TestMinting::*` (7) | El token se contesta **una vez** y no se puede volver a leer de la lista; nada de hash en la respuesta; nombre y permisos obligatorios (sin default de «todo»: el valor de una credencial acotada es el acotado); un permiso que el dueño no tiene se rechaza al crear —la intersección lo tiraría igual, pero así la lista dice lo que significa en vez de mostrar un permiso que no hace nada—; y la entrada de auditoría **no lleva el token**, que sería un segundo sitio del que robarlo |
+| `TestUsingOne::*` (11) | Autentica una llamada; sin él la misma llamada es 401; queda confinado a lo que se le dio; `'*'` sigue al dueño y **degradar al dueño estrecha el token**; revocado y caducado dejan de funcionar; una cuenta desactivada o marcada sin-login se lleva sus tokens —si no, dar de baja a alguien dejaría una puerta que nadie piensa en cerrar—; **no recibe cookie de sesión** ni aparece en la lista de sesiones; y un navegador con sesión sigue siendo un navegador |
+| `TestCsrfDoesNotApplyToIt::*` (1) | Una escritura con *bearer* no necesita token CSRF: ninguna página cross-site puede poner una cabecera `Authorization`, así que el doble-envío no protege nada aquí y exigirlo rechazaría cada escritura de un cliente de API |
+| `TestATokenCannotWidenItself::*` (5) | No puede mintear otro token, ni listar o revocar a sus hermanos, ni cambiar la contraseña del dueño, ni apagar el segundo factor, ni resetear el de otro |
+| `TestNamesAreUnique::*` (3) | Dos tokens vivos no pueden llamarse igual —el nombre es lo único de la lista que dice para qué es, y dos iguales convierten revocar el correcto en cara o cruz—, mayúsculas y espacios no hacen un nombre distinto, y el nombre de uno **revocado** se puede reutilizar: se guarda para el registro, pero negar el nombre de algo que dejó de funcionar hace meses sería una regla sin propósito |
+| `TestTheAdministratorsList::*` (6) | **Sistema › Acceso › Tokens de API**: todo el acceso permanente que existe contra el panel sin que nadie inicie sesión. La lista de cuentas dice quién existe y la de sesiones quién ha entrado; un token no sale en ninguna de las dos, y preguntarlo cuenta a cuenta hace que la respuesta dependa de qué cuentas te acordaste de abrir. Se guarda que lista las de **todos**, que un token cuya **cuenta ya no existe sigue saliendo** —no puede autenticar, pero un resto que nadie sabe nombrar es justo lo que busca una revisión—, que nunca lleva el hash, que necesita el permiso, y que la **jerarquía de cuentas** también protege las credenciales: una cuenta sobre la que no puedes actuar no es una a la que puedas cortarle los tokens |
+| `TestMintingForSomebodyElse::*` (7) | Crear un token **que actúa como otra cuenta** — una superficie de escalada, y las dos reglas que impiden que lo sea: los permisos tienen que ser **de quien llama** (si no, cualquiera que pueda editar usuarios mintea un token para un administrador y se lo queda) y se aplica la jerarquía de cuentas. `'*'` se rechaza aquí aunque se acepte en los propios: significa «lo que tenga el dueño», que para otra cuenta es una promesa sobre un conjunto que quien llama no controla. La intersección sigue intacta —dar un permiso que el **dueño** no tiene no compra nada— y se audita como **evento propio**: repartir una credencial que no es tuya es un acto distinto de crearte la tuya |
+| `TestTheCrossTokenFeed::*` (4) | `GET /api/v1/tokens/access`: **todas** las llamadas de **todos** los tokens, la más nueva primero y con tope. El historial por token contesta «¿este token hace lo que monté?»; esto contesta la que no se podía preguntar: qué ha estado llegando al panel sin que nadie inicie sesión, en orden y a la vez. Una ráfaga de 403 de una credencial en la que nadie estaba pensando se ve aquí y en ningún otro sitio. Un token **sin cuenta** sigue apareciendo, que es para lo que se lee |
+| `TestWhatATokenHasBeenDoing::*` (11) | `last_used` dice que un token está vivo; no dice **para qué es**, si lo que hace es lo que montaste, ni desde dónde llama. Y la auditoría tampoco contesta a eso: registra la **cuenta**, así que lo que escribe un token se lee como lo que escribió la persona, y las lecturas no se auditan para nadie. Se guarda que cada llamada queda con método, patrón de ruta, IP y **código de respuesta** —las **negadas** son la línea que busca una revisión, y un historial de las que funcionaron es el historial de la mitad que salió como se esperaba—; que guarda el **patrón** y no la URL (un anillo lleno de un nombre por fila contesta «qué endpoints usa» con un muro de cadenas casi iguales, y la URL cruda es donde acaba un id o un correo); que una petición de **sesión** no se registra (esto es el historial de un token, no el tráfico del panel); que el anillo se recorta **por token**; que `0` lo apaga; que **sobrevive a la revocación** —que es cuando más se pregunta— y **se va con la cuenta**; y quién puede leerlo |
+| `TestWhatAnAccountMayBeGiven::*` (4) | `GET /api/v1/users/<u>/permissions`: lo que esa cuenta puede llegar a tener, resuelto por la **misma función que usan todas las guardas**. Y la regla que trae consigo: un permiso que el **dueño** no tiene se rechaza al mintear —no es una regla de seguridad, la intersección ya lo tira, sino la misma que aplica la pantalla de la propia cuenta: un permiso que no hace nada en silencio hace que la lista diga algo que no significa— |
+| `TestActingOnSomebodyElsesToken::*` (8) | Reescalar y rotar el token **de otro**, con las dos reglas de siempre (jerarquía de cuentas, y nadie da lo que no tiene) más el techo del dueño; `'*'` rechazado también aquí; al rotar el viejo **sigue funcionando** y el nombre se lo queda el nuevo; un **huérfano** se revoca pero no se reescala ni se rota; y las dos acciones se auditan como **eventos propios** |
+| `TestTheSystemIdentity::*` (7) | Un token que **no es de nadie**, porque la automatización que cuelga de una persona se cae con su cuenta. `system` es una identidad interna: nombre, UID estable y fila en la lista de usuarios, pero sin contraseña, sin sesión y **sin permisos** — actúa con la autoridad del panel precisamente porque nunca pasa por una comprobación de permisos. Así que el invariante que gobierna a todos los demás tokens («intersecados con los del dueño, en cada petición») aquí no tiene con qué intersecar, y **el techo pasa a ser el administrador que lo creó**: su alcance es exactamente el que se le dio, `'*'` se rechaza (sin dueño contra el que resolverlo significaría *todo, para siempre*), solo un administrador puede crearlo, `anonymous` no puede tener ninguno, y se revoca como cualquier otro. Se guarda además que una identidad reservada en sesión **no hereda los permisos de viewer** por el camino del fallback |
+| `TestEditingTheScope::*` (11) | Cambiar lo que puede hacer un token **sin mintear otro**. Antes, un alcance que se quedaba corto por un permiso costaba una rotación: secreto nuevo redesplegado allá donde esté configurado, para arreglar una decisión que no tiene nada que ver con el secreto —el coste que se paga una vez y luego se evita minteando el token ancho—. Se guarda que **el secreto ya desplegado es el que cambia** (nada cacheado: la fila se lee y se interseca en cada petición), que **estrechar muerde igual que ensanchar** (si no, «editar» es una concesión de un solo sentido), que el `token_id` no cambia, y las mismas reglas que al mintear: ni un permiso que no tengas, ni un flag desconocido, ni un alcance vacío, ni el token de otro, ni un token revocado — ni un token editándose a sí mismo. La auditoría lleva **los dos lados** |
+| `TestRotating::*` (11) | Un secreto nuevo **sin que el viejo pare antes**. Rotar a base de revocar-y-crear es lo que esto sustituye, y cuesta dos cosas que solo duelen en producción: rehacer el juego de permisos de memoria, y todo lo que usa el token roto desde la revocación hasta que el nuevo está desplegado. Aquí el viejo **sigue funcionando** y pasa a llamarse «(anterior)», así que el cambio tiene ventana en vez de corte; el nombre se lo queda el nuevo, para que quien lea la lista encuentre el nombre que conoce en el token vigente; se conserva el **plazo original** y no la fecha original —copiar la fecha devolvería algo que caduca mañana y lo llamaría rotación—; y rotar es mintear una credencial, así que un token no puede hacerlo |
+| `TestRevoking::*` (3) | Revocar está **anclado al dueño en el propio UPDATE**, así que adivinar un uid no casa ninguna fila; un administrador con `sessions_revoke` corta **todos** los de otra cuenta de golpe —esto se usa cuando el acceso tiene que parar, y elegirlos de una lista de uno en uno es como se queda uno atrás—; y borrar la cuenta borra sus tokens |
+
 
 
 

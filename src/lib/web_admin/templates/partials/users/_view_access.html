@@ -34,11 +34,24 @@ function _usrViewAccess(unames, ctx) {
         const u = usersData[r.u] || {};
         return u.login_enabled !== false && u.enabled !== false && !u.mfa;
     }).length;
+    // Never signed in, or not in 90 days. The count an access review opens with, and the
+    // reason `last_login` exists at all: the audit log holds `login_ok` but is capped by
+    // NUMBER OF ROWS, so a burst of anything evicts the evidence — and then the question
+    // cannot be answered at all. Accounts that cannot sign in are excluded: a service account
+    // is not dormant, it is a script, and padding the number with them makes the real one
+    // harder to believe.
+    const _dormantCut = new Date(Date.now() - 90 * 86400000).toISOString();
+    const dormant = rows.filter(r => {
+        const u = usersData[r.u] || {};
+        if (u.login_enabled === false || u.enabled === false) return false;
+        return !u.last_login || u.last_login < _dormantCut;
+    }).length;
     const chips = `${_summaryChip('bi-people', t('col_user'), rows.length)}
         ${admins ? _summaryChip('bi-shield-lock', t('usr_count_admins'), admins,
                             hiddenAdmins ? 'text-bg-warning' : '') : ''}
         ${viaGroups ? _summaryChip('bi-diagram-3', t('usr_count_via_groups'), viaGroups) : ''}
         ${noMfa ? _summaryChip('bi-shield-slash', t('usr_count_no_mfa'), noMfa, 'text-bg-warning') : ''}
+        ${dormant ? _summaryChip('bi-hourglass', t('usr_count_dormant'), dormant, 'text-bg-secondary') : ''}
         ${hiddenAdmins ? `<span class="text-warning-emphasis small">
             <i class="bi bi-exclamation-triangle me-1"></i>${esc(tf('usr_admin_via_group_n', hiddenAdmins))}</span>` : ''}`;
     return `<div>
@@ -47,6 +60,7 @@ function _usrViewAccess(unames, ctx) {
             <thead class="ss-thead"><tr>
                 <th>${esc(t('col_user'))}</th>
                 <th class="text-center">${esc(t('mfa_col'))}</th>
+                <th>${esc(t('col_last_login'))}</th>
                 <th>${esc(t('usr_col_direct'))}</th>
                 <th>${esc(t('usr_col_via_groups'))}</th>
                 <th>${esc(t('col_groups'))}</th>
@@ -82,6 +96,9 @@ function _usrAccessRow(r) {
             ${(!eff.adminDirect && eff.adminViaGroup)
                 ? `<span class="badge text-bg-warning fw-normal ms-1"><i class="bi bi-shield-exclamation me-1"></i>${esc(t('usr_admin_via_group'))}</span>` : ''}</td>
         <td class="text-center">${_usrMfaMark(u)}</td>
+        <td class="text-nowrap ss-fs-2">${u.last_login
+            ? esc(_fmtDateTime(u.last_login))
+            : `<span class="text-warning-emphasis fst-italic">${esc(t('never_signed_in'))}</span>`}</td>
         <td class="text-nowrap">${_accRoleBadge(eff.direct)}</td>
         <td>${viaCell}</td>
         <td>${groupCell}</td>
