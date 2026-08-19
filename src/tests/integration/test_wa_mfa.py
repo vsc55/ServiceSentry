@@ -14,6 +14,7 @@ responsible for remembering one more field. Here there is nothing to remember: u
 verifies, the request is anonymous by having no session.
 """
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -29,6 +30,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 from lib.core.mfa import service as mfa_service   # noqa: E402
 from lib.core.mfa import totp                     # noqa: E402
 from tests.conftest import _login                 # noqa: E402
+from tests.helpers import _fn, _read, _strip_comments   # noqa: E402
+
+SRC_ROOT = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 
 
 def _enrol(admin, username='admin'):
@@ -640,3 +644,59 @@ class TestAFailedRegenerationLeavesARecord:
         assert res.status_code == 400
         detail = (self._lines(admin)[-1].get('detail')) or {}
         assert detail.get('stage') == 'disable' and detail.get('error') == 'not_enrolled'
+
+
+class TestTheThreeViewsAnswerTheSameQuestion:
+    """"Which of these accounts is unprotected" is a question the Users section is asked in
+    three places — the table, the cards and the access review — and it was answered in one.
+
+    The column landed first because a table has a cell per row. The cards and the review kept
+    quiet, which is worse than not having the feature: an access review that lists roles and
+    groups and says nothing about second factors reads as one where nobody is missing one.
+
+    So the mark is ONE function used by all three. A tick that means "protected" in the table
+    and something slightly different in the review is worse than not having it in two of them.
+    """
+
+    def _views(self) -> str:
+        base = os.path.join(SRC_ROOT, 'lib', 'web_admin', 'templates', 'partials', 'users')
+        return (_read(os.path.join(base, '_list.html'))
+                + _read(os.path.join(base, '_view_access.html')))
+
+    def test_the_mark_is_written_once(self):
+        src = _strip_comments(self._views())
+        assert 'function _usrMfaMark' in src
+        # Three callers: the table cell, the card chip and the review's column.
+        assert src.count('_usrMfaMark(') >= 4, 'a view answers this its own way again'
+
+    def test_it_says_it_in_words_and_not_only_in_colour(self):
+        body = _fn(_strip_comments(self._views()), '_usrMfaMark')
+        assert 'mfa_state_on' in body and 'mfa_state_off' in body
+        assert 'bi-shield-check' in body and 'bi-shield-slash' in body, \
+            'the two states differ by colour alone — unreadable for a colour-vision deficiency'
+
+    def test_the_cards_answer_either_way(self):
+        """A chip only on the protected accounts cannot be scanned for the others, which is
+        the direction the question is actually asked in."""
+        src = _strip_comments(_read(os.path.join(
+            SRC_ROOT, 'lib', 'web_admin', 'templates', 'partials', 'users', '_list.html')))
+        body = _fn(src, '_usersCardsBody')
+        assert '_usrMfaMark(u)' in body
+        assert 'u.mfa ?' not in body, 'the card chip is conditional on having one again'
+
+    def test_the_access_review_counts_the_unprotected(self):
+        """It is the view whose whole job is the question, so it says the number out loud —
+        and counts only accounts that CAN sign in, or the number stops being believable."""
+        body = _fn(_strip_comments(_read(os.path.join(
+            SRC_ROOT, 'lib', 'web_admin', 'templates', 'partials', 'users',
+            '_view_access.html'))), '_usrViewAccess')
+        assert 'usr_count_no_mfa' in body
+        assert 'login_enabled' in body, 'a service account with no login pads the count'
+
+    def test_all_three_are_served_by_the_flag_the_api_sends(self, admin, client):
+        _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(admin._mfa_store.factor(
+            admin._users['admin']['uid'], decrypt=True)['secret']))
+        rows = client.get('/api/v1/users').get_json() or {}
+        assert rows.get('admin', {}).get('mfa') is True

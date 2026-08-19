@@ -8,6 +8,23 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.88] - 2026-08-19
+
+### Added
+- **The MFA state reaches the other two Users views.** The column landed in the table because a
+  table has a cell per row; the cards and the access review stayed quiet, which is worse than
+  not having it — an access review that lists roles and groups and says nothing about second
+  factors reads as one where nobody is missing one.
+  - One mark, `_usrMfaMark()`, used by all three: a tick or a slashed shield with the state in
+    its tooltip, never colour alone. A tick meaning "protected" in the table and something
+    slightly different in the review would be worse than not having it in two of them.
+  - The card shows it **either way** and as a chip rather than a badge: the question is asked
+    in the direction of "which of these is unprotected", so a mark that appears only on the
+    protected accounts cannot be scanned for the others.
+  - The access review counts them out loud, and counts only accounts that can actually sign
+    in — a service account with login switched off is not a door somebody walks through, and
+    padding the number with them makes the one that matters harder to believe.
+
 ## [0.0.1+build.87] - 2026-08-19
 
 ### Added

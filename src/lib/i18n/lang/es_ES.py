@@ -3497,6 +3497,7 @@ LANG = {
     'usr_view_access':       'Acceso efectivo',
     'usr_count_admins':      'Administradores',
     'usr_count_via_groups':  'Con roles por grupo',
+    'usr_count_no_mfa':      'Sin segundo factor',
     'usr_admin_via_group':   'Admin por grupo',
     'usr_admin_via_group_n': '{} llegan a administrador por pertenecer a un grupo; la columna de rol no lo dice.',
     'usr_col_direct':        'Rol directo',

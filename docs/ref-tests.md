@@ -7318,7 +7318,7 @@ por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta
 
 ## 155. Segundo factor: el escalón que pone delante de un login
 
-**Archivo:** `tests/integration/test_wa_mfa.py` — 56 tests
+**Archivo:** `tests/integration/test_wa_mfa.py` — 61 tests
 
 Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
 lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
@@ -7373,6 +7373,24 @@ una línea de auditoría de distancia y las dos contestan `bad_code` por la red.
 | `TestAFailedRegenerationLeavesARecord::test_an_empty_code_is_told_apart_in_the_log_and_not_on_the_wire` | Cuál de los dos fue no es algo que devolverle a quien los está mandando |
 | `TestAFailedRegenerationLeavesARecord::test_a_right_code_that_still_fails_is_recorded` | **La rama que estaba muda**: un 400 sin nada escrito es un fallo que después no encuentra nadie |
 | `TestAFailedRegenerationLeavesARecord::test_turning_it_off_without_one_is_recorded_too` | Misma forma y misma razón en desactivar |
+
+**Y las tres vistas contestan lo mismo.** «Cuál de estas cuentas está desprotegida» es una
+pregunta que la sección Usuarios recibe en **tres** sitios —la tabla, las tarjetas y la revisión
+de acceso— y se contestaba en uno. La columna llegó primero porque una tabla tiene una celda por
+fila; las otras dos se callaban, que es peor que no tener la función: una revisión de acceso que
+lista roles y grupos y no dice nada de segundos factores se lee como una donde no le falta a
+nadie.
+
+La marca es **una función** usada por las tres. Un tick que significa «protegida» en la tabla y
+algo ligeramente distinto en la revisión es peor que no tenerlo en dos de ellas.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheThreeViewsAnswerTheSameQuestion::test_the_mark_is_written_once` | |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_it_says_it_in_words_and_not_only_in_colour` | Dos iconos distintos, no solo dos colores |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_the_cards_answer_either_way` | Un chip solo en las protegidas no se puede barrer buscando las otras, que es la dirección en la que se hace la pregunta |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_the_access_review_counts_the_unprotected` | La vista cuyo trabajo **es** la pregunta dice el número, y solo cuenta cuentas que pueden entrar |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_all_three_are_served_by_the_flag_the_api_sends` | Una consulta para toda la tabla, no una por cuenta |
 
 
 ---

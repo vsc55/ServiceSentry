@@ -27,10 +27,18 @@ function _usrViewAccess(unames, ctx) {
     const viaGroups = rows.filter(r => r.eff.extra.length).length;
     const admins = rows.filter(r => r.eff.adminDirect || r.eff.adminViaGroup).length;
     const hiddenAdmins = rows.filter(r => !r.eff.adminDirect && r.eff.adminViaGroup).length;
+    // An account that can sign in with a password alone. Counted only for accounts that CAN
+    // sign in: a service account with login switched off is not a door somebody walks through,
+    // and padding the number with them would make the one that matters harder to believe.
+    const noMfa = rows.filter(r => {
+        const u = usersData[r.u] || {};
+        return u.login_enabled !== false && u.enabled !== false && !u.mfa;
+    }).length;
     const chips = `${_summaryChip('bi-people', t('col_user'), rows.length)}
         ${admins ? _summaryChip('bi-shield-lock', t('usr_count_admins'), admins,
                             hiddenAdmins ? 'text-bg-warning' : '') : ''}
         ${viaGroups ? _summaryChip('bi-diagram-3', t('usr_count_via_groups'), viaGroups) : ''}
+        ${noMfa ? _summaryChip('bi-shield-slash', t('usr_count_no_mfa'), noMfa, 'text-bg-warning') : ''}
         ${hiddenAdmins ? `<span class="text-warning-emphasis small">
             <i class="bi bi-exclamation-triangle me-1"></i>${esc(tf('usr_admin_via_group_n', hiddenAdmins))}</span>` : ''}`;
     return `<div>
@@ -38,6 +46,7 @@ function _usrViewAccess(unames, ctx) {
         <div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
             <thead class="ss-thead"><tr>
                 <th>${esc(t('col_user'))}</th>
+                <th class="text-center">${esc(t('mfa_col'))}</th>
                 <th>${esc(t('usr_col_direct'))}</th>
                 <th>${esc(t('usr_col_via_groups'))}</th>
                 <th>${esc(t('col_groups'))}</th>
@@ -72,6 +81,7 @@ function _usrAccessRow(r) {
             ${u.enabled === false ? `<span class="badge bg-secondary fw-normal ms-1 ss-fs-1">${esc(t('status_disabled'))}</span>` : ''}
             ${(!eff.adminDirect && eff.adminViaGroup)
                 ? `<span class="badge text-bg-warning fw-normal ms-1"><i class="bi bi-shield-exclamation me-1"></i>${esc(t('usr_admin_via_group'))}</span>` : ''}</td>
+        <td class="text-center">${_usrMfaMark(u)}</td>
         <td class="text-nowrap">${_accRoleBadge(eff.direct)}</td>
         <td>${viaCell}</td>
         <td>${groupCell}</td>
