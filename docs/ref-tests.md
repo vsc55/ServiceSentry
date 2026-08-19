@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~5.360 tests** (5454 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-19). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5.630 tests** (5632 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-20). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -6397,7 +6397,7 @@ recibía — al vaciarlo y salir, volvía el valor guardado. Reportado sobre `te
 
 ## 133. Configuration — un índice lateral sobre un solo renderizador
 
-**Archivo:** `tests/unit/test_wa_config_views.py` — 80 tests
+**Archivo:** `tests/unit/test_wa_config_views.py` — 83 tests
 **Archivo:** `tests/meta/test_wa_config_views.py` — 3 tests
 
 Siete sub-pestañas contestaban bien **una** pregunta: «enséñame los ajustes sobre X». Encontrar
@@ -7761,7 +7761,7 @@ el campo y el motivo se escribe al lado, tomado del error del servidor y no supu
 
 ## 161. Una entrada de auditoría no puede estar mitad en tu idioma y mitad en identificadores
 
-**Archivo:** `tests/meta/test_audit_detail_words.py` — 9 tests
+**Archivo:** `tests/meta/test_audit_detail_words.py` — 15 tests
 
 El detalle de una entrada guarda dos clases de cadena muy distintas, y la pantalla las trataba
 igual. La mayoría son **datos** —un host, un fichero, algo que alguien escribió— y traducirlos
@@ -7881,6 +7881,36 @@ que nadie mantiene) y tirar el texto de un enlace en vez de desenvolverlo (el sl
 ## 165. Tokens de API: cómo se automatiza una cuenta sin entregar su contraseña
 
 **Archivo:** `tests/unit/test_api_tokens.py` — 26 tests
+**Archivo:** `tests/integration/test_wa_inline_js_syntax.py` — 4 tests
+
+**El JavaScript en línea del panel tiene que *parsear*.** Reportado desde el navegador: el splash
+de carga no se levantaba y la consola decía `Uncaught SyntaxError: unexpected token: identifier`.
+La causa era un comentario escrito **dentro de un template literal**, con backticks dentro, que
+cerró la cadena y convirtió el resto de la frase en código.
+
+Era una clase entera de fallo que este proyecto no podía ver. El front del panel son ~90 ficheros
+de JavaScript dentro de plantillas Jinja, concatenados en **un** `<script>`: un error de sintaxis
+en cualquier punto tumba el bundle entero, así que no se define nada, el arranque no corre y la
+página se queda en el spinner. Todos los tests de servidor siguen pasando —el HTML se renderizó
+perfectamente, y lo que lleva dentro es una cadena para Flask— y los demás guardas leen las
+plantillas como **texto**, que es por lo que tampoco lo notaron.
+
+Este renderiza las páginas de verdad y le pasa cada script a `node --check`: el navegador más
+barato posible — sin DOM, sin ejecución, solo «¿esto es un programa?».
+
+**Se salta si no hay node ≥ 16**, en vez de fallar: la suite tiene que correr en una máquina sin
+herramientas de JavaScript. El umbral de versión también salió de un tropiezo — el primer `node`
+del PATH era un v12, que reporta cada `?.` del panel como error de sintaxis: eso no es una prueba
+sobre el código, es una prueba sobre el intérprete, y un guarda que grita en falso es uno que
+alguien acaba desactivando.
+
+| Test | Qué comprueba |
+|---|---|
+| `test_every_inline_script_parses` (×3 páginas) | `/admin` lleva el bundle entero; las páginas sueltas montan uno menor con las mismas parciales, así que una parcial que solo incluyan ellas quedaría sin comprobar |
+| `test_the_check_would_notice_a_broken_bundle` | **Guarda del guarda**: si `node --check` dejara de ejecutarse —o de poder fallar—, el test de arriba pasaría por encima de cualquier cosa |
+
+---
+
 **Archivo:** `tests/integration/test_wa_api_tokens.py` — 104 tests
 
 Todo menos SCIM se autenticaba con cookie de sesión + CSRF, así que automatizar algo obligaba a
@@ -7924,5 +7954,53 @@ mal escrita vive para siempre—, y que `'*'` significa «lo que tenga el dueño
 | `TestRevoking::*` (3) | Revocar está **anclado al dueño en el propio UPDATE**, así que adivinar un uid no casa ninguna fila; un administrador con `sessions_revoke` corta **todos** los de otra cuenta de golpe —esto se usa cuando el acceso tiene que parar, y elegirlos de una lista de uno en uno es como se queda uno atrás—; y borrar la cuenta borra sus tokens |
 
 
+---
 
+**Archivo:** `tests/integration/test_wa_session_access.py` — 19 tests
 
+**Qué ha hecho una sesión**, no solo que exista. La pantalla de sesiones contestaba quién ha
+entrado, desde dónde y desde cuándo; qué ha hecho ese inicio de sesión no se contestaba en
+ninguna parte. La auditoría tampoco: registra las acciones que **tienen nombre**
+(`config_saved`) y las atribuye a la **cuenta**, así que dos sesiones de la misma persona se
+leen como una — y una petición **rechazada** no dejaba rastro en ningún sitio. «La sesión de
+alguien intentó llegar a la lista de usuarios y le dijeron que no» es justo la línea que busca
+una revisión de accesos, y no existía.
+
+Un anillo por sesión, gemelo de `api_token_access`, que llena un *hook* `after_request` y lee la
+vista **Actividad** de Acceso › Sesiones.
+
+**La regla es el diseño**, y de eso va casi todo el fichero: no se registra cada petición. El
+panel se sondea a sí mismo (salud cada 6 s, *keepalive* cada 20 s, la pestaña de Acceso cada
+30 s), así que un anillo que guardara las lecturas correctas serían doscientos latidos con la
+línea interesante ya desalojada — y una escritura en la respuesta de cada sondeo de cada pestaña
+abierta. Se guardan las **acciones** (POST/PUT/PATCH/DELETE) y los **rechazos** (≥ 400).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatIsRecorded::*` (8) | La regla por los dos lados: el `POST /login` que creó la sesión es la primera fila (todo lo demás pasó dentro de ese inicio de sesión); una **lectura correcta no se registra** —`/api/v1/me` es el keepalive, tres veces por minuto y por pestaña—; una acción sí, **con la respuesta que obtuvo** (se anota *después*: un POST rechazado y uno que funcionó son la misma petición hasta que se le pega el estado); una **lectura rechazada sí se registra aunque sea una lectura**, que es el punto de todo esto; un 404 conserva la **URL** que pidió y el resto guarda el **patrón** de ruta (un anillo lleno de un id por fila contesta «qué endpoints» con un muro de cadenas casi iguales, y la URL cruda es donde acaba un nombre de usuario en una tabla que ve todo el que puede ver la lista); `0` lo apaga; y una petición **con token no escribe aquí** —un token no es una sesión, y sus llamadas son del anillo del token— |
+| `TestTheRing::*` (3) | Deja de crecer; una sesión ocupada **no desaloja** a una tranquila (que es donde una sola petición inesperada es toda la señal); y el *feed* entre sesiones también tiene tope |
+| `TestItIsForgottenWithTheSession::*` (3) | Revocar una sesión olvida lo que hizo; «cerrar todas» limpia el resto (la poda va en `save_all`, que es el camino de esa acción **y** el del arranque, en vez de en cada sitio que llama); y revocar las de una cuenta no se lleva el historial de otra |
+| `TestTheReads::*` (5) | El *feed* **nombra la cuenta** de cada fila —resuelto en el servidor, donde la lista de al lado ya hace esa consulta— y descarta la fila cuya sesión ya no está (esas filas se podan con la sesión, así que esto solo caza la carrera); una sesión contesta **con su profundidad** (`max` viaja con las filas, para que el diálogo distinga «no ha hecho nada registrable» de «el registro está apagado»); una sesión desconocida es **404 y no una lista vacía** (que se leería como «no hizo nada»); y las dos lecturas piden el mismo permiso que la lista, `sessions_view` |
+
+---
+
+**Archivo:** `tests/meta/test_wa_sessions_activity.py` — 12 tests
+
+**Acceso › Sesiones › Actividad**: la vista, y las cuatro cosas que hacen que una vista exista.
+Una vista es una línea en el registro de su sección, una función que pinta, un `include` en el
+bundle y —cuando tiene datos propios— algo que los pide. Sáltate el `include` y el conmutador
+ofrece una vista cuyo renderizador no está definido; sáltate el *fetch* y abre vacía y se queda
+vacía hasta que alguien pulse Actualizar. Ninguna de las dos falla de una forma que un test de
+Python notara por su cuenta.
+
+La otra mitad va de las **celdas compartidas**. Hay cuatro tablas de registro de accesos —el
+historial de un token, el *feed* de todos los tokens, y el mismo par para sesiones— y el color de
+un estado no es decoración: un 401/403 entre los 200 es la fila que una revisión de accesos
+existe para encontrar. Cuatro copias de esa regla se desvían, y la que dejara de separar
+«rechazado» de «roto» se vería perfectamente bien ella sola.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheViewIsWired::*` (6) | Está en el registro como `summary` (recibe **todas** las sesiones que dejó en pie la franja de filtro, no la página en pantalla, así que filtrar por una cuenta muestra el tráfico de esa cuenta); su JS se incluye; el *feed* **solo se pide desde la vista que lo lee**; cambiar a ella la carga; el sondeo de la pestaña y el botón Actualizar la mantienen fresca; y la vista **dice lo que no registra** —quien no lo lea tomaría un *feed* vacío por «no pasó nada» en vez de «no pasó nada registrable»— |
+| `TestTheRowActions::*` (2) | El botón de historial es **una función** que pintan la tabla y la rejilla de tarjetas (dos copias es una vista libre de ofrecer una acción que la otra no), y **leer se ofrece a quien puede ver la lista**: leer lo que hizo una sesión es la pregunta de `sessions_view`, cortarla es la de `sessions_revoke` |
+| `TestTheStatusColoursAreDefinedOnce::*` (4) | Las celdas compartidas existen, se incluyen antes de que nadie pinte una tabla, **ninguna tabla pinta un estado a mano** (la regresión que la guarda vigila) y las cuatro las usan —un ayudante compartido que nadie llama no está compartido, está muerto— |

@@ -235,6 +235,13 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=2, max=120, card='connection'),
     Cfg('web_admin|session_idle_minutes', int, 720, attr='_SESSION_IDLE_MINUTES',
         min=0, max=43200, admin_only=True, card='login_security'),  # idle timeout (0=off)
+    Cfg('web_admin|session_log_max', int, 200, attr='_SESSION_LOG_MAX',
+        # How many recent requests are kept PER SESSION, so "what has this sign-in been doing"
+        # has an answer at all. The twin of `api_token_log_max`, and a ring for the same
+        # reason — but NOT of everything: only the acts (POST/PUT/PATCH/DELETE) and the
+        # refusals (>= 400) are written, because the panel polls itself and a ring of
+        # heartbeats answers nothing. 0 switches it off.
+        min=0, max=10000, env='SS_SESSION_LOG_MAX', admin_only=True, card='login_security'),
     # Brute-force throttles (per client IP). 0 = disabled.
     Cfg('web_admin|login_ratelimit_max', int, 15, attr='_LOGIN_RATELIMIT_MAX',
         min=0, max=1000, admin_only=True, card='login_security'),

@@ -24,12 +24,12 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **39 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **40 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 | Grupo | Tablas |
 | ----- | ------ |
-| Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `mfa_factors`, `mfa_recovery`, `api_tokens`, `api_token_access` |
+| Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `session_access`, `mfa_factors`, `mfa_recovery`, `api_tokens`, `api_token_access` |
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
@@ -166,7 +166,7 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 Índices: `idx_roles_name(name)` UNIQUE.
 
 ### `sessions` — sesiones del WebAdmin
-[lib/core/sessions/store.py:25](../src/lib/core/sessions/store.py#L25)
+[lib/core/sessions/store.py:28](../src/lib/core/sessions/store.py#L28)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -179,6 +179,45 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 | user_agent | TEXT | no | `''` | |
 
 Índices: `idx_sessions_user_uid(user_uid)`. Rename heredado: `sid`→`uid`.
+
+---
+
+### `session_access` — qué ha hecho cada sesión
+[lib/core/sessions/store.py:59](../src/lib/core/sessions/store.py#L59) · gemela de
+[`api_token_access`](#api_token_access--qué-ha-hecho-cada-token)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | **PK** |
+| session_uid | TEXT | no | `''` | → `sessions.uid` (el id **público**, nunca el token) |
+| ts | TEXT | no | `''` | |
+| ip | TEXT | no | `''` | Desde dónde llegó la petición |
+| method | TEXT | no | `''` | |
+| path | TEXT | no | `''` | El **patrón** de la ruta, no la URL |
+| status | INTEGER | no | `0` | El código de respuesta: las **rechazadas** son las que importan |
+
+Índices: `idx_session_access_ses(session_uid)`.
+
+`last_seen` dice que una sesión está viva y nada más. Quién ha entrado, desde dónde y desde
+cuándo se contestan con la fila de arriba; **qué ha hecho** no se contestaba en ningún sitio: la
+auditoría registra las acciones que tienen nombre (`config_saved`) y las atribuye a la
+**cuenta**, así que dos sesiones de la misma persona se leen como una — y una petición
+**rechazada** no dejaba rastro en ninguna parte.
+
+**No se guarda todo, y esa es la regla de diseño**: solo las **acciones**
+(POST/PUT/PATCH/DELETE) y los **rechazos** (status ≥ 400). El panel se sondea a sí mismo
+—`/api/v1/health` cada 6 s, el *keepalive* cada 20 s, la pestaña de Acceso cada 30 s—, así que un
+anillo que guardara las lecturas correctas serían 200 latidos con la única línea interesante ya
+desalojada, y además una escritura en la respuesta de cada sondeo de cada pestaña abierta.
+
+Anillo **por sesión** (`web_admin|session_log_max`, 200 por defecto; 0 lo apaga): una sesión
+ocupada no puede desalojar el historial de una tranquila, y la tranquila es donde una sola
+petición inesperada es toda la señal.
+
+Las filas **se van con la sesión** — al revocarla, al revocar las de una cuenta y al reescribir
+la tabla entera (arranque, «cerrar todas las sesiones»). Actividad con un `session_uid` que ya no
+existe es invisible en el panel, que solo muestra la de las sesiones vivas, y crecería sin
+límite, que es justo lo que un anillo evita.
 
 ---
 

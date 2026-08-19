@@ -10,6 +10,18 @@ from datetime import datetime, timedelta, timezone
 
 from flask import g, request, session
 
+# What a session does that is worth keeping. NOT "every request": the panel polls itself —
+# `/api/v1/health` every 6 s, the keepalive every 20 s, the access tab every 30 s — so a ring
+# that records successful reads is a ring of heartbeats, and the one line somebody opened it
+# for was evicted by the browser that was left open over lunch. Recording them would also put
+# a write on the response path of every poll of every tab.
+#
+# So: the ACTS and the REFUSALS. A method that changes something is an act whatever it
+# returned, and a status of 400 or more is the answer worth having whatever was asked — "this
+# session tried something it may not do" is the line an access review is looking for, and it
+# is a GET as often as not.
+_LOGGED_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
+
 # Stdlib logging, as in lib/db/base.py and lib/security/secret_manager.py.
 _log = logging.getLogger(__name__)
 
@@ -215,6 +227,42 @@ class _SessionsMixin:
             entry['ip'] = current_ip
         entry['last_seen'] = datetime.now(timezone.utc).isoformat()
         return True
+
+    def _hook_session_access(self, response):
+        """Record what this session just did — after the fact, so the STATUS is part of it.
+
+        The mirror of `_hook_api_token_access`, and deliberately the same shape: the two
+        screens that answer "what has been reaching this panel" should not disagree about what
+        a row means. What differs is WHICH requests get a row (see `_LOGGED_METHODS`): a token
+        is a client whose every call is deliberate, a browser is a client that polls.
+
+        A token request is skipped here — it has no session row, and its calls belong to the
+        ring beside the token. Static files are skipped too: they authorise nothing, they
+        arrive by the dozen per page, and a 404 for a missing icon is not access history.
+        """
+        store = getattr(self, '_sessions_store', None)
+        if store is None or getattr(g, 'api_token', None) or request.endpoint == 'static':
+            return response
+        sid = session.get('session_id') or ''
+        if not sid or not session.get('logged_in'):
+            return response
+        status = int(getattr(response, 'status_code', 0) or 0)
+        if request.method not in _LOGGED_METHODS and status < 400:
+            return response
+        try:
+            # The route PATTERN, not the URL — `/api/v1/users/<username>` rather than the forty
+            # paths it resolves to. An unmatched request (a 404) has no rule, so the path is
+            # taken as it came: a 404 is exactly when the URL is the point.
+            rule = getattr(request.url_rule, 'rule', '') or request.path
+            store.log_access(
+                sid,
+                ts=datetime.now(timezone.utc).isoformat(),
+                ip=request.remote_addr or '',
+                method=request.method, path=rule, status=status,
+                keep=int(getattr(self, '_SESSION_LOG_MAX', 200) or 0))
+        except Exception:                       # pylint: disable=broad-except
+            pass                                # bookkeeping must never fail a response
+        return response
 
     def _revoke_session(self, token: str) -> bool:
         """Remove a single session from the registry (by its secret token)."""

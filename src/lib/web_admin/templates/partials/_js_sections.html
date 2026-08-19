@@ -19,6 +19,10 @@
 {% include "partials/core/_field_conditional.html" %}
 {% include "partials/core/_collection_render.html" %}
 {% include "partials/core/_list_table.html" %}
+{# The two cells every access log draws (a status band, a method+route). Four tables show
+   them — a token's history, every token's calls, and the same pair for sessions — and the
+   colour of a status IS the reading, so it is defined once. #}
+{% include "partials/core/_access_log.html" %}
 {# The auto-refresh split button + its toolbar — six sections draw it, so it is core,
    not a thing hiding inside whichever section happened to write it first. #}
 {% include "partials/core/_auto_refresh.html" %}
@@ -182,6 +186,7 @@
 {% include "partials/sessions/_views.html" %}
 {% include "partials/sessions/_list.html" %}
 {% include "partials/sessions/_view_users.html" %}
+{% include "partials/sessions/_view_activity.html" %}
 {% include "partials/sessions/_actions.html" %}
 {# ================================================================
    Roles tab — list, create, edit (incl. built-in), delete roles.

@@ -89,15 +89,20 @@ function _renderGroupRoleMap(sec, rawValue) {
         ? `<div class="grm-empty-msg text-muted small py-1">${esc(t('grm_empty'))}</div>` : '';
 
     const colgroup = hasNames
-        ? `<colgroup><col><col style="width:8rem"><col style="width:7rem"><col style="width:2.2rem"></colgroup>`
+        ? `<colgroup><col><col style="width:10rem"><col style="width:7rem"><col style="width:2.2rem"></colgroup>`
         : `<colgroup><col><col style="width:7rem"><col style="width:2.2rem"></colgroup>`;
     const thead = hasNames
-        ? `<tr><th class="small py-1">${esc(t('grm_group_id'))}</th><th class="small py-1">${esc(t('grm_display_name'))}</th><th class="small py-1">${esc(t('grm_role'))}</th><th></th></tr>`
-        : `<tr><th class="small py-1">${esc(t('grm_group'))}</th><th class="small py-1">${esc(t('grm_role'))}</th><th></th></tr>`;
+        ? `<tr><th class="small py-1 text-nowrap">${esc(t('grm_group_id'))}</th><th class="small py-1 text-nowrap">${esc(t('grm_display_name'))}</th><th class="small py-1 text-nowrap">${esc(t('grm_role'))}</th><th></th></tr>`
+        : `<tr><th class="small py-1 text-nowrap">${esc(t('grm_group'))}</th><th class="small py-1 text-nowrap">${esc(t('grm_role'))}</th><th></th></tr>`;
 
+    // The label wears `text-nowrap`, which no other config option needs: this one has an
+    // ARROW in it, and the spaces around it are two more places a line may break — so
+    // "Mapeo Grupo →" and "Rol" ended up on separate lines, with the arrow pointing at
+    // nothing. "A → B" is one phrase; split across lines it reads as two headings. Below `sm`
+    // the column is full width, so nothing overflows.
     return `<div class="cfg-field-wrap" data-cfg-path="${escAttr(pathStr)}">
     <div class="row mb-2 align-items-start">
-        <label class="col-sm-4 col-form-label col-form-label-sm">${esc(t('group_role_map'))}${_infoIcon}</label>
+        <label class="col-sm-4 col-form-label col-form-label-sm text-nowrap">${esc(t('group_role_map'))}${_infoIcon}</label>
         <div class="col-sm-8">
             <table class="table table-sm table-borderless mb-1 grm-table" id="${tableId}">
                 ${colgroup}

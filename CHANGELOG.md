@@ -8,6 +8,75 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.94] - 2026-08-20
+
+### Added
+- **Access › Sessions now answers what a session has DONE**, not merely that it exists — an
+  Activity view beside the other three, the counterpart of the one the API tokens screen got.
+  The list said who is signed in, from where and since when; what that sign-in had done was
+  answerable nowhere. The audit log does not answer it either: it records the actions that have
+  a NAME (`config_saved`), attributed to the ACCOUNT, so two sessions of the same person read as
+  one — and a request that was REFUSED left no trace at all, which is exactly the line an access
+  review is looking for.
+  - A **ring per session** (`session_access`), the twin of `api_token_access`: date, address,
+    method, route pattern and response code. Read per row from a history button, and all
+    together from the Activity view — which is a `summary`, so it is handed every session the
+    filter strip left standing and shows the traffic of those.
+  - **What is recorded is a rule, not everything**: the acts (POST/PUT/PATCH/DELETE) and the
+    refusals (>= 400). Successful reads are not, because the panel polls itself — health every
+    6 s, the keepalive every 20 s, the access tab every 30 s — so a ring that kept them would be
+    two hundred rows of heartbeat with the one interesting line already evicted, and a database
+    write on the response path of every poll of every open tab. A refusal, by contrast, is as
+    often a GET as not.
+  - Depth is `web_admin|session_log_max` (200 by default, `SS_SESSION_LOG_MAX`, 0 switches it
+    off). The rows go with the session — on revoke, on revoking an account's, and on the rewrite
+    behind "sign everybody out": activity keyed to a session that no longer exists is invisible
+    in the panel and unbounded on disk.
+  - A **token request writes nothing here**. A token is not a session, and its calls belong to
+    the ring beside the token.
+  - `GET /api/v1/sessions/access` and `GET /api/v1/sessions/<uid>/access`, both on
+    `sessions_view` — the flag the list they belong to already rides.
+  - The status colours of an access log are now defined **once** (`core/_access_log.html`) and
+    used by all four tables. The colour IS the reading: a 401/403 among the 200s is the row
+    somebody opened the screen for, and the first copy to stop telling "refused" from "broken"
+    apart would have looked perfectly fine on its own.
+
+### Changed
+- **An audit entry names the field it changed**, instead of printing the storage path.
+  Reported from the panel on saving a setting: the entry read `web_admin.session_log_max`. That
+  path is the identifier and is still stored — it is what ties an entry to a setting from a bug
+  report or a config file — but as the only thing on screen it made the reader translate the
+  panel back into itself, when the Configuration screen labels that very field two clicks away.
+  The label is resolved against the SAME catalog that screen uses (a second dictionary would be
+  a second name to go stale, and it would be this one — nobody reads the audit until something
+  has gone wrong), the key stays as the tooltip, and the export keeps it raw.
+
+### Fixed
+- **The panel would not load at all**: the loading splash stayed and the console said
+  `Uncaught SyntaxError: unexpected token: identifier`. A comment written inside a template
+  literal carried backticks, which closed the string and turned the rest of the sentence into
+  code — and the front end is ~90 JavaScript files concatenated into ONE `<script>`, so a
+  syntax error anywhere in it takes the whole bundle down: nothing is defined, the boot never
+  runs, the spinner never stops. Every server-side test still passed, because the HTML rendered
+  perfectly and what it contains is a string as far as Flask is concerned.
+  - **A guard for the class, not the line**: the pages are rendered and every inline script is
+    handed to `node --check` — the cheapest possible browser, no DOM and no execution. Skipped
+    where there is no node ≥ 16, since the suite has to run on a machine with no JavaScript
+    toolchain; the version floor came from a v12 on PATH reporting every `?.` in the panel as a
+    syntax error, which is evidence about the interpreter and not about the code.
+- **"Group → Role mapping" broke across two lines** in the OIDC and SAML2 sections. The label
+  column is narrow and the spaces around the arrow are line-break opportunities like any other,
+  so it split into "Mapeo Grupo →" and "Rol" — an arrow pointing at nothing on one line and a
+  word that reads as a second heading on the next. "A → B" is one phrase: it either fits or it
+  is wrong. Only that label is pinned, and a guard says why: the others are plain words, where
+  wrapping beats overflowing the column.
+- **…and the column headers of that same table.** "Nombre (Display Name)" broke in two inside a
+  column 8rem wide, and a wrapping header takes the whole row with it: its neighbours sit level
+  with its FIRST line, so "Rol" floated beside half a heading. The headers no longer wrap, the
+  name column is wide enough to hold the widest of them, and the Spanish one stopped repeating
+  itself — "Nombre (Display Name)" is the same word twice in two languages, and the
+  parenthetical belongs to the field's description, where there is room for it.
+
 ## [0.0.1+build.93] - 2026-08-19
 
 ### Added

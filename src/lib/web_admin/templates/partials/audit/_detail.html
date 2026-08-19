@@ -38,7 +38,10 @@ function formatAuditDetailFull(detail) {
     if (Array.isArray(detail)) {
         if (!detail.length) return '';
         let rows = detail.map(c => {
-            const f = esc(c.field || '');
+            // The name a person recognises, with the identifier kept as the tooltip — the
+            // same pattern as the permission badges below, and for the same reason: the label
+            // is what makes the entry readable, the raw key is what makes it greppable.
+            const f = `<span title="${escAttr(c.field || '')}">${esc(_auditChangeLabel(c.field))}</span>`;
             const o = auditVal(c.old);
             const n = auditVal(c.new);
             return `<tr><td class="text-nowrap pe-3"><strong>${f}</strong></td><td>${o}</td><td class="px-2 text-muted">→</td><td>${n}</td></tr>`;
@@ -94,7 +97,8 @@ function _formatBeforeAfter(before, after) {
     if (!keys.length) return '';
     if (hasBefore && hasAfter) {
         const rows = keys.map(k =>
-            `<tr><td class="text-nowrap pe-3"><strong>${esc(k)}</strong></td>
+            `<tr><td class="text-nowrap pe-3"><strong title="${escAttr(k)}">${
+                esc(_auditChangeLabel(k))}</strong></td>
                  <td>${auditVal((before || {})[k])}</td>
                  <td class="px-2 text-muted">→</td>
                  <td>${auditVal((after || {})[k])}</td></tr>`).join('');
@@ -103,7 +107,8 @@ function _formatBeforeAfter(before, after) {
     const snap = hasAfter ? after : before;
     const cap  = hasAfter ? (t('audit_after') || 'After') : (t('audit_before') || 'Before');
     const rows = keys.map(k =>
-        `<tr><td class="pe-3 text-muted small text-nowrap">${esc(k)}</td><td>${auditVal(snap[k])}</td></tr>`).join('');
+        `<tr><td class="pe-3 text-muted small text-nowrap" title="${escAttr(k)}">${
+            esc(_auditChangeLabel(k))}</td><td>${auditVal(snap[k])}</td></tr>`).join('');
     return `<p class="mb-1 text-muted small">${esc(cap)}</p>
         <table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
 }
@@ -138,6 +143,29 @@ function formatHostTestDetail(d) {
         html += `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
     }
     return html || renderReadable(d);
+}
+
+/** What a changed field is CALLED.
+ *
+ *  Config changes arrive as `web_admin.session_log_max` — the storage path, which is what the
+ *  audit stores and must go on storing: it is the identifier, and an entry that named only
+ *  "Requests to keep per session" could not be traced back to a setting from a bug report or
+ *  a config file. What it should not be is the only thing on screen, which is what it was: an
+ *  audit entry that reads as a list of internal keys makes the reader translate the panel back
+ *  into itself, and the panel already knows every one of these names.
+ *
+ *  Resolved against the SAME catalog the Configuration screen labels the field with (`LABELS`,
+ *  by full path or by leaf), then the audit's own `audit_f_*` vocabulary for the fields that
+ *  are not config at all, and finally the raw key. That order matters: the last fallback is
+ *  the identifier and not a prettified guess, because a name invented here for a field nobody
+ *  translated would be a name that exists nowhere else in the product.
+ */
+function _auditChangeLabel(field) {
+    const raw = String(field || '');
+    if (!raw) return '';
+    const leaf = raw.split(/[.|]/).pop();
+    return LABELS[raw] || LABELS[raw.replace(/\./g, '|')] || LABELS[leaf]
+        || I18N['audit_f_' + raw] || I18N['audit_f_' + leaf] || raw;
 }
 
 // ── The words the panel itself wrote, in the reader's language ────────────────────────────

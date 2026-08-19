@@ -61,6 +61,10 @@ class _HooksMixin:
         # after_request handlers all run ahead of it, which is the only window in which a
         # token request can be stopped from being handed a session cookie.
         app.after_request(self._hook_api_token_access)
+        # Its counterpart for a signed-in browser. Not the same hook with a condition inside:
+        # they record different things about different clients (see `_LOGGED_METHODS`), and
+        # one function that decided which would be one function to get the decision wrong in.
+        app.after_request(self._hook_session_access)
         app.after_request(self._hook_api_token_no_cookie)
         app.after_request(self._hook_trace_end)
         app.teardown_request(self._hook_close_thread_db)

@@ -88,6 +88,9 @@ sessionsData = s;
 rolesData = ro;
 groupsData = gr;
 renderSessions();
+// The sessions feed ages like everything else on this tab: same poll, same Refresh button.
+// It fetches only when its view is the open one (sessions/_view_activity.html).
+_sesActivityLoad();
 renderUsers();
 renderRoles();
 renderGroups();

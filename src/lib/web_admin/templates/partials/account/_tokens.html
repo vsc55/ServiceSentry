@@ -271,13 +271,8 @@ async function _tokenHistory(url, name, max) {
                 <tbody>${rows.map(r => `<tr>
                     <td class="text-nowrap small">${esc(_fmtDateTime(r.ts))}</td>
                     <td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(r.ip || '—')}</code></td>
-                    <td class="ss-fs-2"><span class="badge bg-body-secondary text-body-secondary border me-1"
-                        >${esc(r.method)}</span><code>${esc(r.path)}</code></td>
-                    <td class="text-end"><span class="badge ${
-                        r.status >= 500 ? 'text-bg-danger'
-                        : r.status === 403 || r.status === 401 ? 'text-bg-warning'
-                        : r.status >= 400 ? 'text-bg-secondary' : 'text-bg-success'
-                    }">${r.status || '—'}</span></td>
+                    <td class="ss-fs-2">${_accessCallCell(r.method, r.path)}</td>
+                    <td class="text-end">${_accessStatusBadge(r.status)}</td>
                 </tr>`).join('')}</tbody>
             </table>
            </div>

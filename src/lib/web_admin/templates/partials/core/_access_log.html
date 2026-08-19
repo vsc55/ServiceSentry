@@ -1,0 +1,41 @@
+{# ================================================================
+   What a credential has been doing — the two cells every access log draws.
+
+   There are four such tables now: a token's own history and the feed of every token's calls
+   (Access › API tokens), and the same pair for sessions (Access › Sessions). They ask the same
+   question of different clients, so they answer it in the same shape — and the shape is not a
+   matter of taste. The colour of a status IS the reading: a 403 among the 200s is the row an
+   access review exists to find, and a table that painted it like any other refusal, or like a
+   500, would hide the one line worth having.
+
+   Kept here rather than copied per screen because the copies would drift silently: the first
+   one to stop separating "refused" from "broken" would look right on its own, and would only
+   be wrong beside the other three.
+   ================================================================ #}
+
+/** The response status as a badge, coloured by what it MEANS.
+ *
+ *  Four bands, not two: 401/403 is "asked for something it may not have" — the interesting
+ *  one — while another 4xx is usually a client that is out of date, and a 5xx is this panel
+ *  failing rather than the caller misbehaving. `—` for a row with no status, which is what an
+ *  older row from before the column existed looks like.
+ */
+function _accessStatusBadge(status) {
+    const s = Number(status) || 0;
+    const cls = s >= 500 ? 'text-bg-danger'
+        : (s === 401 || s === 403) ? 'text-bg-warning'
+        : s >= 400 ? 'text-bg-secondary'
+        : 'text-bg-success';
+    return `<span class="badge ${cls}">${s || '—'}</span>`;
+}
+
+/** The call itself: the method as a chip, the route beside it.
+ *
+ *  The route is the PATTERN the server stored (`/api/v1/users/<username>`), so the column
+ *  reads as a list of endpoints rather than a list of names — see the store for why that is
+ *  also the privacy-preserving half.
+ */
+function _accessCallCell(method, path) {
+    return `<span class="badge bg-body-secondary text-body-secondary border me-1">${
+        esc(method || '')}</span><code>${esc(path || '')}</code>`;
+}

@@ -9,10 +9,17 @@ const SESSION_VIEWS = [
     { id: 'card',  label_key: 'ses_view_cards', icon: 'bi-grid-3x3-gap', render: '_sessionsCardsBody', mode: 'cards'   },
     { id: 'table', label_key: 'ses_view_table', icon: 'bi-table',        render: null,                 mode: 'table'   },
     { id: 'users', label_key: 'ses_view_users', icon: 'bi-people',       render: '_sesViewUsers',      mode: 'summary' },
+    // What was DONE while signed in, rather than who is signed in — the counterpart of the
+    // API-tokens activity view, for the other kind of client (sessions/_view_activity.html).
+    { id: 'activity', label_key: 'ses_view_activity', icon: 'bi-activity', render: '_sesViewActivity', mode: 'summary' },
 ];
 
 const _sesView = createViewState('ss_sessions_view', SESSION_VIEWS, () => {
     _persistTableConfig();
     renderSessions();
+    // The activity view has a fetch of its own, and arriving at it with nothing loaded is a
+    // view that opens empty and stays that way until somebody presses Refresh. Returns
+    // immediately for the other three.
+    _sesActivityLoad();
 });
 function setSessionsView(id) { _sesView.set(id); }

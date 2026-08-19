@@ -237,6 +237,32 @@ flowchart TD
     E -- Sí --> F["Continúa la petición<br/>(las escrituras POST/PUT/PATCH/DELETE<br/>exigen CSRF X-CSRF-Token)"]
 ```
 
+### Qué ha hecho una sesión
+
+`last_seen` dice que una sesión está viva. Quién ha entrado, desde dónde y desde cuándo se
+contestan con la fila de la sesión; **qué ha hecho** no se contestaba en ninguna parte. La
+auditoría tampoco: registra las acciones que **tienen nombre** (`config_saved`) y las atribuye a
+la **cuenta**, así que dos sesiones de la misma persona se leen como una — y una petición
+**rechazada** no dejaba rastro en ningún sitio.
+
+Cada sesión lleva su propio anillo (`web_admin|session_log_max`, 200 por defecto, 0 lo apaga),
+gemelo del de los tokens: fecha, IP, método, **patrón** de ruta y **código de respuesta**. Se lee
+desde el botón de historial de cada fila y, todo junto, desde la vista **Actividad** de
+Acceso › Sesiones.
+
+**No se guarda todo, y esa es la regla**: solo las **acciones** (POST/PUT/PATCH/DELETE) y los
+**rechazos** (≥ 400). El panel se sondea a sí mismo —salud cada 6 s, *keepalive* cada 20 s, la
+pestaña de Acceso cada 30 s—, así que un anillo con las lecturas correctas serían doscientos
+latidos con la única línea interesante ya desalojada, y una escritura en la respuesta de cada
+sondeo de cada pestaña abierta. Un rechazo, en cambio, es tan a menudo un GET como no: «esta
+sesión intentó algo que no puede» es la línea que busca una revisión, y la regla que descarta
+lecturas no puede descartarla.
+
+Una petición autenticada **con token** no escribe aquí: un token no es una sesión, y sus llamadas
+son del [anillo del token](#qué-ha-hecho-un-token). Las filas **se van con la sesión**, al
+revocarla y al cerrarlas todas: actividad de una sesión que ya no existe es invisible en el panel
+y crecería sin límite.
+
 ### Ejemplo
 
 Bloque `oidc` **ilustrativo** en `config.json` (los valores reales dependen de tu IdP; el

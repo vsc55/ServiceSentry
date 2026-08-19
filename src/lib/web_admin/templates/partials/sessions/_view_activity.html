@@ -1,0 +1,127 @@
+{# ================================================================
+   Sessions — activity: what has been done while signed in.
+
+   The other three views describe the CREDENTIAL: who is connected, from where, since when.
+   None of them can answer the question somebody actually opens this screen with when
+   something has gone wrong — what did that session DO. The audit log does not answer it
+   either: it records the actions that have a name ('config_saved'), attributed to the
+   ACCOUNT, so two sessions of the same person read as one line each other's — and a request
+   that was REFUSED leaves no trace anywhere at all.
+
+   Deliberately the same shape as the API-tokens activity view, down to the status colours
+   (partials/core/_access_log.html): the two screens answer "what has been reaching this
+   panel" for the two kinds of client there are, and two shapes would be two things to learn.
+
+   WHAT IS IN IT IS A RULE, and the note under the table says so: the acts
+   (POST/PUT/PATCH/DELETE) and the refusals (status >= 400). Successful reads are not recorded
+   — the panel polls itself several times a minute per open tab, so a feed that carried them
+   would be a feed of heartbeats with the one interesting line already evicted.
+
+   Like the token feed it is a `summary`: it is handed every session the filter strip left
+   standing and shows the activity OF THOSE. That is what keeps the strip meaning the same
+   thing in every view — filter to one account and this is that account's traffic — instead of
+   a second set of filters to keep in step with the first.
+   ================================================================ #}
+
+let _sesActivity = [];
+
+/** Fetch the feed, but only for the view that reads it.
+ *
+ *  Called from two places on purpose: the view switcher (arriving at the view with nothing
+ *  loaded is a view that opens empty and stays empty) and `refreshAccessData` (the 30 s poll
+ *  and the Refresh button, so the feed ages like everything else on the tab). Both are cheap
+ *  when another view is open — this returns before the fetch.
+ */
+async function _sesActivityLoad() {
+    if (!document.getElementById('sessions-container') || !_sesView.is('activity')) return;
+    const data = await apiGet('/api/v1/sessions/access');
+    if (!data) return;                       // transient error → keep what is on screen
+    _sesActivity = data.access || [];
+    renderSessions();
+}
+
+function _sesViewActivity(sids) {
+    const allowed = new Set(sids);
+    const rows = _sesActivity.filter(r => allowed.has(r.session_uid));
+    if (!rows.length)
+        return `<div class="text-center py-5 text-muted">
+            <i class="bi bi-activity ss-empty-icon"></i>
+            <span>${esc(t('ses_access_none_all'))}</span>
+            <div class="small mt-2">${esc(t('ses_access_rule'))}</div>
+        </div>`;
+    const refused = rows.filter(r => (Number(r.status) || 0) >= 400).length;
+    const chips = `${_summaryChip('bi-activity', t('ses_access'), rows.length)}
+        ${refused ? _summaryChip('bi-shield-exclamation', t('ses_access_refused'), refused,
+                                 'text-bg-warning') : ''}`;
+    return `<div>
+        ${_summaryHeader(chips)}
+        <div class="ss-vscroll">
+            <table class="table table-sm mb-0 align-middle">
+                <thead class="ss-thead-sticky"><tr>
+                    <th>${esc(t('col_time'))}</th>
+                    <th>${esc(t('col_user'))}</th>
+                    <th>${esc(t('col_ip'))}</th>
+                    <th>${esc(t('ses_access_call'))}</th>
+                    <th class="text-end">${esc(t('col_status'))}</th>
+                </tr></thead>
+                <tbody>${rows.map(r => `<tr>
+                    <td class="text-nowrap small">${esc(_fmtDateTime(r.ts))}</td>
+                    <td class="text-nowrap"><code>${esc(r.username || '—')}</code>${
+                        r.is_current ? `<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1"
+                            >${esc(t('session_current'))}</span>` : ''}</td>
+                    <td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(r.ip || '—')}</code></td>
+                    <td class="ss-fs-2">${_accessCallCell(r.method, r.path)}</td>
+                    <td class="text-end">${_accessStatusBadge(r.status)}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+        </div>
+        <div class="form-text ss-fs-2 px-3 py-2">${
+            esc(t('ses_access_feed_cap').replace('{}', rows.length))} ${esc(t('ses_access_rule'))}</div>
+    </div>`;
+}
+
+/** One session's own history, in a dialog — the row-level counterpart of the feed.
+ *
+ *  Its own function rather than the token one with a different URL: the two dialogs say
+ *  different things when they are EMPTY, and that is the half that matters. "This token has
+ *  never been used" is a fact about the token; a session with nothing here has merely not
+ *  done anything that is recorded, which is a fact about the RULE and useless unless the
+ *  dialog states it. The table itself is the shared one.
+ */
+async function _sesHistory(uid, label) {
+    const data = await apiGet(`/api/v1/sessions/${encodeURIComponent(uid)}/access`);
+    if (!data) return;
+    const rows = data.access || [];
+    const cap = data.max;
+    const body = !rows.length
+        ? `<div class="text-center py-4 text-muted">${esc(cap ? t('ses_access_none')
+                                                               : t('ses_access_off'))}</div>`
+        : `<div class="ss-vscroll" style="max-height:24rem">
+            <table class="table table-sm mb-0 align-middle">
+                <thead><tr>
+                    <th>${esc(t('col_time'))}</th><th>${esc(t('col_ip'))}</th>
+                    <th>${esc(t('ses_access_call'))}</th>
+                    <th class="text-end">${esc(t('col_status'))}</th>
+                </tr></thead>
+                <tbody>${rows.map(r => `<tr>
+                    <td class="text-nowrap small">${esc(_fmtDateTime(r.ts))}</td>
+                    <td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(r.ip || '—')}</code></td>
+                    <td class="ss-fs-2">${_accessCallCell(r.method, r.path)}</td>
+                    <td class="text-end">${_accessStatusBadge(r.status)}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+           </div>`;
+    const note = `<div class="form-text ss-fs-2 mt-2">${
+        cap ? esc(t('ses_access_cap').replace('{}', cap)) + ' ' : ''}${esc(t('ses_access_rule'))}</div>`;
+    showHtmlModal(`${t('ses_access')} — ${label || ''}`, body + note, 'primary');
+}
+
+/** The history button, drawn by the table and by the card grid alike — one function, so a
+ *  view cannot end up offering an action the other does not. */
+function _sesHistoryBtn(sid, cls) {
+    const s = sessionsData[sid] || {};
+    return `<button class="btn btn-sm btn-secondary py-0 px-2 ${cls || ''}"
+        title="${escAttr(t('ses_access'))}"
+        onclick="_sesHistory(${jsStr(sid)}, ${jsStr(s.username || '')})"
+        ><i class="bi bi-clock-history"></i></button>`;
+}

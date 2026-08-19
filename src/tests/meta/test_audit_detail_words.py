@@ -161,3 +161,60 @@ class TestAPermissionReadsTheSameEverywhere:
                     'audit_f_count', 'audit_v_never'):
             for lang, name in ((es_ES, 'es_ES'), (en_EN, 'en_EN')):
                 assert lang.LANG.get(key), f'{key} missing in {name}'
+
+
+class TestAChangedFieldIsNamed:
+    """Reported from the panel, on saving a setting: the entry said
+    ``web_admin.session_log_max``.
+
+    That is the storage path — the identifier the audit stores and must go on storing, since
+    it is what ties an entry to a setting from a bug report or a config file. What it must not
+    be is the ONLY thing on screen: an audit that reads as a list of internal keys makes the
+    reader translate the panel back into itself, and the panel already knows every one of
+    these names — the Configuration screen labels the very same field two clicks away.
+
+    So the label is shown and the key becomes the tooltip: the same shape as the permission
+    badges above, for the same reason.
+    """
+
+    def _src(self) -> str:
+        return io.open(DETAIL, encoding='utf-8-sig').read()
+
+    def test_the_changes_table_resolves_the_label(self):
+        src = self._src()
+        assert 'function _auditChangeLabel(' in src, 'nothing turns a field into a name'
+        assert '_auditChangeLabel(c.field)' in src, 'the change rows print the raw key again'
+
+    def test_it_reads_the_catalog_the_config_screen_reads(self):
+        """`LABELS` and not a second dictionary of its own: two names for one option is one
+        name that goes stale, and it would be this one — nobody reads the audit until
+        something has gone wrong."""
+        body = re.search(r'function _auditChangeLabel\(field\)\s*\{(.*?)\n\}',
+                         self._src(), re.S).group(1)
+        assert 'LABELS[' in body
+        assert "split(/[.|]/)" in body, 'a path like web_admin.session_log_max is not resolved'
+
+    def test_the_identifier_survives_as_the_tooltip(self):
+        assert 'title="${escAttr(c.field' in self._src(), (
+            'the raw key is gone from the screen entirely — an entry that cannot be grepped '
+            'back to a setting is a nicer entry that answers less')
+
+    def test_the_last_fallback_is_the_key_itself(self):
+        """Not a prettified guess: a name invented here for a field nobody translated would be
+        a name that exists nowhere else in the product."""
+        body = re.search(r'function _auditChangeLabel\(field\)\s*\{(.*?)\n\}',
+                         self._src(), re.S).group(1)
+        assert body.rstrip().endswith('|| raw;')
+        assert 'humanizeKey' not in body
+
+    def test_the_snapshot_renderer_names_them_the_same_way(self):
+        """`before`/`after` entries are field names too, and two rules for "what is this
+        field called" is one rule that drifts."""
+        assert self._src().count('_auditChangeLabel(') >= 4
+
+    def test_the_export_keeps_the_raw_key(self):
+        """The CSV is read by a machine, or grepped. A translated column header inside the
+        data would make the export depend on the reader's language."""
+        export = io.open(os.path.join(os.path.dirname(DETAIL), '_export.html'),
+                         encoding='utf-8-sig').read()
+        assert 'c.field' in export and '_auditChangeLabel' not in export

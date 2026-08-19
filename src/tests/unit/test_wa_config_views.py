@@ -1040,3 +1040,43 @@ class TestAnOptionIsFindableByItsRealName:
         names = {f.path: f.env for f in CONFIG_FIELDS if f.env}
         assert names, 'no option declares an env var — the scan is looking in the wrong place'
         assert all(n.startswith('SS_') for n in names.values())
+
+
+class TestALabelThatIsOnePhraseStaysOnOneLine:
+    """Reported from the panel: "Mapeo Grupo → Rol" broke across two lines.
+
+    The label column is narrow and the spaces around the arrow are line-break opportunities
+    like any other, so it split into "Mapeo Grupo →" and "Rol" — an arrow pointing at nothing
+    on one line and a word that reads as a second heading on the next. "A → B" is one phrase:
+    it either fits or it is wrong.
+
+    Only this label needs it, and the guard says so rather than the fix spreading to every
+    label in the panel: the others are plain words, and a long one is better wrapped than
+    overflowing its column.
+    """
+
+    GRM = os.path.join(CFG, 'auth', '_group_role_map.html')
+
+    def test_the_group_to_role_label_does_not_wrap(self):
+        src = _read(self.GRM)
+        i = src.index("t('group_role_map')")
+        label = src[src.rindex('<label', 0, i):i]
+        assert 'text-nowrap' in label, 'the arrow label can break across lines again'
+
+    def test_the_column_headers_do_not_wrap_either(self):
+        """The second half of the same report. A header that wraps takes the whole row with
+        it: its neighbours sit level with its FIRST line, so "Rol" ended up floating beside
+        half a heading. A column header is a heading, not a sentence — it fits its column or
+        the column is too narrow."""
+        src = _read(self.GRM)
+        heads = [ln for ln in src.splitlines() if '<th class="small py-1' in ln]
+        assert heads, 'the header row is gone — this guard needs updating with it'
+        for ln in heads:
+            assert 'text-nowrap' in ln, 'a column header can break across lines again'
+
+    def test_the_label_it_protects_is_the_one_with_the_arrow(self):
+        """If the arrow ever leaves the wording, this stops being a fix and starts being a
+        label that cannot wrap for no reason."""
+        from lib.i18n.lang import en_EN, es_ES
+        for mod in (en_EN, es_ES):
+            assert '→' in mod.LANG['group_role_map']

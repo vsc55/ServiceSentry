@@ -19,6 +19,47 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## El panel se quedaba en el spinner: un comentario tumbó los 90 ficheros de JS
+
+**Fecha:** 2026-08-19 · **Área:** `web_admin/templates/partials/cfg/auth/_group_role_map.html`
+(un comentario dentro de un *template literal*)
+
+**Síntoma** — Reportado desde el panel tras un cambio de una sola línea en una tabla de
+Configuración: la pantalla de carga no se levanta. No hay contenido, no hay error visible, no
+hay petición fallida. En la consola del navegador, una línea:
+`Uncaught SyntaxError: unexpected token: identifier — overview:16112`.
+
+**Diagnóstico** — El número de línea no corresponde a ningún fichero del repositorio: el front
+end son ~90 ficheros de JavaScript dentro de plantillas Jinja que se concatenan en **un solo**
+`<script>`, así que 16112 es una posición del bundle renderizado y no de un fuente. Se renderizó
+`/admin` a disco, se extrajeron los bloques `<script>` sin `src` y se le pasó cada uno a
+`node --check`; el fallo salió en el bloque grande, y el `sed` de esa línea del bundle apuntó al
+comentario recién escrito.
+
+**Causa raíz** — El comentario se puso **dentro** de una plantilla de cadena (`` ` … ` ``) y
+llevaba backticks: `` `text-nowrap` ``. El primero cerró la cadena y el resto de la frase pasó a
+ser código. Y como todo el panel es un único `<script>`, un error de sintaxis en cualquier punto
+tumba el bundle entero: no se define nada, el arranque no llega a ejecutarse y el spinner se
+queda puesto. **Todos los tests de servidor seguían pasando**: el HTML se renderiza perfecto y
+lo que lleva dentro, para Flask, es una cadena. Las demás guardas leen las plantillas como
+**texto**, así que tampoco lo veían.
+
+**Solución** — El comentario sale del literal y pasa a sintaxis JS (`//`). Y una guarda para la
+clase entera, no para la línea: `tests/integration/test_wa_inline_js_syntax.py` renderiza
+`/admin`, `/account` y `/overview` y le pasa cada script en línea a `node --check` — el navegador
+más barato posible, sin DOM y sin ejecución. Se salta si no hay node ≥ 16, porque la suite tiene
+que correr en una máquina sin toolchain de JavaScript; ese suelo de versión también salió de un
+tropiezo, un node v12 en el PATH que marcaba cada `?.` del panel como error de sintaxis.
+
+**Lección** — Un proyecto que genera JavaScript desde plantillas de servidor no tiene *ningún*
+test que compruebe que ese JavaScript es un programa, y la ausencia no se nota hasta que algo lo
+rompe: los tests de plantilla comprueban que cierta cadena está presente, y una cadena rota está
+igual de presente. Basta un `node --check` sobre lo renderizado. Corolario: en este panel un
+error de sintaxis no degrada una sección, las tumba todas — el radio de daño de un solo carácter
+es la página entera, así que la guarda barata sale rentable al primer uso.
+
+---
+
 ## «Mi configuración» dejaba de abrirse tras visitar cualquier otra sección
 
 **Fecha:** 2026-08-19 · **Área:** `web_admin/templates/partials/init/_sidebar.html`
