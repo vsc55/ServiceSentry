@@ -244,6 +244,20 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # sign-in, and an attribute is a second copy that a save has to remember to refresh.
     Cfg('web_admin|mfa_required', str, 'off', env='SS_MFA_REQUIRED',
         admin_only=True, no_rule=True, card='login_security'),
+    # How long a sign-in that owes a second factor stays parked between the password and the
+    # code — long enough to unlock a phone and find the app, short enough that a password
+    # typed on a shared machine does not stay half-usable for the afternoon.
+    #
+    # A setting because the right answer depends on the room: a shared terminal in a hospital
+    # wants sixty seconds, and somebody whose key lives in a drawer wants more than five
+    # minutes. Nothing outside the panel ever sees this number, so unlike the TOTP parameters
+    # (period, digits, algorithm — fixed on purpose, see lib/core/mfa/totp.py) changing it
+    # cannot produce an install where enrolment silently fails on somebody's phone.
+    #
+    # The floor is 30 seconds, which is one TOTP step: below that the code on screen can
+    # expire before the hold does, and the failure looks like a wrong code.
+    Cfg('web_admin|mfa_hold_secs', int, 300, env='SS_MFA_HOLD_SECS',
+        min=30, max=3600, admin_only=True, card='login_security'),
     # The domain security keys are registered against. Normally derived from `public_url` and
     # left empty here — this is the escape for a deployment where the two differ: several
     # names in front of one panel, or a public URL on a subdomain of the domain the keys

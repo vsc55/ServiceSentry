@@ -15,6 +15,7 @@ verifies, the request is anonymous by having no session.
 """
 
 import os
+import time
 from unittest.mock import patch
 
 import pytest
@@ -700,3 +701,111 @@ class TestTheThreeViewsAnswerTheSameQuestion:
             admin._users['admin']['uid'], decrypt=True)['secret']))
         rows = client.get('/api/v1/users').get_json() or {}
         assert rows.get('admin', {}).get('mfa') is True
+
+
+class TestHowLongTheParkedSignInLives:
+    """`web_admin|mfa_hold_secs`: the one number in this subsystem that IS a setting.
+
+    It is a judgement about the room rather than about the protocol — a shared terminal wants
+    sixty seconds, a key that lives in a drawer wants more than five minutes — and nothing
+    outside the panel ever sees it. That is what separates it from the TOTP parameters next
+    door (period, digits, algorithm), which the standard also lets you change and which most
+    authenticator apps quietly ignore: offering those would build an install where enrolment
+    fails on somebody's phone with nothing on screen to say why.
+
+    Clamped rather than trusted. Zero would expire the hold before the page finished
+    rendering, and the failure would read as a wrong code.
+    """
+
+    def _hold(self, admin, value):
+        admin._config_cache = None
+        with patch.object(admin, '_config_section', return_value={'mfa_hold_secs': value}):
+            return admin._mfa_hold_secs()
+
+    def test_the_default_is_five_minutes(self, admin):
+        assert admin._mfa_hold_secs() == 300
+
+    def test_the_setting_moves_it(self, admin):
+        assert self._hold(admin, 60) == 60
+
+    def test_it_is_clamped_at_both_ends(self, admin):
+        """A hold shorter than one TOTP step can expire while the code on screen is still the
+        right one, which is the confusing way for this to fail."""
+        assert self._hold(admin, 0) == 30
+        assert self._hold(admin, 5) == 30
+        assert self._hold(admin, 99999) == 3600
+
+    def test_something_that_is_not_a_number_falls_back(self, admin):
+        assert self._hold(admin, 'soon') == 300
+
+    def test_the_parked_note_carries_it(self, admin, client):
+        _enrol(admin)
+        with patch.object(admin, '_mfa_hold_secs', return_value=45):
+            _login(client)
+        with client.session_transaction() as s:
+            held = s.get('mfa_pending') or {}
+        assert held, 'the sign-in was not parked'
+        # Within a second of now + 45: the note stores an absolute expiry, not a duration.
+        assert 40 < float(held['expires']) - time.time() <= 45
+
+
+class TestAWrongCodeCostsSomethingEverywhere:
+    """The login step counted a bad code as a jail offense; the account's own endpoints did
+    not, and they check codes too — confirming an enrolment, regenerating the recovery list and
+    turning the factor off.
+
+    Two of the three were not entirely free: a 403 is caught by the after-request hook and
+    counted on the `authz` track, which exists for somebody browsing into a section they may
+    not see and is deliberately the tolerant one. Guessing a code is not that, and the third —
+    the enrolment confirm — answers 400, which the hook does not look at, so it cost nothing at
+    all. The explicit call puts all three on the `auth` track and, by setting the
+    request-counted flag, keeps it at ONE offense rather than two.
+
+    The exposure was small (a session is needed, and a TOTP rotates every thirty seconds), but
+    "check a secret, unlimited attempts" is exactly the rate-limiting NIST asks for below 64
+    bits of entropy, and a borrowed session was the one place it did not apply.
+    """
+
+    def _armed(self, admin, client):
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(secret))
+        return secret
+
+    def _offenses(self, admin):
+        """Spy on the JAIL rather than on `_ipban_offense`, so the real suppression still runs.
+
+        Patching the panel's own method removes the `g._ipban_counted` flag it sets, and the
+        after-request hook then counts the 403 a second time — which is the test lying about
+        the behaviour it is checking rather than the behaviour being wrong."""
+        return patch.object(admin._ipban, 'register_offense')
+
+    def test_a_bad_code_on_disable_is_one_auth_offense(self, admin, client):
+        self._armed(admin, client)
+        with self._offenses(admin) as jail:
+            client.post('/api/v1/account/mfa/disable', json={'code': '000000'})
+        assert jail.call_count == 1, jail.call_args_list
+        assert jail.call_args[0][1] == 'login_failed'
+
+    def test_a_bad_code_on_regenerate_is_one_auth_offense(self, admin, client):
+        self._armed(admin, client)
+        with self._offenses(admin) as jail:
+            client.post('/api/v1/account/mfa/recovery', json={'code': '000000'})
+        assert jail.call_count == 1, jail.call_args_list
+        assert jail.call_args[0][1] == 'login_failed'
+
+    def test_the_enrolment_confirm_used_to_cost_nothing_at_all(self, admin, client):
+        """It answers 400, and the hook only looks at 401 and 403."""
+        _login(client)
+        client.post('/api/v1/account/mfa/begin', json={})
+        with self._offenses(admin) as jail:
+            client.post('/api/v1/account/mfa/confirm', json={'code': '000000'})
+        assert jail.call_count == 1, jail.call_args_list
+        assert jail.call_args[0][1] == 'login_failed'
+
+    def test_a_good_code_costs_nothing(self, admin, client):
+        secret = self._armed(admin, client)
+        with self._offenses(admin) as jail:
+            res = client.post('/api/v1/account/mfa/recovery', json={'code': _code(secret, 1)})
+        assert (res.get_json() or {}).get('ok'), res.get_json()
+        jail.assert_not_called()

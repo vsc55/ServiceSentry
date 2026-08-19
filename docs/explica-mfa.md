@@ -5,10 +5,13 @@
 >
 > Código: [`src/lib/core/mfa/`](../src/lib/core/mfa/) — `totp.py` (la aritmética del RFC 6238),
 > `qr.py` (el cuadrado, escrito aquí), `store.py` (las dos tablas), `service.py` (alta,
-> confirmación, verificación, códigos de recuperación), `mixin.py` (la política y el paso
-> intermedio del login), `routes.py` (la API de la propia cuenta y el reset de otra),
-> `manifest.py` (permiso y eventos de auditoría), y para las llaves de seguridad `cbor.py`,
-> `cose.py` y `webauthn.py`. **Nada de esto importa Flask salvo `routes.py` y `mixin.py`.**
+> confirmación, verificación, códigos de recuperación), `policy.py` (**quién** debe llevar uno),
+> `mixin.py` (el paso intermedio del login), `routes.py` (la API de la propia cuenta y el reset
+> de otra), `manifest.py` (permiso y eventos de auditoría), y para las llaves de seguridad
+> `cbor.py`, `cose.py` y `webauthn.py`. **Nada de esto importa Flask salvo `routes.py` y
+> `mixin.py`** — la política decide sin tocar una petición, que es lo que la deja probable sin
+> levantar la app. El mapa completo está en el docstring de
+> [`__init__.py`](../src/lib/core/mfa/__init__.py).
 > Interfaz: [`partials/account/_mfa.html`](../src/lib/web_admin/templates/partials/account/_mfa.html),
 > [`login_mfa.html`](../src/lib/web_admin/templates/login_mfa.html) y
 > [`login_mfa_enrol.html`](../src/lib/web_admin/templates/login_mfa_enrol.html).
@@ -72,7 +75,7 @@ Dos detalles del diagrama que no son adorno:
 ## Quién debe llevar uno
 
 `web_admin|mfa_required` toma tres valores, y la lógica vive en
-[`mixin.py`](../src/lib/core/mfa/mixin.py):
+[`policy.py`](../src/lib/core/mfa/policy.py):
 
 | Valor | Alcance |
 |---|---|
@@ -249,6 +252,7 @@ main.py user mfa-status              # qué cuentas llevan uno
 | Clave | Env | Qué es |
 |---|---|---|
 | `web_admin\|mfa_required` | `SS_MFA_REQUIRED` | `off` · `admins` · `all` |
+| `web_admin\|mfa_hold_secs` | `SS_MFA_HOLD_SECS` | Cuánto vive el login aparcado esperando el código (30..3600, por defecto 300) |
 | `web_admin\|webauthn_rp_id` | `SS_WEBAUTHN_RP_ID` | El dominio de las llaves. Vacío = se deduce de `public_url` |
 | `ldap\|mfa_trusted` | — | Ese directorio ya exige un segundo factor |
 | `oidc\|mfa_trusted` | — | Ídem |
@@ -257,6 +261,29 @@ main.py user mfa-status              # qué cuentas llevan uno
 Los tres `mfa_trusted` no tienen variable de entorno, y no es un olvido del MFA: **ninguna** de
 las claves de `ldap`, `oidc` o `saml2` la tiene. Si un despliegue Docker tuviera que fijar el
 SSO por entorno, es un trabajo de esas tres secciones enteras.
+
+### Lo que a propósito NO es configurable
+
+`PERIOD = 30`, `DIGITS = 6`, `ALGORITHM = 'SHA1'` y `SECRET_BYTES = 20` en
+[`totp.py`](../src/lib/core/mfa/totp.py) **parecen** ajustes, porque el estándar los declara
+parámetros de la URI `otpauth://` precisamente para poder cambiarlos. En la práctica la mayoría
+de aplicaciones de autenticación ignoran cualquier cosa que no sea 30/6/SHA1 y usan los valores
+por defecto igualmente.
+
+O sea que ofrecer el ajuste crearía una instalación donde el administrador pone SHA256, el panel
+genera un QR correcto según la norma, y a la gente le fallan los códigos sin nada en pantalla que
+lo explique. Un ajuste que produce un fallo silencioso en el dispositivo de otro es peor que no
+tenerlo.
+
+`WINDOW = 1` (la tolerancia de reloj) tampoco: bajarlo a 0 rompe la función para cualquiera con
+el reloj medio minuto desviado, y subirlo a 2 le da **noventa segundos de validez** al mismo
+código, que es justo la ventana que el antirreplay existe para cerrar. El arreglo para un reloj
+desviado es el reloj.
+
+Y `RECOVERY_COUNT = 10` se puede cambiar en una línea, pero no es un estándar ni un ajuste: no
+hay RFC que fije el número (Google da 10, GitHub 16, Microsoft 1). Lo que **sí** regula NIST
+SP 800-63B es la entropía por código —mínimo 20 bits, y limitar intentos por debajo de 64— y los
+nuestros llevan 50.
 
 > **Cambiar `webauthn_rp_id` deja de funcionar todas las llaves ya registradas**, sin nada en
 > pantalla que lo explique: el navegador las ata a ese valor y no se pueden mover. Por eso se

@@ -8,6 +8,53 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.89] - 2026-08-19
+
+### Added
+- **`web_admin|mfa_hold_secs`** (`SS_MFA_HOLD_SECS`, 30..3600, default 300) — how long a
+  sign-in that has passed the password and still owes the code stays parked. It is a judgement
+  about the room, not about the protocol: a shared terminal wants sixty seconds, a key that
+  lives in a drawer wants more than five minutes.
+  - Clamped rather than trusted: zero would expire the hold before the page finished rendering
+    and the failure would read as a wrong code. The floor is one TOTP step for the same reason.
+  - Deliberately the ONLY new knob. The TOTP parameters beside it (`PERIOD`, `DIGITS`,
+    `ALGORITHM`, `SECRET_BYTES`) look like settings — the `otpauth://` standard declares them
+    parameters — but most authenticator apps ignore anything other than 30/6/SHA1, so offering
+    them would build an install where enrolment fails on somebody's phone with nothing on
+    screen to say why. `WINDOW` stays fixed too: 0 breaks the feature for a clock half a minute
+    out, 2 gives one code ninety seconds of life. Written up in `docs/explica-mfa.md`.
+
+### Fixed
+- **A wrong code cost nothing on the account's own MFA endpoints.** The login step counted one
+  as a jail offense; confirming an enrolment, regenerating the recovery list and turning the
+  factor off did not, and all three check a code.
+  - Two of them were not entirely free — a 403 is picked up by the after-request hook and
+    counted on the tolerant `authz` track, which exists for somebody browsing into a section
+    they may not see. Guessing a code is not that. The third answers **400**, which the hook
+    does not look at, so it was unthrottled outright.
+  - All three now register an explicit `login_failed`, which also sets the request-counted flag
+    and keeps it at one offense rather than two.
+  - The exposure was small (a session is needed, and a TOTP rotates every thirty seconds), but
+    it is exactly the rate-limiting NIST SP 800-63B asks for below 64 bits of entropy, and a
+    borrowed session was the one place it did not apply.
+
+### Changed
+- **`lib/core/mfa/mixin.py` split in two.** It held two kinds of question: one half DECIDES
+  (who must carry a factor, which SSO providers are trusted, where a security key would be
+  registered) and the other REMEMBERS (the half-finished sign-in, which is a note in the Flask
+  cookie). The deciding half is now `policy.py` / `_MfaPolicyMixin`, and it touches no request,
+  cookie or template — so the rules that decide who gets shut out are reachable from a test
+  that does not stand up an app. Both mixins are composed side by side onto `WebAdmin`; nothing
+  about the behaviour changed.
+- **`lib/core/mfa/__init__.py` carries the package map**, like every other core domain — it was
+  the one empty one, in the package with the most files and the three (`cbor`, `cose`,
+  `webauthn`) a reader cannot place without being told. It also records what must NOT be
+  imported there: permission discovery reads `manifest` very early, and pulling the Flask glue
+  in would make that a cycle.
+- Re-aimed a line anchor in `explica-logging.md` that the two added lines in `app.py` had
+  pushed onto a blank line — it had been pointing at an unrelated method for some time, and the
+  guard only notices when the target goes blank.
+
 ## [0.0.1+build.88] - 2026-08-19
 
 ### Added

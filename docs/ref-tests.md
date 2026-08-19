@@ -7318,7 +7318,7 @@ por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta
 
 ## 155. Segundo factor: el escalón que pone delante de un login
 
-**Archivo:** `tests/integration/test_wa_mfa.py` — 61 tests
+**Archivo:** `tests/integration/test_wa_mfa.py` — 70 tests
 
 Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
 lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
@@ -7391,6 +7391,35 @@ algo ligeramente distinto en la revisión es peor que no tenerlo en dos de ellas
 | `TestTheThreeViewsAnswerTheSameQuestion::test_the_cards_answer_either_way` | Un chip solo en las protegidas no se puede barrer buscando las otras, que es la dirección en la que se hace la pregunta |
 | `TestTheThreeViewsAnswerTheSameQuestion::test_the_access_review_counts_the_unprotected` | La vista cuyo trabajo **es** la pregunta dice el número, y solo cuenta cuentas que pueden entrar |
 | `TestTheThreeViewsAnswerTheSameQuestion::test_all_three_are_served_by_the_flag_the_api_sends` | Una consulta para toda la tabla, no una por cuenta |
+
+**Cuánto vive el inicio de sesión aparcado** es el único número de este subsistema que **sí** es
+un ajuste (`web_admin|mfa_hold_secs`): es un juicio sobre la sala —un puesto compartido quiere
+sesenta segundos, una llave guardada en un cajón quiere más de cinco minutos— y nadie fuera del
+panel lo ve nunca. Eso es lo que lo separa de los parámetros TOTP de al lado (periodo, dígitos,
+algoritmo), que la norma también deja cambiar y que la mayoría de apps ignoran en silencio:
+ofrecerlos construiría una instalación donde el alta falla en el móvil de alguien sin nada en
+pantalla que lo explique. Se **acota**, no se confía: un cero expiraría la espera antes de que
+la página terminara de dibujarse, y el fallo se leería como un código incorrecto.
+
+**Y un código equivocado cuesta algo en todas partes.** El paso de login contaba un código malo
+como ofensa de la cárcel; los endpoints de la propia cuenta no, y también comprueban códigos.
+Dos de los tres no salían gratis del todo —un 403 lo recoge el hook de after-request y lo cuenta
+en la pista `authz`, la tolerante, que existe para quien navega a una sección que no puede ver;
+adivinar un código no es eso—. El tercero, confirmar el alta, contesta **400**, que el hook ni
+mira: ese no costaba nada. La llamada explícita pone los tres en la pista `auth` y, al marcar la
+petición como contada, la deja en **una** ofensa y no dos.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestHowLongTheParkedSignInLives::test_the_default_is_five_minutes` | |
+| `TestHowLongTheParkedSignInLives::test_the_setting_moves_it` | |
+| `TestHowLongTheParkedSignInLives::test_it_is_clamped_at_both_ends` | Una espera más corta que un paso TOTP puede expirar mientras el código en pantalla sigue siendo el bueno |
+| `TestHowLongTheParkedSignInLives::test_something_that_is_not_a_number_falls_back` | |
+| `TestHowLongTheParkedSignInLives::test_the_parked_note_carries_it` | La nota guarda un vencimiento absoluto, no una duración |
+| `TestAWrongCodeCostsSomethingEverywhere::test_a_bad_code_on_disable_is_one_auth_offense` | **Una** ofensa, y en la pista de autenticación |
+| `TestAWrongCodeCostsSomethingEverywhere::test_a_bad_code_on_regenerate_is_one_auth_offense` | |
+| `TestAWrongCodeCostsSomethingEverywhere::test_the_enrolment_confirm_used_to_cost_nothing_at_all` | Contesta 400, y el hook solo mira 401 y 403 |
+| `TestAWrongCodeCostsSomethingEverywhere::test_a_good_code_costs_nothing` | |
 
 
 ---

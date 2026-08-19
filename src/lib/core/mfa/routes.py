@@ -83,6 +83,7 @@ def register(app, wa):
         if not out.get('ok'):
             wa._audit('mfa_failed', username, request.remote_addr,
                       detail={'stage': 'enrol', 'error': out.get('error', '')})
+            wa._ipban_offense('login_failed')
             return jsonify(out), 400
         wa._audit('mfa_enrolled', username, request.remote_addr, detail={'method': 'totp'})
         return jsonify(out)
@@ -106,6 +107,7 @@ def register(app, wa):
             # it was is not something to tell whoever is sending them.
             wa._audit('mfa_failed', username, request.remote_addr,
                       detail={'stage': 'recovery', 'error': 'empty' if not code else 'bad_code'})
+            wa._ipban_offense('login_failed')
             return jsonify({'ok': False, 'error': 'bad_code'}), 403
         out = mfa_service.recovery_regenerate(wa._mfa_store, uid)
         if not out.get('ok'):
@@ -142,6 +144,7 @@ def register(app, wa):
         if not mfa_service.verify(wa._mfa_store, uid, code):
             wa._audit('mfa_failed', username, request.remote_addr,
                       detail={'stage': 'disable', 'error': 'empty' if not code else 'bad_code'})
+            wa._ipban_offense('login_failed')
             return jsonify({'ok': False, 'error': 'bad_code'}), 403
         wa._mfa_store.delete(uid)
         wa._audit('mfa_disabled', username, request.remote_addr)
