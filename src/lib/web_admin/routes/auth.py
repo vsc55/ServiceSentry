@@ -10,12 +10,15 @@ Routes registered by this file:
     GET,POST /login/mfa/enrol  enrolment on the way in, when the policy covers this account
                          and it has none — refusing instead would lock out everybody who has
                          not enrolled, which the moment a policy is switched on is everybody
+    POST     /login/mfa/webauthn/begin   options for the security key of the parked sign-in
+    POST     /login/mfa/webauthn/verify  the assertion; the same gate as the code
     POST     /logout     end the current session
 """
 
-from flask import flash, redirect, render_template, request, session, url_for
+from flask import flash, jsonify, redirect, render_template, request, session, url_for
 
 from lib.core.mfa import service as mfa_service
+from lib.core.mfa import webauthn
 from lib.debug import DebugLevel
 from lib.security.ratelimit import RateLimiter
 
@@ -172,7 +175,95 @@ def register(app, wa):
                                   source=held.get('source', 'local'), second_factor_done=True)
             _login_ok(username, held.get('source', 'local'), held.get('remember'))
             return redirect(wa._landing_url(user))
-        return render_template('login_mfa.html')
+        # Whether to offer the key at all is decided HERE and not in the browser: it needs the
+        # account's methods and this install's scope, and a page that offered a button the
+        # server would refuse is a page that teaches people the feature is broken.
+        _uid = wa._mfa_uid(held.get('username', ''))
+        _scope = wa._webauthn_scope()
+        _has_key = 'webauthn' in wa._mfa_store.methods_of(_uid) if _uid else False
+        return render_template('login_mfa.html',
+                               webauthn_offer=bool(_scope.get('ok') and _has_key))
+
+    @app.route('/login/mfa/webauthn/begin', methods=['POST'])
+    def login_mfa_webauthn_begin():
+        """What the browser needs to call `navigator.credentials.get()` for the parked sign-in.
+
+        Reached only with a sign-in halfway in, like the page itself. The challenge is stored
+        INSIDE the parked note rather than beside it, so it dies with the hold: a challenge
+        that outlived the sign-in it belongs to would be one answerable after the person walked
+        away.
+
+        The credential id has to be named — that is what `allowCredentials` is for — and it is
+        not a secret: it is a public handle the browser needs to find the right key. What it
+        does leak is that this ACCOUNT has a key, which whoever already typed its password
+        can see on the previous screen anyway.
+        """
+        held = wa._mfa_pending()
+        if not held or session.get('logged_in'):
+            return jsonify({'ok': False, 'error': 'no_pending'}), 403
+        scope = wa._webauthn_scope()
+        cred = mfa_service.webauthn_credential(wa._mfa_store,
+                                               wa._mfa_uid(held.get('username', '')))
+        if not scope.get('ok') or not cred:
+            return jsonify({'ok': False,
+                            'error': scope.get('reason') or 'not_enrolled'}), 400
+        challenge = webauthn.new_challenge()
+        held = dict(held)
+        held['webauthn_challenge'] = challenge
+        session['mfa_pending'] = held
+        return jsonify({'ok': True, 'rp_id': scope['rp_id'], 'challenge': challenge,
+                        'credential_id': cred['credential_id'],
+                        'timeout_ms': 120_000})
+
+    @app.route('/login/mfa/webauthn/verify', methods=['POST'])
+    def login_mfa_webauthn_verify():
+        """The assertion. The same gate as the code, reached the other way.
+
+        Everything the code path does after a success happens here too and in the same order —
+        re-read the account, clear the hold, establish the session, log it — because this is
+        the same authentication with a different second factor, and a second copy of that
+        sequence that drifts is a second copy that forgets one of the checks.
+        """
+        held = wa._mfa_pending()
+        if not held or session.get('logged_in'):
+            return jsonify({'ok': False, 'error': 'no_pending'}), 403
+        _ip = request.remote_addr or '?'
+        _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX,
+                                              wa._LOGIN_RATELIMIT_WINDOW_SECS)
+        if not _ok:
+            wa._audit('login_throttled', held.get('username', ''), _ip,
+                      detail={'retry_after': _retry, 'stage': 'mfa_webauthn'})
+            wa._ipban_offense('login_throttled')
+            return jsonify({'ok': False, 'error': 'throttled', 'retry_after': _retry}), 429
+        username = held.get('username', '')
+        data = request.get_json(silent=True) or {}
+        scope = wa._webauthn_scope()
+        out = mfa_service.webauthn_verify(
+            wa._mfa_store, wa._mfa_uid(username),
+            auth_data=webauthn.b64u_decode(str(data.get('auth_data') or '')),
+            client_data_json=webauthn.b64u_decode(str(data.get('client_data_json') or '')),
+            signature=webauthn.b64u_decode(str(data.get('signature') or '')),
+            credential_id=str(data.get('credential_id') or ''),
+            challenge=str(held.get('webauthn_challenge') or ''),
+            rp_id=scope.get('rp_id', ''), origin=scope.get('origin', ''))
+        if not out.get('ok'):
+            wa._dbg(f"> Auth/MFA >> security key FAILED user={username!r} "
+                    f"from {request.remote_addr}", DebugLevel.warning)
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'source': held.get('source', ''), 'stage': 'webauthn',
+                              'error': out.get('error', ''), 'detail': out.get('detail', '')})
+            wa._ipban_offense('login_failed')
+            return jsonify({'ok': False, 'error': 'bad_assertion'}), 403
+        user = wa._users.get(username) or {}
+        if not user or not user.get('enabled', True):
+            wa._mfa_clear()
+            _login_failed(username, 'account_disabled')
+            return jsonify({'ok': False, 'error': 'invalid'}), 403
+        wa._mfa_clear()
+        wa._establish_session(username, user, bool(held.get('remember')),
+                              source=held.get('source', 'local'), second_factor_done=True)
+        _login_ok(username, held.get('source', 'local'), held.get('remember'))
+        return jsonify({'ok': True, 'next': wa._landing_url(user)})
 
     @app.route('/login/mfa/enrol', methods=['GET', 'POST'])
     def login_mfa_enrol():

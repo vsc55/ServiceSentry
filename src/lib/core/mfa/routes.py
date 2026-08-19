@@ -9,6 +9,8 @@ Routes registered by this file:
     POST   /api/v1/account/mfa/confirm    prove it with a code; answers the recovery codes ONCE
     POST   /api/v1/account/mfa/recovery   a fresh set of recovery codes
     POST   /api/v1/account/mfa/disable    turn it off (needs a current code)
+    POST   /api/v1/account/mfa/webauthn/begin    options for registering a security key
+    POST   /api/v1/account/mfa/webauthn/confirm  the registration response; stores the key
     DELETE /api/v1/users/<uid>/mfa        take somebody else's off (mfa_reset_others)
 
 **No permission guards the first five.** Managing your own second factor is like changing your
@@ -21,10 +23,18 @@ otherwise a borrowed session is enough to strip the factor and the account is ba
 password somebody already has.
 """
 
+import time
+
 from flask import jsonify, request, session
 
 from lib import APP_NAME
+from lib.core.mfa import cose, webauthn
 from lib.core.mfa import service as mfa_service
+
+# How long a registration challenge is good for. Short on purpose: it is one round trip with a
+# person touching a key in the middle, and a challenge that outlives the page it was issued for
+# is a challenge somebody else can still answer.
+WEBAUTHN_CHALLENGE_SECONDS = 300
 
 
 def register(app, wa):
@@ -39,9 +49,19 @@ def register(app, wa):
     @app.route('/api/v1/account/mfa', methods=['GET'])
     @login_required
     def api_account_mfa():
-        """What this account has. Three facts and no secret — not even the encrypted one."""
+        """What this account has, and whether a security key can be offered at all.
+
+        No secret, ever — not even the encrypted one. `webauthn_ok` travels with the state
+        rather than as a page-load constant because it is a fact about the INSTALLATION that
+        the card has to act on: offering "add a security key" where a credential cannot be
+        scoped produces a key that silently never works again, and `webauthn_reason` is what
+        lets the screen say which of the three things is missing instead of just going quiet.
+        """
         username, _uid = _me()
-        return jsonify({'ok': True, **wa._mfa_status(username)})
+        scope = wa._webauthn_scope()
+        return jsonify({'ok': True, **wa._mfa_status(username),
+                        'webauthn_ok': bool(scope.get('ok')),
+                        'webauthn_reason': scope.get('reason', '')})
 
     @app.route('/api/v1/account/mfa/begin', methods=['POST'])
     @login_required
@@ -149,6 +169,81 @@ def register(app, wa):
         wa._mfa_store.delete(uid)
         wa._audit('mfa_disabled', username, request.remote_addr)
         return jsonify({'ok': True})
+
+    # ── Security keys ────────────────────────────────────────────────────────
+
+    @app.route('/api/v1/account/mfa/webauthn/begin', methods=['POST'])
+    @login_required
+    def api_account_mfa_webauthn_begin():
+        """What the browser needs to call `navigator.credentials.create()`.
+
+        Refused rather than attempted when this install cannot scope a credential — no public
+        URL, not https, or an RP ID the origin does not sit under. A key registered against a
+        guess is one that silently never works again, and the browser's own error for it names
+        nothing useful.
+
+        The challenge is kept in the session, never sent back to be echoed: a challenge the
+        client is trusted to return is not a challenge.
+        """
+        username, uid = _me()
+        if not uid:
+            return jsonify({'ok': False, 'error': 'unknown_user'}), 400
+        scope = wa._webauthn_scope()
+        if not scope.get('ok'):
+            return jsonify({'ok': False, 'error': scope.get('reason') or 'unavailable'}), 400
+        challenge = webauthn.new_challenge()
+        session['webauthn_reg'] = {'challenge': challenge,
+                                   'expires': time.time() + WEBAUTHN_CHALLENGE_SECONDS}
+        user = wa._users.get(username) or {}
+        return jsonify({
+            'ok': True,
+            'rp_id': scope['rp_id'],
+            'rp_name': APP_NAME,
+            'challenge': challenge,
+            # base64url of the uid, because a WebAuthn user handle is BYTES. The uid and not
+            # the name: a rename must not detach the key, exactly as for the TOTP row.
+            'user_id': webauthn.b64u_encode(uid.encode()),
+            'user_name': username,
+            'user_display': user.get('display_name') or username,
+            'algorithms': list(cose.SUPPORTED),
+            'timeout_ms': WEBAUTHN_CHALLENGE_SECONDS * 1000,
+        })
+
+    @app.route('/api/v1/account/mfa/webauthn/confirm', methods=['POST'])
+    @login_required
+    def api_account_mfa_webauthn_confirm():
+        """The registration response. Verified here and stored only if it holds.
+
+        No second step after this one: the response was signed by the authenticator over a
+        challenge this server issued, so the ceremony IS the proof. Asking for one more touch
+        would be theatre.
+        """
+        username, uid = _me()
+        data = request.get_json(silent=True) or {}
+        held = session.pop('webauthn_reg', None) or {}   # one use, whatever the outcome
+        if not held or float(held.get('expires') or 0) < time.time():
+            return jsonify({'ok': False, 'error': 'no_challenge'}), 400
+        scope = wa._webauthn_scope()
+        if not scope.get('ok'):
+            return jsonify({'ok': False, 'error': scope.get('reason') or 'unavailable'}), 400
+        out = mfa_service.webauthn_register(
+            wa._mfa_store, uid,
+            attestation_object=webauthn.b64u_decode(str(data.get('attestation_object') or '')),
+            client_data_json=webauthn.b64u_decode(str(data.get('client_data_json') or '')),
+            challenge=held.get('challenge', ''),
+            rp_id=scope['rp_id'], origin=scope['origin'],
+            label=str(data.get('label') or '')[:64])
+        if not out.get('ok'):
+            # The `detail` says which check failed and goes to the LOG, never to the sender:
+            # "wrong origin" and "wrong challenge" are two different pieces of help to give
+            # somebody probing.
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': 'webauthn_register', 'error': out.get('error', ''),
+                              'detail': out.get('detail', '')})
+            wa._ipban_offense('login_failed')
+            return jsonify({'ok': False, 'error': out.get('error', 'ceremony')}), 400
+        wa._audit('mfa_enrolled', username, request.remote_addr, detail={'method': 'webauthn'})
+        return jsonify({'ok': True, 'method': 'webauthn'})
 
     @app.route('/api/v1/users/<uid>/mfa', methods=['DELETE'])
     @reset_req

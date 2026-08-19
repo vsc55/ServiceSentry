@@ -30,6 +30,8 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
 from lib.core.mfa import service as mfa_service   # noqa: E402
 from lib.core.mfa import totp                     # noqa: E402
+from lib.core.mfa import webauthn                 # noqa: E402
+from tests import webauthn_fabric as fab          # noqa: E402
 from tests.conftest import _login                 # noqa: E402
 from tests.helpers import _fn, _read, _strip_comments   # noqa: E402
 
@@ -504,9 +506,19 @@ class TestTheUsersTableSaysWhoHasOne:
         body = client.get('/api/v1/users').get_json()
         assert body['admin']['mfa'] is True
 
-    def test_it_is_a_boolean_and_carries_nothing_else(self, admin, client):
-        """The users list has no business knowing WHICH kind of factor, let alone anything
-        about it."""
+    def test_the_kinds_travel_beside_the_boolean(self, admin, client):
+        """The TABLE draws the boolean; the KINDS are for the edit modal, which is about one
+        account and where taking the factor off also unregisters a security key the person is
+        probably still carrying. One query for the whole page either way."""
+        _login(client)                       # sign in FIRST: enrolling parks the next one
+        _enrol(admin)
+        row = (client.get('/api/v1/users').get_json() or {})['admin']
+        assert row['mfa'] is True and row['mfa_methods'] == ['totp']
+
+    def test_it_names_the_kinds_and_nothing_about_them(self, admin, client):
+        """The listing says WHICH kinds exist and not one thing more: no secret, no credential
+        id, no recovery codes. The kinds are what a screen has to name before it removes them;
+        everything else about a factor is what the factor is FOR."""
         _login(client)                       # sign in FIRST: enrolling parks the next one
         secret, _codes = _enrol(admin)
         blob = str(client.get('/api/v1/users').get_json()['admin'])
@@ -519,9 +531,10 @@ class TestTheUsersTableSaysWhoHasOne:
         _enrol(admin)
         def _boom():
             raise RuntimeError('database gone')
-        monkeypatch.setattr(admin._mfa_store, 'enrolled_user_uids', _boom)
+        monkeypatch.setattr(admin._mfa_store, 'methods_by_user', _boom)
         res = client.get('/api/v1/users')
-        assert res.status_code == 200 and res.get_json()['admin']['mfa'] is False
+        row = res.get_json()['admin']
+        assert res.status_code == 200 and row['mfa'] is False and row['mfa_methods'] == []
 
     def test_resetting_from_the_admin_screen_clears_the_column(self, admin, client):
         secret, _codes = _enrol(admin)
@@ -809,3 +822,176 @@ class TestAWrongCodeCostsSomethingEverywhere:
             res = client.post('/api/v1/account/mfa/recovery', json={'code': _code(secret, 1)})
         assert (res.get_json() or {}).get('ok'), res.get_json()
         jail.assert_not_called()
+
+
+class TestASecurityKeyThroughTheApp:
+    """The wiring, which is the part the unit tests cannot see.
+
+    :mod:`tests.unit.test_mfa_webauthn` proves the ceremonies against a fabricated one, taken
+    apart a check at a time. What is proved HERE is that a whole ceremony survives the round
+    trip: registered over HTTP on a signed-in account, and then used to finish a sign-in that
+    the password alone did not finish.
+
+    The ceremony is built by :mod:`tests.webauthn_fabric`, shared with the unit file so both
+    suites agree on what a valid one looks like.
+
+    The install is pointed at `panel.example.com` for the length of each test, because that is
+    what the fabricated ceremony is signed for: an RP ID is not a preference, it is baked into
+    what the authenticator signed.
+    """
+
+    def _scoped(self, admin):
+        """Make `_webauthn_scope()` answer for the domain the fabricated ceremony uses."""
+        return patch.object(admin, '_webauthn_scope',
+                            return_value={'ok': True, 'rp_id': fab.RP_ID,
+                                          'origin': fab.ORIGIN, 'reason': ''})
+
+    def _challenge(self, client, url='/api/v1/account/mfa/webauthn/begin'):
+        res = client.post(url, json={})
+        body = res.get_json() or {}
+        assert body.get('ok'), body
+        return body
+
+    def _register(self, admin, client):
+        """A signed-in account registers a key. Returns its private half."""
+        with self._scoped(admin):
+            opts = self._challenge(client)
+            priv, _key, att, cdj = fab._registration(opts['challenge'])
+            out = client.post('/api/v1/account/mfa/webauthn/confirm', json={
+                'attestation_object': webauthn.b64u_encode(att),
+                'client_data_json': webauthn.b64u_encode(cdj)})
+        assert (out.get_json() or {}).get('ok'), out.get_json()
+        return priv
+
+    def test_a_key_can_be_registered_and_is_stored_confirmed(self, admin, client):
+        """No second step after the ceremony: the response was signed over a challenge this
+        server issued, so there is nothing left to establish."""
+        _login(client)
+        self._register(admin, client)
+        uid = admin._users['admin']['uid']
+        assert 'webauthn' in admin._mfa_store.methods_of(uid)
+        factor = admin._mfa_store.factor(uid, method='webauthn')
+        assert factor['confirmed'] and factor['credential_id'] and factor['public_key']
+        assert factor['alg'], 'the algorithm has to be the one recorded at registration'
+
+    def test_the_account_now_owes_a_second_factor(self, admin, client):
+        """A key-only account is an account WITH a factor. Reading only the TOTP row here is
+        what would wave it straight through the login it exists to stop."""
+        _login(client)
+        self._register(admin, client)
+        assert admin._mfa_enrolled('admin') is True
+        assert admin._mfa_required('admin') is True
+
+    def test_the_challenge_is_good_once(self, admin, client):
+        """Replaying a registration response is the same attack as replaying an assertion, and
+        the challenge is what closes both."""
+        _login(client)
+        with self._scoped(admin):
+            opts = self._challenge(client)
+            _priv, _key, att, cdj = fab._registration(opts['challenge'])
+            body = {'attestation_object': webauthn.b64u_encode(att),
+                    'client_data_json': webauthn.b64u_encode(cdj)}
+            assert (client.post('/api/v1/account/mfa/webauthn/confirm',
+                                json=body).get_json() or {}).get('ok')
+            again = client.post('/api/v1/account/mfa/webauthn/confirm', json=body)
+        assert again.status_code == 400
+        assert (again.get_json() or {}).get('error') == 'no_challenge'
+
+    def test_a_ceremony_for_another_site_is_refused(self, admin, client):
+        _login(client)
+        with self._scoped(admin):
+            opts = self._challenge(client)
+            _priv, _key, att, cdj = fab._registration(opts['challenge'], rp_id='evil.example')
+            out = client.post('/api/v1/account/mfa/webauthn/confirm', json={
+                'attestation_object': webauthn.b64u_encode(att),
+                'client_data_json': webauthn.b64u_encode(cdj)})
+        assert out.status_code == 400
+        # What went wrong is written down, not answered: "wrong origin" and "wrong challenge"
+        # are two different pieces of help to give somebody probing.
+        assert (out.get_json() or {}).get('error') == 'ceremony'
+        assert 'detail' not in (out.get_json() or {})
+
+    def test_the_key_finishes_a_sign_in(self, admin, client):
+        """The whole point: a password that was accepted and parked, finished with the key."""
+        _login(client)
+        priv = self._register(admin, client)
+        client.post('/logout', follow_redirects=True)
+
+        _login(client)                       # parks: the account now owes a factor
+        with client.session_transaction() as s:
+            assert not s.get('logged_in') and s.get('mfa_pending')
+        with self._scoped(admin):
+            opts = self._challenge(client, '/login/mfa/webauthn/begin')
+            auth, cdj, sig = fab._assertion(priv, opts['challenge'])
+            out = client.post('/login/mfa/webauthn/verify', json={
+                'credential_id': opts['credential_id'],
+                'auth_data': webauthn.b64u_encode(auth),
+                'client_data_json': webauthn.b64u_encode(cdj),
+                'signature': webauthn.b64u_encode(sig)})
+        assert (out.get_json() or {}).get('ok'), out.get_json()
+        with client.session_transaction() as s:
+            assert s.get('logged_in') and not s.get('mfa_pending')
+        assert client.get('/api/v1/me').status_code == 200
+
+    def test_an_assertion_needs_a_parked_sign_in(self, admin, client):
+        """The same rule the code page has: arriving here with nothing halfway in grants
+        nothing, whatever the bytes say."""
+        _login(client)
+        priv = self._register(admin, client)
+        client.post('/logout', follow_redirects=True)
+        auth, cdj, sig = fab._assertion(priv, webauthn.new_challenge())
+        res = client.post('/login/mfa/webauthn/verify', json={
+            'credential_id': 'whatever', 'auth_data': webauthn.b64u_encode(auth),
+            'client_data_json': webauthn.b64u_encode(cdj),
+            'signature': webauthn.b64u_encode(sig)})
+        assert res.status_code == 403
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+
+    def test_a_bad_assertion_is_audited_and_costs_an_offense(self, admin, client):
+        _login(client)
+        priv = self._register(admin, client)
+        client.post('/logout', follow_redirects=True)
+        _login(client)
+        admin._audit_store.delete_all()
+        with self._scoped(admin):
+            opts = self._challenge(client, '/login/mfa/webauthn/begin')
+            # Signed for a DIFFERENT challenge: a captured assertion, replayed.
+            auth, cdj, sig = fab._assertion(priv, webauthn.new_challenge())
+            with patch.object(admin._ipban, 'register_offense') as jail:
+                out = client.post('/login/mfa/webauthn/verify', json={
+                    'credential_id': opts['credential_id'],
+                    'auth_data': webauthn.b64u_encode(auth),
+                    'client_data_json': webauthn.b64u_encode(cdj),
+                    'signature': webauthn.b64u_encode(sig)})
+        assert out.status_code == 403
+        assert jail.call_count == 1 and jail.call_args[0][1] == 'login_failed'
+        rows = [e for e in admin._audit_store.get_all() if e['event'] == 'mfa_failed']
+        assert rows and (rows[-1].get('detail') or {}).get('stage') == 'webauthn'
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+
+    def test_the_page_offers_the_key_only_when_there_is_one(self, admin, client):
+        """Decided on the SERVER: a button the server would refuse teaches people the feature
+        is broken."""
+        _enrol(admin)
+        _login(client)
+        with self._scoped(admin):
+            assert b'mfaKeyBtn' not in client.get('/login/mfa').data
+        _post_mfa(client, _code(admin._mfa_store.factor(
+            admin._users['admin']['uid'], decrypt=True)['secret']))
+        self._register(admin, client)
+        client.post('/logout', follow_redirects=True)
+        _login(client)
+        with self._scoped(admin):
+            assert b'mfaKeyBtn' in client.get('/login/mfa').data
+
+    def test_the_account_card_is_told_whether_it_can_offer_one(self, admin, client):
+        """`webauthn_ok` travels with the state because it is a fact about the INSTALL that
+        the card has to act on — and the reason travels with it so the screen can say which of
+        the three things is missing."""
+        _login(client)
+        with patch.object(admin, '_webauthn_scope',
+                          return_value={'ok': False, 'reason': 'not_https'}):
+            body = client.get('/api/v1/account/mfa').get_json() or {}
+        assert body['webauthn_ok'] is False and body['webauthn_reason'] == 'not_https'

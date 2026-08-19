@@ -2,6 +2,7 @@
 
 {% block title %}{{ app_name }} — {{ i18n.mfa_step_title }}{% endblock %}
 
+
 {# The second half of a sign-in. Its own page and not a second field on the login form,
    because the password has already been accepted by the time this is drawn — and what has
    NOT happened is a session: there is no row, no `logged_in`, and nothing here that a gate
@@ -44,6 +45,21 @@
                 </div>
                 <button type="submit" class="btn btn-primary w-100">{{ i18n.mfa_step_verify }}</button>
             </form>
+            {% if webauthn_offer %}
+            {# The key, when this account has one and this install can scope it. Below the code
+               and not instead of it: a key that is in the other bag, a laptop that is not this
+               one, or a browser that will not do it are all ordinary, and the code is what is
+               left. Whether it is drawn at all is the SERVER's decision — a button the server
+               would refuse teaches people the feature is broken. #}
+            <div class="d-flex align-items-center my-3">
+                <hr class="flex-grow-1"><span class="px-2 text-muted small">{{ i18n.or }}</span><hr class="flex-grow-1">
+            </div>
+            <button type="button" class="btn btn-secondary w-100" id="mfaKeyBtn"
+                    onclick="_loginKeyGo()">
+                <i class="bi bi-key-fill me-1"></i>{{ i18n.mfa_key_use }}
+            </button>
+            <div class="form-text small text-center" id="mfaKeyMsg"></div>
+            {% endif %}
             {# The way out of a half-finished sign-in. A POST because it drops server state,
                and the only thing on this page that is not the code. #}
             <form method="post" action="/logout" class="mt-3 text-center">
@@ -54,4 +70,73 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if webauthn_offer %}
+<script>
+/* The browser half of the assertion, on the page that has no JS bundle. Everything that
+   decides anything is on the server; this translates base64url to the ArrayBuffers the
+   platform API insists on, and back.
+
+   The challenge is fetched, used once and never composed here — and it lives inside the
+   parked sign-in on the server, so it dies with the hold rather than outliving it. */
+const _b64uToBytes = s => {
+    const pad = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(pad + '='.repeat((4 - pad.length % 4) % 4));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+};
+const _bytesToB64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+const _CSRF = {{ csrf_token | tojson }};
+const _MSG = {
+    touch: {{ i18n.mfa_key_touch | tojson }},
+    failed: {{ i18n.mfa_key_failed | tojson }},
+    browser: {{ i18n.mfa_key_browser_error | tojson }},
+};
+
+async function _loginKeyGo() {
+    const btn = document.getElementById('mfaKeyBtn');
+    const msg = document.getElementById('mfaKeyMsg');
+    const post = (url, body) => fetch(url, {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': _CSRF},
+        body: JSON.stringify(body || {}),
+    }).then(r => r.json().catch(() => ({})));
+    if (!(window.PublicKeyCredential && navigator.credentials)) {
+        msg.textContent = _MSG.browser;
+        return;
+    }
+    btn.disabled = true;
+    msg.textContent = _MSG.touch;
+    try {
+        const d = await post('/login/mfa/webauthn/begin');
+        if (!d.ok) { throw new Error(d.error || 'begin'); }
+        const cred = await navigator.credentials.get({publicKey: {
+            challenge: _b64uToBytes(d.challenge),
+            rpId: d.rp_id,
+            allowCredentials: [{type: 'public-key', id: _b64uToBytes(d.credential_id)}],
+            timeout: d.timeout_ms,
+            userVerification: 'preferred',
+        }});
+        const out = await post('/login/mfa/webauthn/verify', {
+            credential_id: _bytesToB64u(cred.rawId),
+            auth_data: _bytesToB64u(cred.response.authenticatorData),
+            client_data_json: _bytesToB64u(cred.response.clientDataJSON),
+            signature: _bytesToB64u(cred.response.signature),
+        });
+        if (!out.ok) { throw new Error(out.error || 'verify'); }
+        // The server decides where this account lands, the same as the code path does.
+        window.location.href = out.next || '/admin';
+        return;
+    } catch (e) {
+        // Escape or a walk-away arrives here too, and neither deserves a red message: the
+        // code field is still there and is what somebody falls back to.
+        msg.textContent = (e && (e.name === 'NotAllowedError' || e.name === 'AbortError'))
+            ? '' : _MSG.failed;
+    }
+    btn.disabled = false;
+}
+</script>
+{% endif %}
 {% endblock %}

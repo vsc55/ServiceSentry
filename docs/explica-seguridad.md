@@ -15,9 +15,36 @@ Referencia completa de los mecanismos de seguridad implementados en la interfaz 
    - Si LDAP falla por error de red y `fallback_to_local = true` → intenta autenticación local.
 3. Se busca el usuario en el **almacén de usuarios de la base de datos**; si no existe o la contraseña es incorrecta → el **formulario muestra siempre "Invalid credentials"** (mensaje genérico — evita enumeración de usuarios). Si la cuenta existe pero está desactivada o bloqueada → **mismo mensaje genérico** (anti-enumeración). El motivo real se registra en el log de auditoría como `detail.reason`.
 4. La contraseña se verifica con `werkzeug.security.check_password_hash` (**scrypt** por defecto en Werkzeug 3.x). El camino de autenticación está diseñado para tener **tiempo constante** con independencia de si el usuario existe (ver [Anti-enumeración por tiempo](#anti-enumeración-por-tiempo-timing)).
-5. Si es correcta → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
-6. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked`, `invalid_credentials`, `ldap_invalid_credentials`, `ldap_user_not_found` o `ldap_connection_error`). Los logins LDAP/OIDC exitosos incluyen `detail.auth_source`.
-7. El login usa el patrón **POST / Redirect / GET**: en caso de fallo se usa `flash()` y se redirige al `GET /login`, evitando el diálogo de reenvío de formulario al pulsar F5.
+5. Si la cuenta **debe un segundo factor** —porque tiene uno dado de alta, o porque la política
+   `web_admin.mfa_required` le aplica y no lo tiene— **no se crea sesión ninguna**: queda una
+   **nota en la cookie** (`mfa_pending`) y se redirige a `/login/mfa` o a `/login/mfa/enrol`. Un
+   inicio de sesión a medias no es una sesión: sin fila en el registro, sin `logged_in` y sin
+   pasar `_login_required`, la petición sigue siendo anónima **por no tener sesión**. Al
+   verificar el código se **vuelve a leer la cuenta** —entre las dos mitades puede haberse
+   desactivado— y entonces sí se crea. Ver [explica-mfa.md](explica-mfa.md).
+6. Si es correcta y la cuenta **no debe un segundo factor** → se crea una entrada en el **registro de sesiones** del servidor (`_sessions`) con un token de 32 bytes aleatorios (64 hex) y se guarda en la cookie de sesión Flask.
+7. El evento `login_ok` o `login_failed` se escribe en el **registro de auditoría**. En caso de fallo, el campo `detail.reason` almacena la clave i18n que describe la causa real (`user_not_found`, `account_disabled`, `account_locked`, `invalid_credentials`, `ldap_invalid_credentials`, `ldap_user_not_found` o `ldap_connection_error`). Los logins LDAP/OIDC exitosos incluyen `detail.auth_source`.
+8. El login usa el patrón **POST / Redirect / GET**: en caso de fallo se usa `flash()` y se redirige al `GET /login`, evitando el diálogo de reenvío de formulario al pulsar F5.
+
+### Segundo factor (MFA)
+
+El detalle completo —política `off`/`admins`/`all`, confianza por proveedor SSO, alta con QR,
+códigos de recuperación, antirreplay, llaves de seguridad WebAuthn, auditoría y reset— vive en
+**[explica-mfa.md](explica-mfa.md)**, que es la fuente única del tema. Lo que importa aquí es
+cómo encaja con lo demás de esta página:
+
+- **No hay sesión hasta que el código verifica.** El paso intermedio es una nota en la cookie,
+  así que ninguna guarda de este documento tiene que aprender un estado nuevo.
+- **Un código rechazado alimenta fail2ban** por la vía `auth`, igual que una contraseña
+  equivocada: si no, la segunda puerta sería la que no tiene límite de intentos. Ver
+  [fail2ban interno](#fail2ban-interno-bans-de-ip-a-nivel-de-servicio).
+- **El bloqueo de cuenta por intentos sigue siendo el de la contraseña.** Un factor no lo
+  sustituye.
+- **La semilla se cifra con el mismo Fernet** que el resto de secretos ([Cifrado de
+  credenciales](#cifrado-de-credenciales-en-disco)); los códigos de recuperación se guardan
+  **hasheados**, porque nadie necesita volver a leerlos.
+- **Quitarle el factor a otro** es un permiso propio, `mfa_reset_others`, de nadie por defecto
+  ([ref-permisos.md](ref-permisos.md)).
 
 ### Anti-enumeración por tiempo (timing)
 
@@ -473,7 +500,7 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 
 ## Control de Acceso Basado en Roles (RBAC)
 
-> El **catálogo completo** de permisos (73 flags), roles integrados, roles personalizados y
+> El **catálogo completo** de permisos (75 flags), roles integrados, roles personalizados y
 > grupos es la fuente única en **[ref-permisos.md](ref-permisos.md)**. Esta sección cubre solo
 > las **propiedades de seguridad** del RBAC.
 
@@ -661,6 +688,15 @@ Los campos sensibles se cifran en reposo usando **Fernet** (AES-128-CBC + HMAC-S
 
 Estos nombres del core viven en `secret_manager.ENCRYPT_KEYS`
 ([lib/security/secret_manager.py:34](../src/lib/security/secret_manager.py#L34)).
+
+**Fuera de esa lista, con el mismo Fernet:** la semilla TOTP del segundo factor
+(`mfa_factors.secret`), que `MfaStore` cifra a mano al escribirla. No está en `ENCRYPT_KEYS`
+porque la diferencia importa: `encrypt_sensitive` **guarda el valor en claro y lo registra** si
+no puede cifrar —lo correcto para una contraseña que nadie quiere perder—, y para una semilla de
+segundo factor lo correcto es lo contrario, **negarse a escribir**. Sin clave no hay alta, y la
+política de MFA cede en vez de guardar en claro el secreto que la sostiene. Los códigos de
+recuperación no se cifran: se guarda su **hash**, porque nada necesita leerlos de vuelta. Ver
+[explica-mfa.md](explica-mfa.md#qué-se-guarda).
 
 #### Descubrimiento de secretos de módulos (schema-driven)
 

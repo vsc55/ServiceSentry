@@ -8,6 +8,88 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.90] - 2026-08-19
+
+### Added
+- **Edit user names which second factors an account has**, beside the badge, and the
+  confirmation says what removing them costs. The button always took ALL of them — one factor
+  left standing is worse than none, because it reads as protection that is not there — but the
+  screen said only "on", so an administrator fixing a lost phone also unregistered a security
+  key the person was still carrying, and found out afterwards.
+  - The listing carries `mfa_methods` beside the boolean, from one query for the whole page
+    (`methods_by_user()`). The TABLE still draws the boolean and nothing more: a column read at
+    a glance down forty rows answers "protected or not", and which kind is not a question a
+    list is asked. The kinds are for the modal, which is about one account.
+  - Still nothing ABOUT a factor: no secret, no credential id, no recovery codes.
+- **Security keys work end to end (WebAuthn).** The ceremonies and their vectors have been in
+  the tree since build.85; this is the wiring that makes them reachable — registering a key
+  from `/account`, and using it to finish a sign-in the password alone did not finish.
+  - `POST /api/v1/account/mfa/webauthn/{begin,confirm}` to register,
+    `POST /login/mfa/webauthn/{begin,verify}` for the parked sign-in.
+  - **The challenge is never echoed back for the client to return.** Registration keeps it in
+    the cookie and spends it once; the login one lives INSIDE the parked note, so it dies with
+    the hold rather than outliving it.
+  - Stored **confirmed** on arrival: unlike a TOTP enrolment the ceremony IS the proof, so
+    asking for one more touch would be theatre. The algorithm is recorded at registration —
+    a key that names its own when the assertion arrives is the JWT `alg` flaw in other words.
+  - The assertion goes through the same gate as the code and in the same order: re-read the
+    account, clear the hold, establish the session, log it. A second copy of that sequence is
+    a copy that forgets one of the checks.
+  - Whether the key is OFFERED is decided on the server — this account has one, this install
+    can scope one. A button the server would refuse teaches people the feature is broken.
+  - A key and an authenticator app coexist: two rows of `mfa_factors` for one account, and the
+    card names both.
+  - The ceremony fabricator moved to `tests/webauthn_fabric.py`, shared by the unit file and
+    the integration one so both suites agree on what a valid ceremony looks like.
+
+### Fixed
+- **`enrolled` counted only the TOTP row**, so an account whose only factor was a security key
+  looked like an account with no factor — and the login step reads exactly that. It counts any
+  confirmed method now, and answers which ones there are.
+- **The stored public key was truncated.** `cbor.decode_from` answers how far it read FROM
+  WHERE IT STARTED, and the slice that kept the key's own bytes treated that number as an
+  absolute offset. It stored without complaint and failed on the first sign-in — the shape of
+  bug that only surfaces on the second half of a feature. Guarded where it broke: the raw
+  bytes must decode back to the same key, extensions after them or not.
+- **Three reference documents claimed a permission catalogue that was two flags short.**
+  `PERMISSIONS` holds 75; `ref-permisos.md` said 73 and named neither `mfa_reset_others` nor
+  `ipban_config_edit`, and five other files repeated the number. A catalogue that is the
+  declared single source and is wrong is worse than no catalogue: it gets read instead of the
+  code.
+- **Two internal doc anchors had rotted** — `explica-web-admin.md` pointed at a
+  `#sistema-de-permisos` that no longer exists, and the `ref-tests.md` index still linked
+  section 81 by its old title.
+
+### Documentation
+- **MFA is documented where each reader looks for it, not only in its own file.**
+  `explica-mfa.md` was already the single source, but the five documents it links out to held
+  none of the facts they were pointed at for — so every link out of it landed on a page that
+  did not mention the second factor.
+  - `ref-api.md` gains the eight endpoints with their guards, and the four `/login/mfa*` routes
+    in the authentication table — with what "parked sign-in" means, since it is the one thing
+    on that page authorised by something other than a session.
+  - `ref-configuracion.md` gains the six keys (`mfa_required`, `mfa_hold_secs`,
+    `webauthn_rp_id`, and `mfa_trusted` in each of the three SSO sections) with their `SS_*`
+    and the cost of changing `webauthn_rp_id`: every key already registered stops working.
+  - `ref-cli.md` gains `user mfa-reset` / `user mfa-status` and why the way back in lives on
+    the machine at all.
+  - `ref-permisos.md` gains `mfa_reset_others`, and `ref-esquema-bd.md` stops saying `method`
+    is "always `totp` today" — it has been `webauthn` too since the keys shipped.
+  - `explica-seguridad.md` gains the step that was missing from the login flow (there is no
+    session until the code verifies), and the note that the TOTP seed is encrypted with the
+    same Fernet but deliberately NOT through `ENCRYPT_KEYS`, which stores in the clear when it
+    cannot encrypt.
+  - `explica-web-admin.md` gains the six audit events, the `/account` page, and what the users
+    views say about the second factor. `caso-entra-id.md` gains `mfa_trusted` where Conditional
+    Access already asks.
+- **`explica-mfa.md` now maps its own seams**: every place OUTSIDE `lib/core/mfa/` that touches
+  MFA — the two mixins on the app, the three SSO doors, the config registry and its validation,
+  the users listing, the CLI, and the six templates. The domain is self-contained; where it
+  crosses the rest of the app was not written down anywhere, which is how a change lands in a
+  place nobody thought to look.
+- It also gains where the state is VISIBLE (table, cards, effective access, edit modal) and why
+  only the modal names the kinds.
+
 ## [0.0.1+build.89] - 2026-08-19
 
 ### Added

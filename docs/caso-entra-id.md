@@ -258,7 +258,14 @@ Google / Keycloak) que rellenan `provider_url` + claims.
 
 `enabled`, `auto_create_users`, `provider_url`, `client_id`, `client_secret`, `scopes`
 (por defecto `openid email profile`), `username_claim`, `email_claim`, `name_claim`,
-`groups_claim`, `group_role_map`, `default_role`, `button_label`.
+`groups_claim`, `group_role_map`, `default_role`, `button_label`, `mfa_trusted`.
+
+> **Si Entra ya exige MFA** (acceso condicional), enciende `mfa_trusted` en la sección del
+> proveedor para no pedirlo dos veces: la cuenta demostró dos cosas antes de que el panel la
+> viera. Está **apagado por defecto** a propósito —el panel pide lo que puede verificar él hasta
+> que un operador diga que lo hace el directorio— y es una afirmación sobre **esa puerta**: quien
+> además tenga contraseña local sigue cumpliendo la política del panel al entrar por ella. Ver
+> [explica-mfa.md](explica-mfa.md#confiar-en-un-directorio-que-ya-lo-pide).
 
 > **OIDC no tiene pasos manuales**: la config de apps OIDC/OAuth de Entra **sí** es
 > establecible por Graph (redirect URIs, claims, permisos), así que el asistente lo deja
@@ -338,7 +345,7 @@ o **cifrado de token** (ninguna activa por defecto — `lib/providers/saml/auth.
 `enabled`, `auto_create_users`, `sp_entity_id`, `sp_acs_url`, `sp_cert`, `sp_key`,
 `sp_app_id`, `sp_object_id`, `graph_secret`, `idp_entity_id`, `idp_sso_url`, `idp_cert`,
 `username_attr`, `email_attr`, `name_attr`, `groups_attr`, `group_role_map`,
-`default_role`, `button_label`. Los campos PEM (`sp_cert`, `sp_key`, `idp_cert`) se
+`default_role`, `button_label`, `mfa_trusted`. Los campos PEM (`sp_cert`, `sp_key`, `idp_cert`) se
 renderizan como **textarea**.
 
 ### Mapeo Grupos → Rol

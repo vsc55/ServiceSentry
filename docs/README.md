@@ -46,12 +46,12 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [explica-notificaciones.md](explica-notificaciones.md) | Notificaciones: arquitectura (contexto→router→registros de canales y eventos), canales (Telegram HTML, Email SMTP/M365/Gmail, Webhooks HMAC, Microsoft Teams), matriz de routing dinámica por evento, notificación agrupada del monitor, severidad *warning*, y el sistema de textos/plantillas (resolución custom→i18n, listados editables y esquema de tags) |
 | [explica-hosts.md](explica-hosts.md) | Modelo host-céntrico: un host = dirección + perfiles de conexión por protocolo (SSH/SNMP/DB…), referencia por `host_uid`, ejecución host-aware (local/SSH), resolución y migración asistida inline→host |
 | [ref-configuracion.md](ref-configuracion.md) | config.json (database, syslog, syslog_db, ldap, oidc, saml2, email, notifications, webhooks, modules…), receptor syslog, gestor de eventos, configuración de módulos en BD (tablas `module_config`/`module_config_items`), estado de checks, opciones CLI, variables de entorno (`SS_*`), sistema de debug |
-| [ref-cli.md](ref-cli.md) | CLI de gestión one-shot: subcomandos `user`/`group` (alta/baja/rol/contraseña/grupos), `status` y `reload` de servicios; contexto headless, capa de servicio compartida en `lib/core` (rutas web + CLI) y auto-discovery de servicios |
+| [ref-cli.md](ref-cli.md) | CLI de gestión one-shot: subcomandos `user`/`group` (alta/baja/rol/contraseña/grupos, reset del segundo factor), `status` y `reload` de servicios; contexto headless, capa de servicio compartida en `lib/core` (rutas web + CLI) y auto-discovery de servicios |
 | [ref-modulos.md](ref-modulos.md) | Los 20 módulos integrados: referencia de configuración, campos y flujo de cada uno |
-| [explica-web-admin.md](explica-web-admin.md) | Interfaz web Flask: características, roles (73 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
+| [explica-web-admin.md](explica-web-admin.md) | Interfaz web Flask: características, roles (75 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [explica-seguridad.md](explica-seguridad.md) | Autenticación (local/LDAP/OIDC/SAML2), semántica RBAC (escalada, IDOR), sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
 | [explica-mfa.md](explica-mfa.md) | Verificación en dos pasos: el paso intermedio del login (una nota, nunca una sesión), la política `off`/`admins`/`all` que no puede dejar a nadie fuera, confianza por proveedor SSO, TOTP y códigos de recuperación, qué se guarda y cifrado, auditoría, reset por administrador y CLI, y dónde está WebAuthn |
-| [ref-permisos.md](ref-permisos.md) | Fuente única del RBAC: catálogo de los 73 flags de permiso, roles integrados/personalizados, grupos, permisos dinámicos (módulo/servidor/cluster) y estructuras internas |
+| [ref-permisos.md](ref-permisos.md) | Fuente única del RBAC: catálogo de los 75 flags de permiso, roles integrados/personalizados, grupos, permisos dinámicos (módulo/servidor/cluster) y estructuras internas |
 | [caso-entra-id.md](caso-entra-id.md) | Microsoft Entra ID: SSO (OIDC y SAML2) + asistentes de registro de app (Device Code) para SSO/SCIM/M365-email/Teams; flujo, campos de config y **limitaciones** de Graph (config básica de SAML manual, dominios no verificados, `instantiate`, `servicePrincipalNames`) + resolución de problemas |
 | [caso-scim.md](caso-scim.md) | Aprovisionamiento SCIM 2.0 (agnóstico del IdP): activar endpoint + token, JIT vs SCIM, configurar Entra/Okta/otros IdP, altas/bajas y soft-delete de grupos, badges |
 | [caso-ssh-hardening.md](caso-ssh-hardening.md) | Endurecer los hosts monitorizados: cuenta dedicada, comando forzado + envoltorio con allowlist ([ssentry-wrap](ssentry-wrap)), sudoers mínimo para remediación |
@@ -85,7 +85,7 @@ Guía rápida por temas de documentación técnica → documento(s) donde se cub
 | **Instalación** (Linux/Windows/Docker) | [caso-despliegue.md](caso-despliegue.md) · [caso-docker.md](caso-docker.md) · [caso-desarrollo.md](caso-desarrollo.md) |
 | **Despliegue** (producción, proxy inverso, HTTPS, systemd, Compose, k8s) | [caso-despliegue.md](caso-despliegue.md) · [caso-docker.md](caso-docker.md) · [caso-kubernetes.md](caso-kubernetes.md) · [caso-ssh-hardening.md](caso-ssh-hardening.md) |
 | **Seguridad** (auth, CSRF, XSS, SQLi, sesiones, cifrado) | [explica-seguridad.md](explica-seguridad.md) · [caso-entra-id.md](caso-entra-id.md) |
-| **Segundo factor / MFA** (TOTP, política, códigos de recuperación, WebAuthn) | [explica-mfa.md](explica-mfa.md) · [explica-seguridad.md](explica-seguridad.md) |
+| **Segundo factor / MFA** (TOTP, política, códigos de recuperación, WebAuthn) | [explica-mfa.md](explica-mfa.md) · [explica-seguridad.md](explica-seguridad.md) (dónde encaja en el login) · [ref-api.md](ref-api.md) (endpoints) · [ref-configuracion.md](ref-configuracion.md) (claves y `SS_*`) |
 | **SSO / provisioning** (Entra ID, SCIM, LDAP) | [caso-entra-id.md](caso-entra-id.md) · [caso-scim.md](caso-scim.md) · [explica-seguridad.md](explica-seguridad.md) |
 | **Permisos / RBAC** (flags, roles, grupos) | [ref-permisos.md](ref-permisos.md) · [explica-seguridad.md](explica-seguridad.md) (semántica) |
 | **i18n** (traducción, tags, plantillas de texto) | [explica-i18n.md](explica-i18n.md) · [ref-i18n.md](ref-i18n.md) · [explica-notificaciones.md](explica-notificaciones.md) |
@@ -109,7 +109,7 @@ ServiceSentry es una herramienta de monitorización para sistemas que:
 - Detecta **cambios de estado** — no envía notificación si el estado no ha cambiado (sin spam).
 - Envía alertas por **Telegram**, **Email** (SMTP / Microsoft 365 / Gmail), **Webhooks** (con firma HMAC) y **Microsoft Teams**, con matriz de routing por evento y severidad *warning* (aviso ámbar) además de caído/recuperado.
 - **Receptor syslog** integrado (RFC 3164/5424, UDP/TCP/TLS) con BD dedicada opcional, y un **gestor de eventos** que notifica reglas sobre eventos de auditoría o syslog.
-- Incluye **interfaz web de administración** (Flask) con RBAC (73 permisos), grupos, modo oscuro, historial con gráficas e i18n.
+- Incluye **interfaz web de administración** (Flask) con RBAC (75 permisos), grupos, modo oscuro, historial con gráficas e i18n.
 - **Autenticación externa** opcional: LDAP/AD, SSO OIDC/OAuth2 y SAML2, con sincronización de usuarios y mapeo de grupos a roles.
 - **Persistencia pluggable**: SQLite por defecto, o PostgreSQL/MySQL; el esquema se valida y reconcilia automáticamente en cada arranque.
 - Soporta ejecución **local** y **remota** (SSH vía paramiko).

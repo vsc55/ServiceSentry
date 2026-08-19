@@ -254,7 +254,8 @@ async function openUserModal(username, mode = 'edit') {
         _umMfa.classList.toggle('d-none', isNew);
         // Repainted on every open: a reset earlier in this session left it saying "not set
         // up", and the next account this modal opens on may well have one.
-        _umMfaPaint(!!u.mfa, (currentUser.permissions || []).includes('mfa_reset_others'));
+        _umMfaPaint(!!u.mfa, (currentUser.permissions || []).includes('mfa_reset_others'),
+                    u.mfa_methods || []);
     }
 
     document.getElementById('umRoleSearch').value = '';
@@ -387,12 +388,25 @@ async function saveUserModal() {
  *  block vanish under the pointer that had just clicked it — which reads as the section
  *  breaking rather than as the thing you asked for having happened.
  */
-function _umMfaPaint(on, canReset) {
+function _umMfaPaint(on, canReset, methods) {
     const badge = document.getElementById('umMfaState');
     if (badge) {
         badge.className = 'badge ' + (on ? 'text-bg-success' : 'text-bg-secondary');
         badge.innerHTML = `<i class="bi ${on ? 'bi-shield-check' : 'bi-shield-slash'} me-1"></i>`
             + esc(t(on ? 'mfa_state_on' : 'mfa_state_off'));
+    }
+    // WHICH kinds, beside the badge. The button below removes them ALL — one factor left
+    // standing is worse than none, because it reads as protection that is not there — so the
+    // screen has to name what it is about to take, and a security key is the half somebody is
+    // still carrying in their pocket while an administrator fixes their lost phone.
+    const kinds = document.getElementById('umMfaKinds');
+    if (kinds) {
+        const list = (methods || []);
+        kinds.innerHTML = (on && list.length) ? list.map(m =>
+            `<span class="badge bg-body-secondary text-body-secondary fw-normal border ms-1"
+               ><i class="bi ${m === 'webauthn' ? 'bi-key-fill' : 'bi-phone'} me-1"></i>${
+               esc(t(m === 'webauthn' ? 'mfa_method_webauthn' : 'mfa_method_totp'))}</span>`
+        ).join('') : '';
     }
     document.getElementById('umMfaReset')?.classList.toggle('d-none', !(on && canReset));
 }
@@ -407,7 +421,9 @@ function _umResetMfa() {
     const username = _editingUser;
     const u = (username && usersData[username]) || {};
     if (!u.uid) return;
-    showConfirmModal(t('mfa_reset_other_q').replace('{}', username), async () => {
+    const _q = (u.mfa_methods || []).includes('webauthn')
+        ? t('mfa_reset_other_q_key') : t('mfa_reset_other_q');
+    showConfirmModal(_q.replace('{}', username), async () => {
         // The confirmation is gone by the time this runs, so the only thing left on screen is
         // the button that opened it — and it is what says the request is in flight.
         const done = ssBtnBusy(document.getElementById('umMfaReset'));
@@ -419,7 +435,8 @@ function _umResetMfa() {
         }
         showToast(t('mfa_reset_other_ok'), 'success');
         u.mfa = false;
-        _umMfaPaint(false, true);
+        u.mfa_methods = [];
+        _umMfaPaint(false, true, []);
         // The list carries the column, so it has to hear about this too.
         if (typeof renderUsers === 'function') renderUsers();
     });

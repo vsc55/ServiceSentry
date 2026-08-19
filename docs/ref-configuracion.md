@@ -348,6 +348,9 @@ Detalle de mecanismos, requisitos y seguridad en [explica-notificaciones.md](exp
 | `web_admin.config_update_banner_secs` | int | `8` | Segundos que se muestra el banner de "configuración actualizada" (0–60) |
 | `web_admin.lockout_max_attempts` | int | `5` | Intentos fallidos antes de bloquear la cuenta (0 = desactivado) (0–100) |
 | `web_admin.lockout_duration_secs` | int | `900` | Duración del bloqueo de cuenta en segundos (60–86400) |
+| `web_admin.mfa_required` | string | `"off"` | **Segundo factor obligatorio**: `off` (nadie), `admins` (quien sea administrador por rol **o por grupo**) o `all`. Encenderla **no deja fuera a nadie**: a quien le aplique y no tenga factor se le lleva a una página de alta dentro del propio inicio de sesión. Una cuenta que ya tiene factor lo verifica siempre, valga lo que valga esto. Env: `SS_MFA_REQUIRED`. Ver [explica-mfa.md](explica-mfa.md#quién-debe-llevar-uno). |
+| `web_admin.mfa_hold_secs` | int | `300` | Cuánto vive el inicio de sesión **aparcado** entre la contraseña y el código (30–3600). El suelo son 30 s porque es un paso TOTP: por debajo, el código en pantalla puede caducar antes que la espera y el fallo parece un código equivocado. Env: `SS_MFA_HOLD_SECS` |
+| `web_admin.webauthn_rp_id` | string | `""` | Dominio contra el que se registran las **llaves de seguridad**. Vacío = se deduce de `public_url`. Cambiarlo **inutiliza todas las llaves ya registradas** —el navegador ata la credencial a este valor y no se puede mover—, y por eso no se deduce de la petición, donde lo decidiría el proxy inverso. Env: `SS_WEBAUTHN_RP_ID`. Ver [explica-mfa.md](explica-mfa.md#llaves-de-seguridad-webauthn). |
 | `web_admin.ipban_enabled` | bool | `true` | [fail2ban interno](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio): interruptor maestro (`false` ⇒ nunca banea) |
 | `web_admin.ipban_auth_threshold` | int | `10` | Ofensas de la vía `auth` (login fallido, CSRF…) antes del ban (0 = off) (0–1000) |
 | `web_admin.ipban_auth_window_secs` | int | `600` | Ventana deslizante de la vía `auth` (10–86400) |
@@ -400,6 +403,7 @@ Requiere el paquete opcional `ldap3` (`pip install ldap3`). Si no está instalad
 | `ldap.name_attr` | string | `"displayName"` | Atributo LDAP del que se lee el nombre visible |
 | `ldap.username_attr` | string | `""` | Atributo del que derivar el username (vacío = usa el introducido en login) |
 | `ldap.group_attr` | string | `"memberOf"` | Atributo LDAP del que se leen los grupos |
+| `ldap.mfa_trusted` | bool | `false` | **Ese directorio ya exige un segundo factor**: confiar en él salta tanto el paso del código como el alta obligatoria, porque las dos existen para establecer el mismo hecho. Es una afirmación sobre **esa puerta**: quien además tenga contraseña local sigue cumpliendo la política del panel al entrar por ella. Sin variable de entorno, como el resto de la sección. Ver [explica-mfa.md](explica-mfa.md#confiar-en-un-directorio-que-ya-lo-pide). |
 | `ldap.group_role_map` | string (JSON) | `"{}"` | Objeto JSON `{"CN=Admins,...": "admin", ...}` que mapea grupos LDAP a roles de la app. El patrón casa de forma **exacta** contra el valor de `memberOf` (DN completo) **o** su CN (primer RDN) — no por subcadena (`Admins` no casa `Admins-ReadOnly`) |
 | `ldap.group_display_names` | dict | `{}` | Cache `{DN: nombre visible}` de grupos (autocompletado del mapeo) |
 | `ldap.default_role` | string | `""` | Rol por defecto para usuarios LDAP sin mapeo de grupo (vacío = `none`) |
@@ -423,6 +427,7 @@ Requiere el paquete opcional `authlib` (`pip install authlib`).
 | `oidc.email_claim` | string | `"email"` | Claim del que se extrae el email |
 | `oidc.name_claim` | string | `"name"` | Claim del que se extrae el nombre visible |
 | `oidc.groups_claim` | string | `"groups"` | Claim del que se leen los grupos (p.ej. Object IDs en Entra ID) |
+| `oidc.mfa_trusted` | bool | `false` | **Ese directorio ya exige un segundo factor**: confiar en él salta tanto el paso del código como el alta obligatoria, porque las dos existen para establecer el mismo hecho. Es una afirmación sobre **esa puerta**: quien además tenga contraseña local sigue cumpliendo la política del panel al entrar por ella. Sin variable de entorno, como el resto de la sección. Ver [explica-mfa.md](explica-mfa.md#confiar-en-un-directorio-que-ya-lo-pide). |
 | `oidc.group_role_map` | string (JSON) | `"{}"` | Objeto JSON que mapea valores del claim de grupos a roles de la app |
 | `oidc.group_display_names` | dict | `{}` | Cache `{id de grupo: nombre visible}` (autocompletado del mapeo) |
 | `oidc.default_role` | string | `""` | Rol por defecto para usuarios OIDC sin mapeo de grupo (vacío = `none`) |
@@ -457,6 +462,7 @@ Requiere el paquete opcional `python3-saml` (`pip install python3-saml`). **[alp
 | `saml2.email_attr` | string | `"email"` | Atributo SAML del que se lee el email |
 | `saml2.name_attr` | string | `"displayName"` | Atributo SAML del que se lee el nombre visible |
 | `saml2.groups_attr` | string | `"groups"` | Atributo SAML del que se leen los grupos |
+| `saml2.mfa_trusted` | bool | `false` | **Ese directorio ya exige un segundo factor**: confiar en él salta tanto el paso del código como el alta obligatoria, porque las dos existen para establecer el mismo hecho. Es una afirmación sobre **esa puerta**: quien además tenga contraseña local sigue cumpliendo la política del panel al entrar por ella. Sin variable de entorno, como el resto de la sección. Ver [explica-mfa.md](explica-mfa.md#confiar-en-un-directorio-que-ya-lo-pide). |
 | `saml2.group_role_map` | string (JSON) | `"{}"` | Mapeo `{grupo SAML: rol}` |
 | `saml2.group_display_names` | dict | `{}` | Cache `{grupo: nombre visible}` (autocompletado del mapeo) |
 | `saml2.default_role` | string | `""` | Rol por defecto para usuarios SAML sin mapeo de grupo (vacío = `none`) |

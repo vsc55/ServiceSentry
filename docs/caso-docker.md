@@ -331,7 +331,7 @@ el panel web sobreviven a los reinicios del contenedor.
 | **Credenciales** | | |
 | `SS_USERNAME` | *(obligatorio)* | Usuario del panel de administración |
 | `SS_PASSWORD` | *(obligatorio)* | Contraseña del panel de administración |
-| **App (variables genéricas)** | | Apariencia, seguridad/proxy, log de auditoría, Telegram y nivel de log (`SS_LANG`, `SS_DARK_MODE`, `SS_SECURE_COOKIES`, `SS_REMEMBER_ME_DAYS`, `SS_PROXY_COUNT`, `SS_PUBLIC_URL`, `SS_FORCE_HTTPS`, `SS_FORCE_FQDN`, `SS_AUDIT_MAX_ENTRIES`, `SS_TELEGRAM_*`, `SS_LOG_LEVEL`…) → ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno) |
+| **App (variables genéricas)** | | Apariencia, seguridad/proxy, log de auditoría, Telegram y nivel de log (`SS_LANG`, `SS_DARK_MODE`, `SS_SECURE_COOKIES`, `SS_REMEMBER_ME_DAYS`, `SS_PROXY_COUNT`, `SS_PUBLIC_URL`, `SS_FORCE_HTTPS`, `SS_FORCE_FQDN`, `SS_AUDIT_MAX_ENTRIES`, `SS_MFA_REQUIRED`, `SS_TELEGRAM_*`, `SS_LOG_LEVEL`…) → ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno) |
 | **Página de estado pública** | | |
 | `SS_PUBLIC_STATUS` | `false` | Habilitar el endpoint `/status` sin autenticación |
 | `SS_PUBLIC_STATUS_DETAIL` | `false` | Mostrar el detalle por ítem en la página de estado pública |
