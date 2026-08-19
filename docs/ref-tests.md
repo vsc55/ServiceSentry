@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~4913 tests** (4913 recolectados: 4776 pasan y 43 se saltan bajo `-n auto`, medido el 2026-08-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5.100 tests** (5060 recolectados entre `unit`, `meta` e `integration`; los e2e piden motores o navegador aparte. Medido el 2026-08-18). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -4246,7 +4246,7 @@ enterarse, es justo el caso que motiva el guard.
 
 ## 89. Meta — Este documento
 
-**Archivo:** `tests/meta/test_docs_tests_inventory.py` — 9 tests
+**Archivo:** `tests/meta/test_docs_tests_inventory.py` — 11 tests
 
 Este documento es el mapa de la suite, y hasta ahora **no lo vigilaba nadie** — a diferencia del
 índice de rutas, que sí tiene `test_routes_documented.py` rompiendo el build. Resultado: cuando se
@@ -4264,6 +4264,8 @@ Las comprobaciones son mecánicas a propósito: un fichero está nombrado en el 
 | `TestDocumentAccuracy::test_every_path_the_document_names_exists` | La dirección contraria: un renombrado deja al documento apuntando a la nada, que es como un inventario se vuelve ficción |
 | `TestDocumentAccuracy::test_declared_counts_are_not_rotten` | Los "— N tests" declarados, con tolerancia del 30% |
 | `TestDocumentAccuracy::test_the_headline_total_is_in_the_right_ballpark` | La cabecera `**Total: ~N tests**`, escrita a mano, llegó a estar 500 tests desfasada |
+| `TestTheRowsNameRealTests::test_the_scan_finds_rows` | Que el propio barrido lee algo: más de 100 filas con la forma clase-dos-puntos-test |
+| `TestTheRowsNameRealTests::test_every_named_test_exists` | **La deriva silenciosa**: un renombrado deja la fila describiendo una conducta bajo un nombre que la suite ya no tiene, así que el documento sigue prometiendo un guard que quizá ya no está. Dos aparecieron la primera vez que se ejecutó. Las filas `Clase::*` no se expanden: el número entre paréntesis es prosa, y leerlo fallaría cada vez que se **añade** un test a una clase que la fila describe bien |
 
 > **Por qué los contadores llevan tolerancia y no igualdad exacta:** casar el número exacto exigiría
 > reimplementar la recolección de pytest — solo `parametrize` ya hace que el conteo estático difiera
@@ -4472,7 +4474,22 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 | `TestSidebarSections::*` (3) | Secciones gateadas por permiso, botones de pestaña SPA en toda URL, y el cliente abre el pane que toca según la URL (recarga, deep link, atrás/adelante) |
 | `TestFrontendWiring::*` (3) | La página declara su punto de entrada de render, el panel conserva los placeholders, y el panel no es una standalone |
 
-**Archivo:** `tests/integration/test_wa_account_page.py` — 9 tests
+**Archivo:** `tests/integration/test_wa_account_page.py` — 26 tests
+
+La página creció una tercera tarjeta —el segundo factor— y dejó de caber en una pantalla: la
+contraseña y el MFA quedaban por debajo del pliegue, detrás de dos preferencias que no son a
+lo que se entra aquí. Partida en dos —lo que te gusta, y cómo entras— sobre **el shell de raíl
+del panel**, el mismo que usan Configuración y Módulos: índice al lado, la sección abierta a su
+derecha, y los dos llenando el pane.
+
+Dos maquetas perdieron por el camino y se nombran para no repetirlas: una pila de tarjetas de
+640px centrada en el pane (más página vacía que página) y una barra de pestañas horizontal
+encima (se sienta donde va el título de la sección y mide lo que midan sus etiquetas).
+
+**Guardar vive en la barra de herramientas**, sobre el detalle, y sirve a las dos secciones: la
+que no está en pantalla conserva sus campos en el DOM, así que cambiar de sección nunca se
+lleva una edición por delante. Y la página **no lleva título propio**: la miga de pan de la
+barra superior ya nombra la sección, como en todas las demás.
 
 | Test | Qué comprueba |
 |---|---|
@@ -4481,8 +4498,46 @@ Overview, History y Syslog viven fuera del panel, pero **todas las URL sirven el
 | `TestItIsAPageNotAModal::*` (2) | Es una página, y el modal antiguo **no queda en ningún sitio** |
 | `TestOpensLikeTheOtherPages::test_user_menu_opens_it_spa_on_every_url` | Se abre igual desde cualquier URL |
 | `TestDarkModeMovedToUserMenu::*` (2) | El control de modo oscuro ya no está ni en la página ni en el panel |
+| `TestTheTwoHalvesAreSections::test_both_sections_are_offered` | Los dos botones y los dos destinos existen |
+| `TestTheTwoHalvesAreSections::test_it_uses_the_panel_rail_shell` | Las mismas clases de las que cuelga el índice de Configuración; y sin `mx-auto`, que es lo que la centraba |
+| `TestTheTwoHalvesAreSections::test_the_rail_switches_the_sections_itself` | `.ss-rail` es un `<nav>`, no un `.nav`: el plugin de pestañas de Bootstrap no encuentra lista padre y se calla, así que el cambio va escrito a mano |
+| `TestTheTwoHalvesAreSections::test_the_page_does_not_repeat_the_breadcrumb_title` | La miga de pan ya nombra la sección: un encabezado aquí imprimía «Configuración de Cuenta» dos veces |
+| `TestTheTwoHalvesAreSections::test_preferences_is_the_section_the_markup_opens_on` | Un solo pane activo, y es el inocuo: no se abre sobre un formulario de contraseña |
+| `TestTheTwoHalvesAreSections::test_the_security_section_holds_the_password_and_the_second_factor` | Contraseña y MFA en Seguridad, y **en ninguna otra** |
+| `TestTheTwoHalvesAreSections::test_the_preferences_section_holds_what_save_writes` | Idioma y página de inicio en Preferencias, y en ninguna otra |
+| `TestTheTwoHalvesAreSections::test_save_serves_both_sections_from_the_toolbar` | Guardar vive en la barra, sobre las dos: dentro de una sería invisible desde la otra mientras sus campos se siguen enviando |
 
-**Archivo:** `tests/meta/test_wa_partials_convention.py` — 15 tests
+**La barra dice lo que puede hacer.** Eran Cancelar y Guardar, y las dos estaban mal por lo
+mismo: no decían nada del estado de la página.
+
+**Cancelar no tenía nada que cancelar.** La página abre con lo que ya tiene el servidor y no
+escribe nada hasta Guardar, así que significaba «volver» —que es para lo que está el botón Atrás
+del navegador— mientras se leía como «deshacer», que es lo único que no hacía. **Recargar** es la
+versión honesta: tira lo tecleado y vuelve a preguntar al servidor.
+
+**Guardar estaba siempre disponible**, así que no servía para contestar «¿he cambiado algo?» —una
+pregunta que merece respuesta en una página cuya otra mitad es un formulario de contraseña—.
+Ahora arranca deshabilitado y se enciende con el mismo punto de «sin guardar» que usa
+Configuración. Y **cada campo modificado lo dice por sí mismo** con el mismo acento que
+Configuración usa para lo editado-y-no-guardado: una regla, dos selectores, el color escrito una
+sola vez.
+
+La comparación es contra **lo que la página abrió** y no contra `currentUser`: los dos coinciden
+al principio y solo uno sigue siendo cierto tras guardar.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheToolbarSaysWhatItCanDo::test_the_cancel_button_is_gone` | |
+| `TestTheToolbarSaysWhatItCanDo::test_save_starts_disabled_and_carries_the_dirty_dot` | |
+| `TestTheToolbarSaysWhatItCanDo::test_the_baseline_is_what_the_page_opened_with` | Una línea base leída de un objeto vivo llama limpia a la página en cuanto el objeto se actualiza, hayan cambiado o no los campos |
+| `TestTheToolbarSaysWhatItCanDo::test_both_kinds_of_change_count` | La página nunca recibe la contraseña actual, así que ahí «no vacío» **es** el cambio |
+| `TestTheToolbarSaysWhatItCanDo::test_each_changed_field_says_so_for_itself` | El botón contesta «¿hay algo que guardar?»; el acento contesta «qué» — y es lo único que sobrevive a la sección que no estás mirando |
+| `TestTheToolbarSaysWhatItCanDo::test_the_accent_is_the_one_configuration_uses` | Una regla con dos selectores: si el color se define aparte, «editado y sin guardar» acaba significando dos cosas según la pantalla |
+| `TestTheToolbarSaysWhatItCanDo::test_saving_moves_the_baseline` | Sin esto el botón se queda encendido tras guardar, que es la misma mentira al revés |
+| `TestTheToolbarSaysWhatItCanDo::test_reloading_empties_what_the_password_half_DREW_too` | Los tres campos se vaciaban y el medidor de fuerza no: una barra roja diciendo «Débil» bajo un campo vacío es un veredicto sobre una contraseña que ya no está |
+| `TestTheToolbarSaysWhatItCanDo::test_reloading_over_unsaved_work_asks_first` | Es el único control de la página que puede perder lo tecleado, y pregunta con el diálogo propio, nunca con el del navegador |
+
+**Archivo:** `tests/meta/test_wa_partials_convention.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -5157,7 +5212,8 @@ puede irse — no hay scroll debajo de ella que se la lleve.
 | `TestTheHeaderDoesNotGoBackToSticky::test_the_shell_is_the_bounded_one` | `.ss-main` a `100vh` es justo la razón por la que sticky no podía funcionar |
 | `TestTheSearchBoxIsCollapsed::test_it_starts_closed` | El filtro sirve para encontrar un ajuste entre muchos, no para estar a la vista el resto del tiempo |
 | `TestTheSearchBoxIsCollapsed::test_the_toggle_targets_it` | Incluido el estado cerrado anunciado a accesibilidad |
-| `TestTheSearchBoxIsCollapsed::test_an_active_filter_is_visible_with_the_box_closed` | **La trampa** de esconder el buscador: un filtro activo con la caja cerrada deja media configuración oculta y parece pérdida de datos |
+| `TestTheSearchBoxIsCollapsed::test_closing_the_box_clears_the_filter` | **La trampa** de esconder el buscador, cerrada en origen: un filtro activo con la caja cerrada deja media configuración oculta y parece pérdida de datos, así que cerrar borra el término |
+| `TestTheSearchBoxIsCollapsed::test_the_toolbar_closes_the_card_when_the_box_is_hidden` | Sin nada debajo, la barra **es** el fondo de la tarjeta: un borde recto sin nada bajo él se lee como un panel que no ha renderizado |
 | `TestTheSearchBoxIsCollapsed::test_the_toolbar_closes_the_card_when_the_box_is_hidden` | Sin nada debajo, la barra **es** el fondo del card y tiene que tener su forma; un borde inferior recto sin nada después parece un panel que no llegó a pintarse |
 | `TestTheSearchBoxIsCollapsed::test_opening_it_puts_the_cursor_in_it` | Pulsas la lupa porque vas a escribir; abrir sin foco pide un segundo clic |
 | `TestTheControlsAreStillThere::test_the_header_holds_them_all` | Un cambio de layout no puede dejarse un control por el camino |
@@ -5516,9 +5572,9 @@ página que se auto-refresca, un redibujado que pide datos además compite con s
 
 ## 117. Marcado que no hace lo que sugiere el nombre de la clase
 
-**Archivo:** `tests/meta/test_wa_css_traps.py` — 9 tests
+**Archivo:** `tests/meta/test_wa_css_traps.py` — 18 tests
 
-Tres trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
+Cuatro trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
 
 **Una clase que ignora el tema.** El panel se sirve en claro y oscuro y recuerda cuál elegiste, así que un componente que
 decide sus propios colores acierta la mitad de las veces. El que cayó fue una cabecera de
@@ -5566,8 +5622,61 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 | `TestNoControlWearsTheSurfaceColour::test_the_graphite_button_is_not_one_of_the_surfaces` | Si se define con una variable de superficie, vuelve a ser invisible sobre esa superficie |
 | `TestNoControlWearsTheSurfaceColour::test_it_stays_on_the_neutral_ramp` | Los tres canales del hex, iguales: el tema oscuro es una escala de grises y su único botón oscuro también tiene que serlo |
 | `TestATableCellStaysATableCell::test_no_cell_is_turned_into_a_flex_container` | **La segunda trampa**: `d-flex` en un `<td>` lo saca de `display:table-cell`, deja de contar para la altura de la fila y su borde se dibuja a la altura del contenido — el separador se parte justo en esa columna |
+| `TestARuleThatHidesABarNothingElseDrives::test_the_scan_finds_the_rule_it_is_about` | Si las barras dirigidas por el sidebar dejan de estar ocultas, este guard no está leyendo nada |
+| `TestARuleThatHidesABarNothingElseDrives::test_the_account_nav_is_not_swept_into_it` | Meter `#accountTabs` en esa regla deja la mitad de seguridad de `/account` sin ninguna forma de llegar |
+| `TestARuleThatHidesABarNothingElseDrives::test_the_account_page_still_ships_that_nav` | Renombrar el id dejaría el guard anterior pasando sobre un id que ya no existe |
+| `TestASettingsPageThatFillsItsPane::test_it_hangs_on_the_shared_shell` | `/account` cuelga del raíl compartido y no de una maqueta propia |
+| `TestASettingsPageThatFillsItsPane::test_it_is_not_a_centred_column` | `mx-auto` es lo que la ponía en una columna por el medio de un marco que hay que llenar |
+| `TestASettingsPageThatFillsItsPane::test_the_cards_are_capped_without_being_centred` | Tope para que quepan dos tarjetas de campos y no más; sin margen, que es como vuelve a centrarse |
 
 ---
+
+**Una regla que oculta una barra que nada más gobierna.** `#infraSubTabs, #accessSubTabs,
+#ipbanSubTabs, #tab-events .nav-tabs { display: none }` esconde esas barras de subpestañas
+porque **el sidebar** lleva las mismas subpestañas: los panes siguen cambiando, desde otro
+control. Eso es seguro ahí y solo ahí. Una barra que nada duplica, oculta, es media página sin
+entrada.
+
+`/account` es justo ese caso: no tiene subitems en el sidebar, así que su barra es la única ruta
+a la mitad de seguridad —la contraseña y el segundo factor—. La guarda está sobre la **regla** y
+no sobre el marcado porque el fallo es silencioso: el pane se renderiza, los campos están en el
+DOM, `getElementById` los encuentra, y sencillamente no hay ningún control en pantalla que los
+saque.
+
+---
+
+**Una página de ajustes que no llena su pane.** `/account` se maqueta con el raíl del propio
+panel —el de Configuración y Módulos— y no con una maqueta suya. Antes hubo dos, y las dos se
+reportaron desde la pantalla: una pila de tarjetas de 640px con `mx-auto`, que en un monitor
+ancho dejaba más página vacía que página, y una barra de pestañas horizontal encima, sentada
+donde va el título de la sección.
+
+La guarda es sobre la **forma** y no sobre el aspecto: un `max-width` está bien y un `mx-auto`
+junto a él es lo que estaba mal, porque pone los ajustes en una columna por el medio de un marco
+que se supone lleno.
+
+De paso quedó fuera `.nav-justified` de Bootstrap, y merece anotarse por qué: sus reglas son
+`.nav-justified > .nav-link` y `.nav-justified .nav-item`, así que iguala la **celda** y solo
+estira un enlace que sea **hijo directo** de la barra. Con `<li class="nav-item"><button
+class="nav-link">` —el marcado de todos los paneles con pestañas de esta app— el botón conserva
+su ancho de contenido y solo se centra dentro de una celda igual: las cajas que se ven siguen
+midiendo distinto y el arreglo parece no haber hecho nada.
+
+---
+
+**Un SVG sin tamaño llena lo que le den.** El QR se sirve con `viewBox` y **sin** `width` ni
+`height` a propósito —un cuadrado del tamaño que eligió el servidor es uno que no cabe en el
+móvil de alguien con el brazo estirado—, y el precio de esa decisión es que hereda su
+contenedor. Sin acotar, el contenedor es el diálogo entero: en `modal-lg` se dibujaba a 800px
+y empujaba la clave y el campo de confirmación fuera de vista, así que lo único que la pantalla
+existe para enseñar era lo único que no se veía. Reportado en pantalla, que es donde se
+encuentra siempre esta familia.
+
+La guarda es sobre la **clase** y no sobre el marcado, porque el arreglo tiene que valer para
+el siguiente sitio que enseñe uno: `.ss-qr` acota el ancho y lo hace con `min()` (un móvil más
+estrecho que el tope debe llevarse el ancho que tiene, no un cuadrado más ancho que el
+diálogo), `.ss-qr svg` le dice al SVG que lo tome, y ningún `${d.svg}` del árbol se dibuja sin
+la clase.
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
@@ -7162,3 +7271,404 @@ variable excusa un nombre que ya no significa nada.
 
 Validada por los dos lados quitando una variable del fichero (rojo, nombrándola) e inventando
 una que nadie lee (rojo también). Seis `def test_`, 73 al expandir los `parametrize`.
+
+---
+
+## 154. Segundo factor: la aritmética que decide quién entra
+
+**Archivo:** `tests/unit/test_mfa_totp.py` — 35 tests
+**Archivo:** `tests/unit/test_mfa_qr.py` — 53 tests
+
+Las dos piezas puras sobre las que se apoya el MFA, y las dos se prueban contra **números
+publicados fuera de este repositorio** en vez de contra sí mismas. Es la diferencia entre un
+test y un comentario: un TOTP que coincide consigo mismo no coincide con el teléfono de nadie.
+
+`totp.py` son treinta líneas de aritmética que deciden si alguien entra, y **RFC 6238 Apéndice B
+imprime una tabla** de códigos esperados para un secreto conocido en instantes conocidos. Esa
+tabla es la primera clase del fichero. El resto es lo que el RFC no cubre y de lo que vive o
+muere un login.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheNumbersTheRfcPublishes::*` (7) | Los seis instantes del Apéndice B, a ocho dígitos y a seis (el de seis es la última mitad del de ocho: el truncamiento es el mismo, el módulo no), y que el contador es `floor(unix/30)` — sin eso los vectores no son reproducibles |
+| `TestACodeIsGoodExactlyOnce::*` (3) | El verificador responde **el paso**, no un booleano: un código vive treinta segundos, así que uno leído por encima del hombro —o en una página de phishing— sirve hasta que caduca. El mismo código no vale dos veces, y **tampoco el anterior**, que es donde caería un replay del de hace medio minuto |
+| `TestTheClockToleranceIsOneStep::*` (5) | Un paso a cada lado y ni uno más: cero se lee como «esto está roto» en cualquier máquina medio minuto desfasada, y dos es un código válido durante minuto y medio |
+| `TestEverythingThatIsNotACodeSaysNo::*` (13) | Se llega desde un formulario de login, así que llega toda forma de disparate y **ninguna puede reventar**: vacío, letras, longitud equivocada, `None`. Y falla cerrado — un secreto ilegible no verifica nada, y el código correcto del secreto equivocado sigue siendo incorrecto |
+| `TestReadingASecretTheWayAPersonTypesIt::*` (3) | Minúsculas, espacios y relleno son el mismo secreto: la pantalla lo imprime en grupos de cuatro y alguien lo teclea así |
+| `TestTheLinkTheAppReads::*` (4) | El emisor va **dos veces** a propósito (en el prefijo de la etiqueta, que es lo que leen las apps anteriores a la especificación, y como parámetro, que es lo que define) o la entrada sale como un usuario suelto entre cuarenta; y una cuenta que es un correo sobrevive al viaje — `@` y `:` sin escapar en un segmento de ruta son cómo el enlace llega truncado al teléfono |
+
+`qr.py` es ISO/IEC 18004 escrito a mano porque **no hay ninguna librería de QR en el proyecto ni
+en el entorno**, así que nada se puede comparar contra una segunda implementación. Lo que sí se
+puede comparar es el ejemplo resuelto de la propia norma.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheArithmeticAgainstThePublishedExample::*` (3) | Los diez códigos de corrección que la norma imprime para los dieciséis de datos de su ejemplo (`01234567`, versión 1-M). Y que un byte cambiado cambia el resultado: un polinomio generador mal construido puede seguir devolviendo la **longitud** correcta |
+| `TestTheFormatInformation::*` (13) | Las ocho cadenas publicadas de quince bits para nivel L, que ninguna sale todo a cero (para eso existe la máscara XOR: un área sin escribir no puede leerse como una configuración válida) y que la información de versión lleva la versión en sus bits altos |
+| `TestTheCapacityTableAddsUp::*` (13) | La tabla está transcrita de la norma, y un error al copiarla da un símbolo del tamaño correcto con el número de códigos equivocado — que se lee como una cámara que no enfoca. Datos + corrección = el total de cada versión, la capacidad crece, se elige la versión **más pequeña** que quepa, y lo que no cabe es «ninguna versión» en vez de una excepción |
+| `TestTheSymbolIsShapedLikeAQrCode::*` (10) | Cuadrado, los tres localizadores donde la norma los fija —y **el cuarto ángulo sin localizador**, que es cómo un lector deduce la orientación—, temporización alternando, el módulo oscuro fijo, patrones de alineación desde la versión 2, y que no sale todo de un color |
+| `TestEveryVersionRenders::*` (11) | Las diez versiones, cada una con su estructura de bloques —que es la parte que difiere— y el entrelazado devolviendo el recuento completo de códigos |
+| `TestTheSvg::*` (4) | Autocontenido, con `viewBox` y **sin `width`** (un QR al tamaño que eligió el servidor es uno que no cabe en el móvil de alguien con el brazo estirado), zona de silencio de cuatro módulos, y **nada de la carga llega al marcado**: se construye sólo con enteros, que es lo que permite meterlo en la página como HTML |
+
+Lo que ningún test hace es **acercar un móvil a la pantalla**. Por eso el alta no se fía de esto:
+el secreto en base32 se imprime al lado, y el factor no se enciende hasta que un código generado
+por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta.
+
+---
+
+## 155. Segundo factor: el escalón que pone delante de un login
+
+**Archivo:** `tests/integration/test_wa_mfa.py` — 70 tests
+
+Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
+lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
+
+La propiedad sobre la que descansa todo, y la primera clase del fichero: un inicio de sesión que
+debe un segundo factor **no es una sesión**. Ni fila en la tabla de sesiones, ni `logged_in`, ni
+nada que `_login_required` deje pasar. La alternativa evidente —crear la sesión y marcarla— le
+entrega una sesión real y utilizable por API a quien tenga la contraseña, y hace a cada puerta
+del panel responsable de recordar un campo más. Aquí no hay nada que recordar: hasta que el
+código verifica, la petición es anónima **por no tener sesión**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestAPasswordAloneStopsBeingEnough::*` (5) | Sin factor, nada cambia —lo que permite desplegarlo en una instalación que no ha oído hablar de esto—; con factor, la contraseña aterriza en el segundo paso sin crear sesión; **el aparcamiento no es sesión** (`/api/v1/me` y `/api/v1/users` siguen rechazando y la tabla de sesiones sigue vacía); el código correcto termina, el incorrecto no |
+| `TestTheSecondStepCannotBeWalkedAround::*` (4) | La página exige un inicio aparcado (llegar a la URL a pelo es el login, no una pista de qué falta); un código sin nada aparcado no concede nada; **el código se comprueba contra la cuenta que está a medias**, no contra quien tenga uno que verifique; y una cuenta deshabilitada entre las dos mitades no entra — esto es la segunda mitad de una autenticación, así que relee en vez de fiarse de lo que vio la primera |
+| `TestACodeIsSpentWhenItIsUsed::*` (3) | El mismo código no abre una segunda sesión (treinta segundos es mucho tiempo para tener el código de otro), un código de recuperación sirve una vez, y usar uno deja los otros |
+| `TestManagingYourOwn::*` (5) | El estado **nunca lleva el secreto**, ni siquiera cifrado; darse de alta dos veces se rechaza (sobrescribir en silencio un factor que funciona desde una sesión prestada es el ataque entero que este endpoint sería); y desactivarlo o regenerar los códigos **exigen un código actual** — una sesión es exactamente lo que tiene un atacante que ha robado una |
+| `TestResettingSomebodyElses::*` (4) | Detrás de su propio permiso, que no tiene nadie por defecto (es también lo que haría un atacante con `users_edit` para quitar la protección antes de ir a por la contraseña); un administrador puede retirarlo y la cuenta vuelve a entrar solo con contraseña; **se lleva los códigos de recuperación con él**; y retirárselo a quien no tiene contesta que no lo tiene |
+| `TestRequiringIt::*` (9) | La política (`web_admin\|mfa_required`: `off` / `admins` / `all`). Lo que importa es que **activarla no deja fuera a nadie**: quien le aplique y no tenga factor lo configura *al entrar*, que es la única razón por la que una política así se puede encender con nadie dado de alta. `admins` cuenta a quien lo sea **por grupo** —preguntar solo por el rol propio es el fallo que la auditoría de agosto encontró en otras cuatro guardas—; un factor ya configurado se sigue exigiendo aunque la política se apague; la pantalla de alta **no acuña un secreto para quien ya tiene uno** (si no, una contraseña sola reemplazaría un factor que funciona); una política que **no se puede honrar** —sin clave de cifrado— cede ella en vez de la instalación; y un valor que no es uno de los tres se rechaza al guardar, porque almacenado se leería como «ninguno de los que compruebo», que falla ABIERTO |
+| `TestTrustingADirectoryThatAlreadyAsks::*` (8) | Fase 3: `ldap\|oidc\|saml2` pueden declarar `mfa_trusted` — «este directorio ya lo exige». **Sin confiar por defecto**, que es la dirección conservadora: el panel sigue pidiendo lo que puede verificar él hasta que un operador diga que lo hace el directorio. Confiar salta **las dos mitades** —el código y el alta obligatoria—, porque ambas existen para establecer el mismo hecho y el IdP lo estableció. Y no dice nada de un inicio de sesión **local**: quien además tenga contraseña aquí sigue cumpliendo la política del panel al usarla, o confiar en un directorio desarmaría en silencio todas las demás puertas. Confiar en uno no confía en los otros, una fuente sin sección (la pestaña de Teams) **nunca** se confía, y quitar la confianza vuelve a pedirlo |
+| `TestWhereASecurityKeyWouldBeRegistered::*` (8) | Dónde se registrarían las llaves de seguridad. El navegador ata una credencial al RP ID y **no se puede mover**, así que registrar contra una suposición produce una llave que en silencio no vuelve a funcionar: sin `public_url`, con una IP, o en HTTP plano **no se ofrece** —negarse aquí es una explicación en vez de un error opaco del navegador—. El escape `webauthn_rp_id` permite atarlas a un dominio padre, y se rechaza si el origen no cuelga de él (el navegador lo rechazaría, que es peor sitio para enterarse). Un proxy que el panel no está leyendo es un **aviso y no un rechazo**: la ceremonia funcionaría, lo que se rompe antes es la cookie de sesión, y culpar a WebAuthn mandaría a alguien al ajuste equivocado |
+| `TestTheUsersTableSaysWhoHasOne::*` (4) | La columna MFA de la tabla de usuarios: **una sola consulta** para toda la tabla (el store responde un conjunto de uids justo para que cuarenta cuentas no sean cuarenta viajes), un **booleano y nada más** —la lista de usuarios no tiene por qué saber de qué tipo es el factor, mucho menos nada sobre él—, un store que no puede contestar deja la columna en «no» en vez de tumbar la página, y restablecer desde la pantalla de admin la limpia |
+
+**Y las páginas de inicio de sesión dicen que están trabajando.** Un formulario que **navega**
+no tiene nada que decir mientras espera: el progreso lo lleva el navegador arriba en la pestaña,
+donde no mira nadie que esté tecleando un código, y el botón pulsado se queda exactamente igual
+—así que una respuesta lenta y un botón muerto son la misma foto—. Estas tres páginas **no**
+cargan el bundle JS del panel, así que el shell lleva una versión dirigida por marcado y cada
+formulario se apunta con `data-busy`. Apuntarse y no automático: las mismas páginas llevan un
+formulario al que no hay que tocar, el logout que abandona un inicio de sesión a medias.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSignInPagesSayTheyAreWorking::test_the_shell_ships_the_mechanism` | |
+| `TestTheSignInPagesSayTheyAreWorking::test_the_code_form_opts_in` | |
+| `TestTheSignInPagesSayTheyAreWorking::test_the_enrolment_form_opts_in` | La pantalla desde la que se reportó |
+| `TestTheSignInPagesSayTheyAreWorking::test_the_way_out_is_left_alone` | Deshabilitar el logout por estar ocupada la página quita la única salida justo cuando se quiere |
+
+**Una regeneración fallida deja registro.** Generar códigos nuevos es lo que hace alguien que
+cree que la lista anterior se filtró, así que una negativa merece una línea — y una de sus ramas
+no dejaba **ninguna**. Dos fallos comparten pantalla y no pueden compartir relato: el **código**
+estaba mal (o vacío), que es la persona; o el código estaba **bien** y la regeneración falló
+igual —el factor desapareció entre dos peticiones, o la base de datos no aceptó la escritura—,
+que no tiene nada que ver con quien la envía, contestaba 400 y no registraba nada.
+
+Lo que se le cuenta al navegador es más grueso que lo que se apunta: `empty` y `bad_code` están a
+una línea de auditoría de distancia y las dos contestan `bad_code` por la red.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestAFailedRegenerationLeavesARecord::test_a_wrong_code_is_recorded_with_its_stage` | |
+| `TestAFailedRegenerationLeavesARecord::test_an_empty_code_is_told_apart_in_the_log_and_not_on_the_wire` | Cuál de los dos fue no es algo que devolverle a quien los está mandando |
+| `TestAFailedRegenerationLeavesARecord::test_a_right_code_that_still_fails_is_recorded` | **La rama que estaba muda**: un 400 sin nada escrito es un fallo que después no encuentra nadie |
+| `TestAFailedRegenerationLeavesARecord::test_turning_it_off_without_one_is_recorded_too` | Misma forma y misma razón en desactivar |
+
+**Y las tres vistas contestan lo mismo.** «Cuál de estas cuentas está desprotegida» es una
+pregunta que la sección Usuarios recibe en **tres** sitios —la tabla, las tarjetas y la revisión
+de acceso— y se contestaba en uno. La columna llegó primero porque una tabla tiene una celda por
+fila; las otras dos se callaban, que es peor que no tener la función: una revisión de acceso que
+lista roles y grupos y no dice nada de segundos factores se lee como una donde no le falta a
+nadie.
+
+La marca es **una función** usada por las tres. Un tick que significa «protegida» en la tabla y
+algo ligeramente distinto en la revisión es peor que no tenerlo en dos de ellas.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheThreeViewsAnswerTheSameQuestion::test_the_mark_is_written_once` | |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_it_says_it_in_words_and_not_only_in_colour` | Dos iconos distintos, no solo dos colores |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_the_cards_answer_either_way` | Un chip solo en las protegidas no se puede barrer buscando las otras, que es la dirección en la que se hace la pregunta |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_the_access_review_counts_the_unprotected` | La vista cuyo trabajo **es** la pregunta dice el número, y solo cuenta cuentas que pueden entrar |
+| `TestTheThreeViewsAnswerTheSameQuestion::test_all_three_are_served_by_the_flag_the_api_sends` | Una consulta para toda la tabla, no una por cuenta |
+
+**Cuánto vive el inicio de sesión aparcado** es el único número de este subsistema que **sí** es
+un ajuste (`web_admin|mfa_hold_secs`): es un juicio sobre la sala —un puesto compartido quiere
+sesenta segundos, una llave guardada en un cajón quiere más de cinco minutos— y nadie fuera del
+panel lo ve nunca. Eso es lo que lo separa de los parámetros TOTP de al lado (periodo, dígitos,
+algoritmo), que la norma también deja cambiar y que la mayoría de apps ignoran en silencio:
+ofrecerlos construiría una instalación donde el alta falla en el móvil de alguien sin nada en
+pantalla que lo explique. Se **acota**, no se confía: un cero expiraría la espera antes de que
+la página terminara de dibujarse, y el fallo se leería como un código incorrecto.
+
+**Y un código equivocado cuesta algo en todas partes.** El paso de login contaba un código malo
+como ofensa de la cárcel; los endpoints de la propia cuenta no, y también comprueban códigos.
+Dos de los tres no salían gratis del todo —un 403 lo recoge el hook de after-request y lo cuenta
+en la pista `authz`, la tolerante, que existe para quien navega a una sección que no puede ver;
+adivinar un código no es eso—. El tercero, confirmar el alta, contesta **400**, que el hook ni
+mira: ese no costaba nada. La llamada explícita pone los tres en la pista `auth` y, al marcar la
+petición como contada, la deja en **una** ofensa y no dos.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestHowLongTheParkedSignInLives::test_the_default_is_five_minutes` | |
+| `TestHowLongTheParkedSignInLives::test_the_setting_moves_it` | |
+| `TestHowLongTheParkedSignInLives::test_it_is_clamped_at_both_ends` | Una espera más corta que un paso TOTP puede expirar mientras el código en pantalla sigue siendo el bueno |
+| `TestHowLongTheParkedSignInLives::test_something_that_is_not_a_number_falls_back` | |
+| `TestHowLongTheParkedSignInLives::test_the_parked_note_carries_it` | La nota guarda un vencimiento absoluto, no una duración |
+| `TestAWrongCodeCostsSomethingEverywhere::test_a_bad_code_on_disable_is_one_auth_offense` | **Una** ofensa, y en la pista de autenticación |
+| `TestAWrongCodeCostsSomethingEverywhere::test_a_bad_code_on_regenerate_is_one_auth_offense` | |
+| `TestAWrongCodeCostsSomethingEverywhere::test_the_enrolment_confirm_used_to_cost_nothing_at_all` | Contesta 400, y el hook solo mira 401 y 403 |
+| `TestAWrongCodeCostsSomethingEverywhere::test_a_good_code_costs_nothing` | |
+
+
+---
+
+## 156. WebAuthn: las dos piezas que hay que escribir antes de tocar el navegador
+
+**Archivo:** `tests/unit/test_mfa_cbor.py` — 57 tests
+**Archivo:** `tests/unit/test_mfa_cose.py` — 23 tests
+
+WebAuthn habla **CBOR**: el objeto de atestación es uno, y la clave pública de la credencial es
+otro anidado dentro de una cadena de bytes del primero. No hay librería de CBOR en el proyecto
+y meter una para leer dos estructuras no compensaba —el mismo razonamiento que el codificador
+de QR—, así que se escriben y se validan igual: contra lo que publica la norma.
+
+`cbor.py` es **solo decodificación** (el navegador lo manda y el servidor lo lee; un codificador
+serían cien líneas que solo ejecutarían los tests) y se prueba contra la tabla del **Apéndice A
+del RFC 8949**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTableTheRfcPrints::*` (32) | Las entradas de la tabla que importan: enteros en todos los anchos, negativos (`-1 - n`), cadenas de bytes y de texto, arrays, mapas anidados y los tres valores simples. Y que un negativo **no** se lee como su magnitud: las claves COSE usan etiquetas negativas (`-1`, `-2`, `-3`) para el material de la clave, así que equivocar el signo buscaría el campo equivocado en vez de fallar |
+| `TestItRefusesWhatTheCanonicalFormDoesNotUse::*` (6) | WebAuthn exige la forma **definida** (CTAP2 §6). Aceptar también la de longitud indefinida sería aceptar dos codificaciones del mismo valor, que es cómo una firma se calcula sobre una y se comprueba contra la otra. Una clave repetida se **rechaza** en vez de resolverse —las dos codificaciones discrepan sobre lo que dice el mapa, y elegir una es elegir por quien lo mandó— y los bytes sobrantes de un documento completo son un error |
+| `TestItSaysHowMuchItConsumed::*` (3) | Los datos del autenticador llevan la clave pública como CBOR **seguido** de las extensiones, así que dónde termina la clave es una pregunta con respuesta; un parser que ignora lo que viene detrás no distingue una clave de una clave con algo pegado |
+| `TestEveryMalformedInputIsARefusalAndNotACrash::*` (16) | Corre en la ruta de login sobre bytes que compuso otro: truncados, reservados, texto que no es UTF-8, un campo de longitud que pide un gigabyte **antes de reservar memoria**, y anidamiento profundo acotado —unos pocos bytes de `[[[[…` están si no a un límite de recursión de ser una denegación de servicio en la única ruta alcanzable sin sesión— |
+
+`cose.py` convierte el mapa de etiquetas enteras que devuelve el autenticador en un objeto de
+clave que `cryptography` puede verificar. **No hay tabla publicada** contra la que contrastarlo
+como en los dos casos anteriores, así que los vectores están **fabricados**: se genera un par
+real, se exporta al mapa COSE que mandaría un autenticador, y su firma se comprueba a través de
+este módulo. Es un viaje de ida y vuelta y el fichero lo dice — lo que prueba es que las
+etiquetas se leen con los números que les da la norma, que es la mitad que produce en silencio
+un «firma inválida» para todos los usuarios cuando está mal.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheThreeAlgorithmsAuthenticatorsActuallySend::*` (7) | ES256 (todas las llaves de seguridad), RS256 (lo que produjo Windows Hello durante años y lo que sigue mandando mucho hardware instalado) y EdDSA. Ida y vuelta de los tres, más que una firma sobre otros datos o de otra clave **no** verifica |
+| `TestTheAlgorithmIsTheOneRegistered::*` (3) | Lo que **no** es un viaje de ida y vuelta y es lo que más importa: el algoritmo es el que se guardó al **registrar**, nunca el que la clave declara cuando llega la aserción. Una clave que elige su propio algoritmo al verificar es el fallo del `alg` de JWT con otras palabras. Una clave que discrepa de lo registrado se rechaza; un algoritmo no soportado se rechaza en vez de adivinarse (uno que no se puede comprobar es uno cuya firma habría que creerse); y una clave sin etiqueta `alg` se acepta bajo el registrado, porque no todos los autenticadores la rellenan |
+| `TestAKeyThatIsNotOneIsRefused::*` (13) | Formas que no son una clave COSE, curva o tipo equivocados para el algoritmo, coordenadas del tamaño o tipo equivocados, un módulo RSA **lo bastante pequeño como para factorizarlo** (lo eligió el autenticador, así que el suelo se comprueba en vez de suponerse), y que `verify` no lanza nunca: cada forma de fallar tiene que verse igual desde fuera |
+
+---
+
+## 157. WebAuthn: las ceremonias, desmontadas comprobación a comprobación
+
+**Archivo:** `tests/unit/test_mfa_webauthn.py` — 53 tests
+
+No hay vector publicado de una ceremonia entera como el RFC 6238 publica códigos, así que aquí
+están **fabricadas**: una clave P-256 real, un blob de datos del autenticador montado byte a
+byte con la disposición que fija la norma, y una firma real. Eso por sí solo sólo demuestra que
+el camino feliz se pone de acuerdo consigo mismo — por eso la forma del fichero es la contraria:
+cada clase coge una ceremonia que **sí** verificaría y rompe exactamente una cosa, porque cada
+una de esas cosas es la función entera cuando falta.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheHappyPathAgreesWithItself::*` (3) | Registro → credencial que guardar (id, clave, algoritmo, contador), y una aserción de esa credencial verifica. Una sola clase, a propósito |
+| `TestTheChallengeIsTheOneThisServerIssued::*` (3) | Sin esto, una aserción capturada una vez es replicable para siempre, que es justo lo que un segundo factor existe para impedir. Comparado en **tiempo constante**, y sin challenge no pasa nunca |
+| `TestTheOriginIsCompareExactly::*` (6) | Igualdad exacta y no «termina en»: `https://panel.example.com.attacker.net` pasa cualquier prueba que no lo sea. El esquema y el puerto forman parte de él |
+| `TestTheCredentialIsScopedToThisSite::*` (2) | El hash del RP ID dentro de los datos del autenticador, contra SHA-256 del dominio que sirve el panel — en el registro y en la aserción |
+| `TestSomebodyHasToHaveBeenThere::*` (3) | Sin el flag de presencia, una credencial que se puede ejercer sin que nadie toque nada es un fichero, no un factor. La **verificación de usuario** (PIN/huella) sólo se exige cuando se pide |
+| `TestTheSignatureCoversTheCeremonyAndNotSomethingElse::*` (3) | La firma cubre `authData ‖ SHA-256(clientDataJSON)`, en ese orden: los datos del cliente son donde viven el challenge y el origen, así que una firma que no cubre su hash es una firma sobre una ceremonia que eligió otro. Y una respuesta de **registro** replicada en el login no es un login |
+| `TestACounterThatStopsMoving::*` (5) | La única señal del protocolo que dice que dos dispositivos responden por una credencial. Un cero en cualquiera de los dos lados significa que el autenticador no lleva contador —permitido, y común en los de plataforma—: sólo uno que **existe** y va hacia atrás es prueba |
+| `TestWhereTheRpIdComesFrom::*` (14) | De `public_url` y nunca de la petición: detrás de un proxy inverso la petición dice lo que dijera el proxy, y una credencial registrada contra el nombre equivocado es una que **en silencio no vuelve a funcionar**. Dominio registrable y nada más; una IP o algo inservible da vacío, y el llamante no ofrece WebAuthn en vez de adivinar. El **origen** sí conserva el puerto, porque es lo que manda el navegador |
+| `TestMalformedInputIsARefusalAndNotACrash::*` (14) | Todo llega del navegador por una ruta alcanzable sin sesión: datos más cortos que su cabecera fija, un blob que dice llevar credencial y no la lleva, una longitud de id que se sale del buffer, datos de cliente que no son un objeto, y base64url que no lo es |
+
+---
+
+## 158. Un solo elemento activo en una barra lateral que Bootstrap ve como varias
+
+**Archivo:** `tests/meta/test_wa_spa_nav.py` — 5 tests
+
+El panel es un único shell SPA cuyas secciones son pestañas de Bootstrap, y **no** están todas
+en un mismo `.nav`: las de primer nivel cuelgan de la lista exterior, las de Sistema de un
+`ul.ss-sb-sub.nav` anidado, y la página de cuenta la abre un `.nav-link` oculto de la exterior.
+Bootstrap solo desactiva dentro del grupo que contiene el disparador que le pidieron mostrar
+(`Tab._parent = element.closest('.list-group, .nav, [role="tablist"]')`), así que cruzar de un
+grupo a otro deja estado atrás **por los dos lados**.
+
+**La mitad del pane** — un pane del otro grupo no se oculta nunca y dos secciones se dibujan
+una encima de otra. Ya estaba resuelto: se ocultan todos los panes de primer nivel salvo el
+recién activado.
+
+**La mitad del disparador, que es la que mordió.** `Tab.show()` empieza con
+`if (this._elemIsActive(this._element)) return` (5.3.3): un disparador que aún lleva `.active`
+no se puede volver a mostrar. El barrido que limpia los demás buscaba `.ss-sb-item`, y
+`#btn-nav-account` es un `.nav-link` oculto sin esa clase — nada le quitaba nunca el `.active`.
+Abrir «Mi configuración» una vez, entrar en cualquier sección de Sistema, y el menú de usuario
+quedaba muerto: el botón seguía marcado como activo, `show()` volvía en la primera línea y no
+se levantaba ningún error en ningún sitio.
+
+Por eso la guarda es sobre el **selector**: un barrido escrito en términos de a qué se *parece*
+un disparador seguirá dejándose los que no se parecen a los demás. Escrito en términos de lo que
+un disparador **es** —`[data-bs-toggle="tab"]`— no puede.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_listener_is_found` | Hay dos listeners del mismo evento; se elige por lo que hace, no por ser el primero |
+| `TestEveryTriggerLosesItsActiveMark::test_the_sweep_matches_triggers_by_what_they_are` | **La regresión**: volver a seleccionar por clase deja `.active` puesto en cualquier disparador que no vista `.ss-sb-item` |
+| `TestEveryTriggerLosesItsActiveMark::test_the_account_trigger_is_the_one_that_proves_it` | El disparador de cuenta, nombrado: oculto, sin la clase de la barra, y en el grupo exterior mientras las secciones que roban el resaltado están en el anidado |
+| `TestEveryTriggerLosesItsActiveMark::test_the_sweep_leaves_the_sub_item_highlight_alone` | Los sub-ítems los repunta `_sbSyncSub`: limpiarlos aquí dejaría el resaltado en blanco un fotograma en cada navegación |
+| `TestTheOtherHalfOfTheSameProblem::test_panes_from_the_other_group_are_hidden` | La otra mitad del mismo problema, que ya estaba resuelta y no puede perderse |
+
+---
+
+## 159. Una fila que informa de un estado, no un control que se va de la pantalla
+
+**Archivo:** `tests/meta/test_wa_user_modal_mfa.py` — 14 tests
+
+Admin › Sistema › Editar usuario lleva una fila de segundo factor: una insignia que dice si la
+cuenta tiene uno y un botón que se lo quita. Son dos preguntas distintas, y confundirlas es lo
+que falló dos veces, las dos reportadas desde la pantalla.
+
+La fila nació como **control**: dibujada sólo para una cuenta que *tiene* factor y sólo para
+quien tenga `mfa_reset_others`, con el argumento de que un botón que nadie puede pulsar es
+ruido en un modal que ya lleva cuatro pestañas. Cierto del botón. Falso de la insignia, que
+contesta algo sobre **la cuenta** —lo mismo que ya contesta la columna MFA de la tabla de
+usuarios, así que aquí no aparece nada que la lista no enseñara ya—. Y «sin configurar» es
+justo el estado que interesa ver.
+
+Aplicada al momento del restablecimiento, la misma regla era peor: el bloque desaparecía bajo
+el puntero que acababa de pulsarlo, dejando un toast como única prueba de que algo había
+pasado. Una pieza de interfaz que se quita a sí misma no se distingue de una que se ha roto.
+
+Así que se separan, y este fichero fija la separación: **la insignia** se dibuja para toda
+cuenta existente, en uno de sus dos estados, al abrir y tras restablecer; **el botón** aparece
+sólo si hay factor que quitar y quien mira puede quitarlo; **la fila** sólo se oculta en una
+cuenta **nueva**, que aún no existe para tener factor.
+
+Las guardas leen las dos funciones y no la página servida: qué clases acaban en un elemento
+después de un clic no es algo que conteste una petición.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_two_functions_are_found` | |
+| `TestTheRowStaysAfterAReset::test_the_reset_does_not_hide_the_row` | **La regresión**: ocultar `umMfaGroup` ahí es lo que hacía desaparecer la sección justo cuando tenía algo que decir |
+| `TestTheRowStaysAfterAReset::test_it_repaints_to_the_off_state_instead` | |
+| `TestTheRowStaysAfterAReset::test_the_repaint_happens_only_after_the_server_agreed` | Pintar «sin configurar» antes de la llamada es una pantalla que discrepa de la base de datos mientras dure la petición, y para siempre si falla |
+| `TestTheTwoStatesAreBothDrawn::test_it_paints_either_state` | La insignia lleva sus propias palabras: el estado no va por color solo |
+| `TestTheTwoStatesAreBothDrawn::test_only_the_button_comes_and_goes` | El botón necesita **las dos cosas**: factor que quitar y permiso para quitarlo. La función no toca la visibilidad de la fila |
+| `TestTheTwoStatesAreBothDrawn::test_the_badge_it_paints_exists_in_the_markup` | |
+| `TestOpeningIsTheOtherMoment::test_only_a_new_account_has_no_row` | Ni la falta de factor ni la falta de permiso pueden volver a esconder la fila entera |
+| `TestOpeningIsTheOtherMoment::test_both_the_state_and_the_permission_reach_the_paint` | Las dos preguntas llegan al pintado, que es donde se separan |
+| `TestOpeningIsTheOtherMoment::test_opening_repaints_the_row` | Sin esto, restablecer una cuenta y abrir otra que **sí** tiene factor la enseñaría como «sin configurar» |
+
+**Y la página de cuenta recuerda su sección.** Recargar `/account` estando en Seguridad devolvía
+a Preferencias. El resto de subnavegaciones del panel recuerdan (`ss_active_subtab_*`), y esta
+se reseteaba **a propósito** — el argumento era que reabrir sobre un formulario de contraseña a
+medio escribir no es donde lo dejaste—. Ese argumento no sobrevive a una recarga: los campos se
+vacían al abrir de todas formas, así que lo único que el reseteo tiraba era lo único que valía
+la pena guardar.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheAccountPageRemembersItsSection::test_choosing_a_section_stores_it` | |
+| `TestTheAccountPageRemembersItsSection::test_opening_restores_it` | |
+| `TestTheAccountPageRemembersItsSection::test_an_id_that_no_longer_exists_falls_back` | Una sección renombrada dejaría la página con **todos** los paneles ocultos y nada que lo explique |
+| `TestTheAccountPageRemembersItsSection::test_the_storage_call_cannot_take_the_page_down` | `localStorage` lanza en un navegador con el almacenamiento desactivado, y esto corre en la **entrada** a la página |
+
+---
+
+## 160. Un diálogo, cuatro puertas, y lo que un cuadro con un campo le debe al teclado
+
+**Archivo:** `tests/meta/test_wa_info_modal.py` — 23 tests
+
+`#infoModal` es **un solo elemento** que manejan cuatro helpers: un volcado clave/valor, una
+lista de enlaces, una tabla y `showHtmlModal` —el único cuyo cuerpo compone quien llama, y el
+único que puede llevar un control dentro—. Esa compartición es justo lo que hay que vigilar:
+lo que deja puesto un helper es con lo que abre el siguiente.
+
+**El hueco del pie.** El botón de acción se escribía en el **cuerpo**, así que «Verificar»
+flotaba sobre el pie como si perteneciera al campo de arriba mientras el pie de verdad sólo
+tenía «Cerrar». Se mueve junto a «Cerrar», donde todos los diálogos del panel guardan su
+confirmación — y como el hueco es compartido, se **vacía en cada apertura** desde la única
+función en la que terminan los cuatro. Sin eso, una tabla de variables NUT llega con un botón
+«Verificar» encima.
+
+**Enter.** Los diálogos del segundo factor existen para recibir un código. No hay `<form>` en
+ellos —un modal construido desde una cadena no lo es—, así que Enter en un input suelto no hace
+absolutamente nada: se lee como una tecla ignorada, no como una no soportada. Se ata a mano, y
+el campo se lleva el cursor al abrir el diálogo: la misma observación, dos veces.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_four_openers_are_found` | |
+| `TestEveryOpenerGoesThroughOneDoor::test_none_of_them_shows_the_modal_by_itself` | Un helper que llama a `Modal(...).show()` por su cuenta se salta el sitio donde se vacía el pie |
+| `TestEveryOpenerGoesThroughOneDoor::test_the_shared_door_always_clears_the_slot` | **La regresión**: escribir el hueco sólo cuando *hay* botones deja vivos los del diálogo anterior |
+| `TestEveryOpenerGoesThroughOneDoor::test_only_the_caller_composed_dialog_can_fill_it` | Los tres helpers que escapan reciben datos, no marcado: darles un pie en crudo les regala la propiedad por la que `showHtmlModal` se llama así |
+| `TestEveryOpenerGoesThroughOneDoor::test_the_slot_exists_in_the_markup` | |
+| `TestEveryOpenerGoesThroughOneDoor::test_it_sits_in_the_footer_beside_close` | Y **después** de Cerrar: la confirmación va la última |
+| `TestTheCodeFieldAnswersTheKeyboard::test_enter_runs_the_same_thing_the_button_does` | Enter y el botón son la misma acción, no dos caminos que puedan divergir |
+| `TestTheCodeFieldAnswersTheKeyboard::test_it_stops_the_key_from_doing_anything_else` | Sin `preventDefault`, el mismo Enter puede enviar además el formulario en el que caiga el diálogo |
+| `TestTheCodeFieldAnswersTheKeyboard::test_the_field_takes_the_cursor_when_the_dialog_opens` | Por `shown.bs.modal` al abrir (enfocar antes es un foco que Bootstrap recupera) y directo si el cuadro ya está arriba |
+| `TestTheCodeFieldAnswersTheKeyboard::test_both_dialogs_that_ask_for_a_code_are_wired` | Alta y «pide un código» son dos, y las dos piden lo mismo |
+| `TestTheCodeFieldAnswersTheKeyboard::test_neither_of_them_leaves_its_button_in_the_body` | La regresión de la maqueta: una confirmación escrita en el cuerpo se dibuja sobre el pie y deja a Cerrar solo debajo |
+
+**Y nada espera en silencio.** Cada acción de la tarjeta del segundo factor habla con el
+servidor, y todas lo hacían sin nada en pantalla que lo dijera: pulsas «Verificar» y el diálogo
+se queda exactamente igual hasta que llega la respuesta. Reportado como «no se sabe si está
+haciendo cosas» — que es además el estado en el que se vuelve a pulsar el botón, y un código se
+gasta una vez.
+
+`ssBtnBusy` es el mecanismo único: deshabilita el control, le antepone un spinner y devuelve la
+forma de restaurarlo. Deshabilitar es la mitad del asunto: un spinner que no lo hace es adorno
+delante de un doble envío.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestNothingWaitsInSilence::test_the_helper_disables_as_well_as_spins` | |
+| `TestNothingWaitsInSilence::test_it_restores_a_button_that_was_already_disabled` | `disabled = false` al salir enciende un control que estaba apagado antes de la llamada |
+| `TestNothingWaitsInSilence::test_it_keeps_a_label_and_replaces_a_lone_icon` | Un botón convertido en spinner encoge al ancho de uno: el pie da un salto justo cuando alguien lo está mirando a ver si pasa algo |
+| `TestNothingWaitsInSilence::test_every_request_in_the_card_shows_it` | Acuñar el secreto (aún no hay diálogo, lo lleva el botón de la tarjeta), confirmar el alta, y las dos que piden código |
+| `TestNothingWaitsInSilence::test_the_two_code_spenders_share_one_busy_state` | Regenerar y desactivar pasan por `_accMfaAskCode`: una copia en cada callback son dos reglas que pueden divergir |
+| `TestNothingWaitsInSilence::test_the_shared_one_always_gives_the_button_back` | Sin `finally`, un callback que lanza deja un spinner que no para nunca |
+| `TestNothingWaitsInSilence::test_the_card_says_it_is_asking` | El GET de la tarjeta no tenía botón donde colgarse: se quedaba en su descripción estática todo el viaje |
+
+**Y una negativa se enseña donde ocurrió.** Un código rechazado sacaba un toast: lejos del campo
+del que habla, desaparecido a los pocos segundos mientras el diálogo sigue abierto, y diciendo
+«ese código no es válido» pasara lo que pasara — que es **mentira** cuando el código era correcto
+y falló la escritura, o cuando el factor se quitó desde otra sesión entre medias. Ahora se marca
+el campo y el motivo se escribe al lado, tomado del error del servidor y no supuesto.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestARefusalIsShownWhereItHappened::test_the_reason_comes_from_the_server` | Cuatro motivos con texto propio, y un `default` para el que no se conozca |
+| `TestARefusalIsShownWhereItHappened::test_the_field_is_marked_and_the_message_placed_next_to_it` | Bootstrap solo dibuja `.invalid-feedback` junto a un control `.is-invalid`: van juntos o no se ve ninguno. Y se **selecciona** el código rechazado en vez de borrarlo |
+| `TestARefusalIsShownWhereItHappened::test_both_dialogs_have_somewhere_to_put_it` | |
+| `TestARefusalIsShownWhereItHappened::test_typing_clears_the_last_refusal` | Un campo que sigue en rojo mientras se corrige discute con lo que hay escrito ahora |
+| `TestARefusalIsShownWhereItHappened::test_no_path_falls_back_to_a_toast_for_a_refused_code` | La regresión: `showToast(t('mfa_bad_code'))` es la forma que esto sustituye, y la que se vuelve a escribir en el siguiente diálogo |
+
+---
+
+## 161. Una entrada de auditoría no puede estar mitad en tu idioma y mitad en identificadores
+
+**Archivo:** `tests/meta/test_audit_detail_words.py` — 5 tests
+
+El detalle de una entrada guarda dos clases de cadena muy distintas, y la pantalla las trataba
+igual. La mayoría son **datos** —un host, un fichero, algo que alguien escribió— y traducirlos
+sería absurdo. Unas pocas son **vocabulario que eligió el propio panel** al escribir la entrada:
+`stage: 'forced_enrol'`, `error: 'bad_code'`, `method: 'totp'`. Esas llegaban a la pantalla tal
+cual. Reportado desde el panel: «veo textos como bad_code, forced_enrol».
+
+El renderizador traduce **por campo** y nunca por valor —una regla por valor traduciría un host
+llamado `local`— y toda búsqueda cae al valor crudo, así que la entrada que escriba un módulo
+sigue leyéndose, solo que sin traducir. Ese fallback es también la razón de que no falle nada
+cuando falta una palabra: el síntoma es silencioso, y está a un grep de distancia de cazarse.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScanItself::test_the_renderer_still_translates_by_field` | |
+| `TestTheScanItself::test_the_sources_yield_vocabulary` | |
+| `TestEveryWordThePanelWroteHasWords::test_the_stages_and_reasons_are_translated` | Cada valor literal escrito en un `detail=` y cada `error` que el servicio devuelve tiene su `audit_v_*` en los dos idiomas |
+| `TestEveryWordThePanelWroteHasWords::test_the_field_names_are_translated` | |
+| `TestEveryWordThePanelWroteHasWords::test_the_two_languages_carry_the_same_set` | Una palabra traducida en un idioma y no en el otro es el mismo fallo, encontrado más tarde |

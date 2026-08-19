@@ -1,66 +1,163 @@
 {# Account settings as its own page (served at /account, standalone='account').
-   Personal preferences (language + landing page) and security (change password).
+   Personal preferences (language + landing page) and security (change password + the
+   second factor).
    Dark mode is NOT here — it is the quick toggle in the user menu (see _sidebar.html).
    Fields are populated by initAccountPage() and saved by saveAccountPreferences()
-   (both in partials/account/_render.html). #}
-<div class="mx-auto ss-account-page">
-    <h4 class="mb-3"><i class="bi bi-person-gear me-2"></i>{{ i18n.account_settings }}</h4>
+   (both in partials/account/_render.html).
 
-    <div class="card mb-3">
-        <div class="card-header py-2 fw-semibold">
-            <i class="bi bi-palette me-1"></i>{{ i18n.settings_appearance }}
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label small fw-semibold">{{ i18n.language }}</label>
-                <select class="form-select form-select-sm" id="settingsLang">
-                    <option value="">{{ i18n.system_default }}</option>
-                    {% for l in supported_langs %}
-                    <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="mb-1">
-                <label class="form-label small fw-semibold">{{ i18n.pref_landing_page }}</label>
-                {# Options built by initAccountPage() from HOME_PAGES;
-                   first entry is "Default (…)" = inherit from group/global. #}
-                <select class="form-select form-select-sm" id="settingsLanding"></select>
-                <div class="form-text small">{{ i18n.pref_landing_page_hint }}</div>
-            </div>
-        </div>
-    </div>
+   THE SHELL. Same one Configuration and Modules use: an index down the side, level with the
+   toolbar and running to the bottom of the pane, and the open section beside it filling
+   everything left. Full-bleed on all four edges, because a navigation column is part of the
+   frame and a strip of page background around it reads as the panel having failed to fill.
 
-    <div class="card mb-3">
-        <div class="card-header py-2 fw-semibold">
-            <i class="bi bi-shield-lock me-1"></i>{{ i18n.settings_security }}
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label small fw-semibold">{{ i18n.current_password }}</label>
-                <input type="password" class="form-control form-control-sm" id="settingsPwCurrent" autocomplete="current-password">
-            </div>
-            <div class="mb-3">
-                <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
-                <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password"
-                    oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm');_updatePasswordStrength('settingsPwNew','settingsPwStrengthBar','settingsPwStrengthLabel')">
-                <div class="progress mt-1" style="height:4px" id="settingsPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
-                <div class="text-muted small mt-1" id="settingsPwStrengthLabel" style="min-height:1.1em"></div>
-            </div>
-            <div class="mb-1">
-                <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
-                <input type="password" class="form-control form-control-sm" id="settingsPwConfirm" autocomplete="new-password"
-                    oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm')">
-                <div class="valid-feedback">{{ i18n.passwords_match }}</div>
-                <div class="invalid-feedback">{{ i18n.passwords_dont_match }}</div>
-            </div>
-            <div class="form-text">{{ i18n.leave_empty_no_change }}</div>
-        </div>
-    </div>
+   Three layouts were tried before this one, and the two that lost are worth naming so they
+   are not tried again: a single centred column (the second factor pushed the security half
+   below the fold), and a boxed 640px card stack with tabs — centred in a wide screen, it left
+   more empty page than page, and the tab bar sat where the section title goes.
 
-    <div class="d-flex justify-content-end gap-2">
-        <button type="button" class="btn btn-sm btn-secondary" onclick="_accountCancel()" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
-        <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk" onclick="saveAccountPreferences()" title="{{ i18n.save }}">
-            <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
-        </button>
+   No title of its own either: the breadcrumb in the top bar already names the section, and
+   an <h6> in the toolbar printed "Configuración de Cuenta" twice on the same screen. #}
+<div class="ss-shell">
+    {# The index. `ss-rail-item`, not a Bootstrap pill: this is the panel's own index and it
+       has to look the same here as it does in Configuration. Switching is `_accSection()`
+       rather than `data-bs-toggle` — the rail is not a `.nav`, and a Bootstrap tab that
+       cannot find its parent list fails by doing nothing at all. #}
+    <nav class="ss-rail" aria-label="{{ i18n.account_settings }}" id="accountTabs">
+        <div class="ss-rail-group">
+            <button type="button" class="ss-rail-item active" id="btn-acctab-prefs"
+                    data-acc-section="acctab-prefs" onclick="_accSection('acctab-prefs')">
+                <i class="bi bi-sliders me-1"></i>
+                <span class="text-truncate">{{ i18n.settings_preferences }}</span>
+            </button>
+            <button type="button" class="ss-rail-item" id="btn-acctab-security"
+                    data-acc-section="acctab-security" onclick="_accSection('acctab-security')">
+                <i class="bi bi-shield-lock me-1"></i>
+                <span class="text-truncate">{{ i18n.settings_security }}</span>
+            </button>
+        </div>
+    </nav>
+
+    <div class="ss-shell-main">
+        {# Reload and Save belong to the top edge, over the detail — the same pair, in the same
+           place, that Configuration keeps. Below the cards they were two buttons floating in
+           the middle of a wide empty page.
+
+           RELOAD and not Cancel. There is nothing to cancel: this page opens with what the
+           server already holds and writes nothing until Save. "Cancel" meant "go back", which
+           is what the browser's own Back button is for, and it read as "undo" — the one thing
+           it did not do. Reload is the honest version of the same gesture: throw away what is
+           typed and ask the server again.
+
+           SAVE IS DISABLED UNTIL SOMETHING CHANGES, with the same dirty badge Configuration
+           uses. A button that is always available says nothing about whether there is anything
+           to do, and on a page whose other half is a password form, "did I change something?"
+           is a question worth answering on the button itself. #}
+        <div class="ss-bleed-top" data-ss-pane-head>
+            <div class="ss-toolbar ss-toolbar-plain">
+                <button type="button" class="btn btn-sm btn-secondary ms-auto"
+                        id="btnAccountReload" onclick="_accountReload()"
+                        title="{{ i18n.reload }}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>{{ i18n.reload }}
+                </button>
+                {# One Save for both sections: it writes whatever was filled in — language,
+                   landing page, password — and the section that is not on screen keeps its
+                   fields in the DOM, so switching never drops an edit. #}
+                <button class="btn btn-sm btn-primary" id="btnAccountSettingsOk"
+                        onclick="saveAccountPreferences()" title="{{ i18n.save }}" disabled>
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
+                    <span class="badge text-bg-warning ms-1 d-none" id="badgeAccountDirty"
+                          title="{{ i18n.unsaved_changes }}">●</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="ss-vscroll ss-scroll-pad ss-scroll-fade">
+            <div class="ss-account-body">
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="acctab-prefs" role="tabpanel">
+                      {# A grid, not a column: on a wide screen the cards of a section sit
+                         side by side instead of one narrow strip down the left with the rest
+                         of the page empty. Below `xl` they stack, which is the only thing a
+                         card of form fields can do on a narrow screen. #}
+                      <div class="row g-3">
+                        <div class="col-12 col-xl-6">
+                        <div class="card mb-0">
+                            <div class="card-header py-2 fw-semibold">
+                                <i class="bi bi-palette me-1"></i>{{ i18n.settings_appearance }}
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3" data-acc-field="settingsLang">
+                                    <label class="form-label small fw-semibold">{{ i18n.language }}</label>
+                                    <select class="form-select form-select-sm" id="settingsLang">
+                                        <option value="">{{ i18n.system_default }}</option>
+                                        {% for l in supported_langs %}
+                                        <option value="{{ l }}">{{ i18n['lang_' + l] }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-1" data-acc-field="settingsLanding">
+                                    <label class="form-label small fw-semibold">{{ i18n.pref_landing_page }}</label>
+                                    {# Options built by initAccountPage() from HOME_PAGES;
+                                       first entry is "Default (…)" = inherit from group/global. #}
+                                    <select class="form-select form-select-sm" id="settingsLanding"></select>
+                                    <div class="form-text small">{{ i18n.pref_landing_page_hint }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="acctab-security" role="tabpanel">
+                      <div class="row g-3">
+                        <div class="col-12 col-xl-6">
+                        <div class="card mb-0">
+                            <div class="card-header py-2 fw-semibold">
+                                <i class="bi bi-key me-1"></i>{{ i18n.password }}
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3" data-acc-field="settingsPwCurrent">
+                                    <label class="form-label small fw-semibold">{{ i18n.current_password }}</label>
+                                    <input type="password" class="form-control form-control-sm" id="settingsPwCurrent" autocomplete="current-password">
+                                </div>
+                                <div class="mb-3" data-acc-field="settingsPwNew">
+                                    <label class="form-label small fw-semibold">{{ i18n.new_password }}</label>
+                                    <input type="password" class="form-control form-control-sm" id="settingsPwNew" autocomplete="new-password"
+                                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm');_updatePasswordStrength('settingsPwNew','settingsPwStrengthBar','settingsPwStrengthLabel')">
+                                    <div class="progress mt-1" style="height:4px" id="settingsPwStrengthBar"><div class="progress-bar" role="progressbar"></div></div>
+                                    <div class="text-muted small mt-1" id="settingsPwStrengthLabel" style="min-height:1.1em"></div>
+                                </div>
+                                <div class="mb-1" data-acc-field="settingsPwConfirm">
+                                    <label class="form-label small fw-semibold">{{ i18n.confirm_password }}</label>
+                                    <input type="password" class="form-control form-control-sm" id="settingsPwConfirm" autocomplete="new-password"
+                                        oninput="_checkPwMatch('settingsPwNew','settingsPwConfirm')">
+                                    <div class="valid-feedback">{{ i18n.passwords_match }}</div>
+                                    <div class="invalid-feedback">{{ i18n.passwords_dont_match }}</div>
+                                </div>
+                                <div class="form-text">{{ i18n.leave_empty_no_change }}</div>
+                            </div>
+                        </div>
+                        </div>
+
+                        {# Two-factor authentication. Its own card, and NOT part of what Save
+                           writes: every action here talks to the server on its own, because
+                           each one either creates a secret or spends a code. A field in this
+                           form would have made "Save" mean two very different things. #}
+                        <div class="col-12 col-xl-6">
+                        <div class="card mb-0">
+                            <div class="card-header py-2 fw-semibold d-flex align-items-center">
+                                <i class="bi bi-shield-check me-1"></i>{{ i18n.mfa_section }}
+                                <span class="ms-auto" id="accMfaState"></span>
+                            </div>
+                            <div class="card-body" id="accMfaBody">
+                                <div class="text-muted small">{{ i18n.mfa_desc }}</div>
+                            </div>
+                        </div>
+                        </div>
+                      </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>

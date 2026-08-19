@@ -148,7 +148,9 @@ def register(app, wa) -> None:
                       detail={'reason': 'login_disabled'})
             return redirect(url_for('login'))
 
-        wa._establish_session(username, user)
+        # False means the account owes a second factor — see the OIDC callback.
+        if not wa._establish_session(username, user, source='saml2'):
+            return redirect(url_for('login_mfa'))
         wa._audit('login_ok', username, request.remote_addr,
                   detail={'auth_source': 'saml2'})
         return redirect(wa._landing_url(user))

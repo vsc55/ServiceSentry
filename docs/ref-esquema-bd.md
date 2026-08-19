@@ -24,12 +24,12 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **35 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **37 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 | Grupo | Tablas |
 | ----- | ------ |
-| Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions` |
+| Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `mfa_factors`, `mfa_recovery` |
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
@@ -179,6 +179,68 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 | user_agent | TEXT | no | `''` | |
 
 Índices: `idx_sessions_user_uid(user_uid)`. Rename heredado: `sid`→`uid`.
+
+---
+
+### `mfa_factors` — segundo factor dado de alta, por usuario
+[lib/core/mfa/store.py:39](../src/lib/core/mfa/store.py#L39)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | **PK** |
+| user_uid | TEXT | no | `''` | → `users.uid` |
+| method | TEXT | no | `'totp'` | hoy siempre `totp`; la columna existe para WebAuthn |
+| secret | TEXT | no | `''` | **cifrado** (Fernet, prefijo `enc:`) |
+| confirmed | INTEGER | no | `0` | un alta empezada y no demostrada no concede nada |
+| last_step | INTEGER | no | `-1` | anti-replay: el último paso TOTP aceptado |
+| label | TEXT | no | `''` | |
+| credential_id | TEXT | no | `''` | **WebAuthn**: la credencial que presentará el navegador, base64url |
+| public_key | TEXT | no | `''` | **WebAuthn**: la clave COSE tal como la mandó el autenticador (base64url del CBOR) |
+| alg | INTEGER | no | `0` | **WebAuthn**: el algoritmo, grabado al **registrar** |
+| sign_count | INTEGER | no | `0` | **WebAuthn**: el contador del autenticador; 0 = no lleva |
+| created | TEXT | no | `''` | |
+| updated | TEXT | no | `''` | |
+
+Índices: `idx_mfa_factors_user(user_uid)`.
+
+**Las cuatro columnas de WebAuthn son propias y no reutilizan `secret`**: una clave pública no
+es un secreto, y meterla ahí haría que dar de alta una llave de seguridad fallara en una
+instalación sin clave de cifrado —por un valor que no tiene nada que proteger—. La clave COSE se
+guarda **en la forma en que llegó** y se vuelve a parsear con el decodificador que está probado
+contra la norma: una sola representación y ningún segundo sitio que pueda discrepar sobre qué
+es la clave. Y `alg` se graba al registrar porque una clave que nombra su propio algoritmo
+cuando llega la aserción es el fallo del `alg` de JWT con otras palabras.
+
+`sign_count` avanza con un `UPDATE … WHERE sign_count < ?`, monótono igual que `last_step`: dos
+aserciones compitiendo no pueden dejar que la posterior baje el listón para la anterior, que es
+justo el estado que intentaría producir un autenticador clonado.
+
+**Tabla propia y no una columna en `users`**: el `extra` de `users` se fusiona en el diccionario
+que devuelve el store, y ese diccionario es el que serializa la API de usuarios — un secreto
+TOTP ahí estaría a un `GET /api/v1/users` de distancia de cualquiera con `users_view`.
+
+`last_step` está en la BD y no en memoria porque «ya usado» tiene que valer **entre procesos**:
+dos réplicas del web con un contador local cada una aceptarían el mismo código dos veces.
+
+---
+
+### `mfa_recovery` — códigos de recuperación de un solo uso
+[lib/core/mfa/store.py:60](../src/lib/core/mfa/store.py#L60)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | **PK** |
+| user_uid | TEXT | no | `''` | → `users.uid` |
+| code_hash | TEXT | no | `''` | **hash**, no cifrado |
+| used_at | TEXT | no | `''` | vacío = sin gastar |
+| created | TEXT | no | `''` | |
+
+Índices: `idx_mfa_recovery_user(user_uid)`.
+
+Hasheados y no cifrados: nada necesita leer un código de recuperación, sólo comprobarlo — se usa
+el mismo hasher que las contraseñas, así el coste se mueve con él en vez de ser una segunda
+decisión que nadie revisa. Gastar uno es un `UPDATE … WHERE used_at = ''`, que es lo que hace
+que dos peticiones con el mismo código sólo cambien una fila.
 
 ---
 

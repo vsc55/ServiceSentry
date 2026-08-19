@@ -22,6 +22,34 @@
 <body class="{% block body_class %}{% endblock %}">
     {% block body %}{% endblock %}
     <script src="/static/js/bootstrap.bundle.min.js"></script>
+    {# A form that NAVIGATES has nothing to say while it waits. The browser's own progress is
+       up in the tab, where nobody looking at a code field is looking, and the button that was
+       pressed sits there exactly as it did — so a slow answer and a dead button are the same
+       picture. Reported from the sign-in that asks for a second factor.
+
+       Opt-in with `data-busy` on the form, never automatic: a page can carry forms that must
+       not be touched, and the "cancel this sign-in" logout beside the code field is one of
+       them. Written HERE and not in the panel's JS bundle, because the login family does not
+       load the bundle — these three pages are the whole reason this exists.
+
+       Disabling the button in the submit handler is safe for these forms specifically: none
+       of their submit buttons carries a `name`, so none of them was ever part of the payload
+       a disabled control would drop. #}
+    <script>
+        document.querySelectorAll('form[data-busy]').forEach(f => {
+            f.addEventListener('submit', () => {
+                const btn = f.querySelector('button[type="submit"]');
+                if (!btn || btn.disabled) return;
+                // The label stays and the spinner goes in front of it — same rule as
+                // `ssBtnBusy` in the panel bundle, for the same reason: the label is the only
+                // thing on screen saying what is taking a moment.
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"'
+                    + ' role="status" style="width:.75em;height:.75em" aria-hidden="true"></span>'
+                    + btn.innerHTML;
+                btn.disabled = true;
+            });
+        });
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 

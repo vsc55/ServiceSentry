@@ -19,6 +19,47 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## «Mi configuración» dejaba de abrirse tras visitar cualquier otra sección
+
+**Fecha:** 2026-08-19 · **Área:** `web_admin/templates/partials/init/_sidebar.html`
+(listener global `shown.bs.tab`)
+
+**Síntoma** — Reportado desde el panel: se abre «Mi configuración» una vez, se navega por
+Sistema (Configuración, Módulos…), y al volver a pulsar «Mi configuración» **no pasa nada**.
+Ni error en consola, ni petición, ni parpadeo: el menú se cierra y la pantalla se queda como
+estaba. Volvía a funcionar recargando la página.
+
+**Diagnóstico** — La ausencia total de error apuntaba a un `return` temprano, no a una
+excepción. `openAccountPage()` hace `bootstrap.Tab.getOrCreateInstance(btn).show()`, así que se
+leyó el Bootstrap que se sirve: `grep -o "show(){const t=this._element;if(this._elemIsActive(t))return"`
+sobre `static/js/bootstrap.bundle.min.js` (5.3.3) lo confirma — `show()` no hace nada si su
+propio disparador ya lleva `.active`. Quedaba explicar por qué se lo quedaba: el listener que
+mantiene un único elemento activo barre `#ss-sidebar .ss-sb-item.active`, y el disparador de
+cuenta es `<button class="nav-link" id="btn-nav-account">`, sin esa clase.
+
+**Causa raíz** — Dos hechos que por separado son correctos. Bootstrap solo desactiva dentro del
+grupo del disparador (`Tab._parent = element.closest('.list-group, .nav, [role="tablist"]')`) y
+las secciones de Sistema viven en un `ul.ss-sb-sub.nav` anidado, distinto del `ul` exterior
+donde está el botón oculto de cuenta; y el barrido que el panel añadió precisamente para cubrir
+ese hueco seleccionaba por **la clase de aspecto** de un ítem de barra lateral en vez de por lo
+que lo hace un disparador. El botón de cuenta se quedaba marcado como activo para siempre y a
+partir de ahí `show()` volvía en su primera línea.
+
+**Solución** — El barrido pasa a
+`#ss-sidebar .ss-sb-item.active, #ss-sidebar [data-bs-toggle="tab"].active`. Cinco tests nuevos
+en `tests/meta/test_wa_spa_nav.py`, validados reintroduciendo el selector viejo: el que fija la
+regresión falla y los otros cuatro siguen pasando.
+
+**Lección** — Un barrido de estado escrito en términos de **a qué se parece** un elemento se
+dejará siempre los que no se parecen a los demás, y en este caso el que no se parecía era el
+único que estaba oculto — o sea, el único cuyo `.active` sobrante no se ve en pantalla. Cuando
+lo que se limpia es el estado de un mecanismo (aquí, un disparador de pestaña), el selector
+tiene que nombrar el mecanismo (`[data-bs-toggle="tab"]`) y no la decoración. Corolario del
+mismo caso: un fallo *silencioso* de una librería —un `return` en la primera línea— se localiza
+antes leyendo la librería que releyendo el código propio.
+
+---
+
 ## Un paquete a dos versiones tenía los avisos de la otra
 
 **Fecha:** 2026-08-16 · **Área:** `lib/core/diagnostics/advisories.py` (`vulnerabilities`)

@@ -78,6 +78,16 @@ def register(app, wa):
         audit log names them and a reader has to be able to look them up — see
         :func:`users_svc.builtin_users`.  They are synthesized, never rows.
         """
+        # Which accounts carry a second factor — ONE query for the whole table, not one per
+        # row. The store answers a set of uids precisely so a page of forty accounts does not
+        # become forty round trips.
+        _mfa_uids = set()
+        _store = getattr(wa, '_mfa_store', None)
+        if _store is not None:
+            try:
+                _mfa_uids = _store.enrolled_user_uids()
+            except Exception:      # pylint: disable=broad-except
+                _mfa_uids = set()   # the column reads "no" rather than the page failing
         safe = {}
         for uname, udata in wa._users.items():
             safe[uname] = {
@@ -101,6 +111,9 @@ def register(app, wa):
                 # checkbox only when that table was actually customised.
                 'table_config': udata.get('table_config') if isinstance(udata.get('table_config'), dict) else {},
                 'has_dashboard_layout': bool(udata.get('dashboard_layout')),
+                # Whether this account has a second factor. A boolean and nothing else: the
+                # users list has no business knowing WHICH kind, let alone anything about it.
+                'mfa': bool(udata.get('uid') and udata.get('uid') in _mfa_uids),
                 'modal_config': udata.get('modal_config') if isinstance(udata.get('modal_config'), dict) else {},
             }
         # A real account is never shadowed by the built-in of the same name. New ones can no

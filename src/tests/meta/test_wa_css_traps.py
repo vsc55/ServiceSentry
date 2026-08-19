@@ -184,3 +184,119 @@ class TestNoTemplatePinsALightSurface:
             src = _read(os.path.join(TPL, *rel.split('/')))
             assert re.search(r'<thead class="ss-thead(-sticky)?"', src), \
                 f'{rel} no longer uses the theme-aware header'
+
+
+class TestAnSvgWithNoSizeFillsWhateverItIsGiven:
+    """The QR is shipped with a `viewBox` and no width or height on purpose — a square sized
+    by the server is one that does not fit somebody's phone at arm's length. The cost of that
+    decision is that it inherits its container, and an unconstrained container is the whole
+    dialog: at `modal-lg` it drew 800px wide and pushed the key and the confirmation field
+    below the fold, so the one thing the screen exists to show was the one thing off it.
+
+    Reported on screen, which is where this class of thing is always found. The guard is on
+    the CLASS rather than on the markup, because the fix has to hold for the next place that
+    shows one."""
+
+    def test_the_qr_class_caps_its_width(self):
+        css = _read(CSS)
+        m = re.search(r'\.ss-qr\s*\{([^}]*)\}', css)
+        assert m, '.ss-qr is gone — the QR would fill whatever box it lands in'
+        body = m.group(1)
+        assert 'width' in body, '.ss-qr sets no width, which is the bug it exists to prevent'
+        # `min(...)` and not a flat width: a phone narrower than the cap must get the width it
+        # has rather than a square wider than the dialog it is in.
+        assert 'min(' in body, '.ss-qr must cap the width WITHOUT overflowing a narrow screen'
+
+    def test_the_svg_inside_it_is_told_to_scale(self):
+        """Capping the box does nothing on its own: an SVG with no width is not laid out by
+        its parent's width unless it is told to take it."""
+        css = _read(CSS)
+        m = re.search(r'\.ss-qr\s+svg\s*\{([^}]*)\}', css)
+        assert m, '.ss-qr svg has no rule — the box would be capped and the square would not'
+        assert 'width' in m.group(1) and 'height' in m.group(1)
+
+    def test_every_qr_in_the_markup_goes_through_it(self):
+        """A second place that drops an SVG into a dialog without the class inherits the bug
+        rather than the fix."""
+        loose = []
+        for path in _templates():
+            src = _read(path)
+            for m in re.finditer(r'\$\{\s*(?:d|out|res)\.svg\s*\}', src):
+                window = src[max(0, m.start() - 200):m.start()]
+                if 'ss-qr' not in window:
+                    loose.append(os.path.relpath(path, TPL))
+        assert not loose, ('a QR is drawn without .ss-qr in: ' + ', '.join(sorted(set(loose))))
+
+
+class TestARuleThatHidesABarNothingElseDrives:
+    """`#infraSubTabs, #accessSubTabs, #ipbanSubTabs, #tab-events .nav-tabs { display: none }`
+    hides those sub-tab bars because the SIDEBAR carries the same sub-tabs — the panes still
+    switch, from another control. That is safe there and only there: a bar that nothing else
+    duplicates is, once hidden, half a page with no way in.
+
+    /account is exactly that case. It has no sidebar sub-items, so its own bar is the only
+    route to the security half — the password and the second factor. The guard is on the RULE
+    rather than on the markup because the failure is silent: the pane renders, the fields are
+    in the DOM, `getElementById` finds them, and there is simply no control on screen that
+    brings them up.
+    """
+
+    def _hiding_selectors(self):
+        """Every selector in the stylesheet whose block hides what it matches."""
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        out = []
+        for m in re.finditer(r'([^{}]+)\{([^}]*)\}', css):
+            if re.search(r'display\s*:\s*none', m.group(2)):
+                out.extend(part.strip() for part in m.group(1).split(','))
+        return out
+
+    def test_the_scan_finds_the_rule_it_is_about(self):
+        assert any('#accessSubTabs' == s for s in self._hiding_selectors()), \
+            'the sidebar-driven bars are no longer hidden — this guard is reading nothing'
+
+    def test_the_account_nav_is_not_swept_into_it(self):
+        for sel in self._hiding_selectors():
+            assert '#accountTabs' not in sel, \
+                f'{sel} hides the account section list — its security half becomes unreachable'
+            assert not ('#tab-account' in sel and 'nav' in sel), \
+                f'{sel} hides the account section list — its security half becomes unreachable'
+
+    def test_the_account_page_still_ships_that_nav(self):
+        """Renaming the id without touching the check above would leave the check passing on
+        an id that no longer exists."""
+        src = _code(os.path.join(TPL, 'partials', 'account', '_page.html'))
+        assert 'id="accountTabs"' in src, 'the account section list is gone or renamed'
+        assert 'ss-rail' in src
+
+
+class TestASettingsPageThatFillsItsPane:
+    """`/account` is laid out with the panel's own rail shell — the one Configuration and
+    Modules use — and not with a layout of its own. Two of those were built first and both
+    were reported from the screen: a 640px card stack with `mx-auto`, which on a wide monitor
+    left more empty page than page, and a horizontal tab bar over it, sitting where the
+    section title goes.
+
+    The guard is on the shape rather than on the look: a `max-width` is fine and a `mx-auto`
+    with one is the thing that was wrong, because it puts the settings in a column down the
+    middle of a frame that is supposed to be filled."""
+
+    def _account_page(self) -> str:
+        return _code(os.path.join(TPL, 'partials', 'account', '_page.html'))
+
+    def test_it_hangs_on_the_shared_shell(self):
+        src = self._account_page()
+        for cls in ('ss-shell', 'ss-rail', 'ss-rail-item', 'ss-shell-main'):
+            assert cls in src, f'{cls} is gone — the account page has a layout of its own again'
+
+    def test_it_is_not_a_centred_column(self):
+        assert 'mx-auto' not in self._account_page(),             'the account page centres itself again — the shell has to fill the pane'
+
+    def test_the_cards_are_capped_without_being_centred(self):
+        """A cap so two cards of form fields sit side by side and no further — past that a
+        password box a metre wide is not more readable. Left-aligned, which is the half the
+        centred version got wrong."""
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        m = re.search(r'\.ss-account-body\s*\{([^}]*)\}', css)
+        assert m, '.ss-account-body is gone — the cards stretch to whatever the monitor is'
+        assert 'max-width' in m.group(1)
+        assert 'margin' not in m.group(1), 'a margin here is how it gets centred again'

@@ -33,6 +33,7 @@ const _USR_COLS = [
     { id: 'display_name', label: () => t('col_display_name')||'Display Name',       sortKey: 'display_name', always: false },
     { id: 'role',         label: () => t('col_role'),                              sortKey: 'role',         always: false },
     { id: 'sessions',     label: () => t('col_sessions'),                          sortKey: 'sessions',     always: false, resizable: false },
+    { id: 'mfa',          label: () => t('mfa_col'),                                sortKey: 'mfa',          always: false, resizable: false },
     ..._META_TAIL,
 ];
 const _USERS_DEFAULT_COLS = new Set(['display_name', 'role', 'sessions']);
@@ -76,6 +77,23 @@ function _usersRowActions(uname, ctx) {
     ].join('');
 }
 
+/** Whether this account carries a second factor, as one mark.
+ *
+ *  A tick or a slashed shield, never colour alone: it is read at a glance down forty rows,
+ *  and "which of these is unprotected" has to survive a colour-vision deficiency. The title
+ *  says it in words.
+ *
+ *  Shared by the three views that answer the same question — the table's column, the card's
+ *  chip row and the access review — because a mark that means "protected" in one of them and
+ *  something slightly different in another is worse than not having it in two of them.
+ */
+function _usrMfaMark(u) {
+    const on = !!(u || {}).mfa;
+    return `<span class="ss-help ${on ? 'text-success' : 'text-muted'}" title="${escAttr(
+        on ? t('mfa_state_on') : t('mfa_state_off'))}"><i class="bi ${
+        on ? 'bi-shield-check' : 'bi-shield-slash'}"></i></span>`;
+}
+
 // List/card view toggle (persisted per browser).
 // The view is owned by the registry now (users/_views.html); this stays as the name the
 // older markup called, so nothing that still says _setUsersView breaks.
@@ -97,6 +115,12 @@ function _usersCardsBody(unames, ctx) {
         ].join('');
         const chips = [
             `<span class="badge ${roleBadgeClass(role)}">${esc(roleLabel)}</span>`,
+            // Either way, and not only when it is on: the question this answers is "which of
+            // these accounts is unprotected", and a mark that appears only on the protected
+            // ones cannot be scanned for the others. A CHIP and not one of the badges above —
+            // those are the loud row, for what is wrong with an account.
+            u.builtin ? '' : `<span class="badge bg-body-secondary text-body-secondary fw-normal border"
+                >${_usrMfaMark(u)} <span class="ms-1">${esc(t('mfa_col'))}</span></span>`,
             u.email ? `<span class="badge bg-body-secondary text-body-secondary fw-normal border"><i class="bi bi-envelope me-1"></i>${esc(u.email)}</span>` : '',
             sc > 0 ? `<span class="badge bg-primary bg-opacity-75 rounded-pill"><i class="bi bi-plug me-1"></i>${sc}</span>` : '',
         ].join('');
@@ -116,7 +140,8 @@ createListTable({
     key: 'users', containerId: 'users-container', tableId: 'users-table',
     accent: 'amber', icon: 'bi-people', title: () => t('user_management'),
     columns: _USR_COLS, defaultVisible: _USERS_DEFAULT_COLS,
-    thClass: { role: 'text-center', sessions: 'text-center ss-th-narrow' },
+    thClass: { role: 'text-center', sessions: 'text-center ss-th-narrow',
+               mfa: 'text-center ss-th-narrow' },
     persist: true, clearLabelKey: 'subtab_users',
     // Filter strip (shared design — see createListTable's spec.filters). `q` searches the
     // two name columns at once, since which one a user is looking for is not worth a choice.
@@ -167,6 +192,7 @@ createListTable({
             case 'display_name': return (usersData[uname].display_name || uname).toLowerCase();
             case 'role':         return usersData[uname].role || 'viewer';
             case 'sessions':     return ctx.sessionCounts[uname] || 0;
+            case 'mfa':          return (usersData[uname] || {}).mfa ? 1 : 0;
             default:             return uname.toLowerCase();
         }
     },
@@ -202,6 +228,8 @@ createListTable({
                     ? `<span class="badge bg-primary bg-opacity-75 rounded-pill">${sc}</span>`
                     : `<span class="text-muted small">—</span>`}</td>`;
             }
+            case 'mfa':
+                return `<td class="text-center text-nowrap">${_usrMfaMark(u)}</td>`;
             default: return '<td></td>';
         }
     },

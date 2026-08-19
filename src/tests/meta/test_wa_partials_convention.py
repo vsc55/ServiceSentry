@@ -126,3 +126,49 @@ class TestSize:
         n = len(io.open(os.path.join(TPL, rel), encoding='utf-8').read().splitlines())
         assert n <= self.LIMIT, (f'{rel} is {n} lines — split its sub-sections into '
                                  f'their own partials (see ipban/_bans|_history|_whitelist)')
+
+
+class TestTheTwoShapesOfTheApiHelpersAreNotMixed:
+    """`apiGet` answers the parsed BODY. `apiPost`, `apiPut` and `apiDelete` answer
+    `{status, data}`. Two shapes in one module, and reading the wrong one does not fail
+    loudly — it yields `undefined`, the caller falls to its default, and the screen shows a
+    plausible wrong answer.
+
+    Reported from the account page: an account WITH a second factor was drawn as "not set up",
+    and the button then posted an enrolment the server correctly refused. One mistake, two
+    symptoms, and neither of them said what was wrong.
+
+    The guard is narrow on purpose. `r.data` after an `apiGet` is legitimate when the endpoint
+    genuinely returns a body with a `data` key — `/api/v1/modules/page/<m>` does — so what is
+    checked is the pattern that cannot be right: reading `.data` off the awaited call itself.
+    """
+
+    def _js_partials(self):
+        for root, _dirs, files in os.walk(TPL):
+            for name in files:
+                if name.endswith('.html'):
+                    yield os.path.join(root, name)
+
+    def test_nothing_reads_data_straight_off_an_awaited_apiget(self):
+        # `(await apiGet(…)).data` / `(await apiGet(…) || {}).data` — always wrong, because
+        # the body IS the answer.
+        bad_inline = re.compile(r'\(\s*await\s+apiGet(?:Silent)?\([^;]*?\)\s*(?:\|\|[^;]*?)?\)\s*\.data\b')
+        offenders = []
+        for path in self._js_partials():
+            with io.open(path, encoding='utf-8') as fh:
+                src = fh.read()
+            if bad_inline.search(src):
+                offenders.append(os.path.relpath(path, TPL))
+        assert not offenders, (
+            'these read `.data` off an apiGet, which answers the body itself: '
+            + ', '.join(sorted(offenders)))
+
+    def test_the_helpers_still_have_the_shapes_this_guard_assumes(self):
+        """If `apiGet` ever starts returning a wrapper too, this guard becomes wrong rather
+        than merely unnecessary — so it checks the premise instead of assuming it."""
+        with io.open(os.path.join(TPL, 'partials', 'core', '_api.html'), encoding='utf-8') as fh:
+            src = fh.read()
+        get_body = src.split('async function apiGet(', 1)[1].split('async function', 1)[0]
+        assert 'return await r.json();' in get_body, 'apiGet no longer answers the body'
+        post_body = src.split('async function apiPost(', 1)[1].split('async function', 1)[0]
+        assert 'status: r.status' in post_body, 'apiPost no longer answers {status, data}'

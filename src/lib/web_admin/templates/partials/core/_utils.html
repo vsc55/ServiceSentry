@@ -11,6 +11,33 @@ function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 /** Current UTC time as a second-precision ISO-8601 string (e.g. 2026-06-16T10:20:30Z). */
 function _nowISO() { return new Date().toISOString().replace(/\.\d+Z$/, 'Z'); }
 
+/** Mark a button as working, and hand back the way to stop.
+ *
+ *  `const done = ssBtnBusy(btn); … ; done();` — restoring exactly what was there, including a
+ *  button that was ALREADY disabled, which a bare `disabled = false` would quietly enable.
+ *
+ *  A button with a LABEL keeps it and gets the spinner in front: one that becomes a lone
+ *  spinner shrinks to the width of one, so the bar it sits in jumps at the moment somebody is
+ *  watching it to see whether anything happened — and the label is the only thing on screen
+ *  saying WHAT is taking a moment. An icon-only button has no such text to protect and no
+ *  width to lose, so there the spinner takes the icon's place, which is how the five
+ *  hand-written copies this replaced already behaved.
+ *
+ *  Disabling is half the point: an action that spends a one-time code must not be sendable
+ *  twice because the first press looked like it did nothing.
+ */
+function ssBtnBusy(btn) {
+    if (!btn) return () => {};
+    const html = btn.innerHTML;
+    const was = btn.disabled;
+    const labelled = !!(btn.textContent || '').trim();
+    const spin = '<span class="spinner-border spinner-border-sm' + (labelled ? ' me-1' : '')
+        + '" role="status" style="width:.75em;height:.75em" aria-hidden="true"></span>';
+    btn.disabled = true;
+    btn.innerHTML = labelled ? spin + html : spin;
+    return () => { btn.innerHTML = html; btn.disabled = was; };
+}
+
 /** Render a searchable checkbox/radio grid into #gridId from a data object.
  *  Shared skeleton (sorted iteration + search filter + "empty" fallback) for
  *  the role/group/user pickers; the per-row markup and filter stay per-caller:

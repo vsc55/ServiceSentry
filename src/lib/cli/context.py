@@ -36,6 +36,9 @@ class CliContext:
         self.config_dir = config_dir
         self.var_dir = var_dir or config_dir
         fernet = secret_manager.fernet_from_secret_file(secret_key_path(config_dir))
+        # Kept: the MFA store needs the same one, and deriving it twice is two places
+        # that can disagree about which key this process is holding.
+        self.fernet = fernet
         db_cfg = bootstrap_database_cfg(read_config_raw(config_path(config_dir), fernet))
         db_path = os.path.join(self.var_dir, 'data.db')
         self.db = get_connector(db_cfg or None, default_sqlite_path=db_path)

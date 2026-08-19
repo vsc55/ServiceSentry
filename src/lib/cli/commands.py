@@ -234,6 +234,52 @@ def cmd_group_del(ctx, args) -> int:
                + (f" (removed from {len(affected)} user(s))" if affected else ""))
 
 
+def _mfa_store(ctx):
+    """The MFA store on the CLI's own connector. Built here rather than in the context so a
+    command that never touches second factors does not reconcile their tables."""
+    from lib.core.mfa.store import MfaStore          # noqa: PLC0415
+    return MfaStore(ctx.db, fernet=getattr(ctx, 'fernet', None))
+
+
+def cmd_user_mfa_reset(ctx, args) -> int:
+    """Remove a user's second factor and its recovery codes (``user mfa-reset``).
+
+    The supported way back in for somebody who lost their phone AND their codes. It lives on
+    the machine because the alternative is an installation whose last administrator cannot
+    open it — and because whoever can run this can already read the database, so it adds no
+    reach that was not there.
+    """
+    username = args.username
+    user = ctx.users.get(username)
+    if not user:
+        return _err(f"user '{username}' not found")
+    uid = str(user.get('uid') or '')
+    store = _mfa_store(ctx)
+    if not store.factor(uid):
+        return _ok(f"user '{username}' has no second factor")
+    if not store.delete(uid):
+        return _err(f"could not remove the second factor of '{username}'")
+    return _ok(f"second factor removed for '{username}' — they can enrol a new one at /account")
+
+
+def cmd_user_mfa_status(ctx, args) -> int:
+    """List which accounts have a second factor (``user mfa-status``)."""
+    _ = args
+    store = _mfa_store(ctx)
+    enrolled = store.enrolled_user_uids()
+    rows = sorted((name, str(u.get('uid') or '')) for name, u in ctx.users.items())
+    if not rows:
+        print('no users')
+        return 0
+    width = max(len(n) for n, _u in rows)
+    for name, uid in rows:
+        mark = 'yes' if uid in enrolled else 'no'
+        left = store.recovery_left(uid) if uid in enrolled else 0
+        extra = f'  ({left} recovery codes left)' if uid in enrolled else ''
+        print(f'{name.ljust(width)}  {mark}{extra}')
+    return 0
+
+
 # ── service status / reload ─────────────────────────────────────────────────────
 def cmd_status(ctx, args) -> int:
     """Print a per-service status table (``status``).
@@ -285,6 +331,8 @@ _HANDLERS = {
     ('user', 'disable'):    cmd_user_disable,
     ('user', 'passwd'):     cmd_user_passwd,
     ('user', 'role'):       cmd_user_role,
+    ('user', 'mfa-reset'):  cmd_user_mfa_reset,
+    ('user', 'mfa-status'): cmd_user_mfa_status,
     ('user', 'group-add'):  cmd_user_group_add,
     ('user', 'group-del'):  cmd_user_group_del,
     ('group', 'add'):       cmd_group_add,

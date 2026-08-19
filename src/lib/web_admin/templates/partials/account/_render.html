@@ -58,21 +58,158 @@ function initAccountPage() {
                 `<option value="${escAttr(p.id)}">${esc(_homePageLabel(p))}</option>`).join('');
         _landSel.value = currentUser.pref_landing_page || '';
     }
-    document.getElementById('settingsPwCurrent').value = '';
-    document.getElementById('settingsPwNew').value     = '';
-    const spConf = document.getElementById('settingsPwConfirm');
-    spConf.value = '';
-    spConf.classList.remove('is-valid', 'is-invalid');
+    // The second factor draws itself from the server — it is not a preference this form
+    // holds, and asking on open is what keeps the badge honest after a reset from elsewhere.
+    _accMfaLoad();
+    _accClearPasswords();
+    // The section this account was last on, which survives a reload — the same promise the
+    // sub-tabs of Infrastructure and Access make. A stored id that no longer names a section
+    // (renamed, or written by an older build) falls back to the first one rather than opening
+    // a page with nothing on it.
+    let want = 'acctab-prefs';
+    try { want = localStorage.getItem(_ACC_SECTION_KEY) || want; } catch (e) { /* ignore */ }
+    if (!document.getElementById(want)) want = 'acctab-prefs';
+    _accSection(want);
+    // What the page opened with. Everything below compares against THIS rather than against
+    // `currentUser`: the two are the same right now, and only one of them stays true after a
+    // save — a baseline read from a live object would call the page clean the moment the
+    // object was updated, whether or not the fields were.
+    _accBaseline = {lang: langSel.value, landing: _landSel ? _landSel.value : ''};
+    _accWireDirty();
+    _accMarkDirty();
 }
 
-// Cancel: leave the account pane without a reload. Going Back returns to the pane we opened
-// it from (opening it pushState'd /account); with no history to go back to, fall to Services.
-function _accountCancel() {
-    if (window.history.length > 1) window.history.back();
-    else _navTab('#tab-services');
+/** Empty the password half and everything drawn FROM it.
+ *
+ *  The three boxes were being cleared and the strength meter under them was not, so a reload
+ *  left a red bar reading "Weak" beneath an empty field — a verdict on a password that is no
+ *  longer there, and the one part of the form that says it is still holding something.
+ *
+ *  `_updatePasswordStrength` resets itself when the field is empty, so the meter is cleared by
+ *  asking it again rather than by a second piece of code that knows how it is drawn.
+ */
+function _accClearPasswords() {
+    for (const id of ['settingsPwCurrent', 'settingsPwNew', 'settingsPwConfirm']) {
+        const el = document.getElementById(id);
+        if (el) { el.value = ''; el.classList.remove('is-valid', 'is-invalid'); }
+    }
+    if (typeof _updatePasswordStrength === 'function') {
+        _updatePasswordStrength('settingsPwNew', 'settingsPwStrengthBar', 'settingsPwStrengthLabel');
+    }
+}
+
+/** What the page opened with, so a change can be told from a redraw. */
+let _accBaseline = null;
+
+/** Is there anything for Save to write?
+ *
+ *  Two different kinds of change, and both count: a PREFERENCE that differs from what the page
+ *  opened with, and any of the three password boxes holding anything at all. The password half
+ *  cannot be compared against a baseline — the page never receives the current password, and
+ *  the boxes start empty precisely so nothing is submitted by accident — so "not empty" IS the
+ *  change there.
+ */
+function _accDirtyFields() {
+    if (!_accBaseline) return [];
+    const val = id => (document.getElementById(id) || {}).value || '';
+    const out = [];
+    if (val('settingsLang') !== _accBaseline.lang) out.push('settingsLang');
+    if (val('settingsLanding') !== _accBaseline.landing) out.push('settingsLanding');
+    for (const id of ['settingsPwCurrent', 'settingsPwNew', 'settingsPwConfirm']) {
+        if (val(id)) out.push(id);
+    }
+    return out;
+}
+
+function _accDirty() { return _accDirtyFields().length > 0; }
+
+/** Paint the Save button for the current state.
+ *
+ *  Disabled with nothing to write, and wearing the same dirty dot Configuration uses when
+ *  there is. A Save that is always available says nothing about whether there is anything to
+ *  do — and on a page whose other half is a password form, that is a question worth answering
+ *  on the button itself.
+ */
+function _accMarkDirty() {
+    const btn = document.getElementById('btnAccountSettingsOk');
+    const dot = document.getElementById('badgeAccountDirty');
+    const dirty = _accDirtyFields();
+    // …and each field says for itself whether it is one of them. The button answers "is there
+    // anything to save"; this answers "what", which is the question somebody has when they
+    // come back to a page they left half-edited — and it is the only one that survives the
+    // section they are not looking at, since the other half is off screen.
+    document.querySelectorAll('[data-acc-field]').forEach(w =>
+        w.classList.toggle('ss-field-dirty', dirty.includes(w.dataset.accField)));
+    if (!btn) return;
+    btn.disabled = !dirty.length;
+    if (dot) dot.classList.toggle('d-none', !dirty.length);
+}
+
+/** Listen once per element, on the events that can change a value.
+ *
+ *  `input` covers typing and `change` covers a select being picked with the keyboard or a
+ *  password manager filling a box without a keystroke — which is exactly the case where a
+ *  Save that stayed disabled would look broken.
+ */
+function _accWireDirty() {
+    for (const id of ['settingsLang', 'settingsLanding',
+                      'settingsPwCurrent', 'settingsPwNew', 'settingsPwConfirm']) {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.accDirtyWired) continue;
+        el.dataset.accDirtyWired = '1';
+        el.addEventListener('input', _accMarkDirty);
+        el.addEventListener('change', _accMarkDirty);
+    }
+}
+
+/** Open one of the account's sections, from the rail beside them.
+ *
+ *  Written out rather than handed to Bootstrap: the rail is a `<nav>` of `.ss-rail-item`
+ *  buttons — the panel's own index, so it looks the same here as it does in Configuration —
+ *  and Bootstrap's tab plugin only drives elements inside a `.nav`/`.list-group`/`[role=
+ *  tablist]`. Given anything else it finds no parent and returns quietly, which is a switch
+ *  that does nothing at all rather than one that visibly breaks.
+ */
+const _ACC_SECTION_KEY = 'ss_account_section';
+
+function _accSection(id) {
+    const shell = document.getElementById('accountTabs')?.closest('.ss-shell');
+    if (!shell) return;
+    // Remembered like every other sub-navigation in the panel (`ss_active_subtab_*`): coming
+    // back to a page — or reloading it — lands where you left rather than at the top.
+    try { localStorage.setItem(_ACC_SECTION_KEY, id); } catch (e) { /* ignore */ }
+    shell.querySelectorAll('.ss-rail-item[data-acc-section]').forEach(b =>
+        b.classList.toggle('active', b.dataset.accSection === id));
+    // `show` and `active` are two classes and both decide visibility: a `.fade` pane is
+    // `opacity:0` without `show` and `display:none` without `active`, so setting one of them
+    // leaves a section that takes up the room and cannot be read.
+    shell.querySelectorAll(':scope .tab-content > .tab-pane').forEach(p => {
+        p.classList.toggle('show', p.id === id);
+        p.classList.toggle('active', p.id === id);
+    });
+}
+
+/** Throw away what is typed and ask the server again.
+ *
+ *  This replaced a Cancel button, and the difference is not cosmetic: there was nothing to
+ *  cancel. The page opens with what the server already holds and writes nothing until Save, so
+ *  "Cancel" meant "go back" — which is what the browser's own Back button is for — while
+ *  reading as "undo", the one thing it did not do.
+ *
+ *  With unsaved edits on screen it asks first, through the panel's own dialog: this is the
+ *  one control here that can lose work.
+ */
+function _accountReload() {
+    const go = () => { _accBaseline = null; initAccountPage(); };
+    if (_accDirty()) showConfirmModal(t('unsaved_changes_discard'), go);
+    else go();
 }
 
 async function saveAccountPreferences() {
+    // Nothing to write, nothing to do. The button is disabled in this state, so getting here
+    // means the keyboard shortcut or a call from somewhere else — and a save that writes the
+    // same values back would still cost a round trip and a toast saying something happened.
+    if (!_accDirty()) return;
     const langVal  = document.getElementById('settingsLang').value;
     const landVal  = document.getElementById('settingsLanding')?.value ?? '';
     const prevLang = currentUser.pref_lang;
@@ -94,10 +231,11 @@ async function saveAccountPreferences() {
     if (r && r.ok) {
         currentUser.pref_lang = langVal;
         currentUser.pref_landing_page = landVal;
-        ['settingsPwCurrent', 'settingsPwNew', 'settingsPwConfirm'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) { el.value = ''; el.classList.remove('is-valid', 'is-invalid'); }
-        });
+        _accClearPasswords();
+        // The page is now what was just written: this IS the new baseline, and the password
+        // boxes were emptied above. Without moving it, Save would stay lit after saving.
+        _accBaseline = {lang: langVal, landing: landVal};
+        _accMarkDirty();
         showToast(t('preferences_saved'));
         if (langVal !== prevLang) setTimeout(() => location.reload(), 800);
     } else {

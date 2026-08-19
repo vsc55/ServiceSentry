@@ -73,6 +73,41 @@
                                 <label class="form-label small fw-semibold">{{ i18n.landing_page }}</label>
                                 <select class="form-select form-select-sm" id="umLandingPage"></select>
                             </div>
+                            {# The second factor sits in the half of this row that was already
+                               empty, rather than on a line of its own: it is one badge and one
+                               button, and a full-width band for that pushed everything below it
+                               down a row for nothing.
+
+                               Drawn for every EXISTING account, in one of two states — a new
+                               one has no account yet to have a factor. "Not set up" is a state
+                               worth seeing, and it is the same fact the users table shows in
+                               its MFA column, so nothing appears here that the list did not
+                               already say.
+
+                               The BUTTON is the part that comes and goes: only when there is a
+                               factor to take off and only for a holder of `mfa_reset_others`.
+                               There is no counterpart that turns it ON for somebody else —
+                               only the owner can enrol an authenticator they are holding, and
+                               a button implying otherwise would be a lie about what an
+                               administrator can do.
+
+                               Hiding the whole row when there was no factor was wrong twice:
+                               opening on such an account showed nothing where the state should
+                               be, and a reset made the block vanish under the pointer that had
+                               just clicked it.
+
+                               Badge and button are painted from JS on every open
+                               (_umMfaPaint), so what is written here is only the shape. #}
+                            <div class="col-sm-6 d-none" id="umMfaGroup">
+                                <label class="form-label small fw-semibold">{{ i18n.mfa_section }}</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge text-bg-success" id="umMfaState"><i class="bi bi-shield-check me-1"></i>{{ i18n.mfa_state_on }}</span>
+                                    <button type="button" class="btn btn-sm btn-warning" id="umMfaReset"
+                                            onclick="_umResetMfa()">
+                                        <i class="bi bi-shield-slash me-1"></i>{{ i18n.mfa_reset_other }}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                         <div class="row g-3 mb-2 flex-shrink-0" id="umPasswordGroup">
                             <div class="col-sm-6">

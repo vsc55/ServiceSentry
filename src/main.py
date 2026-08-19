@@ -486,6 +486,12 @@ def args_init() -> argparse.Namespace:
     _p = up.add_parser('role', help="set a user's role")
     _p.add_argument('username')
     _p.add_argument('role', help='admin|editor|viewer|none or a custom role')
+    # The way back in for somebody who lost their phone AND their recovery codes. It is on
+    # the machine on purpose: the alternative is an installation whose last administrator
+    # cannot open it, and whoever can run this can already read the database.
+    _p = up.add_parser('mfa-reset', help="remove a user's second factor (TOTP + recovery codes)")
+    _p.add_argument('username')
+    up.add_parser('mfa-status', help='show which accounts have a second factor')
     for _act, _hlp in (('group-add', 'add a user to a group'),
                        ('group-del', 'remove a user from a group')):
         _p = up.add_parser(_act, help=_hlp)

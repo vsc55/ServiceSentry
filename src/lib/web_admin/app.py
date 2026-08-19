@@ -40,6 +40,8 @@ from lib.services.monitoring.checks_mixin import _ChecksMixin
 # inherited here just like the mixins above.
 from lib.core.permissions.mixin import _PermissionsMixin
 from lib.core.sessions.mixin import _SessionsMixin
+from lib.core.mfa.mixin import _MfaMixin
+from lib.core.mfa.policy import _MfaPolicyMixin
 from lib.core.users.mixin import _UsersMixin
 from lib.core.roles.mixin import _RolesMixin
 from lib.core.groups.mixin import _GroupsMixin
@@ -54,7 +56,8 @@ __all__ = ['WebAdmin']
 # built in __init__ and exposed via ``self._embedded_services``.  _ServicesMixin
 # discovers + controls them.
 class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
-               _SessionsMixin, _AuditMixin, _AuthMixin, _ChecksMixin, _ServicesMixin,
+               _SessionsMixin, _MfaMixin, _MfaPolicyMixin, _AuditMixin, _AuthMixin,
+               _ChecksMixin, _ServicesMixin,
                _IpBanMixin, _FreshnessMixin, _StoresMixin, _ConfigMixin,
                _ScannersMixin, _EmbedMixin, _ContextMixin, _ServerMixin,
                _HooksMixin, _GuardsMixin):
@@ -237,6 +240,14 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         self._builtin_role_names: dict[str, str] = {}
         self._builtin_role_overrides: dict[str, dict] = {}
         self._groups: dict[str, dict] = {}
+        # Mint the key BEFORE the stores are built. `_get_fernet()` caches what it finds, and
+        # the stores below capture that value rather than the method — so on a fresh install,
+        # where the key file does not exist until `_create_app` writes it, every one of them
+        # was constructed with `fernet=None` and anything secret saved during that FIRST run
+        # went to disk in clear. It corrected itself on the next restart, which is what made
+        # it invisible: the only install affected is the one nobody has restarted yet.
+        # Idempotent — `_create_app` calls it again and gets the same key.
+        self._load_or_create_secret_key()
         self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/hosts)
         # History + check-state stores reuse the single shared connector (created
         # in _init_entity_store) — must come AFTER it, else they'd each open their

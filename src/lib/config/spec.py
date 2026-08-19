@@ -230,6 +230,45 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=0, max=1000, admin_only=True, card='login_security'),
     Cfg('web_admin|login_ratelimit_window_secs', int, 300, attr='_LOGIN_RATELIMIT_WINDOW_SECS',
         min=10, max=3600, admin_only=True, card='login_security'),
+    # Who has to carry a second factor. Three values and not a switch, because "everybody"
+    # and "the accounts that can change everything" are different decisions with different
+    # costs: `admins` is the one most installs actually want, and offering only on/off means
+    # the answer to "protect the dangerous accounts" is "make forty people enrol".
+    #
+    # `off` is the default and stays it: turning this on is a policy an operator chooses, not
+    # something an upgrade does to an installation overnight. Somebody who must have one and
+    # does not is not locked out — they enrol on the way in, which is what makes it safe to
+    # switch on with everybody already signed up to nothing.
+    #
+    # Read at the point of use rather than mirrored on an attribute: it is consulted once per
+    # sign-in, and an attribute is a second copy that a save has to remember to refresh.
+    Cfg('web_admin|mfa_required', str, 'off', env='SS_MFA_REQUIRED',
+        admin_only=True, no_rule=True, card='login_security'),
+    # How long a sign-in that owes a second factor stays parked between the password and the
+    # code — long enough to unlock a phone and find the app, short enough that a password
+    # typed on a shared machine does not stay half-usable for the afternoon.
+    #
+    # A setting because the right answer depends on the room: a shared terminal in a hospital
+    # wants sixty seconds, and somebody whose key lives in a drawer wants more than five
+    # minutes. Nothing outside the panel ever sees this number, so unlike the TOTP parameters
+    # (period, digits, algorithm — fixed on purpose, see lib/core/mfa/totp.py) changing it
+    # cannot produce an install where enrolment silently fails on somebody's phone.
+    #
+    # The floor is 30 seconds, which is one TOTP step: below that the code on screen can
+    # expire before the hold does, and the failure looks like a wrong code.
+    Cfg('web_admin|mfa_hold_secs', int, 300, env='SS_MFA_HOLD_SECS',
+        min=30, max=3600, admin_only=True, card='login_security'),
+    # The domain security keys are registered against. Normally derived from `public_url` and
+    # left empty here — this is the escape for a deployment where the two differ: several
+    # names in front of one panel, or a public URL on a subdomain of the domain the keys
+    # should be scoped to.
+    #
+    # It is worth being blunt about the cost of changing it: a credential is scoped to this by
+    # the BROWSER and cannot be moved. Change it and every key already registered stops
+    # working, with nothing on screen to say why — which is also why it is not derived from
+    # the request, where a reverse proxy gets to decide it per call.
+    Cfg('web_admin|webauthn_rp_id', str, '', env='SS_WEBAUTHN_RP_ID',
+        admin_only=True, no_rule=True, card='login_security'),
     # Internal fail2ban — progressive per-IP jail shared by every exposed service
     # (web + syslog). Offenses accumulate per IP; crossing a threshold jails the IP
     # for an escalating term. Two tracks: 'auth' (anonymous/login/CSRF/SCIM/401/anon-403)
@@ -357,6 +396,16 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('ldap|use_ssl', bool, False),
     Cfg('ldap|ssl_verify', bool, True),   # validate the LDAPS server certificate (MITM guard)
     Cfg('ldap|fallback_to_local', bool, True),
+    # Does this directory already ask for a second factor of its own? When it does, asking
+    # again here is friction with no gain — the account proved two things before the panel
+    # ever saw it. Default False, which is the conservative direction: the panel keeps asking
+    # for what it can verify itself until an operator says the IdP is doing it.
+    #
+    # It skips BOTH halves for sign-ins through this provider — the code step and the forced
+    # enrolment — because both exist to establish the same fact, and the IdP has established
+    # it. A factor the account enrolled here stays enrolled and is still asked for on a LOCAL
+    # sign-in; trusting a provider is a statement about that door, not about the account.
+    Cfg('ldap|mfa_trusted', bool, False, admin_only=True, no_rule=True),
     Cfg('ldap|allow_email_login', bool, False),
     Cfg('ldap|port', int, 389, min=1, max=65535),
     Cfg('ldap|timeout', int, 5, min=1, max=60),
@@ -377,6 +426,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ OIDC ═════════════════════════════════════════════════════════════════
     Cfg('oidc|enabled', bool, False),
     Cfg('oidc|auto_create_users', bool, True),
+    Cfg('oidc|mfa_trusted', bool, False, admin_only=True, no_rule=True),
     Cfg('oidc|group_role_map', dict, '{}'),
     Cfg('oidc|group_display_names', dict),
     Cfg('oidc|provider_url', str, '', no_rule=True),
@@ -401,6 +451,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # ══ SAML2 ════════════════════════════════════════════════════════════════
     Cfg('saml2|enabled', bool, False),
     Cfg('saml2|auto_create_users', bool, True),
+    Cfg('saml2|mfa_trusted', bool, False, admin_only=True, no_rule=True),
     Cfg('saml2|group_role_map', dict, '{}'),
     Cfg('saml2|group_display_names', dict),
     Cfg('saml2|sp_entity_id', str, '', no_rule=True),

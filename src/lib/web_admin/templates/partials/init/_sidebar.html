@@ -263,9 +263,20 @@ function _sbPaneUrl(btn, paneId) {
 document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', e => {
     const btn = e.target;
     // Clear the top-level active items (leave the sub-item highlight to _sbSyncSub below).
-    document.querySelectorAll('#ss-sidebar .ss-sb-item.active').forEach(el => {
-        if (el !== btn && !el.classList.contains('ss-sb-subsub')) el.classList.remove('active');
-    });
+    //
+    // Every tab TRIGGER, not only the ones that look like sidebar items: `#btn-nav-account` is
+    // a hidden `.nav-link` with no `.ss-sb-item`, and it was the one thing this sweep never
+    // reached. Bootstrap's `Tab.show()` returns immediately when its own trigger already
+    // carries `.active` (5.3.3, `show(){…if(this._elemIsActive(t))return}`), and the sections
+    // live in a different `.nav` group so they never deactivate it either. So: open Account
+    // once, go to any System section, and the user menu stopped working entirely — the button
+    // was still marked active, `show()` returned, and nothing at all happened. Reported as
+    // "My settings does not load any more", which is what a control that does nothing looks
+    // like from outside.
+    document.querySelectorAll('#ss-sidebar .ss-sb-item.active, #ss-sidebar [data-bs-toggle="tab"].active')
+        .forEach(el => {
+            if (el !== btn && !el.classList.contains('ss-sb-subsub')) el.classList.remove('active');
+        });
     btn.classList.add('active');
     const target = btn.dataset.bsTarget || '';
     // Bootstrap only de-activates panes WITHIN the same .nav tablist; the sections and the

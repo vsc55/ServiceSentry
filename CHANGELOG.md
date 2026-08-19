@@ -8,6 +8,459 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.89] - 2026-08-19
+
+### Added
+- **`web_admin|mfa_hold_secs`** (`SS_MFA_HOLD_SECS`, 30..3600, default 300) — how long a
+  sign-in that has passed the password and still owes the code stays parked. It is a judgement
+  about the room, not about the protocol: a shared terminal wants sixty seconds, a key that
+  lives in a drawer wants more than five minutes.
+  - Clamped rather than trusted: zero would expire the hold before the page finished rendering
+    and the failure would read as a wrong code. The floor is one TOTP step for the same reason.
+  - Deliberately the ONLY new knob. The TOTP parameters beside it (`PERIOD`, `DIGITS`,
+    `ALGORITHM`, `SECRET_BYTES`) look like settings — the `otpauth://` standard declares them
+    parameters — but most authenticator apps ignore anything other than 30/6/SHA1, so offering
+    them would build an install where enrolment fails on somebody's phone with nothing on
+    screen to say why. `WINDOW` stays fixed too: 0 breaks the feature for a clock half a minute
+    out, 2 gives one code ninety seconds of life. Written up in `docs/explica-mfa.md`.
+
+### Fixed
+- **A wrong code cost nothing on the account's own MFA endpoints.** The login step counted one
+  as a jail offense; confirming an enrolment, regenerating the recovery list and turning the
+  factor off did not, and all three check a code.
+  - Two of them were not entirely free — a 403 is picked up by the after-request hook and
+    counted on the tolerant `authz` track, which exists for somebody browsing into a section
+    they may not see. Guessing a code is not that. The third answers **400**, which the hook
+    does not look at, so it was unthrottled outright.
+  - All three now register an explicit `login_failed`, which also sets the request-counted flag
+    and keeps it at one offense rather than two.
+  - The exposure was small (a session is needed, and a TOTP rotates every thirty seconds), but
+    it is exactly the rate-limiting NIST SP 800-63B asks for below 64 bits of entropy, and a
+    borrowed session was the one place it did not apply.
+
+### Changed
+- **`lib/core/mfa/mixin.py` split in two.** It held two kinds of question: one half DECIDES
+  (who must carry a factor, which SSO providers are trusted, where a security key would be
+  registered) and the other REMEMBERS (the half-finished sign-in, which is a note in the Flask
+  cookie). The deciding half is now `policy.py` / `_MfaPolicyMixin`, and it touches no request,
+  cookie or template — so the rules that decide who gets shut out are reachable from a test
+  that does not stand up an app. Both mixins are composed side by side onto `WebAdmin`; nothing
+  about the behaviour changed.
+- **`lib/core/mfa/__init__.py` carries the package map**, like every other core domain — it was
+  the one empty one, in the package with the most files and the three (`cbor`, `cose`,
+  `webauthn`) a reader cannot place without being told. It also records what must NOT be
+  imported there: permission discovery reads `manifest` very early, and pulling the Flask glue
+  in would make that a cycle.
+- Re-aimed a line anchor in `explica-logging.md` that the two added lines in `app.py` had
+  pushed onto a blank line — it had been pointing at an unrelated method for some time, and the
+  guard only notices when the target goes blank.
+
+## [0.0.1+build.88] - 2026-08-19
+
+### Added
+- **The MFA state reaches the other two Users views.** The column landed in the table because a
+  table has a cell per row; the cards and the access review stayed quiet, which is worse than
+  not having it — an access review that lists roles and groups and says nothing about second
+  factors reads as one where nobody is missing one.
+  - One mark, `_usrMfaMark()`, used by all three: a tick or a slashed shield with the state in
+    its tooltip, never colour alone. A tick meaning "protected" in the table and something
+    slightly different in the review would be worse than not having it in two of them.
+  - The card shows it **either way** and as a chip rather than a badge: the question is asked
+    in the direction of "which of these is unprotected", so a mark that appears only on the
+    protected accounts cannot be scanned for the others.
+  - The access review counts them out loud, and counts only accounts that can actually sign
+    in — a service account with login switched off is not a door somebody walks through, and
+    padding the number with them makes the one that matters harder to believe.
+
+## [0.0.1+build.87] - 2026-08-19
+
+### Added
+- **`docs/explica-mfa.md`** — the second factor, written down: the parked sign-in that is not a
+  session, the policy that cannot lock anybody out, per-provider SSO trust, enrolment and
+  verification as sequence diagrams, what the two tables hold and what is encrypted, the six
+  audit events and why none is muted, the admin reset and its CLI, the config keys with their
+  env vars, and exactly where WebAuthn stops. Indexed from `docs/README.md`.
+
+### Changed
+- **The account page is a settings page now**, laid out on the panel's own rail shell — the one
+  Configuration and Modules use: the index down the side, the open section beside it, both
+  filling the pane. It had grown a third card with the second factor and stopped fitting a
+  screen, so the password and the MFA controls sat below the fold, behind two preferences
+  nobody opens this page to change.
+  - Two layouts lost on the way and are named in the docs so they are not tried again: a 640px
+    card stack centred with `mx-auto` (on a wide monitor it left more empty page than page), and
+    a horizontal tab bar over it (it sits where the section title goes and measures whatever its
+    labels measure). Bootstrap's `.nav-justified` was tried on that bar and looked like it did
+    nothing — it equalises `.nav-item` and stretches only a `.nav-link` that is a DIRECT child
+    of the bar, and every tabbed panel here writes `<li class="nav-item"><button …>`.
+  - **Save and Cancel moved into the toolbar**, over the detail, shared by both sections: the
+    one not on screen keeps its fields in the DOM, so switching never silently drops an edit.
+    Below the cards they were a pair of buttons floating in the middle of a wide empty page.
+  - The MFA card is still outside what Save writes, for the reason it always was: each of its
+    actions either mints a secret or spends a code, and a field in this form would have made
+    one button mean "change my language" and "replace my second factor" at once.
+  - The cards of a section sit in a **grid** — two side by side from `xl` up — capped by
+    `.ss-account-body` and left-aligned, never centred. Past that cap a password box a metre
+    wide is not more readable.
+  - Section switching is written out (`_accSection`) rather than handed to Bootstrap: the rail
+    is a `<nav>`, not a `.nav`, and a Bootstrap tab that cannot find its parent list returns
+    quietly — a control that does nothing at all.
+  - **The page no longer prints its own title.** The breadcrumb in the top bar already names the
+    section and every other section in the panel leaves it at that; this one said "Account
+    Settings" twice on the same screen.
+  - The rail is **visible**, unlike the sub-tab bars in Access/Infrastructure/IPban that CSS
+    hides because the sidebar carries the same entries. `/account` has no sidebar sub-items, so
+    it is the only route to the security half — and a guard now refuses to let that id be swept
+    into the hiding rule, because the failure is silent: the pane renders, the fields are in the
+    DOM, and nothing on screen brings them up.
+
+### Fixed
+- **"My settings" stopped opening after visiting any other section**, with no error anywhere: no
+  request, no console message, nothing. `Tab.show()` returns at its first line when its own
+  trigger already carries `.active` (Bootstrap 5.3.3), and the sweep that keeps one active
+  trigger across the sidebar selected `.ss-sb-item` — which the hidden `#btn-nav-account` does
+  not wear. Bootstrap never cleared it either: the System sections live in a different `.nav`
+  group and it only deactivates within one. So the button stayed marked active for good.
+  - The sweep now also matches `[data-bs-toggle="tab"].active`: a state sweep written in terms
+    of what an element LOOKS like will always miss the ones that do not look like the others.
+  - Guarded in `tests/meta/test_wa_spa_nav.py` (validated by reintroducing the old selector) and
+    written up in `docs/caso-diagnostico.md`.
+- **The account toolbar now says what it can do.** It was Cancel and Save, and both were wrong
+  in the same way: neither said anything about the state of the page.
+  - **Cancel had nothing to cancel** — the page opens with what the server holds and writes
+    nothing until Save, so it meant "go back", which the browser's Back button already does,
+    while reading as "undo", the one thing it did not do. It is **Reload** now: throw away what
+    is typed and ask the server again, asking first when there are unsaved edits.
+  - **Save starts disabled** and lights with the same dirty dot Configuration uses, so the
+    button answers "is there anything to save" instead of being permanently available on a page
+    whose other half is a password form.
+  - **Each changed field marks itself**, with the same accent Configuration uses for
+    edited-and-not-saved — one CSS rule, two selectors, the colour written once, so the state
+    cannot come to mean two things depending on the screen.
+  - The comparison is against what the page OPENED with, never against `currentUser`: the two
+    agree at first and only one stays true after a save.
+  - Reload (and Save) now also clear what the password half DREW: the three boxes were emptied
+    and the strength meter under them was not, leaving a red "Weak" bar under an empty field.
+- **`/account` remembers which section you were on** across a reload, like every other
+  sub-navigation in the panel. A stored id that no longer names a section falls back to the
+  first one rather than opening a page with every pane hidden.
+- **Audit entries were half in the reader's language and half in identifiers** — `bad_code`,
+  `forced_enrol`, `totp` reached the screen exactly as the server wrote them. The detail
+  renderer translates the fields whose values are vocabulary the panel chose (`stage`, `error`,
+  `method`, `source`, …), never by value: a value-driven rule would translate a host called
+  `local`. Every lookup falls back to the raw word, so a module's own detail still reads.
+  - That fallback is also why nothing failed when a word was missing, which is what
+    `tests/meta/test_audit_detail_words.py` now closes: it reads the `detail={…}` literals the
+    core writes and asks both language files for each one.
+- **A failed regeneration of the recovery codes now leaves a record, and says which failure it
+  was.** A wrong or empty code is the person; a CORRECT code whose write then failed is not —
+  and that second branch answered 400 and recorded nothing at all. What the browser is told
+  stays coarser than what is written down: `empty` and `bad_code` are one audit line apart and
+  both answer `bad_code` on the wire.
+  - The refusal is now shown IN the dialog, on the field, with the server's own reason instead
+    of a toast that says "that code is not valid" whatever went wrong — which was a lie when
+    the code was right.
+- **The sign-in pages said nothing while they worked either** — reported from the enrolment
+  screen at first sign-in, where Verify sat unchanged until the page navigated. Those three
+  pages do not load the panel's JS bundle, so the shell carries a markup-driven version: a form
+  with `data-busy` disables its submit button and puts a spinner in front of the label.
+  - Opt-in rather than automatic, because the same pages carry a form that must be left alone —
+    the logout that abandons a half-finished sign-in is the way out, and disabling it because
+    the page is busy would remove the only exit at the moment somebody wants it.
+- **Nothing in the second-factor card said it was working.** Press Verify and the dialog sat
+  exactly as it was until the answer arrived — which is also the state in which somebody presses
+  again, and a code is spent once.
+  - A new generic `ssBtnBusy(btn)` disables the control, prepends a spinner and hands back the
+    restore. Prepends rather than replaces: a button that becomes a lone spinner shrinks to the
+    width of one, so the footer jumps at the moment somebody is watching it, and the label is
+    the only thing saying what is taking a moment. It also restores a button that was ALREADY
+    disabled, which a bare `disabled = false` would quietly enable.
+  - The five hand-written copies of the same four lines (test-connection, the field pickers, the
+    host checks) now go through it. A labelled button keeps its label with the spinner in
+    front; an icon-only button has neither a label to protect nor width to lose, so there the
+    spinner takes the icon's place — which is how those copies already behaved.
+  - Used by every waiting path: minting a secret (nothing is on screen yet, so the card's own
+    button carries it), confirming an enrolment, the two dialogs that spend a code — once, in
+    `_accMfaAskCode`, rather than copied into each callback — and the admin reset in Edit user.
+  - The card itself shows a spinner while it asks the server what state it is in; it used to sit
+    on its static description through the whole round trip.
+- **Enter in the second-factor code field did nothing**, and the Verify button sat in the
+  dialog BODY while the footer held only Close. Both fixed, and both are about the same dialog
+  knowing what it is for: it exists to receive a code.
+  - `showHtmlModal` takes a fourth argument now — buttons for the FOOTER, beside Close, where
+    every other dialog in the panel keeps its confirm. The slot is emptied on every open by the
+    one function all four openers end in, so a table of NUT variables can never inherit a
+    "Verify" button from the dialog before it.
+  - Enter is bound explicitly because there is no `<form>` in a modal built from a string, so a
+    lone input does nothing at all on Enter — a keypress that reads as ignored rather than
+    unsupported. The field also takes the cursor when the dialog opens.
+  - Guarded in `tests/meta/test_wa_info_modal.py`, both halves validated by reintroducing them.
+- **The second-factor row in Edit user disappeared instead of saying "not set up".** It was
+  drawn only for an account that HAS a factor and only for a holder of `mfa_reset_others` — a
+  rule that is right about the BUTTON and wrong about the badge beside it, which answers a
+  question about the account rather than offering an action. Two symptoms from the one mistake:
+  opening the modal on an account with no factor showed nothing where the state should be, and
+  resetting one made the whole block vanish under the pointer that had just clicked it, leaving
+  a toast as the only evidence anything had happened.
+  - The badge is now drawn for every existing account, in one of two states; the button appears
+    only when there is a factor to take off and the viewer may take it; the row is hidden for a
+    NEW account only, which has no account yet to have a factor.
+  - Nothing is disclosed that was not already on screen: the users table has carried the same
+    fact in its MFA column since build.86.
+  - Guarded in `tests/meta/test_wa_user_modal_mfa.py`, which pins the badge, the button and the
+    row as three separate decisions.
+- **The code prompt stayed on screen after turning MFA off**, over a toast saying it had
+  worked. `showHtmlModal` is the one dialog whose buttons the CALLER composes, so nothing
+  behind them dismisses it; the enrol and regenerate paths only appeared to close because the
+  recovery codes replace the same dialog. Disabling opens nothing over it, so it sat there
+  asking for a code that had already been accepted. `hideInfoModal()` now closes it — on
+  success only, deliberately: a wrong code has to leave the box open to be retyped.
+
+## [0.0.1+build.86] - 2026-08-18
+
+### Added
+- **An MFA column in the users table.** "Which of these accounts is unprotected" is a question
+  the screen answers now, instead of one an administrator opens forty modals for. It is a tick
+  or a dash with the state in its tooltip — never colour alone, because it is read at a glance
+  down a long list and has to survive a colour-vision deficiency.
+  - **One query for the whole table.** The store answers a set of uids precisely so a page of
+    forty accounts does not become forty round trips, and a store that cannot answer leaves the
+    column reading "no" rather than taking the page down with it.
+  - A boolean and nothing else: the users list has no business knowing which KIND of factor an
+    account has, let alone anything about it.
+- **Resetting somebody's second factor from Admin › System › Edit user.** Shown only for an
+  existing account that HAS one and only to a holder of `mfa_reset_others` — hidden rather than
+  disabled, because a control nobody can use is noise on a modal that already has four tabs.
+  - The confirmation says what it COSTS rather than asking whether you are sure: that account
+    goes back to signing in with its password alone until it sets a new one up.
+  - There is no counterpart that turns MFA on for somebody else. Only the owner can enrol an
+    authenticator they are holding, and a button implying otherwise would be a lie about what
+    an administrator can do.
+
+### Fixed
+- **The account page showed "not set up" for an account that HAS a second factor**, and the
+  Set-up button then failed. One mistake with two symptoms: `apiGet` answers the parsed BODY
+  while `apiPost`/`apiDelete` answer `{status, data}`, and reading `.data` off the GET yielded
+  `undefined`, so the card fell to its default and the button posted an enrolment the server
+  correctly refused with 409. Neither symptom said what was wrong — which is the argument for
+  the guard rather than the one-line fix: `tests/meta/test_wa_partials_convention.py` now
+  refuses `.data` read straight off an awaited `apiGet` anywhere in the templates, and checks
+  the two helpers still have the shapes it assumes so it becomes wrong rather than merely
+  unnecessary if they change. Validated by reintroducing the bug.
+  - `r.data` after an `apiGet` stays legal where the endpoint genuinely returns a body with a
+    `data` key — `/api/v1/modules/page/<m>` does — so the guard matches only the form that
+    cannot be right.
+
+## [0.0.1+build.85] - 2026-08-18
+
+### Added
+- **`mfa_factors` can hold a security key**: `credential_id`, `public_key`, `alg` and
+  `sign_count`. The `method` column was there from the first MFA commit for exactly this, so a
+  user can end up with a TOTP app and a key and the two are told apart rather than replacing
+  each other.
+  - The four are **their own columns and do not reuse `secret`**: a public key is not a secret,
+    and putting it there would make enrolling a key fail on an install with no encryption key —
+    for a value that has nothing to protect.
+  - The COSE key is stored **in the form it arrived in** (base64url of the CBOR) and re-parsed
+    by the decoder that is tested against the standard: one representation, and no second place
+    that can disagree about what the key is.
+  - `alg` is recorded at REGISTRATION, because a key that names its own algorithm when the
+    assertion arrives is the JWT `alg` flaw in other words.
+  - `note_sign_count` moves the counter forward in the SQL (`WHERE sign_count < ?`), monotonic
+    the same way `note_step` is: two assertions racing must not let the later one lower the bar
+    for the earlier, which is precisely the state a cloned authenticator would try to produce.
+  - A registered key is stored **confirmed**: unlike a TOTP enrolment, the ceremony IS the
+    proof — the response was signed by the authenticator over a challenge this server issued,
+    so there is nothing left for a second step to establish.
+
+## [0.0.1+build.84] - 2026-08-18
+
+### Added
+- **The panel now decides whether it can offer a security key at all**, before offering one.
+  Three things have to hold, and when one does not the answer is *do not offer it* rather than
+  try: a credential is scoped by the browser to the RP ID and **cannot be moved**, so
+  registering against a guess produces a key that silently never works again and nothing on
+  screen that says why. No public URL, an IP address (not a registrable domain) or plain HTTP
+  each mean the option is not shown — refusing here is an explanation instead of an opaque
+  browser error.
+- `web_admin|webauthn_rp_id`, the escape for a deployment where the public URL and the domain
+  the keys should belong to differ — several names in front of one panel, or a public URL on a
+  subdomain. An override the origin does not sit under is refused here, because the browser
+  would refuse it somewhere worse.
+- **A reverse proxy the panel is not reading is reported as a warning, not a refusal.** With
+  `proxy_count` at 0 behind a proxy terminating TLS the panel believes it serves plain HTTP —
+  but the ceremony would still work, and what breaks first is the session cookie. Blocking
+  WebAuthn there would name the wrong problem and send somebody to the wrong setting.
+- Eight tests.
+
+## [0.0.1+build.83] - 2026-08-18
+
+### Added
+- **The WebAuthn ceremonies** (`lib/core/mfa/webauthn.py`) — registration and authentication
+  verified as arithmetic over bytes the browser posted, with no Flask, no store and no clock.
+  Six checks, and each is the whole feature when it is missing: the challenge (constant-time,
+  or an assertion captured once is replayable forever), the origin (exact equality — a
+  substring test is how `https://panel.example.com.attacker.net` becomes a valid login), the
+  RP ID hash, user presence, a signature over `authData ‖ SHA-256(clientDataJSON)` and nothing
+  else, and a signature counter that moved forward.
+- **The RP ID comes from `web_admin|public_url`, never from the request.** Behind a reverse
+  proxy the request says whatever the proxy last said, and a credential registered against the
+  wrong name is one that silently never works again — the browser scopes it and it cannot be
+  moved. Nothing usable answers empty, and the caller declines to offer WebAuthn rather than
+  guessing.
+- **Attestation is deliberately not verified**, and that is a choice rather than an omission:
+  the statement says which model of authenticator was used, and checking it means shipping and
+  maintaining vendor roots to answer a question this panel does not ask. A second factor here
+  is "something the person has", not "something from a manufacturer we approve".
+- 53 tests. The happy path is one class; the other eight each take a ceremony that would
+  verify and break exactly one thing.
+
+## [0.0.1+build.82] - 2026-08-18
+
+### Added
+- **The two pieces WebAuthn needs before any of it can touch a browser**, both written here
+  because there is no CBOR library in this project and adding one to read two structures was
+  not a trade worth making — the same reasoning as the QR encoder, and the same discipline:
+  checked against what the standard publishes rather than against themselves.
+  - `lib/core/mfa/cbor.py` — decoding only, against RFC 8949's own Appendix A table. It
+    **refuses the indefinite-length form** WebAuthn's canonical encoding does not use, because
+    accepting two encodings of one value is how a signature comes to be computed over one and
+    checked against the other; it refuses a repeated map key rather than picking one for
+    whoever sent it; and it **says how much it consumed**, since the credential's public key is
+    CBOR followed by extensions and a parser that ignores the remainder cannot tell a key from
+    a key with something appended.
+  - `lib/core/mfa/cose.py` — the authenticator's key map as something `cryptography` can verify
+    with: ES256, RS256 and EdDSA, and nothing else guessed at. **The algorithm is the one
+    recorded at registration, never the one the key claims when the assertion arrives** — a key
+    that picks its own is the JWT `alg` flaw with different words. An RSA modulus below 2048
+    bits is refused: the authenticator chose the size, so the floor is checked rather than
+    assumed.
+  - 82 tests. The CBOR ones sit on a published table; the COSE ones are an honest round trip
+    (a real key pair exported into the COSE map an authenticator would send) and the file says
+    so, because what they prove is that the labels are read as the standard numbers them —
+    the half that silently produces "invalid signature" for every user when it is wrong.
+
+## [0.0.1+build.81] - 2026-08-18
+
+### Added
+- **`ldap|mfa_trusted`, `oidc|mfa_trusted`, `saml2|mfa_trusted` — "this directory already
+  requires MFA".** Where it does, asking again is friction with no gain: the account proved two
+  things before the panel ever saw it. It is a switch per provider and not a rule in the code,
+  because whether an IdP enforces MFA is a fact about somebody else's system that only its
+  operator can state.
+  - **Off by default**, which is the conservative direction: the panel keeps asking for what it
+    can verify itself until an operator says the directory is doing it.
+  - Trusting one skips **both halves** for sign-ins through it — the code step and the forced
+    enrolment — because both exist to establish the same fact.
+  - It says nothing about a **local** sign-in. Trusting a provider is a statement about that
+    door, not about the account: somebody who also has a password here still meets the panel's
+    own policy when they use it, or trusting one directory would quietly disarm every other.
+  - A sign-in source with no config section of its own — the Microsoft Teams tab — is never
+    trusted. There is nowhere to say it enforces MFA, and the answer to "no setting" is the
+    safe one.
+  - Eight tests, including the two that would matter if this were got backwards: trusting one
+    provider does not trust the others, and turning the trust back off asks again.
+
+## [0.0.1+build.80] - 2026-08-18
+
+### Added
+- **`web_admin|mfa_required` — the installation can now make accounts carry a second factor**:
+  `off` (the default, unchanged behaviour), `admins`, or `all`. Three values and not a switch,
+  because "everybody" and "the accounts that can change everything" are different decisions
+  with different costs, and offering only on/off makes the answer to "protect the dangerous
+  accounts" be "make forty people enrol".
+  - **Switching it on locks nobody out**, which is the only reason a policy like this is safe
+    to turn on at all. Somebody it covers who has no factor enrols ON THE WAY IN, at
+    `/login/mfa/enrol` — still with no session, exactly like the code step. Refusing the
+    sign-in instead would shut out everybody who has not enrolled, which the moment the policy
+    is switched on is everybody, the last administrator included.
+  - `admins` counts an administrator **however they became one** — their own role or a group
+    carrying it. Asking only the account's own role is the bug the August audit found in four
+    other guards, and repeating it here would have left the accounts the policy exists to
+    protect as the ones it skipped. It reuses `users_svc.user_is_admin`, which that audit
+    added.
+  - **A policy that cannot be honoured gives way rather than the installation.** `MfaStore`
+    refuses to write a seed it cannot encrypt, so on an install with no key a policy demanding
+    a factor would demand something nobody can enrol. `_mfa_policy()` reads `off` in that case
+    whatever the config says, and logs why — the alternative is a panel nobody can open and a
+    setting that looks correct.
+  - A value that is not one of the three is refused at save. Stored, it would be read as "not
+    one of the values I check for", which fails OPEN — the one direction a policy field must
+    never fail in.
+  - A factor somebody already set up is still asked for when the policy is `off`: turning the
+    policy off must not silently stop honouring what people opted into.
+  - The enrolment screen will not mint a secret for an account that already has a factor.
+    Without that, a password alone would replace a working one.
+- Nine tests for the policy, and the honest note that goes with forced enrolment: the account
+  is one password away from that page, so whoever has the password can enrol THEIR
+  authenticator. It is the exposure a password-reset flow already carries, it is audited, and
+  the alternative — an out-of-band enrolment step — is a feature nobody would switch on.
+
+## [0.0.1+build.79] - 2026-08-16
+
+### Added
+- **Two-factor authentication for local accounts (TOTP)** — phase one: anybody can turn it on
+  from `/account`, nothing forces it yet, and an account that has not enrolled signs in exactly
+  as before. Which is what makes it safe to deploy on an installation that has never heard of
+  it.
+  - **RFC 6238 from the standard library** — `hmac`, `hashlib`, `struct`, `base64` and nothing
+    else. A dependency for thirty lines of arithmetic that has not changed since 2011 is a
+    dependency in a panel people install on segregated networks and count what it pulls in. It
+    is tested against the table of expected codes the RFC itself publishes (Appendix B), which
+    is the difference between a test and a comment: a TOTP that agrees with itself agrees with
+    nobody's phone.
+  - **A code is good exactly once.** The verifier answers the time STEP rather than a boolean,
+    and the step is stored, so a code read over a shoulder — or off a phishing page — stops
+    working the moment it is used instead of at the end of its thirty seconds. The counter
+    lives in the database because "already used" has to hold between processes: two web
+    replicas with a local counter each would accept the same code twice.
+  - **A QR code and the base32 key, always both.** There is no QR library in this project and
+    adding one to draw a square was not a trade worth making, so `lib/core/mfa/qr.py` is
+    ISO/IEC 18004 in two hundred lines (byte mode, level L, versions 1–10, smallest that
+    fits). It is checked against the error-correction codewords the standard prints for its
+    own worked example and the published table of format strings — but no test can hold a
+    phone up to a screen, so the key is printed beside the square and the factor is not
+    switched on until a code the app produced verifies. A wrong QR costs one manual entry.
+  - **Ten single-use recovery codes**, shown once, hashed with the account hasher — nothing
+    ever needs to read one back. Plus `main.py user mfa-reset <user>` on the machine, which is
+    the way back for somebody who lost the phone AND the codes; without it the last
+    administrator can lock the installation permanently.
+- **The half-finished sign-in is not a session.** A password accepted but not yet seconded
+  writes no session row and sets no `logged_in`; it is a short note in the signed cookie that
+  expires in five minutes. The alternative — create the session and flag it — hands a real,
+  API-usable session to whoever has the password and makes every gate responsible for one more
+  field. The check sits in `_establish_session`, the one place in the panel where a session is
+  born, so the three SSO callbacks inherit it rather than walking around it.
+- Its own tables (`mfa_factors`, `mfa_recovery`) and not a column on `users`: that record is
+  merged into what the users API serialises, so a TOTP seed there would be one
+  `GET /api/v1/users` away from everybody with `users_view`. The seed is encrypted at rest, and
+  **enrolment is refused outright when it cannot be** — the one place in this project that
+  will not fall back to plaintext, because a seed is a generator and one read out of a database
+  produces valid codes for as long as the factor exists.
+- `mfa_reset_others`, granted to nobody by default. Taking another account's factor off is the
+  supported way back in for a lost phone, and it is also what an attacker with `users_edit`
+  would do before going after the password.
+- `showHtmlModal` — the fourth dialog shape, for a modal with a CONTROL in it. The other three
+  cannot carry a form, and a bespoke modal per case is how a panel ends up with six that look
+  almost alike.
+- `.ss-qr` caps the square. The SVG ships with a `viewBox` and no width or height on purpose —
+  one sized by the server does not fit somebody's phone at arm's length — and the cost of that
+  is that it inherits its container. Unconstrained, the container is the dialog: at `modal-lg`
+  it drew 800px wide and pushed the key and the confirmation field below the fold, so the one
+  thing the screen exists to show was the one thing off it. Capped with `min()` so a narrow
+  phone gets the width it has rather than a square wider than the dialog, and guarded on the
+  class rather than the markup so the next place that shows one inherits the fix.
+
+### Fixed
+- **Secrets saved during the very first run of a fresh install were stored in clear text.**
+  `_get_fernet()` caches what it finds, the stores capture that value rather than the method,
+  and `_init_entity_store()` runs *before* `_create_app()` writes the key file — so on an
+  install with no `SS_SECRET_KEY` and no `.flask_secret` yet, the hosts, credentials and
+  (now) MFA stores were all built with no encryption. It corrected itself on the next restart,
+  which is exactly what kept it invisible: the only affected install is the one nobody has
+  restarted. The key is now minted before the stores are built. Found because MFA fails closed
+  rather than storing a seed in the clear, so it was the first store to report it.
+
 ## [0.0.1+build.78] - 2026-08-16
 
 ### Security

@@ -50,6 +50,7 @@ su SSOT (ver el [mapa temático](#mapa-temático-dónde-está-cada-cosa)).
 | [ref-modulos.md](ref-modulos.md) | Los 20 módulos integrados: referencia de configuración, campos y flujo de cada uno |
 | [explica-web-admin.md](explica-web-admin.md) | Interfaz web Flask: características, roles (73 permisos), notificaciones, syslog, eventos, seguridad, endpoints REST, i18n, formularios por schema |
 | [explica-seguridad.md](explica-seguridad.md) | Autenticación (local/LDAP/OIDC/SAML2), semántica RBAC (escalada, IDOR), sesiones, cifrado, XSS, SSRF, path traversal, auditoría y tests de seguridad |
+| [explica-mfa.md](explica-mfa.md) | Verificación en dos pasos: el paso intermedio del login (una nota, nunca una sesión), la política `off`/`admins`/`all` que no puede dejar a nadie fuera, confianza por proveedor SSO, TOTP y códigos de recuperación, qué se guarda y cifrado, auditoría, reset por administrador y CLI, y dónde está WebAuthn |
 | [ref-permisos.md](ref-permisos.md) | Fuente única del RBAC: catálogo de los 73 flags de permiso, roles integrados/personalizados, grupos, permisos dinámicos (módulo/servidor/cluster) y estructuras internas |
 | [caso-entra-id.md](caso-entra-id.md) | Microsoft Entra ID: SSO (OIDC y SAML2) + asistentes de registro de app (Device Code) para SSO/SCIM/M365-email/Teams; flujo, campos de config y **limitaciones** de Graph (config básica de SAML manual, dominios no verificados, `instantiate`, `servicePrincipalNames`) + resolución de problemas |
 | [caso-scim.md](caso-scim.md) | Aprovisionamiento SCIM 2.0 (agnóstico del IdP): activar endpoint + token, JIT vs SCIM, configurar Entra/Okta/otros IdP, altas/bajas y soft-delete de grupos, badges |
@@ -84,6 +85,7 @@ Guía rápida por temas de documentación técnica → documento(s) donde se cub
 | **Instalación** (Linux/Windows/Docker) | [caso-despliegue.md](caso-despliegue.md) · [caso-docker.md](caso-docker.md) · [caso-desarrollo.md](caso-desarrollo.md) |
 | **Despliegue** (producción, proxy inverso, HTTPS, systemd, Compose, k8s) | [caso-despliegue.md](caso-despliegue.md) · [caso-docker.md](caso-docker.md) · [caso-kubernetes.md](caso-kubernetes.md) · [caso-ssh-hardening.md](caso-ssh-hardening.md) |
 | **Seguridad** (auth, CSRF, XSS, SQLi, sesiones, cifrado) | [explica-seguridad.md](explica-seguridad.md) · [caso-entra-id.md](caso-entra-id.md) |
+| **Segundo factor / MFA** (TOTP, política, códigos de recuperación, WebAuthn) | [explica-mfa.md](explica-mfa.md) · [explica-seguridad.md](explica-seguridad.md) |
 | **SSO / provisioning** (Entra ID, SCIM, LDAP) | [caso-entra-id.md](caso-entra-id.md) · [caso-scim.md](caso-scim.md) · [explica-seguridad.md](explica-seguridad.md) |
 | **Permisos / RBAC** (flags, roles, grupos) | [ref-permisos.md](ref-permisos.md) · [explica-seguridad.md](explica-seguridad.md) (semántica) |
 | **i18n** (traducción, tags, plantillas de texto) | [explica-i18n.md](explica-i18n.md) · [ref-i18n.md](ref-i18n.md) · [explica-notificaciones.md](explica-notificaciones.md) |
