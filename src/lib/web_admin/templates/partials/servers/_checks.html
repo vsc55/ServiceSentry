@@ -115,11 +115,10 @@ async function _loadClusterNodes(pkey, mod, key, selId, btn) {
     const sel = document.getElementById(selId);
     const item = _clusterCheckItem(mod, key);
     if (!sel || !item) { showToast(t('connection_error'), 'danger'); return; }
-    const orig = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`; }
+    const done = ssBtnBusy(btn);
     const res = await apiPost('/api/v1/modules/watchfuls/' + mod + '/list_nodes',
                               Object.assign({}, item, { _item_key: key }));
-    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    done();
     const data = res && res.data;
     if (!data || !data.ok) { showToast((data && data.message) || t('connection_error'), 'danger'); return; }
     const cur = sel.value || ((_hostDraft.profiles || {})[pkey] || {}).node || '';

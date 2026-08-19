@@ -4,6 +4,8 @@
 
 import os
 
+import re
+
 import pytest
 
 try:
@@ -66,8 +68,14 @@ class TestAuthentication:
         resp = _login(client, username="disabled_user", password="secret")
         assert resp.status_code == 200
         body = resp.data.decode()
-        # Anti-enumeration: must NOT reveal the account is disabled
-        assert "disabled" not in body.lower()
+        # Anti-enumeration: must NOT reveal the account is disabled.
+        #
+        # The MARKUP only — scripts are stripped first. The shell carries a form-busy handler
+        # that touches `btn.disabled`, and a whole-document grep for the word "disabled" reads
+        # that as a leak. What the guard is about is what the page SAYS to whoever sent the
+        # password, and no JavaScript is part of that sentence.
+        visible = re.sub(r"<script[^>]*>.*?</script>", "", body, flags=re.S | re.I)
+        assert "disabled" not in visible.lower()
         # Must show the same generic error as an invalid password
         assert "invalid" in body.lower() or "credentials" in body.lower() or "incorrect" in body.lower()
 

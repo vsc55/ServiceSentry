@@ -19,6 +19,8 @@ Split by category: this file holds the isolated tests (no app, no DB, no HTTP); 
 original ``test_wa_config_views.py`` lives in ``tests/meta/test_wa_config_views.py``."""
 
 import os
+import re
+
 from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
@@ -722,7 +724,13 @@ class TestASectionIsASheetNotACard:
         assert '_dirtyFields.has(path)' in mark
         assert "classList.toggle('cfg-row-dirty', dirty)" in mark
         assert "classList.toggle('cfg-row-changed', changed && !dirty)" in mark
-        assert '.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-dirty {' in _read(CSS)
+        # The selector, not the whole rule head: `.ss-field-dirty` (the account page's
+        # fields) shares the block, so the colour is written once and the two states of
+        # "edited and not saved" cannot drift apart between screens.
+        css = _read(CSS)
+        assert '.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-dirty' in css
+        assert re.search(r'cfg-row-dirty[^{}]*\{[^}]*var\(--bs-info\)', css), (
+            'the pending accent lost its own colour and reads as the changed one')
 
     def test_putting_a_value_back_undoes_the_pending_state(self):
         """Reported: change the audit sort direction and put it back, and the row stays marked

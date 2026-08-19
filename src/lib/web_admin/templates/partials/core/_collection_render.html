@@ -25,12 +25,9 @@ async function testItemConnection(pathStr, url, btn, extra) {
         _runItemMultiCheck(parts[0], _colSchema, _itemKey, url, itemData, _mc);
         return;
     }
-    const origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
+    const _done = ssBtnBusy(btn);
     const result = await apiPost(url, itemData);
-    btn.disabled = false;
-    btn.innerHTML = origHtml;
+    _done();
     if (!result) return;
     const d = result.data || {};
     const ok = d.ok;
@@ -175,10 +172,9 @@ async function itemAction(btn) {
             _pkTitle = (_tm && _tm.pick) || btn.title || resultFld;
         }
         const _fpTok = openFieldPickerLoading(pathStr + '|' + resultFld, _pkTitle, undefined, resultMulti);
-        const _oh = btn.innerHTML; btn.disabled = true;
-        btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
+        const _pkDone = ssBtnBusy(btn);
         const r2 = await apiPost(url, itemData);
-        btn.disabled = false; btn.innerHTML = _oh;
+        _pkDone();
         const d2 = r2 && r2.data;
         // Pass the open-token so a late response can't fill a picker the user has since
         // closed or reopened for another field (stale-response race).
@@ -187,12 +183,9 @@ async function itemAction(btn) {
         return;
     }
 
-    const origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>`;
+    const _done = ssBtnBusy(btn);
     const res = await apiPost(url, itemData);
-    btn.disabled = false;
-    btn.innerHTML = origHtml;
+    _done();
     if (!res) return;
 
     const ok  = res.data && res.data.ok;

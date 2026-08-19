@@ -140,6 +140,21 @@ function formatHostTestDetail(d) {
     return html || renderReadable(d);
 }
 
+// ── The words the panel itself wrote, in the reader's language ────────────────────────────
+// An audit detail holds two very different kinds of string. Most are DATA — a hostname, a
+// filename, something somebody typed — and translating those would be nonsense. A few are
+// VOCABULARY the panel chose when it wrote the entry: `stage: 'forced_enrol'`,
+// `error: 'bad_code'`, `method: 'totp'`. Those were reaching the screen raw, which is how an
+// audit log ends up half in Spanish and half in identifiers.
+//
+// The list is of FIELDS and not of values, on purpose: a value-driven rule would translate a
+// host called `local` or a module whose id happens to match one of these words. And every
+// lookup falls back to the word itself, so an entry a module wrote — or one from a build newer
+// than the language file — still reads, just untranslated.
+const _AUDIT_ENUM_FIELDS = new Set(['stage', 'error', 'method', 'source', 'result', 'kind']);
+const _auditWord = v => I18N['audit_v_' + String(v)] || String(v);
+const _auditFieldLabel = k => I18N['audit_f_' + String(k)] || String(k);
+
 // Recursive pretty renderer for any value
 function renderReadable(v) {
     if (v === null || v === undefined) return '<span class="text-muted">∅</span>';
@@ -163,7 +178,10 @@ function renderReadable(v) {
     }
     if (typeof v === 'object') {
         const rows = Object.entries(v).map(([k, val]) =>
-            `<tr><td class="pe-3 text-muted small text-nowrap">${esc(k)}</td><td>${renderReadable(val)}</td></tr>`
+            `<tr><td class="pe-3 text-muted small text-nowrap">${esc(_auditFieldLabel(k))}</td><td>${
+                (typeof val === 'string' && _AUDIT_ENUM_FIELDS.has(k))
+                    ? esc(_auditWord(val))
+                    : renderReadable(val)}</td></tr>`
         ).join('');
         return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
     }

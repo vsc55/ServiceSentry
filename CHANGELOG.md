@@ -8,6 +8,150 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.87] - 2026-08-19
+
+### Added
+- **`docs/explica-mfa.md`** — the second factor, written down: the parked sign-in that is not a
+  session, the policy that cannot lock anybody out, per-provider SSO trust, enrolment and
+  verification as sequence diagrams, what the two tables hold and what is encrypted, the six
+  audit events and why none is muted, the admin reset and its CLI, the config keys with their
+  env vars, and exactly where WebAuthn stops. Indexed from `docs/README.md`.
+
+### Changed
+- **The account page is a settings page now**, laid out on the panel's own rail shell — the one
+  Configuration and Modules use: the index down the side, the open section beside it, both
+  filling the pane. It had grown a third card with the second factor and stopped fitting a
+  screen, so the password and the MFA controls sat below the fold, behind two preferences
+  nobody opens this page to change.
+  - Two layouts lost on the way and are named in the docs so they are not tried again: a 640px
+    card stack centred with `mx-auto` (on a wide monitor it left more empty page than page), and
+    a horizontal tab bar over it (it sits where the section title goes and measures whatever its
+    labels measure). Bootstrap's `.nav-justified` was tried on that bar and looked like it did
+    nothing — it equalises `.nav-item` and stretches only a `.nav-link` that is a DIRECT child
+    of the bar, and every tabbed panel here writes `<li class="nav-item"><button …>`.
+  - **Save and Cancel moved into the toolbar**, over the detail, shared by both sections: the
+    one not on screen keeps its fields in the DOM, so switching never silently drops an edit.
+    Below the cards they were a pair of buttons floating in the middle of a wide empty page.
+  - The MFA card is still outside what Save writes, for the reason it always was: each of its
+    actions either mints a secret or spends a code, and a field in this form would have made
+    one button mean "change my language" and "replace my second factor" at once.
+  - The cards of a section sit in a **grid** — two side by side from `xl` up — capped by
+    `.ss-account-body` and left-aligned, never centred. Past that cap a password box a metre
+    wide is not more readable.
+  - Section switching is written out (`_accSection`) rather than handed to Bootstrap: the rail
+    is a `<nav>`, not a `.nav`, and a Bootstrap tab that cannot find its parent list returns
+    quietly — a control that does nothing at all.
+  - **The page no longer prints its own title.** The breadcrumb in the top bar already names the
+    section and every other section in the panel leaves it at that; this one said "Account
+    Settings" twice on the same screen.
+  - The rail is **visible**, unlike the sub-tab bars in Access/Infrastructure/IPban that CSS
+    hides because the sidebar carries the same entries. `/account` has no sidebar sub-items, so
+    it is the only route to the security half — and a guard now refuses to let that id be swept
+    into the hiding rule, because the failure is silent: the pane renders, the fields are in the
+    DOM, and nothing on screen brings them up.
+
+### Fixed
+- **"My settings" stopped opening after visiting any other section**, with no error anywhere: no
+  request, no console message, nothing. `Tab.show()` returns at its first line when its own
+  trigger already carries `.active` (Bootstrap 5.3.3), and the sweep that keeps one active
+  trigger across the sidebar selected `.ss-sb-item` — which the hidden `#btn-nav-account` does
+  not wear. Bootstrap never cleared it either: the System sections live in a different `.nav`
+  group and it only deactivates within one. So the button stayed marked active for good.
+  - The sweep now also matches `[data-bs-toggle="tab"].active`: a state sweep written in terms
+    of what an element LOOKS like will always miss the ones that do not look like the others.
+  - Guarded in `tests/meta/test_wa_spa_nav.py` (validated by reintroducing the old selector) and
+    written up in `docs/caso-diagnostico.md`.
+- **The account toolbar now says what it can do.** It was Cancel and Save, and both were wrong
+  in the same way: neither said anything about the state of the page.
+  - **Cancel had nothing to cancel** — the page opens with what the server holds and writes
+    nothing until Save, so it meant "go back", which the browser's Back button already does,
+    while reading as "undo", the one thing it did not do. It is **Reload** now: throw away what
+    is typed and ask the server again, asking first when there are unsaved edits.
+  - **Save starts disabled** and lights with the same dirty dot Configuration uses, so the
+    button answers "is there anything to save" instead of being permanently available on a page
+    whose other half is a password form.
+  - **Each changed field marks itself**, with the same accent Configuration uses for
+    edited-and-not-saved — one CSS rule, two selectors, the colour written once, so the state
+    cannot come to mean two things depending on the screen.
+  - The comparison is against what the page OPENED with, never against `currentUser`: the two
+    agree at first and only one stays true after a save.
+  - Reload (and Save) now also clear what the password half DREW: the three boxes were emptied
+    and the strength meter under them was not, leaving a red "Weak" bar under an empty field.
+- **`/account` remembers which section you were on** across a reload, like every other
+  sub-navigation in the panel. A stored id that no longer names a section falls back to the
+  first one rather than opening a page with every pane hidden.
+- **Audit entries were half in the reader's language and half in identifiers** — `bad_code`,
+  `forced_enrol`, `totp` reached the screen exactly as the server wrote them. The detail
+  renderer translates the fields whose values are vocabulary the panel chose (`stage`, `error`,
+  `method`, `source`, …), never by value: a value-driven rule would translate a host called
+  `local`. Every lookup falls back to the raw word, so a module's own detail still reads.
+  - That fallback is also why nothing failed when a word was missing, which is what
+    `tests/meta/test_audit_detail_words.py` now closes: it reads the `detail={…}` literals the
+    core writes and asks both language files for each one.
+- **A failed regeneration of the recovery codes now leaves a record, and says which failure it
+  was.** A wrong or empty code is the person; a CORRECT code whose write then failed is not —
+  and that second branch answered 400 and recorded nothing at all. What the browser is told
+  stays coarser than what is written down: `empty` and `bad_code` are one audit line apart and
+  both answer `bad_code` on the wire.
+  - The refusal is now shown IN the dialog, on the field, with the server's own reason instead
+    of a toast that says "that code is not valid" whatever went wrong — which was a lie when
+    the code was right.
+- **The sign-in pages said nothing while they worked either** — reported from the enrolment
+  screen at first sign-in, where Verify sat unchanged until the page navigated. Those three
+  pages do not load the panel's JS bundle, so the shell carries a markup-driven version: a form
+  with `data-busy` disables its submit button and puts a spinner in front of the label.
+  - Opt-in rather than automatic, because the same pages carry a form that must be left alone —
+    the logout that abandons a half-finished sign-in is the way out, and disabling it because
+    the page is busy would remove the only exit at the moment somebody wants it.
+- **Nothing in the second-factor card said it was working.** Press Verify and the dialog sat
+  exactly as it was until the answer arrived — which is also the state in which somebody presses
+  again, and a code is spent once.
+  - A new generic `ssBtnBusy(btn)` disables the control, prepends a spinner and hands back the
+    restore. Prepends rather than replaces: a button that becomes a lone spinner shrinks to the
+    width of one, so the footer jumps at the moment somebody is watching it, and the label is
+    the only thing saying what is taking a moment. It also restores a button that was ALREADY
+    disabled, which a bare `disabled = false` would quietly enable.
+  - The five hand-written copies of the same four lines (test-connection, the field pickers, the
+    host checks) now go through it. A labelled button keeps its label with the spinner in
+    front; an icon-only button has neither a label to protect nor width to lose, so there the
+    spinner takes the icon's place — which is how those copies already behaved.
+  - Used by every waiting path: minting a secret (nothing is on screen yet, so the card's own
+    button carries it), confirming an enrolment, the two dialogs that spend a code — once, in
+    `_accMfaAskCode`, rather than copied into each callback — and the admin reset in Edit user.
+  - The card itself shows a spinner while it asks the server what state it is in; it used to sit
+    on its static description through the whole round trip.
+- **Enter in the second-factor code field did nothing**, and the Verify button sat in the
+  dialog BODY while the footer held only Close. Both fixed, and both are about the same dialog
+  knowing what it is for: it exists to receive a code.
+  - `showHtmlModal` takes a fourth argument now — buttons for the FOOTER, beside Close, where
+    every other dialog in the panel keeps its confirm. The slot is emptied on every open by the
+    one function all four openers end in, so a table of NUT variables can never inherit a
+    "Verify" button from the dialog before it.
+  - Enter is bound explicitly because there is no `<form>` in a modal built from a string, so a
+    lone input does nothing at all on Enter — a keypress that reads as ignored rather than
+    unsupported. The field also takes the cursor when the dialog opens.
+  - Guarded in `tests/meta/test_wa_info_modal.py`, both halves validated by reintroducing them.
+- **The second-factor row in Edit user disappeared instead of saying "not set up".** It was
+  drawn only for an account that HAS a factor and only for a holder of `mfa_reset_others` — a
+  rule that is right about the BUTTON and wrong about the badge beside it, which answers a
+  question about the account rather than offering an action. Two symptoms from the one mistake:
+  opening the modal on an account with no factor showed nothing where the state should be, and
+  resetting one made the whole block vanish under the pointer that had just clicked it, leaving
+  a toast as the only evidence anything had happened.
+  - The badge is now drawn for every existing account, in one of two states; the button appears
+    only when there is a factor to take off and the viewer may take it; the row is hidden for a
+    NEW account only, which has no account yet to have a factor.
+  - Nothing is disclosed that was not already on screen: the users table has carried the same
+    fact in its MFA column since build.86.
+  - Guarded in `tests/meta/test_wa_user_modal_mfa.py`, which pins the badge, the button and the
+    row as three separate decisions.
+- **The code prompt stayed on screen after turning MFA off**, over a toast saying it had
+  worked. `showHtmlModal` is the one dialog whose buttons the CALLER composes, so nothing
+  behind them dismisses it; the enrol and regenerate paths only appeared to close because the
+  recovery codes replace the same dialog. Disabling opens nothing over it, so it sat there
+  asking for a code that had already been accepted. `hideInfoModal()` now closes it — on
+  success only, deliberately: a wrong code has to leave the box open to be retyped.
+
 ## [0.0.1+build.86] - 2026-08-18
 
 ### Added

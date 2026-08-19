@@ -52,6 +52,23 @@ function showToast(msg, type = 'success', delay = 3000) {
     bootstrap.Toast.getOrCreateInstance(t, { delay }).show();
 }
 
+// ──────────────────────────── The one dialog the four openers share ──────
+/** Put the caller's action buttons in the FOOTER and show `#infoModal`.
+ *
+ *  All four openers end here, and the reason is the slot: it is emptied on EVERY open, so a
+ *  dialog can never inherit the buttons of the one before it — which is precisely what a
+ *  shared element makes easy to get wrong, and it would arrive as a "Verify" button on a table
+ *  of NUT variables.
+ *
+ *  Buttons belong beside Close and not in the body: one floating over the footer reads as
+ *  belonging to the field above it, and the eye looks for the confirm next to the close.
+ */
+function _infoModalOpen(actions) {
+    const slot = document.getElementById('infoModalActions');
+    if (slot) slot.innerHTML = actions || '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+}
+
 // ──────────────────────────── Generic info modal ──────────────────
 // Show a title + an optional lead message + a key/value table.  `data` may be a
 // plain object ({key: value}) or an array of [key, value] pairs (preserves order).
@@ -73,7 +90,7 @@ function showInfoModal(title, data, lead, variant) {
             ? `<table class="table table-sm table-striped align-middle mb-0 ss-fs-3"><tbody>${rows}</tbody></table>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
     document.getElementById('infoModalBody').innerHTML = body;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+    _infoModalOpen();
 }
 
 // ──────────────────────────── Generic list-of-links modal ──────────
@@ -101,7 +118,7 @@ function showLinksModal(title, items, lead) {
         + (rows
             ? `<table class="table table-sm table-striped align-middle mb-0 ss-fs-3"><tbody>${rows}</tbody></table>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+    _infoModalOpen();
 }
 
 // ──────────────────────────── Generic table modal ─────────────────
@@ -140,7 +157,7 @@ function showTableModal(title, columns, rows, lead, variant) {
                  class="table table-sm table-striped align-middle mb-0 ss-fs-3"
                  >${head}<tbody>${body}</tbody></table></div>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+    _infoModalOpen();
 }
 
 // ──────────────────────────── Modal with a body the caller composed ──────
@@ -153,10 +170,28 @@ function showTableModal(title, columns, rows, lead, variant) {
 // The caller owns the escaping here — that is the trade, and it is why this is named for
 // what it does rather than looking like the safe ones. Everything passed in must already
 // have been through `esc()`, except markup the SERVER composed from values it controls.
-function showHtmlModal(title, html, variant) {
+//
+// `actions` is the same bargain for the FOOTER: buttons that go beside Close, so the dialog's
+// confirm sits where every other dialog in the panel keeps one instead of floating in the body
+// above it.
+function showHtmlModal(title, html, variant, actions) {
     document.getElementById('infoModalTitle').textContent = title || '';
     const cls = ['success', 'warning', 'danger', 'primary'].includes(variant) ? variant : 'primary';
     document.getElementById('infoModalBody').innerHTML =
         `<div class="ss-modal-${cls}">${html || ''}</div>`;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+    _infoModalOpen(actions);
+}
+
+// Close whichever of the four is on screen. They all drive the same `#infoModal`, so this
+// serves all of them — and it exists because `showHtmlModal` is the one whose buttons the
+// CALLER composes: the other three ship a dismiss button in the markup, and a caller-built
+// action has nothing that closes the dialog behind it.
+//
+// It stays a separate call rather than something the helper does on any click, because
+// whether an action should close the dialog depends on how it went: a code that was wrong
+// must leave the box open to be retyped, and a dialog that shut on every press would take the
+// field away at exactly the wrong moment.
+function hideInfoModal() {
+    const el = document.getElementById('infoModal');
+    if (el) bootstrap.Modal.getOrCreateInstance(el).hide();
 }

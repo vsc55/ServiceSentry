@@ -231,10 +231,9 @@ async function _runHostFieldAction(mod, idx, fieldName, btn) {
                       _item_key: it._key || '', ..._hostDraftPayload() };
     // Spinner on the button (no "Testing…" toast — this isn't a test, e.g. it
     // just lists databases), mirroring the Modules tab's itemAction().
-    const _orig = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.75em;height:.75em" role="status"></span>'; }
+    const _done = ssBtnBusy(btn);
     const res = await apiPost('/api/v1/modules/watchfuls/' + mod + '/' + ia.id, payload);
-    if (btn) { btn.disabled = false; btn.innerHTML = _orig; }
+    _done();
     const d = res && res.data;
     if (!d || !d.ok) { showToast((d && d.message) || t('connection_error'), 'danger'); return; }
     if (ia.result === 'field_picker') {

@@ -25,7 +25,7 @@
             <div class="alert alert-{{ category }} py-2 small">{{ message }}</div>
             {% endfor %}
             {% endwith %}
-            <form method="post" action="/login">
+            <form method="post" action="/login" data-busy>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">{{ i18n.username }}</label>

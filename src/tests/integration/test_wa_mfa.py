@@ -14,6 +14,8 @@ responsible for remembering one more field. Here there is nothing to remember: u
 verifies, the request is anonymous by having no session.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 try:
@@ -523,3 +525,118 @@ class TestTheUsersTableSaysWhoHasOne:
         uid = admin._users['admin']['uid']
         assert client.delete(f'/api/v1/users/{uid}/mfa').status_code == 200
         assert client.get('/api/v1/users').get_json()['admin']['mfa'] is False
+
+
+class TestTheSignInPagesSayTheyAreWorking:
+    """A form that NAVIGATES has nothing to say while it waits. The browser's own progress
+    lives up in the tab, where nobody typing a code is looking, and the button that was pressed
+    stays exactly as it was — so a slow answer and a dead button are the same picture. Reported
+    from the enrolment page at first sign-in: "Verify does not show a spinner".
+
+    These three pages do NOT load the panel's JS bundle, so `ssBtnBusy` is not available to
+    them; the shell carries a markup-driven version instead, and the guard is that each form
+    opts in. Opt-in and not automatic, because the same pages carry a form that must be left
+    alone: the logout that abandons a half-finished sign-in.
+    """
+
+    def _form(self, html: str, action: str) -> str:
+        i = html.index(f'action="{action}"')
+        return html[html.rindex('<form', 0, i):html.index('>', i) + 1]
+
+    def test_the_shell_ships_the_mechanism(self, client):
+        html = client.get('/login').data.decode('utf-8', 'replace')
+        assert "form[data-busy]" in html, 'the shell no longer wires the waiting state'
+        assert 'spinner-border' in html
+
+    def test_the_code_form_opts_in(self, admin, client):
+        _enrol(admin)
+        _login(client)                       # parks the sign-in at the second step
+        html = client.get('/login/mfa').data.decode('utf-8', 'replace')
+        assert 'data-busy' in self._form(html, '/login/mfa')
+
+    def test_the_enrolment_form_opts_in(self, admin, client):
+        _set_policy(admin, 'all')
+        _login(client)
+        html = client.get('/login/mfa/enrol').data.decode('utf-8', 'replace')
+        assert 'data-busy' in self._form(html, '/login/mfa/enrol')
+
+    def test_the_way_out_is_left_alone(self, admin, client):
+        """The logout beside the code field abandons the sign-in. Disabling it because the
+        page is busy would take away the only exit at the moment it is wanted."""
+        _set_policy(admin, 'all')
+        _login(client)
+        html = client.get('/login/mfa/enrol').data.decode('utf-8', 'replace')
+        assert 'data-busy' not in self._form(html, '/logout')
+
+
+class TestAFailedRegenerationLeavesARecord:
+    """Regenerating recovery codes is what somebody does when they think the old list leaked,
+    so a refusal here is worth a line — and one branch of it was leaving none at all.
+
+    Two different failures share one screen and must not share one story:
+
+    * the CODE was wrong (or empty) — that is the person, and it is what a run of them looks
+      like when somebody is guessing;
+    * the code was RIGHT and the regeneration still failed — the factor went away between two
+      requests, or the database would not take the write. Nothing about that is the sender's
+      doing, it answered 400 and recorded nothing, and it is invisible from the browser.
+
+    What the browser is told stays coarser than what is written down: `empty` and `bad_code`
+    are one audit line apart and both answer `bad_code` on the wire. Which of the two it was is
+    not something to hand back to whoever is sending them.
+    """
+
+    def _lines(self, admin, event='mfa_failed'):
+        return [e for e in admin._audit_store.get_all() if e['event'] == event]
+
+    def _post(self, client, code):
+        return client.post('/api/v1/account/mfa/recovery', json={'code': code})
+
+    def test_a_wrong_code_is_recorded_with_its_stage(self, admin, client):
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(secret))
+        admin._audit_store.delete_all()
+        assert self._post(client, '000000').status_code == 403
+        rows = self._lines(admin)
+        assert rows, 'a refused regeneration wrote nothing at all'
+        detail = rows[-1].get('detail') or {}
+        assert detail.get('stage') == 'recovery'
+        assert detail.get('error') == 'bad_code'
+
+    def test_an_empty_code_is_told_apart_in_the_log_and_not_on_the_wire(self, admin, client):
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(secret))
+        admin._audit_store.delete_all()
+        res = self._post(client, '')
+        assert res.status_code == 403
+        assert (res.get_json() or {}).get('error') == 'bad_code', \
+            'the wire tells the sender which of the two it was'
+        assert ((self._lines(admin)[-1].get('detail')) or {}).get('error') == 'empty'
+
+    def test_a_right_code_that_still_fails_is_recorded(self, admin, client):
+        """**The branch that used to be silent.** The code was correct, so this is not the
+        person — and a 400 with nothing written down is a failure nobody can find afterwards."""
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(secret))
+        admin._audit_store.delete_all()
+        with patch.object(admin._mfa_store, 'set_recovery', return_value=False):
+            res = self._post(client, _code(secret, 1))
+        assert res.status_code == 400
+        assert (res.get_json() or {}).get('error') == 'write_failed'
+        rows = self._lines(admin)
+        assert rows, 'a write that failed with a CORRECT code left no trace'
+        detail = rows[-1].get('detail') or {}
+        assert detail.get('stage') == 'recovery' and detail.get('error') == 'write_failed'
+
+    def test_turning_it_off_without_one_is_recorded_too(self, admin, client):
+        """Same shape, same reason: a request to remove a factor that is not there says
+        something about the sender, and it was answering 400 in silence."""
+        _login(client)
+        admin._audit_store.delete_all()
+        res = client.post('/api/v1/account/mfa/disable', json={'code': '000000'})
+        assert res.status_code == 400
+        detail = (self._lines(admin)[-1].get('detail')) or {}
+        assert detail.get('stage') == 'disable' and detail.get('error') == 'not_enrolled'

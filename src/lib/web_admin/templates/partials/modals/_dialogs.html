@@ -71,8 +71,15 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body" id="infoModalBody"></div>
+            {# Close is the constant; the slot beside it is where a caller's ACTION goes —
+               "Verify" on the second-factor dialogs. In the footer and not in the body,
+               because a button floating over the footer reads as belonging to the field above
+               it rather than to the dialog, and the eye looks for the confirm next to the
+               close. Filled by `showHtmlModal`'s fourth argument and cleared by every other
+               opener, so a dialog never inherits the last one's buttons. #}
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.close }}">{{ i18n.close }}</button>
+                <span id="infoModalActions" class="d-flex gap-2"></span>
             </div>
         </div>
     </div>

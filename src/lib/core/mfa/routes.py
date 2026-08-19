@@ -98,11 +98,23 @@ def register(app, wa):
         """
         username, uid = _me()
         data = request.get_json(silent=True) or {}
-        if not mfa_service.verify(wa._mfa_store, uid, str(data.get('code') or '')):
-            wa._audit('mfa_failed', username, request.remote_addr, detail={'stage': 'recovery'})
+        code = str(data.get('code') or '')
+        if not mfa_service.verify(wa._mfa_store, uid, code):
+            # `empty` and `bad_code` are one audit line apart and are two different stories: a
+            # form submitted with nothing in it is somebody in a hurry, and a run of wrong
+            # codes is somebody guessing. On the wire both stay `bad_code` — which of the two
+            # it was is not something to tell whoever is sending them.
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': 'recovery', 'error': 'empty' if not code else 'bad_code'})
             return jsonify({'ok': False, 'error': 'bad_code'}), 403
         out = mfa_service.recovery_regenerate(wa._mfa_store, uid)
         if not out.get('ok'):
+            # This branch used to answer 400 and record NOTHING, which is the worst place to
+            # be silent: the code was right, so it is not the person — it is the factor gone
+            # between two requests, or a database that would not take the write. Both are
+            # invisible from the browser, and the second is invisible everywhere else too.
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': 'recovery', 'error': out.get('error', '')})
             return jsonify(out), 400
         wa._audit('mfa_recovery_regenerated', username, request.remote_addr)
         return jsonify(out)
@@ -122,10 +134,14 @@ def register(app, wa):
         """
         username, uid = _me()
         data = request.get_json(silent=True) or {}
+        code = str(data.get('code') or '')
         if not wa._mfa_enrolled(username):
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': 'disable', 'error': 'not_enrolled'})
             return jsonify({'ok': False, 'error': 'not_enrolled'}), 400
-        if not mfa_service.verify(wa._mfa_store, uid, str(data.get('code') or '')):
-            wa._audit('mfa_failed', username, request.remote_addr, detail={'stage': 'disable'})
+        if not mfa_service.verify(wa._mfa_store, uid, code):
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': 'disable', 'error': 'empty' if not code else 'bad_code'})
             return jsonify({'ok': False, 'error': 'bad_code'}), 403
         wa._mfa_store.delete(uid)
         wa._audit('mfa_disabled', username, request.remote_addr)

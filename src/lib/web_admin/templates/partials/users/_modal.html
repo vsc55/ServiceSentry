@@ -247,8 +247,14 @@ async function openUserModal(username, mode = 'edit') {
     // modal that already has four tabs.
     const _umMfa = document.getElementById('umMfaGroup');
     if (_umMfa) {
-        _umMfa.classList.toggle('d-none',
-            isNew || !u.mfa || !(currentUser.permissions || []).includes('mfa_reset_others'));
+        // Only a NEW account has nothing to say here — there is no account yet to have a
+        // factor. For every existing one the row is drawn either way: "not set up" is a state
+        // worth seeing, and it is the same fact the users table already shows in its MFA
+        // column, so nothing is disclosed here that the list did not.
+        _umMfa.classList.toggle('d-none', isNew);
+        // Repainted on every open: a reset earlier in this session left it saying "not set
+        // up", and the next account this modal opens on may well have one.
+        _umMfaPaint(!!u.mfa, (currentUser.permissions || []).includes('mfa_reset_others'));
     }
 
     document.getElementById('umRoleSearch').value = '';
@@ -368,6 +374,29 @@ async function saveUserModal() {
 }
 
 
+/** The second-factor row: whether this account has one, and the way to take it off.
+ *
+ *  Two separate questions, which is why they are two arguments. The BADGE answers "does this
+ *  account have a second factor" and is drawn either way — it is a fact about the account, the
+ *  same fact the MFA column of the users table shows, and an account without one is precisely
+ *  the case worth seeing. The BUTTON appears only when there is something to take off and the
+ *  viewer holds `mfa_reset_others`.
+ *
+ *  The row was hidden outright when there was no factor, and it was wrong twice: opening on an
+ *  account without one showed nothing where the state should be, and a reset made the whole
+ *  block vanish under the pointer that had just clicked it — which reads as the section
+ *  breaking rather than as the thing you asked for having happened.
+ */
+function _umMfaPaint(on, canReset) {
+    const badge = document.getElementById('umMfaState');
+    if (badge) {
+        badge.className = 'badge ' + (on ? 'text-bg-success' : 'text-bg-secondary');
+        badge.innerHTML = `<i class="bi ${on ? 'bi-shield-check' : 'bi-shield-slash'} me-1"></i>`
+            + esc(t(on ? 'mfa_state_on' : 'mfa_state_off'));
+    }
+    document.getElementById('umMfaReset')?.classList.toggle('d-none', !(on && canReset));
+}
+
 /** Take another account's second factor off.
  *
  *  Confirmed first, and the confirmation says what it COSTS rather than asking "are you sure":
@@ -379,14 +408,18 @@ function _umResetMfa() {
     const u = (username && usersData[username]) || {};
     if (!u.uid) return;
     showConfirmModal(t('mfa_reset_other_q').replace('{}', username), async () => {
+        // The confirmation is gone by the time this runs, so the only thing left on screen is
+        // the button that opened it — and it is what says the request is in flight.
+        const done = ssBtnBusy(document.getElementById('umMfaReset'));
         const res = await apiDelete(`/api/v1/users/${encodeURIComponent(u.uid)}/mfa`);
+        done();
         if (!res || !(res.data || {}).ok) {
             showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
             return;
         }
         showToast(t('mfa_reset_other_ok'), 'success');
         u.mfa = false;
-        document.getElementById('umMfaGroup')?.classList.add('d-none');
+        _umMfaPaint(false, true);
         // The list carries the column, so it has to hear about this too.
         if (typeof renderUsers === 'function') renderUsers();
     });

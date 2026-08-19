@@ -27,7 +27,7 @@
             <div class="small text-muted mb-3">
                 <i class="bi bi-shield-lock me-1"></i>{{ i18n.mfa_step_lead }}
             </div>
-            <form method="post" action="/login/mfa">
+            <form method="post" action="/login/mfa" data-busy>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="mb-3">
                     <label class="form-label small fw-semibold" for="mfaCode"

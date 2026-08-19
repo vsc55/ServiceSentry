@@ -875,6 +875,7 @@
     overflow-x: hidden;
 }
 
+
 /* ── Cluster edit modal: wide, draggable (by header) and user-resizable ──── */
 #clusterEditModal .cl-modal-dialog {
     pointer-events: auto;               /* needed so the resize handle gets events */
@@ -1955,8 +1956,12 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
    :hover — mixing it with the JS state + position:fixed left flyouts lingering/overlapping. */
 .ss-sb-flywrap.ss-fly-open .ss-sb-flyout { display: block; }
 
-/* Account settings page (/account): a comfortable reading width for the settings cards. */
-.ss-account-page { max-width: 640px; }
+/* Account settings (/account): the cards of the open section, beside the rail.
+   A cap and NOT a centred box — it sits against the left edge and the shell fills the pane.
+   Two cards of form fields side by side is what the width is for; past that a password field
+   a metre wide is not more readable, it is just wider. It used to be `max-width: 640px` with
+   `mx-auto`, which on a wide screen left more empty page than page. */
+.ss-account-body { max-width: 76rem; }
 .ss-sb-flyout .ss-sb-subsub { padding-left: 1rem; }
 /* The flyout always shows full items (icon + label) left-aligned, even in mini mode —
    otherwise the mini rule (centred icon, no gap) leaves a big gap before the icon. */
@@ -2058,9 +2063,23 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .cfg-sheet tr.cfg-row-changed > td:first-child {
     box-shadow: inset 3px 0 0 var(--bs-warning);
 }
-.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-dirty {
+/* Two selectors, one look, and the colour written down once. `.ss-field-dirty` is the same
+   state on any form in the panel — the account page wears it — and the day this accent
+   changes it has to change for both, or "edited and not saved" starts meaning two things
+   depending on which screen you are on. */
+.cfg-sheet .cfg-fields .cfg-field-wrap.cfg-row-dirty,
+.ss-field-dirty {
     box-shadow: inset 3px 0 0 var(--bs-info);
     background: color-mix(in srgb, var(--bs-info) 6%, transparent);
+}
+/* Outside the config sheet there is no field wrapper with padding of its own, so the accent
+   would be drawn under the first letter of the label. The room is taken back with a negative
+   margin: a marked field must not shift sideways against the ones around it. */
+.ss-field-dirty {
+    padding: .25rem .5rem;
+    margin: -.25rem -.5rem;
+    border-radius: .25rem;
+    transition: background-color .15s ease-in-out;
 }
 .cfg-sheet .cfg-fields .cfg-field-wrap:hover { background: var(--bs-tertiary-bg); }
 .cfg-sheet .cfg-fields .cfg-field-wrap .row { margin-bottom: 0; }

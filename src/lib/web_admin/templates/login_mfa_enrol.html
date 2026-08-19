@@ -50,7 +50,7 @@
             <div class="small mb-1">{{ i18n.mfa_enrol_manual }}</div>
             <div class="font-monospace user-select-all border rounded px-2 py-1 mb-3 small ss-secret"
                 >{{ secret_groups }}</div>
-            <form method="post" action="/login/mfa/enrol">
+            <form method="post" action="/login/mfa/enrol" data-busy>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="mb-3">
                     <label class="form-label small fw-semibold" for="mfaEnrolCode"

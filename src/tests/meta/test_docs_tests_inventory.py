@@ -172,3 +172,44 @@ class TestDocumentAccuracy:
         assert declared <= defs * 1.6, (
             f'docs/ref-tests.md claims ~{declared} against {defs} `def test_` functions — '
             f'too far apart to be parametrize expansion; re-count with --collect-only')
+
+
+class TestTheRowsNameRealTests:
+    """The tables under each section name individual tests as ``Class::test_name``, and until
+    now nothing checked that either half still exists.
+
+    It drifts the same way the counts did, and more quietly: a rename leaves the row behind
+    describing behaviour under a name the suite no longer has, so the document keeps promising
+    a guard that may or may not still be there. Two were found the first time this ran — one
+    renamed weeks earlier, one renamed the same afternoon.
+
+    Only exact `Class::test_name` rows are checked. `Class::*` and `Class::* (3)` are the
+    document's own shorthand for "the whole class" and are deliberately not expanded: the count
+    in the brackets is prose, and a guard reading it would fail on every test ADDED to a class
+    that the row still describes correctly.
+    """
+
+    def _named(self) -> set:
+        return set(re.findall(r'`([A-Za-z_]\w*)::(test_\w+)`', _doc()))
+
+    def _defined(self) -> set:
+        out = set()
+        for rel in _test_files():
+            tree = ast.parse(io.open(os.path.join(SRC, rel), encoding='utf-8-sig').read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                            and child.name.startswith('test_'):
+                        out.add((node.name, child.name))
+        return out
+
+    def test_the_scan_finds_rows(self):
+        assert len(self._named()) > 100, 'no `Class::test_name` rows matched — the format changed'
+
+    def test_every_named_test_exists(self):
+        missing = sorted(f'{c}::{t}' for c, t in self._named() - self._defined())
+        assert not missing, (
+            f'{len(missing)} row(s) in docs/ref-tests.md name a test that no longer exists '
+            '(renamed or deleted, and the row was left behind): ' + ', '.join(missing))

@@ -18,6 +18,13 @@
 let _accMfa = null;
 
 async function _accMfaLoad() {
+    // The card says it is asking. Without this the section sits on its static description
+    // through the round trip and there is nothing to tell a slow answer from a broken one.
+    const _body = document.getElementById('accMfaBody');
+    if (_body) {
+        _body.innerHTML = `<div class="text-muted small"><span
+            class="spinner-border spinner-border-sm me-2"></span>${esc(t('loading'))}</div>`;
+    }
     // `apiGet` answers the parsed BODY; `apiPost`/`apiDelete` answer `{status, data}`. Two
     // shapes in one module, and reading the wrong one here did not fail loudly — it fell to
     // the default, so an account with a factor was drawn as "not set up" and the button then
@@ -37,7 +44,7 @@ function _accMfaDraw() {
         : `<span class="badge text-bg-secondary">${esc(t('mfa_state_off'))}</span>`;
     if (!_accMfa.enrolled) {
         body.innerHTML = `<div class="text-muted small mb-3">${esc(t('mfa_desc'))}</div>
-            <button type="button" class="btn btn-sm btn-primary" onclick="_accMfaBegin()"
+            <button type="button" class="btn btn-sm btn-primary" onclick="_accMfaBegin(event)"
                 ><i class="bi bi-shield-plus me-1"></i>${esc(t('mfa_enable'))}</button>`;
         return;
     }
@@ -57,8 +64,13 @@ function _accMfaDraw() {
  *  The secret is drawn from what the server just stored, so the square and the string are
  *  the SAME secret the confirmation will verify — building the URI in the browser would be a
  *  second place that decides what is being enrolled. */
-async function _accMfaBegin() {
+async function _accMfaBegin(ev) {
+    // Minting a secret and drawing a QR is the longest wait in this card, and it happens with
+    // NOTHING on screen yet — the dialog only appears once the answer is in. So the button
+    // that was pressed carries the wait.
+    const done = ssBtnBusy(ev && ev.currentTarget);
     const res = await apiPost('/api/v1/account/mfa/begin', {});
+    done();
     const d = (res && res.data) || {};
     if (!d.ok) {
         showToast(d.error === 'no_key' ? t('mfa_no_key') : t('save_error'), 'danger');
@@ -79,17 +91,80 @@ async function _accMfaBegin() {
         <div class="small mb-1">${esc(t('mfa_enrol_confirm'))}</div>
         <input type="text" id="accMfaCode" class="form-control form-control-sm text-center"
                inputmode="numeric" autocomplete="one-time-code" maxlength="6">
-        <div class="mt-3 text-end">
-          <button type="button" class="btn btn-sm btn-primary" onclick="_accMfaConfirm()"
-            >${esc(t('mfa_step_verify'))}</button>
-        </div>`, 'primary');
+        <div class="invalid-feedback" id="accMfaCodeErr"></div>`,
+        'primary',
+        `<button type="button" class="btn btn-sm btn-primary" id="accMfaConfirmGo"
+            onclick="_accMfaConfirm()">${esc(t('mfa_step_verify'))}</button>`);
+    _accMfaWireCode('accMfaCode', _accMfaConfirm);
+}
+
+/** The code field: Enter submits it, and it has the cursor when the dialog opens.
+ *
+ *  Both are the same observation — this dialog exists to receive six digits, so the six digits
+ *  are what it should be ready for. Enter needs saying out loud because there is no `<form>`
+ *  here: a lone input outside one does nothing at all on Enter, which is a keypress that looks
+ *  ignored rather than unsupported.
+ *
+ *  The focus goes through `shown.bs.modal` when the dialog is opening — focusing an element
+ *  Bootstrap has not finished showing is focus that Bootstrap then takes back — and directly
+ *  when the box is already up, which is the regenerate path replacing the contents of a dialog
+ *  that never closed.
+ */
+function _accMfaWireCode(id, run) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        run();
+    });
+    // Typing clears the last refusal. A field that stays red while it is being corrected is a
+    // field arguing with what is currently in it.
+    el.addEventListener('input', () => el.classList.remove('is-invalid'));
+    const modal = document.getElementById('infoModal');
+    if (modal && modal.classList.contains('show')) el.focus();
+    else modal?.addEventListener('shown.bs.modal', () => el.focus(), { once: true });
+}
+
+/** Why the server said no, in words, for the person who is looking at the field.
+ *
+ *  A toast was all these paths gave, and a toast is the wrong shape for this: it appears away
+ *  from the field, it says the same thing whatever went wrong, and it takes itself away while
+ *  the dialog it was about is still open. Worse, "that code is not valid" is a lie when the
+ *  factor was removed from another session or the write failed — the code WAS right.
+ */
+function _accMfaErrText(err) {
+    switch (String(err || '')) {
+        case 'bad_code':     return t('mfa_bad_code');
+        case 'not_enrolled': return t('mfa_err_not_enrolled');
+        case 'write_failed': return t('mfa_err_write_failed');
+        case 'no_key':       return t('mfa_no_key');
+        default:             return t('save_error');
+    }
+}
+
+/** Mark the field and say why, leaving the dialog open on what was typed.
+ *
+ *  Bootstrap draws `.invalid-feedback` only next to an `.is-invalid` control, so the two go
+ *  together or neither shows. The field is selected rather than cleared: a code retyped from
+ *  the same phone is one character different from the one that was refused.
+ */
+function _accMfaFieldError(inputId, err) {
+    const el = document.getElementById(inputId);
+    const msg = document.getElementById(inputId + 'Err');
+    if (msg) msg.textContent = _accMfaErrText(err);
+    if (el) { el.classList.add('is-invalid'); el.focus(); el.select(); }
 }
 
 async function _accMfaConfirm() {
     const code = (document.getElementById('accMfaCode') || {}).value || '';
+    // The Verify button carries the wait, and is disabled while it does: a code is spent once,
+    // and a second press because the first looked inert would spend a code that already worked.
+    const done = ssBtnBusy(document.getElementById('accMfaConfirmGo'));
     const res = await apiPost('/api/v1/account/mfa/confirm', {code});
+    done();
     const d = (res && res.data) || {};
-    if (!d.ok) { showToast(t('mfa_bad_code'), 'danger'); return; }
+    if (!d.ok) { _accMfaFieldError('accMfaCode', d.error || 'bad_code'); return; }
     showToast(t('mfa_enrol_done'), 'success');
     _accMfaShowCodes(d.recovery, false);
     _accMfaLoad();
@@ -114,19 +189,36 @@ function _accMfaAskCode(title, variant, onCode) {
         <div class="small mb-2">${esc(t('mfa_ask_code'))}</div>
         <input type="text" id="accMfaAsk" class="form-control form-control-sm text-center"
                inputmode="numeric" autocomplete="one-time-code" maxlength="16">
-        <div class="mt-3 text-end">
-          <button type="button" class="btn btn-sm btn-${variant}" id="accMfaAskGo"
-            >${esc(t('mfa_step_verify'))}</button>
-        </div>`, variant);
+        <div class="invalid-feedback" id="accMfaAskErr"></div>`,
+        variant,
+        `<button type="button" class="btn btn-sm btn-${variant}" id="accMfaAskGo"
+            >${esc(t('mfa_step_verify'))}</button>`);
+    // The wait is handled HERE and not in the two callbacks: both of them spend a code against
+    // the server, both are the only thing on screen while they do it, and a rule about what a
+    // dialog looks like while it is working is one rule or it is none. `finally`, so a callback
+    // that throws leaves a usable button rather than a spinner that never stops.
+    const run = async () => {
+        const done = ssBtnBusy(document.getElementById('accMfaAskGo'));
+        try {
+            await onCode((document.getElementById('accMfaAsk') || {}).value || '');
+        } finally {
+            done();
+        }
+    };
     const go = document.getElementById('accMfaAskGo');
-    if (go) go.onclick = () => onCode((document.getElementById('accMfaAsk') || {}).value || '');
+    if (go) go.onclick = run;
+    _accMfaWireCode('accMfaAsk', run);
 }
 
 function _accMfaRegen() {
     _accMfaAskCode(t('mfa_recovery_new'), 'primary', async code => {
         const res = await apiPost('/api/v1/account/mfa/recovery', {code});
         const d = (res && res.data) || {};
-        if (!d.ok) { showToast(t('mfa_bad_code'), 'danger'); return; }
+        // In the dialog and not a toast: the reason belongs beside the field it is about, and
+        // "that code is not valid" would be a lie when the write failed with a correct code.
+        // The server writes an `mfa_failed` audit line either way, with which of the two it
+        // was — the browser is told less than the log records, on purpose.
+        if (!d.ok) { _accMfaFieldError('accMfaAsk', d.error || 'bad_code'); return; }
         _accMfaShowCodes(d.recovery, true);
         _accMfaLoad();
     });
@@ -136,7 +228,14 @@ function _accMfaDisable() {
     _accMfaAskCode(t('mfa_disable'), 'warning', async code => {
         const res = await apiPost('/api/v1/account/mfa/disable', {code});
         const d = (res && res.data) || {};
-        if (!d.ok) { showToast(t('mfa_bad_code'), 'danger'); return; }
+        // A wrong code leaves the dialog open so it can be retyped — closing on every press
+        // would take the field away at exactly the wrong moment.
+        if (!d.ok) { _accMfaFieldError('accMfaAsk', d.error || 'bad_code'); return; }
+        // It worked, and nothing else opens over this one: the regenerate and enrol paths
+        // replace the dialog's contents with the recovery codes, so they close themselves by
+        // being replaced. This one only raises a toast, and left alone it sat there asking
+        // for a code that had already been accepted.
+        hideInfoModal();
         showToast(t('mfa_disabled_ok'), 'success');
         _accMfaLoad();
     });
