@@ -42,8 +42,11 @@ OVERVIEW_WIDGETS = [
      'cols': 4, 'h': 140, 'has_h': True, 'order': 140,
      'perms': {'any': ['modules_view']}, 'nav': {'tab': '#tab-status'},
      'rows': incident_rows,
+     # `state_rows`: this table lists nothing BUT active issues, so having rows is the
+     # state. A table of sessions is not in trouble for having rows, and says nothing.
      'view': {'kind': 'table', 'icon': 'bi-exclamation-triangle', 'title_key': 'overview_incidents',
-              'accent': 'red', 'data_url': '/api/v1/overview/widget/incidents',
+              'accent': 'red', 'state_rows': 'error',
+              'data_url': '/api/v1/overview/widget/incidents',
               'empty_key': 'overview_no_issues', 'empty_ok': True,
               'columns': [
                   {'key': 'module', 'label_key': 'col_module', 'sortable': True, 'cell': 'module_incident'},

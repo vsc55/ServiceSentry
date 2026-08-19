@@ -90,6 +90,30 @@ function _dwRenderStat(view, content) {
     return _dwStatCard(st.accent, st.bg, st.color, content.icon || view.icon || 'bi-grid-1x2',
         value, view.label_key, sub);
 }
+// A widget that is reporting trouble tints its whole surface, not just its accent bar:
+// a 3px line at the top of one card among twenty is not what a page full of tiles is scanned
+// for. The state travels WITH the widget's own data (`content.state` for a stat card,
+// `view.state_rows` for a table that only ever lists problems), so the core never holds a
+// list of which widgets are allowed to go red — a module-contributed widget gets the same
+// treatment by saying the same word.
+function _dwApplyState(dw, state) {
+    if (!dw) return;
+    dw.classList.toggle('dw-state-error', state === 'error');
+    dw.classList.toggle('dw-state-warn', state === 'warn');
+}
+// The state as of the last fetch, for a re-render (a drag, a filter, a resize) that rebuilds
+// the grid from cache. Without this the tint would vanish on the first interaction and come
+// back at the next poll, which reads as a flicker with no cause.
+function _dwStateClass(id) {
+    const def = _DW_DEFS[id] || {};
+    const view = def.view;
+    if (!view) return '';
+    let state = '';
+    if (view.kind === 'stat') state = (_dwStatContent[id] || {}).state || '';
+    else if (view.kind === 'table' && view.state_rows)
+        state = (_dwTableRows[id] || []).length ? view.state_rows : '';
+    return state === 'error' ? ' dw-state-error' : (state === 'warn' ? ' dw-state-warn' : '');
+}
 // Dispatch a data-driven widget by its `view.kind`.
 function _dwRenderView(id, view, content, item) {
     if (view.kind === 'stat')  return _dwRenderStat(view, content);
@@ -331,6 +355,9 @@ async function _dwTableFetch(id) {
         const cur = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
         const tb = cur && cur.querySelector('tbody');
         if (tb) tb.innerHTML = _dwTableTbody(id, view, _dwTableRows[id]);
+        // Only for a table whose rows ARE the problem (active incidents). A table that
+        // lists sessions is not in trouble for having rows.
+        if (view.state_rows) _dwApplyState(cur, _dwTableRows[id].length ? view.state_rows : '');
     } catch (e) { /* leave the placeholder on error */ }
     finally { _dwTableBusy[id] = false; }
 }
@@ -347,6 +374,7 @@ async function _dwStatFetch(id) {
         _dwStatContent[id] = (data && data.content) || {};
         const cont = document.querySelector(`${sel} .dw-content`);
         if (cont) cont.innerHTML = _dwRenderStat(view, _dwStatContent[id]);
+        _dwApplyState(document.querySelector(sel), _dwStatContent[id].state);
     } catch (e) { /* leave the placeholder on error */ }
     finally { _dwStatBusy[id] = false; }
 }

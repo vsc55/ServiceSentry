@@ -1282,6 +1282,18 @@
 .dw { border-radius: var(--bs-border-radius-lg); }
 .dw-content { flex: 1; min-height: 0; overflow: hidden; }
 
+/* A widget reporting trouble tints its whole surface. Done by REDEFINING the variable
+   every widget card already paints itself from (`--ss-surface-bg`), so these two rules
+   need to know nothing about any widget's markup — including a widget a module brought
+   with it. Repainting the card from here would mean one selector per card shape, and a
+   new shape would silently stay grey.
+
+   The tints are Bootstrap's own subtle backgrounds, which the dark theme already
+   redefines further up: one rule, both themes, and the same colour language the rest of
+   the panel uses for "this is in that state". */
+.dw-state-warn  { --ss-surface-bg: var(--bs-warning-bg-subtle); }
+.dw-state-error { --ss-surface-bg: var(--bs-danger-bg-subtle); }
+
 /* Click-through widgets jump to their tab — only outside edit mode. The card
    sits inside .dw-content, so the affordance is applied there; interactive
    controls (sort headers, links) keep their own cursor via [onclick] etc. */

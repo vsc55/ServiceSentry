@@ -136,7 +136,11 @@ def servers_stat(wa) -> dict:
     if summ.get('virtual', 0):
         badges.append({'cls': 'text-bg-info', 'icon': 'bi-diagram-3',
                        'count': summ['virtual'], 'key': 'host_virtual'})
-    return {'value': sum(ss.values()),
+    # `state` tints the whole card; `accent` is only the 3px bar. Maintenance is
+    # deliberately NOT a state: a host somebody took down on purpose is the one case where
+    # the panel already knows there is nothing to react to.
+    state = 'error' if ss.get('error', 0) else ('warn' if ss.get('warning', 0) else '')
+    return {'value': sum(ss.values()), 'state': state,
             'accent': 'red' if ss.get('error', 0) > 0 else 'blue', 'badges': badges}
 
 

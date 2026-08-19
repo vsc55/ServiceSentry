@@ -836,6 +836,8 @@ LANG = {
     'dashboard_save_layout':    'Save',
     'dashboard_save_layout_tt': 'Save the current layout to your account',
     'dashboard_saved':          'Layout saved',
+    'dashboard_unsaved':        'Unsaved',
+    'dashboard_unsaved_tt':     'This arrangement only exists in this browser. Save it to your account to see it in every session.',
     'dashboard_reset':    'Reset',
     'dashboard_reset_tt': 'Reload your last saved layout (or the organisation default / factory if none)',
     'dashboard_clear':    'Use default',

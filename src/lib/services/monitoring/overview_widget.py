@@ -33,4 +33,4 @@ def checks_stat(wa) -> dict:
         badges.append({'key': 'overview_has_warnings', 'args': [warn], 'plain': True,
                        'color': '#f59e0b'})
     return {'value': total, 'accent': accent, 'icon': 'bi-exclamation-triangle-fill',
-            'badges': badges}
+            'state': 'error' if err else 'warn', 'badges': badges}

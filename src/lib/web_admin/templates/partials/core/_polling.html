@@ -70,8 +70,12 @@ function _startVersionPoll(intervalMs = 60000) {
             const _ep = (typeof _tcEpoch === 'number') ? _tcEpoch : undefined;
             const r = await fetch('/api/v1/me');
             if (r.status === 401) { _onSessionTerminated(); return; }
-            if (r.ok && typeof _syncRemoteTableConfig === 'function') {
-                _syncRemoteTableConfig(await r.json(), _ep);
+            if (r.ok) {
+                const me = await r.json();
+                if (typeof _syncRemoteTableConfig === 'function') _syncRemoteTableConfig(me, _ep);
+                // The dashboard layout rides the same poll: it is per USER, so a layout
+                // saved in another session has to reach this one without a reload.
+                if (typeof _syncRemoteDashboard === 'function') _syncRemoteDashboard(me);
             }
         } catch (_) { /* the fetch wrapper already flagged the connection */ }
     };

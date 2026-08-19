@@ -214,8 +214,16 @@ function setOverviewAutoRefresh(seconds) {
 function _dwControlsHtml() {
     const perms = new Set(currentUser.permissions || []);
     const _canEditLayout = perms.has('overview_edit');
+    // The `ms-auto` that pushes this lot to the right lives on the WRAPPER, never on the
+    // badge: the badge starts hidden, a `d-none` element takes no part in the flex layout,
+    // and an auto margin on it disappears with it — dragging the buttons back to the left
+    // exactly when there is nothing to report.
     const editBtns = _canEditLayout ? `
-        <div class="btn-group ms-auto" role="group">
+        <div class="d-flex align-items-center ms-auto">
+        <span class="badge text-bg-warning me-2${_dwIsDirty() ? '' : ' d-none'}"
+              id="dwDirtyBadge" title="${escAttr(t('dashboard_unsaved_tt'))}">
+            <i class="bi bi-exclamation-triangle me-1"></i>${t('dashboard_unsaved')}</span>
+        <div class="btn-group" role="group">
             <button class="btn btn-sm btn-secondary" id="dwEditBtn" onclick="_dwToggleEdit()" title="${escAttr(t('dashboard_edit_tt'))}">
                 <i class="bi bi-pencil-square me-1"></i>${t('dashboard_edit')}</button>
             <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" id="dwEditCaret"
@@ -234,6 +242,7 @@ function _dwControlsHtml() {
                 ${perms.has('overview_reset_factory') ? `<li><button type="button" class="dropdown-item py-1 text-danger" onclick="_dwResetFactory()" title="${escAttr(t('dashboard_reset_factory_tt'))}">
                     <i class="bi bi-bootstrap-reboot me-1"></i>${t('dashboard_reset_factory')}</button></li>` : ''}
             </ul>
+        </div>
         </div>` : '';
     const kioskBtn = `
         <button class="btn btn-sm btn-secondary${_canEditLayout ? '' : ' ms-auto'}" onclick="_dwToggleKiosk()" title="${escAttr(t('dashboard_fullscreen_tt'))}">
@@ -326,7 +335,8 @@ async function renderOverview() {
         const hasH    = _dwInstHasH(item.id, item.mws || '');   // table→auto at 'sum' scope
         const hpx     = hasH ? _dwHpx(item.h) : null;
         const cStyle  = hpx ? ` style="flex:none;height:${hpx}px;overflow-y:auto"` : '';
-        h += `<div class="dw dw-c${item.cols}${spClass}${navClass}${modClass}" data-wid="${escAttr(item.id)}"
+        const stClass = _dwStateClass(item.id);
+        h += `<div class="dw dw-c${item.cols}${spClass}${navClass}${modClass}${stClass}" data-wid="${escAttr(item.id)}"
                data-cols="${item.cols}" data-h="${escAttr(String(item.h || 'auto'))}"${item.sev ? ` data-sev="${escAttr(String(item.sev))}"` : ''}${item.srvf ? ` data-srvf="${escAttr(String(item.srvf))}"` : ''}${item.modf ? ` data-modf="${escAttr(String(item.modf))}"` : ''}${item.mws ? ` data-mws="${escAttr(String(item.mws))}"` : ''}${item.mwlvl ? ` data-mwlvl="${escAttr(String(item.mwlvl))}"` : ''}${display}>`;
         h += _dwToolbar(item.id, item.cols, item.h || 'auto', item);
         h += `<div class="dw-content"${cStyle}>${_dwContent(item.id, data, item)}</div>`;

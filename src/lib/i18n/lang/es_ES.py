@@ -842,6 +842,8 @@ LANG = {
     'dashboard_save_layout':    'Guardar',
     'dashboard_save_layout_tt': 'Guardar la disposición actual en tu cuenta',
     'dashboard_saved':          'Disposición guardada',
+    'dashboard_unsaved':        'Sin guardar',
+    'dashboard_unsaved_tt':     'Esta disposición solo existe en este navegador. Guárdala en tu cuenta para verla en cualquier sesión.',
     'dashboard_reset':    'Restablecer',
     'dashboard_reset_tt': 'Recargar tu última disposición guardada (o el predeterminado de la organización / fábrica si no hay)',
     'dashboard_clear':    'Usar predeterminado',

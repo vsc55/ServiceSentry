@@ -116,6 +116,93 @@ class TestChecksStat:
         assert out['badges'][0]['key'] == 'overview_all_ok'
 
 
+class TestTheCardSaysWhenSomethingIsWrong:
+    """A widget reporting trouble tints its whole surface, and what decides that is the
+    widget's own content (`state`) — never a list in the core of which cards may go red.
+
+    The rule these pin down is that `state` is derived from the SAME numbers the card
+    prints. A tint computed a second way is a tint that eventually contradicts the badges
+    under it, and then neither is believed."""
+
+    def test_a_hard_error_beats_a_warning(self):
+        wa = _FakeWA(
+            {'cpu': {'a': {'status': False, 'severity': 'warning'},
+                     'b': {'status': False, 'severity': 'error'}}},
+            {'cpu': {}})
+        assert checks_stat(wa)['state'] == 'error'
+
+    def test_warnings_alone_are_a_warning(self):
+        wa = _FakeWA({'cpu': {'a': {'status': False, 'severity': 'warning'}}}, {'cpu': {}})
+        assert checks_stat(wa)['state'] == 'warn'
+
+    def test_all_ok_carries_no_state(self):
+        """Not `state: 'ok'`: green is the absence of a problem, and a card that paints
+        itself for being fine is twenty cards painting themselves for being fine."""
+        wa = _FakeWA({'cpu': {'a': {'status': True}}}, {'cpu': {}})
+        assert not checks_stat(wa).get('state')
+
+    def test_no_data_at_all_is_not_an_error(self):
+        """Nothing has run yet. Painting that red would cry wolf on every fresh install."""
+        wa = _FakeWA({}, {})
+        assert not checks_stat(wa).get('state')
+
+    def test_the_state_agrees_with_the_accent(self):
+        for status, accent in (
+                ({'cpu': {'a': {'status': False}}}, 'red'),
+                ({'cpu': {'a': {'status': False, 'severity': 'warning'}}}, 'amber')):
+            out = checks_stat(_FakeWA(status, {'cpu': {}}))
+            assert out['accent'] == accent
+            assert out['state'] == ('error' if accent == 'red' else 'warn')
+
+    def test_a_stopped_service_is_a_warning_and_never_an_error(self):
+        """Somebody stopped it. That is worth seeing and is not a failure."""
+        from lib.services.manager.overview_widget import _services_stat
+        assert _services_stat(3, 1)['state'] == 'warn'
+        assert not _services_stat(4, 0).get('state')
+
+    @pytest.mark.parametrize('sev, expected', [
+        (0, 'error'), (3, 'error'),      # emergency … error
+        (4, 'warn'),                     # warning
+        (5, ''), (6, ''), (7, ''),       # notice / info / debug — things happening normally
+    ])
+    def test_syslog_reads_the_rfc_numbers(self, sev, expected):
+        from lib.services.syslog.overview_widget import syslog_stats_stat
+
+        class _Store:
+            @staticmethod
+            def stats(only=None):
+                return {'total': 1, 'by_severity': [{'value': sev, 'name': 'x', 'count': 1}]}
+
+        class _WA:
+            _syslog_store = _Store()
+
+        assert syslog_stats_stat(_WA()).get('state', '') == expected
+
+    def test_syslog_counts_nobody_sent_are_not_a_state(self):
+        """A severity with a zero count is not a message. It is also what the badges skip,
+        and the tint reads the same list for exactly that reason."""
+        from lib.services.syslog.overview_widget import syslog_stats_stat
+
+        class _Store:
+            @staticmethod
+            def stats(only=None):
+                return {'total': 0, 'by_severity': [{'value': 0, 'name': 'emerg', 'count': 0}]}
+
+        class _WA:
+            _syslog_store = _Store()
+
+        assert not syslog_stats_stat(_WA()).get('state')
+
+    def test_only_a_table_of_problems_declares_state_rows(self):
+        """`state_rows` says "having rows IS the problem". True of active incidents; a table
+        of sessions or recent activity is not in trouble for having rows, and if one ever
+        claims it is, the dashboard turns red for working normally."""
+        from lib.core.overview.discovery import discover_overview_widgets
+        claimed = {w['id'] for w in discover_overview_widgets()
+                   if (w.get('view') or {}).get('state_rows')}
+        assert claimed == {'incidents'}, f'unexpected widgets claiming state_rows: {claimed}'
+
+
 class TestSeverityFilter:
 
     def _wa(self):

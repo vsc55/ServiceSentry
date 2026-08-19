@@ -8,6 +8,58 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.91] - 2026-08-19
+
+### Added
+- **A widget reporting trouble tints its whole surface**, amber for a warning and red for an
+  error. The accent bar every stat card already had is 3px at the top of one tile among
+  twenty, and a dashboard is scanned rather than read.
+  - The state travels **with the widget's own data** — `state` in the content a stat card
+    serves, `state_rows` in the view of a table whose rows ARE the problem (active incidents;
+    a table of sessions is not in trouble for having rows). The core holds no list of which
+    widgets may go red, so a module-contributed widget gets this by saying the same word.
+  - Tinting by the existing accent colour would have been one line and wrong: the fail2ban
+    card is amber when the jail is **enabled**, so it would paint a permanent warning over a
+    service working exactly as intended.
+  - There is no `ok` state. Green is the absence of a problem, and twenty cards painting
+    themselves for being fine is a dashboard with no signal left in it.
+  - Applied by redefining `--ss-surface-bg` — the variable every widget card already paints
+    itself from — so the two CSS rules know nothing about any card's markup. Repainting the
+    cards directly would need one selector per card shape, and the next shape added would
+    silently stay grey.
+  - Declared by: checks (error/warning counts), servers (host status; maintenance is
+    deliberately not a state — somebody took that host down on purpose), services (a stopped
+    service is a warning, never an error), syslog (RFC 5424 severities, read from the same
+    breakdown the badges show so the tint cannot contradict the numbers under it) and the
+    active-incidents table.
+
+### Fixed
+- **The same account showed a different Overview at each hostname.** Reported from the panel:
+  one dashboard at `https://ss.example.net`, another at `http://192.168.0.1:8080`, same user.
+  `localStorage` is scoped to the ORIGIN — scheme + host + port — so those two are separate
+  stores of one account, and the layout was read from the local one FIRST, unconditionally.
+  - That alone would be a per-host quirk. What made it a dead end is the pair of rules around
+    it: every drag, resize and filter wrote the local copy, while only the explicit Save
+    reached the database. The copy that always won was the copy nothing ever reconciled, so
+    saving the layout in one session left the other showing a months-old arrangement
+    **forever**, with nothing on screen to say it was a draft.
+  - **The account is authoritative now.** `localStorage` holds an unsaved DRAFT and is
+    consulted only while it is one; otherwise the layout comes from the account and the local
+    copy is refreshed from it. An empty `dashboard_layout` means "I follow the org default", so
+    a leftover local copy is dropped rather than outliving that choice.
+  - **A draft is marked** — its own flag (`ss_layout2_dirty_<user>`) and an "Unsaved" badge in
+    the toolbar. Without the flag a draft and a stale cache are the same bytes, which is how
+    the stale one got to win; without the badge, a months-old draft is indistinguishable from
+    the layout you actually saved. It is raised by a real difference from what the ACCOUNT
+    would show, not by every write: opening edit mode and closing it stores the same
+    arrangement back, and a badge for that teaches people to ignore the badge. The three
+    functions that serialise the grid now agree on their column fallback, which was a
+    difference no edit caused and would have read as a permanent phantom draft.
+  - **Other sessions converge.** The layout rides the session keepalive that already
+    reconciles the table config — one `/api/v1/me`, two consumers — so a layout saved in
+    another session lands here without a reload. Never over an edit in progress or a save in
+    flight: converging is worth less than destroying work somebody is in the middle of.
+
 ## [0.0.1+build.90] - 2026-08-19
 
 ### Added

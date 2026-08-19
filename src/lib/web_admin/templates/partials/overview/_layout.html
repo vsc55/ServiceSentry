@@ -191,7 +191,43 @@ function _dwDef(id) {
 }
 
 // ──────────────────────── Layout persistence ──────────────────────
+// TWO copies, and which one wins is the whole design:
+//
+//   * the ACCOUNT (`dashboard_layout`, in the DB) is the layout. It is what every
+//     session of this user sees, on any host and any browser.
+//   * `localStorage` holds an UNSAVED DRAFT — the arrangement being dragged around
+//     right now, kept across a reload so a half-finished edit is not lost.
+//
+// It used to be the other way round: the local copy won unconditionally, and every
+// drag wrote it while only the explicit Save reached the DB. `localStorage` is scoped
+// to the ORIGIN, so https://panel.example and http://10.0.0.1:8080 are two different
+// stores of the same account — and the account had no way to win. Saving in one
+// session left the other showing a months-old draft forever, with nothing on screen
+// to say it was a draft at all.
 function _dwKey() { return 'ss_layout2_' + (currentUser.username || '_'); }
+// The flag that tells a draft apart from a stale cache. Without it the two look
+// identical, which is exactly how the stale one got to win.
+function _dwDirtyKey() { return 'ss_layout2_dirty_' + (currentUser.username || '_'); }
+function _dwIsDirty() { try { return localStorage.getItem(_dwDirtyKey()) === '1'; } catch (_) { return false; } }
+function _dwMarkDirty(on) {
+    try {
+        if (on) localStorage.setItem(_dwDirtyKey(), '1');
+        else localStorage.removeItem(_dwDirtyKey());
+    } catch (_) {}
+    _dwPaintDirty();
+}
+// Says out loud that what is on screen is not what the account holds. A draft nobody
+// can see is a draft that gets mistaken for the real layout.
+function _dwPaintDirty() {
+    document.getElementById('dwDirtyBadge')?.classList.toggle('d-none', !_dwIsDirty());
+}
+// True while our own PUT is in flight: the keepalive must not adopt a /me snapshot
+// that was taken before it landed.
+let _dwSavePending = false;
+// What the ACCOUNT would show, as of the last load. An edit is only a draft if it
+// differs from this — opening edit mode and closing it again is not a change, and
+// neither is a widget the merge added on its own.
+let _dwBaseline = null;
 
 // Org-wide default layout set by an admin (fetched on init). Empty ⇒ use the
 // built-in layout defined by _DW_DEFS order/sizes.
@@ -225,26 +261,56 @@ function _dwResolvedDefault() {
 }
 
 function _dwLoad() {
-    // 1) Local working copy (unsaved draft) if present.
-    try {
-        const raw = localStorage.getItem(_dwKey());
-        if (raw) {
-            const saved = JSON.parse(raw);
-            const known = new Set(Object.keys(_DW_DEFS));
-            const layout = (Array.isArray(saved) ? saved : [])
-                .filter(w => known.has(w.id) || _dwIsSpacer(w.id) || _dwIsModuleWidget(w.id));
-            return _dwMergeMissing(layout);
-        }
-    } catch (_) {}
-    // 2) The user's saved layout from the DB (account preferences).
+    const known = new Set(Object.keys(_DW_DEFS));
+    const usable = arr => (Array.isArray(arr) ? arr : [])
+        .filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id) || _dwIsModuleWidget(w.id)))
+        .map(w => ({ ...w }));
+    // What the ACCOUNT would show — computed first and ALWAYS, even when a draft is what
+    // ends up on screen: it is the thing a draft is a draft against. Empty account means
+    // "I follow the org-wide default", which is just as much an answer as a saved layout.
     const db = (currentUser && Array.isArray(currentUser.dashboard_layout)) ? currentUser.dashboard_layout : [];
-    if (db.length) {
-        const known = new Set(Object.keys(_DW_DEFS));
-        const layout = db.filter(w => w && (known.has(w.id) || _dwIsSpacer(w.id) || _dwIsModuleWidget(w.id))).map(w => ({ ...w }));
-        return _dwMergeMissing(layout);
+    const account = db.length ? _dwMergeMissing(usable(db)) : _dwResolvedDefault();
+    _dwBaseline = JSON.stringify(account);
+    // 1) An unsaved draft — and ONLY while it is unsaved. A local copy with no draft flag
+    //    is a cache of the account, and the account below is read instead.
+    if (_dwIsDirty()) {
+        try {
+            const raw = localStorage.getItem(_dwKey());
+            if (raw) return _dwMergeMissing(usable(JSON.parse(raw)));
+        } catch (_) {}
     }
-    // 3) Org-wide default → 4) factory built-in.
-    return _dwResolvedDefault();
+    // 2) The account. Authoritative: this is what every other session of this user is
+    //    showing, and the local cache is refreshed from it rather than consulted.
+    if (db.length) {
+        try { localStorage.setItem(_dwKey(), JSON.stringify(db)); } catch (_) {}
+        return account;
+    }
+    // 3) Org-wide default → 4) factory built-in. A leftover local copy would outlive the
+    //    decision to follow the default, so it goes.
+    try { localStorage.removeItem(_dwKey()); } catch (_) {}
+    return account;
+}
+
+// Adopt a layout saved by ANOTHER session of this user, pushed by the keepalive poll
+// (the same /api/v1/me the table config already rides on). Without this, "unique per
+// user" is only true until two sessions are open at once.
+function _syncRemoteDashboard(me) {
+    if (!me || typeof me !== 'object') return;
+    // Never over an edit in progress: converging is worth less than not destroying
+    // work somebody is in the middle of. It converges when they save or discard.
+    if (_dwSavePending || _dwEditing || _dwIsDirty()) return;
+    const incoming = Array.isArray(me.dashboard_layout) ? me.dashboard_layout : [];
+    const mine = (currentUser && Array.isArray(currentUser.dashboard_layout)) ? currentUser.dashboard_layout : [];
+    if (JSON.stringify(incoming) === JSON.stringify(mine)) return;
+    if (typeof currentUser === 'object' && currentUser) currentUser.dashboard_layout = incoming;
+    try {
+        if (incoming.length) localStorage.setItem(_dwKey(), JSON.stringify(incoming));
+        else localStorage.removeItem(_dwKey());
+    } catch (_) {}
+    // Only redraw what is on screen: the overview lives in a pane that may not be the
+    // visible one, and the next render reads the layout we just updated anyway.
+    const c = document.getElementById('overview-container');
+    if (c && c.offsetParent !== null && typeof renderOverview === 'function') renderOverview();
 }
 
 function _dwSave() {
@@ -252,7 +318,7 @@ function _dwSave() {
     if (!grid) return;
     const layout = [...grid.querySelectorAll('.dw[data-wid]')].map(el => ({
         id:     el.dataset.wid,
-        cols:   parseInt(el.dataset.cols) || 3,
+        cols:   parseInt(el.dataset.cols) || 2,
         h:      el.dataset.h  || 'auto',
         hidden: el.style.display === 'none',
         ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
@@ -262,7 +328,11 @@ function _dwSave() {
         ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
         ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
-    localStorage.setItem(_dwKey(), JSON.stringify(layout));
+    const json = JSON.stringify(layout);
+    localStorage.setItem(_dwKey(), json);
+    // Only a real difference is a draft. Opening edit mode and closing it writes the same
+    // arrangement back, and a badge for that would train people to ignore the badge.
+    _dwMarkDirty(_dwBaseline !== null && json !== _dwBaseline);
 }
 
 // ──────────────────────── Edit mode ───────────────────────────────
@@ -627,6 +697,7 @@ function _dwRefreshAddBar() {
 // layout (or the factory built-in when no default has been set). Any user.
 function _dwReset() {
     localStorage.removeItem(_dwKey());
+    _dwMarkDirty(false);
     _dwEditing = false;
     renderOverview();
 }
@@ -635,6 +706,7 @@ function _dwReset() {
 // org-wide default from now on — including any future changes to that default.
 async function _dwClearConfig() {
     localStorage.removeItem(_dwKey());
+    _dwMarkDirty(false);
     const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: [] });
     if (r && r.ok && typeof currentUser === 'object' && currentUser) {
         currentUser.dashboard_layout = [];
@@ -652,6 +724,7 @@ async function _dwResetFactory() {
     if (r && r.ok && typeof currentUser === 'object' && currentUser) {
         currentUser.dashboard_layout = factory;
     }
+    _dwMarkDirty(!(r && r.ok));   // it only stopped being a draft if the account took it
     _dwEditing = false;
     renderOverview();
 }
@@ -674,9 +747,15 @@ async function _dwSaveDb() {
         ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
-    const r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout });
+    _dwSavePending = true;
+    let r;
+    try { r = await apiPut('/api/v1/users/me/preferences', { dashboard_layout: layout }); }
+    finally { _dwSavePending = false; }
     if (r && r.ok) {
         if (typeof currentUser === 'object' && currentUser) currentUser.dashboard_layout = layout;
+        // It is the account's layout now, not a draft — and it stops winning over what
+        // another session saves next.
+        _dwMarkDirty(false);
         showToast(t('dashboard_saved'), 'success');
     } else {
         showToast((r && r.error) || t('error') || 'Error', 'danger');

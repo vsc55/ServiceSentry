@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~5.130 tests** (5060 recolectados entre `unit`, `meta` e `integration`; los e2e piden motores o navegador aparte. Medido el 2026-08-18). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5.190 tests** (5364 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-19). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -4634,7 +4634,7 @@ Limitador de ventana deslizante en proceso (`lib.security.ratelimit`), con reloj
 
 ## 95. Overview — recuento de checks y filtros de severidad
 
-**Archivo:** `tests/unit/test_overview_checks_widget.py` — 28 tests
+**Archivo:** `tests/unit/test_overview_checks_widget.py` — 42 tests
 
 Los avisos se cuentan **aparte** de los errores duros: mezclarlos convierte un umbral rozado en una
 caída.
@@ -7694,3 +7694,66 @@ cuando falta una palabra: el síntoma es silencioso, y está a un grep de distan
 | `TestEveryWordThePanelWroteHasWords::test_the_stages_and_reasons_are_translated` | Cada valor literal escrito en un `detail=` y cada `error` que el servicio devuelve tiene su `audit_v_*` en los dos idiomas |
 | `TestEveryWordThePanelWroteHasWords::test_the_field_names_are_translated` | |
 | `TestEveryWordThePanelWroteHasWords::test_the_two_languages_carry_the_same_set` | Una palabra traducida en un idioma y no en el otro es el mismo fallo, encontrado más tarde |
+
+---
+
+## 162. La disposición del Overview es de la cuenta, no del navegador
+
+**Archivo:** `tests/meta/test_wa_overview_layout_sync.py` — 18 tests
+
+Reportado desde el panel: «entro por `https://ss.ejemplo.net` y veo un dashboard, entro por
+`http://192.168.0.1:8080` y veo otro, y es el mismo usuario». Lo era. Lo que no era el mismo es
+el **origen**: `localStorage` está aislado por esquema + host + puerto, así que esas dos son dos
+cajas distintas de la misma cuenta.
+
+Eso solo sería una rareza por host. Lo que lo convertía en un callejón sin salida era el par de
+reglas que lo rodeaba: la copia local se leía **la primera y sin condiciones**, la escribía
+*cada* arrastre y *cada* filtro, y a la base de datos solo llegaba el botón explícito de
+guardar. O sea que la copia que siempre ganaba era también la que nada reconciliaba: guardar la
+disposición en una sesión dejaba a la otra con un borrador de hace meses **para siempre**, sin
+nada en pantalla que dijera que era un borrador.
+
+El arreglo es la forma que la config de tablas ya tenía cuarenta líneas más allá
+(`_syncRemoteTableConfig`): **manda la cuenta**, lo local es caché, y el *keepalive* adopta lo
+que guardó otra sesión. Lo único que hace falta encima es poder distinguir un **borrador** de
+una caché rancia —sin esa marca son los mismos bytes, que es justo cómo la rancia llegó a
+ganar—. De ahí que casi todos estos tests vayan sobre la bandera.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheAccountIsTheLayout::*` (4) | La regresión en una línea: la copia local va **detrás** de `_dwIsDirty()`, la cuenta se lee antes de refrescar la caché, una cuenta vacía —«sigo el default de la organización»— **borra** la copia local en vez de dejarla sobrevivir a esa decisión, y `_dwLoad` no puede devolver lo local sin haber mirado la cuenta |
+| `TestADraftIsMarked::*` (8) | Una edición **de verdad** levanta la bandera: se compara contra lo que daría la **cuenta** (abrir el modo edición y cerrarlo escribe la misma disposición, y una insignia por eso enseña a ignorar la insignia), y los tres serializadores de la rejilla usan el mismo valor por defecto —una diferencia que no causó ninguna edición sería un «sin guardar» fantasma permanente—. Guardar en la cuenta la baja **solo si la cuenta aceptó** (un guardado fallido que se diera por guardado lo pisaría el siguiente poll); las tres salidas de un borrador —descartar, seguir el default, volver a fábrica— la limpian; la bandera tiene **clave propia**, porque compartirla con la disposición la haría desaparecer con lo que describe; y la pantalla lo dice, que es lo que faltaba para que esto se reportara antes. El `ms-auto` que empuja la barra a la derecha **no** va en la insignia: arranca oculta, un `d-none` no participa en el flex, y el margen desaparecía con ella llevándose los botones a la izquierda justo cuando no había nada que avisar |
+| `TestOtherSessionsConverge::*` (6) | El *keepalive* alimenta también al dashboard y el cuerpo de `/me` se lee **una vez** (leerlo dos veces devuelve un flujo vacío); la sincronización se echa atrás ante una edición en curso o un guardado en vuelo —converger vale menos que destruir el trabajo de alguien—; actualiza las dos copias; no hace nada si nada cambió (el poll corre cada 20 s y redibujar volvería a pedir los datos del overview eternamente); y solo redibuja si el panel está a la vista |
+
+---
+
+## 163. Un widget que detecta un problema lo dice con el fondo
+
+**Archivo:** `tests/meta/test_wa_overview_state.py` — 9 tests
+
+La barra de acento que ya tenía cada tarjeta son 3 px arriba de una baldosa entre veinte, y un
+dashboard se **barre con la vista**, no se lee. Pedido desde el panel: «que los widget que
+detectan errores cambien el color de fondo si saltan warning o error».
+
+Dos reglas sostienen el diseño, y las dos están aquí porque la implementación evidente las
+rompe:
+
+**El estado viaja con el dato del propio widget** — `state` en el contenido de una tarjeta,
+`state_rows` en la vista de una tabla («tener filas *es* el problema»). El core no guarda
+ninguna lista de qué widgets pueden ponerse rojos, que importa porque un widget que trae un
+módulo tiene que poder hacerlo diciendo la misma palabra. Y porque el **acento no sirve de
+atajo**: la tarjeta de fail2ban es ámbar cuando el jail está **activado**, así que teñir por
+acento pintaría un aviso permanente sobre un servicio funcionando exactamente como debe.
+
+**El tinte se aplica redefiniendo la variable** de la que ya se pintan las tarjetas
+(`--ss-surface-bg`), así que el CSS no sabe nada del marcado de ninguna. Repintar la tarjeta
+pediría un selector por forma de tarjeta, y la siguiente forma que se añadiera se quedaría gris
+en silencio.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheStateComesFromTheData::*` (4) | La tarjeta se tiñe de su **propio contenido**; una tabla solo si declara que sus filas son el problema —y una tabla vacía **limpia** el tinte en vez de conservar el último—; los estados son exactamente dos (`ok` **no** es un estado: verde es la ausencia de problema, y veinte tarjetas pintándose por estar bien es un dashboard sin señal); y ninguna de las dos funciones nombra un widget |
+| `TestTheTintSurvivesARedraw::*` (2) | Un arrastre, un cambio de tamaño o un filtro reconstruyen la rejilla desde caché: sin esto el tinte desaparece a la primera interacción y vuelve en el siguiente poll —un parpadeo sin causa, peor que no teñir—. Y preguntarle el estado a un espaciador (sin `view`) no puede lanzar una excepción en mitad del render, que dejaría el dashboard en blanco |
+| `TestTheCssTouchesNoCardMarkup::*` (3) | Las dos reglas van por la variable, y son **clases**, nunca CSS por id |
+
+

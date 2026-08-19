@@ -1005,6 +1005,56 @@ Para activar el modo edición, pulsa **✏ Edit Dashboard** en la barra de herra
 
 ![Dashboard en modo edición](images/dashboard_edit.svg)
 
+### Estado de un widget (fondo ámbar / rojo)
+
+Un widget que está informando de un problema **tiñe toda su superficie**: ámbar para un aviso,
+rojo para un error. La barra de acento que ya tenía cada tarjeta son 3 px arriba de una baldosa
+entre veinte, y un dashboard se barre con la vista.
+
+El estado **viaja con el dato del propio widget**, nunca desde una lista en el core:
+
+- una tarjeta de estadística lo declara en su contenido (`state: 'error' | 'warn'`);
+- una tabla lo declara en su vista (`state_rows`), y solo si sus filas **son** el problema —la
+  de incidencias activas—. Una tabla de sesiones no está en apuros por tener filas.
+
+Así, un widget aportado por un módulo consigue lo mismo diciendo la misma palabra. Lo declaran
+hoy: **comprobaciones**, **servidores** (mantenimiento **no** cuenta: ese host lo tiró alguien a
+propósito), **servicios** (uno parado es aviso, nunca error), **syslog** (severidades RFC 5424,
+leídas del mismo desglose que pintan las insignias) y la tabla de **incidencias activas**.
+
+No existe un estado `ok`: el verde es la ausencia de problema, y veinte tarjetas pintándose por
+estar bien es un dashboard sin señal. Y el tinte se aplica **redefiniendo `--ss-surface-bg`**, la
+variable de la que ya se pinta cada tarjeta, así que las dos reglas CSS (`.dw-state-warn` /
+`.dw-state-error`) no saben nada del marcado de ninguna.
+
+### Dónde vive la disposición (y por qué hay dos copias)
+
+La disposición es **de la cuenta**: se guarda en `dashboard_layout` de las preferencias del
+usuario y es lo que ve cualquier sesión suya, en cualquier host y cualquier navegador. Junto a
+ella hay una segunda copia en `localStorage` (`ss_layout2_<usuario>`) que es un **borrador sin
+guardar**: la disposición que se está arrastrando ahora mismo, conservada entre recargas para no
+perder una edición a medias.
+
+Cuál de las dos gana lo decide una bandera aparte, `ss_layout2_dirty_<usuario>`:
+
+| Estado | Qué se pinta |
+|---|---|
+| Hay borrador (bandera puesta) | El borrador, con la insignia **«Sin guardar»** en la barra |
+| No hay borrador | Lo que guarda la cuenta — y la copia local se **refresca** desde ella |
+| La cuenta está vacía | El default de la organización, o el de fábrica; la copia local se **borra** |
+
+Y el *keepalive* de sesión (el mismo `/api/v1/me` que ya reconcilia la configuración de las
+tablas) adopta lo que haya guardado **otra sesión**, sin recargar. Nunca por encima de una
+edición en curso ni de un guardado en vuelo: converger vale menos que destruir el trabajo de
+alguien a medias.
+
+> **Por qué la bandera existe.** Antes ganaba lo local sin condiciones, y como `localStorage`
+> está aislado por **origen** (esquema + host + puerto), `https://panel.ejemplo` y
+> `http://10.0.0.1:8080` eran dos cajas distintas de la misma cuenta que nada reconciliaba.
+> Guardar en una sesión dejaba a la otra con un borrador viejo indefinidamente, y sin marca en
+> pantalla no había forma de saber que lo que se veía era un borrador. Sin la bandera, un
+> borrador y una caché rancia son los mismos bytes.
+
 ### Respuesta de `/api/v1/modules/overview`
 
 ```json

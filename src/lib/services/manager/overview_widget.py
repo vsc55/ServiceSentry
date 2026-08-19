@@ -32,7 +32,8 @@ def _services_stat(on: int, off: int) -> dict:
         {'style': 'muted', 'icon': 'bi-stop-circle', 'key': 'overview_services_off', 'args': [off]}
         if off else
         {'style': 'ok', 'icon': 'bi-check-circle', 'key': 'overview_services_all_on'})
-    return {'value': on + off, 'accent': 'green' if not off else 'amber', 'badges': badges}
+    return {'value': on + off, 'accent': 'green' if not off else 'amber',
+            'state': 'warn' if off else '', 'badges': badges}
 
 
 def services_stat(wa) -> dict:

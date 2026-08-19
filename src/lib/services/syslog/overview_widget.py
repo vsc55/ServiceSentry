@@ -27,7 +27,14 @@ def syslog_stats_stat(wa) -> dict:
         total, by_sev = 0, []
     sev_badges = [{'fn': 'sev', 'value': s.get('value'), 'name': s.get('name'),
                    'count': s.get('count')} for s in (by_sev or []) if s.get('count')]
-    return {'value': total, 'badges': sev_badges}
+    # RFC 5424 numbers this the same way the card already paints it: 0-3 are
+    # emergency/alert/critical/error, 4 is warning, and 5-7 are things happening normally.
+    # Read from the SAME breakdown the badges show, so the tint can never disagree with
+    # the numbers printed under it.
+    _sevs = [s.get('value') for s in (by_sev or []) if s.get('count')]
+    _sevs = [v for v in _sevs if isinstance(v, int)]
+    state = 'error' if any(v <= 3 for v in _sevs) else ('warn' if 4 in _sevs else '')
+    return {'value': total, 'state': state, 'badges': sev_badges}
 
 
 def syslog_rows(wa, f: str = '') -> list:
