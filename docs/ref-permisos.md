@@ -9,8 +9,8 @@
 >   [explica-web-admin.md](explica-web-admin.md).
 > - Los **endpoints** de roles/grupos/usuarios están en [ref-api.md](ref-api.md).
 
-El sistema usa **73 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
-código) tiene exactamente esos 73 flags.
+El sistema usa **75 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
+código) tiene exactamente esos 75 flags.
 
 ---
 
@@ -18,7 +18,7 @@ código) tiene exactamente esos 73 flags.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (73 flags) |
+| `admin` | Todos los permisos (75 flags) |
 | `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
 | `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`, `credentials_view` (sin `config_view`, que expone secretos sin enmascarar) |
 
@@ -29,7 +29,7 @@ código) tiene exactamente esos 73 flags.
 
 ## Roles personalizados
 
-Se crean desde **Acceso → Roles** asignando cualquier combinación de los 73 permisos. Se
+Se crean desde **Acceso → Roles** asignando cualquier combinación de los 75 permisos. Se
 persisten en la tabla `roles`.
 
 Sus permisos se editan en **un** sitio: la sub-sección **Acceso → Permisos**, que pone todos los
@@ -52,7 +52,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 
 ---
 
-## Catálogo de permisos (73 flags)
+## Catálogo de permisos (75 flags)
 
 | Grupo | Permiso | Descripción |
 |-------|---------|-------------|
@@ -86,6 +86,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `overview_reset_factory` | Restaurar el layout de fábrica |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
+| **Segundo factor** | `mfa_reset_others` | Quitar el segundo factor de **otra** cuenta, con sus códigos de recuperación. **De nadie por defecto**, ni siquiera de `admin`: es el camino de vuelta de quien perdió el móvil *y* los códigos, y es también lo que haría alguien con `users_edit` para desarmar la protección antes de ir a por la contraseña. No existe el contrario —nadie puede **activar** el MFA de otro—, porque solo el dueño puede dar de alta un autenticador que tiene en la mano. Ver [explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta) |
 | **Checks** | `checks_view` | Ver resultados de checks y la pestaña Status |
 | | `checks_run` | Lanzar comprobaciones bajo demanda |
 | | `checks_delete` | Vaciar la tabla de estado de los checks (Config › Mantenimiento). **Sin rol por defecto**: antes iba con `checks_run` —que tiene `editor`— y eso dejaba una acción destructiva al alcance de un rol pensado para *operar* la monitorización, no para borrar lo que reportó |
@@ -118,7 +119,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 
 > **IP bans (fail2ban)** añade su propia familia granular `ipban_*` (`ipban_ban_view/add/edit/delete`,
 > `ipban_history_view`, `ipban_history_delete`, `ipban_whitelist_view/add/delete`, `ipban_watchlist_clear`,
-> `ipban_service_edit`). Ver [ref-api.md](ref-api.md#ip-bans-fail2ban--libservicesipbanroutespy).
+> `ipban_service_edit`, `ipban_config_edit`). Ver [ref-api.md](ref-api.md#ip-bans-fail2ban--libservicesipbanroutespy).
 
 ### Permisos dinámicos
 
@@ -145,7 +146,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
   son identidad, la nombran users/groups/roles/resolución/SCIM/CLI, y no las posee ningún dominio.
 - `ROLES` — las claves de rol integrado, mayor privilegio primero. **Derivada** de
   `BUILTIN_ROLE_UIDS`, no escrita otra vez.
-- `PERMISSIONS` — tupla con los 73 flags.
+- `PERMISSIONS` — tupla con los 75 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` para renderizar el modal de edición de
   roles agrupado.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` de los roles integrados.
@@ -166,3 +167,4 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
 - [explica-web-admin.md](explica-web-admin.md) — restricción de UI por permisos
 - [ref-api.md](ref-api.md) — endpoints y guards
 - [ref-esquema-bd.md](ref-esquema-bd.md) — tablas `users`/`roles`/`groups`
+- [explica-mfa.md](explica-mfa.md) — qué concede y qué no concede `mfa_reset_others`

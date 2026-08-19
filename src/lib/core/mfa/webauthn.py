@@ -141,6 +141,7 @@ def parse_auth_data(blob: bytes) -> dict:
         'sign_count': struct.unpack('>I', data[33:37])[0],
         'credential_id': b'',
         'public_key': None,
+        'public_key_raw': b'',
         'aaguid': b'',
     }
     if not out['flags'] & FLAG_AT:
@@ -154,13 +155,23 @@ def parse_auth_data(blob: bytes) -> dict:
     if cred_len > 1023 or len(data) < 55 + cred_len:
         raise CeremonyError('credential id length is not usable')
     out['credential_id'] = data[55:55 + cred_len]
+    key_at = 55 + cred_len
     try:
-        key, _consumed = cbor.decode_from(data, 55 + cred_len)
+        key, consumed = cbor.decode_from(data, key_at)
     except cbor.CborError as exc:
         raise CeremonyError('credential public key is not readable') from exc
     if not isinstance(key, dict):
         raise CeremonyError('credential public key is not a COSE key')
     out['public_key'] = key
+    # The key's own bytes, as they arrived. Stored verbatim and re-parsed by this same decoder
+    # when an assertion turns up, so there is ONE representation and no second place that can
+    # disagree about what the key is — which is also why nothing here encodes CBOR: this
+    # module reads it, and a writer would be a second opinion.
+    # `consumed` is a LENGTH, not an end offset — the decoder answers how far it read from
+    # where it was told to start. Slicing to it as if it were absolute silently produced a
+    # truncated key that stored and then would not verify, which is the shape of bug that only
+    # shows up on the second half of the feature.
+    out['public_key_raw'] = data[key_at:key_at + consumed]
     return out
 
 
@@ -228,6 +239,7 @@ def verify_registration(*, attestation_object: bytes, client_data_json: bytes,
     cose.public_key(auth['public_key'], alg)
     return {'credential_id': auth['credential_id'],
             'public_key': auth['public_key'],
+            'public_key_raw': auth['public_key_raw'],
             'alg': alg,
             'sign_count': auth['sign_count'],
             'aaguid': auth['aaguid'],

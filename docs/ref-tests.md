@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~5.100 tests** (5060 recolectados entre `unit`, `meta` e `integration`; los e2e piden motores o navegador aparte. Medido el 2026-08-18). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5.130 tests** (5060 recolectados entre `unit`, `meta` e `integration`; los e2e piden motores o navegador aparte. Medido el 2026-08-18). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -152,7 +152,7 @@ WebAdmin = pytest.importorskip('lib.web_admin.app').WebAdmin
 78. [Panel Web — Política de bind del servidor web](#78-panel-web--política-de-bind-del-servidor-web)
 79. [Panel Web — SCIM 2.0 (aprovisionamiento)](#79-panel-web--scim-20-aprovisionamiento)
 80. [Panel Web — Utilidades genéricas](#80-panel-web--utilidades-genéricas-apiv1util)
-81. [Seguridad (regresiones) y Portabilidad multi-motor](#81-seguridad-regresiones-y-portabilidad-multi-motor)
+81. [Portabilidad multi-motor](#81-portabilidad-multi-motor)
 82. [Servicios — IP-ban (jail, store, integración)](#82-servicios--ip-ban-jail-store-integración)
 83. [CLI — Servicios de usuarios/grupos y comandos](#83-cli--servicios-de-usuariosgrupos-y-comandos)
 84. [Monitor — Notificador multi-canal](#84-monitor--notificador-multi-canal-routing-y-formato)
@@ -1459,7 +1459,7 @@ que reparte la capacidad de bloquear la base de datos.
 |---|---|---|---|
 | `test_permissions_tuple_has_66_flags` | `len(PERMISSIONS) == 66` | 66 elementos | Otro número |
 | `test_permissions_are_unique` | Sin duplicados en `PERMISSIONS` | `set` sin colisiones | Si hay repetidos |
-| `test_permissions_expected_flags` | El conjunto exacto de 73 flags | Coincide con el set esperado | Si falta o sobra alguno |
+| `test_permissions_expected_flags` | El conjunto exacto de 75 flags | Coincide con el set esperado | Si falta o sobra alguno |
 | `test_permission_groups_structure` | `PERMISSION_GROUPS` es lista de 2-tuplas | Lista con pares `(key, [perms])` | Si la estructura difiere |
 | `test_permission_groups_cover_all_permissions` | Todos los flags están en algún grupo | Unión de grupos == PERMISSIONS | Si alguno no está cubierto |
 | `test_permission_groups_no_duplicates` | Ningún flag aparece en más de un grupo | Sin duplicados entre grupos | Si hay solapamiento |
@@ -7318,7 +7318,7 @@ por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta
 
 ## 155. Segundo factor: el escalón que pone delante de un login
 
-**Archivo:** `tests/integration/test_wa_mfa.py` — 70 tests
+**Archivo:** `tests/integration/test_wa_mfa.py` — 80 tests
 
 Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
 lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
@@ -7340,7 +7340,7 @@ código verifica, la petición es anónima **por no tener sesión**.
 | `TestRequiringIt::*` (9) | La política (`web_admin\|mfa_required`: `off` / `admins` / `all`). Lo que importa es que **activarla no deja fuera a nadie**: quien le aplique y no tenga factor lo configura *al entrar*, que es la única razón por la que una política así se puede encender con nadie dado de alta. `admins` cuenta a quien lo sea **por grupo** —preguntar solo por el rol propio es el fallo que la auditoría de agosto encontró en otras cuatro guardas—; un factor ya configurado se sigue exigiendo aunque la política se apague; la pantalla de alta **no acuña un secreto para quien ya tiene uno** (si no, una contraseña sola reemplazaría un factor que funciona); una política que **no se puede honrar** —sin clave de cifrado— cede ella en vez de la instalación; y un valor que no es uno de los tres se rechaza al guardar, porque almacenado se leería como «ninguno de los que compruebo», que falla ABIERTO |
 | `TestTrustingADirectoryThatAlreadyAsks::*` (8) | Fase 3: `ldap\|oidc\|saml2` pueden declarar `mfa_trusted` — «este directorio ya lo exige». **Sin confiar por defecto**, que es la dirección conservadora: el panel sigue pidiendo lo que puede verificar él hasta que un operador diga que lo hace el directorio. Confiar salta **las dos mitades** —el código y el alta obligatoria—, porque ambas existen para establecer el mismo hecho y el IdP lo estableció. Y no dice nada de un inicio de sesión **local**: quien además tenga contraseña aquí sigue cumpliendo la política del panel al usarla, o confiar en un directorio desarmaría en silencio todas las demás puertas. Confiar en uno no confía en los otros, una fuente sin sección (la pestaña de Teams) **nunca** se confía, y quitar la confianza vuelve a pedirlo |
 | `TestWhereASecurityKeyWouldBeRegistered::*` (8) | Dónde se registrarían las llaves de seguridad. El navegador ata una credencial al RP ID y **no se puede mover**, así que registrar contra una suposición produce una llave que en silencio no vuelve a funcionar: sin `public_url`, con una IP, o en HTTP plano **no se ofrece** —negarse aquí es una explicación en vez de un error opaco del navegador—. El escape `webauthn_rp_id` permite atarlas a un dominio padre, y se rechaza si el origen no cuelga de él (el navegador lo rechazaría, que es peor sitio para enterarse). Un proxy que el panel no está leyendo es un **aviso y no un rechazo**: la ceremonia funcionaría, lo que se rompe antes es la cookie de sesión, y culpar a WebAuthn mandaría a alguien al ajuste equivocado |
-| `TestTheUsersTableSaysWhoHasOne::*` (4) | La columna MFA de la tabla de usuarios: **una sola consulta** para toda la tabla (el store responde un conjunto de uids justo para que cuarenta cuentas no sean cuarenta viajes), un **booleano y nada más** —la lista de usuarios no tiene por qué saber de qué tipo es el factor, mucho menos nada sobre él—, un store que no puede contestar deja la columna en «no» en vez de tumbar la página, y restablecer desde la pantalla de admin la limpia |
+| `TestTheUsersTableSaysWhoHasOne::*` (5) | La columna MFA de la tabla de usuarios: **una sola consulta** para toda la tabla (`methods_by_user()`, justo para que cuarenta cuentas no sean cuarenta viajes), la **tabla dibuja el booleano** y los **tipos viajan al lado** para el modal de edición —que va de UNA cuenta y donde quitar el factor desregistra además una llave que esa persona sigue llevando encima—, nada **sobre** los factores (ni secreto, ni id de credencial, ni códigos), un store que no puede contestar deja la columna en «no» en vez de tumbar la página, y restablecer desde la pantalla de admin la limpia |
 
 **Y las páginas de inicio de sesión dicen que están trabajando.** Un formulario que **navega**
 no tiene nada que decir mientras espera: el progreso lo lleva el navegador arriba en la pestaña,
@@ -7420,6 +7420,28 @@ petición como contada, la deja en **una** ofensa y no dos.
 | `TestAWrongCodeCostsSomethingEverywhere::test_a_bad_code_on_regenerate_is_one_auth_offense` | |
 | `TestAWrongCodeCostsSomethingEverywhere::test_the_enrolment_confirm_used_to_cost_nothing_at_all` | Contesta 400, y el hook solo mira 401 y 403 |
 | `TestAWrongCodeCostsSomethingEverywhere::test_a_good_code_costs_nothing` | |
+
+**Y una llave de seguridad, de punta a punta.** Los tests unitarios prueban las ceremonias
+contra una fabricada y desmontada comprobación a comprobación; lo que se prueba **aquí** es que
+una ceremonia entera sobrevive al viaje: registrada por HTTP en una cuenta con sesión, y luego
+usada para terminar un inicio de sesión que la contraseña sola no terminó.
+
+La ceremonia la construye `tests/webauthn_fabric.py`, compartido con el fichero unitario para
+que las dos suites estén de acuerdo en qué es una ceremonia válida. Una copia en cada uno serían
+dos codificadores CBOR que pueden discrepar, y el día que discreparan una de las dos suites
+estaría demostrando algo sobre sí misma.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestASecurityKeyThroughTheApp::test_a_key_can_be_registered_and_is_stored_confirmed` | Sin segundo paso: la respuesta venía firmada sobre un challenge que emitió este servidor |
+| `TestASecurityKeyThroughTheApp::test_the_account_now_owes_a_second_factor` | Una cuenta **solo** con llave es una cuenta con factor: leer solo la fila TOTP la dejaría pasar de largo |
+| `TestASecurityKeyThroughTheApp::test_the_challenge_is_good_once` | Repetir una respuesta de registro es el mismo ataque que repetir una aserción |
+| `TestASecurityKeyThroughTheApp::test_a_ceremony_for_another_site_is_refused` | Y **qué** falló se escribe en el log, no se contesta |
+| `TestASecurityKeyThroughTheApp::test_the_key_finishes_a_sign_in` | El objetivo entero: contraseña aceptada y aparcada, terminada con la llave |
+| `TestASecurityKeyThroughTheApp::test_an_assertion_needs_a_parked_sign_in` | La misma regla que la página del código: sin nada a medias no se concede nada |
+| `TestASecurityKeyThroughTheApp::test_a_bad_assertion_is_audited_and_costs_an_offense` | Una aserción capturada y repetida: auditada, y una ofensa en la pista de autenticación |
+| `TestASecurityKeyThroughTheApp::test_the_page_offers_the_key_only_when_there_is_one` | Lo decide el **servidor**: un botón que el servidor rechazaría enseña que la función está rota |
+| `TestASecurityKeyThroughTheApp::test_the_account_card_is_told_whether_it_can_offer_one` | `webauthn_ok` viaja con el estado, y el motivo con él |
 
 
 ---

@@ -48,10 +48,25 @@ function _accMfaDraw() {
                 ><i class="bi bi-shield-plus me-1"></i>${esc(t('mfa_enable'))}</button>`;
         return;
     }
+    // Which KINDS this account has. An app and a key are two factors of one account and the
+    // card says both, because "I have a key on this laptop" is the thing somebody needs to
+    // remember before they wipe the laptop.
+    const methods = _accMfa.methods || [];
+    const hasKey = methods.includes('webauthn');
+    const kinds = `<div class="d-flex gap-2 flex-wrap mb-3">
+        ${methods.includes('totp') ? `<span class="badge bg-body-secondary text-body-secondary
+            fw-normal border"><i class="bi bi-phone me-1"></i>${esc(t('mfa_method_totp'))}</span>` : ''}
+        ${hasKey ? `<span class="badge bg-body-secondary text-body-secondary fw-normal border"
+            ><i class="bi bi-key-fill me-1"></i>${esc(t('mfa_method_webauthn'))}</span>` : ''}
+      </div>`;
     body.innerHTML = `<div class="text-muted small mb-3">${esc(t('mfa_desc'))}</div>
+        ${kinds}
         <div class="small mb-3"><i class="bi bi-key me-1"></i>${
             esc(t('mfa_recovery_left').replace('{}', _accMfa.recovery_left))}</div>
         <div class="d-flex gap-2 flex-wrap">
+          ${(_accMfa.webauthn_ok && !hasKey && _accKeySupported()) ? `<button type="button"
+            class="btn btn-sm btn-primary" onclick="_accKeyAdd(event)"
+            ><i class="bi bi-key-fill me-1"></i>${esc(t('mfa_key_add'))}</button>` : ''}
           <button type="button" class="btn btn-sm btn-secondary" onclick="_accMfaRegen()"
             ><i class="bi bi-arrow-repeat me-1"></i>${esc(t('mfa_recovery_new'))}</button>
           <button type="button" class="btn btn-sm btn-warning" onclick="_accMfaDisable()"
@@ -239,4 +254,92 @@ function _accMfaDisable() {
         showToast(t('mfa_disabled_ok'), 'success');
         _accMfaLoad();
     });
+}
+
+/* ── Security keys ────────────────────────────────────────────────────────────
+   The browser half of the WebAuthn ceremonies. Everything that DECIDES anything is on the
+   server (lib/core/mfa/webauthn.py, tested against its own vectors); what is here is the
+   translation between base64url — how the panel puts bytes in JSON — and the ArrayBuffers the
+   platform API insists on, plus the one thing only the browser knows: whether it has an
+   authenticator at all. */
+
+/** Can this browser do it? Three different "no"s, and they are not interchangeable.
+ *
+ *  `navigator.credentials` is missing on an old browser, and `PublicKeyCredential` is missing
+ *  outside a secure context — which is the case the panel most often meets, because http on a
+ *  LAN address is a normal way to run this. The button is not drawn rather than drawn and then
+ *  failing with a browser error that names none of that.
+ */
+function _accKeySupported() {
+    return !!(window.PublicKeyCredential && navigator.credentials
+              && typeof navigator.credentials.create === 'function');
+}
+
+const _b64uToBytes = s => {
+    const pad = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(pad + '='.repeat((4 - pad.length % 4) % 4));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+};
+const _bytesToB64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/** Register a security key on this account.
+ *
+ *  The challenge is never composed here: it comes from the server, is used once and is not
+ *  echoed back for it to trust. What the browser returns is passed on as it arrived — this
+ *  function reads none of it, because everything worth checking about those bytes is checked
+ *  on the other side.
+ */
+async function _accKeyAdd(ev) {
+    const done = ssBtnBusy(ev && ev.currentTarget);
+    const res = await apiPost('/api/v1/account/mfa/webauthn/begin', {});
+    const d = (res && res.data) || {};
+    if (!d.ok) {
+        done();
+        showToast(_accKeyReason(d.error), 'danger');
+        return;
+    }
+    let cred = null;
+    try {
+        cred = await navigator.credentials.create({publicKey: {
+            challenge: _b64uToBytes(d.challenge),
+            rp: {id: d.rp_id, name: d.rp_name},
+            user: {id: _b64uToBytes(d.user_id), name: d.user_name, displayName: d.user_display},
+            pubKeyCredParams: (d.algorithms || []).map(alg => ({type: 'public-key', alg})),
+            timeout: d.timeout_ms,
+            // The panel does not check attestation and says so: asking for one would collect a
+            // statement about the make of somebody's key that nothing here reads.
+            attestation: 'none',
+            authenticatorSelection: {residentKey: 'discouraged', userVerification: 'preferred'},
+        }});
+    } catch (e) {
+        // A refusal and a timeout arrive here the same way, and neither is an error worth a
+        // red toast: the person pressed Escape or walked away.
+        done();
+        if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) return;
+        showToast(t('mfa_key_browser_error'), 'danger');
+        return;
+    }
+    const out = await apiPost('/api/v1/account/mfa/webauthn/confirm', {
+        attestation_object: _bytesToB64u(cred.response.attestationObject),
+        client_data_json: _bytesToB64u(cred.response.clientDataJSON),
+    });
+    done();
+    const od = (out && out.data) || {};
+    if (!od.ok) { showToast(_accKeyReason(od.error), 'danger'); return; }
+    showToast(t('mfa_key_added'), 'success');
+    _accMfaLoad();
+}
+
+/** Why a key cannot be registered, in words. The three refusals from `_webauthn_scope` are
+ *  three different jobs for whoever reads them — set a public URL, put the panel behind TLS,
+ *  fix an override that does not match — so they do not share a message. */
+function _accKeyReason(err) {
+    switch (String(err || '')) {
+        case 'no_public_url':   return t('mfa_key_no_public_url');
+        case 'not_https':       return t('mfa_key_not_https');
+        case 'rp_id_mismatch':  return t('mfa_key_rp_mismatch');
+        case 'no_challenge':    return t('mfa_key_expired');
+        default:                return t('mfa_key_failed');
+    }
 }

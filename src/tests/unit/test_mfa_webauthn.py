@@ -26,70 +26,15 @@ import struct
 
 import pytest
 
-from lib.core.mfa import cose, webauthn as wa
+from lib.core.mfa import cbor, cose, webauthn as wa
 
 pytest.importorskip('cryptography')
 
 from cryptography.hazmat.primitives import hashes                    # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import ec             # noqa: E402
 
-RP_ID = 'panel.example.com'
-ORIGIN = 'https://panel.example.com'
-
-
-def _cbor_map(pairs: dict) -> bytes:
-    """The tiny bit of CBOR encoding the tests need — the decoder is the code under test."""
-    def item(v):
-        if isinstance(v, int):
-            if v >= 0:
-                return bytes([0x00 | v]) if v < 24 else b'\x18' + bytes([v]) if v < 256 \
-                    else b'\x19' + struct.pack('>H', v)
-            n = -1 - v
-            return bytes([0x20 | n]) if n < 24 else b'\x38' + bytes([n])
-        if isinstance(v, bytes):
-            return (bytes([0x40 | len(v)]) if len(v) < 24
-                    else b'\x58' + bytes([len(v)])) + v
-        raise TypeError(v)
-    out = bytes([0xA0 | len(pairs)])
-    for k, v in pairs.items():
-        out += item(k) + item(v)
-    return out
-
-
-def _key():
-    priv = ec.generate_private_key(ec.SECP256R1())
-    n = priv.public_key().public_numbers()
-    return priv, {1: cose.KTY_EC2, 3: cose.ES256, -1: cose.CRV_P256,
-                  -2: n.x.to_bytes(32, 'big'), -3: n.y.to_bytes(32, 'big')}
-
-
-def _auth_data(rp_id=RP_ID, flags=wa.FLAG_UP | wa.FLAG_AT, count=1,
-               cred_id=b'cred-0001', cose_key=None, extra=b''):
-    blob = hashlib.sha256(rp_id.encode()).digest() + bytes([flags]) + struct.pack('>I', count)
-    if flags & wa.FLAG_AT:
-        blob += b'\x00' * 16 + struct.pack('>H', len(cred_id)) + cred_id
-        blob += _cbor_map(cose_key) if cose_key else b''
-    return blob + extra
-
-
-def _client_data(kind, challenge, origin=ORIGIN):
-    return json.dumps({'type': kind, 'challenge': challenge, 'origin': origin,
-                       'crossOrigin': False}).encode()
-
-
-def _registration(challenge, **kw):
-    priv, key = _key()
-    auth = _auth_data(cose_key=key, **kw)
-    att = b'\xa3' + b'\x63fmt' + b'\x64none' + b'\x67attStmt' + b'\xa0' \
-          + b'\x68authData' + b'\x59' + struct.pack('>H', len(auth)) + auth
-    return priv, key, att, _client_data('webauthn.create', challenge)
-
-
-def _assertion(priv, challenge, origin=ORIGIN, rp_id=RP_ID, flags=wa.FLAG_UP, count=2):
-    auth = _auth_data(rp_id=rp_id, flags=flags, count=count)
-    cdj = _client_data('webauthn.get', challenge, origin)
-    sig = priv.sign(auth + hashlib.sha256(cdj).digest(), ec.ECDSA(hashes.SHA256()))
-    return auth, cdj, sig
+from tests.webauthn_fabric import (                                  # noqa: E402
+    ORIGIN, RP_ID, _assertion, _auth_data, _cbor_map, _client_data, _key, _registration)
 
 
 class TestTheHappyPathAgreesWithItself:
@@ -103,6 +48,36 @@ class TestTheHappyPathAgreesWithItself:
         assert out['credential_id'] == b'cred-0001'
         assert out['alg'] == cose.ES256 and out['public_key'] == key
         assert out['sign_count'] == 1
+
+    def test_the_key_bytes_it_hands_back_are_the_key(self):
+        """The credential is STORED as the bytes it arrived in and re-parsed by this same
+        decoder when an assertion turns up — one representation, so there is no second place
+        that can disagree about what the key is.
+
+        Which makes this slice the whole of that promise. `decode_from` answers how far it read
+        FROM WHERE IT STARTED, and reading that number as an absolute offset produced a
+        truncated key: it stored without complaint, and failed on the first sign-in — the shape
+        of bug that only surfaces on the second half of the feature.
+        """
+        ch = wa.new_challenge()
+        _priv, key, att, cdj = _registration(ch)
+        out = wa.verify_registration(attestation_object=att, client_data_json=cdj,
+                                     challenge=ch, rp_id=RP_ID, origin=ORIGIN)
+        assert cbor.decode(out['public_key_raw']) == key
+
+    def test_it_stops_at_the_key_and_not_at_whatever_follows(self):
+        """Extensions come after the key in the same blob, so "the rest of the buffer" is not
+        an answer either."""
+        ch = wa.new_challenge()
+        priv, key = _key()
+        auth = _auth_data(cose_key=key, extra=b'\xa0' * 8)
+        att = (b'\xa3' + b'\x63fmt' + b'\x64none' + b'\x67attStmt' + b'\xa0'
+               + b'\x68authData' + b'\x59' + struct.pack('>H', len(auth)) + auth)
+        out = wa.verify_registration(attestation_object=att,
+                                     client_data_json=_client_data('webauthn.create', ch),
+                                     challenge=ch, rp_id=RP_ID, origin=ORIGIN)
+        assert cbor.decode(out['public_key_raw']) == key
+        assert priv is not None
 
     def test_an_assertion_from_that_credential_verifies(self):
         ch = wa.new_challenge()

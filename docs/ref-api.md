@@ -185,7 +185,16 @@ alimenta a fail2ban:
 | Método | Ruta | Permiso | Propósito |
 |---|---|---|---|
 | GET, POST | `/login` | público | Página de login local + submit (rate-limit por IP) |
+| GET, POST | `/login/mfa` | **login aparcado** | El segundo factor cuando la cuenta lleva uno: código TOTP o código de recuperación |
+| GET, POST | `/login/mfa/enrol` | **login aparcado** | Alta obligatoria, cuando la política le aplica a la cuenta y no tiene factor |
+| POST | `/login/mfa/webauthn/begin` | **login aparcado** | Opciones de la aserción para la llave de seguridad |
+| POST | `/login/mfa/webauthn/verify` | **login aparcado** | La aserción firmada; la misma puerta que el código |
 | POST | `/logout` | sesión (+CSRF) | Cierra sesión, revoca el token |
+
+«Login aparcado» **no es una sesión**: es una nota en la cookie (`mfa_pending`) que dice quién
+está a medio entrar y por qué puerta. No hay fila en la tabla de sesiones, ni `logged_in`, ni
+`_login_required` que pase — hasta que el código verifica, la petición es anónima por no tener
+sesión. Ver [explica-mfa.md](explica-mfa.md#la-propiedad-de-la-que-cuelga-todo).
 
 ## Páginas / UI
 
@@ -233,6 +242,30 @@ propio panel —`system` y `anonymous`—, que se **sintetizan** en la respuesta
 que quien las vea en auditoría pueda consultarlas: UID estable, rol `none`, `auth_source:
 "internal"`, sin contraseña ni sesión. `PUT`/`DELETE` sobre ellas responden `403 user_builtin`.
 Ver [explica-seguridad.md](explica-seguridad.md#quién-aparece-en-la-columna-usuario).
+
+## Segundo factor (MFA) — [lib/core/mfa/routes.py](../src/lib/core/mfa/routes.py)
+
+| Método | Ruta | Permiso | Propósito |
+|---|---|---|---|
+| GET | `/api/v1/account/mfa` | sesión | Qué tiene esta cuenta: `enrolled`, `methods`, códigos restantes y si la instalación puede ofrecer llaves (`webauthn_ok` + `webauthn_reason`). **Nunca el secreto**, ni siquiera cifrado |
+| POST | `/api/v1/account/mfa/begin` | sesión | Empieza un alta: secreto, enlace `otpauth://` y QR |
+| POST | `/api/v1/account/mfa/confirm` | sesión | Lo demuestra con un código; responde los códigos de recuperación **una sola vez** |
+| POST | `/api/v1/account/mfa/recovery` | sesión (+ código actual) | Juego nuevo de códigos de recuperación; invalida el anterior |
+| POST | `/api/v1/account/mfa/disable` | sesión (+ código actual) | Apaga el segundo factor de la propia cuenta |
+| POST | `/api/v1/account/mfa/webauthn/begin` | sesión | Opciones de registro de una llave de seguridad |
+| POST | `/api/v1/account/mfa/webauthn/confirm` | sesión | La respuesta de registro; guarda credencial, clave pública y algoritmo |
+| DELETE | `/api/v1/users/<uid>/mfa` | `mfa_reset_others` | Quita el segundo factor **de otra cuenta**, con sus códigos |
+
+**A los siete primeros no los guarda ningún permiso**, y es deliberado: gestionar el propio
+segundo factor es como cambiar la propia contraseña —cada cuenta lo hace en su página—, y un
+flag ahí sería una forma de impedirle a alguien protegerse. El guardado es el último, porque es
+el único que **baja** la protección de una cuenta que no es la de quien llama.
+
+Todo lo que cambia estado vuelve a comprobar a quien llama: apagarlo pide un código actual, o
+una sesión prestada bastaría para dejar la cuenta en la contraseña que alguien ya tiene. El
+`DELETE` se lleva **todos** los factores y los códigos en una transacción; dejar medio factor en
+pie es peor que ninguno, porque se lee como protección que no está. Ver
+[explica-mfa.md](explica-mfa.md).
 
 ## Roles — [lib/core/roles/routes.py](../src/lib/core/roles/routes.py)
 
@@ -628,3 +661,4 @@ curl https://sentry.example.com/api/v1/health     # {"startup_id": "..."}
 - [explica-servicios.md](explica-servicios.md) — servicios de fondo y plano de control
 - [explica-notificaciones.md](explica-notificaciones.md) — canales y routing de notificaciones
 - [ref-esquema-bd.md](ref-esquema-bd.md) — tablas de la BD que respaldan estos endpoints
+- [explica-mfa.md](explica-mfa.md) — el segundo factor: política, alta, verificación y reset

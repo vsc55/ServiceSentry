@@ -33,13 +33,22 @@ instancia en marcha, así que se pueden lanzar en caliente. Las opciones globale
 | `user role <username> <role>` | Cambiar el rol (no puede quitarse el rol al último admin) |
 | `user group-add <username> <group>` | Añadir el usuario a un grupo (por nombre o uid) |
 | `user group-del <username> <group>` | Quitar el usuario de un grupo |
+| `user mfa-reset <username>` | Quitar el **segundo factor** y sus códigos de recuperación. Ver [explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta) |
+| `user mfa-status` | Qué cuentas llevan segundo factor, y cuántos códigos de recuperación les quedan |
 
 ```bash
 python3 main.py user add alice -P 'S3cret!' --role editor --email alice@example.com --group devs
 python3 main.py user role alice admin
 python3 main.py user disable bob
 python3 main.py user passwd bob            # pide la contraseña de forma oculta
+python3 main.py user mfa-reset bob         # perdió el móvil Y los códigos
+python3 main.py user mfa-status
 ```
+
+> **Por qué el reset del MFA está también aquí.** El camino soportado desde la web pide el
+> permiso `mfa_reset_others`, que no tiene nadie por defecto; si la única cuenta que lo llevaba
+> es justo la que no puede entrar, el panel no ofrece salida. Esto la da desde la máquina, y no
+> concede alcance nuevo: quien puede ejecutarlo ya puede leer la base de datos.
 
 ## Gestión de grupos (`group`)
 

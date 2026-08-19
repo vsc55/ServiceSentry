@@ -183,13 +183,14 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 ---
 
 ### `mfa_factors` — segundo factor dado de alta, por usuario
-[lib/core/mfa/store.py:39](../src/lib/core/mfa/store.py#L39)
+[lib/core/mfa/store.py:39](../src/lib/core/mfa/store.py#L39) · el porqué de todo esto, en
+[explica-mfa.md](explica-mfa.md#qué-se-guarda)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
 | uid | TEXT | no | — | **PK** |
 | user_uid | TEXT | no | `''` | → `users.uid` |
-| method | TEXT | no | `'totp'` | hoy siempre `totp`; la columna existe para WebAuthn |
+| method | TEXT | no | `'totp'` | `totp` o `webauthn`; una cuenta puede llevar **una fila de cada** |
 | secret | TEXT | no | `''` | **cifrado** (Fernet, prefijo `enc:`) |
 | confirmed | INTEGER | no | `0` | un alta empezada y no demostrada no concede nada |
 | last_step | INTEGER | no | `-1` | anti-replay: el último paso TOTP aceptado |
@@ -911,3 +912,4 @@ PostgreSQL gestionada puede negar `pg_database_size` a un no-superusuario— se 
 - [ref-schema-json.md](ref-schema-json.md) — `schema.json` de módulos (NO la BD)
 - [explica-servicios.md](explica-servicios.md) — servicios de fondo y plano de control
 - [explica-seguridad.md](explica-seguridad.md) — cifrado de secretos en reposo
+- [explica-mfa.md](explica-mfa.md) — qué escribe y qué lee `mfa_factors` / `mfa_recovery`

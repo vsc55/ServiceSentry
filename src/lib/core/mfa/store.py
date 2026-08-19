@@ -343,6 +343,22 @@ class MfaStore(BaseStore):
         except Exception:      # pylint: disable=broad-except
             return False
 
+    def methods_by_user(self) -> dict:
+        """`{user_uid: [method, …]}` for every confirmed factor — ONE query for the whole table.
+
+        The listing draws a column from this and the Edit-user row names the kinds, so asking
+        per account is the shape that turns a page of forty into forty round trips. Same reason
+        `enrolled_user_uids` exists; this one answers the finer question, and the two are one
+        scan of the same table.
+        """
+        out: dict = {}
+        for who, method in self._db.fetchall(
+                f'SELECT user_uid, method FROM {_F} WHERE confirmed = 1 ORDER BY user_uid,'
+                ' method'):
+            if who and method:
+                out.setdefault(who, []).append(method)
+        return out
+
     def methods_of(self, user_uid: str) -> list:
         """Which kinds of factor this account has, confirmed. Ordered, so the screen is."""
         rows = self._db.fetchall(

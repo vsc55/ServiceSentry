@@ -140,7 +140,7 @@ flowchart TD
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 73 flags granulares; activar/desactivar desde el modal. Los permisos se editan por dos caminos: el modal del rol (un rol cada vez) y la sub-sección **Acceso › Permisos**, que los pone todos a la vez frente a los integrados |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 75 flags granulares; activar/desactivar desde el modal. Los permisos se editan por dos caminos: el modal del rol (un rol cada vez) y la sub-sección **Acceso › Permisos**, que los pone todos a la vez frente a los integrados |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -252,7 +252,7 @@ mientras un filtro los esconde.
 
 ![Gestión de acceso](images/access_tab.svg)
 
-El **catálogo completo** de roles integrados, roles personalizados, grupos y los **73 flags
+El **catálogo completo** de roles integrados, roles personalizados, grupos y los **75 flags
 de permiso** (más los permisos dinámicos por módulo/servidor/cluster y las estructuras
 internas `PERMISSIONS`/`PERMISSION_GROUPS`/`_perm_required`/`_get_effective_permissions`) es
 la fuente única en **[ref-permisos.md](ref-permisos.md)**. La **semántica de seguridad**
@@ -364,6 +364,8 @@ El permiso requerido se indica entre paréntesis.
 | Método | Ruta | Descripción |
 | ------ | ---- | ----------- |
 | `POST` | `/login` | Iniciar sesión con usuario y contraseña (también maneja LDAP si está habilitado) |
+| `GET`/`POST` | `/login/mfa` · `/login/mfa/enrol` | El **segundo factor** y el alta obligatoria, cuando la cuenta debe uno. No hay sesión todavía: lo que autoriza estas dos páginas es la nota `mfa_pending` de la cookie |
+| `POST` | `/login/mfa/webauthn/begin` · `…/verify` | La aserción de la **llave de seguridad**, como alternativa al código |
 | `POST` | `/logout` | Cerrar sesión e invalidar el token de sesión (requiere CSRF) |
 | `GET` | `/auth/oidc/login` | Inicia el flujo OIDC; redirige al IdP (requiere `oidc.enabled = true` y `authlib`) |
 | `GET` | `/auth/oidc/callback` | Callback OIDC; crea sesión tras verificar el token del IdP |
@@ -440,7 +442,7 @@ nodo, titular de la VIP, split-brain, prioridad — ver [ref-modulos.md](ref-mod
   `/api/v1/modules/status`.
 - Autorización: permisos globales `clusters_view/add/edit/delete` **+** permisos
   dinámicos por-cluster `cluster.{uid}.{view|add|edit|delete}` (resueltos en
-  `lib/core/modules/routes.py` por el `host_uids` del ítem). Ver §[Permisos](#sistema-de-permisos).
+  `lib/core/modules/routes.py` por el `host_uids` del ítem). Ver §[Permisos](#roles-grupos-y-permisos).
 
 ### Credenciales
 
@@ -629,6 +631,15 @@ renderiza en el sub-tab Providers (`_renderMsTeamsSection`). Cómo funciona el c
 | `GET` | `/api/v1/me` | auth | Obtener información del usuario actual (permisos, preferencias, `table_config`) |
 | `PUT` | `/api/v1/users/me/password` | auth | Cambiar la contraseña propia |
 | `PUT` | `/api/v1/users/me/preferences` | auth | Guardar preferencias propias: `lang`, `dark_mode`, `table_config` y `dashboard_layout` (sin permiso especial) |
+
+**Segundo factor en la vista de usuarios:** la tabla lleva una columna **MFA** (sí/no), y las
+tarjetas y la vista de **acceso efectivo** contestan lo mismo, para que la pregunta «¿quién no
+está protegido?» no dependa de en qué vista estés. El modal de edición añade, para una cuenta
+existente, una fila con la insignia de estado, **qué tipos** tiene (app de códigos y/o llave de
+seguridad) y —solo para quien tenga `mfa_reset_others`— el botón de quitarlo, que se lleva
+**todos** los factores y los códigos. La lista cuesta **una consulta** para toda la página, no
+una por cuenta. No existe el contrario: nadie puede activarle el MFA a otro. Ver
+[explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta).
 
 **Configuración de tablas por usuario (`table_config`):** cada usuario guarda
 su propia configuración de columnas de las tablas del panel (columnas visibles,
@@ -914,6 +925,23 @@ El nombre del módulo y de la acción deben coincidir con la regex `^[a-z][a-z0-
 |--------|------|---------|-------------|
 | `GET` | `/lang/<code>` | auth | Establecer preferencia de idioma (navegación; persiste en el perfil) |
 
+### Mi configuración (`/account`)
+
+Una **sección más del shell SPA** —no un modal y no una recarga—, con el mismo *rail* lateral
+que el resto (`.ss-shell` + `.ss-rail`) y dos secciones: **Preferencias** (idioma, tema, página
+de inicio, tamaño de página) y **Seguridad** (contraseña y segundo factor). Recuerda en qué
+sección estaba entre recargas.
+
+La barra de la sección tiene **Recargar** y **Guardar**, no *Cancelar*: guardar arranca
+desactivado y solo se habilita cuando algo cambia de verdad, y el campo modificado y aún sin
+guardar se **resalta** (`.ss-field-dirty`, la misma marca que usa la pantalla de configuración).
+Recargar vuelve a pedir el estado al servidor y **vacía el formulario de contraseña entero**,
+medidor de fuerza incluido.
+
+La tarjeta del segundo factor —alta con QR y clave, códigos de recuperación, llaves de
+seguridad, desactivar— se documenta en **[explica-mfa.md](explica-mfa.md#el-alta)**; sus
+endpoints, en [ref-api.md](ref-api.md#segundo-factor-mfa--libcoremfaroutespy).
+
 ---
 
 ## Dashboard Personalizable
@@ -1081,7 +1109,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 73 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 75 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
@@ -1233,6 +1261,12 @@ Todos los eventos auditados:
 | `user_deleted` | Eliminación de usuario |
 | `password_changed` | Usuario cambia su propia contraseña |
 | `password_reset` | Admin resetea la contraseña de otro usuario |
+| `mfa_enrolled` | Una cuenta activó su segundo factor |
+| `mfa_disabled` | Una cuenta lo desactivó |
+| `mfa_recovery_regenerated` | Juego nuevo de códigos de recuperación (el anterior queda inservible) |
+| `mfa_failed` | Código de segundo factor rechazado. `detail` lleva `stage` (`login`, `forced_enrol`, `disable`…) y `error` (`empty` / `bad_code`), que distinguen un formulario enviado en vacío de una racha de códigos equivocados — por la red las dos contestan lo mismo |
+| `mfa_recovery_used` | Se gastó un código de recuperación: el dueño en apuros, o alguien dentro |
+| `mfa_reset_by_admin` | Un administrador quitó el segundo factor de otra cuenta (`mfa_reset_others`) |
 | `user_preferences_changed` | Cambio de preferencias de UI de un usuario (idioma, tema) |
 | `all_sessions_revoked` | Invalidación global de sesiones |
 | `session_revoked` | Revocación de una sesión concreta |

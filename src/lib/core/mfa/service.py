@@ -25,7 +25,7 @@ import secrets
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib import APP_NAME
-from lib.core.mfa import qr, totp
+from lib.core.mfa import cbor, qr, totp, webauthn
 
 # How many recovery codes an enrolment gets. Ten is enough to lose a few and still have a way
 # in, and few enough that the list stays something a person actually stores somewhere.
@@ -65,16 +65,24 @@ def recovery_hashes(codes) -> list:
 def status(store, user_uid: str) -> dict:
     """What the account page and the users list need to know, and nothing more.
 
-    No secret, ever — not even the encrypted one. Three facts: is there a factor, has it been
-    proved, and how many ways back in are left.
+    No secret, ever — not even the encrypted one. Is there a factor, has it been proved, WHICH
+    kinds there are, and how many ways back in are left.
+
+    `enrolled` counts ANY confirmed method and not just the TOTP row, which is the difference
+    between a gate that asks a key-only account for its key and one that waves it through: the
+    login step reads this, and an account whose only factor is a security key would otherwise
+    look like an account with no factor at all.
     """
     factor = store.factor(user_uid)
+    methods = store.methods_of(user_uid)
     return {
-        'enrolled': bool(factor and factor.get('confirmed')),
+        'enrolled': bool(methods),
         'pending': bool(factor and not factor.get('confirmed')),
-        'method': (factor or {}).get('method', ''),
+        'method': (factor or {}).get('method', '') if factor and factor.get('confirmed')
+                  else (methods[0] if methods else ''),
+        'methods': methods,
         'since': (factor or {}).get('updated', ''),
-        'recovery_left': store.recovery_left(user_uid) if factor else 0,
+        'recovery_left': store.recovery_left(user_uid) if methods else 0,
     }
 
 
@@ -175,3 +183,98 @@ def verify(store, user_uid: str, code: str, *, now: float | None = None) -> str:
             # racing with the same code produce exactly one success.
             return 'recovery' if store.consume_recovery(uid) else ''
     return ''
+
+
+# ── Security keys ────────────────────────────────────────────────────────────
+# The ceremonies themselves live in `webauthn.py` and know nothing about this installation.
+# What is here is the part that touches the store: what to keep from a registration, and how
+# to check an assertion against what was kept.
+#
+# Every function below answers a dict and NEVER raises a `CeremonyError` outward. Which check
+# failed is something the server logs; the sender is told "no". "Wrong origin" and "wrong
+# challenge" are two different pieces of help to give somebody probing.
+
+def webauthn_register(store, user_uid: str, *, attestation_object: bytes,
+                      client_data_json: bytes, challenge: str, rp_id: str, origin: str,
+                      label: str = '', require_uv: bool = False) -> dict:
+    """Verify a registration and store the credential. `{'ok': True}` or `{'ok': False, …}`.
+
+    Stored **confirmed**, unlike a TOTP enrolment: the ceremony IS the proof. The response was
+    signed by the authenticator over a challenge this server issued, so there is nothing left
+    for a second step to establish — asking for one more touch would be theatre.
+
+    The public key is kept as it arrived (base64url of its CBOR) and the algorithm is recorded
+    HERE. A key that gets to name its own algorithm when the assertion turns up is the JWT
+    `alg` flaw with different words.
+    """
+    if not user_uid:
+        return {'ok': False, 'error': 'unknown_user'}
+    try:
+        cred = webauthn.verify_registration(
+            attestation_object=attestation_object, client_data_json=client_data_json,
+            challenge=challenge, rp_id=rp_id, origin=origin, require_uv=require_uv)
+    except webauthn.CeremonyError as exc:
+        return {'ok': False, 'error': 'ceremony', 'detail': str(exc)}
+    saved = store.save_credential(
+        user_uid,
+        credential_id=webauthn.b64u_encode(cred['credential_id']),
+        public_key=webauthn.b64u_encode(cred['public_key_raw']),
+        alg=cred['alg'], sign_count=cred['sign_count'], label=label)
+    if not saved:
+        return {'ok': False, 'error': 'write_failed'}
+    return {'ok': True, 'method': 'webauthn',
+            'credential_id': webauthn.b64u_encode(cred['credential_id'])}
+
+
+def webauthn_credential(store, user_uid: str) -> dict:
+    """What the browser needs to be told to use: `{'credential_id', 'alg', 'sign_count'}`.
+
+    Empty when there is none. The `allowCredentials` list is built from this, and it is the
+    reason a key can be offered before anybody has touched anything: the panel knows which
+    credential to ask for.
+    """
+    factor = store.factor(user_uid, method='webauthn')
+    if not factor or not factor.get('confirmed') or not factor.get('credential_id'):
+        return {}
+    return {'credential_id': factor['credential_id'], 'alg': int(factor.get('alg') or 0),
+            'sign_count': int(factor.get('sign_count') or 0)}
+
+
+def webauthn_verify(store, user_uid: str, *, auth_data: bytes, client_data_json: bytes,
+                    signature: bytes, credential_id: str, challenge: str, rp_id: str,
+                    origin: str, require_uv: bool = False) -> dict:
+    """Check an assertion against the stored credential. `{'ok': True}` or `{'ok': False, …}`.
+
+    The credential id the browser answers with is compared to the stored one **before** the
+    signature is checked: an assertion from some other key of the same person's is a valid
+    assertion, and it is not this account's second factor.
+
+    The stored key is re-parsed by the same decoder that read it at registration, so there is
+    one representation of what the key is rather than two that can disagree.
+    """
+    factor = store.factor(user_uid, method='webauthn')
+    if not factor or not factor.get('confirmed') or not factor.get('credential_id'):
+        return {'ok': False, 'error': 'not_enrolled'}
+    if str(credential_id or '') != factor['credential_id']:
+        return {'ok': False, 'error': 'wrong_credential'}
+    try:
+        key = cbor.decode(webauthn.b64u_decode(factor['public_key']))
+    except cbor.CborError:
+        # The stored key cannot be read: not the sender's doing, and not something to answer
+        # with a bad-signature message that would send somebody to buy a new key.
+        return {'ok': False, 'error': 'stored_key_unreadable'}
+    if not isinstance(key, dict):
+        return {'ok': False, 'error': 'stored_key_unreadable'}
+    try:
+        out = webauthn.verify_assertion(
+            auth_data=auth_data, client_data_json=client_data_json, signature=signature,
+            challenge=challenge, rp_id=rp_id, origin=origin, public_key=key,
+            alg=int(factor.get('alg') or 0), last_sign_count=int(factor.get('sign_count') or 0),
+            require_uv=require_uv)
+    except webauthn.CeremonyError as exc:
+        return {'ok': False, 'error': 'ceremony', 'detail': str(exc)}
+    # Only after the signature held: a counter moved by a response that did not verify would
+    # let somebody raise the bar for the real key without owning it.
+    if out.get('sign_count'):
+        store.note_sign_count(user_uid, int(out['sign_count']))
+    return {'ok': True, 'method': 'webauthn', 'uv': bool(out.get('uv'))}

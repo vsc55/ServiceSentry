@@ -81,13 +81,13 @@ def register(app, wa):
         # Which accounts carry a second factor — ONE query for the whole table, not one per
         # row. The store answers a set of uids precisely so a page of forty accounts does not
         # become forty round trips.
-        _mfa_uids = set()
+        _mfa_methods = {}
         _store = getattr(wa, '_mfa_store', None)
         if _store is not None:
             try:
-                _mfa_uids = _store.enrolled_user_uids()
+                _mfa_methods = _store.methods_by_user()
             except Exception:      # pylint: disable=broad-except
-                _mfa_uids = set()   # the column reads "no" rather than the page failing
+                _mfa_methods = {}   # the column reads "no" rather than the page failing
         safe = {}
         for uname, udata in wa._users.items():
             safe[uname] = {
@@ -111,9 +111,16 @@ def register(app, wa):
                 # checkbox only when that table was actually customised.
                 'table_config': udata.get('table_config') if isinstance(udata.get('table_config'), dict) else {},
                 'has_dashboard_layout': bool(udata.get('dashboard_layout')),
-                # Whether this account has a second factor. A boolean and nothing else: the
-                # users list has no business knowing WHICH kind, let alone anything about it.
-                'mfa': bool(udata.get('uid') and udata.get('uid') in _mfa_uids),
+                # Whether this account has a second factor, and of which kinds.
+                #
+                # The TABLE draws the boolean and nothing more — a column read at a glance down
+                # forty rows answers "protected or not", and which kind is not a question a
+                # list is asked. The KINDS are for the edit modal, which is about one account
+                # and where taking the factor off ALSO unregisters a security key the person
+                # is probably still carrying. A screen that removes something without naming
+                # it is the part that was missing.
+                'mfa': bool(udata.get('uid') and _mfa_methods.get(udata.get('uid'))),
+                'mfa_methods': list(_mfa_methods.get(udata.get('uid')) or ()),
                 'modal_config': udata.get('modal_config') if isinstance(udata.get('modal_config'), dict) else {},
             }
         # A real account is never shadowed by the built-in of the same name. New ones can no
