@@ -265,7 +265,7 @@ class _AuthMixin:
             rl.reset(request.remote_addr or '?')
         session.permanent = remember
         token, uid = self._create_session(
-            username, request.remote_addr, request.user_agent.string,
+            username, request.remote_addr, request.user_agent.string, remember,
         )
         session['session_token'] = token
         session['session_id']    = uid

@@ -135,3 +135,26 @@ def test_every_config_section_has_a_title(lang_mod, lang):
         f'{lang}: config sections whose title is not in the top-level dictionary '
         f'(a nested one does not count — that is not where a card reads it): '
         + ', '.join(missing))
+
+
+@pytest.mark.parametrize('lang_mod,lang', [(en_EN, 'en_EN'), (es_ES, 'es_ES')])
+def test_no_option_hint_hides_in_the_labels_dict(lang_mod, lang):
+    """Reported from the panel: an option's help text was written, was in the language file,
+    and did not appear. The info panel opened — the env var and the key were in it — with no
+    prose above them.
+
+    It was defined in the nested `labels` dict, under `<option>_hint`. Nothing reads that:
+    `fieldLabel()` looks in `labels` by the option's own name, and `fieldHint()` looks in
+    `hints` by `section|option` (or by the bare option). A key that matches neither is text
+    nobody will ever see, and every check passes — the key exists, the parity holds, the
+    option has a label.
+
+    The same shape as the section title that shipped invisible for the same reason (see
+    `test_every_config_section_has_a_title`). Two dictionaries, one of them nested, and the
+    only signal that you picked the wrong one is that the screen stays blank.
+    """
+    strays = sorted(k for k in lang_mod.LANG.get('labels', {}) if k.endswith('_hint'))
+    assert not strays, (
+        f'{lang}: help text inside `labels`, where nothing reads it — it belongs in `hints`, '
+        f"keyed `section|option` (or, for a hint a template draws itself with t('…_hint'), at "
+        f'the top level): ' + ', '.join(strays))

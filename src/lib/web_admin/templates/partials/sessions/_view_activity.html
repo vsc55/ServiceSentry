@@ -93,9 +93,11 @@ async function _sesHistory(uid, label) {
     if (!data) return;
     const rows = data.access || [];
     const cap = data.max;
+    // See the token dialog: `cap === 0` is "no ceiling", so only `enabled` can say off.
+    const on = data.enabled !== false;
     const body = !rows.length
-        ? `<div class="text-center py-4 text-muted">${esc(cap ? t('ses_access_none')
-                                                               : t('ses_access_off'))}</div>`
+        ? `<div class="text-center py-4 text-muted">${esc(on ? t('ses_access_none')
+                                                             : t('ses_access_off'))}</div>`
         : `<div class="ss-vscroll" style="max-height:24rem">
             <table class="table table-sm mb-0 align-middle">
                 <thead><tr>
@@ -112,7 +114,8 @@ async function _sesHistory(uid, label) {
             </table>
            </div>`;
     const note = `<div class="form-text ss-fs-2 mt-2">${
-        cap ? esc(t('ses_access_cap').replace('{}', cap)) + ' ' : ''}${esc(t('ses_access_rule'))}</div>`;
+        esc(cap ? t('ses_access_cap').replace('{}', cap) : t('ses_access_cap_none'))} ${
+        esc(t('ses_access_rule'))}</div>`;
     showHtmlModal(`${t('ses_access')} — ${label || ''}`, body + note, 'primary');
 }
 

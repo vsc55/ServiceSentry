@@ -138,7 +138,7 @@ class _ApiTokenMixin:
         """
         row = getattr(g, 'api_token', None)
         store = getattr(self, '_api_token_store', None)
-        if not row or store is None:
+        if not row or store is None or not getattr(self, '_API_TOKEN_LOG_ENABLED', True):
             return response
         try:
             rule = getattr(request.url_rule, 'rule', '') or request.path

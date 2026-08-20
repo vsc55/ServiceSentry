@@ -259,14 +259,17 @@ class TestTheAuditEntrySaysWhatHappened:
         rows = [{'table': t, 'ok': True} for t in known]
         assert len(summarize_run(rows, known, 2)['ok_tables']) == 2
 
-    def test_zero_turns_the_names_off_but_never_the_counts(self):
-        """0 = off, the usual meaning of 0 in a limit. What it must NOT do is empty the entry:
-        the counts say the run happened and how it went, and without them the record would be
-        indistinguishable from a run that covered nothing."""
+    def test_zero_lists_every_name(self):
+        """0 = NO CEILING, which is what 0 means in every other ceiling in this panel —
+        `audit_max_entries`, the syslog retention, the backup buckets. It used to mean "names
+        off" here, and that made this the one cap where zeroing everything to keep everything
+        threw away the part worth reading. The counts stay either way: they are what says the
+        run happened and how it went."""
         from lib.core.config.service import summarize_run           # noqa: PLC0415
         known = [f't{i}' for i in range(5)]
         out = summarize_run([{'table': t, 'ok': True} for t in known], known, 0)
-        assert 'ok_tables' not in out and 'ok_truncated' not in out
+        assert out['ok_tables'] == known
+        assert 'ok_truncated' not in out, 'nothing was cut, so nothing was left out'
         assert out['tables_total'] == 5 and out['tables_ok'] == 5
 
     def test_a_clean_run_still_names_its_tables(self):

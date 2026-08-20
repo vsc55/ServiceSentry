@@ -177,8 +177,14 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 | last_seen | TEXT | no | `''` | |
 | ip | TEXT | no | `''` | |
 | user_agent | TEXT | no | `''` | |
+| remember | INTEGER | no | `0` | Se inició con «Recordarme» → **exenta del timeout por inactividad** |
 
 Índices: `idx_sessions_user_uid(user_uid)`. Rename heredado: `sid`→`uid`.
+
+`last_seen` se **escribe en la BD** como mucho una vez por minuto (igual que el `last_used` de
+un token, y por lo mismo: corre en cada petición y el panel se sondea solo). Durante mucho
+tiempo no se escribía nunca después de crear la fila, así que tras un reinicio la caducidad por
+inactividad contaba desde el **login** y no desde la última petición.
 
 ---
 
@@ -210,9 +216,10 @@ auditoría registra las acciones que tienen nombre (`config_saved`) y las atribu
 anillo que guardara las lecturas correctas serían 200 latidos con la única línea interesante ya
 desalojada, y además una escritura en la respuesta de cada sondeo de cada pestaña abierta.
 
-Anillo **por sesión** (`web_admin|session_log_max`, 200 por defecto; 0 lo apaga): una sesión
-ocupada no puede desalojar el historial de una tranquila, y la tranquila es donde una sola
-petición inesperada es toda la señal.
+Anillo **por sesión** (`web_admin|session_log_max`, 200 por defecto; **0 = sin límite**, y el
+interruptor `web_admin|session_log_enabled` es lo que lo apaga): una sesión ocupada no puede
+desalojar el historial de una tranquila, y la tranquila es donde una sola petición inesperada es
+toda la señal.
 
 Las filas **se van con la sesión** — al revocarla, al revocar las de una cuenta y al reescribir
 la tabla entera (arranque, «cerrar todas las sesiones»). Actividad con un `session_uid` que ya no
@@ -323,7 +330,10 @@ que dos peticiones con el mismo código sólo cambien una fila.
 Índices: `idx_api_token_access_tok(token_uid)`.
 
 Es un **anillo por token**, no un log: se guardan las N llamadas más recientes de cada uno
-(`web_admin|api_token_log_max`, 200 por defecto; 0 lo apaga) y las viejas se descartan. Una
+(`web_admin|api_token_log_max`, 200 por defecto) y las viejas se descartan. **0 = sin límite**
+—entonces sí es un log y crece con el tráfico—; para no registrar nada está el interruptor
+`web_admin|api_token_log_enabled`. Son dos ajustes porque «sin límite» y «sin filas» son
+respuestas opuestas y un solo número no puede significar las dos. Una
 tabla que crece con el tráfico de la API es justo lo que la contabilidad de una API no puede
 ser, y las preguntas que esto contesta —qué ha estado haciendo, desde dónde llama— son sobre
 el pasado reciente. Quien necesite «para siempre» tiene un proxy inverso delante.

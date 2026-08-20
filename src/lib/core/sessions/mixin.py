@@ -22,6 +22,11 @@ from flask import g, request, session
 # is a GET as often as not.
 _LOGGED_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
+# How stale the stored `last_seen` may get. Same reasoning — and the same number — as the API
+# token's `last_used`: the column answers "is this still in use", which does not need to be
+# true to the second, and a write per request would put it on the path of every poll.
+_TOUCH_SECONDS = 60
+
 # Stdlib logging, as in lib/db/base.py and lib/security/secret_manager.py.
 _log = logging.getLogger(__name__)
 
@@ -133,9 +138,14 @@ class _SessionsMixin:
         return self._sessions_store.save_all(self._sessions)
 
     def _create_session(
-        self, username: str, ip: str, user_agent: str,
+        self, username: str, ip: str, user_agent: str, remember: bool = False,
     ) -> tuple[str, str]:
-        """Register a new session and return (token, uid)."""
+        """Register a new session and return (token, uid).
+
+        *remember* is stored rather than merely applied to the cookie: it is the difference
+        between "keep me signed in" and "keep the cookie on disk", and only the second half
+        used to reach the server.
+        """
         token    = secrets.token_hex(32)          # the secret auth credential (256-bit)
         uid      = str(uuid.uuid4())               # public session id (matches user/host/… uids)
         now      = datetime.now(timezone.utc).isoformat()
@@ -147,6 +157,7 @@ class _SessionsMixin:
             'last_seen':  now,
             'ip':         ip,
             'user_agent': user_agent,
+            'remember':   bool(remember),
         }
         self._sessions[token] = entry
         # Single-row insert instead of rewriting the whole sessions table.
@@ -201,13 +212,23 @@ class _SessionsMixin:
         idle_age = _age('last_seen')
         abs_age  = _age('created')
         max_abs  = self._REMEMBER_ME_DAYS * 86400
-        if (idle and idle_age is not None and idle_age > idle) or \
-           (abs_age is not None and abs_age > max_abs):
+        # "Remember me" waives the IDLE window and only that. The absolute cap below still
+        # applies, so a remembered session is bounded by `remember_me_days` — the number the
+        # checkbox is named after — instead of living forever.
+        #
+        # The idle timeout protects a session left open on a machine somebody walks away from.
+        # That is a real risk and it is why it is on by default; it is also, for somebody who
+        # ticked the box, a promise the panel was not keeping — twelve hours is shorter than a
+        # night, so a person who works daily signed in every single morning and the checkbox
+        # changed nothing they could observe.
+        idle_expired = (idle and not entry.get('remember')
+                        and idle_age is not None and idle_age > idle)
+        if idle_expired or (abs_age is not None and abs_age > max_abs):
             del self._sessions[token]
             self._sessions_store.delete(token)
             self._audit('session_expired', username=uname, ip=request.remote_addr,
                         detail={'uid': entry.get('uid', token[:8]),
-                                'reason': 'idle' if (idle and idle_age and idle_age > idle) else 'absolute'})
+                                'reason': 'idle' if idle_expired else 'absolute'})
             session.clear()
             return False
         if 'session_id' not in session:
@@ -225,8 +246,30 @@ class _SessionsMixin:
                 },
             )
             entry['ip'] = current_ip
-        entry['last_seen'] = datetime.now(timezone.utc).isoformat()
+        entry['last_seen'] = now.isoformat()
+        self._touch_session(entry, now)
         return True
+
+    def _touch_session(self, entry: dict, now: datetime) -> None:
+        """Write `last_seen` through to the database, at most once a minute.
+
+        Not on every request: this runs on ALL of them, and the panel polls itself several
+        times a minute per open tab — an UPDATE on each would put the busiest write in the
+        installation on the path of a heartbeat. A minute of resolution is far below anything
+        the column is asked ("has this session been used in the last twelve hours").
+
+        The marker lives INSIDE the entry rather than in a dictionary beside it, so it dies
+        with the session instead of leaking one key per sign-in for the life of the process.
+        Every writer of this row names its columns, so the extra key reaches nothing.
+        """
+        last = entry.get('_seen_flushed')
+        if last is not None and (now - last).total_seconds() < _TOUCH_SECONDS:
+            return
+        entry['_seen_flushed'] = now
+        try:
+            self._sessions_store.touch(entry.get('uid', ''), entry['last_seen'])
+        except Exception:                       # pylint: disable=broad-except
+            pass                                # bookkeeping must never fail a request
 
     def _hook_session_access(self, response):
         """Record what this session just did — after the fact, so the STATUS is part of it.
@@ -241,7 +284,8 @@ class _SessionsMixin:
         arrive by the dozen per page, and a 404 for a missing icon is not access history.
         """
         store = getattr(self, '_sessions_store', None)
-        if store is None or getattr(g, 'api_token', None) or request.endpoint == 'static':
+        if (store is None or not getattr(self, '_SESSION_LOG_ENABLED', True)
+                or getattr(g, 'api_token', None) or request.endpoint == 'static'):
             return response
         sid = session.get('session_id') or ''
         if not sid or not session.get('logged_in'):

@@ -468,9 +468,12 @@ def summarize_run(results, known_tables, max_listed: int = 100) -> dict:
     and on a clean run the counts alone left the entry with nothing in it to read. What the
     reader wants is WHICH tables the run covered.
 
-    ``max_listed=0`` turns the NAMES off and keeps the counts — for an operator who wants the
-    entry to stay small. The counts are never dropped: they are the part that says the run
-    happened and how it went, and an entry without them would record nothing at all.
+    ``max_listed=0`` means **no ceiling**: every name is listed. It used to mean the
+    opposite — names off, counts kept — and that made this the one cap in the panel where 0
+    meant "none" while the same 0 in `audit_max_entries`, the syslog retention and the backup
+    buckets means "no limit". Somebody zeroing every ceiling to keep everything lost exactly
+    the names that make an entry worth opening. An operator who wants small entries asks for a
+    small number.
 
     *max_listed* is a PARAMETER rather than a constant so the caller can hand it the
     configured value (``web_admin|audit_detail_max_items``) — this module is Flask-free and
@@ -504,14 +507,13 @@ def summarize_run(results, known_tables, max_listed: int = 100) -> dict:
     # The names, not only the counts. "33 of 33" answers a question nobody asked; the entry
     # exists so that somebody can see WHICH tables the run covered and which it did not —
     # and with zero failures the counts alone left the detail showing nothing at all.
-    # cap == 0 → the names are off; the counts above stay, because they are what says the run
-    # happened and how it went.
-    if ok_tables and cap:
-        out['ok_tables'] = ok_tables[:cap]
-        if len(ok_tables) > cap:
+    # cap == 0 → no ceiling, every name is listed (see the docstring).
+    if ok_tables:
+        out['ok_tables'] = ok_tables[:cap] if cap else list(ok_tables)
+        if cap and len(ok_tables) > cap:
             out['ok_truncated'] = len(ok_tables) - cap
-    if failed and cap:
-        out['failed'] = failed[:cap]
-        if len(failed) > cap:
+    if failed:
+        out['failed'] = failed[:cap] if cap else failed
+        if cap and len(failed) > cap:
             out['failed_truncated'] = len(failed) - cap
     return out

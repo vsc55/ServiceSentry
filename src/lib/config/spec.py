@@ -100,6 +100,13 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=1, max=365, env='SS_REMEMBER_ME_DAYS', admin_only=True,
         flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
         card='login_security'),
+    Cfg('web_admin|api_token_log_enabled', bool, True, attr='_API_TOKEN_LOG_ENABLED',
+        # WHETHER to record at all. Separate from the ceiling below, because "no limit" and
+        # "no rows" are opposite answers and one number cannot carry both — it used to, and
+        # `0` meant the second while the same `0` in `audit_max_entries` and `syslog|max_rows`
+        # means the first. Somebody zeroing every cap to mean "keep everything" switched two
+        # of them off instead.
+        env='SS_API_TOKEN_LOG_ENABLED', card='api_tokens'),
     Cfg('web_admin|api_token_log_max', int, 200, attr='_API_TOKEN_LOG_MAX',
         # How many recent calls are kept PER TOKEN. A ring, not a log: the questions it answers
         # ("what has this been doing", "where is it calling from") are about the recent past,
@@ -107,8 +114,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # must not be. Per token rather than globally, so a chatty token cannot evict the
         # history of a quiet one — and the quiet one is where a single unexpected call is the
         # whole signal.
-        # 0 switches it off entirely, for an installation that reads its access log off a
-        # proxy and does not want the rows here.
+        # 0 = NO CEILING: the ring becomes a log and the table grows with API traffic,
+        # which is a deliberate choice and not the default. Switching the recording off is
+        # the option above.
         min=0, max=10000, env='SS_API_TOKEN_LOG_MAX', card='api_tokens'),
     Cfg('web_admin|audit_max_entries', int, 500, attr='_AUDIT_MAX_ENTRIES',
         # The 'audit' card is bespoke, so this has no `card=` to be placed by; the card draws
@@ -123,8 +131,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # install writes hundreds of names into one entry, and on a broken database hundreds
         # of error strings with them: that stops being a record and starts being an obstacle
         # to whoever is reading the log, exactly when reading it matters most.
-        # 0 turns the NAMES off and keeps the counts, for an operator who wants the entry
-        # small; the counts stay either way, since they are what says the run happened.
+        # 0 = NO CEILING, like every other ceiling here: every name is listed. It meant the
+        # opposite until somebody zeroed all four caps in this panel meaning "keep
+        # everything" and silently lost two logs and these names.
         min=0, max=10000, env='SS_AUDIT_DETAIL_MAX_ITEMS'),
     Cfg('web_admin|backup_dir', str, '', attr='_BACKUP_DIR',
         # Where copies are written. Empty means `<var_dir>/backups`, which is the sane
@@ -235,12 +244,16 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=2, max=120, card='connection'),
     Cfg('web_admin|session_idle_minutes', int, 720, attr='_SESSION_IDLE_MINUTES',
         min=0, max=43200, admin_only=True, card='login_security'),  # idle timeout (0=off)
+    Cfg('web_admin|session_log_enabled', bool, True, attr='_SESSION_LOG_ENABLED',
+        # The same pair as the API-token ring, and for the same reason: whether to record is
+        # a switch, how much to keep is a number, and 0 in that number means "no ceiling".
+        admin_only=True, env='SS_SESSION_LOG_ENABLED', card='login_security'),
     Cfg('web_admin|session_log_max', int, 200, attr='_SESSION_LOG_MAX',
         # How many recent requests are kept PER SESSION, so "what has this sign-in been doing"
         # has an answer at all. The twin of `api_token_log_max`, and a ring for the same
         # reason — but NOT of everything: only the acts (POST/PUT/PATCH/DELETE) and the
         # refusals (>= 400) are written, because the panel polls itself and a ring of
-        # heartbeats answers nothing. 0 switches it off.
+        # heartbeats answers nothing. 0 = no ceiling; the switch above is how it stops.
         min=0, max=10000, env='SS_SESSION_LOG_MAX', admin_only=True, card='login_security'),
     # Brute-force throttles (per client IP). 0 = disabled.
     Cfg('web_admin|login_ratelimit_max', int, 15, attr='_LOGIN_RATELIMIT_MAX',

@@ -1021,6 +1021,34 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 | Registro de sesiones | Múltiples logins registran sesiones | Todas las sesiones en `/api/sessions` | Si faltan |
 | Revocar sesión | `DELETE /api/sessions/<id>` | Sesión eliminada | Si persiste |
 
+### `TestRememberMeReachesTheServer`, `TestLastSeenReachesTheDatabase`
+
+Reportado desde el panel: «marco recordar y **siempre** me pide usuario y contraseña». Y la
+casilla no era la razón por sí sola: `remember` solo ponía `session.permanent`, que es la
+caducidad de la **cookie**. El servidor no se enteraba, así que el timeout por inactividad
+expiraba una sesión recordada igual de rápido que cualquier otra — y 12 h (el default) es menos
+que una noche, así que quien trabaja a diario entraba cada mañana y marcar la casilla no cambiaba
+nada observable. La auditoría lo decía sin ambigüedad: seis `session_expired` seguidos, todos con
+`reason: idle`.
+
+Debajo había un segundo defecto que lo empeoraba: `last_seen` se actualizaba **solo en memoria**.
+Nada parecía mal —la pantalla de sesiones lee la memoria del mismo proceso— hasta un reinicio,
+tras el cual la inactividad se contaba desde el **login** y no desde la última petición. Con el
+vigilante de desarrollo, que reinicia con cada edición, eso es cada pocos minutos; entre dos
+réplicas web, ninguna veía nunca el tráfico de la otra.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestRememberMeReachesTheServer::test_the_flag_is_stored_with_the_session` | Llega a la fila de la sesión y no solo a la cookie — si vive únicamente en memoria, un reinicio olvida lo que pidió la persona |
+| `TestRememberMeReachesTheServer::test_and_it_is_false_when_the_box_is_not_ticked` | |
+| `TestRememberMeReachesTheServer::test_an_ordinary_session_still_expires_from_inactivity` | La protección de la que va todo esto: una sesión abierta en una máquina de la que alguien se levantó |
+| `TestRememberMeReachesTheServer::test_a_remembered_one_does_not` | **La regresión**, del lado que faltaba |
+| `TestRememberMeReachesTheServer::test_but_the_absolute_cap_still_holds` | `remember_me_days` da nombre a la casilla y sigue siendo el techo: «recordarme» no puede significar «para siempre» |
+| `TestRememberMeReachesTheServer::test_the_screen_says_which_ones_are_exempt` | Si no, la única sesión que sobrevive días a las demás se lee como un fallo del timeout en vez de como la respuesta a «¿por qué sigue esa ahí?» |
+| `TestLastSeenReachesTheDatabase::test_activity_is_written_through` | |
+| `TestLastSeenReachesTheDatabase::test_a_restart_no_longer_counts_from_the_login` | El bug reproducido como ocurre: el registro se reconstruye desde la BD, que es todo lo que tiene un proceso nuevo |
+| `TestLastSeenReachesTheDatabase::test_it_is_not_a_write_per_request` | Corre en **todas** las peticiones y el panel se sondea solo varias veces por minuto y pestaña: se escribe como mucho una vez por minuto, muy por debajo de lo que se le pregunta a la columna |
+
 ### `TestUserInputValidation`
 
 | Test | Qué comprueba | OK | Error |
@@ -4706,7 +4734,7 @@ Ver también §88b y §89.
 | `TestPerModuleHeaders::test_headers_use_the_real_parameter_names` | Una cabecera con `<ip>` para una ruta declarada `<path:ip>` se lee bien pero deja de casar — así empezó la deriva |
 | `TestSurfaceIndex::test_every_route_falls_under_an_indexed_prefix` | El índice lista **prefijos**: un dominio nuevo tiene que aparecer, un endpoint dentro de uno conocido no |
 
-**Archivo:** `tests/unit/test_i18n_keys_exist.py` — 5 tests
+**Archivo:** `tests/unit/test_i18n_keys_exist.py` — 9 tests
 **Archivo:** `tests/meta/test_i18n_keys_exist.py` — 3 tests
 
 | Test | Qué comprueba |
@@ -7911,7 +7939,7 @@ alguien acaba desactivando.
 
 ---
 
-**Archivo:** `tests/integration/test_wa_api_tokens.py` — 104 tests
+**Archivo:** `tests/integration/test_wa_api_tokens.py` — 105 tests
 
 Todo menos SCIM se autenticaba con cookie de sesión + CSRF, así que automatizar algo obligaba a
 guardar una contraseña **real** — y en cuanto una cuenta lleva segundo factor, una contraseña ya
@@ -7945,7 +7973,7 @@ mal escrita vive para siempre—, y que `'*'` significa «lo que tenga el dueño
 | `TestTheAdministratorsList::*` (6) | **Sistema › Acceso › Tokens de API**: todo el acceso permanente que existe contra el panel sin que nadie inicie sesión. La lista de cuentas dice quién existe y la de sesiones quién ha entrado; un token no sale en ninguna de las dos, y preguntarlo cuenta a cuenta hace que la respuesta dependa de qué cuentas te acordaste de abrir. Se guarda que lista las de **todos**, que un token cuya **cuenta ya no existe sigue saliendo** —no puede autenticar, pero un resto que nadie sabe nombrar es justo lo que busca una revisión—, que nunca lleva el hash, que necesita el permiso, y que la **jerarquía de cuentas** también protege las credenciales: una cuenta sobre la que no puedes actuar no es una a la que puedas cortarle los tokens |
 | `TestMintingForSomebodyElse::*` (7) | Crear un token **que actúa como otra cuenta** — una superficie de escalada, y las dos reglas que impiden que lo sea: los permisos tienen que ser **de quien llama** (si no, cualquiera que pueda editar usuarios mintea un token para un administrador y se lo queda) y se aplica la jerarquía de cuentas. `'*'` se rechaza aquí aunque se acepte en los propios: significa «lo que tenga el dueño», que para otra cuenta es una promesa sobre un conjunto que quien llama no controla. La intersección sigue intacta —dar un permiso que el **dueño** no tiene no compra nada— y se audita como **evento propio**: repartir una credencial que no es tuya es un acto distinto de crearte la tuya |
 | `TestTheCrossTokenFeed::*` (4) | `GET /api/v1/tokens/access`: **todas** las llamadas de **todos** los tokens, la más nueva primero y con tope. El historial por token contesta «¿este token hace lo que monté?»; esto contesta la que no se podía preguntar: qué ha estado llegando al panel sin que nadie inicie sesión, en orden y a la vez. Una ráfaga de 403 de una credencial en la que nadie estaba pensando se ve aquí y en ningún otro sitio. Un token **sin cuenta** sigue apareciendo, que es para lo que se lee |
-| `TestWhatATokenHasBeenDoing::*` (11) | `last_used` dice que un token está vivo; no dice **para qué es**, si lo que hace es lo que montaste, ni desde dónde llama. Y la auditoría tampoco contesta a eso: registra la **cuenta**, así que lo que escribe un token se lee como lo que escribió la persona, y las lecturas no se auditan para nadie. Se guarda que cada llamada queda con método, patrón de ruta, IP y **código de respuesta** —las **negadas** son la línea que busca una revisión, y un historial de las que funcionaron es el historial de la mitad que salió como se esperaba—; que guarda el **patrón** y no la URL (un anillo lleno de un nombre por fila contesta «qué endpoints usa» con un muro de cadenas casi iguales, y la URL cruda es donde acaba un id o un correo); que una petición de **sesión** no se registra (esto es el historial de un token, no el tráfico del panel); que el anillo se recorta **por token**; que `0` lo apaga; que **sobrevive a la revocación** —que es cuando más se pregunta— y **se va con la cuenta**; y quién puede leerlo |
+| `TestWhatATokenHasBeenDoing::*` (12) | `last_used` dice que un token está vivo; no dice **para qué es**, si lo que hace es lo que montaste, ni desde dónde llama. Y la auditoría tampoco contesta a eso: registra la **cuenta**, así que lo que escribe un token se lee como lo que escribió la persona, y las lecturas no se auditan para nadie. Se guarda que cada llamada queda con método, patrón de ruta, IP y **código de respuesta** —las **negadas** son la línea que busca una revisión, y un historial de las que funcionaron es el historial de la mitad que salió como se esperaba—; que guarda el **patrón** y no la URL (un anillo lleno de un nombre por fila contesta «qué endpoints usa» con un muro de cadenas casi iguales, y la URL cruda es donde acaba un id o un correo); que una petición de **sesión** no se registra (esto es el historial de un token, no el tráfico del panel); que el anillo se recorta **por token**; que `0` significa **sin límite** y no «sin filas» —el mismo `0` significa «sin límite» en `audit_max_entries` y en `syslog|max_rows`, así que quien los pone todos a cero para guardarlo todo apagaba dos sin enterarse—, y apagarlo es un **interruptor** aparte; que **sobrevive a la revocación** —que es cuando más se pregunta— y **se va con la cuenta**; y quién puede leerlo |
 | `TestWhatAnAccountMayBeGiven::*` (4) | `GET /api/v1/users/<u>/permissions`: lo que esa cuenta puede llegar a tener, resuelto por la **misma función que usan todas las guardas**. Y la regla que trae consigo: un permiso que el **dueño** no tiene se rechaza al mintear —no es una regla de seguridad, la intersección ya lo tira, sino la misma que aplica la pantalla de la propia cuenta: un permiso que no hace nada en silencio hace que la lista diga algo que no significa— |
 | `TestActingOnSomebodyElsesToken::*` (8) | Reescalar y rotar el token **de otro**, con las dos reglas de siempre (jerarquía de cuentas, y nadie da lo que no tiene) más el techo del dueño; `'*'` rechazado también aquí; al rotar el viejo **sigue funcionando** y el nombre se lo queda el nuevo; un **huérfano** se revoca pero no se reescala ni se rota; y las dos acciones se auditan como **eventos propios** |
 | `TestTheSystemIdentity::*` (7) | Un token que **no es de nadie**, porque la automatización que cuelga de una persona se cae con su cuenta. `system` es una identidad interna: nombre, UID estable y fila en la lista de usuarios, pero sin contraseña, sin sesión y **sin permisos** — actúa con la autoridad del panel precisamente porque nunca pasa por una comprobación de permisos. Así que el invariante que gobierna a todos los demás tokens («intersecados con los del dueño, en cada petición») aquí no tiene con qué intersecar, y **el techo pasa a ser el administrador que lo creó**: su alcance es exactamente el que se le dio, `'*'` se rechaza (sin dueño contra el que resolverlo significaría *todo, para siempre*), solo un administrador puede crearlo, `anonymous` no puede tener ninguno, y se revoca como cualquier otro. Se guarda además que una identidad reservada en sesión **no hereda los permisos de viewer** por el camino del fallback |
@@ -7956,7 +7984,7 @@ mal escrita vive para siempre—, y que `'*'` significa «lo que tenga el dueño
 
 ---
 
-**Archivo:** `tests/integration/test_wa_session_access.py` — 19 tests
+**Archivo:** `tests/integration/test_wa_session_access.py` — 20 tests
 
 **Qué ha hecho una sesión**, no solo que exista. La pantalla de sesiones contestaba quién ha
 entrado, desde dónde y desde cuándo; qué ha hecho ese inicio de sesión no se contestaba en
@@ -7977,7 +8005,7 @@ abierta. Se guardan las **acciones** (POST/PUT/PATCH/DELETE) y los **rechazos** 
 
 | Test | Qué comprueba |
 |---|---|
-| `TestWhatIsRecorded::*` (8) | La regla por los dos lados: el `POST /login` que creó la sesión es la primera fila (todo lo demás pasó dentro de ese inicio de sesión); una **lectura correcta no se registra** —`/api/v1/me` es el keepalive, tres veces por minuto y por pestaña—; una acción sí, **con la respuesta que obtuvo** (se anota *después*: un POST rechazado y uno que funcionó son la misma petición hasta que se le pega el estado); una **lectura rechazada sí se registra aunque sea una lectura**, que es el punto de todo esto; un 404 conserva la **URL** que pidió y el resto guarda el **patrón** de ruta (un anillo lleno de un id por fila contesta «qué endpoints» con un muro de cadenas casi iguales, y la URL cruda es donde acaba un nombre de usuario en una tabla que ve todo el que puede ver la lista); `0` lo apaga; y una petición **con token no escribe aquí** —un token no es una sesión, y sus llamadas son del anillo del token— |
+| `TestWhatIsRecorded::*` (9) | La regla por los dos lados: el `POST /login` que creó la sesión es la primera fila (todo lo demás pasó dentro de ese inicio de sesión); una **lectura correcta no se registra** —`/api/v1/me` es el keepalive, tres veces por minuto y por pestaña—; una acción sí, **con la respuesta que obtuvo** (se anota *después*: un POST rechazado y uno que funcionó son la misma petición hasta que se le pega el estado); una **lectura rechazada sí se registra aunque sea una lectura**, que es el punto de todo esto; un 404 conserva la **URL** que pidió y el resto guarda el **patrón** de ruta (un anillo lleno de un id por fila contesta «qué endpoints» con un muro de cadenas casi iguales, y la URL cruda es donde acaba un nombre de usuario en una tabla que ve todo el que puede ver la lista); `0` significa **sin límite** y no «sin filas» —el mismo `0` significa «sin límite» en `audit_max_entries` y en `syslog|max_rows`, así que quien los pone todos a cero para guardarlo todo apagaba dos sin enterarse—, y apagarlo es un **interruptor** aparte; y una petición **con token no escribe aquí** —un token no es una sesión, y sus llamadas son del anillo del token— |
 | `TestTheRing::*` (3) | Deja de crecer; una sesión ocupada **no desaloja** a una tranquila (que es donde una sola petición inesperada es toda la señal); y el *feed* entre sesiones también tiene tope |
 | `TestItIsForgottenWithTheSession::*` (3) | Revocar una sesión olvida lo que hizo; «cerrar todas» limpia el resto (la poda va en `save_all`, que es el camino de esa acción **y** el del arranque, en vez de en cada sitio que llama); y revocar las de una cuenta no se lleva el historial de otra |
 | `TestTheReads::*` (5) | El *feed* **nombra la cuenta** de cada fila —resuelto en el servidor, donde la lista de al lado ya hace esa consulta— y descarta la fila cuya sesión ya no está (esas filas se podan con la sesión, así que esto solo caza la carrera); una sesión contesta **con su profundidad** (`max` viaja con las filas, para que el diálogo distinga «no ha hecho nada registrable» de «el registro está apagado»); una sesión desconocida es **404 y no una lista vacía** (que se leería como «no hizo nada»); y las dos lecturas piden el mismo permiso que la lista, `sessions_view` |

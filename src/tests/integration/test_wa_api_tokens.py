@@ -936,12 +936,24 @@ class TestWhatATokenHasBeenDoing:
         assert len(store.access_for('t-1')) <= 12     # trimmed every keep//4 inserts
         assert len(store.access_for('t-2')) == 1
 
-    def test_zero_switches_it_off(self, admin):
-        """An installation reading its access log off a proxy should not be made to store
-        these rows at all."""
-        admin._api_token_store.log_access('t-off', ts='2026-01-01T00:00:00', ip='',
-                                          method='GET', path='/x', status=200, keep=0)
-        assert admin._api_token_store.access_for('t-off') == []
+    def test_zero_is_no_ceiling_and_not_no_rows(self, admin):
+        """It used to mean "record nothing", which is the opposite of what the same `0` means
+        in `audit_max_entries` and `syslog|max_rows`. Somebody zeroing every cap in the panel
+        to keep everything switched two of them off instead — reported from this install, with
+        four zeroed fields and two silently empty logs."""
+        for i in range(30):
+            admin._api_token_store.log_access('t-all', ts=f'2026-01-01T00:{i:02d}:00', ip='',
+                                              method='GET', path='/x', status=200, keep=0)
+        assert len(admin._api_token_store.access_for('t-all', limit=999)) == 30
+
+    def test_the_switch_is_what_stops_it(self, admin, client):
+        """"No limit" and "no rows" are opposite answers, so they are two settings."""
+        _login(client)
+        raw = _mint(client).get_json()['token']
+        admin._API_TOKEN_LOG_ENABLED = False
+        _bearer(admin, raw).get('/api/v1/users')
+        uid = client.get('/api/v1/account/tokens').get_json()['tokens'][0]['uid']
+        assert admin._api_token_store.access_for(uid) == []
 
     def test_the_history_outlives_the_revocation(self, client, admin):
         """"What did this do before we cut it off" is asked precisely about the tokens that

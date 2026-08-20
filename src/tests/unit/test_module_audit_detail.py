@@ -46,11 +46,14 @@ class TestItBoundsWhatAModuleWrote:
         d = cap_audit_lists({'name': 'GitHub import: 81 ok', 'imported': 81, 'ok': True}, 1)
         assert d == {'name': 'GitHub import: 81 ok', 'imported': 81, 'ok': True}
 
-    def test_zero_drops_the_names_and_keeps_the_rest(self):
-        """For an operator who wants entries small. The counts are never dropped — an entry
-        without them would record nothing at all."""
+    def test_zero_is_no_ceiling_and_not_no_list(self):
+        """It meant the opposite until this panel settled on one reading of 0. This was the
+        last ceiling that disagreed: `audit_max_entries`, the syslog retention and the backup
+        buckets all take 0 as "no limit", so somebody zeroing every cap to keep everything
+        lost exactly the names that make an entry worth opening. Small entries are a small
+        NUMBER now."""
         d = cap_audit_lists({'name': 'x', 'failed': 3, 'failed_names': ['a', 'b', 'c']}, 0)
-        assert d == {'name': 'x', 'failed': 3}
+        assert d == {'name': 'x', 'failed': 3, 'failed_names': ['a', 'b', 'c']}
 
     def test_a_nonsense_ceiling_does_not_lose_the_entry(self):
         """Config arrives as text and can be anything. Dropping the detail because the

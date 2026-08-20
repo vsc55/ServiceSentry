@@ -65,7 +65,21 @@ Además del [bloqueo por cuenta](#bloqueo-de-cuenta-por-intentos-fallidos), hay 
 ### Sesiones persistentes ("Remember me")
 
 - El formulario de login incluye un checkbox `remember_me`.
-- Si se activa, `session.permanent = True` (duración configurable).
+- Si se activa, `session.permanent = True` — la **cookie** dura `web_admin|remember_me_days`
+  (30 por defecto) en vez de morir al cerrar el navegador.
+- …y la sesión queda **exenta del timeout por inactividad**. Esa mitad faltaba: `remember` era
+  una propiedad de la cookie y el servidor no se enteraba, así que `session_idle_minutes` (720,
+  **12 h**) expiraba una sesión recordada igual de rápido que cualquier otra. Doce horas es
+  menos que una noche: quien trabaja a diario iniciaba sesión cada mañana y marcar la casilla no
+  cambiaba nada observable. Ahora se guarda en la fila de la sesión (columna `remember`) y
+  `_check_session` la mira.
+- **El tope absoluto sigue aplicando**: `remember_me_days` desde `created`. «Recordarme» no
+  significa «para siempre», significa el número que da nombre a la casilla.
+- El timeout por inactividad sigue existiendo y sigue activo por defecto para el resto: protege
+  una sesión abierta en una máquina de la que alguien se levantó.
+- `last_seen` se escribe en la BD como mucho **una vez por minuto**. Antes se actualizaba solo en
+  memoria, así que tras un reinicio la inactividad se contaba desde el **login** — y con el
+  vigilante de desarrollo, que reinicia con cada edición, eso era cada pocos minutos.
 - La `secret_key` de Flask se genera aleatoriamente la primera vez y se persiste en disco (`.flask_secret`); las instancias posteriores reutilizan la misma clave — las sesiones no se invalidan al reiniciar el proceso.
 
 ### Último acceso (`last_login`)
@@ -227,9 +241,11 @@ comprobación fallida invalida la sesión y corta:
 ```mermaid
 flowchart TD
     A["Petición entrante"] --> B{"¿Token de sesión válido?"}
+    %% «Recordarme» exime del idle y solo de eso: el tope absoluto sigue aplicando.
     B -- No --> X["/api/* sin sesión → 401 JSON<br/>rutas de página → redirect /login"]
     B -- Sí --> C{"¿Inactividad < _SESSION_IDLE_MINUTES?"}
     C -- No --> X
+    C -- "No, pero es 'recordada'" --> D
     C -- Sí --> D{"¿Dentro del tope absoluto<br/>_REMEMBER_ME_DAYS?"}
     D -- No --> X
     D -- Sí --> E{"¿Usuario habilitado?"}
@@ -245,8 +261,8 @@ auditoría tampoco: registra las acciones que **tienen nombre** (`config_saved`)
 la **cuenta**, así que dos sesiones de la misma persona se leen como una — y una petición
 **rechazada** no dejaba rastro en ningún sitio.
 
-Cada sesión lleva su propio anillo (`web_admin|session_log_max`, 200 por defecto, 0 lo apaga),
-gemelo del de los tokens: fecha, IP, método, **patrón** de ruta y **código de respuesta**. Se lee
+Cada sesión lleva su propio anillo (`web_admin|session_log_max`, 200 por defecto; **0 = sin
+límite**, y `web_admin|session_log_enabled` es el interruptor), gemelo del de los tokens: fecha, IP, método, **patrón** de ruta y **código de respuesta**. Se lee
 desde el botón de historial de cada fila y, todo junto, desde la vista **Actividad** de
 Acceso › Sesiones.
 
@@ -432,8 +448,8 @@ respuesta**, y se lee desde el botón de historial de su fila. Las **negadas** e
 propósito: «este token pidió algo que no puede tener» es la línea que busca una revisión, y un
 historial de las que funcionaron es el historial de la mitad que salió como se esperaba.
 
-Es un **anillo por token** —`web_admin|api_token_log_max`, 200 por defecto, 0 lo apaga— y no un
-log: una tabla que crece con el tráfico de la API es lo que la contabilidad de una API no puede
+Es un **anillo por token** —`web_admin|api_token_log_max`, 200 por defecto; **0 = sin límite**,
+y quien lo apaga es `web_admin|api_token_log_enabled`— y no un log: una tabla que crece con el tráfico de la API es lo que la contabilidad de una API no puede
 ser. Sobrevive a la revocación, que es cuando más se pregunta por él, y se borra con la cuenta.
 
 ### `'*'` no es una frase, son dos

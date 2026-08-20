@@ -253,7 +253,8 @@ def register(app, wa):
         if not row:
             return jsonify({'error': wa._t('api_token_not_found')}), 404
         return jsonify({'access': wa._api_token_store.access_for(uid),
-                        'max': int(getattr(wa, '_API_TOKEN_LOG_MAX', 200) or 0)})
+                        'max': int(getattr(wa, '_API_TOKEN_LOG_MAX', 200) or 0),
+                        'enabled': bool(getattr(wa, '_API_TOKEN_LOG_ENABLED', True))})
 
     @app.route('/api/v1/account/tokens/<uid>/rotate', methods=['POST'])
     @session_required
@@ -537,7 +538,8 @@ def register(app, wa):
             if err:
                 return err
         return jsonify({'access': wa._api_token_store.access_for(uid),
-                        'max': int(getattr(wa, '_API_TOKEN_LOG_MAX', 200) or 0)})
+                        'max': int(getattr(wa, '_API_TOKEN_LOG_MAX', 200) or 0),
+                        'enabled': bool(getattr(wa, '_API_TOKEN_LOG_ENABLED', True))})
 
     @app.route('/api/v1/users/<username>/permissions', methods=['GET'])
     @session_required

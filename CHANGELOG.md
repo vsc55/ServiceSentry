@@ -8,6 +8,62 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.95] - 2026-08-20
+
+### Changed
+- **`0` in the two access-log ceilings now means "no limit", not "no rows".** Reported from the
+  panel, and the report came with the evidence: an install with `audit_max_entries`,
+  `syslog|max_rows`, `api_token_log_max` and `session_log_max` all zeroed — four caps set to the
+  same number by somebody who meant "keep everything", and two of them silently switched off,
+  because `0` meant the opposite in those two. One number cannot carry both answers.
+  - `web_admin|api_token_log_enabled` and `web_admin|session_log_enabled` (both default on,
+    both env-settable) are what stops the recording now. The `*_log_max` numbers only say how
+    much is kept, and `0` there is a ring with no ceiling — which does grow with traffic, and
+    says so in its description.
+  - The per-entity history responses carry `enabled` alongside `max`, because the dialogs used
+    to read "switched off" off a zero — and would have announced that nothing is recorded at
+    the exact moment everything is.
+  - `audit_detail_max_items` was the last ceiling that disagreed — `0` there dropped the NAMES
+    from an audit entry and kept the counts. It now lists every name, like every other `0` in
+    the panel (`audit_max_entries`, the syslog retention, the backup buckets: "nothing
+    configured means keep everything"). Small entries are a small number. The audit of all 21
+    integer settings found no others: the remaining zeros belong to THRESHOLDS that trigger an
+    action (`lockout_max_attempts`, `login_ratelimit_max`, `scim_ratelimit_max`, `proxy_count`,
+    `session_idle_minutes`), where "0 = do not fire" is the only reading that means anything.
+
+### Fixed
+- **An option's help text was written, was in the language file, and never appeared.**
+  Reported from the panel with a screenshot: the info panel of "Items per audit detail" opened
+  showing its key and its env var, and no prose above them. The text was defined in the nested
+  `labels` dictionary under `<option>_hint` — which nothing reads: `fieldLabel()` looks in
+  `labels` by the option's own name, `fieldHint()` looks in `hints` by `section|option`. A key
+  matching neither is text nobody can ever see, and every check passed: the key existed, the
+  two languages were in parity, the option had a label. Moved to `hints`, and a guard added —
+  the same shape as the section title that shipped invisible for the same reason two builds
+  ago, so now the *class* is checked: nothing named `*_hint` may sit in `labels`.
+- **"Remember me" did not keep anybody signed in.** Reported from the panel: "I tick remember
+  me and it always asks for user and password". It did. The checkbox set `session.permanent`,
+  which is the COOKIE's expiry, and that was the whole of it — the server never learned what
+  the person had asked for, so the idle timeout expired a remembered session exactly as fast
+  as any other. With the default `session_idle_minutes` of 720, twelve hours is shorter than a
+  night: anybody who works daily signed in every morning and ticking the box changed nothing
+  they could observe. The audit log said so plainly — six consecutive `session_expired`, every
+  one of them `reason: idle`.
+  - The flag is now stored with the session (`sessions.remember`), and a remembered session is
+    **exempt from the idle window**. The absolute cap still applies: `remember_me_days` is the
+    number the checkbox is named after, and "remember me" must not mean "forever".
+  - The idle timeout stays on by default for everything else — it protects a session left open
+    on a machine somebody walked away from, which is a real risk and the reason it exists.
+  - The sessions list marks the exempt ones, so the session that outlives every other by days
+    reads as the answer to "why is that one still here" rather than as a broken timeout.
+- **…and the timeout was harsher than its own setting**, because `last_seen` never reached the
+  database. It was updated in the in-memory registry and written to the row exactly once, at
+  creation. Nothing looked wrong — the sessions screen reads the same process's memory — but
+  after a restart the idle countdown began at the LOGIN instead of the last request. In
+  development, where the watcher restarts on every edit, that is every few minutes; across two
+  web replicas, neither ever saw the other's traffic. It is now written through at most once a
+  minute, the same throttle (and the same reasoning) as an API token's `last_used`.
+
 ## [0.0.1+build.94] - 2026-08-20
 
 ### Added

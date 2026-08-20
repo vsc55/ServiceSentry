@@ -259,9 +259,13 @@ async function _tokenHistory(url, name, max) {
     if (!data) return;
     const rows = data.access || [];
     const cap = data.max != null ? data.max : max;
+    // Off is a field now, not a zero: `cap === 0` means "keep everything", so reading the
+    // empty state off the number would announce that nothing is recorded at the exact moment
+    // everything is.
+    const on = data.enabled !== false;
     const body = !rows.length
-        ? `<div class="text-center py-4 text-muted">${esc(cap ? t('api_token_access_none')
-                                                              : t('api_token_access_off'))}</div>`
+        ? `<div class="text-center py-4 text-muted">${esc(on ? t('api_token_access_none')
+                                                             : t('api_token_access_off'))}</div>`
         : `<div class="ss-vscroll" style="max-height:24rem">
             <table class="table table-sm mb-0 align-middle">
                 <thead><tr>
@@ -276,7 +280,8 @@ async function _tokenHistory(url, name, max) {
                 </tr>`).join('')}</tbody>
             </table>
            </div>
-           <div class="form-text ss-fs-2 mt-2">${esc(t('api_token_access_cap').replace('{}', cap))}</div>`;
+           <div class="form-text ss-fs-2 mt-2">${esc(cap ? t('api_token_access_cap').replace('{}', cap)
+                                                            : t('api_token_access_cap_none'))}</div>`;
     showHtmlModal(`${t('api_token_access')} — ${name || ''}`, body, 'primary');
 }
 

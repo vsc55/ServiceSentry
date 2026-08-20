@@ -262,11 +262,13 @@ class ApiTokenStore(BaseStore):
                    path: str, status: int, keep: int = 200) -> None:
         """Record one call. Never raises: bookkeeping must not fail a request.
 
-        `keep` <= 0 turns it off — an installation that does not want the rows, or that reads
-        its access log off a proxy, should not be made to store them here.
+        `keep` <= 0 means **no ceiling**: every call is kept and the ring becomes a log. It
+        does NOT mean "record nothing" — whether to record at all is a switch of its own
+        (`web_admin|api_token_log_enabled`), decided by the caller. One number cannot carry
+        both answers, and it used to: `0` here meant "no rows" while the same `0` in
+        `audit_max_entries` means "no limit", so zeroing every cap to keep everything switched
+        this one off instead.
         """
-        if keep <= 0:
-            return
         try:
             self._db.execute(
                 f'INSERT INTO {_A} (uid, token_uid, ts, ip, method, path, status)'
@@ -274,7 +276,7 @@ class ApiTokenStore(BaseStore):
                 (str(uuid.uuid4()), str(token_uid or ''), str(ts or ''), str(ip or ''),
                  str(method or '')[:8], str(path or '')[:255], int(status or 0)))
             self._access_since_trim += 1
-            if self._access_since_trim >= max(10, keep // 4):
+            if keep > 0 and self._access_since_trim >= max(10, keep // 4):
                 self._access_since_trim = 0
                 self._trim_access(token_uid, keep)
             self._db.commit()

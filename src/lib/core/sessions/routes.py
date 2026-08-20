@@ -78,14 +78,17 @@ def register(app, wa):
     def api_session_access(uid):
         """One session's recent requests, newest first.
 
-        ``max`` travels with them so the dialog can tell "this session has done nothing worth
-        recording" from "the recording is switched off" — an installation with
-        ``session_log_max`` at 0 would otherwise read as a session that has never acted.
+        ``enabled`` travels with them so the dialog can tell "this session has done nothing
+        worth recording" from "the recording is switched off" — an empty list reads as the
+        first, and an installation that turned it off would look like a session that has never
+        acted. It is a field of its own because ``max`` cannot answer it any more: 0 there
+        means *no ceiling*, which is the opposite of off.
         """
         if not sessions_svc.find_token_by_uid(wa._sessions, uid):
             return jsonify({'error': wa._t('session_not_found')}), 404
         return jsonify({'access': wa._sessions_store.access_for(uid),
-                        'max': int(getattr(wa, '_SESSION_LOG_MAX', 200) or 0)})
+                        'max': int(getattr(wa, '_SESSION_LOG_MAX', 200) or 0),
+                        'enabled': bool(getattr(wa, '_SESSION_LOG_ENABLED', True))})
 
     @app.route('/api/v1/sessions/invalidate', methods=['POST'])
     @sessions_revoke_req

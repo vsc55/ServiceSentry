@@ -68,6 +68,9 @@ function _sessionsCardsBody(sids) {
                     <div class="d-flex align-items-center gap-1 flex-wrap">
                         <code class="fw-semibold ss-fs-4">${esc(s.username)}</code>
                         ${isCurrent ? `<span class="badge text-bg-success rounded-pill ss-fs-1">${t('session_current')}</span>` : ''}
+                        ${s.remember ? `<span class="badge text-bg-secondary rounded-pill ms-1 ss-fs-1"
+                    title="${escAttr(t('session_remembered_tt'))}"><i class="bi bi-pin-angle-fill me-1"></i>${
+                    esc(t('session_remembered'))}</span>` : ''}
                     </div>
                     <div class="text-muted ss-fs-2"><i class="bi bi-geo-alt me-1"></i>${esc(s.ip)}</div>
                 </div>
@@ -137,7 +140,9 @@ createListTable({
         const s = sessionsData[sid];
         const isCurrent = !!s.is_current;
         switch (colId) {
-            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('session_current')}</span>`:''}</td>`;
+            case 'username':   return `<td class="text-nowrap"><code>${esc(s.username)}</code>${isCurrent?`<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('session_current')}</span>`:''}${s.remember ? `<span class="badge text-bg-secondary rounded-pill ms-1 ss-fs-1"
+                    title="${escAttr(t('session_remembered_tt'))}"><i class="bi bi-pin-angle-fill me-1"></i>${
+                    esc(t('session_remembered'))}</span>` : ''}</td>`;
             case 'ip':         return `<td class="text-nowrap"><code class="text-muted ss-fs-3">${esc(s.ip)}</code></td>`;
             case 'user_agent': return `<td class="small text-muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent||'')}">${esc(s.user_agent||'—')}</td>`;
             case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created))}</td>`;

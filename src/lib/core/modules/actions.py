@@ -262,8 +262,8 @@ def cap_audit_lists(detail: dict, max_items: int) -> dict:
 
     Honours ``web_admin|audit_detail_max_items``, the same setting the database-maintenance
     entry uses, and says what it dropped: a list silently cut at N reads as a complete list
-    of N, which is worse than no list at all.  ``max_items=0`` drops the lists and keeps
-    everything else — the counts and the summary line are what say the action ran.
+    of N, which is worse than no list at all.  ``max_items=0`` means **no ceiling** — every
+    item is kept — which is what 0 means in every other ceiling in this panel.
 
     Returns a new dict; the caller's is untouched.
     """
@@ -276,7 +276,8 @@ def cap_audit_lists(detail: dict, max_items: int) -> dict:
         if not isinstance(val, list):
             out[key] = val
             continue
-        if not cap:
+        if not cap:                     # 0 = no ceiling, not "no list"
+            out[key] = list(val)
             continue
         out[key] = val[:cap]
         if len(val) > cap:

@@ -347,7 +347,7 @@ poner una cabecera `Authorization`— y la respuesta no lleva cookie de sesión.
 |---|---|---|---|
 | GET | `/api/v1/sessions` | `sessions_view` | Sesiones activas, keyed por uid |
 | GET | `/api/v1/sessions/access` | `sessions_view` | **Todo lo registrado** de **todas** las sesiones vivas, lo más nuevo primero (tope 500). Cada fila lleva la cuenta. Se registran las **acciones** (POST/PUT/PATCH/DELETE) y los **rechazos** (≥ 400); las lecturas correctas no, porque el panel se sondea a sí mismo |
-| GET | `/api/v1/sessions/<uid>/access` | `sessions_view` | Lo mismo de **una** sesión, con `max` (la profundidad del anillo) para distinguir «no ha hecho nada registrable» de «el registro está apagado» |
+| GET | `/api/v1/sessions/<uid>/access` | `sessions_view` | Lo mismo de **una** sesión, con `max` (la profundidad del anillo; 0 = sin límite) y `enabled` (si se está registrando), para distinguir «no ha hecho nada registrable» de «el registro está apagado» |
 | POST | `/api/v1/sessions/invalidate` | `sessions_revoke` | Revocar TODAS las sesiones |
 | POST | `/api/v1/sessions/revoke/<uid>` | `sessions_revoke` | Revocar una sesión |
 | POST | `/api/v1/sessions/revoke-user/<username>` | `sessions_revoke` | Revocar todas las de un usuario |

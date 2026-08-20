@@ -109,17 +109,21 @@ class TestWhatIsRecorded:
         rows = admin._sessions_store.access_for(_sid(c))
         assert rows[0]['path'] == '/api/v1/sessions/revoke/<uid>'
 
-    def test_zero_switches_it_off(self, admin, client):
-        """For an installation that reads its access log off the proxy in front and does not
-        want the rows here at all."""
+    def test_zero_is_no_ceiling_and_not_no_rows(self, admin):
+        """The same `0` means "no limit" in `audit_max_entries` and `syslog|max_rows`, so it
+        cannot mean "no rows" here: whoever zeroes every cap in the panel to keep everything
+        would switch this off believing the opposite."""
+        for i in range(30):
+            admin._sessions_store.log_access('s-all', ts=f'2026-01-01T00:{i:02d}:00', ip='',
+                                             method='POST', path='/x', status=200, keep=0)
+        assert len(admin._sessions_store.access_for('s-all', limit=999)) == 30
+
+    def test_the_switch_is_what_stops_it(self, admin, client):
+        """Recording nothing is a decision of its own, and it is a switch."""
+        admin._SESSION_LOG_ENABLED = False
         _login(client)
-        admin._SESSION_LOG_MAX = 0
-        try:
-            before = len(_rows(admin, client))
-            client.post('/api/v1/account/tokens', json={'name': 'x', 'permissions': []})
-            assert len(_rows(admin, client)) == before
-        finally:
-            admin._SESSION_LOG_MAX = 200
+        client.post('/api/v1/account/tokens', json={'name': 'x', 'permissions': []})
+        assert _rows(admin, client) == []
 
     def test_a_token_request_writes_nothing_here(self, admin, client):
         """A token is not a session. Its calls belong to the ring beside the token, and a row

@@ -26,6 +26,11 @@ def build_sessions_view(sessions: dict, users: dict, current_token) -> dict:
             'user_agent': entry.get('user_agent', ''),
             'created':    entry.get('created', ''),
             'last_seen':  entry.get('last_seen', ''),
+            # Whether this sign-in asked to be remembered — which now means something on the
+            # server: it is exempt from the idle timeout. Without it on screen, the one
+            # session that outlives every other by days looks like a bug in the timeout
+            # instead of the answer to "why is that one still here".
+            'remember':   bool(entry.get('remember')),
             'is_current': token == current_token,
         }
     return result

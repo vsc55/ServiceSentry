@@ -13,7 +13,7 @@ expose); the secret ``token`` is the primary key and is never sent to clients.
 
 Schema::
 
-    sessions(uid, token PK, user_uid, created, last_seen, ip, user_agent)
+    sessions(uid, token PK, user_uid, created, last_seen, ip, user_agent, remember)
     session_access(uid PK, session_uid, ts, ip, method, path, status)
 """
 
@@ -35,6 +35,13 @@ _SCHEMA = TableSpec(
         Column('last_seen',  'TEXT', nullable=False, default="''"),
         Column('ip',         'TEXT', nullable=False, default="''"),
         Column('user_agent', 'TEXT', nullable=False, default="''"),
+        # Whether the sign-in asked to be remembered. It was a property of the COOKIE only —
+        # `session.permanent` — so the server had no idea, and the idle timeout expired a
+        # remembered session exactly as fast as any other. Which made "remember me" mean "the
+        # cookie survives closing the browser" and nothing else: come back the next morning,
+        # more than `session_idle_minutes` had passed, and you signed in again. Stored here so
+        # the check that enforces the timeout can see what the person asked for.
+        Column('remember',   'INTEGER', nullable=False, default='0'),
     ),
     indexes=(Index('idx_sessions_user_uid', ('user_uid',)),),
     renames={'sid': 'uid'},  # legacy column rename, data preserved
@@ -105,7 +112,7 @@ class SessionsStore(BaseStore):
     def load(self) -> dict:
         """Return all sessions as ``{token: {uid, user_uid, …}}``."""
         rows = self._db.fetchall(
-            'SELECT token, uid, user_uid, created, last_seen, ip, user_agent '
+            'SELECT token, uid, user_uid, created, last_seen, ip, user_agent, remember '
             f'FROM {_T}'
         )
         return {
@@ -116,6 +123,7 @@ class SessionsStore(BaseStore):
                 'last_seen':  r[4],
                 'ip':         r[5],
                 'user_agent': r[6],
+                'remember':   bool(r[7]),
             }
             for r in rows
         }
@@ -137,12 +145,13 @@ class SessionsStore(BaseStore):
                 for token, s in sessions.items():
                     self._db.execute(
                         f'INSERT INTO {_T}'
-                        '(token, uid, user_uid, created, last_seen, ip, user_agent)'
-                        ' VALUES(?,?,?,?,?,?,?)',
+                        '(token, uid, user_uid, created, last_seen, ip, user_agent,'
+                        ' remember) VALUES(?,?,?,?,?,?,?,?)',
                         (token,
                          s.get('uid', ''),        s.get('user_uid', ''),
                          s.get('created', ''),    s.get('last_seen', ''),
-                         s.get('ip', ''),         s.get('user_agent', '')),
+                         s.get('ip', ''),         s.get('user_agent', ''),
+                         1 if s.get('remember') else 0),
                     )
                 self._prune_access([s.get('uid', '') for s in sessions.values()])
             return True
@@ -156,13 +165,34 @@ class SessionsStore(BaseStore):
                 self._db.execute(f'DELETE FROM {_T} WHERE token = ?', (token,))
                 self._db.execute(
                     f'INSERT INTO {_T}'
-                    '(token, uid, user_uid, created, last_seen, ip, user_agent)'
-                    ' VALUES(?,?,?,?,?,?,?)',
+                    '(token, uid, user_uid, created, last_seen, ip, user_agent,'
+                    ' remember) VALUES(?,?,?,?,?,?,?,?)',
                     (token,
                      session.get('uid', ''),        session.get('user_uid', ''),
                      session.get('created', ''),    session.get('last_seen', ''),
-                     session.get('ip', ''),         session.get('user_agent', '')),
+                     session.get('ip', ''),         session.get('user_agent', ''),
+                     1 if session.get('remember') else 0),
                 )
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def touch(self, uid: str, when: str) -> bool:
+        """Persist `last_seen` for one session. **Throttled by the caller, never here.**
+
+        It was written to the in-memory registry and nowhere else, so the column kept the
+        creation time for the life of the row. Nothing looked wrong — the sessions screen
+        reads the same process's memory — until a restart, when the idle timeout started
+        counting from the LOGIN instead of from the last request. In development, where the
+        watcher restarts on every edit, that is every few minutes; across two web replicas,
+        neither ever saw the other's traffic.
+        """
+        if not uid:
+            return False
+        try:
+            with self._db.transaction():
+                self._db.execute(f'UPDATE {_T} SET last_seen = ? WHERE uid = ?',
+                                 (str(when or ''), str(uid)))
             return True
         except Exception:  # pylint: disable=broad-except
             return False
@@ -213,10 +243,13 @@ class SessionsStore(BaseStore):
                    path: str, status: int, keep: int = 200) -> None:
         """Record one request. Never raises: bookkeeping must not fail a response.
 
-        `keep` <= 0 turns it off — an installation that does not want the rows, or that reads
-        its access log off the proxy in front, should not be made to store them here.
+        `keep` <= 0 means **no ceiling** — every request that matches the rule is kept and the
+        ring becomes a log. Whether to record at all is a switch of its own
+        (`web_admin|session_log_enabled`) and belongs to the caller: "no limit" and "no rows"
+        are opposite answers, and a single number that carried both is how somebody zeroing
+        every cap in the panel to keep everything switched two of them off.
         """
-        if keep <= 0 or not session_uid:
+        if not session_uid:
             return
         try:
             self._db.execute(
@@ -225,7 +258,7 @@ class SessionsStore(BaseStore):
                 (str(uuid.uuid4()), str(session_uid), str(ts or ''), str(ip or ''),
                  str(method or '')[:8], str(path or '')[:255], int(status or 0)))
             self._access_since_trim += 1
-            if self._access_since_trim >= max(10, keep // 4):
+            if keep > 0 and self._access_since_trim >= max(10, keep // 4):
                 self._access_since_trim = 0
                 self._trim_access(session_uid, keep)
             self._db.commit()
