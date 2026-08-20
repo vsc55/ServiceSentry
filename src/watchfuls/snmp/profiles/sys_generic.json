@@ -1,21 +1,68 @@
 {
     "id": "sys_generic",
-    "label": {"en_EN": "System (RFC 1213)", "es_ES": "Sistema (RFC 1213)"},
+    "label": {
+        "en_EN": "System (RFC 1213)",
+        "es_ES": "Sistema (RFC 1213)"
+    },
     "description": {
         "en_EN": "What every agent answers: the name, what it says it is, and how long it has been up. Standard MIB-II, so it works before anybody has chosen a profile for the device.",
         "es_ES": "Lo que contesta cualquier agente: el nombre, qué dice que es y cuánto lleva encendido. MIB-II estándar, así que funciona antes de que nadie haya elegido un perfil para el aparato."
     },
+    "match": {
+        "probe": "1.3.6.1.2.1.1.1.0"
+    },
     "metrics": [
-        {"key": "sys_name", "oid": "1.3.6.1.2.1.1.5.0", "kind": "text", "role": "name",
-         "label": {"en_EN": "Name", "es_ES": "Nombre"}},
-        {"key": "sys_descr", "oid": "1.3.6.1.2.1.1.1.0", "kind": "text", "role": "model",
-         "label": {"en_EN": "Description", "es_ES": "Descripción"}},
-        {"key": "sys_location", "oid": "1.3.6.1.2.1.1.6.0", "kind": "text", "role": "location",
-         "label": {"en_EN": "Location", "es_ES": "Ubicación"}},
-        {"key": "sys_contact", "oid": "1.3.6.1.2.1.1.4.0", "kind": "text", "role": "contact",
-         "label": {"en_EN": "Contact", "es_ES": "Contacto"}},
-        {"key": "uptime", "oid": "1.3.6.1.2.1.1.3.0", "kind": "gauge", "unit": "s",
-         "scale": 0.01, "chart": "line",
-         "label": {"en_EN": "Uptime", "es_ES": "Tiempo encendido"}}
+        {
+            "key": "sys_name",
+            "oid": "1.3.6.1.2.1.1.5.0",
+            "kind": "text",
+            "role": "name",
+            "label": {
+                "en_EN": "Name",
+                "es_ES": "Nombre"
+            }
+        },
+        {
+            "key": "sys_descr",
+            "oid": "1.3.6.1.2.1.1.1.0",
+            "kind": "text",
+            "role": "model",
+            "label": {
+                "en_EN": "Description",
+                "es_ES": "Descripción"
+            }
+        },
+        {
+            "key": "sys_location",
+            "oid": "1.3.6.1.2.1.1.6.0",
+            "kind": "text",
+            "role": "location",
+            "label": {
+                "en_EN": "Location",
+                "es_ES": "Ubicación"
+            }
+        },
+        {
+            "key": "sys_contact",
+            "oid": "1.3.6.1.2.1.1.4.0",
+            "kind": "text",
+            "role": "contact",
+            "label": {
+                "en_EN": "Contact",
+                "es_ES": "Contacto"
+            }
+        },
+        {
+            "key": "uptime",
+            "oid": "1.3.6.1.2.1.1.3.0",
+            "kind": "gauge",
+            "unit": "s",
+            "scale": 0.01,
+            "chart": "line",
+            "label": {
+                "en_EN": "Uptime",
+                "es_ES": "Tiempo encendido"
+            }
+        }
     ]
 }

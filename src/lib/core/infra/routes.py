@@ -103,7 +103,8 @@ def register(app, wa):
         results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
 
         lang = session.get('lang') or wa._DEFAULT_LANG
-        fields = {mod: (history_svc.history_meta(wa._modules_dir, mod, lang).get('fields') or {})
+        fields = {mod: (history_svc.history_meta(wa._modules_dir, mod, lang,
+                                                 wa._var_dir or '').get('fields') or {})
                   for mod in bound}
         return jsonify({'host':    infra_svc.fleet_row(record),
                         'results': results,

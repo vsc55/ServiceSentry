@@ -1,0 +1,1000 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""The MIB manager screen — a list that reaches the bottom, and one row per module.
+
+Two separate things went wrong in the same modal, and both are the kind that no Python test
+would ever see.
+
+**The list stopped short of the bottom.** Its height was pinned in the markup
+(``max-height:35vh``) and the modal BODY was what scrolled. That is fine at exactly one
+dialog size and wrong at every other: this modal can be dragged to a new size and maximized
+to 95vh, and at 95vh the list used a third of the height while the rest of the modal sat
+empty. The fix is the chain the rest of the panel already uses — ``.ss-vfill`` down to a
+single ``.ss-vscroll`` — so the height is whatever the dialog turns out to have. It only
+holds if EVERY link is present, which is what this file checks: a chain with one link
+missing collapses back to content height and looks exactly like the bug.
+
+**And the list was keyed by file, not by module.** The API answers ``raw`` (.mib) and
+``compiled`` (.py); shown as two columns those are the same MIB twice, so "is this one
+compiled?" meant reading both columns and comparing by eye. The list is now keyed the way
+pysmi is keyed — by module name — and the file pair is a state on the row.
+"""
+
+import os
+import re
+
+from tests.helpers import _fn, _read, _strip_comments
+
+SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+WEB = os.path.join(SRC, 'watchfuls', 'snmp', 'web')
+UI = os.path.join(WEB, '_ui.html')
+MODALS = os.path.join(WEB, '_modals.html')
+STYLES = os.path.join(WEB, '_styles.html')
+CSS = os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')
+
+MODAL_ID = 'mibManagerModal'
+
+
+def _pyfn(src: str, name: str) -> str:
+    """The body of a top-level PYTHON function — `_fn` is a JavaScript extractor.
+
+    Sliced to the next top-level `def` or to the END of the file: the function this guard
+    reads most is the last one in its module, and `index()` on a needle that is not there
+    raises rather than answering.
+    """
+    i = src.index('def %s' % name)
+    j = src.find('\ndef ', i + 1)
+    return src[i:] if j < 0 else src[i:j]
+
+
+def _manager_modal() -> str:
+    """The manager modal's markup only — the file also holds the browser and details ones."""
+    src = _read(MODALS)
+    i = src.index('id="%s"' % MODAL_ID)
+    return src[i:]
+
+
+class TestTheListReachesTheBottom:
+    """Every link of the fill chain, because a chain is only as good as its weakest link and
+    a broken one fails silently: the list simply stops where its content stops."""
+
+    def test_the_dialog_is_given_a_height_to_hand_down(self):
+        """`.ss-vfill` distributes a height; it does not invent one. Bootstrap's
+        `modal-dialog-scrollable` is what sizes the dialog to the viewport — without it the
+        dialog is content-sized and there is nothing for the list to fill."""
+        modal = _manager_modal()
+        dlg = re.search(r'<div class="(modal-dialog[^"]*)"', modal)
+        assert dlg, 'the manager modal has no modal-dialog'
+        assert 'modal-dialog-scrollable' in dlg.group(1)
+
+    def test_the_body_fills_and_does_not_scroll_itself(self):
+        modal = _manager_modal()
+        body = re.search(r'<div class="(modal-body[^"]*)"', modal)
+        assert body, 'the manager modal has no modal-body'
+        assert 'ss-vfill' in body.group(1)
+
+    def test_the_generic_rule_that_makes_that_work_exists(self):
+        """`modal-dialog-scrollable` puts `overflow-y: auto` on the body — the opposite of
+        what a fill chain needs, because a body that scrolls grows with its content and the
+        list inside it never learns how tall it may be. One generic rule undoes it; keyed on
+        the class, so any modal that opts into the chain gets it."""
+        css = _read(CSS)
+        m = re.search(r'\.modal-body\.ss-vfill\s*\{([^}]*)\}', css)
+        assert m, '.modal-body.ss-vfill is gone — the body will scroll and the list will not'
+        assert 'overflow' in m.group(1) and 'hidden' in m.group(1)
+
+    def test_the_list_container_is_the_link_that_grows_and_scrolls(self):
+        assert 'id="mibManagerBody" class="ss-vfill"' in _manager_modal()
+        assert "'<div id=\"mibList\" class=\"ss-vscroll" in _read(UI)
+
+    def test_nothing_in_the_modal_pins_a_height_of_its_own(self):
+        """The bug, in its original form: `max-height:35vh` on the lists. A height pinned
+        anywhere in the chain wins over the height being handed down, and the modal goes back
+        to having dead space under a list that stopped early."""
+        parts = [_manager_modal()]
+        # Only the manager's own renderers: the same file also builds the browser tree and
+        # the details tables, which are capped modals of their own.
+        ui = _strip_comments(_read(UI))
+        parts += [_fn(ui, name) for name in ('_mibRender', '_mibListHeader', '_mibRow')]
+        for src in parts:
+            hits = re.findall(r'(?:max-)?height\s*:\s*\d+vh', src)
+            assert not hits, f'a viewport height is pinned in the manager: {hits}'
+
+    def test_the_modules_stylesheet_no_longer_sizes_the_modal_by_id(self):
+        """Layout behaviour lives in reusable classes; per-id CSS is how the same rule ends
+        up written three times and fixed once."""
+        styles = _strip_comments(_read(STYLES))
+        for prop in ('min-height', 'flex:', 'overflow-y'):
+            assert not re.search(r'#%s[^{]*\{[^}]*%s' % (MODAL_ID, re.escape(prop)), styles), \
+                f'#{MODAL_ID} still sets {prop} by id'
+
+    def test_everything_above_the_list_refuses_to_shrink(self):
+        """A flex item shrinks before its siblings scroll. If the toolbar can shrink, a long
+        list squashes the buttons instead of scrolling — so the fixed parts say so."""
+        modal = _manager_modal()
+        body = modal[modal.index('modal-body'):modal.index('modal-footer')]
+        # The direct children of the body that are not the list itself.
+        fixed = re.findall(r'\n                <(?:div|details)[^>]*class="([^"]*)"', body)
+        assert fixed, 'the body has no direct children — this guard needs rewriting'
+        for cls in fixed:
+            if 'ss-vfill' in cls:
+                continue          # the list: the one thing allowed to grow
+            assert 'flex-shrink-0' in cls, f'a fixed row can shrink instead: {cls}'
+
+
+class TestOneRowPerModule:
+
+    def test_the_list_is_keyed_by_module_name(self):
+        """Not by file: `raw` and `compiled` are the same MIB twice, and two vendors can each
+        ship a copy of the same standard module — which is one thing to compile, not two."""
+        body = _fn(_read(UI), '_mibRows')
+        assert 'raws.push' in body, 'a module has to hold every source that claims it'
+        assert "state = " in body and "'dep'" in body and "'pending'" in body
+
+    def test_a_module_with_no_source_is_a_dependency(self):
+        """A .py with no .mib beside it was pulled in by pysmi resolving an IMPORTS, not
+        asked for — and it cannot be compiled, because there is nothing to compile from."""
+        ui = _read(UI)
+        assert "!r.raws.length ? 'dep'" in _strip_comments(ui)
+        # …which is why the compile action is conditional on a source existing.
+        assert 'r.raws.length && r.py' not in _fn(ui, '_compileSelected')
+        assert 'r.raws.length' in _fn(ui, '_compileSelected')
+
+    def test_deleting_a_row_deletes_every_file_it_stands_for(self):
+        """The row is a module; the files behind it are an implementation detail. Deleting
+        one and silently leaving the other is how a 'deleted' MIB keeps resolving."""
+        body = _fn(_read(UI), '_mibArtifacts')
+        assert "kind: 'raw'" in body and "kind: 'compiled'" in body
+
+    def test_the_selection_survives_a_module_being_compiled(self):
+        """The list re-renders on every poll while a compile runs. Keyed by file, a row's
+        identity changes the moment its .py appears and the tick under the user's cursor
+        would move; keyed by module, it does not."""
+        assert 'let _mibSelection = new Set();' in _read(UI)
+        assert '_mibFilterLists();' in _fn(_read(UI), '_mibRefreshCompiled')
+
+    def test_the_state_chips_carry_the_counts(self):
+        """"What is still pending" is the question this modal exists to answer, so it is on
+        screen before anything is typed or clicked."""
+        body = _fn(_read(UI), '_mibChips')
+        for state in ('pending', 'compiled', 'dep'):
+            assert "'%s'" % state in body
+
+
+class TestAFailureIsItsOwnState:
+    """A vendor MIB that cannot be parsed stays pending for ever, and "pending" is also what a
+    MIB nobody has compiled yet says — so on its own it reads as "the button is broken". They
+    need opposite things done to them: one a click, the other a file that is not broken. pysmi
+    knows the reason (`Bad grammar near offset 558 … line 21`) and the panel used to drop it.
+
+    SYNOLOGY-SMB-MIB is the file that made this obvious: Synology ships it malformed, every
+    descriptor starting uppercase where SMI wants a value reference, so the parser stops at
+    the first table definition. Nothing here can fix that file — it can only say so.
+    """
+
+    def test_the_reason_is_a_state_and_not_a_flavour_of_pending(self):
+        body = _fn(_read(UI), '_mibRows')
+        assert "'failed'" in body, 'a recorded failure has to be its own state'
+
+    def test_it_has_a_chip_of_its_own(self):
+        """After a run of two hundred, "what failed" has to be one click, not a scroll."""
+        assert "'failed'" in _fn(_read(UI), '_mibChips')
+        assert 'failed: 0' in _fn(_read(UI), '_mibCounts')
+
+    def test_the_reason_outlives_the_page(self):
+        """Held in the page it died with the modal, which is the one place it was needed: a
+        compile of two hundred is not watched to the end, and the failures are what you come
+        back for. The list answers with them."""
+        ui = _strip_comments(_read(UI))
+        assert '_mibCompileErrors' not in ui, 'the page must not keep its own copy'
+        assert '_mibData.errors' in _fn(ui, '_mibRows')
+
+    def test_the_whole_message_is_one_click_away(self):
+        """A parser message is a sentence with an offset in it: too long for a row, too
+        important to truncate."""
+        body = _fn(_read(UI), '_mibStateBadge')
+        assert '_mibShowError' in body and 'bg-danger' in body
+        assert body.index('if (r.error)') < body.index("state === 'compiled'"), \
+            'the reason has to be checked before the plain states'
+
+    def test_nothing_reworded_it_on_the_way(self):
+        """`showInfoModal` escapes its values, which is why the reason is handed to it as a
+        value and not as markup — and why it arrives verbatim."""
+        body = _fn(_read(UI), '_mibShowError')
+        assert 'r.error' in body and 'showInfoModal' in body
+
+    def test_the_reason_reaches_the_browser_at_all(self):
+        """Four hops, and it is dropped at any one of them: pysmi's status carries it, the
+        resolver classifies, the job records, the list answers."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        adm = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert "'errors':  _compile_errors(failed, _status)" in res, \
+            'the reason is looked up under the same name the failure was filed under'
+        assert "'errors':    result.get('errors', {})" in adm
+        assert "'errors':          errors," in adm
+
+
+class TestTheCompilerIsNotTheOnlyThingThatReadsTheFile:
+    """pysmi says where it gave up ("Bad grammar near offset 558") and names the symbols it
+    could not place ("Unknown parents for symbols: netSnmpPassCounter64") — both one step away
+    from the thing to change. The linter says the thing itself, with the line."""
+
+    def test_the_editor_can_ask_before_saving(self):
+        """On what is on screen, not on what is on disk: the point is to answer while the
+        change is still a change."""
+        body = _fn(_read(UI), '_mibLintNow')
+        assert '_mibSrcEditor.getValue()' in body
+
+    def test_a_clean_file_is_told_so_out_loud(self):
+        """Pressing a check button and getting nothing back is indistinguishable from a check
+        button that does not work."""
+        assert 'mib_lint_clean' in _fn(_read(UI), '_mibLintNow')
+
+    def test_the_failure_modal_carries_the_hints(self):
+        assert '_mibLint(' in _fn(_read(UI), '_mibShowError')
+
+    def test_the_hints_are_read_now_and_not_stored_with_the_error(self):
+        """An error kept from last week beside hints from last week is two stale things
+        agreeing with each other. The file is what it is right now."""
+        adm = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert '\'hints\'' not in adm, 'findings are being frozen into the failure store'
+        assert 'lint_mib' in adm, 'nothing reads them at all'
+
+    def test_a_version_can_be_removed_by_hand(self):
+        """The history is not tidied automatically beyond the cap — but a version somebody
+        knows is junk should not have to stay for ever."""
+        ui = _read(UI)
+        assert '_mibVersionDelete' in _fn(ui, '_mibVersionRow')
+        assert 'showConfirmModal' in _fn(ui, '_mibVersionDelete')
+
+    def test_deleting_the_vendors_own_says_what_it_is(self):
+        """v1 is the only version that cannot be got back from anywhere: the file it came
+        from has been overwritten by every save since."""
+        assert 'mib_version_delete_original_confirm' in _fn(_read(UI), '_mibVersionDelete')
+
+    def test_it_reads_and_does_not_write(self):
+        """Checking a file must never be a thing that changes it — and it audits a row per
+        look unless it is declared read-only."""
+        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
+        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
+        ro = acts[acts.index('READ_ONLY_ACTIONS'):]
+        assert "'lint_mib_source'" in acts and "'lint_mib_source'" in ro
+
+
+class TestTheSourceIsReadableAgainstTheError:
+    """The reason names a LINE, and the viewer used to be a `<pre>` — no numbers to count, so
+    you scrolled and guessed. CodeMirror was already in the panel for the notification
+    template editor; it brings the numbering, and one mode brings the colour."""
+
+    def test_the_loader_is_shared_and_not_borrowed_from_a_config_tab(self):
+        """A watchful reaching into `partials/cfg/notify/` for a function is a dependency
+        nobody would look for, and the first tidy-up of that tab breaks the MIB viewer."""
+        core = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
+                            '_codemirror.html')
+        assert os.path.isfile(core), 'the CodeMirror loader is not core'
+        assert 'function _ensureCodeMirror' in _read(core)
+        tpl = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'cfg',
+                                 'notify', '_tpl_html.html'))
+        assert 'function _ensureCodeMirror' not in tpl, 'two loaders is one too many'
+        sections = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                      '_js_sections.html'))
+        assert 'partials/core/_codemirror.html' in sections
+
+    def test_there_is_a_mode_for_mibs_because_codemirror_ships_none(self):
+        """The bundled modes are css, xml, javascript and htmlmixed. ASN.1/SMI is not among
+        them, so the colour is this module's to define."""
+        body = _fn(_read(UI), '_mibDefineMode')
+        assert "defineMode('mib'" in body
+
+    def test_the_mode_lexes_and_does_not_parse(self):
+        """It has to colour a file that DOES NOT parse — which is exactly when somebody is
+        reading it. Anything that needed the grammar to hold would give up on the one file
+        worth looking at."""
+        ui = _read(UI)
+        body = _fn(ui, '_mibDefineMode')
+        assert 'startState' in body and 'token:' in body
+        # The distinction a malformed vendor MIB gets wrong: in SMI the CASE of the first
+        # letter IS the meaning — uppercase a type reference, lowercase a value.
+        assert '/^[A-Z]/.test(t)' in body
+
+    def test_a_string_survives_the_end_of_a_line(self):
+        """A DESCRIPTION runs over many lines. A mode that closed the string at the newline
+        would colour the rest of the file as code, from the first description onwards."""
+        assert 'state.inString' in _fn(_read(UI), '_mibDefineMode')
+
+    def test_a_viewer_that_cannot_be_pretty_is_still_a_viewer(self):
+        """The loader can fail — a missing asset, a locked-down browser. Falling back to the
+        old <pre> costs nothing; failing to show the source costs the whole screen."""
+        body = _fn(_read(UI), '_mibRenderSource')
+        assert '_ensureCodeMirror' in body
+        assert '<pre' in body, 'no fallback: a failed load would blank the source'
+
+    def test_arriving_from_a_failure_opens_on_the_failing_line(self):
+        """The value of the reason IS the line; scrolling to it by hand loses it."""
+        ui = _read(UI)
+        assert 'line\\s+(\\d+)' in _fn(ui, '_mibErrorLine') or \
+               'line\\s' in _fn(ui, '_mibErrorLine')
+        assert '_mibErrorLine(r.error)' in _fn(ui, '_mibRow')
+        assert 'mib-src-badline' in _fn(ui, '_mibRenderSource')
+
+
+class TestTheDetailModalIsTwoTabs:
+    """One modal was a stack of three collapsibles — a header, imports, an objects table and
+    the source at the bottom, each opening and closing over the others. Split in two, each
+    half gets the whole height: what the file DECLARES, and what it SAYS. Both viewers do it,
+    because both have a source: the raw one an ASN.1 MIB, the compiled one the Python module
+    pysmi wrote."""
+
+    def test_both_viewers_offer_the_same_pair(self):
+        ui = _read(UI)
+        for name in ('_mibShowRawDetails', '_mibShowDetails'):
+            body = _fn(ui, name)
+            assert 'nav-tabs' in body, f'{name} still stacks its sections'
+            assert 'mibTabDecl' in body and 'mibTabCode' in body
+
+    def test_the_pane_is_the_scroller_and_not_a_box_inside_it(self):
+        """A box of a fixed height inside a pane that already has one is a keyhole with a
+        scrollbar on each side."""
+        ui = _read(UI)
+        for name in ('_mibShowRawDetails', '_mibShowDetails'):
+            body = _fn(ui, name)
+            assert 'max-height:45vh' not in body, f'{name} still pins a height inside a pane'
+            assert 'ss-vscroll' in body
+
+    def test_a_pane_is_allowed_to_be_a_flex_column(self):
+        """Bootstrap's `.tab-content > .active { display: block }` outranks a class-only
+        `display: flex`: the class sits in the markup, the layout ignores it, and nothing
+        says so. The chain needs the specificity won back."""
+        css = _read(CSS)
+        assert re.search(r'\.tab-content > \.tab-pane\.active\.ss-vfill\s*\{', css)
+
+    def test_the_editor_is_told_to_measure_again_when_its_tab_opens(self):
+        """CodeMirror measures itself when it is built, and a hidden tab has no size to
+        measure: built behind the other tab it comes out a few pixels tall and stays that way
+        until something makes it look again."""
+        ui = _read(UI)
+        for name in ('_mibShowRawDetails', '_mibShowDetails'):
+            assert "'shown.bs.tab'" in _fn(ui, name), f'{name} never refreshes the editor'
+
+    def test_what_pysmi_writes_gets_its_own_mode(self):
+        """The compiled half is Python, and CodeMirror 5 ships no mode for it here either —
+        the bundled ones are css, xml, javascript and htmlmixed."""
+        body = _fn(_read(UI), '_mibDefinePyMode')
+        assert "defineMode('pysnmp'" in body
+        assert 'state.triple' in body, 'a docstring outlives its line'
+        assert "'pysnmp'" in _fn(_read(UI), '_mibShowDetails')
+
+
+class TestAMibCanBeFixedAndTakenBack:
+    """Vendors ship broken MIBs, and there is nothing to do about that from here except let
+    somebody correct one. A correction nobody can undo is one nobody dares make, so the
+    history is the feature and the pencil is only the button."""
+
+    def test_the_editor_starts_read_only(self):
+        """This modal is opened to READ far more often than to change anything, and a text
+        box you can type into by accident is a file you can break by accident."""
+        ui = _read(UI)
+        assert 'readOnly:    true' in _fn(ui, '_mibRenderSource')
+        assert "setOption('readOnly', !_mibEditOn)" in _fn(ui, '_mibEditToggle')
+
+    def test_saving_says_the_mib_has_to_be_compiled_again(self):
+        """The compiled module is now older than its source; leaving that unsaid is how an
+        edit gets made, believed, and never actually used by anything."""
+        assert 'mib_edit_saved' in _fn(_read(UI), '_mibEditSave')
+
+    def test_the_list_is_reloaded_after_an_edit(self):
+        """The file changed, so what the list says about it did: its compiled module is now
+        stale and any recorded failure was about bytes that are gone."""
+        assert '_mibLoad()' in _fn(_read(UI), '_mibEditSave')
+
+    def test_restoring_asks_first(self):
+        """It overwrites the file every check resolves through."""
+        assert 'showConfirmModal' in _fn(_read(UI), '_mibVersionRestore')
+
+    def test_viewing_an_old_version_cannot_be_mistaken_for_the_file(self):
+        """An old version shown in the same editor as the current one, unlabelled, is how
+        the wrong content gets edited on top of and saved."""
+        body = _fn(_read(UI), '_mibVersionView')
+        assert 'mib_version_viewing' in body
+        assert '_mibEditToggle(false)' in body
+
+
+class TestLeavingTheEditorCostsNothing:
+    """Cancelling an edit used to re-fetch the file and rebuild the modal around it — which
+    threw away the tab you were on, the scroll position and the editor itself, to undo
+    something already sitting in memory. On screen that is the whole modal flashing to put
+    back what you were already looking at."""
+
+    def test_cancelling_puts_back_a_value_it_already_holds(self):
+        body = _fn(_read(UI), '_mibEditCancel')
+        assert 'setValue(_mibSrcOnDisk)' in body
+        assert 'apiPost' not in body and '_mibShowRawDetails' not in body, \
+            'leaving the editor fetches and rebuilds again'
+
+    def test_the_editor_keeps_what_it_was_handed(self):
+        """There is nothing to put back otherwise, and the file would have to be fetched to
+        find out what it already said."""
+        assert '_mibSrcOnDisk = text' in _fn(_read(UI), '_mibRenderSource')
+
+    def test_saving_redraws_the_one_pane_that_went_stale(self):
+        """What the file declares changed, so that tab is quietly wrong — and it is one pane,
+        not a modal."""
+        body = _fn(_read(UI), '_mibEditSave')
+        assert '_mibDeclRefresh()' in body
+        assert '_mibShowRawDetails' not in body, 'saving rebuilds the modal'
+
+    def test_restoring_does_not_rebuild_it_either(self):
+        body = _fn(_read(UI), '_mibVersionRestoreConfirmed')
+        assert '_mibDeclRefresh()' in body
+        assert '_mibShowRawDetails' not in body
+        assert 'setValue' in body, 'it reloads the modal to see what it just wrote'
+
+    def test_the_declarations_pane_is_never_empty(self):
+        """A pane with nothing in it reads as a screen that failed to load — and a MIB whose
+        syntax breaks mid-file really does declare nothing this parser can see, which is worth
+        saying, since the source tab next door is where the answer is."""
+        body = _fn(_read(UI), '_mibDeclHtml')
+        assert 'mib_details_none' in body
+        assert body.rindex('mib_details_none') > body.index('objects_detail')
+
+    def test_an_open_version_list_is_redrawn_after_a_save(self):
+        """A save adds a version; a list left open showing the state before it lies about the
+        thing that just happened."""
+        assert '_mibVersionsDraw()' in _fn(_read(UI), '_mibEditSave')
+
+
+class TestNothingIsKeptWhereItCannotBeReached:
+    """Deleting a MIB keeps its versions, which is right — and drawing nothing for them was
+    not: a thing that exists, cannot be seen, cannot be brought back and cannot be cleared out
+    is worse than either keeping or dropping it."""
+
+    def test_a_history_with_no_file_is_a_row(self):
+        assert "'orphan'" in _fn(_read(UI), '_mibRows')
+        assert 'orphan' in _fn(_read(UI), '_mibCounts')
+
+    def test_it_has_a_chip_so_it_can_be_found(self):
+        assert "'orphan'" in _fn(_read(UI), '_mibChips')
+
+    def test_the_row_offers_the_two_things_that_apply_to_it(self):
+        """There is no file: compiling, viewing the source and deleting the file are all
+        about something that is not there."""
+        body = _fn(_read(UI), '_mibRow')
+        assert '_mibOrphanRestore' in body and '_mibOrphanForget' in body
+
+    def test_deleting_a_mib_offers_to_take_the_history(self):
+        """Offered at the moment of deciding — asking afterwards in its own dialog is asking
+        once the moment has passed — and never ticked by default."""
+        body = _fn(_read(UI), '_mibDeleteRow')
+        assert 'mib_delete_with_history' in body
+        assert 'checked: false' in body
+
+    def test_the_confirm_modal_grew_that_checkbox_generically(self):
+        """One opt-in checkbox on the shared confirm dialog, the same shape the reason field
+        already had — not a dialog of this module's own."""
+        toast = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
+                                   '_toast.html'))
+        assert '_confirmModalCheckOpts' in toast
+        dialogs = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                     'modals', '_dialogs.html'))
+        assert 'confirmModalCheckWrap' in dialogs
+
+
+class TestARowIsAModuleAndNotAFileName:
+    """`trunk.mib` declares IEEE8023-LAG-MIB. pysmi locates a source by the FILE name and
+    writes the MODULE name, so a screen keyed on the file asks about a `.py` that will never
+    be written: the MIB compiles, the compiler says "already up to date", and the row says
+    pending for ever. On a real library that was 132 pending of which 117 were an illusion."""
+
+    def test_the_row_is_keyed_by_what_the_file_declares(self):
+        body = _fn(_read(UI), '_mibRows')
+        assert 'f.module' in body, 'keyed on the file name, half a vendor archive never lands'
+
+    def test_the_file_name_is_still_shown_when_it_differs(self):
+        """A row reading IEEE8023-LAG-MIB while the folder holds `trunk.mib` is a row nobody
+        can match to a file, and matching them is most of what this screen is for."""
+        rows = _fn(_read(UI), '_mibRows')
+        assert 'r.file =' in rows
+        assert 'r.file' in _fn(_read(UI), '_mibRow')
+
+    def test_a_compiled_module_is_a_dependency_only_if_nothing_declares_it(self):
+        """Compared against file names, every MIB whose file is not named after its module
+        looked like something pysmi had gone and fetched by itself — 97 of them."""
+        assert '_mibRawModules' in _fn(_read(UI), '_mibIsDependency')
+
+    def test_the_compile_button_counts_the_work_and_not_the_rows(self):
+        """A row is a module; the job walks file names. In a vendor archive the two differ,
+        and the button promising 14 while the bar goes to 15 is the same disease as the 933%
+        progress bar."""
+        assert '_mibData.pending' in _fn(_read(UI), '_mibUpdateCompileBtn')
+
+    def test_the_listing_ships_that_list_from_the_function_that_decides_it(self):
+        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert "'pending':         _mib_resolver.pending_raw_mibs" in admin
+
+    def test_pending_answers_the_name_the_compiler_needs(self):
+        """Asked about the MODULE, answered with the FILE: handed a module name pysmi would
+        look for a file of that name, find none, and go to the internet for it."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        i = res.index('def pending_raw_mibs')
+        body = res[i:res.index('\ndef ', i)]
+        assert 'raw_module_name(path)' in body and 'compiled_mtime.get(mib)' in body
+        assert 'out.append(stem)' in body
+
+
+class TestACompileThatDidNothingSaysSo:
+    """Reported: seven MIBs pending, compile, no error, still pending. Both halves were the
+    file-name/module-name split, on the two sides of the same conversation with pysmi."""
+
+    def test_an_import_is_resolved_by_the_name_it_asks_for(self):
+        """pysmi tries the module name as a FILE name, which in a vendor archive finds
+        nothing: DIFFSERV-DSCP-TC lives in `diffserv-dscp-tc-rfc3289.mib`."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        assert 'def module_index' in res and 'def _module_reader' in res
+        i = res.index('for _dir in raw_mib_dirs(raw_dir):')
+        assert '_module_reader' in res[:i], 'the index has to be asked FIRST'
+
+    def test_the_verdict_is_looked_up_under_both_names(self):
+        """A module pysmi compiled comes back under the MODULE's name; one it could not parse
+        under the name it was HANDED, because it never read the module out of the file."""
+        body = _pyfn(_read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py')),
+                     '_classify_compile_results')
+        assert 'all_results.get(_mod(m))' in body and 'all_results.get(m)' in body
+
+    def test_a_failure_is_reported_under_the_module_name(self):
+        """Which is what the panel keys its rows and its stored reasons by."""
+        body = _pyfn(_read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py')),
+                     '_classify_compile_results')
+        assert '_status[_mod(m)] = st' in body
+
+    def test_the_store_is_cleared_by_what_the_job_reached(self):
+        """`attempted` listed file names against a result keyed by module: always empty, so
+        nothing was ever cleared and a MIB that had since compiled kept its old red row."""
+        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert "result.get('attempted')" in admin
+        assert 'raw_facts(_full)' in admin, 'the error index is keyed by module too'
+
+
+class TestSomeMibsAreNeverCompiled:
+    """RFC-1212 and RFC-1215 are macro definitions and nothing else: no `.py` is produced for
+    them and none is missing. Shown as "pending" — which is what a row with a source and no
+    compiled module says — they are a number that never goes down."""
+
+    def test_they_have_a_state_of_their_own(self):
+        body = _fn(_read(UI), '_mibRows')
+        assert "'builtin'" in body and 'macro_only' in body
+
+    def test_the_badge_says_why_there_is_no_module(self):
+        assert 'mib_builtin_tooltip' in _fn(_read(UI), '_mibStateBadge')
+
+    def test_the_row_offers_no_compile_button(self):
+        """A button whose only outcome is nothing happening."""
+        assert "r.state !== 'builtin'" in _fn(_read(UI), '_mibRow')
+
+    def test_the_states_still_add_up(self):
+        """Every row is counted once: a state missing from the counter reads as NaN in the
+        chip and as a total that does not match the list."""
+        assert 'builtin: 0' in _fn(_read(UI), '_mibCounts')
+
+    def test_the_listing_ships_the_names_from_the_resolver(self):
+        """One list of the two names. Two would be one of them updated on its own."""
+        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert '_mib_resolver.MACRO_ONLY_MIBS' in admin
+        assert "'RFC-1212'" not in admin, 'the admin surface knows the names on its own'
+
+
+class TestACompiledModuleCanOutliveItsSource:
+    """Delete the copy a duplicated module was compiled from and the `.py` stays — it is what
+    pysnmp loads, and dropping it would take the module out of service over a tidy-up. But
+    nothing is newer than anything now, so the clock cannot notice, and the row would read
+    "compiled" while what is compiled came from a file nobody can open any more."""
+
+    def test_the_row_compares_against_where_the_py_came_from(self):
+        body = _fn(_read(UI), '_mibRows')
+        assert 'r.pySource' in body and "r.state = 'stale'" in body
+
+    def test_the_badge_says_which_kind_of_outdated_it_is(self):
+        """"The source is newer" is advice about a file you can open. This one is about one
+        that is not there, and doing the same thing about it has a different reason."""
+        assert 'mib_stale_gone_tooltip' in _fn(_read(UI), '_mibStateBadge')
+
+    def test_the_server_agrees_that_it_is_pending(self):
+        """The chips and the compile button read two different answers — that is how the
+        panel once showed "Pending 0, Errors 1" over a button compiling three."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        i = res.index('def pending_raw_mibs')
+        body = res[i:res.index('\ndef ', i)]
+        assert 'compiled_source' in body and 'orphaned' in body
+
+    def test_provenance_is_read_where_it_is_written(self):
+        """pysmi writes the header; the resolver owns everything about compiled modules. The
+        admin surface asks it rather than parsing a .py of its own."""
+        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert 'ASN.1 source' not in admin
+        assert '_mib_resolver.compiled_source' in admin
+
+
+class TestSeveralFilesOneModule:
+    """``×3`` was the fact, not the question. Which of the three is being compiled, and
+    whether they even differ, are the two things somebody needs to decide which one stays —
+    and while nobody decides, the alphabet decides."""
+
+    def test_the_badge_opens_the_comparison(self):
+        """A tooltip listing three paths is a tooltip you cannot act on."""
+        body = _fn(_read(UI), '_mibRow')
+        assert '_mibDupesShow' in body
+
+    def test_it_says_whether_they_differ_without_opening_it(self):
+        """Identical copies are clutter; different ones are a decision waiting. A badge that
+        looks the same for both makes you open every one of them to find out which."""
+        body = _fn(_read(UI), '_mibRow')
+        assert 'bg-warning' in body and 'r.dupe' in body
+
+    def test_the_eye_opens_the_copy_that_is_actually_used(self):
+        """Opening the first by alphabet shows a file that may have nothing to do with what
+        got compiled — which is the whole confusion this screen is about."""
+        body = _fn(_read(UI), '_mibRow')
+        assert 'r.dupe && r.dupe.used' in body
+
+    def test_the_comparison_is_server_side(self):
+        """The listing ships a hash per copy, never the content: comparing in the page would
+        mean fetching every duplicate in full to throw most of it away."""
+        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        dupes = admin[admin.index('def _duplicate_sources'):admin.index('def diff_mib_files')]
+        assert "'sha'" in dupes and "'content'" not in dupes
+        assert 'def diff_mib_files' in admin
+
+    def test_one_derivation_of_what_the_difference_is(self):
+        """Versions and files ask the same question. Two implementations of it stay in step
+        until the day the context lines or the cap change in one of them."""
+        admin = _strip_comments(_read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py')))
+        assert admin.count('difflib.unified_diff(') == 1
+
+    def test_which_copy_wins_is_asked_of_pysmi(self):
+        """It follows pysmi's own directory walk and extension order. Re-derived here, it
+        would be right until the release that changed it and silent about having stopped."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        i = res.index('def resolve_raw_sources')
+        body = res[i:res.index('\ndef ', i)]
+        assert 'FileReader' in body
+
+    def test_the_tree_is_walked_once_for_the_whole_batch(self):
+        """The reader re-walks the entire tree on every single lookup, and the listing asks
+        it once per duplicate — on a library of a thousand files that is the refresh."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        assert 'def resolve_raw_sources' in res, 'one name at a time is one walk at a time'
+
+    def test_the_filter_is_not_a_state(self):
+        """A duplicated module is still compiled, or pending, or failed. Folded into the
+        state chips it would have to steal rows from them to exist."""
+        assert "_mibFilter === 'dupe'" in _fn(_read(UI), '_mibVisibleRows')
+        assert 'c.dupe' in _fn(_read(UI), '_mibCounts')
+
+    def test_the_chip_is_only_there_when_it_counts_something(self):
+        """A chip that always reads zero is a chip nobody reads."""
+        body = _fn(_read(UI), '_mibChips')
+        assert 'if (c.dupe)' in body
+
+    def test_deleting_a_copy_says_the_module_needs_compiling_again(self):
+        """Delete the copy that was being compiled and another takes over — the compiled
+        module now comes from a file that is not the one on disk any more."""
+        body = _fn(_read(UI), '_mibDupDeleteConfirmed')
+        assert 'mib_dupe_deleted_used' in body
+
+    def test_it_is_a_declared_action(self):
+        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
+        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
+        assert "'diff_mib_files'" in acts
+        assert "'diff_mib_files'" in acts[acts.index('READ_ONLY_ACTIONS'):], \
+            'reading a diff writes nothing'
+
+
+class TestTwoProblemsAreNotOneProblem:
+    """Files collide on a module name for two different reasons: they are copies of one MIB,
+    or they are different MIBs whose first line was copy-pasted. The screen gave one answer to
+    both — "pick the one that stays" — and for the second that answer deletes a whole MIB."""
+
+    def test_the_screen_says_when_they_are_not_copies(self):
+        body = _fn(_read(UI), '_mibDupesHtml')
+        assert '_strangers' in body and 'mib_dupe_strangers' in body
+
+    def test_it_does_not_open_a_diff_between_unrelated_files(self):
+        """A diff of two MIBs that share nothing is a full rewrite: every line removed and
+        every line added, which reads as a comparison gone wrong."""
+        assert 'd.kinship !== 0' in _fn(_read(UI), '_mibDupesShow')
+
+    def test_kinship_is_measured_where_the_files_are_read(self):
+        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        assert 'def _kinship' in admin and "'kinship': kin" in admin
+
+    def test_it_is_the_descriptors_that_are_compared(self):
+        """Not the size, not the text: what a MIB declares is what survives being copied,
+        renamed and re-indented."""
+        lint = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_lint.py'))
+        assert 'def declared_names' in lint
+
+
+class TestTheDateDecidesAndIsShown:
+    """`LAST-UPDATED` is what tells two copies of a standard module apart — 2002 against 1999
+    in the pair that prompted this — and it was only visible twenty lines into the diff."""
+
+    def test_the_column_exists_only_when_something_fills_it(self):
+        """A quarter of a real library declares no date at all (SNMPv2-TC has no
+        MODULE-IDENTITY), and a column of dashes is a column that costs width and says
+        nothing."""
+        body = _fn(_read(UI), '_mibDupesHtml')
+        assert '_hasDates' in body
+
+    def test_newest_is_claimed_only_when_the_dates_differ(self):
+        """Two copies of one date have no newest, and one date against a blank is not a
+        comparison — the other file did not say."""
+        body = _fn(_read(UI), '_mibDupesHtml')
+        assert 'new Set(' in body and '.size > 1' in body
+
+    def test_a_file_that_does_not_say_is_not_shown_as_older(self):
+        body = _fn(_read(UI), '_mibDupRow')
+        assert 'mib_dupe_no_updated' in body
+
+    def test_it_is_read_beside_the_module_name(self):
+        """Both facts live in the same header, and the listing wants both of every file: two
+        reads and two caches for one header would be one of them going stale on its own."""
+        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        i = res.index('def raw_facts')
+        body = res[i:res.index('\ndef ', i)]
+        assert 'module' in body and 'updated' in body
+        assert body.count('fh.read(') == 1
+
+
+class TestDeletingIsNotOneThing:
+    """A row is a MODULE and stands for two files: the source somebody wrote and the .py
+    pysmi made from it. Deleting them together is right almost always — and the two cases
+    where it is not are the ones that matter. A compiled module is an OUTPUT: dropping it is
+    how you ask for it to be built again from a source that has since changed underneath it.
+    And a source can go while the .py stays loaded, which is a thing to do on purpose and
+    never by accident."""
+
+    def test_the_two_halves_can_be_asked_for_separately(self):
+        body = _fn(_read(UI), '_mibArtifacts')
+        assert "scope !== 'compiled'" in body and "scope !== 'raw'" in body
+
+    def test_no_scope_still_means_both(self):
+        """Every existing caller passes nothing — a scope that defaulted to one half would
+        turn every delete on the screen into half a delete."""
+        assert 'function _mibArtifacts(rows, scope)' in _read(UI)
+
+    def test_the_menu_is_only_there_when_there_are_two_things(self):
+        """With one file there is nothing to choose, and a caret says there is."""
+        body = _fn(_read(UI), '_mibDeleteBtn')
+        assert '!r.raws.length || !r.py' in body and 'return one' in body
+
+    def test_the_row_and_the_selection_share_one_menu(self):
+        """The same three choices over a different set. Two copies of a menu are two menus
+        that drift."""
+        ui = _read(UI)
+        assert '_mibDeleteMenu' in _fn(ui, '_mibDeleteBtn')
+        assert '_mibDeleteMenu' in _fn(ui, '_mibListHeader')
+
+    def test_the_question_says_what_SURVIVES(self):
+        """What goes is half of it; what stays is the half somebody gets wrong. Deleting the
+        source leaves a compiled module still in use, which does not look like a deletion at
+        all until the next compile."""
+        body = _fn(_read(UI), '_mibDeleteMsg')
+        assert 'mib_delete_compiled_confirm' in body and 'mib_delete_raw_confirm' in body
+
+    def test_the_history_is_not_offered_when_only_the_py_goes(self):
+        """The history is the history OF the source. A .py is not something anybody edited."""
+        assert "scope !== 'compiled'" in _fn(_read(UI), '_mibDeleteRow')
+
+    def test_hiding_the_selection_button_hides_its_caret(self):
+        """The button is inside a group now: hiding it alone leaves the caret on its own."""
+        assert "getElementById('mibDeleteSelGroup')" in _fn(_read(UI), '_mibUpdateDeleteBtn')
+
+    def test_a_scope_the_selection_has_nothing_of_says_so(self):
+        """Every row picked may still be uncompiled. Silence there reads as a click that did
+        not register."""
+        assert 'mib_delete_none_of_that' in _fn(_read(UI), '_mibDeleteSelected')
+
+
+class TestTheHistoryIsServerSide:
+
+    def test_the_module_declares_its_own_table(self):
+        """The mechanism for a module keeping data in the shared database, used as intended:
+        a file beside the MIBs would be per-container, and a deployment with a web container
+        and a worker container shares the database and not the disk."""
+        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
+        assert 'def discover_db_tables' in init
+        assert 'mib_versions.SCHEMA' in init
+
+    def test_editing_needs_edit_rights_and_reading_does_not(self):
+        """`READ_ONLY_ACTIONS` is what the route checks to decide whether `modules_view` is
+        enough. A write action listed there is a write anybody who can look can do."""
+        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
+        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
+        ro = acts[acts.index('READ_ONLY_ACTIONS'):]
+        for a in ('save_mib_source', 'restore_mib_version', 'list_mib_versions',
+                  'get_mib_version'):
+            assert f"'{a}'" in acts, f'{a} is not a declared action — the route 404s'
+        for a in ('save_mib_source', 'restore_mib_version'):
+            assert f"'{a}'" not in ro, f'{a} is marked read-only — anyone who can look can write'
+        for a in ('list_mib_versions', 'get_mib_version'):
+            assert f"'{a}'" in ro, f'{a} audits a row for every look'
+
+    def test_the_actor_reaches_the_module(self):
+        """A history that says only WHAT changed answers half the question on a panel with
+        more than one administrator."""
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'modules', 'routes.py'))
+        assert "config['__user__'] = session.get('username', '')" in routes
+
+
+class TestManyMibsStayWorkable:
+    """Twenty MIBs are a list. A repository import brings two thousand, and a flat list of
+    two thousand is unreadable however fast it draws — the folders the import already keeps
+    are the structure that was there all along, so the list uses them."""
+
+    def test_the_group_is_decided_after_the_state_and_not_before(self):
+        """It depends on the state — a dependency has no folder — and reading a property the
+        line above has not assigned yet is `undefined`, which compares false and quietly puts
+        every dependency in the top-level group. Ninety-four of them, filed as if somebody had
+        chosen them."""
+        body = _fn(_read(UI), '_mibRows')
+        assert body.index('r.state = ') < body.index('r.group ='), \
+            'the group is computed before the state it depends on'
+
+    def test_dependencies_are_not_filed_as_if_somebody_chose_them(self):
+        ui = _read(UI)
+        assert '_MIB_DEP_GROUP' in _fn(ui, '_mibRows')
+        assert 'mib_group_deps' in _fn(ui, '_mibGroupLabel')
+
+    def test_they_sort_last_because_it_says_so(self):
+        """The key is a control character, and leaving the order to how a collation feels
+        about one is having an opinion about something nobody should have to."""
+        assert 'rank' in _fn(_read(UI), '_mibGroups')
+
+    def test_a_small_tree_is_still_a_plain_list(self):
+        """Grouping twenty files is pure overhead: the headers exist for the case that does
+        not fit, and must not tax the case that does."""
+        ui = _read(UI)
+        assert '_MIB_AUTO_EXPAND' in _fn(ui, '_mibListHtml')
+        assert 'shown.map(r => _mibRow(r))' in _fn(ui, '_mibListHtml')
+
+    def test_one_folder_is_not_a_choice(self):
+        """A selector offering the only option there is, is a permanent reminder of a tree
+        with no branches."""
+        assert 'groups.size < 2' in _fn(_read(UI), '_mibFolderSelect')
+
+    def test_a_search_opens_the_folders_it_matched_in(self):
+        """Typing something that exists and being shown nothing, because the match is inside
+        a closed folder, is a search that reads as broken."""
+        assert '!!q ||' in _fn(_read(UI), '_mibListHtml')
+
+    def test_a_folder_can_be_selected_from_its_header(self):
+        """Compiling or deleting a vendor's worth of MIBs is one of the few things anybody
+        does in bulk here, and doing it by ticking six hundred boxes is not doing it."""
+        ui = _read(UI)
+        assert '_mibGroupSelect' in _fn(ui, '_mibGroupHeader')
+
+    def test_the_header_checkbox_is_not_inside_the_collapse_button(self):
+        """A control inside a control: the browser is entitled to swallow the click, and
+        which of the two wins is not a thing to leave to chance."""
+        body = _fn(_read(UI), '_mibGroupHeader')
+        assert '<button' not in body, 'the header is a button again, with a checkbox in it'
+        assert 'role="button"' in body, 'the collapse target is not reachable by keyboard'
+
+    def test_it_selects_what_is_visible_and_not_what_the_folder_holds(self):
+        """With a state chip or a search active, a tick beside four rows must not select the
+        six hundred behind them."""
+        assert '_mibVisibleRows()' in _fn(_read(UI), '_mibGroupSelect')
+
+    def test_a_half_selected_folder_does_not_look_untouched(self):
+        """`indeterminate` is a property, not an attribute, so it cannot be written into the
+        markup — and an empty box on a folder with half its rows ticked is a lie."""
+        ui = _read(UI)
+        assert 'indeterminate' in _fn(ui, '_mibGroupCheckStates')
+        assert '_mibGroupCheckStates()' in _fn(ui, '_mibFilterLists')
+
+    def test_the_folder_says_how_much_is_left_and_not_how_much_there_is(self):
+        """A folder of six hundred says nothing on its own; "588/612" says where the work is
+        and which vendor to open. A stale module does not count as done — it was compiled from
+        bytes that are no longer there, which is the whole reason that state exists."""
+        body = _fn(_read(UI), '_mibGroupHeader')
+        assert "r.py && r.state !== 'stale'" in body
+        assert '${done}/${rs.length}' in body
+
+    def test_the_counts_are_of_the_folder_and_not_of_the_moment(self):
+        """A count that moves as you type is one nobody can use to decide where to look —
+        which is the only thing the number is for."""
+        body = _fn(_read(UI), '_mibFilterLists')
+        assert '_mibFolderSelect(all)' in body, 'the folder counts follow the filter'
+
+
+class TestTheCompileButtonSaysWhatItDoes:
+    """It said "compile all" and did neither: it walked every MIB and let pysmi skip the
+    up-to-date ones. Two actions now, because they are two things."""
+
+    def test_the_default_action_is_the_pending_one(self):
+        """It is what somebody presses without reading it, so it had better be the one that
+        does the work and not the inventory."""
+        assert "_compileMibs(null, 'pending')" in _manager_modal()
+
+    def test_rebuilding_everything_is_behind_the_dropdown_and_asks(self):
+        """Slow, almost never wanted, and indistinguishable from the fast one once it is
+        running."""
+        assert 'dropdown-toggle-split' in _manager_modal()
+        assert 'showConfirmModal' in _fn(_read(UI), '_mibRebuildAll')
+
+    def test_the_two_labels_stay_on_their_own_buttons(self):
+        """The compile job restores the main button's label when it ends, and it restored the
+        DROPDOWN item's — so "compile pending" renamed itself to "rebuild everything" the first
+        time anybody compiled, and stayed renamed. Two actions, one name, and the name that
+        survived was the slow one."""
+        # Comments here name the key on purpose; only the code counts.
+        ui = _strip_comments(_read(UI))
+        assert 'mib_compile_all' not in _fn(ui, '_compileMibs'), \
+            "the running job puts the other action's label on this button"
+        assert 'mib_compile_pending' in _fn(ui, '_compileMibs')
+
+    def test_the_scope_reaches_the_job(self):
+        assert "scope: scope || 'pending'" in _fn(_read(UI), '_compileMibs')
+
+    def test_finding_nothing_to_do_is_said_out_loud(self):
+        """A job that ends instantly and silently is a button that reads as broken — the
+        exact reading this screen has had to unlearn once already."""
+        assert 'up_to_date' in _fn(_read(UI), '_mibHandleCompileResult')
+
+    def test_a_module_compiled_from_bytes_that_are_gone_is_its_own_state(self):
+        """Editing a MIB produces this every single time: the row said "compiled" and meant
+        "compiled from something else", which sends somebody looking for a bug in the sampler
+        instead of pressing compile. As a FLAG on 'compiled' it also sat inside that count, so
+        the chips read "Pending 0, Compiled 97" while the button set off to do three files."""
+        ui = _read(UI)
+        assert "'stale'" in _fn(ui, '_mibRows')
+        assert 'mib_stale' in _fn(ui, '_mibStateBadge')
+
+    def test_the_chips_partition_the_list(self):
+        """Every row in exactly one state. Anything else and the counts stop adding up to the
+        total, which is the moment a number on screen becomes decoration."""
+        body = _fn(_read(UI), '_mibCounts')
+        for st in ('pending', 'stale', 'compiled', 'failed', 'dep'):
+            assert f'{st}: 0' in body or f'all: rows.length' in body
+        assert 'c[r.state]++' in body, 'a row can be counted in two places'
+
+    def test_the_button_and_the_chips_answer_the_same_question(self):
+        """"Compile pending" walks pending + outdated + failed. If the chips do not add up to
+        what it is about to do, one of the two is lying — and the one people trust is the one
+        they can see."""
+        body = _fn(_read(UI), '_mibToCompile')
+        for st in ('pending', 'stale', 'failed'):
+            assert f"'{st}'" in body
+
+    def test_the_button_says_how_many_before_it_is_pressed(self):
+        """Pressing it and being told a number you had no way of predicting is how this came
+        to look like it was doing something else entirely."""
+        ui = _read(UI)
+        assert '_mibToCompile().length' in _fn(ui, '_mibUpdateCompileBtn')
+        assert '_mibUpdateCompileBtn()' in _fn(ui, '_mibFilterLists')
+
+
+class TestImportingIsFoldedAway:
+
+    def test_the_import_rows_live_in_a_collapsed_panel(self):
+        """Four always-open import rows took half the modal for a step taken once in a
+        while. Folded, they cost one line — and `<details>` with no `open` starts closed."""
+        modal = _manager_modal()
+        m = re.search(r'<details[^>]*id="mibImportPanel"([^>]*)>', modal)
+        assert m, 'the import panel is gone'
+        assert 'open' not in m.group(1)
+        panel = modal[m.end():modal.index('</details>', m.end())]
+        for el in ('mibImportUrlInput', 'mibGithubUrlInput', 'mibArchiveSel'):
+            assert el in panel, f'{el} is not inside the import panel'
+
+    def test_its_summary_is_translated_like_every_other_string(self):
+        """An empty <summary> is a triangle with no word beside it."""
+        assert 'id="mibImportSummary"' in _manager_modal()
+        assert "_set('mibImportSummary'" in _read(UI)
+
+    def test_the_progress_bar_stays_outside_it(self):
+        """A compile started from the panel reports into the bar; folded away with the panel,
+        a running job would look like nothing happening."""
+        modal = _manager_modal()
+        assert modal.index('mibProgressSection') > modal.index('id="mibImportPanel"')
+        panel_end = modal.index('</details>', modal.index('id="mibImportPanel"'))
+        assert modal.index('mibProgressSection') > panel_end

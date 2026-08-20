@@ -16,11 +16,27 @@
 /* MIB Browser — scrollable OID tree */
 #mibBrowserTree { overflow-y: auto; max-height: 65vh; }
 
-/* MIB Manager — modal content minimum height */
-#mibManagerModal .modal-content { min-height: 60vh; }
+/* MIB Manager — the height chain is .modal-dialog-scrollable + .ss-vfill/.ss-vscroll in the
+   markup, not CSS pinned to this modal's id: the list has to reach the bottom edge at the
+   default size, at a size the user dragged, and at the 95vh the maximize button sets. */
 
-/* MIB Manager — modal body fills remaining height */
-#mibManagerModal .modal-body { flex: 1 1 auto; overflow-y: auto; }
+/* MIB source viewer — the editor fills the panel it was given; the height is the modal's to
+   set, not the editor's. A viewer of a 200-line MIB and one of a 4000-line MIB are the same
+   box, because the thing that varies is the scroll and not the frame. */
+.mib-src .CodeMirror { height: 100%; font-size: .72rem; }
+
+/* …and the same box when CodeMirror will not load: a viewer that fails to be pretty must not
+   fail to be a viewer. */
+.mib-src-plain {
+    font-size: .70rem;
+    max-height: 45vh;
+    overflow: auto;
+    background: var(--bs-body-secondary-bg, var(--bs-secondary-bg));
+}
+
+/* The line a compiler named. Painted on the line background rather than the gutter: the
+   gutter number is what you searched for, the line is what you came to read. */
+.mib-src-badline { background: rgba(var(--bs-danger-rgb), .18); }
 
 /* MIB Manager — file upload label */
 #mibUploadLabel { cursor: pointer; }

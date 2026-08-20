@@ -180,9 +180,37 @@ function _auditChangeLabel(field) {
 // lookup falls back to the word itself, so an entry a module wrote — or one from a build newer
 // than the language file — still reads, just untranslated.
 const _AUDIT_ENUM_FIELDS = new Set(['stage', 'error', 'method', 'source', 'result', 'kind',
-                                    'expires_at']);
-const _auditWord = v => I18N['audit_v_' + String(v)] || String(v);
-const _auditFieldLabel = k => I18N['audit_f_' + String(k)] || String(k);
+                                    'expires_at', 'action']);
+
+// …and a fourth kind: the words a MODULE wrote. `action: 'compile_mibs_status'` and
+// `failed_detail` are SNMP's vocabulary, not the core's, and the core ships no string that
+// names a module — so it asks the module, in the module's own `ui` block, under the same
+// `audit_f_`/`audit_v_` names. An entry says which module it was about; that is the whole
+// handle. Core first: a module must not be able to rename `error` or `user` for everybody.
+//
+// Scoped to the object being rendered and put back afterwards, because an entry can hold
+// another module's object inside its own and the words must follow the thing they belong to.
+let _auditMod = '';
+function _auditModWord(key) {
+    return (_auditMod && typeof _modUiStr === 'function')
+        ? (_modUiStr(_auditMod, key, '') || '') : '';
+}
+const _auditWord = v => I18N['audit_v_' + String(v)]
+                     || _auditModWord('audit_v_' + String(v)) || String(v);
+
+// `<field>_truncated` is not anybody's vocabulary — the CORE adds it when it caps a list
+// (see cap_audit_lists), so the core reads it back the same way: the field's own label and
+// what the suffix means. Written out per field, there would be one to forget every time a
+// module adds a list.
+function _auditFieldLabel(k) {
+    const key = String(k);
+    const own = I18N['audit_f_' + key] || _auditModWord('audit_f_' + key);
+    if (own) return own;
+    if (key.endsWith('_truncated')) {
+        return `${_auditFieldLabel(key.slice(0, -'_truncated'.length))} — ${t('audit_f_truncated_suffix')}`;
+    }
+    return key;
+}
 
 // A third kind of value, and the reason it needs its own rule: these are not vocabulary the
 // panel chose, they are PERMISSION FLAGS — the same catalog Access › Permissions and the token
@@ -224,6 +252,9 @@ function renderReadable(v) {
         return v.map(x => renderReadable(x)).join('<hr class="my-1">');
     }
     if (typeof v === 'object') {
+        // Whose words these are, for as long as they are being drawn.
+        const _prevMod = _auditMod;
+        if (typeof v.module === 'string' && v.module) _auditMod = v.module;
         const rows = Object.entries(v).map(([k, val]) =>
             `<tr><td class="pe-3 text-muted small text-nowrap">${esc(_auditFieldLabel(k))}</td><td>${
                 _AUDIT_PERM_FIELDS.has(k)
@@ -232,6 +263,7 @@ function renderReadable(v) {
                         ? esc(_auditWord(val))
                         : renderReadable(val)}</td></tr>`
         ).join('');
+        _auditMod = _prevMod;
         return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
     }
     return esc(String(v));

@@ -9,6 +9,9 @@
 {% include "partials/core/_constants.html" %}
 {% include "partials/core/_utils.html" %}
 {% include "partials/core/_toast.html" %}
+{# The CodeMirror lazy-loader. Core because two unrelated screens want it — the notification
+   template editor and the MIB source viewer — and neither should reach into the other. #}
+{% include "partials/core/_codemirror.html" %}
 {% include "partials/core/_polling.html" %}
 {% include "partials/core/_api.html" %}
 {% include "partials/core/_field_render.html" %}

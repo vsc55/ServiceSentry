@@ -162,7 +162,7 @@ function _hostFieldControl(f, val, onch, ctx) {
     }
     if (f.secret || f.sensitive) {
         return fieldCtl({kind: 'secret',
-            inputAttrs: ` autocomplete="new-password" placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}"`,
+            inputAttrs: ` placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}"`,
             onChange: `${onch}this.value)`});
     }
     // Placeholder: the 'label' field (or a schema placeholder of '__key__')

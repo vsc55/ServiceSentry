@@ -38,6 +38,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
 | [Perfiles de host](#5-perfiles-de-host-__host_profile__) | `schema.json` · `__host_profile__` | `watchfuls/*` | `lib.core.hosts.profiles` | sección Servers (formularios por protocolo) |
 | [Tablas de módulo](#6-tablas-de-módulo-discover_db_tables) | `__init__.py` · `discover_db_tables()` | `watchfuls/*` | `reconcile_module_tables()` | BD general (crea/migra `mod_<m>_<n>`) |
+| [Campos de historial en caliente](#6c-campos-de-historial-en-caliente-discover_history_fields) | `__init__.py` · `discover_history_fields()` | `watchfuls/*` | `module_history_fields()` | leyenda y eje de las gráficas de History e Infraestructura |
 | [Provisión Entra](#7-provisión-entra-__entraid_provision__) | `schema.json`/OIDC · `__entraid_provision__` | `watchfuls/*` + config OIDC | `normalize_entraid_provision()` | asistente device-code → registro de app en Graph |
 | [Páginas de módulo](#2c-una-sección-propia-aportada-por-un-módulo-__page__) | `schema.json` · `__page__` | `watchfuls/*` | `module_pages_catalog()` | sección propia: URL + entrada de sidebar + panel |
 | [Registro de config](#8-registro-de-config-spec-y-layout) | `spec.py` (`Cfg`) + `layout.py` (`TABS`/`CARDS`) | — (registro central, no escaneo) | `config_layout()` / `cfg_meta()` | pantalla de config renderizada desde datos |
@@ -540,6 +541,43 @@ flowchart TB
 
 ---
 
+## 6c. Campos de historial en caliente (`discover_history_fields`)
+
+Lo que un módulo grafica se declara en su `schema.json` (`__history__.fields`: nombre, etiqueta
+y unidad de cada valor), y eso basta mientras la respuesta sea la misma en todas las
+instalaciones. Deja de bastar en cuanto depende de datos que aporta la instalación: el módulo
+SNMP graba **lo que declaren sus perfiles de dispositivo**, y alguno lo escribió alguien para el
+aparato de su rack después de publicarse esta versión. Un schema no puede nombrar un campo que
+no existía cuando se escribió.
+
+**Descriptor** (en `watchfuls/<m>/__init__.py`): una función
+`discover_history_fields(lang, var_dir='')` que devuelve `{campo: {label, unit}}` — la misma
+forma que produce el `__history__` estático, porque es lo que hace un valor **graficable y
+nombrable**. Recibe el idioma del lector y el directorio de datos (donde viven los ficheros que
+aporta la instalación); una función que sólo necesite el idioma puede aceptar sólo ese.
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    stat["schema.json · __history__.fields<br/>(lo que el módulo graba SIEMPRE)"]
+    dyn["watchfuls/&lt;m&gt;/__init__.py · discover_history_fields(lang, var_dir)<br/>(lo que depende de los datos instalados)"]
+    dyn --> merge["history_meta(): dinámicos primero, estáticos encima"]
+    stat --> merge
+    merge --> ui(["leyenda, etiqueta y unidad en History y en Infraestructura"])
+```
+
+- **Gana el estático**: es el que alguien escribió a propósito, y un descubrimiento en caliente
+  que lo renombrara en silencio convertiría el schema en una mentira que se lee como correcta.
+- **Fallar es un mapa vacío, nunca una excepción.** Estos nombres deciden lo que dice la leyenda
+  de una gráfica; un módulo que no sepa contestar cuesta *sus etiquetas* — los valores se siguen
+  grabando y graficando, leídos por su nombre crudo— y eso no es motivo para que la pantalla de
+  History devuelva un 500.
+- **Dónde acaba:** `lib/modules/history_fields.py` lo resuelve y
+  `lib.core.history.service.history_meta()` lo mezcla.
+
+---
+
 ## 7. Provisión Entra (`__entraid_provision__`)
 
 Un módulo (o la config OIDC) declara la app de Entra que el asistente device-code compartido
@@ -886,6 +924,7 @@ flowchart TB
 | Un tipo de credencial para un módulo | `schema.json` → `__credential__` (+ campos en schema/lang) |
 | Un protocolo de conexión de host | `schema.json` → `__host_profile__` |
 | Una tabla propia de un módulo | `discover_db_tables()` en el `__init__.py` del módulo |
+| Que un módulo nombre campos de historial que sólo conoce en caliente | `discover_history_fields(lang, var_dir)` en su `__init__.py` — ver §6c |
 | Que el backup incluya los ficheros de un módulo | `schema.json` → `__backup_part__` — ver §6b |
 | Registrar una app de Entra para un módulo | `schema.json` → `__entraid_provision__` |
 | Una opción de configuración | `Cfg(...)` en `spec.py` (+ entrada en `CARDS` de `layout.py`) |

@@ -197,6 +197,99 @@ class SnmpClient:
         except Exception as exc:  # pylint: disable=broad-except
             return None, str(exc)
 
+    # ── SNMP Walk of ONE subtree (used by sampling) ────────────────────────────
+
+    # A table nobody bounded is a cycle nobody bounded: a chassis switch can answer thousands
+    # of rows on one column, and the walk that fetches them is the same one that has to finish
+    # before the next check runs. The ceiling is generous for real hardware and finite for the
+    # rest; a truncated walk says so instead of pretending it saw the whole table.
+    WALK_MAX_ROWS = 512
+
+    @staticmethod
+    def _snmp_walk_oid(
+        host: str,
+        port: int,
+        version: str,
+        community: str,
+        timeout: int,
+        retries: int,
+        oid: str,
+        max_rows: int = 0,
+        v3_username: str = '',
+        v3_auth_key: str = '',
+        v3_priv_key: str = '',
+        v3_auth_proto: str = 'MD5',
+        v3_priv_proto: str = 'DES',
+    ) -> tuple:
+        """Walk ONE subtree and return ``({index: value}, error)``.
+
+        The discovery walk is a different question and answers it differently: it sweeps two
+        fixed subtrees, truncates values to 120 characters and swallows errors, because what it
+        produces is a list somebody picks from. A profile metric names its own column, needs the
+        value **whole** (a truncated counter is a wrong number, not a shortened one), and needs
+        to know when the device did not answer — an empty table and an unreachable device look
+        identical otherwise, and they are not the same thing.
+
+        Keys are the OID **suffix** after the walked root, which is the table index: `"3"` for a
+        plain table, `"1.3.6.1.4.1"` for one indexed by an OID. Rows come back in the order the
+        device sent them.
+        """
+        if not _HAS_PYSNMP:
+            return {}, 'pysnmp is not installed'
+        root = str(oid or '').strip().lstrip('.')
+        if not root:
+            return {}, 'no oid'
+        limit = int(max_rows or SnmpClient.WALK_MAX_ROWS)
+
+        async def _run() -> tuple:
+            auth_data = SnmpClient._auth_data(
+                version, community, v3_username, v3_auth_key, v3_priv_key,
+                v3_auth_proto, v3_priv_proto,
+            )
+            transport = await UdpTransportTarget.create(
+                (host, port), timeout=timeout, retries=retries
+            )
+            engine  = SnmpEngine()
+            context = ContextData()
+            target  = ObjectType(ObjectIdentity(root))
+            rows: dict = {}
+            # GETBULK where the version allows it: a 48-port table is one round trip instead of
+            # forty-eight, and the walk happens on every cycle rather than when somebody asks.
+            if version != '1':
+                cmd = bulk_walk_cmd(engine, auth_data, transport, context, 0, 50, target,
+                                    lexicographicMode=False)
+            else:
+                cmd = walk_cmd(engine, auth_data, transport, context, target,
+                               lexicographicMode=False)
+            try:
+                async for err_ind, err_st, err_idx, var_binds in cmd:
+                    if err_ind:
+                        return rows, str(err_ind)
+                    if err_st:
+                        return rows, f'{err_st.prettyPrint()} at index {int(err_idx) - 1}'
+                    for vb in var_binds:
+                        oid_str = str(vb[0])
+                        if oid_str == root:
+                            index = '0'          # a scalar walked as if it were a table
+                        elif oid_str.startswith(root + '.'):
+                            index = oid_str[len(root) + 1:]
+                        else:
+                            return rows, None    # walked past the subtree: the table is done
+                        rows[index] = str(vb[1].prettyPrint())
+                        if len(rows) >= limit:
+                            return rows, None
+            finally:
+                try:
+                    engine.close_dispatcher()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            return rows, None
+
+        try:
+            return run_coroutine(_run())
+        except Exception as exc:  # pylint: disable=broad-except
+            return {}, str(exc)
+
     # ── SNMP Walk (used by discover) ───────────────────────────────────────────
 
     @staticmethod

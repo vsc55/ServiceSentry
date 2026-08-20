@@ -124,21 +124,33 @@ def fill_from_stored_item(wa, module, config):
 
 
 def restore_action_secrets(wa, module, config):
-    """Restore masked (null/'') secret fields in an action's *config* from the stored
-    module-config item (matched by the injected ``_item_key``), so a web action (e.g. datastore
-    test_connection / list_databases) run AFTER a reload uses the real stored secret instead of
-    the masked placeholder."""
-    key = str(config.get('_item_key') or '').strip()
-    if not key:
-        return
+    """Restore masked (null/'') secret fields in an action's *config* from what is stored.
+
+    Two levels, because a module has secrets at both. An ITEM's (matched by the injected
+    ``_item_key``) so a web action run after a reload — datastore test_connection,
+    list_databases — authenticates with the stored password instead of the masked placeholder.
+    And the MODULE's own, which reach an action the same way and were left masked: the browser
+    holds ``null`` for every secret it was sent, so an action that needs one received nothing
+    and behaved as if it had never been configured. A GitHub token that silently does not
+    apply looks exactly like a rate limit nobody can explain.
+    """
     try:
         from lib.security import secret_manager  # noqa: PLC0415
         modules = wa._load_modules()
     except Exception:  # pylint: disable=broad-except
         return
+    key = str(config.get('_item_key') or '').strip()
     for mk in (module, f'watchfuls.{module}'):
         mod = modules.get(mk)
         if not isinstance(mod, dict):
+            continue
+        # The module's own fields: everything that is not a collection of items.
+        _own = {k: v for k, v in mod.items()
+                if not k.startswith('__') and not isinstance(v, dict)}
+        if _own:
+            secret_manager.restore_sensitive(
+                config, _own, keys=getattr(wa, '_secret_keys', frozenset()))
+        if not key:
             continue
         for coll, items in mod.items():
             if coll.startswith('__') or not isinstance(items, dict):

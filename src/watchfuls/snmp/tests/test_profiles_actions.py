@@ -120,40 +120,140 @@ class TestTheCatalogueOnScreen:
 
 
 class TestAskingTheDeviceWhatItIs:
+    """The list of candidates comes from the PROFILES, not from this action.
 
-    def test_it_proposes_the_generic_profile_for_anything_that_answers(self, acts):
-        """MIB-II is what every agent serves, so it is what makes a device measurable before
-        anybody has decided anything about it."""
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.99999.1', None)}
+    Each says how it is recognised — `match.sysobjectid_prefix` (who made the device) and
+    `match.probe` (an OID it must answer) — and detection asks exactly those. It carried a
+    hardcoded list of "the generic ones" for one build, and the profile added in that build was
+    invisible to it: assigned by hand it worked perfectly, detected it did not exist. That is
+    what a list of names inside the core always turns into, and it is why the catalogue is
+    scanned instead.
+    """
+
+    # sysDescr / hrMemorySize / ssCpuUser — what the shipped profiles probe.
+    DESCR = '1.3.6.1.2.1.1.1.0'
+    HOSTMIB = '1.3.6.1.2.1.25.2.2.0'
+    UCD = '1.3.6.1.4.1.2021.11.9.0'
+    SYSOID = '1.3.6.1.2.1.1.2.0'
+
+    def test_a_device_that_only_answers_mib2_gets_the_generic_profile(self, acts):
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.99999.1', None),
+                         self.DESCR: ('Some appliance', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
-        assert res['ok'] is True
-        assert res['items'] == ['sys_generic']
-        assert res['matched'] == ''
+        assert res['ok'] is True and res['items'] == ['sys_generic']
 
-    def test_a_device_with_interfaces_gets_the_interface_profile(self, acts):
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.99999.1', None),
-                         '1.3.6.1.2.1.2.1.0': ('8', None)}
+    def test_a_nas_that_serves_the_host_mib_is_offered_storage(self, acts):
+        """The case that exposed the hardcoded list: a Synology answers HOST-RESOURCES-MIB and
+        its sysObjectID is its own, which no generic profile claims and none should. Whether a
+        device's volumes can be read is a question only the device can answer."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
+                         self.DESCR: ('Linux nas-01', None),
+                         self.HOSTMIB: ('182', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
-        assert res['items'] == ['sys_generic', 'if_generic']
-        assert res['interfaces'] == 8
+        assert 'hr_storage' in res['items']
+        assert res['reasons']['hr_storage'] == 'probe'
 
-    def test_a_device_with_no_interfaces_does_not_get_a_table_of_none(self, acts):
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.99999.1', None),
-                         '1.3.6.1.2.1.2.1.0': ('0', None)}
-        assert acts.detect_profiles({'host': '10.0.0.1'})['items'] == ['sys_generic']
+    def test_a_device_that_does_not_serve_it_is_not_offered_it(self, acts):
+        """A switch has no filesystems. Offering the profile would be offering a screen of
+        empty charts, which reads as a broken device rather than as an inapplicable profile."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.9.1.1', None),
+                         self.DESCR: ('Cisco IOS', None)}
+        assert 'hr_storage' not in acts.detect_profiles({'host': '10.0.0.1'})['items']
 
-    def test_a_claimed_device_gets_the_profile_that_claims_it(self, acts):
-        """`ucd_linux` claims the UCD tree, which is what most Linux and BSD agents answer."""
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.8072.3.2.10', None)}
+    def test_who_made_it_counts_for_a_profile_with_no_probe(self, acts, tmp_path):
+        """A vendor profile can be pure vendor OIDs with no OID worth probing; then the
+        sysObjectID is the only thing that can claim it."""
+        (tmp_path / 'snmp_profiles').mkdir()
+        (tmp_path / 'snmp_profiles' / 'acme.json').write_text(json.dumps(_profile(
+            'acme', match={'sysobjectid_prefix': '1.3.6.1.4.1.77777'})), encoding='utf-8')
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.77777.9', None)}
+        res = acts.detect_profiles({'host': '10.0.0.1', '__var_dir__': str(tmp_path)})
+        assert res['matched'] == 'acme' and 'acme' in res['items']
+        assert res['reasons']['acme'] == 'sysobjectid'
+
+    def test_a_declared_probe_governs_over_the_vendor_claim(self, acts):
+        """A profile that names an OID has made the more specific statement about itself: the
+        device has to answer THIS. A model of the right make that does not answer it does not
+        have what the profile measures, and proposing it would offer empty charts — and, through
+        supersedes, would displace the generic profile that does work on that model."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.8072.3.2.10', None),
+                         self.DESCR: ('Linux srv', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
-        assert res['matched'] == 'ucd_linux'
-        assert 'ucd_linux' in res['items']
+        assert res['matched'] == 'ucd_linux', 'the claim is still reported'
+        assert 'ucd_linux' not in res['items'], 'but it did not answer its own probe'
 
-    def test_the_proposal_never_repeats_a_profile(self, acts):
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.8072.3.2.10', None),
-                         '1.3.6.1.2.1.2.1.0': ('2', None)}
+    def test_a_profile_claimed_both_ways_appears_once(self, acts):
+        """`ucd_linux` names the net-snmp tree AND probes its own OID; a device running
+        net-snmp answers to both, and two entries would be one profile ticked twice."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.8072.3.2.10', None),
+                         self.DESCR: ('Linux srv', None),
+                         self.UCD: ('7', None)}
         items = acts.detect_profiles({'host': '10.0.0.1'})['items']
+        assert items.count('ucd_linux') == 1
         assert len(items) == len(set(items))
+
+    def test_answering_at_all_is_the_signal(self, acts):
+        """Not what the value says. A threshold here would be this action deciding something
+        about a profile it is supposed to know nothing about — and "0 interfaces" or "0
+        processes" is still a device that implements the MIB."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.99999.1', None),
+                         self.DESCR: ('Some appliance', None),
+                         self.HOSTMIB: ('0', None)}
+        assert 'hr_storage' in acts.detect_profiles({'host': '10.0.0.1'})['items']
+
+    def test_an_empty_answer_is_not_an_answer(self, acts):
+        """Some agents return an empty string for an OID they do not really implement."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.99999.1', None),
+                         self.DESCR: ('Some appliance', None),
+                         self.HOSTMIB: ('', None)}
+        assert 'hr_storage' not in acts.detect_profiles({'host': '10.0.0.1'})['items']
+
+    def test_the_proposal_is_stable_across_runs(self, acts):
+        """Two detections of one unchanged device must tick the same boxes, or the admin is
+        left deciding which run to believe."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
+                         self.DESCR: ('Linux nas-01', None),
+                         self.HOSTMIB: ('182', None)}
+        first = acts.detect_profiles({'host': '10.0.0.1'})['items']
+        second = acts.detect_profiles({'host': '10.0.0.1'})['items']
+        assert first == second
+
+    def test_a_vendor_with_several_profiles_gets_them_all(self):
+        """A Synology system, its disks and its volumes are three subjects and three profiles,
+        and all three claim the vendor tree. Proposing only the most specific would leave the
+        other two undetected on exactly the hardware they were written for."""
+        from watchfuls.snmp import profiles as _p
+        got = [x['id'] for x in _p.claims_sysobjectid(_p.catalog(), '1.3.6.1.4.1.6574.1')]
+        assert {'synology_system', 'synology_disks', 'synology_raid'} <= set(got)
+
+    def test_a_synology_is_offered_its_own_profiles(self, acts):
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
+                         self.DESCR: ('Linux nas-01 DSM', None),
+                         '1.3.6.1.4.1.6574.1.5.1.0': ('DS920+', None)}
+        res = acts.detect_profiles({'host': '10.0.0.1'})
+        assert {'synology_system', 'synology_disks', 'synology_raid'} <= set(res['items'])
+
+    def test_a_vendor_profile_displaces_the_generic_one_it_replaces(self, acts):
+        """A Synology answers both the UCD disk-I/O probe and its own. Proposing both would
+        chart every disk twice, under two sets of names that disagree."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
+                         self.DESCR: ('Linux nas-01 DSM', None),
+                         '1.3.6.1.4.1.6574.1.5.1.0': ('DS920+', None),
+                         '1.3.6.1.4.1.6574.101.1.1.1.0': ('0', None),
+                         '1.3.6.1.4.1.2021.13.15.1.1.1.1': ('1', None)}
+        items = acts.detect_profiles({'host': '10.0.0.1'})['items']
+        assert 'synology_storageio' in items and 'disk_io' not in items
+
+    def test_a_generic_profile_survives_where_the_vendor_one_does_not_apply(self, acts):
+        """Only what was PROPOSED supersedes: a Synology profile the device does not serve
+        cannot displace one it does. An older model with no storage-I/O table still charts its
+        disks through UCD."""
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
+                         self.DESCR: ('Linux nas-01 DSM', None),
+                         '1.3.6.1.4.1.6574.1.5.1.0': ('DS213', None),
+                         '1.3.6.1.4.1.2021.13.15.1.1.1.1': ('1', None)}
+        items = acts.detect_profiles({'host': '10.0.0.1'})['items']
+        assert 'disk_io' in items and 'synology_storageio' not in items
 
     def test_a_device_that_does_not_answer_is_an_error_and_not_an_empty_answer(self, acts):
         """"No profile matches" would read as a device with nothing to measure. It is a
@@ -169,16 +269,26 @@ class TestAskingTheDeviceWhatItIs:
     def test_it_brings_back_what_the_device_says_about_itself(self, acts):
         """sysDescr is often the only thing that identifies a box whose sysObjectID nobody has
         claimed — and it is what somebody writes a profile from."""
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.6574.1', None),
-                         '1.3.6.1.2.1.1.1.0': ('Linux nas-01 5.10', None),
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
+                         self.DESCR: ('Linux nas-01 5.10', None),
                          '1.3.6.1.2.1.1.5.0': ('nas-01', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
         assert res['sysdescr'] == 'Linux nas-01 5.10' and res['sysname'] == 'nas-01'
         assert res['sysobjectid'] == '1.3.6.1.4.1.6574.1'
 
-    def test_a_device_that_answers_nonsense_for_its_interfaces_still_reports(self, acts):
-        """One unusable answer out of four is not a failed detection."""
-        acts._answers = {'1.3.6.1.2.1.1.2.0': ('1.3.6.1.4.1.99999.1', None),
-                         '1.3.6.1.2.1.2.1.0': ('n/a', None)}
+    def test_a_large_catalogue_cannot_turn_one_button_into_a_minute(self, acts):
+        """One round trip per probing profile, against a device somebody is waiting on. Past
+        the cap the rest are not probed — which costs suggestions, not the answer."""
+        from watchfuls.snmp import actions as _mod
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.99999.1', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
-        assert res['ok'] is True and res['interfaces'] == 0
+        assert res['probed'] <= _mod._MAX_PROBES
+
+    def test_every_shipped_profile_says_how_to_recognise_it(self):
+        """A profile the catalogue cannot detect is one an admin has to know exists — which is
+        the failure this whole mechanism replaced."""
+        from watchfuls.snmp import profiles as _p
+        for pid, prof in _p.catalog().items():
+            match = prof.get('match') or {}
+            assert match.get('probe') or match.get('sysobjectid_prefix'), \
+                f'{pid} can never be detected'

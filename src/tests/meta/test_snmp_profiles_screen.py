@@ -166,6 +166,46 @@ class TestTheHostModalIsWhereItIsActuallyBound:
             'the callback must win over the modulesData path, not the other way round')
 
 
+class TestTheChipsReadAsNames:
+    """The field stores profile ids, which is the right thing to store — they survive a
+    rename, they are what the API speaks and what a bug report quotes. They are not what a
+    person reads: a row of `hr_storage`, `if_generic`, `ucd_linux` on a host form says nothing
+    about what is being measured, by somebody who is deciding whether the assignment is right.
+    """
+
+    def test_the_chips_renderer_asks_for_a_label(self):
+        js = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_field_chips.html')))
+        assert 'const CHIP_LABELS' in js
+        assert '_chipLabel(key, v)' in js
+
+    def test_the_key_is_module_and_field_so_both_panes_hit_it(self):
+        """The Modules tab path carries the item's uid and the host modal's carries its index;
+        neither is part of what the FIELD is, and a registry keyed by either would work on one
+        screen and not the other."""
+        js = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_field_chips.html')))
+        fn = _fn(js, '_chipLabelKey')
+        assert 'parts[0]' in fn and 'parts[parts.length - 1]' in fn
+
+    def test_the_module_registers_one_for_its_field(self):
+        js = _read(UI)
+        assert f"CHIP_LABELS['{PICKER_KEY.split('|')[0]}|{FIELD}']" in js
+
+    def test_the_id_is_not_lost_when_a_name_replaces_it(self):
+        """It is the string that identifies the profile everywhere else, so it stays in the
+        tooltip rather than disappearing behind a translation."""
+        js = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_field_chips.html')))
+        assert 'title="${escAttr(_tip)}"' in js
+
+    def test_a_catalogue_that_cannot_be_read_leaves_the_ids(self):
+        """Which is the old behaviour and a working screen — not a retry loop, and not chips
+        that vanish."""
+        fn = _fn(_strip_comments(_read(UI)), '_snmpProfNamesLoad')
+        assert '_snmpProfNamesFrom((d && d.ok && d.items) || [])' in fn
+
+
 class TestNothingReadsAsItsOwnKey:
 
     def test_every_string_the_screen_asks_for_exists_in_both_languages(self):
@@ -189,3 +229,29 @@ class TestNothingReadsAsItsOwnKey:
             assert (data.get('hints') or {}).get(FIELD), f'{code}: no hint'
             assert (data.get('group_labels') or {}).get(
                 _schema()['servers'][FIELD]['group']), f'{code}: the group has no name'
+
+
+class TestTheMibManagerScreen:
+    """Two ways the MIB manager misleads without erroring, both found on screen."""
+
+    def test_a_source_with_no_folder_is_not_offered_as_one(self):
+        """Synology publishes an archive of twenty MIBs; the mirror that hosts three of them
+        is a dependency source for compiling, not the place to import from. Listed in the
+        folder dropdown it looks like the main way in, and it is the small version."""
+        js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
+        block = js.split('function _mibPopulateGithub')[1].split('function ')[0]
+        assert 'if (!r.folder) continue' in block
+
+    def test_the_import_report_cannot_push_the_dialog_open(self):
+        """A first import is twenty "new" rows. Left to grow, the list pushes the buttons
+        that act on it off the bottom of the screen — at the one moment they are needed."""
+        js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
+        fn = _fn(js, '_mibArchiveReport')
+        assert 'ss-scroll-box' in fn
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-scroll-box' in css, 'the class the report relies on does not exist'
+
+    def test_the_bounded_box_is_a_reusable_class_and_not_an_id(self):
+        """The panel has one rule about layout CSS: a generic class, never a per-id rule."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '#mibArchiveResult' not in css

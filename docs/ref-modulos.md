@@ -931,9 +931,13 @@ Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/prof
 | `width` | 32 o 64 bits del contador — **es lo que distingue una vuelta de un reinicio** |
 | `max_rate` | Techo opcional: una tasa imposible para ese enlace se descarta |
 | `index_label` | La columna que **nombra** cada fila de una tabla (sin ella, ocho interfaces son ocho números de índice, que no son el puerto del frontal) |
+| `scale_by` | La columna que da el factor, **por fila**, cuando lo decide el aparato y no el perfil (el tamaño de bloque de un sistema de ficheros) |
+| `group` | A qué **tabla** pertenece la métrica, para las tablas cuyas filas no tienen nombre: la identidad de una fila es su nombre, y sin él dos tablas caen a su índice SNMP — donde almacenamiento fila 3 y procesador fila 3 no son la misma fila |
 | `chart` | `line`, `area`, `value` o `none` |
 | `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina |
-| `match.sysobjectid_prefix` | Qué aparatos reclama el perfil; gana el prefijo **más específico** |
+| `match.sysobjectid_prefix` | **Quién fabricó** el aparato: qué aparatos reclama el perfil; gana el prefijo **más específico** |
+| `match.probe` | **Qué sirve** el aparato: un OID que, si contesta, hace que el perfil aplique. Es el que importa para los genéricos — «¿implementa la HOST-RESOURCES-MIB?» no lo puede contestar un `sysObjectID`: un Synology, un Linux y un Windows la implementan y sus `sysObjectID` no tienen nada que ver |
+| `match.supersedes` | Qué perfiles genéricos **desplaza** éste en los aparatos que reclama: un Synology contesta el sondeo de E/S de UCD y el suyo, y los dos miden los mismos discos |
 
 **Los contadores mienten de dos formas opuestas.** Un valor nuevo menor que el anterior es una
 **vuelta** del contador (uno de octetos de 32 bits se llena en ~34 s en un enlace de gigabit) o
@@ -945,9 +949,24 @@ reinicio y se descarta la muestra** (a un terabit tardaría 4,6 años en dar la 
 casos se guarda la nueva referencia: perder un punto cuesta un punto; inventarlo cuesta la
 gráfica.
 
-Se envían tres perfiles genéricos —`sys_generic` (MIB-II: nombre, descripción, uptime),
-`if_generic` (IF-MIB: tráfico por interfaz, con las columnas de 64 bits) y `ucd_linux`
-(UCD-SNMP-MIB: CPU, carga y memoria)— y una instalación puede añadir los suyos o **sustituir uno
+Se envían **nueve** perfiles, todos de MIBs estándar para que funcionen sin saber quién
+fabricó el aparato, y **disjuntos** entre sí:
+
+| Perfil | MIB | Qué mide |
+|---|---|---|
+| `sys_generic` | MIB-II | Nombre, descripción, ubicación, contacto, uptime |
+| `if_generic` | IF-MIB | Tráfico y errores por interfaz (columnas de 32 y 64 bits) |
+| `ip_stats` | IP-MIB | Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados |
+| `icmp_stats` | ICMP-MIB | Ecos, inalcanzables y TTL agotado, de entrada y de salida |
+| `tcp_udp_stats` | TCP-MIB, UDP-MIB | Conexiones establecidas, retransmisiones, resets, datagramas a puertos cerrados |
+| `ucd_linux` | UCD-SNMP-MIB | CPU, carga y memoria |
+| `hr_storage` | HOST-RESOURCES-MIB | Uso y capacidad por volumen |
+| `disk_io` | UCD-SNMP-MIB | Bytes y operaciones por segundo, por dispositivo de bloque |
+| `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+
+Los contadores de interfaz dicen *cuánto* tráfico hubo; `ip_stats` dice *qué pasó* con él, y las
+retransmisiones de `tcp_udp_stats` son el número que avisa de que un enlace va mal mucho antes
+de que esté caído. Una instalación puede añadir los suyos o **sustituir uno
 enviado reutilizando su `id`**, que es lo que se hace cuando una versión de firmware mueve un
 OID y el arreglo no puede esperar a la siguiente versión de este producto.
 
@@ -964,15 +983,54 @@ El botón del campo abre el catálogo con las filas marcables, y el mismo catál
 lectura desde la barra del módulo, al lado del navegador de MIBs. Se marca, no se teclea: un `id`
 de perfil escrito de memoria es un aparato que no mide nada hasta que alguien nota la errata.
 
-**Detectar** lee `sysObjectID`, `sysDescr` e `ifNumber` —todo MIB-II, así que funciona contra
-hardware que el catálogo no ha visto nunca— y marca lo que encaja. Propone y nunca asigna: un
-perfil equivocado no falla, mide números que parecen buenos, y ése es justo el fallo que tiene
-que pasar por una persona. Un aparato que no contesta se informa como inalcanzable y no como un
-aparato que ningún perfil reclama: en pantalla se leen igual y piden acciones opuestas.
+**Detectar** lee la identidad del aparato (`sysObjectID`, `sysDescr`) y luego pregunta lo que
+**cada perfil dice que hay que preguntarle**: su `match.probe`. Los candidatos los declara el
+catálogo, no el código — una lista de «los genéricos» escrita dentro de la acción se queda
+caducada en cuanto alguien añade un perfil, que es exactamente lo que pasó con el de
+almacenamiento. Propone y nunca asigna: un perfil equivocado no falla, mide números que parecen
+buenos, y ése es justo el fallo que tiene que pasar por una persona. Un aparato que no contesta
+se informa como inalcanzable y no como un aparato que ningún perfil reclama: en pantalla se leen
+igual y piden acciones opuestas.
+
+Y los perfiles son **disjuntos a propósito**: se asignan varios a la vez, así que dos que den el
+mismo valor no es redundancia — es una medida graficada dos veces con dos nombres. Por eso
+`hr_storage` mide sólo volúmenes y deja la CPU y la memoria a `ucd_linux`.
 
 Los perfiles propios de la instalación van en `<var_dir>/snmp_profiles/`, junto a sus MIBs, para
 que una actualización del paquete no se los lleve. Cada fila del catálogo dice si viene enviada o
 escrita aquí, que es lo primero que hay que mirar cuando un aparato mide mal.
+
+#### El muestreo
+
+Un check pregunta un OID y compara la respuesta con algo; el muestreo pregunta **un perfil
+entero** y guarda los números. Son independientes: un check dice si algo *es cierto* del
+aparato, el muestreo dice lo que *está haciendo*, y una máquina puede merecer lo uno sin lo
+otro — un servidor con perfiles y **cero checks** ya es trabajo del ciclo.
+
+Por cada aparato con perfiles y por ciclo:
+
+- las métricas de valor suelto (`oid`) salen en **un resultado** por aparato, con clave
+  `<servidor>/metrics`;
+- las de tabla (`walk`) salen en **un resultado por fila**, con clave `<servidor>/<nombre>` —
+  donde el nombre es el que da el propio aparato en la columna `index_label`, no el índice SNMP.
+  Las métricas de una misma fila viajan juntas: entrada, salida y errores de una interfaz son
+  un resultado, no tres gráficas de un tercio de puerto cada una.
+
+**La muestra anterior sobrevive al proceso.** Un contador sólo significa algo como diferencia,
+y el monitor construye un `Watchful` nuevo cada ciclo (en modo systemd one-shot, un **proceso**
+nuevo). La lectura previa se guarda donde vive `fail_streak` —el `check_state` de la BD— por esa
+razón exacta: en el objeto, cada ciclo parecería el primero y ningún contador se graficaría
+jamás.
+
+**Respuestas parciales son normales.** Un perfil asignado a un aparato que sirve la mitad cuesta
+esas métricas y nada más; un switch sin agente UCD sigue teniendo interfaces que graficar. Y un
+aparato que no contesta **nada** se informa una vez por aparato (no una por métrica: cuarenta
+avisos de un cable desenchufado es como se aprende a ignorar los avisos), con dos ciclos de
+gracia, porque un datagrama UDP perdido no es una caída.
+
+Los campos que salen de un perfil se nombran solos en las gráficas: el módulo los declara en
+caliente con `discover_history_fields()` — ver
+[explica-descubrimiento.md](explica-descubrimiento.md#6c-campos-de-historial-en-caliente-discover_history_fields).
 
 ### Gestión de MIBs
 

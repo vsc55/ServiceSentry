@@ -9,6 +9,8 @@ across check cycles (the monitor builds a fresh Watchful each cycle).
 
 from unittest.mock import MagicMock, patch
 
+import os
+
 import pytest
 
 from conftest import create_mock_monitor
@@ -174,6 +176,34 @@ class TestCompileResultClassification:
         assert r['ok'] is False
         assert r['failed'] == ['A']
 
+    def test_the_reason_travels_with_the_failure(self):
+        """A pysmi status is a string subclass that only ever says *that* it failed; the
+        cause hangs off the object as `.error`. Dropped, a malformed vendor MIB becomes a row
+        that reads "pending" forever — indistinguishable from one nobody has compiled yet, and
+        the user has nothing to act on. It cost a session to find one by hand."""
+        class _Status(str):
+            pass
+        st = _Status('failed')
+        st.error = ValueError('Bad grammar near offset 558 at MIB X, line 21')
+        r = mib_resolver._classify_compile_results(['A'], {'A': st})
+        assert r['ok'] is False
+        assert 'line 21' in r['errors']['A']
+
+    def test_a_failure_with_no_reason_carries_no_empty_one(self):
+        """An empty string in a tooltip is a tooltip that opens onto nothing."""
+        r = mib_resolver._classify_compile_results(['A'], {'A': 'failed'})
+        assert r.get('errors') == {}
+
+    def test_the_reason_survives_a_partial_run(self):
+        """The partial envelope is the common case — one broken MIB among twenty — and it is
+        exactly the case where knowing WHICH one and WHY is the whole point."""
+        class _Status(str):
+            pass
+        st = _Status('failed')
+        st.error = ValueError('Bad grammar')
+        r = mib_resolver._classify_compile_results(['A', 'B'], {'A': 'compiled', 'B': st})
+        assert r['partial'] is True and r['errors']['B'] == 'Bad grammar'
+
     def test_missing_and_unprocessed_are_failures(self):
         assert mib_resolver._classify_compile_results(['A'], {'A': 'missing'})['ok'] is False
         assert mib_resolver._classify_compile_results(['A'], {'A': 'unprocessed'})['ok'] is False
@@ -315,28 +345,63 @@ class TestLoadMibSources:
 
 
 class TestKnownRepos:
-    """Each known repo must expose a parseable folder and a list of dep
-    templates — repos mix extensions, so a single template won't resolve all
-    imported MIBs (the .my/.mib coexistence bug)."""
+    """A source is a GitHub **folder**, a vendor **archive**, or both.
 
-    def test_structure(self):
+    Projects that host MIBs publish a directory; vendors publish one file, and the same vendor
+    can be both — Synology is an archive plus a mirror whose templates resolve dependencies
+    while compiling, and it is deliberately NOT offered as a folder: importing the mirror gets
+    three of the twenty MIBs its own archive carries, from the place that looks like the main
+    way in.
+    """
+
+    def test_every_source_can_be_reached(self):
         assert mib_admin._KNOWN_MIB_REPOS
         for r in mib_admin._KNOWN_MIB_REPOS:
             assert r.get('name')
-            assert mib_admin._parse_github_folder(r['folder']) is not None
+            assert r.get('folder') or r.get('archive'), r['name']
+
+    def test_a_folder_parses_and_carries_templates(self):
+        """A folder import resolves imported MIBs through its own templates; without them a
+        repo that mixes extensions leaves half its dependencies unresolvable."""
+        for r in mib_admin._KNOWN_MIB_REPOS:
+            if not r.get('folder'):
+                continue
+            assert mib_admin._parse_github_folder(r['folder']) is not None, r['name']
             tpls = r.get('dep_templates')
-            assert isinstance(tpls, list) and tpls
-            for t in tpls:
-                assert '@mib@' in t
+            assert isinstance(tpls, list) and tpls, r['name']
+
+    def test_every_template_carries_the_placeholder(self):
+        """Without `@mib@` pysmi has nothing to substitute and the source fetches the same
+        URL for every dependency."""
+        for r in mib_admin._KNOWN_MIB_REPOS:
+            for t in r.get('dep_templates') or ():
+                assert '@mib@' in t, r['name']
 
     def test_extensions_covered(self):
-        # Each repo must offer both an extension-less and a suffixed variant so
-        # dependencies stored either way resolve.
+        # A source with templates must offer both an extension-less and a suffixed variant so
+        # dependencies stored either way resolve (the .my/.mib coexistence bug).
         for r in mib_admin._KNOWN_MIB_REPOS:
-            tpls = r['dep_templates']
+            tpls = r.get('dep_templates') or []
+            if not tpls:
+                continue
             has_plain    = any(t.rstrip('/').endswith('@mib@') for t in tpls)
             has_suffixed = any(t.split('@mib@')[-1] for t in tpls)
             assert has_plain and has_suffixed, r['name']
+
+    def test_a_self_contained_archive_needs_no_templates(self):
+        """Dependency templates resolve a module a MIB IMPORTS and does not have. Every
+        Synology MIB imports only the standard SNMPv2-* modules, which the default mirror
+        serves — not one of them imports another SYNOLOGY-* module, so a template pointing at
+        a partial mirror could never resolve anything and would 404 on every try."""
+        syno = [r for r in mib_admin._KNOWN_MIB_REPOS if r['name'] == 'Synology']
+        assert syno and syno[0]['dep_templates'] == []
+
+    def test_an_archive_source_says_where_it_unpacks(self):
+        """Named after the SOURCE, so a vendor renaming the folder inside its own zip does not
+        leave a second copy of every MIB beside the first."""
+        for r in mib_admin._KNOWN_MIB_REPOS:
+            if r.get('archive'):
+                assert r.get('subdir'), r['name']
 
 
 class TestRepoTemplates:
@@ -349,6 +414,13 @@ class TestRepoTemplates:
     def test_empty(self):
         assert Watchful._repo_templates({}) == []
         assert Watchful._repo_templates({'mib_repos': '  '}) == []
+
+
+# What a downloaded file has to look like for the import to keep it. It used to be a
+# two-word comment, which the import took because the NAME ended in .txt — and that is
+# exactly the hole net-snmp's `nodemap` and its `Makefile.mib` walked through.
+_MIB_BYTES = (b'FOO-MIB DEFINITIONS ::= BEGIN\n'
+              b'foo OBJECT IDENTIFIER ::= { iso 1 }\nEND\n')
 
 
 class TestImportFromGithub:
@@ -371,7 +443,7 @@ class TestImportFromGithub:
         elif 'api.github.com' in u:
             body = _json.dumps(self._listing).encode()
         else:
-            body = b'-- mib --'
+            body = _MIB_BYTES
         m = MagicMock()
         m.read.return_value = body
         m.__enter__ = lambda s: s
@@ -388,15 +460,19 @@ class TestImportFromGithub:
     def test_recursive_import(self, tmp_path):
         res = self._run(tmp_path, recursive=True)
         assert res['ok'] is True
-        # README and notes.md are skipped; recurses into sub/ for BAR-MIB.
-        assert res['imported'] == ['BAR-MIB', 'FOO-MIB.txt']
+        # README and notes.md are skipped; recurses into sub/ for BAR-MIB. Both land
+        # under the source's own folder — named after the repository when nothing declares
+        # one — because a root shared by every import is a root where the next ENTITY-MIB
+        # overwrites the last.
+        assert res['imported'] == ['r/BAR-MIB', 'r/FOO-MIB.txt']
         assert res['count'] == 2
         raw = tmp_path / 'snmp_mibs' / 'raw'
-        assert sorted(p.name for p in raw.iterdir()) == ['BAR-MIB', 'FOO-MIB.txt']
+        assert [p.name for p in raw.iterdir()] == ['r']
+        assert sorted(p.name for p in (raw / 'r').iterdir()) == ['BAR-MIB', 'FOO-MIB.txt']
 
     def test_non_recursive_skips_subfolders(self, tmp_path):
         res = self._run(tmp_path, recursive=False)
-        assert res['imported'] == ['FOO-MIB.txt']
+        assert res['imported'] == ['r/FOO-MIB.txt']
         assert res['total'] == 1
 
     def test_progress_reports_total_then_xy(self, tmp_path):
@@ -441,7 +517,7 @@ class TestImportFromGithub:
             elif u.endswith('MIB-3.txt'):
                 raise OSError('network blip')   # one file fails to download
             else:
-                body = b'-- mib --'
+                body = _MIB_BYTES
             m = MagicMock()
             m.read.return_value = body
             m.__enter__ = lambda s: s
@@ -467,6 +543,86 @@ class TestImportFromGithub:
             assert a not in Watchful.READ_ONLY_ACTIONS
 
 
+class TestTheRepositoryTreeSurvivesTheImport:
+    """LibreNMS keeps its MIBs in 378 vendor sub-folders under `mibs/`, and that layout is the
+    only thing telling two vendors' ENTITY-MIB apart. The path comes from the `path` field of
+    each Contents API entry — which the older mock in this file did not send, so the one field
+    the nesting depends on was never exercised.
+    """
+
+    def _api(self, tree):
+        """A listing keyed by repo path, with entries carrying `path` like the real API."""
+        import json as _json
+
+        def fake(req, timeout=None):
+            u = getattr(req, 'full_url', req)
+            if 'api.github.com' in u:
+                p = u.split('/contents/')[1].split('?')[0]
+                body = _json.dumps(tree.get(p, [])).encode()
+            else:
+                body = _MIB_BYTES
+            m = MagicMock()
+            m.read.return_value = body
+            m.__enter__ = lambda s: s
+            m.__exit__ = MagicMock(return_value=False)
+            return m
+        return fake
+
+    def test_a_vendor_sub_folder_stays_a_sub_folder(self, tmp_path):
+        tree = {
+            'mibs': [
+                {'type': 'file', 'name': 'ROOT-MIB', 'path': 'mibs/ROOT-MIB',
+                 'download_url': 'https://raw/ROOT-MIB'},
+                {'type': 'dir', 'name': 'cisco', 'path': 'mibs/cisco'},
+            ],
+            'mibs/cisco': [
+                {'type': 'file', 'name': 'C-MIB', 'path': 'mibs/cisco/C-MIB',
+                 'download_url': 'https://raw/C-MIB'},
+                {'type': 'dir', 'name': 'nested', 'path': 'mibs/cisco/nested'},
+            ],
+            'mibs/cisco/nested': [
+                {'type': 'file', 'name': 'N-MIB', 'path': 'mibs/cisco/nested/N-MIB',
+                 'download_url': 'https://raw/N-MIB'},
+            ],
+        }
+        with patch('urllib.request.urlopen', side_effect=self._api(tree)), \
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
+            res = mib_admin._run_github_import(
+                str(tmp_path), 'https://github.com/librenms/librenms/tree/master/mibs',
+                True, None, subdir='librenms')
+        assert res['imported'] == ['librenms/ROOT-MIB', 'librenms/cisco/C-MIB',
+                                   'librenms/cisco/nested/N-MIB']
+        raw = tmp_path / 'snmp_mibs' / 'raw'
+        assert (raw / 'librenms' / 'cisco' / 'nested' / 'N-MIB').is_file()
+        # …and the walker can SEE it there. A MIB the reader does not reach does not exist as
+        # far as the panel is concerned: it is not listed, not counted and never compiled.
+        from watchfuls.snmp import mib_resolver
+        found = {rel for rel, _f in mib_resolver.iter_raw_mibs(str(raw))}
+        assert 'librenms/cisco/nested/N-MIB' in found
+
+    def test_the_folder_you_asked_for_is_the_root(self, tmp_path):
+        """Importing `mibs/cisco` puts its files at the top of the source folder, not under a
+        `cisco/` nobody asked to recreate: the folder you point at is the thing you are
+        importing."""
+        tree = {'mibs/cisco': [
+            {'type': 'file', 'name': 'C-MIB', 'path': 'mibs/cisco/C-MIB',
+             'download_url': 'https://raw/C-MIB'}]}
+        with patch('urllib.request.urlopen', side_effect=self._api(tree)), \
+             patch('lib.security.net_guard.validate_external_url', return_value=None):
+            res = mib_admin._run_github_import(
+                str(tmp_path), 'https://github.com/librenms/librenms/tree/master/mibs/cisco',
+                True, None, subdir='librenms')
+        assert res['imported'] == ['librenms/C-MIB']
+
+    def test_a_tree_deeper_than_the_walker_will_read_is_still_reachable(self, tmp_path):
+        """`iter_raw_mibs` stops at RAW_MAX_DEPTH, and a MIB it cannot see is a MIB that does
+        not exist as far as the panel is concerned — so an import must not bury one deeper
+        than that."""
+        from watchfuls.snmp import mib_resolver
+        # source folder + the deepest nesting an import can produce, against the reader's cap.
+        assert mib_resolver.RAW_MAX_DEPTH >= 4
+
+
 class TestImportFromGithubAsync:
     """Async job variant: start → poll status → done, with a live count."""
 
@@ -486,7 +642,7 @@ class TestImportFromGithubAsync:
         elif 'api.github.com' in u:
             body = _json.dumps(self._listing).encode()
         else:
-            body = b'-- mib --'
+            body = _MIB_BYTES
         m = MagicMock()
         m.read.return_value = body
         m.__enter__ = lambda s: s
@@ -608,7 +764,7 @@ class TestImportFromGithubAsync:
             elif u.endswith('BAD-MIB.txt'):
                 raise OSError('boom')
             else:
-                body = b'-- mib --'
+                body = _MIB_BYTES
             m = MagicMock(); m.read.return_value = body
             m.__enter__ = lambda s: s; m.__exit__ = MagicMock(return_value=False)
             return m
@@ -631,7 +787,8 @@ class TestImportFromGithubAsync:
         # …and the two that WORKED, plus WHY the third did not. "2 ok, 1 failed"
         # answers how many; the entry exists so somebody can see which, and a
         # re-run to find out costs another pass over GitHub's 60/h anonymous limit.
-        assert st['imported_names'] == ['OK1-MIB.txt', 'OK2-MIB.txt']
+        # Under the source's folder, which is where an import puts things now.
+        assert st['imported_names'] == ['r/OK1-MIB.txt', 'r/OK2-MIB.txt']
         assert st['failed_detail'] == [{'name': 'BAD-MIB.txt', 'error': 'boom'}]
 
 
@@ -726,6 +883,125 @@ class TestMibCatalog:
         assert res['ok'] is True
         assert not os.path.isfile(mib_catalog.catalog_path(vd))  # discarded
         assert rebuilt == []   # NOT rebuilt synchronously
+
+
+def _wait_for_job(job_id, timeout=3.0):
+    """Block until the background compile thread has recorded its result."""
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        if mib_admin._compile_jobs.get(job_id, {}).get('done'):
+            return
+        _t.sleep(0.02)
+
+class TestWhatCompileAllActuallyCompiled:
+    """"Compile all" walked every MIB and let pysmi skip the up-to-date ones — so it did not
+    recompile everything, and it did not compile only what needed it either. With twenty files
+    nobody notices; with two thousand the progress bar reads 0/2000 while the real work is
+    three files, and there was no way at all to force a rebuild when pysmi's timestamp check
+    is the thing that is wrong (pysmi upgraded, a dependency changed).
+    """
+
+    def setup_method(self):
+        mib_admin._compile_jobs.clear()
+
+    def _tree(self, tmp_path, compiled=()):
+        raw = tmp_path / 'snmp_mibs' / 'raw'
+        raw.mkdir(parents=True)
+        comp = tmp_path / 'snmp_mibs' / 'compiled'
+        comp.mkdir()
+        for n in ('A-MIB', 'B-MIB'):
+            (raw / f'{n}.txt').write_text('x', encoding='utf-8')
+        for n in compiled:
+            p = comp / f'{n}.py'
+            p.write_text('# compiled', encoding='utf-8')
+            os.utime(p, (2 ** 31, 2 ** 31))       # far newer than the sources
+        return {'__var_dir__': str(tmp_path)}
+
+    def test_pending_walks_only_what_needs_it(self, tmp_path, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
+                            lambda *a, **k: seen.update(k) or
+                            {'ok': True, 'compiled': True, 'partial': False,
+                             'failed': [], 'results': {}})
+        cfg = self._tree(tmp_path, compiled=('A-MIB',))
+        start = Watchful.compile_mibs_start({**cfg, 'scope': 'pending'})
+        assert start['total'] == 1, 'it walked the up-to-date one too'
+
+    def test_the_job_compiles_exactly_what_it_counted(self, tmp_path, monkeypatch):
+        """The scope narrowed the NUMBER and not the WORK. `mibs_filter` was only sent when the
+        caller had asked for specific files, so with a scope the compiler was told nothing and
+        re-derived its own list from the directory — everything — while the job reported the
+        narrowed total. On screen: "Compiling 28 / 3", and a progress bar at 933%.
+
+        Two derivations of "what to compile" that can disagree is one too many. This pins that
+        there is one, whatever the scope."""
+        seen = {}
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
+                            lambda *a, **k: seen.update(k) or
+                            {'ok': True, 'compiled': True, 'partial': False,
+                             'failed': [], 'results': {}})
+        cfg = self._tree(tmp_path, compiled=('A-MIB',))
+        for scope in ('pending', 'all'):
+            seen.clear()
+            start = Watchful.compile_mibs_start({**cfg, 'scope': scope})
+            _wait_for_job(start['job_id'])
+            assert len(seen['mibs_filter']) == start['total'], (
+                f'scope={scope}: it counts {start["total"]} and walks '
+                f'{len(seen["mibs_filter"])}')
+
+    def test_an_explicit_selection_is_also_what_gets_walked(self, tmp_path, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
+                            lambda *a, **k: seen.update(k) or
+                            {'ok': True, 'compiled': True, 'partial': False,
+                             'failed': [], 'results': {}})
+        cfg = self._tree(tmp_path)
+        start = Watchful.compile_mibs_start({**cfg, 'mibs': ['A-MIB.txt']})
+        _wait_for_job(start['job_id'])
+        assert seen['mibs_filter'] == ['A-MIB'] and start['total'] == 1
+
+    def test_pending_with_nothing_to_do_says_so(self, tmp_path):
+        """A job that finds no work, ends instantly and says nothing is a button that reads as
+        broken — which is the exact reading this screen has had to unlearn once already."""
+        cfg = self._tree(tmp_path, compiled=('A-MIB', 'B-MIB'))
+        out = Watchful.compile_mibs_start({**cfg, 'scope': 'pending'})
+        assert out['done'] is True and out['up_to_date'] is True
+        assert out['total'] == 0
+
+    def test_all_forces_the_rebuild(self, tmp_path, monkeypatch):
+        """The whole point of the second action: pysmi compares timestamps and answers
+        'untouched', which is right almost always and useless in the case you reach for it."""
+        seen = {}
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
+                            lambda *a, **k: seen.update(k) or
+                            {'ok': True, 'compiled': True, 'partial': False,
+                             'failed': [], 'results': {}})
+        cfg = self._tree(tmp_path, compiled=('A-MIB', 'B-MIB'))
+        start = Watchful.compile_mibs_start({**cfg, 'scope': 'all'})
+        assert start['total'] == 2, 'it skipped the up-to-date ones'
+        _wait_for_job(start['job_id'])
+        assert seen.get('rebuild') is True
+
+    def test_pending_does_not_force_it(self, tmp_path, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
+                            lambda *a, **k: seen.update(k) or
+                            {'ok': True, 'compiled': True, 'partial': False,
+                             'failed': [], 'results': {}})
+        cfg = self._tree(tmp_path)
+        start = Watchful.compile_mibs_start({**cfg, 'scope': 'pending'})
+        _wait_for_job(start['job_id'])
+        assert seen.get('rebuild') is False
+
+    def test_an_explicit_list_still_wins(self, tmp_path, monkeypatch):
+        """Compiling one row from its own button is neither scope: it is that file."""
+        monkeypatch.setattr(mib_admin._mib_resolver, 'compile_raw_mibs_progressive',
+                            lambda *a, **k: {'ok': True, 'compiled': True, 'partial': False,
+                                             'failed': [], 'results': {}})
+        cfg = self._tree(tmp_path, compiled=('A-MIB', 'B-MIB'))
+        start = Watchful.compile_mibs_start({**cfg, 'mibs': ['A-MIB.txt']})
+        assert start['total'] == 1
 
 
 class TestCompilePhase:
@@ -1011,17 +1287,19 @@ class TestTheImplicitCompileIsBounded:
         which is how re-importing a folder for a few new MIBs came to cost as much as the
         first import."""
         import json as _json
-        raw = tmp_path / 'snmp_mibs' / 'raw'
+        # In the folder the import writes to — named after the repository — because that is
+        # the file it will compare against.
+        raw = tmp_path / 'snmp_mibs' / 'raw' / 'r'
         raw.mkdir(parents=True)
         target = raw / 'SAME-MIB.txt'
-        target.write_text('-- mib --', encoding='utf-8')
+        target.write_bytes(_MIB_BYTES)
         before = target.stat().st_mtime_ns
         listing = [{'type': 'file', 'name': 'SAME-MIB.txt',
                     'download_url': 'https://raw/SAME-MIB.txt'}]
 
         def fake(req, timeout=None):
             u = getattr(req, 'full_url', req)
-            body = _json.dumps(listing).encode() if 'api.github.com' in u else b'-- mib --'
+            body = _json.dumps(listing).encode() if 'api.github.com' in u else _MIB_BYTES
             m = MagicMock(); m.read.return_value = body
             m.__enter__ = lambda s: s; m.__exit__ = MagicMock(return_value=False)
             return m

@@ -19,6 +19,9 @@ let _snmpProfSel      = new Set();
 let _snmpProfExpanded = new Set();
 let _snmpProfGen      = 0;        // bumped per open — a late fetch for a closed modal is dropped
 let _snmpProfOnPick   = null;     // where the selection goes, when it is not a modulesData path
+let _snmpProfReasons  = {};       // why a detection proposed each profile, once one has run
+let _snmpProfNames    = null;     // {id: name} for the chips, fetched once and cached
+let _snmpProfNamesBusy = false;
 
 function _snmpProfT(key, fallback) { return _modUiStr(_snmpProfMod, key, fallback); }
 
@@ -66,6 +69,7 @@ function _snmpProfOpen(modName, pathStr, current, onPick) {
     _snmpProfItems = null;
     _snmpProfExpanded = new Set();
     _snmpProfSel = new Set(_snmpProfList(current).map(s => s.toLowerCase()));
+    _snmpProfReasons = {};
     const gen = ++_snmpProfGen;
 
     const titleEl = document.getElementById('snmpProfilesTitle');
@@ -104,6 +108,7 @@ async function _snmpProfFetch(gen) {
         return;
     }
     _snmpProfItems = Array.isArray(d.items) ? d.items : [];
+    _snmpProfNamesFrom(_snmpProfItems);
     // Where an installation's own profiles go — the answer to "and how do I add one",
     // which is otherwise a documentation lookup from a screen that already knows.
     const dirEl = document.getElementById('snmpProfilesDir');
@@ -207,6 +212,7 @@ function _snmpProfRender() {
                               : `<span class="badge bg-secondary bg-opacity-50 text-body ss-fs-1">${esc(_snmpProfT('profile_src_shipped', 'Shipped'))}</span>`}
                         <span class="badge bg-secondary bg-opacity-50 text-body ss-fs-1">${nMetrics} ${esc(_snmpProfT('profile_metrics', 'metrics'))}</span>
                         ${p.match ? `<code class="text-muted ss-fs-1" title="${escAttr(_snmpProfT('profile_match', 'Claims devices under this sysObjectID'))}">${esc(p.match)}</code>` : ''}
+                        ${_snmpProfReasonBadge(p.id)}
                     </div>
                     ${_snmpProfDesc(p) ? `<div class="text-muted ss-fs-2">${esc(_snmpProfDesc(p))}</div>` : ''}
                 </div>
@@ -220,6 +226,17 @@ function _snmpProfRender() {
     }
     h += '</div>';
     bodyEl.innerHTML = h;
+}
+
+/** Why a detection proposed this profile — the difference between "the device answers the
+ *  OID this profile needs" and "the device says it is one of these". Shown because a proposal
+ *  the admin cannot argue with is one they can only trust or ignore. */
+function _snmpProfReasonBadge(id) {
+    const why = _snmpProfReasons[id];
+    if (!why) return '';
+    const key = why === 'sysobjectid' ? 'profile_why_sysobjectid' : 'profile_why_probe';
+    const fb = why === 'sysobjectid' ? 'identified itself' : 'answers its OIDs';
+    return `<span class="badge bg-info ss-fs-1"><i class="bi bi-magic me-1"></i>${esc(_snmpProfT(key, fb))}</span>`;
 }
 
 function _snmpProfExpand(id) {
@@ -277,13 +294,15 @@ async function _snmpProfDetect(btn) {
         return;
     }
     for (const id of (d.items || [])) _snmpProfSel.add(String(id).toLowerCase());
+    // Why each one was proposed, so the ticks can be argued with rather than just trusted.
+    _snmpProfReasons = d.reasons || {};
     _snmpProfCommit();
     if (box) {
         box.style.display = '';
         const bits = [];
         if (d.sysname)     bits.push(`<strong>${esc(d.sysname)}</strong>`);
         if (d.sysobjectid) bits.push(`<code>${esc(d.sysobjectid)}</code>`);
-        if (d.interfaces)  bits.push(`${d.interfaces} ${esc(_snmpProfT('profile_interfaces', 'interfaces'))}`);
+        bits.push(`${(d.items || []).length} ${esc(_snmpProfT('profile_metrics_found', 'profiles'))}`);
         // What it says about itself is often the only thing that identifies a box whose
         // sysObjectID nobody has claimed — and it is what somebody writes a profile from.
         const descr = d.sysdescr ? `<div class="text-muted ss-fs-2 mt-1">${esc(d.sysdescr)}</div>` : '';
@@ -295,6 +314,39 @@ async function _snmpProfDetect(btn) {
     }
     _snmpProfRender();
 }
+
+// ── How a stored id reads on the field ──────────────────────────────────────
+
+function _snmpProfNamesFrom(items) {
+    const map = {};
+    for (const p of items || []) map[String(p.id).toLowerCase()] = _snmpProfLabel(p, p.id);
+    _snmpProfNames = map;
+}
+
+/** The chips show what the profile is called; the id stays in the tooltip.
+ *
+ *  Storing the id and showing the name is the whole point — a row of `hr_storage`,
+ *  `if_generic`, `ucd_linux` on the host form says nothing about what is being measured, and
+ *  the person reading it is deciding whether the assignment is right. */
+function _snmpProfChipLabel(value, key) {
+    if (_snmpProfNames) return _snmpProfNames[String(value).toLowerCase()] || '';
+    _snmpProfNamesLoad(key);
+    return '';
+}
+
+async function _snmpProfNamesLoad(key) {
+    if (_snmpProfNames || _snmpProfNamesBusy) return;
+    _snmpProfNamesBusy = true;
+    const res = await apiPost(_snmpActionUrl('snmp', 'list_profiles'), {});
+    _snmpProfNamesBusy = false;
+    const d = res && res.data;
+    // An empty map and not a retry loop: a catalogue that could not be read leaves the ids on
+    // screen, which is the old behaviour and a working screen.
+    _snmpProfNamesFrom((d && d.ok && d.items) || []);
+    if (typeof renderChips === 'function') renderChips(key);
+}
+
+CHIP_LABELS['snmp|device_profiles'] = _snmpProfChipLabel;
 
 // ── The field this picker belongs to ────────────────────────────────────────
 // Registered against the FIELD KIND (`snmp|servers|device_profiles`) and not one item's

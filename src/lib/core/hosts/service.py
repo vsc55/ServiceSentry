@@ -48,9 +48,27 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
     (e.g. ram_swap ``<uid>_ram``) are mapped back to their base bound item.  Sorted by
     ``(module, name)``."""
     def _matches(skey, keys):
-        """Map a (possibly derived) result key to its bound base item key."""
-        base = skey if skey in keys else skey.rsplit('_', 1)[0]
-        return base if base in keys else None
+        """Map a (possibly derived) result key to its bound base item key.
+
+        Three shapes, tried in order of how specific they are:
+
+        * the key IS the item (an inline check);
+        * <item>/<detail> — the composite convention the rest of the product already
+          speaks (history's check_label resolves it the same way): one item producing
+          several rows, which is what an SNMP device profile does when it samples a table
+          and files a row per interface, per volume, per disk;
+        * <item>_<suffix> — the older derived-key shape (ram_swap's <uid>_ram).
+
+        The middle one was missing, and its absence had no symptom worth noticing: the rows
+        were recorded, charted and named correctly, and simply never reached the screen that
+        was built to show them.
+        """
+        if skey in keys:
+            return skey
+        for base in (skey.split('/', 1)[0], skey.rsplit('_', 1)[0]):
+            if base in keys:
+                return base
+        return None
 
     results = []
     for bare, keys in bound.items():

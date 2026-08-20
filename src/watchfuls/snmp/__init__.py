@@ -16,10 +16,13 @@ import re
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
+from . import profiles as _profiles
 from .actions import SnmpActions
 from .client import SnmpClient, _HAS_PYSNMP
 from .defaults import _SCHEMA, _CHECK_DEFAULTS, _SERVER_DEFAULTS
 from .mib_admin import MibAdmin, _HAS_PYSMI
+from . import mib_versions as _mib_versions
+from .sampler import SnmpSampler
 
 # What is left here is the module itself: the class, the loop over items and the dispatch to
 # one check. Everything that answered a different question moved out - speaking SNMP to a
@@ -27,7 +30,7 @@ from .mib_admin import MibAdmin, _HAS_PYSMI
 # invokes (actions). They are mixed back in below, so the class is unchanged from the outside.
 
 
-class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
+class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
     """Multi-server SNMP OID monitoring."""
 
     ITEM_SCHEMA = _SCHEMA
@@ -50,10 +53,22 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
         'import_mib_from_github',
         'import_mib_from_github_start',
         'import_mib_from_github_status',
+        'import_mib_archive',
         'get_mib_details',
         'get_raw_mib_details',
         'get_all_symbols',
         'build_oid_index',
+        'save_mib_source',
+        'diff_mib_versions',
+        'restore_mib_version',
+        'list_mib_versions',
+        'get_mib_version',
+        'lint_mib_source',
+        'delete_mib_version',
+        'orphan_versions',
+        'diff_mib_files',
+        'restore_orphan',
+        'forget_mib_versions',
     })
 
     # Actions that produce no side effects — audit logging is suppressed for them.
@@ -65,6 +80,12 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
         'get_mib_details',
         'get_raw_mib_details',
         'get_all_symbols',
+        'list_mib_versions',
+        'get_mib_version',
+        'diff_mib_versions',
+        'lint_mib_source',
+        'orphan_versions',
+        'diff_mib_files',
     })
 
 
@@ -102,13 +123,19 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
             )
             return self.dict_return
 
-        # Iterate servers; each server carries its own 'checks' sub-collection.
+        # Iterate servers; each carries its own 'checks' sub-collection and, when a device
+        # profile is assigned to it, a set of metrics to sample. The two are independent: a
+        # check says whether something is TRUE of the device, sampling says what it is DOING,
+        # and a device may well be worth one and not the other.
         items: list[tuple[str, dict, dict]] = []
+        sampled: list[tuple[str, dict]] = []
         for srv_key, srv in self.get_conf('servers', {}).items():
             if not isinstance(srv, dict):
                 continue
             if not srv.get('enabled', _SERVER_DEFAULTS['enabled']):
                 continue
+            if self.profiles_of(srv):
+                sampled.append((srv_key, srv))
             for chk_key, chk_cfg in (srv.get('checks') or {}).items():
                 if not isinstance(chk_cfg, dict):
                     continue
@@ -124,6 +151,13 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
                 pool.submit(self._check_item, key, cfg, srv): key
                 for key, cfg, srv in items
             }
+            # Sampling shares the pool: it is the same conversation with the same devices, and
+            # a second pool would double the sockets this module opens against a network the
+            # admin sized for one.
+            futures.update({
+                pool.submit(self._sample_item, srv_key, srv): srv_key
+                for srv_key, srv in sampled
+            })
             for future in concurrent.futures.as_completed(futures):
                 key = futures[future]
                 try:
@@ -263,3 +297,39 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
                 return False
 
         return False
+
+
+def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
+    """Every value a device profile can record, named — see lib.modules.history_fields.
+
+    What this module charts is not knowable at build time: it is decided by the profiles
+    installed, which are files, and one of them was written for the box in somebody's rack
+    after this release shipped. The static __history__ in schema.json says a check has no
+    numeric field, which is true of a check; a sampled metric arrives with a name only if the
+    profile that declared it is asked.
+
+    The UNION of the catalogue, not the profiles actually assigned: a field's label answers
+    "what is this series", which does not depend on which device happens to serve it, and
+    working out the assignments would mean reading the module configuration from a function
+    whose whole point is that it does not need it.
+    """
+    cdir = _profiles.custom_dir(var_dir)
+    catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+    out: dict = {}
+    for prof in catalog.values():
+        # First profile to name a field wins: two profiles measuring "cpu_user" are measuring
+        # the same thing, and the alternative is a label that changes with dict order.
+        for field, meta in _profiles.history_fields(prof, lang).items():
+            out.setdefault(field, meta)
+    return out
+
+
+def discover_db_tables():
+    """The tables this module keeps in the shared database.
+
+    Edited MIB sources and their history. On the general connector rather than a file beside
+    the MIBs because a deployment with a web container and a worker container shares the
+    database and not the disk — and a MIB corrected in the panel has to be the MIB the worker
+    compiles.
+    """
+    return [_mib_versions.SCHEMA]

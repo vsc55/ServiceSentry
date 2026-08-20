@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~5.660 tests** (5661 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-20). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.195 tests** (6162 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-20). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -649,6 +649,43 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_slash_composite_key` | Clave compuesta con `/` | `'u-123/vip'` y `'/node/pve04'` → `'u-123'` | Si difiere |
 | `test_underscore_derived_key` | Clave derivada con `_` | `'u-9_ram'` → `'u-9'` | Si difiere |
 | `test_unknown_key_returns_none` | Clave desconocida | `'nope/vip'` → `None` | Si devuelve algo |
+
+---
+
+## 9b. Monitor — Campos de historial en caliente
+
+**Archivo:** `tests/unit/test_history_fields.py` — 14 tests
+
+Lo que un módulo grafica se declara en su `schema.json`, y eso es correcto mientras la respuesta
+sea la misma en todas las instalaciones. Deja de serlo en cuanto depende de datos que aporta la
+instalación: el módulo SNMP graba lo que declaren sus perfiles de dispositivo, y alguno lo
+escribió alguien para el aparato de su rack después de publicarse la versión. Un schema no puede
+nombrar un campo que no existía cuando se escribió.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatAModuleCanDeclare::*` (5) | Un módulo que no declara nada no es un error (diecinueve de veintiún watchfuls no tienen motivo para este gancho); los campos vuelven con **la forma que habla el historial**; un campo sin etiqueta se grafica por su propio nombre (peor leyenda, leyenda al fin); llegan el idioma del lector y el directorio de datos (donde viven los ficheros que aporta la instalación: un gancho que no lo viera sólo podría describir lo que se envía); y un gancho al que sólo le importe el idioma no tiene que aceptar el resto |
+| `TestNothingHereCanBreakAChart::*` (6) | Un gancho que revienta cuesta **sus etiquetas** y nada más (los valores se siguen grabando y graficando, leídos por su nombre crudo — no es motivo para un 500 en History); lo que devuelve basura se ignora; un campo que no es un mapa se toma por su nombre; uno sin nombre se descarta; un módulo que ya no existe es un mapa vacío (el historial guarda registros de módulos retirados); y **un nombre que no es un nombre de módulo no se importa jamás** — llega desde un registro de historial, que es dato, y compone una ruta de import |
+| `TestTheModuleThatNeededIt::*` (3) | SNMP nombra cada métrica que sus perfiles pueden grabar, **traducida**; lo que la máquina *es* no se ofrece como serie; y el resto de módulos conservan exactamente los campos que declara su schema |
+
+---
+
+## 9c. Hosts — Qué resultados son de esta máquina
+
+**Archivo:** `tests/unit/test_hosts_status_rows.py` — 11 tests
+
+Un módulo graba resultados con claves suyas; un host sabe qué **items** tiene enlazados. Todo lo
+que enseñan «Últimos datos» e Infraestructura sale de emparejar lo uno con lo otro, y equivocarse
+ahí falla de la manera callada: las filas se graban bien, se grafican bien y se nombran bien, y
+simplemente no aparecen. Nada da error, y la pantalla se lee como una máquina que nunca ha
+informado. Le pasó exactamente eso al muestreo de perfiles SNMP — ver
+[caso-diagnostico.md](caso-diagnostico.md).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhichResultsBelongToTheHost::*` (7) | La clave que **es** el item; la **compuesta** `<item>/<detalle>`, que es la que emite un perfil al muestrear una tabla (la regresión: se descartaban en silencio); **todas** las filas de un item llegan (un switch son cuarenta puertos de un item, y quedarse con la primera enseñaría un puerto y parecería que funciona); sólo el **primer** segmento es el item (proxmox emite `<uid>/node/pve04`, y partir por la última barra buscaría un item llamado `<uid>/node`); la forma derivada antigua (`<uid>_ram`) sigue valiendo — añadir una forma no puede costar otra; el resultado de **otro host** no se toma prestado (el join es lo que acota los resultados de un módulo a *esta* máquina); y `srv-uid2` no es `srv-uid` — un `startswith` habría hecho que sí |
+| `TestWhenThereIsNoLiveValue::*` (2) | El historial rellena también para una clave compuesta (un host en mantenimiento tiene los registros vivos purgados, y «aquí no hay nada» se leería como que nunca informó); y una fila viva **no se duplica** con su propio historial |
+| `TestWhatTheRowIsCalled::*` (2) | El resultado se nombra a sí mismo cuando puede (una fila muestreada trae el nombre que le dio el aparato: «eth0», no la etiqueta del item, que haría cuarenta puertos llamados todos «nas-01»); y si no, cae a la etiqueta del item enlazado |
 
 ---
 
@@ -2527,7 +2564,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 37. BD — Tablas declaradas por módulos
 
-**Archivo:** `tests/unit/test_db_module_tables.py` — 15 tests
+**Archivo:** `tests/unit/test_db_module_tables.py` — 17 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3525,7 +3562,51 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 27 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 31 tests
+
+**Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
+veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
+deciden si funciona algo, y ninguna va de SNMP: que **la muestra anterior sobreviva** (un
+contador sólo significa algo como diferencia, y el monitor construye un `Watchful` nuevo cada
+ciclo —en systemd one-shot, un **proceso** nuevo—: con el estado en el objeto, cada ciclo
+parecería el primero y ningún contador se graficaría jamás) y que **una fila conserve su
+nombre** (una tabla se recorre por índice SNMP, que no es el puerto del frontal ni es estable
+cuando el aparato renumera).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhichDevicesAreSampled::*` (5) | Los perfiles se leen escritos como se escriban (cadena en pantalla, lista por la API — la misma asignación, y un aparato que no mide porque el valor llegó en la otra forma es un fallo sin síntoma); **un servidor con perfiles y sin checks ya es trabajo** (la razón de esta fase); uno sin perfiles no recibe ni una pregunta; un perfil que ya no está en el catálogo cuesta las métricas de ese aparato y no el ciclo; y un host en mantenimiento no se grafica (alguien está trabajando en él, y la gráfica sería del trabajo) |
+| `TestCountersAcrossCycles::*` (3) | El primer ciclo guarda **referencia y ningún valor** (no hay de qué restar: un valor ahí pondría el uptime entero como el tráfico de un intervalo); el segundo ya es tasa **y sobrevive a una instancia nueva**; y la referencia se guarda donde aguanta un proceso nuevo — el `check_state`, al lado de `fail_streak` y por el mismo motivo |
+| `TestATableKeepsItsNames::*` (5) | Cada fila se archiva bajo **el nombre que le da el aparato** (bajo el índice, una gráfica de «3» es una que nadie puede accionar, y pasa a ser otro puerto el día que el aparato renumere); una fila sin nombre cae a su índice en vez de desaparecer; un nombre que partiría la clave (`eth0/1`) se sanea pero **se conserva entero** en la fila, que es lo que lee una persona; la columna de nombres se recorre **una vez** aunque la compartan cinco métricas; y las métricas de una fila llegan juntas (dos resultados serían dos gráficas de medio puerto sin nada que dijera que son el mismo) |
+| `TestWhenTheDeviceDecidesTheUnit::*` (4) | El factor viene de **otra columna y por fila** (dos volúmenes de un mismo NAS pueden tener bloques distintos); esa columna se recorre una vez; un factor que falta **deja la lectura en paz** (el factor es un detalle *sobre* el valor: un aparato que contestó el valor pero no la unidad ha contestado el valor); y un factor cero se rechaza — multiplicar por él graficaría todos los volúmenes vacíos, que parece un dato y no una lectura mala |
+| `TestTwoNamelessTablesAreNotOneTable::*` (2) | Las filas de dos tablas **sin nombres** no se fusionan (almacenamiento fila 3 y procesador fila 3 comparten el índice y nada más: fusionadas, la carga de CPU acaba en el mismo registro que el tamaño de un volumen); y una tabla sin nombres y sin grupo sigue informando — peor, no rota |
+| `TestAProbeProvesItAnswersAndStopsThere::*` (4) | **Reportado**: «probar servidor» contra un NAS con sólo SNMP y perfiles se queda en «probando…» y no vuelve. No estaba colgado: el muestreo lee **todas** las métricas de **todos** los perfiles —quince perfiles de ocho métricas son 135 walks, cada uno cientos de round-trips contra el aparato— y **una prueba no guarda nada de eso**: su respuesta es una gráfica que nadie está dibujando. Lo que la prueba tiene que demostrar es que los perfiles llegan al aparato, y un valor que vuelve lo demuestra. Se comprueba que una prueba **para en la primera métrica que contesta** (135 walks → 2 en el caso real), que **un ciclo de verdad las sigue leyendo todas** (recortarlo ahí sería recortar las gráficas), que una prueba **sin respuesta lo sigue diciendo**, y que un ciclo **sólo se cree una prueba si se lo dicen** (`is True` y no verdad-aproximada: un doble de test contesta que sí a todo, y un ciclo que se crea un ensayo deja de rellenar el historial) |
+| `TestTheProbeThePanelRuns::*` (2) | El botón **Probar** del modal de host no pasa por el monitor: monta un `Watchful` de usar y tirar con un item y enseña lo que vuelva. Un servidor con perfiles y sin checks OID no devolvía nada, y «nada» se dibuja como «nada que probar» — que se lee como una configuración mal puesta y no como una función sin cablear. Además, el catálogo enviado tiene que ser alcanzable **sin directorio de datos** (el probe no tiene), o los perfiles serían invisibles justo donde el admin comprueba su trabajo |
+| `TestWhatIsNotASeries::*` (1) | Lo que la máquina **es** (nombre, modelo) viaja al lado de los números y no como serie propia: identifica lo que se está graficando, y una gráfica de eso sería una gráfica de nada |
+| `TestWhenTheDeviceGoesQuiet::*` (5) | Un ciclo callado no es una caída (un datagrama UDP perdido no lo es); dos sí; se informa **una vez por aparato y no una por métrica** (cuarenta avisos de un cable desenchufado es como se aprende a ignorar los avisos); una respuesta parcial cuesta sólo las métricas que fallaron (un switch sin agente UCD sigue teniendo interfaces); y un aparato que vuelve a contestar deja de estar caído |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_walk_oid.py` — 11 tests
+
+**Recorrer UNA columna**, que es lo que pide una métrica de perfil. El walk de descubrimiento
+barre dos subárboles fijos, trunca los valores a 120 caracteres y se traga los errores, porque
+lo que produce es una lista de la que alguien elige; las tres decisiones son erróneas para una
+muestra. Lo que se fija aquí es sobre todo **la aritmética de la clave**: las filas se archivan
+por el sufijo del OID tras la raíz recorrida, y equivocarse ahí no lanza nada — produce una
+tabla cuyas filas están indexadas por algo que no es el índice, que luego se casa con los
+nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del 4.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheKeyIsTheIndex::*` (4) | La fila se indexa por lo que queda tras la raíz; **un índice de varias partes se conserva entero** (muchas tablas se indexan por más de un número —un disco dentro de una controladora— y quedarse con el primero fusiona filas que no son la misma); un escalar recorrido como tabla es una tabla de uno; y el recorrido **para al salir del subárbol** (lo de después es de otra métrica, y quedárselo archivaría valores ajenos bajo índices de ésta) |
+| `TestTheValueArrivesWhole::*` (1) | Un valor largo **no se trunca**: un contador acortado es un número distinto, y nada aguas abajo podría notarlo |
+| `TestSayingWhatWentWrong::*` (4) | Un aparato que no contesta lo dice (una tabla vacía y un aparato inalcanzable se ven igual si no, y uno significa «asigna otro perfil» y el otro «mira el cable»); un estado de error nombra el índice donde ocurrió; las filas leídas antes del error **se conservan** (media tabla se grafica; tirarla convierte una respuesta parcial en una caída); y pedir la raíz vacía se rechaza en vez de recorrer el árbol entero del aparato |
+| `TestABoundedTable::*` (2) | La tabla para en el techo, y el techo por defecto da de sobra para hardware real (48 puertos, 24 discos, unos cientos de subinterfaces) — si no, el límite es pérdida silenciosa de datos en vez de una salvaguarda |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 41 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -3541,13 +3622,189 @@ perfiló, y cuando un firmware mueve un OID el arreglo no espera a la siguiente 
 | `TestNothingUnusableGetsThrough::*` (6) | Métrica sin nombre, con nombre que no es identificador, sin OID, con OID **y** walk (quien lo escribió no decidió), con un nombre MIB en vez de un número, con un `kind` inventado; un perfil **sin métricas usables no es un perfil**; una métrica rota no se lleva el perfil; una clave duplicada se descarta (dos métricas bajo una clave escribirían en una serie, y la gráfica sería la que el bucle alcanzara última); un fichero roto cuesta sólo su perfil; y un directorio que no existe es un catálogo vacío, no un fallo |
 | `TestTheInstallationsOwn::*` (3) | Los perfiles propios entran en el catálogo, reutilizar un `id` enviado lo **sustituye**, y uno roto se ignora |
 | `TestWhereAnInstallationKeepsItsOwn::*` (5) | Un directorio se lee en orden de fichero; uno que nadie creó es una lista vacía y no un error (la carpeta aparece la primera vez que alguien deja un perfil, y hasta entonces el catálogo enviado es todo el catálogo); lo que no es un perfil se ignora (una carpeta que se edita a mano acumula notas y ficheros a medias); viven **bajo el directorio de datos** y no junto a los enviados (una actualización del paquete reemplaza el directorio de la aplicación, y el perfil que alguien escribió para el aparato de su rack tiene que sobrevivir a eso); y sin directorio de datos no hay carpeta en vez de una relativa (que resolvería contra el directorio de trabajo del servicio, que no es donde nadie dejó un fichero) |
+| `TestWhenTheDeviceDecidesTheUnit::*` (3) | Una métrica puede **nombrar la columna que la escala** (el almacenamiento lo obliga: una tabla de sistemas de ficheros da el tamaño en *unidades de asignación* y pone el tamaño de una unidad en la columna de al lado, por fila — 4096 en casi todos los agentes, 512 o 65536 en bastantes, y un perfil que lo adivinara informaría un NAS dieciséis veces más pequeño sin que nada lo dijera); una columna de escala que no es un OID se descarta; y el perfil de almacenamiento enviado lo usa **en el usado y en el total** (si no, el volumen se graficaría en unidades contra una capacidad en bytes: dos líneas incomparables en un eje) |
+| `TestTwoNamelessTablesAreNotOneTable::*` (3) | Una métrica puede decir **a qué tabla pertenece**; un grupo que no es identificador se descarta (acaba en una clave de resultado, que es un segmento de ruta); y **toda tabla sin nombres enviada declara uno** — la que no, es la que se fusionará con otra, en silencio, en el primer aparato que sirva las dos |
+| `TestAProbeHasToBeAnswerable::*` (2) | Un `probe` es un GET, y un GET contra una **columna** de tabla no contesta nada (la columna no tiene instancia, sólo sus filas). Un perfil cuyo probe fuera una de sus propias columnas validaría, cargaría, se quedaría en el catálogo y **no se detectaría jamás** — asignado a mano mide perfecto, que es justo el fallo más difícil de notar. Ningún probe enviado es una columna pelada, y un perfil que sólo tiene tablas sondea **una de sus filas** (que además es la condición que interesa: a una máquina sin discos no hay que ofrecerle un perfil de discos) |
+| `TestAVendorProfileDisplacesAGenericOne::*` (4) | Un Synology corre net-snmp por debajo, así que contesta el sondeo de E/S de UCD **y el suyo**, y los dos miden los mismos discos: sin esto la detección propone la pareja y quien acepte ambos grafica cada disco **dos veces**, con dos juegos de nombres que discrepan en lo que cada MIB cuenta distinto. Un perfil puede declarar **a quién sustituye**; una lista que no sean ids se descarta; el perfil de E/S del fabricante enviado sustituye al genérico; y **todo lo sustituido existe** — sustituir a uno que se renombró dejaría de sustituirlo en silencio y el doble conteo volvería sin nada que dijera por qué |
+| `TestOneProfileOneSubject::*` (2) | Los perfiles se asignan **varios a la vez**, así que tienen que ser disjuntos: dos que den el mismo valor no es redundancia, es **una medida graficada dos veces con dos nombres**, y el día que discrepen no hay nada que diga cuál vale. El de almacenamiento mide sólo almacenamiento (la CPU y la memoria son del perfil de sistema, y un NAS con net-snmp se lleva ése también); y **ningún par de perfiles enviados comparte una clave de métrica** — la clave *es* el campo del historial, así que compartirla sería escribir en una serie y quedarse con lo que el bucle alcanzara último |
 | `TestNames::*` (3) | Una cadena suelta vale como nombre en todos los idiomas (un perfil para un rack de una empresa no tiene por qué ser bilingüe); gana el idioma del lector con respaldo; y una métrica sin etiqueta se sigue leyendo |
 | `TestClaimingADevice::*` (3) | Gana el prefijo **más específico** (el árbol del fabricante y el nodo del modelo son reclamaciones legítimas, y la concreta sabe más); casa por **nodos y no por dígitos** (`…657` no puede reclamar `…6574`: son fabricantes distintos); y un aparato desconocido no reclama nada |
 | `TestWhatTheChartsGet::*` (2) | Los campos salen con la **forma que habla el historial** —la misma que produce el `__history__` estático de un módulo, porque es lo que hace un valor graficable y nombrable, y un perfil es exactamente esa declaración para un valor que llega sin ninguna— y lo que la máquina **es** (nombre, modelo) no es una serie |
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 17 tests
+**Archivo:** `watchfuls/snmp/tests/test_mib_lint.py` — 23 tests
+
+**Decir por qué un MIB no va a compilar, antes de que el compilador lo diga mal.** Dos MIB de
+fabricante se rompieron aquí con un día de diferencia y los dos se rompieron de las mismas dos
+maneras. Lo que dice el compilador queda **a un paso** de la causa: `Bad grammar near offset
+558` señala dónde se rindió, y `Unknown parents for symbols: netSnmpPassCounter64` nombra los
+símbolos que no pudo *colocar*, no el import que falta.
+
+El listón de un linter no es «¿encuentra cosas?» — es **callarse con todo lo que está bien**.
+Un primer borrador de éste marcaba **74 de 98** MIB reales y valía menos que nada: un hallazgo
+sólo significa «ve a mirar esa línea» mientras los hallazgos sean raros. Las dos clases de
+ruido que producía están fijadas aquí, porque ninguna se veía hasta pasarlo por ficheros de
+verdad.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatAMibDeclares::*` (3) | Los descriptores son lo que un MIB **es**, en los únicos términos que sobreviven a que lo copien, lo renombren o lo reindenten: se nombran los que el fichero define, un nombre **dentro de un comentario no es una definición**, y un fichero que no define nada no declara nada |
+| `TestTheDateAMibDeclares::*` (6) | `LAST-UPDATED` es lo que decide cuál de dos copias del mismo módulo se queda, y sólo se veía veinte líneas dentro del diff. Se lee la forma de **cuatro dígitos** y también la de **dos** (SMIv1: en la biblioteca real hay 18 de una y 179 de la otra), con el siglo correcto —un `99` leído como 2099 sería el fichero más nuevo de la biblioteca—; gana **la del MODULE-IDENTITY** y no las `REVISION` de debajo; una **comentada no es una fecha**; y un MIB que no la declara **no dice nada** (una cuarta parte de la biblioteca: SNMPv2-TC son convenciones textuales y no tiene MODULE-IDENTITY) |
+| `TestItIsQuietAboutWhatIsFine::*` (8) | Un MIB limpio **no dice nada**; las definiciones **indentadas** siguen siendo definiciones (la mitad de las de net-snmp van cuatro espacios adentro, y anclado en la columna cero no veía ninguna: sus tipos de fila parecían indefinidos y sus tablas parecían apuntar a nada); la llave del `SEQUENCE` **puede ir en la línea siguiente**; `IMPORTS` **no es un objeto llamado IMPORTS** (seguido de `OBJECT-TYPE,` en la línea de abajo, encajaba como «definición cuyo nombre empieza en mayúscula» en 74 ficheros), y `END` tampoco; un tipo **definido aquí** no falta; algo que no es un MIB **no recibe opinión**; y un nombre dentro de un comentario o de una `DESCRIPTION` **no es código** — un linter que lee prosa es uno al que nadie cree dos veces |
+| `TestTheTwoWaysVendorMibsActuallyBreak::*` (6) | Un tipo **usado y nunca importado** (NET-SNMP-PASS-MIB, exacto); el hallazgo **lleva la línea** (uno sin la línea correcta es uno que alguien tiene que ir a buscar); un descriptor **que empieza en mayúscula** (el SMB de Synology, exacto) **con el nombre que debería tener** sugerido; una tabla cuyo `SEQUENCE OF` **nombra un objeto** y no un tipo; y los hallazgos **van en orden de fichero** |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_mib_import_filter.py` — 41 tests
+
+**Qué entra en una importación, y dónde lo deja.** Tres cosas fallaban al entrar y las tres
+callaban. **Un nombre no es una prueba**: la carpeta `mibs/` de Net-SNMP trae `nodemap`,
+`rfclist`, `ianalist`, `mibfetch` y `smistrip` —listas y scripts— y un `Makefile.mib`, que es
+un Makefile con la extensión en la que más confiaba el filtro; todos aterrizaban en la lista
+como MIB que no compilarían jamás. **Todo caía en la raíz**: noventa ficheros de un origen sin
+un fabricante al lado, y el siguiente origen con su propio ENTITY-MIB sobrescribiendo el de
+éste. Y **la guarda de rutas contestaba distinto según lo que existiera en disco**, que con
+dieciséis hilos de descarga es una carrera: de tres a seis ficheros de setenta y nueve
+rechazados en cada ejecución, un puñado distinto cada vez.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhichRouteAnImportTakes::*` (6) | **Reportado**: LibreNMS seguía bajando ficheros sueltos y fallando. El ZIP estaba puesto como respaldo de un **rechazo**, y con cuota disponible el paseo no falla: **trunca** en su propio tope, vuelve con las primeras cuarenta carpetas y parece que funcionó. Ahora una importación **recursiva de la carpeta que el origen publica** va directa al ZIP; una **subcarpeta de fabricante sigue paseando** (una petición para listarla y unas cuantas descargas directas: gastar 86 MB en diez ficheros sería cambiar un desperdicio por otro mayor); una **no recursiva** también; un origen **sin archivo declarado** también; un paseo **cortado en su propio tope se termina con el ZIP** (no sólo un rechazo: mismo problema, misma solución); y uno que **terminó se deja en paz** |
+| `TestASourceDeclaresItsOwnArchive::*` (8) | **Qué zip, y qué carpeta de él, lo declara el origen.** LibreNMS publica sus MIB dentro de un proyecto que no va de MIB, así que su archivo es el proyecto entero y los MIB están bajo una ruta suya; el siguiente origen publicará un tarball de release, u otra rama, o un espejo, y ninguno lo encontraría una URL construida aquí. Se comprueba que `librenms.json` declara `archive` + `archive_only` **sin perder la vía API** (que sigue siendo la barata para lo que sí puede hacer); que el cargador lo lleva; que **el módulo no conoce ese nombre por su cuenta**; que **el archivo declarado gana** al construido; que una **subcarpeta conserva su ruta** (pedir `mibs/synology` e importar todo `mibs` son cuatro mil ficheros que nadie pidió); que un repositorio **que nadie describió sigue funcionando**; que pedido **por nombre** la declaración es lo único que dice qué parte guardar; y que **el formato está documentado**, que es lo que hace que añadir un origen no toque código |
+| `TestWhenGithubSaysNo::*` (6) | Reportado desde el panel: importar `mibs/` de LibreNMS dio 389 ficheros y **25 carpetas fallidas**, todas con `HTTP Error 403: rate limit exceeded`. GitHub permite 60 peticiones por hora sin token y el recorrido gasta una por carpeta; LibreNMS tiene unas cuatrocientas. Agotada la cuota, cada llamada restante falla igual, así que recorrer la cola para demostrarlo convertía **una** condición en veinticinco filas idénticas. Se comprueba que la negativa **se reconoce por su cabecera** (un 403 a secas no lo es: un repositorio privado también contesta 403, y confundirlos abandonaría una importación que sólo iba a fallar en esa carpeta); que **dice cuándo vuelve la cuota**; que una negativa **sin cabecera de reposición sigue siendo una negativa**; que cualquier otro error no lo es; que **el recorrido para** en vez de demostrarlo veinticinco veces; y que el mensaje **dice qué hacer** —«importa una subcarpeta» es consejo para un tope nuestro, no para GitHub negándose— |
+| `TestATokenChangesTheBudget::*` (4) | El tope **se mueve con la cuota** (40 carpetas caben en una hora anónima; con token son 5000 peticiones y quedarse en 40 no tiene sentido); el token viaja **en los dos tipos de petición** (los listados van a la API y los ficheros a raw.github: en sólo uno se agota igual); es un **secreto declarado** (cifrado en reposo y enmascarado en la API — un token en claro en una tabla de configuración es un token en una copia de seguridad); y **un secreto del módulo llega a su propia acción**, que es lo que lo hace utilizable: el navegador tiene `null` para todo secreto que se le envió, así que la acción recibía nada y se comportaba como si no estuviera configurado |
+| `TestOnlyAMibComesIn::*` (7) | Un MIB **dice lo que es** (`DEFINITIONS ::= BEGIN`, con o sin `IMPLICIT TAGS`); una lista de OIDs no lo es; **un Makefile con extensión `.mib` tampoco** —y sólo leerlo lo zanja—; lo vacío no lo es; la cabecera se busca **más allá de un preámbulo largo** (una licencia de doscientas líneas es normal y pararse antes rechazaría un MIB bueno); los nombres que **declara el origen** no llegan ni a pedirse **y el módulo no los conoce por su cuenta** (si los conociera, es que se han vuelto a escribir a mano en el código); y el mobiliario que trae **cualquier** repositorio (readme, licencia, makefile) sí vive aquí, porque es saber sobre git y no sobre un fabricante |
+| `TestWhereAnImportLands::*` (4) | Un origen declarado **dice dónde va**; cualquier otro se nombra **por su repositorio**; una URL que no es una carpeta no pide nada; y **todos los orígenes que se publican declaran destino** — se leía sólo para los ZIP, y por eso toda importación de carpeta se vaciaba en la raíz |
+| `TestThePathGuardAnswersTheSameEveryTime::*` (5, +1 skip) | Aguanta **mientras la carpeta se crea por debajo** (las condiciones reales: dieciséis hilos importando en una carpeta que ellos mismos crean); y **sigue rechazando lo que está para rechazar** — `..`, una ruta absoluta (que `os.path.join` deja ganar, y eso es un salto de directorio sin un solo punto), y un enlace simbólico fuera del árbol, comprobado sólo cuando el destino **existe**, que es la única vez que un enlace tiene a dónde apuntar |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_mib_dupes.py` — 29 tests
+
+**Varios ficheros, un solo nombre de módulo.** pysmi resuelve un import **por nombre**: de tres
+ficheros llamados `SNMPv2-TC` lee uno, compila ése y no menciona los otros dos. Un archivo de
+fabricante trae su propia copia recortada de los MIB estándar —el `SNMPv2-SMI` del switch LG
+tiene 54 líneas frente a las 339 de net-snmp— y quien gana lo decide el orden de un recorrido de
+directorios, que es tanto como decir el alfabeto. Lo que se rompe entonces no es ese MIB, sino
+**todos los que lo importan**, tres módulos más allá de donde nadie va a mirar.
+
+El listado decía `×3`, que es el hecho y no la pregunta. Las preguntas son si las copias
+**siquiera difieren** y, si difieren, **cuál se está usando**; las dos se pueden contestar aquí
+—una comparando el contenido, la otra preguntándoselo a pysmi— así que se contestan.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatCountsAsADuplicate::*` (5) | Un fichero solo no es un duplicado; dos que **se llaman igual** sí; dos que **se llaman distinto y declaran el mismo módulo** también —`rfc2011.mib` e `ip-mib.mib` son los dos IP-MIB: compilan los dos y el segundo pisa al primero, y agrupando por nombre de fichero eso no se veía (seis duplicados por esa cuenta, treinta por ésta)—; **dos ficheros que se llaman igual y declaran módulos distintos no lo son** (el error del revés: ofrecería un diff entre cosas que no tienen nada que ver); y la extensión no cambia cuál es |
+| `TestWhetherTheyDiffer::*` (4) | Copias idénticas **lo dicen**; distintas **lo dicen**; los **finales de línea por sí solos no las hacen distintas** (todo lo de abajo compara LÍNEAS: `unified_diff` no ve un CRLF en su vida, así que llamarlas distintas y luego no enseñar diferencia manda a alguien a buscar una que nunca hubo); y **la respuesta coincide con el diff**, que es la misma pregunta hecha dos veces y no se les puede dejar discrepar |
+| `TestWhichCopyIsUsed::*` (6) | **El compilado dice de dónde salió** —pysmi escribe la ruta del fuente en la cabecera de todo lo que produce, así que es un registro y no una conjetura; «cuál leería la próxima vez» es otra pregunta con otra respuesta, y discrepan justo cuando importa, porque un archivo de fabricante que aterriza al lado cambia la segunda y no la primera—; lee la cabecera **del módulo por el que se pregunta** y no la de otro; **sin nada compilado se le pregunta a pysmi**, y por nombre de FICHERO, que es como el compilador localiza un fuente; lo que contesta **es un fichero que está ahí**; un nombre que nadie contesta **no sale** (el listado y la pregunta son dos momentos, y entre medias un fichero puede irse); y no se pregunta nada cuando no hay nada que preguntar |
+| `TestTheListingCarriesIt::*` (2) | El listado **informa de los duplicados** y un módulo con un solo fichero no es uno |
+| `TestWhetherTheyAreTheSameMibAtAll::*` (4) | Dos cosas chocan en un nombre de módulo y **no son el mismo problema**. Copias de un MIB comparten sus descriptores pase lo que pase entre versiones (un IF-MIB contra uno más viejo da 98%); dos MIB que sólo comparten la primera línea **no comparten ninguno** —lo que produce un archivo de fabricante copiando una cabecera: tres ficheros LINKSYS con 10, 60 y 122 objetos, ni un nombre en común, los tres llamados `rlBrgMulticast`—. Se comprueba que las copias dan **100**, que la cabecera compartida da **0**, que se mide **contra el más pequeño** (un MIB de diez objetos contenido en uno de cien es una copia que creció, no un 10% de coincidencia), y que uno que **no declara nada no tiene respuesta** (`-1`): un porcentaje de nada sería una respuesta donde no la hay, y un 0 se leería como «no tienen relación» |
+| `TestTheDateEachCopyDeclares::*` (3) | Cada copia **lleva su fecha**; la que no la declara la lleva **en blanco** y no ausente (la columna es del grupo entero, y una celda vacía tiene que distinguirse de una que nadie rellenó); y sale **de la misma lectura que el nombre del módulo** — las dos cosas están en la misma cabecera y el listado quiere las dos de todos los ficheros |
+| `TestTheDiffBetweenTwoFiles::*` (5) | El diff **va de A a B** y ambos lados llevan su ruta (uno cuya dirección hay que adivinar se lee al revés sin enterarse); dos idénticos **no producen nada que enseñar**; **no se lee fuera de la carpeta de MIBs** (las rutas vienen de la página, y una ruta de la página es un argumento, no un hecho); **un fichero que no está no es un fichero vacío** (diferenciar contra la nada marcaría todas las líneas como borradas, que se lee como un fichero vaciado); y hace falta un `var_dir` |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_mib_edit.py` — 52 tests
+
+**Editar un MIB, y poder deshacerlo.** Los fabricantes publican MIB rotos —SYNOLOGY-SMB-MIB no
+ha compilado nunca en ninguna parte— y desde aquí no hay nada que hacer salvo dejar que alguien
+lo corrija; una corrección que no se puede deshacer es una que nadie se atreve a hacer, así que
+**el historial es la función y el editor sólo es el botón**. La propiedad que sostiene todo lo
+demás es que **el fichero en disco sigue siendo la copia de trabajo**: a pysmi se le dan
+directorios y compila lo que encuentra en ellos, así que una edición que sólo llegara a la base
+de datos sería una edición que no compila nadie — y eso se ve exactamente igual que un guardado
+que no funcionó.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestSavingIsTwoThings::*` (5) | **El fichero en disco es lo que cambia**; lo que había antes se guarda **como el original** (la primera edición es el último momento en que el contenido del fabricante existe en algún sitio); el original se guarda **una vez y no en cada guardado**; el cambio **queda atribuido**; y guardar **los mismos bytes no es una versión** (una versión que no registra ningún cambio es ruido en la única lista que tiene que seguir siendo legible, y es lo que produce un Ctrl+S de más) |
+| `TestSayingWhatAChangeWasFor::*` (3) | La nota **viaja con la versión** (una lista de treinta versiones que no dicen nada es una lista que nadie lee dos veces, y «para qué era ésta» se sabe *mientras* se hace el cambio, no después); la nota es **una línea y no un documento** (es una columna de una lista: un párrafo ahí echa fuera de la fila los botones que tiene al lado); y no poner nota no es un error |
+| `TestSeeingWhatChanged::*` (6) | Una versión **contra el fichero actual** (la comparación que de verdad se quiere: «¿qué he cambiado desde la v3?»), y **dos versiones entre sí**; «no hay diferencias» **se dice** en vez de mostrar un panel vacío, que es indistinguible de un diff que no cargó; el diff está **acotado** y avisa de que se cortó (uno al que le falta el final callando es peor que ninguno); un lado que no existe falla; y **el uid tiene que ser de este MIB** — viene del navegador, y una versión de otro se leería como un diff de éste y sería una forma de sacar contenido que nadie pidió |
+| `TestTakingItBack::*` (4) | Restaurar **deja el contenido antiguo en disco**; **añade una versión y nunca reescribe una** (un historial que se puede editar responde a una pregunta distinta de la que se le hace: volver atrás es algo que *pasó*, y pasó a una hora); restaurar algo que no está falla; y **un número de versión no se reutiliza jamás** |
+| `TestAnImportThatWritesOverAnEdit::*` (4) | Volver a descargar los originales puso el fichero del fabricante encima de una corrección hecha a mano, **y no dijo nada**: el arreglo seguía en el historial, pero en disco estaba otra vez el roto, la fila decía «desactualizado» y la siguiente compilación fallaba con el mismo error de antes del arreglo. La importación **sigue ganando** —un MIB más nuevo del fabricante suele ser el motivo de pedirlo—, pero lo que sustituye **pasa a ser una versión** (volver al arreglo es un clic, no arqueología); **se informa de a cuáles** pisó (un recuento de ficheros importados no dice nada del único que importaba); un MIB **que nadie editó no se registra** (registrar todos llenaría el almacén de copias del fabricante y enterraría las versiones que significan algo); y **los mismos bytes no son una sustitución**, que es el caso común de reimportar |
+| `TestTheSameBytesAreNotFiledTwice::*` (3) | El sha se guardaba en cada versión **desde la primera fila y no lo leía nadie**. Sin leerlo, el ciclo normal —arreglarlo, vuelve el fichero del fabricante, restaurar el arreglo, vuelve otra vez— archiva dos documentos distintos como cuatro, luego seis, luego ocho; y al llegar al tope son las versiones que significan algo las que salen para dejar sitio a copias de otras que ya estaban. Se comprueba que el fichero del fabricante al volver **no archiva nada** (ya es la v1, la copia guardada la primera vez que alguien editó el MIB); que **el ciclo entero se queda en dos documentos** por muchas vueltas que dé —la mitad mecánica no archiva, y las restauraciones sí, porque son cosas que alguien **hizo**—; y que la consulta dice **qué versión** tiene ese contenido |
+| `TestWhatAHistoryBelongsTo::*` (3) | **Al módulo, no al nombre del fichero**: pysmi compila por nombre de módulo, escribe `<NOMBRE>.py` y resuelve cada `IMPORTS` por nombre, así que el módulo es la cosa y el fichero es dónde hay una copia. Indexado por el nombre del fichero, **renombrar un MIB perdía su historial** — y renombrar un fichero no es editarlo. Un fichero que no declara nada **cae en su nombre** (si no, toda acción sobre él falla con «nombre inválido» en vez de con lo que pasa); y **borrar el fichero conserva el historial** — borrar un MIB para reimportarlo limpio es la forma normal de salir de un lío, y es justo cuando la edición anterior vale algo |
+| `TestRemovingOneVersion::*` (4) | Una versión **se puede quitar**; **los números de las demás no se mueven** (un número nombra un punto de la historia de ese MIB: renumerar haría que una nota que dice «restaurada de la v2» apuntara a otro documento); un uid **de otro MIB no se borra desde aquí** (viene del navegador, en una pantalla sobre uno); y borrar algo que no está falla |
+| `TestAVersionKnowsWhatItWasBuiltOn::*` (5) | Una versión es una **actualización sobre una base**, y cuál era es lo que los números no pueden contestar: la v2 es «el arreglo», pero el arreglo ¿a qué? Importa el día en que el fabricante publica una versión nueva — lo útil entonces no es el contenido de la v2, es el **cambio v1 → v2**, y eso sólo es un cambio si se sabe dónde empezaba. Cada versión guarda el **sha de lo que sustituyó**, resuelto a un número de versión al leerlo; la del fabricante **no tiene base** (nada vino antes, y una inventada es peor que ninguna); una importación **anota lo que pisó**, que es cómo «tu arreglo fue sustituido» deja de ser una suposición; **el cambio se sigue pudiendo leer después de que la base se mueva**, que es todo el propósito; y una base borrada **no deja número** —una respuesta vacía es la correcta y un número equivocado no— aunque el registro de sobre qué se escribió se conserva |
+| `TestAHistoryWithNoFileCanStillBeReached::*` (5) | Borrar un MIB **conserva** sus versiones —perder una edición porque alguien quitó un fichero para reimportarlo limpio es lo contrario de para lo que está un historial— pero conservado y nunca dibujado es algo que existe y no se puede alcanzar. Ahora es **una fila**: el listado lo informa, uno que sí tiene fichero no lo es, **el fichero se puede recuperar** a donde vivía (una versión sabe su ruta, que es el único registro que queda de ella), **no se escribe encima de un fichero que esté** (esta acción nunca pregunta, porque normalmente no hay nada que preguntar), y el historial **se puede soltar** |
+| `TestDeletingCanTakeTheHistoryToo::*` (4) | **Por defecto no**; **sí cuando se pide**; el módulo se resuelve **antes de que el fichero se vaya** (su nombre vive DENTRO: leído después no queda de dónde, y el historial borrado sería el que dijera el nombre del fichero); y borrar un **compilado** no lo toca nunca — un `.py` es una salida, y quitar uno no dice nada del historial de su fuente |
+| `TestWhatItRefuses::*` (4) | Una ruta que **se sale** (el nombre viene del navegador y acaba siendo un fichero que se escribe); un fichero que no está; algo **demasiado grande para ser un MIB**; y **sin base de datos no hay edición callada** — escribir el fichero mientras falla el historial sería justo el caso para el que existe el historial, sin historial |
+| `TestTheHistoryDoesNotGrowForEver::*` (1) | Las más viejas se van, **menos la del fabricante**: es la única versión que no se puede reconstruir de ningún sitio, porque el fichero del que salió lo ha sobrescrito cada guardado posterior |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_mib_errors.py` — 19 tests
+
+**Por qué un MIB no compiló, escrito donde están los MIB.** Compilar doscientos MIB no es algo
+que nadie mire hasta el final, y los fallos son justo a lo que se vuelve — con el modal ya
+cerrado, tras recargar, mañana. Guardado sólo en la página, el motivo moría con el modal y la
+fila volvía a decir «pendiente», que es también lo que dice un MIB que nadie ha compilado
+todavía: dos estados que piden cosas opuestas (uno un clic, el otro un fichero que no esté
+roto) pintados igual, y el que no se puede confundir con nada era el primero en olvidarse. La
+mitad interesante no es escribirlo, es **saber cuándo una entrada ha dejado de ser verdad**,
+porque una fila roja que nadie puede quitar haciendo lo obvio es peor que ninguna fila.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheStoreItself::*` (8) | El fallo se escribe **con la fuente de la que hablaba** (tamaño y mtime: un error sólo es cierto del fichero que lo produjo); vive **al lado** de los MIB y no entre ellos (dentro de `raw/` se listaría como un MIB, se ofrecería para compilar y contaría); un trabajo **limpia sólo lo que cubrió**; la escritura **no deja restos** (es atómica porque el trabajo escribe mientras el panel lee); un fichero corrupto o ausente **no es un store** y no se lleva el modal por delante; **no crece para siempre**; y el mensaje **no se reescribe por el camino** — `Bad grammar near offset 558 … line 21` es accionable por el offset y la línea |
+| `TestWhenAReasonStopsBeingTrue::*` (6) | Sobrevive mientras nada cambió; se cae si **el MIB compiló** desde entonces, si **la fuente se sustituyó** (un MIB arreglado es otro fichero con el mismo nombre) o si **ya no está**; una entrada sin mensaje no es un error; y la basura en el store se ignora sin reventar. La poda es **en lectura**, no en escritura: así cuenta también un fichero dejado a mano en la carpeta, sin que nada tenga que enterarse |
+| `TestTheListCarriesThem::*` (4) | El motivo **llega al panel**; una lista sin fallos lo dice en plano; **el fichero compilado lo zanja** (lo obvio que hace alguien ante una fila roja es volver a compilarla, y cuando funciona la fila tiene que ponerse verde sin que nadie limpie nada); y sin `var_dir` no es un fallo |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_mib_tree.py` — 48 tests
+
+**Los MIB en bruto viven en un árbol, y todo lo que los lee tiene que saberlo.** En cuanto una
+importación conserva la carpeta de la que viene un fichero, un MIB que estaba en `raw/` pasa a
+estar en `raw/synology/`, y **todo sitio que escaneara ese directorio plano informa de nada** —
+y «nada» no es un error en ningún punto de este módulo: el recuento dice cero, el trabajo de
+compilación no encuentra faena y termina al instante, y el botón se lee como roto. Hubo que
+encontrar **tres** escaneos por separado después de arreglar el primero, que es para lo que está
+este fichero. La otra mitad es el empalme entre lo que el panel **selecciona** (ficheros, que
+ahora llevan su carpeta) y lo que pysmi **compila** (nombres de módulo, que nunca la llevan).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWalkingTheTree::*` (5) | Un MIB dentro de una carpeta se encuentra, y los que ya estaban planos siguen contando; los ocultos no son MIB; la ruta relativa usa **barras normales** (es un identificador que viaja al navegador y vuelve para borrar un fichero: una barra invertida en Windows lo convertiría en otra cadena a la vuelta); un directorio que no existe está vacío; y **el recorrido está acotado** — a `raw/` se dejan ficheros a mano, y uno de ellos será algún día un enlace simbólico o un árbol de kernel descomprimido |
+| `TestWhatPysmiIsGiven::*` (2) | **Cada carpeta con MIB es una fuente** (pysmi resuelve un módulo importado por *nombre* contra los directorios que le das y no sabe nada de árboles, así que un MIB de fabricante en una subcarpeta no podría importar el estándar que tiene al lado); y una carpeta sin MIB no es fuente |
+| `TestWhatNeedsCompiling::*` (5) | Un MIB en una carpeta **está pendiente**; la respuesta son **nombres de módulo y no rutas**; un nombre se pide **una vez** (dos carpetas de fabricante pueden tener cada una un `SNMPv2-SMI`: es un módulo, y pedirlo dos veces lo compila dos veces); un módulo compilado zanja su fuente **viva donde viva**; y el atajo que decide si pagar el arranque del compilador ve un MIB dentro de una carpeta — ciego a las carpetas dice que no y la compilación automática no corre nunca |
+| `TestAFileIsFoundByOneNameAndBecomesAnother::*` (6) | **El nombre del fichero no es el nombre del módulo, y pysmi sólo conoce el segundo.** `trunk.mib` declara IEEE8023-LAG-MIB: a pysmi se le pide `trunk` —así localiza el fichero— y escribe `IEEE8023-LAG-MIB.py`, así que preguntar «¿está compilado *trunk*?» es preguntar por un fichero que no existirá jamás. Se comprueba que **el módulo se lee de dentro del fichero**; que uno que no declara ninguno **contesta nada** en vez de adivinar por el nombre (una suposición disfrazada de respuesta no se distingue de una respuesta); que **lo pendiente se pregunta por el módulo**; que un `.py` con el nombre del **fichero** no zanja nada (el mismo error del revés); que **se sigue contestando el nombre que el compilador necesita** (con el del módulo pysmi no encontraría el fichero y se iría a la red a buscarlo); y que la respuesta **se recuerda hasta que el fichero cambia** |
+| `TestAnImportIsResolvedByTheNameItAsksFor::*` (4) | **Un `IMPORTS` nombra un módulo, y pysmi lo busca como si fuera un nombre de FICHERO.** En un archivo de fabricante eso no encuentra nada: `DIFFSERV-DSCP-TC` está en `diffserv-dscp-tc-rfc3289.mib`, `DNS-SERVER-MIB` en `rfc1611.mib` y todos los Linksys en un `ls*.mib`. Cada import volvía «missing» y se llevaba por delante al MIB que lo pedía. Ahora hay un **índice de módulo → fichero** que se consulta **primero**, construido en la primera pregunta y no antes; un módulo que nadie declara no está en él; como fuente de pysmi **contesta por el nombre declarado** y se aparta de lo que no conoce; y una dependencia se encuentra **aunque el fichero se llame de otra manera**, que es todo el asunto |
+| `TestAFailureHasToBeVisible::*` (3) | La otra mitad del mismo informe: compilaban «sin error» y seguían pendientes. **pysmi contesta con uno u otro nombre según le vaya**: lo que compila vuelve con el nombre del MÓDULO, lo que no puede parsear con el nombre que le PASARON, porque no llegó a leer el módulo del fichero. El veredicto se buscaba sólo por el nombre del fichero, así que el fallo era invisible para todo MIB cuyo fichero no se llame como su módulo. Se guarda que **el fallo se informa con el nombre del módulo** (que es como el panel indexa filas y motivos), que **el motivo viaja con él** (una fila roja sin motivo es una fila sobre la que nadie puede actuar), y que el trabajo **dice qué alcanzó** — `attempted` es lo que limpia los motivos guardados, y listado por nombre de fichero contra un resultado indexado por módulo estaba **siempre vacío**: no se limpiaba nunca y un MIB ya compilado conservaba su fila roja |
+| `TestAMibThatIsOnlyMacros::*` (5) | RFC-1212 y RFC-1215 **definen gramática y nada más**: pysmi no puede compilarlos porque no hay nada dentro que compilar, y pysnmp ya los trae. Reportado desde el panel: `Bad grammar near offset 285 at MIB RFC-1212` en cada ejecución y sin arreglo posible —un archivo de fabricante traía la variante de MG-Soft, cuyo cuerpo entero es `SMI OBJECT-TYPE`, una directiva de SMIC que pysmi no conoce— porque la lista de stubs se filtraba por «no está en raw_dir», regla correcta para los built-in normales (dejas un SNMPv2-MIB.txt y lo quieres compilado) y equivocada para estos dos, donde tener una copia no puede significar «compílala». Se comprueba que **nunca está pendiente**, que **nunca se le pide al compilador** (un stub lo cubre como *dependencia* y eso es todo lo que un stub puede hacer: pedido por nombre, pysmi parsea antes de consultar a nadie), que se reconoce **por su módulo y no por el nombre del fichero** (la copia del fabricante se llama `RFC-1212.my` y vive en una carpeta `RFC-1212.my_for_MG-Soft`), que **los built-in normales siguen compilándose**, y que **la pareja se nombra en un solo sitio** |
+| `TestACompiledModuleCanOutliveItsSource::*` (6) | Borrar una de las copias de un módulo que llegó dos veces deja el `.py` **hecho desde la que se fue** — y el `.py` no se borra, porque es lo que carga pysnmp y tirarlo sacaría el módulo de servicio por una limpieza. **Ningún reloj puede verlo**: borrar un fichero no hace nada más nuevo. Lo que sí lo dice es la cabecera que escribe pysmi con la ruta del fuente: se comprueba que **se lee**, que mientras ese fichero está **no hay nada pendiente**, que **en cuanto no está el módulo vuelve a estarlo**, que un `.py` **sin cabecera no arrastra a nadie** (tomar el silencio por «se fue» recompilaría la biblioteca entera para siempre), que la respuesta **se recuerda hasta que el `.py` cambia**, y que sin compilado no hay procedencia |
+| `TestNothingScansItFlatAnyMore::*` (1) | Ningún módulo lista el directorio en bruto directamente: el recorrido compartido es la única vía. Los tres sitios fallaban igual de callados |
+| `TestADeadMirrorCannotCostTheCompilation::*` (3) | Un timeout solo **no salva** una compilación: pysmi pide varias variantes de nombre por módulo y se traga el error entre intentos, así que un host caído se paga una vez por variante y por módulo. Cada petición lleva el timeout (pysmi no pone ninguno); **un host que no habla se da por perdido** y deja de ir a la red; y **una respuesta reinicia la cuenta** — un 404 es una respuesta: ese espejo no aloja *ese* MIB, y el siguiente puede estar |
+| `TestAModuleCanBeCompiledTwice::*` (5) | pysmi escribe el módulo en un temporal y lo pone en su sitio con `os.rename`. En POSIX eso sobrescribe; **en Windows lanza** si el destino existe (`WinError 183`), así que pysmi no podía sustituir jamás un módulo que ya hubiera escrito — un MIB editado se quedaba desactualizado para siempre y «recompilar todo» no recompilaba nada. Se comprueba que dentro del contexto el renombrado **sustituye**; que el `os` real **se devuelve** —y también cuando la compilación revienta—, porque es un proxy sobre el módulo escritor y no un parche a `os.rename`, que lo comparte el proceso entero; que **el resto de `os` sigue llegando** (el escritor usa más que `rename`); y que **el compilador entra de verdad** en el contexto, porque un arreglo en el que nadie entra no es un arreglo |
+| `TestWhereTheStandardModulesComeFrom::*` (3) | Se prueba primero una fuente **viva** (todo MIB de fabricante importa `SNMPv2-SMI`/`-TC`/`-CONF`, así que quien conteste por ellos decide si compila algo); toda plantilla lleva `@mib@`; y **hay más de una** — un único origen por defecto es un punto único de fallo, y falló |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_mib_archive.py` — 32 tests
+
+**El archivo de MIBs de un fabricante, y distinguir una actualización de un retroceso.** Dos
+cosas que un catálogo de MIBs tiene que acertar en cuanto puede importar de más de un sitio, y
+las dos fallan calladas: que **un fichero conserve la carpeta de la que viene** (LibreNMS publica
+un directorio por fabricante y un archivo de fabricante trae su propia estructura; aplanados, dos
+ficheros llamados `ENTITY-MIB` caen en el mismo sitio y uno gana en silencio — el panel enseña
+una sola entrada y no es la que crees) y que **importar no sea automáticamente actualizar** (cada
+MIB lleva el `LAST-UPDATED` que escribió su autor, que es lo único que dice si el archivo va por
+delante de lo instalado; la fecha del fichero dice cuándo se descargó).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheRepositoryZipIsAWayPastTheApi::*` (9) | **Idea del usuario, y es la buena**: `codeload` sirve el repositorio entero como un fichero y **no es la API**, así que no gasta cuota — donde recorrer cuatrocientas carpetas a una petición cada una no cabe en sesenta por hora. Se comprueba la traducción de URL de carpeta a URL de zip **más la ruta dentro del repositorio** (una subcarpeta conserva su ruta entera; un repositorio pelado también vale; lo que no es GitHub no lo es); que **sólo sale esa carpeta** (un zip de repositorio trae dieciséis mil ficheros que no vienen a cuento); que la carpeta pedida **no se conserva como carpeta** (es dónde se encontró, no dónde va) pero **lo que hay debajo sí** (es la organización del fabricante); que **el tope cuenta lo que se importa** y no lo que el zip contiene; y que **dice cuántos quedaron fuera** — LibreNMS trae 4830 MIB y 396 MB de ellos, que es una decisión y no un detalle |
+| `TestTheArchiveNeverLandsInMemory::*` (2) | El archivo **se transmite a un fichero temporal** y se borra pase lo que pase (decenas de megas para sacar una carpeta es justo el caso de esta vía, y eso en memoria funciona en un portátil y mata un contenedor; y una importación diaria que deja su temporal llena un disco); y **una descarga que pasa del tope se rechaza** mientras baja, que es el único sitio donde se puede: un servidor que sigue enviando no va a parar porque el fichero que llena tenga un límite |
+| `TestWhenTheZipTakesOver::*` (3) | El zip entra **sólo después de que la API se niegue** (es una descarga del repositorio entero, y la vía API es más barata para todo lo que sí puede hacer); se informa **como una sola importación**, porque es lo que se pidió; y si el zip **también falla** se respeta la primera respuesta — dos fracasos contados como un éxito son peores que el fracaso |
+| `TestWhatComesOutOfTheArchive::*` (7) | Los MIB se importan; **la estructura del archivo sobrevive**; la carpeta **envoltorio** del empaquetado no cuenta como estructura (la de Synology se llama literalmente «MIB files»: conservarla entierra cada MIB un nivel más abajo y el día que el fabricante la renombre la siguiente importación aterriza **al lado** de la anterior en vez de actualizarla); un nombre que una carpeta no puede tener se sanea en vez de rechazarse (negar un espacio negaría al fabricante entero); lo que no es un MIB se deja en paz; **un miembro que se escapa del directorio se rechaza** (un zip es el fichero de otro, y sus nombres son cadenas de otro); y lo que no es un zip lo dice |
+| `TestUpdateOrDowngrade::*` (6) | Lo que no está es **nuevo**; bytes idénticos son **sin cambios y no se reescriben** (reescribirlos marca el fichero como caducado frente a su módulo compilado y compra un re-parseo de segundos por un fichero que no cambió); un sello más nuevo es una **actualización**; **uno más antiguo se rechaza** —el retroceso silencioso: el archivo del año pasado sobre un MIB que alguien arregló a mano, cuyo síntoma aparece mucho después como un OID que dejó de resolver— pero **se puede forzar** (volver a un archivo bueno conocido es legítimo; hacerlo sin querer no); y una diferencia **sin sello** es una actualización (muchos MIB no llevan `LAST-UPDATED`, y negarla los haría inactualizables para siempre) |
+| `TestLookingBeforeImporting::*` (2) | Una pasada **en seco** informa y no escribe nada («¿merece la pena actualizar?» no debería costar la actualización); y una fuente conocida se puede **nombrar** en vez de pegar su URL — el panel ofrece el fabricante, y nadie tiene por qué recordar dónde vive el fichero |
+| `TestTheVersionStamp::*` (3) | El sello se lee del `MODULE-IDENTITY`; un MIB sin él no se puede comparar; y los sellos **ordenan como cadenas** — que es justo la razón de compararlos así en vez de parsear una fecha que nadie necesita |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 26 tests
 
 **El catálogo, tal y como lo recibe el panel** — y preguntarle a un aparato qué es. Hasta que
 estas dos acciones existieron, la matriz de OIDs era real e invisible: tres ficheros JSON, un
@@ -3561,7 +3818,7 @@ parecen buenos, y ése es justo el fallo que tiene que confirmar una persona).
 | Test | Qué comprueba |
 |---|---|
 | `TestTheCatalogueOnScreen::*` (8) | Lista lo que se envía; **cada fila dice su origen**; los perfiles propios de la instalación salen al lado de los enviados; reutilizar un `id` enviado se ve como **propio** y no duplica la fila; la pantalla dice **dónde van los perfiles propios** (si no, «¿y cómo añado uno?» es una consulta a la documentación desde una pantalla que ya sabe la respuesta); sin directorio de datos sale el catálogo enviado y no un error; la fila trae lo que la pantalla dibuja (tipo, unidad, ancho del contador y **qué nombra las filas** de una tabla); y los nombres viajan en todos los idiomas que tenga el perfil, porque un catálogo contesta a todas las sesiones |
-| `TestAskingTheDeviceWhatItIs::*` (9) | A cualquier aparato que conteste se le propone el genérico (MIB-II es lo que sirve todo agente); uno con interfaces se lleva el perfil de interfaces y uno sin ellas no se lleva una tabla de nada; un aparato reclamado se lleva el perfil que lo reclama; la propuesta no repite; un aparato que **no contesta es un error y no una respuesta vacía** («ningún perfil casa» se leería como un aparato sin nada que medir, y son dos cosas distintas para quien lo lee); sin host no se pregunta nada; vuelve lo que el aparato **dice de sí mismo** (el `sysDescr` suele ser lo único que identifica una caja que nadie ha reclamado, y es de donde se escribe un perfil); y una respuesta ilegible de cuatro no es una detección fallida |
+| `TestAskingTheDeviceWhatItIs::*` (13) | **Los candidatos los declaran los perfiles, no la acción.** Cada uno dice cómo se le reconoce —`match.sysobjectid_prefix` (quién lo fabricó) y `match.probe` (un OID que el aparato tiene que contestar)— y la detección pregunta exactamente eso. La acción llevó una lista de «los genéricos» escrita dentro durante exactamente un build, y el perfil añadido en ese build era **invisible para ella**: asignado a mano funcionaba, detectado no existía. Aquí: un aparato que sólo contesta MIB-II se lleva el genérico; **un NAS que sirve la HOST-RESOURCES-MIB se lleva almacenamiento** (el caso que destapó la lista: un Synology la contesta y su `sysObjectID` es suyo, que ningún perfil genérico reclama ni debe); uno que no la sirve no se lo lleva (un switch no tiene sistemas de ficheros, y ofrecérselo sería ofrecer una pantalla de gráficas vacías); quién lo fabricó sigue contando aunque no se sondee nada; un perfil reclamado **por las dos vías aparece una vez**; **contestar es la señal**, no lo que diga el valor (un umbral aquí sería la acción decidiendo algo sobre un perfil del que no debe saber nada, y «0 procesos» sigue siendo un aparato que implementa la MIB); una respuesta vacía no es una respuesta; dos detecciones del mismo aparato marcan lo mismo (si no, el admin decide a qué ejecución creer); un aparato que **no contesta es un error y no una respuesta vacía**; sin host no se pregunta nada; vuelve lo que el aparato **dice de sí mismo**; el sondeo está **acotado** (un viaje de ida y vuelta por perfil, contra un aparato con alguien esperando); y **todo perfil enviado dice cómo reconocerlo** — uno que el catálogo no puede detectar es uno que el admin tiene que saber que existe, que es el fallo que todo esto sustituyó |
 
 ---
 
@@ -3583,7 +3840,7 @@ idénticas.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 135 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 152 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 
@@ -8113,7 +8370,7 @@ mira las pantallas sin darle el registro con ella.
 
 ---
 
-**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 16 tests
+**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 24 tests
 
 **La pantalla del catálogo de perfiles**: el cableado que hace visible un catálogo. Un watchful
 trae su propia interfaz en tres ficheros que una convención recoge, y una pantalla hecha así
@@ -8127,7 +8384,38 @@ como su propia clave.
 | `TestTheScreenIsWired::*` (4) | Los ficheros se llaman como la convención los recoge (`*_ui.html` / `*_modals.html`: uno con otro nombre no se inyecta y el fallo es un botón que no hace nada); **cada elemento que el script busca existe en el marcado**; el botón de la barra llama a una función que existe (el módulo declara el botón, y el core no sabe qué abre); y las dos acciones están declaradas y son de **sólo lectura** (una fuera de `WATCHFUL_ACTIONS` es un 404, y una fuera de `READ_ONLY_ACTIONS` exige permiso de edición para *mirar* el catálogo, y audita cada vistazo) |
 | `TestTheFieldThatAssignsThem::*` (5) | El aparato lleva sus perfiles —en el **servidor** y no en una comprobación: lo que una máquina *es* no cambia porque alguien le añada un cuarto OID—; es una **lista y no una elección** (un NAS es el genérico más las interfaces más sus discos; un perfil por aparato obligaría a un perfil monolítico por modelo); el picker se registra contra la **clase de campo** y no contra la ruta de un item (cada servidor dibuja el mismo campo con su propio uid dentro de la ruta); el renderizador busca por esa clave; y **un campo multivalor también puede tener picker** (la rama de chips devolvía antes de mirarlo, así que varios valores significaba teclearlos — y un `id` de perfil escrito de memoria es un aparato que no mide nada hasta que alguien nota la errata) |
 | `TestTheHostModalIsWhereItIsActuallyBound::*` (5) | La pestaña Modules edita la config de un módulo; **el modal del host es donde alguien dice «esta caja es un NAS»**, y dibuja los mismos campos del schema con OTRO renderizador que no sabía nada de campos multivalor ni de pickers — así que el campo que en una pantalla tenía chips y selector, en la que importa era una caja de texto. Aquí también es chips; ofrece el picker del **mismo registro** (un segundo registro serían dos sitios donde equivocarse); la clave es `módulo|colección|campo` (la misma identidad a la que la pestaña Modules llega vía `_schemaKeyOf`, construida a mano porque un borrador de host no tiene ruta en `modulesData`); el picker se abre **con un callback** (escribir directo en `modulesData` dejaría el valor donde este panel no lo lee, y el campo volvería vacío al repintar); y el picker de perfiles **respeta ese callback** — si no, el botón abre, las marcas se ven bien y no se asocia nada |
+| `TestTheChipsReadAsNames::*` (5) | El campo guarda **ids**, que es lo correcto de guardar (sobreviven a un renombrado, son lo que habla la API y lo que se cita en un informe de fallo) y no es lo que lee una persona: una fila de `hr_storage`, `if_generic`, `ucd_linux` en el formulario de un host no dice nada de lo que se está midiendo, a quien está decidiendo si la asignación es correcta. El renderizador de chips **pide una etiqueta** al registro; la clave es `módulo|campo`, que es a lo que llegan **los dos paneles** (la ruta de Modules lleva el uid del item y la del modal del host su índice, y ninguno es parte de lo que el *campo* es); el módulo registra la suya; **el id no se pierde** — sigue en el tooltip, porque es la cadena que identifica el perfil en todos los demás sitios; y un catálogo que no se pueda leer deja los ids en pantalla, que es la conducta de antes y una pantalla que funciona |
+| `TestTheMibManagerScreen::*` (3) | Dos formas en que el gestor de MIBs engaña sin dar error: una fuente **sin carpeta no se ofrece como carpeta** (Synology publica un archivo de veinte MIB, y el espejo que aloja tres es fuente de dependencias para compilar, no el sitio del que importar — en el desplegable de carpetas parece la vía principal y es la versión pequeña); el informe de importación **no puede abrir el diálogo a empujones** (una primera importación son veinte filas «nuevo», y creciendo libre echa fuera de pantalla los botones que actúan sobre él, justo cuando hacen falta); y el cuadro acotado es una **clase reutilizable y no una regla por id**, que es la única norma que tiene el panel sobre CSS de maquetación |
 | `TestNothingReadsAsItsOwnKey::*` (2) | Cada cadena que pide la pantalla existe en **los dos idiomas** (la que falta se muestra como su clave literal); y el campo tiene etiqueta, texto de ayuda y nombre de grupo en ambos |
+
+---
+
+**Archivo:** `tests/meta/test_snmp_mib_manager_screen.py` — 125 tests
+
+**La pantalla del gestor de MIBs**: una lista que llega abajo, y una fila por módulo. Dos cosas
+distintas fallaron en el mismo modal y ninguna la ve Python. **La lista se quedaba corta**: su
+alto estaba clavado en el marcado (`max-height:35vh`) y lo que hacía scroll era el *cuerpo* del
+modal — correcto a exactamente un tamaño de diálogo y falso a todos los demás, porque este modal
+se puede arrastrar y maximizar a 95vh, y a 95vh la lista usaba un tercio del alto con el resto
+vacío. **Y la lista estaba indexada por fichero y no por módulo**: la API contesta `raw` (.mib) y
+`compiled` (.py), que en dos columnas son el mismo MIB dos veces, así que «¿este está
+compilado?» se respondía leyendo las dos y comparando a ojo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheListReachesTheBottom::*` (7) | **Cada eslabón** de la cadena de relleno, porque una cadena vale lo que su eslabón más débil y el que falta falla callado —la lista simplemente termina donde termina su contenido—: el diálogo **recibe un alto** que repartir (`.ss-vfill` reparte, no inventa); el cuerpo rellena y **no hace scroll él**; existe la regla genérica que deshace el `overflow-y: auto` que Bootstrap le pone (un cuerpo que scrollea crece con su contenido y la lista de dentro nunca se entera de cuánto puede medir); el contenedor de la lista es el que crece **y** scrollea; **nada clava un alto propio** (el fallo original, en su forma original); la hoja del módulo **ya no dimensiona el modal por id**; y todo lo que va encima de la lista **se niega a encoger** (un item flex encoge antes de que su hermano scrollee: si la barra puede encoger, una lista larga aplasta los botones en vez de desplazarse) |
+| `TestOneRowPerModule::*` (5) | La lista se indexa por **nombre de módulo**, que es por lo que se indexa pysmi (y dos fabricantes pueden traer cada uno una copia del mismo módulo estándar: es una cosa que compilar, no dos); un `.py` **sin fuente al lado** es una dependencia que pysmi arrastró resolviendo un IMPORTS, y no se puede compilar porque no hay de qué; **borrar una fila borra todos los ficheros que representa** (dejar uno callado es cómo un MIB «borrado» sigue resolviendo); la **selección sobrevive** a que un módulo se compile (indexada por fichero, la identidad de la fila cambia en cuanto aparece su `.py` y la marca se movería bajo el cursor); y los chips de estado **llevan los recuentos** |
+| `TestAPendingRowSaysWhyItIsPending::*` (4) | Un MIB de fabricante que no se puede parsear está pendiente para siempre, y «pendiente» es también lo que dice uno que nadie ha compilado todavía — así que por sí solo se lee como «el botón no funciona». pysmi **sabe** el motivo (`Bad grammar near offset 558 … line 21`) y el panel lo tiraba. La fila **lleva el motivo** de la última compilación; el motivo **manda sobre la insignia de pendiente** (mismo estado, distinta cosa que hacer: uno necesita un clic, el otro que arreglen el fichero); compilar una fila **no borra el motivo de otra** (un trabajo habla por los módulos que cubrió); y el motivo **llega al navegador**, que son tres saltos y se cae en cualquiera |
+| `TestManyMibsStayWorkable::*` (12) | Veinte MIB son una lista; una importación de repositorio trae dos mil, y una lista plana de dos mil no se lee por rápido que se dibuje — así que se usan las carpetas que la importación ya conserva. El grupo se calcula **después** del estado y no antes (depende de él —una dependencia no tiene carpeta— y leer una propiedad que la línea anterior aún no ha asignado da `undefined`, que compara falso y mete **calladamente** todas las dependencias en el grupo raíz: noventa y cuatro ficheros archivados como si alguien los hubiera elegido); las dependencias tienen grupo propio y **van al final porque se dice**, no porque una intercalación opine sobre un carácter de control; un árbol pequeño **sigue siendo una lista plana** (agrupar veinte ficheros es puro coste: las cabeceras existen para el caso que no cabe y no deben gravar el que sí); **una sola carpeta no es una elección**; una búsqueda **abre las carpetas donde encontró algo** (teclear algo que existe y que no salga nada, porque está dentro de una carpeta cerrada, es una búsqueda que se lee como rota); y los recuentos son **de la carpeta y no del momento** — un número que se mueve mientras tecleas no sirve para lo único para lo que está, decidir dónde mirar |
+| `TestARowIsAModuleAndNotAFileName::*` (6) | **Un MIB se localiza por el nombre del fichero y se compila con el del módulo**, y son distintos la mitad de las veces en un archivo de fabricante. La fila se teclea por lo que el fichero **declara**; el nombre del fichero se sigue enseñando cuando no coinciden (una fila que pone IEEE8023-LAG-MIB mientras la carpeta tiene `trunk.mib` no se puede casar con ningún fichero, y casarlos es para lo que está esta pantalla); un `.py` es **dependencia sólo si nadie lo declara** (comparado contra nombres de fichero, 97 módulos que traía el usuario parecían descargados por pysmi); el botón cuenta **la lista que el servidor va a recorrer** y no sus propias filas; y lo pendiente se pregunta por el módulo pero **contesta el nombre del fichero**, que es lo que el compilador necesita |
+| `TestACompileThatDidNothingSaysSo::*` (4) | Los dos lados de la misma conversación con pysmi: el índice por módulo **se consulta primero** (si no, el nombre del fichero gana y vuelve a no encontrar nada); el veredicto **se busca con los dos nombres**; el fallo **se informa con el del módulo**; y el almacén de motivos **se limpia con lo que el trabajo alcanzó**, indexado también por módulo |
+| `TestSomeMibsAreNeverCompiled::*` (5) | Tienen **estado propio** («integrado»); la insignia **dice por qué no hay módulo**; la fila **no ofrece compilar** (un botón cuyo único desenlace es que no pase nada); **los estados siguen sumando** (uno que falte en el contador sale como NaN en el chip y como un total que no cuadra con la lista); y los nombres **salen del resolver**, no los conoce la capa de administración por su cuenta |
+| `TestACompiledModuleCanOutliveItsSource::*` (4) | La fila compara contra **de dónde salió el `.py`** y no sólo contra las fechas; la insignia dice **qué clase de desactualizado** es («el fuente es más nuevo» es un consejo sobre un fichero que puedes abrir; éste es sobre uno que no está); **el servidor coincide en que está pendiente** (chips y botón leyendo dos respuestas distintas es cómo el panel llegó a decir «Pendientes 0, Errores 1» sobre un botón que compilaba tres); y la procedencia se lee **donde se escribe** — el resolver es el dueño de todo lo compilado, y la superficie de administración se lo pregunta en vez de parsear un `.py` por su cuenta |
+| `TestSeveralFilesOneModule::*` (11) | La insignia `×N` **abre la comparación** en vez de ser un tooltip con tres rutas; **dice si difieren** sin abrirla; el ojo abre **la copia que se está usando** y no la primera por alfabeto; la comparación es **de servidor** (el listado lleva un hash por copia, nunca el contenido); **una sola derivación** de qué es la diferencia (versiones y ficheros preguntan lo mismo); a **pysmi** se le pregunta quién gana y **el árbol se recorre una vez** para todo el lote; el filtro **no es un estado** (un duplicado sigue estando compilado o pendiente); el chip **sólo está cuando cuenta algo**; borrar una copia **avisa de que hay que recompilar**; y es una acción declarada y de sólo lectura |
+| `TestTwoProblemsAreNotOneProblem::*` (4) | La pantalla **dice cuándo no son copias**; **no abre un diff** entre ficheros sin relación (sería una reescritura entera: todas las líneas fuera y todas dentro, que se lee como una comparación estropeada); el parentesco se mide **donde se leen los ficheros**; y lo que se compara son **los descriptores**, no el tamaño ni el texto |
+| `TestTheDateDecidesAndIsShown::*` (4) | La columna **sólo existe cuando algo la llena** (una columna de guiones ocupa ancho y no dice nada); **«más reciente» sólo se afirma cuando las fechas difieren** —dos iguales no tienen una más nueva, y una fecha contra un blanco no es una comparación: el otro fichero no lo dijo—; el que no la declara **no se pinta como más viejo**; y se lee **al lado del nombre del módulo**, en una sola lectura |
+| `TestDeletingIsNotOneThing::*` (8) | Una fila son **dos ficheros** —el fuente y el `.py`— y se pueden pedir por separado; sin ámbito siguen siendo los dos; el menú **sólo aparece cuando hay dos cosas** que elegir; la fila y la selección **comparten un menú**; la pregunta dice qué **sobrevive** (borrar el fuente deja un compilado que se sigue usando, y eso no parece un borrado hasta la siguiente compilación); el historial **no se ofrece cuando sólo se va el `.py`**; esconder el botón de selección **esconde su caret**; y un ámbito del que la selección no tiene nada **lo dice** |
+| `TestImportingIsFoldedAway::*` (3) | Las filas de importación viven en un panel **plegado** (cuatro barras siempre abiertas se comían medio modal para un paso que se da de higos a brevas); su resumen está **traducido** (un `<summary>` vacío es un triángulo sin palabra al lado); y la **barra de progreso se queda fuera** (una compilación lanzada desde el panel informa en la barra: plegada con él, un trabajo en marcha parecería que no pasa nada) |
 
 ---
 
@@ -8146,3 +8434,30 @@ renderizador no está definido. Todos fallan **en silencio**.
 | `TestItIsTheSharedMachinery::*` (3) | Sale de `createListTable` con persistencia y franja de filtro, toda columna ordenable tiene valor de orden, y las vistas vienen del registro compartido |
 | `TestItDoesNotGoStale::*` (5) | Reportado desde el panel: una máquina dada de alta en Sistema no aparecía aquí. La primera versión pedía la flota **sólo si no tenía ninguna**, que es la caché que una sección se puede permitir mientras es lo único que escribe sus propios datos — y ésta no escribe ninguno: todo lo que hay en pantalla se edita en otro sitio, así que «ya tengo una flota» nunca es motivo para creer que es la de ahora. Se guarda que el punto de entrada pregunta siempre, que los redibujados baratos (filtro, orden, página) **no** tocan la red, que lleva el control de auto-refresco compartido en vez de un intervalo escrito a mano, que el tick para cuando la sección no está en pantalla y que el intervalo elegido sobrevive a una recarga |
 | `TestItShowsWithoutHandingOver::*` (4) | La proyección es **lista blanca**; el dominio **no escribe** (ni un POST/PUT/DELETE/PATCH: `infra_view` no puede ser un rodeo a los permisos del registro); **no tiene almacén propio** —cada dato es de alguien: hosts, estado de checks, historial, y una cuarta copia sería una cuarta cosa que mantener en hora, y la primera en desviarse sería la que la gente está mirando—; y el **vocabulario de estado es el del registro**, porque un segundo juego de nombres sería una segunda definición de «máquina rota» |
+
+---
+
+## 166. Un secreto guardado no es un inicio de sesión
+
+**Archivo:** `tests/meta/test_wa_secret_fields.py` — 10 tests
+
+Reportado desde el panel: **Firefox ofrece guardar un inicio de sesión en cada recarga —
+usuario `1`, contraseña `public`**. Son la versión SNMP y la comunidad de un aparato vigilado.
+El gestor de contraseñas había encontrado un `<input type="password">`, tomó el campo de al lado
+como usuario y decidió que la página era un formulario de acceso.
+
+El aviso es la mitad inofensiva. La otra mitad es que esa misma maquinaria **rellena** esos
+campos: una contraseña guardada pegada en una caja de comunidad es un valor a punto de salir
+hacia un aparato, y de ahí a la configuración. Los secretos de un panel —comunidades, claves de
+firma de webhook, tokens de API, la contraseña con la que se prueba un *bind* LDAP— no son las
+credenciales de este sitio, y nada que los trate como tales puede estar bien.
+
+Así que un secreto se enmascara **desde la hoja de estilo** sobre un input de texto normal, que
+ningún gestor reconoce, y el tipo `password` del navegador se conserva **sólo** como respaldo
+donde ese enmascarado no existe: perder el enmascarado sería mucho peor que el aviso que evita.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestASecretIsNotACredential::*` (2) | **Ninguna plantilla escribe `type="password"` a mano** salvo las que son de verdad de este sitio (el acceso, cambiar mi contraseña, crear usuario, resetear la de otro) — la decisión depende de lo que soporte el navegador, así que la toma el renderizador; y **esas cuatro lo siguen siendo**, porque si no la guarda anterior se cumpliría enmascarándolo todo, incluido donde el gestor sí debe funcionar |
+| `TestTheMaskingNeverDegrades::*` (5) | Se le **pregunta al navegador** antes de fiarse (`-webkit-text-security` aplicado a ciegas enseña todos los secretos en claro donde no existe); sin él **vuelve a ser un input de contraseña**; la clase sólo se pone donde funciona; la hoja de estilo lleva el enmascarado de verdad; y **el nombre no estaba cogido** — `.ss-secret` ya era el secreto compartido del MFA impreso para teclearlo en un móvil, y dos reglas con un nombre son una que no se aplica |
+| `TestTheOtherManagersAreToldToo::*` (3) | 1Password, LastPass y Bitwarden **no leen `autocomplete`**, leen lo suyo, y son los que pegarían una entrada del baúl en una comunidad: el campo se desapunta por todos los nombres; **las dos formas salen de la misma función** (dos `<input>` serían dos sitios donde olvidar un atributo); y ningún llamante escribe su propio `autocomplete`, que en la misma etiqueta el parser ignora — creer que hace algo es peor que no ponerlo |

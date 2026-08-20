@@ -388,6 +388,23 @@
    table body wants none of it, which is why this is a separate class and not part of
    .ss-vscroll. */
 .ss-scroll-pad { padding: .75rem .5rem 1rem 0; }
+/* .ss-scroll-box : a result panel that reports a LIST whose length is not the caller's to
+   choose — an import of twenty files, a check of forty rows. Left to grow it pushes everything
+   below it out of the dialog and the buttons that acted on it end up off screen, which is the
+   one moment somebody needs them. Caps itself and scrolls its own overflow instead.
+   Generic on purpose: nothing here knows what the list is of. */
+.ss-scroll-box { max-height: 14rem; overflow-y: auto; }
+/* .ss-vfill on a MODAL BODY: the body becomes the top of the fill chain, so it must not be
+   what scrolls — the .ss-vscroll inside it is. Bootstrap's .modal-dialog-scrollable puts
+   `overflow-y: auto` here, which is exactly the opposite: the body grows with its content
+   and the list inside it never learns how tall it is allowed to be. Pair it with
+   .modal-dialog-scrollable, which is what gives the dialog a height to hand down. */
+.modal-body.ss-vfill { overflow: hidden; }
+/* .ss-vfill on a TAB PANE: Bootstrap's `.tab-content > .active { display: block }` outranks a
+   class-only `display: flex`, so a pane meant to be the middle of a chain silently becomes a
+   block and the chain stops there — the class is in the markup, the layout ignores it, and
+   nothing says so. Naming the active pane wins the specificity back. */
+.tab-content > .tab-pane.active.ss-vfill { display: flex; flex-direction: column; }
 /* .ss-qr : a QR code drawn to be READ OFF A SCREEN, not to fill one.
    The SVG is deliberately shipped with a viewBox and no width or height — a square sized by
    the server is one that does not fit somebody's phone at arm's length — which means it
@@ -2331,3 +2348,14 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .db-opt-icon { flex: 0 0 1rem; font-size: .85rem; text-align: center; }
 .db-opt-spin { animation: db-opt-spin 1s linear infinite; }
 @keyframes db-opt-spin { to { transform: rotate(360deg); } }
+
+/* .ss-masked : a secret shown masked WITHOUT being a password input. Browsers hunt for
+   `input[type=password]` to autofill and to offer "save this login", which is wrong for every
+   secret in this panel — none of them is a login here, and a manager filling one writes a
+   saved password into a value that is about to be sent to a device. Applied only where the
+   browser supports it: `fieldCtl()` feature-detects and falls back to a real password input,
+   because losing the masking would be far worse than the prompt it avoids. */
+.ss-masked {
+    -webkit-text-security: disc;
+    text-security: disc;
+}

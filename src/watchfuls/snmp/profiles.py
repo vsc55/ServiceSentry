@@ -108,9 +108,36 @@ def normalise_metric(raw) -> dict | None:
         # The column that NAMES each row. Without it a table of eight interfaces is eight
         # numbered lines, and the number is the SNMP index — which is not the port on the
         # front of the switch, and is the first thing somebody assumes it is.
-        idx = str(raw.get('index_label') or '').strip()
-        if idx and _OID_RE.match(idx):
-            out['index_label'] = idx
+        # One column, or SEVERAL joined: a SMART table has one row per (disk, attribute), and
+        # either column alone names several rows — "Reallocated_Sector_Ct" is a row on every
+        # disk in the box, and merging them would chart one disk's sectors as all of them.
+        idx = raw.get('index_label')
+        if isinstance(idx, (list, tuple)):
+            cols = [str(c).strip() for c in idx]
+            cols = [c for c in cols if _OID_RE.match(c)]
+            if len(cols) == 1:
+                out['index_label'] = cols[0]
+            elif cols:
+                out['index_label'] = cols
+        else:
+            idx = str(idx or '').strip()
+            if idx and _OID_RE.match(idx):
+                out['index_label'] = idx
+        # The factor this reading has to be multiplied by, when the DEVICE decides it and not
+        # the profile. Storage is the case that forces it: a filesystem table reports its size
+        # in allocation units and puts the size of a unit in a column beside it, per row —
+        # 4096 on most agents, 512 or 65536 on plenty, and a profile that guessed would report
+        # a NAS as sixteen times smaller than it is with nothing on screen saying so.
+        sby = str(raw.get('scale_by') or '').strip()
+        if sby and _OID_RE.match(sby):
+            out['scale_by'] = sby
+        # Which TABLE this column belongs to, for the tables whose rows have no names. Row
+        # identity is the row's name, and two nameless tables of one device fall back to their
+        # SNMP indices — where storage row 3 and processor row 3 are not the same row and
+        # would silently merge into one. Named tables do not need it: the name is the identity.
+        grp = str(raw.get('group') or '').strip().lower()
+        if grp and _ID_RE.match(grp):
+            out['group'] = grp
     for num, cast in (('scale', float), ('max_rate', float), ('width', int)):
         if raw.get(num) not in (None, ''):
             try:
@@ -151,14 +178,40 @@ def normalise(raw) -> dict | None:
         'label':   _label(raw.get('label'), pid.replace('_', ' ').capitalize()),
         'metrics': metrics,
     }
-    # What this profile is FOR, matched against the device's own answer to sysObjectID. Only a
-    # prefix: a vendor's tree identifies the family, and the exact node identifies a model
-    # nobody wants to enumerate.
+    # What this profile is FOR, and how a device is recognised as one of them. Two ways,
+    # because devices answer two different questions about themselves:
+    #
+    #   sysobjectid_prefix — WHO MADE IT. A prefix, so a vendor's tree identifies the family
+    #     and the exact node identifies a model nobody wants to enumerate.
+    #   probe — WHAT IT SERVES. One OID: if the device answers it, the profile applies. This is
+    #     the one that matters for the generic profiles, because "does it implement
+    #     HOST-RESOURCES-MIB" is not a question sysObjectID can answer — a Synology, a Linux
+    #     box and a Windows server all do, and their sysObjectIDs have nothing in common.
+    #
+    # Both live in the PROFILE and not in the code that detects: an action carrying a list of
+    # "the generic ones" is a list that goes stale the moment somebody adds a profile, which is
+    # exactly how the storage profile shipped invisible to detection.
     match = raw.get('match')
     if isinstance(match, dict):
+        found = {}
         prefix = str(match.get('sysobjectid_prefix') or '').strip()
         if _OID_RE.match(prefix):
-            out['match'] = {'sysobjectid_prefix': prefix}
+            found['sysobjectid_prefix'] = prefix
+        probe = str(match.get('probe') or '').strip()
+        if _OID_RE.match(probe):
+            found['probe'] = probe
+        # Which generic profiles this one replaces on the devices it claims. A Synology runs
+        # net-snmp underneath, so it answers the UCD disk-I/O probe AND its own — and both
+        # measure the same disks. Detection would propose the pair, and an admin who accepted
+        # both would chart every disk twice under two sets of names.
+        sup = match.get('supersedes')
+        if isinstance(sup, (list, tuple)):
+            ids = [str(x).strip().lower() for x in sup]
+            ids = [x for x in ids if _ID_RE.match(x)]
+            if ids:
+                found['supersedes'] = ids
+        if found:
+            out['match'] = found
     if isinstance(raw.get('description'), (str, dict)):
         out['description'] = _label(raw.get('description'), '')
     return out
@@ -232,23 +285,34 @@ def label_of(obj: dict, lang: str, default_lang: str = 'en_EN') -> str:
             or str((obj or {}).get('id') or (obj or {}).get('key') or ''))
 
 
-def match_sysobjectid(profiles: dict, sysobjectid: str) -> dict | None:
-    """The profile that claims this device, if one does.
+def claims_sysobjectid(profiles: dict, sysobjectid: str) -> list:
+    """Every profile that claims this device, most specific first, then by id.
 
-    Longest prefix wins: a vendor's tree and a model's node under it are both legitimate
-    claims, and the more specific one is the one that knows more about the machine.
+    Longest prefix wins on specificity — a vendor's tree and a model's node under it are both
+    legitimate claims, and the more specific one knows more about the machine — but a vendor
+    can legitimately have SEVERAL profiles at the same depth: a Synology's system, its disks
+    and its volumes are three different subjects and three different profiles, and they all
+    claim the same tree. Returning one of them would leave the other two undetected for the
+    device they were written for.
+
+    Ties are broken by id so two runs against one unchanged device agree.
     """
     oid = str(sysobjectid or '').strip().lstrip('.')
     if not oid:
-        return None
-    best = None
-    for prof in (profiles or {}).values():
+        return []
+    hits = []
+    for pid in sorted(profiles or {}):
+        prof = profiles[pid]
         prefix = ((prof.get('match') or {}).get('sysobjectid_prefix') or '')
-        if not prefix or not (oid == prefix or oid.startswith(prefix + '.')):
-            continue
-        if best is None or len(prefix) > len((best.get('match') or {}).get('sysobjectid_prefix') or ''):
-            best = prof
-    return best
+        if prefix and (oid == prefix or oid.startswith(prefix + '.')):
+            hits.append((-len(prefix), pid, prof))
+    return [prof for _n, _pid, prof in sorted(hits, key=lambda h: (h[0], h[1]))]
+
+
+def match_sysobjectid(profiles: dict, sysobjectid: str) -> dict | None:
+    """The most specific profile that claims this device, if one does."""
+    hits = claims_sysobjectid(profiles, sysobjectid)
+    return hits[0] if hits else None
 
 
 def history_fields(profile: dict, lang: str = 'en_EN') -> dict:

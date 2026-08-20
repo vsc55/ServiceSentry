@@ -52,10 +52,15 @@ document.getElementById('btnConfirmModalOk').addEventListener('click', () => {
             return;   // keep the modal open until a reason is given
         }
     }
+    // Checkbox mode (showConfirmModal opts.check): the callback gets whether it was ticked.
+    if (_confirmModalCheckOpts) {
+        arg = !!document.getElementById('confirmModalCheck')?.checked;
+    }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).hide();
     const cb = _confirmModalCallback;
     _confirmModalCallback = null;
     _confirmModalReasonOpts = null;
+    _confirmModalCheckOpts = null;
     if (cb) cb(arg);
 });
 document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameItem);

@@ -17,13 +17,17 @@ from . import profiles as _profiles
 from .client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
 
-# What every SNMP agent answers, and therefore what a device can be asked before anybody has
-# decided what it is: its identity (sysObjectID), how it describes itself (sysDescr) and
-# whether it has interfaces worth charting (ifNumber).
+# What every SNMP agent answers, and therefore what identifies a device before anybody has
+# decided anything about it. Everything ELSE a detection asks comes from the profiles
+# themselves — see `match.probe`.
 _OID_SYSOBJECTID = '1.3.6.1.2.1.1.2.0'
 _OID_SYSDESCR    = '1.3.6.1.2.1.1.1.0'
 _OID_SYSNAME     = '1.3.6.1.2.1.1.5.0'
-_OID_IFNUMBER    = '1.3.6.1.2.1.2.1.0'
+
+# A detection is one round trip per profile that declares a probe, against a device somebody is
+# waiting on. Generous for a catalogue of a few dozen and finite for an installation that grew
+# hundreds; past it the rest are simply not probed, which costs suggestions and not the answer.
+_MAX_PROBES = 40
 
 
 class SnmpActions:
@@ -90,6 +94,15 @@ class SnmpActions:
                 detail['name'] = f'{_ntot} MIBs compiled'
             else:
                 detail['name'] = 'already up-to-date'
+        elif action in ('save_mib_source', 'restore_mib_version'):
+            # A MIB is a file the monitor reads: editing one changes what every check that
+            # resolves through it sees. The version number is what makes the entry findable
+            # afterwards — the content itself is in the history, not in an audit row.
+            _vers = result.get('versions') or []
+            _v = _vers[0].get('version') if _vers else None
+            detail['name'] = f'{result.get("mib", "")} v{_v}' if _v else str(result.get('mib', ''))
+            if result.get('unchanged'):
+                detail['name'] += ' (no change)'
         else:
             detail['name'] = action
         return detail
@@ -252,9 +265,16 @@ class SnmpActions:
         a profile for, and a wrong profile does not fail - it measures numbers that look fine.
         The admin confirms.
 
-        Three questions, all from MIB-II, so this works against a device the catalogue has
-        never heard of: who it says it is, how it describes itself, and whether it has
-        interfaces at all.
+        **Which profiles are candidates is declared by the profiles**, not listed here. Each
+        says how it is recognised: `match.sysobjectid_prefix` (who made the device) and/or
+        `match.probe` (an OID it must answer). This action carried a hardcoded list of "the
+        generic ones" for exactly one build, and the profile added in that build was invisible
+        to it - which is what a list of module names inside the core always turns into.
+
+        Two kinds of question, because a device answers two different ones about itself: who
+        made it, and what it serves. Only the second can answer "does it implement
+        HOST-RESOURCES-MIB", and a Synology, a Linux box and a Windows server all do while
+        their sysObjectIDs have nothing in common.
         """
         cfg = config or {}
         if not _HAS_PYSNMP:
@@ -293,31 +313,67 @@ class SnmpActions:
             return {'ok': False, 'message': str(err), 'items': []}
         sysdescr, _e1 = cls._snmp_get(oid=_OID_SYSDESCR, **conn)
         sysname,  _e2 = cls._snmp_get(oid=_OID_SYSNAME,  **conn)
-        ifnumber, _e3 = cls._snmp_get(oid=_OID_IFNUMBER, **conn)
 
         var_dir = str(cfg.get('__var_dir__') or '').strip()
         cdir = _profiles.custom_dir(var_dir)
         catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
 
-        # MIB-II first: every agent answers it, so it is what makes a device measurable before
-        # anybody has decided anything about it.
-        proposed = ['sys_generic'] if 'sys_generic' in catalog else []
-        try:
-            interfaces = int(str(ifnumber or '0').strip() or 0)
-        except (TypeError, ValueError):
-            interfaces = 0
-        if interfaces > 0 and 'if_generic' in catalog:
-            proposed.append('if_generic')
-        matched = _profiles.match_sysobjectid(catalog, str(sysoid or ''))
-        if matched and matched['id'] not in proposed:
-            proposed.append(matched['id'])
+        # Who made it: every profile whose sysObjectID prefix claims this device. Several,
+        # because a vendor's system, disks and volumes are three subjects and three profiles,
+        # and they all claim the same tree — proposing one would leave the rest undetected on
+        # exactly the hardware they were written for.
+        claimed = _profiles.claims_sysobjectid(catalog, str(sysoid or ''))
+        matched = claimed[0] if claimed else None
+
+        # What it serves: every profile that names an OID the device has to answer. Probed in
+        # catalogue order so the result is the same on every run, and capped so a large
+        # catalogue cannot turn one button into a minute of round trips.
+        proposed, reasons, probed = [], {}, 0
+        for pid in sorted(catalog):
+            probe = (catalog[pid].get('match') or {}).get('probe')
+            if not probe:
+                continue
+            if probed >= _MAX_PROBES:
+                break
+            probed += 1
+            value, perr = cls._snmp_get(oid=probe, **conn)
+            # Answering at all is the signal: the value itself belongs to the profile's own
+            # metrics, and a threshold here would be this action deciding something about a
+            # profile it is not supposed to know anything about.
+            if perr or value in (None, ''):
+                continue
+            proposed.append(pid)
+            reasons[pid] = 'probe'
+        # A vendor's claim proposes only the profiles that do NOT declare a probe. A profile
+        # that names one has made a more specific statement about itself — "the device has to
+        # answer THIS" — and a model that does not answer it does not have what the profile
+        # measures. Proposing it anyway would offer empty charts, and (through supersedes)
+        # would displace the generic profile that does work on that model.
+        for prof in claimed:
+            if (prof.get('match') or {}).get('probe'):
+                continue
+            if prof['id'] not in proposed:
+                proposed.append(prof['id'])
+            reasons.setdefault(prof['id'], 'sysobjectid')
+
+        # A vendor profile that measures what a generic one measures wins on that device: the
+        # vendor knows its own hardware, and proposing both would chart every disk twice under
+        # two sets of names. Only what was PROPOSED supersedes — a profile the device does not
+        # serve cannot displace one it does.
+        replaced = set()
+        for pid in proposed:
+            replaced.update((catalog[pid].get('match') or {}).get('supersedes') or ())
+        if replaced:
+            proposed = [p for p in proposed if p not in replaced]
+            reasons = {k: v for k, v in reasons.items() if k not in replaced}
 
         return {
             'ok':          True,
             'items':       proposed,
+            'reasons':     reasons,
+            'probed':      probed,
             'sysobjectid': str(sysoid or ''),
             'sysdescr':    str(sysdescr or ''),
             'sysname':     str(sysname or ''),
-            'interfaces':  interfaces,
             'matched':     matched['id'] if matched else '',
         }

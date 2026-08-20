@@ -80,6 +80,56 @@ class TestWhatShips:
                 assert m.get('index_label'), f"{m['key']} walks a table it cannot name"
 
 
+class TestWhenTheDeviceDecidesTheUnit:
+    """A reading is not always in the unit it looks like. Storage is the case: a filesystem
+    table reports its size in ALLOCATION UNITS and puts the size of a unit in a column beside
+    it, per row — 4096 on most agents, 512 or 65536 on plenty. A profile that guessed would
+    report a NAS as sixteen times smaller than it is, with nothing on screen saying so."""
+
+    def test_a_metric_can_name_the_column_that_scales_it(self):
+        m = profiles.normalise_metric(_metric(key='fs_used', oid=None,
+                                              walk='1.3.6.1.2.1.25.2.3.1.6',
+                                              scale_by='1.3.6.1.2.1.25.2.3.1.4'))
+        assert m['scale_by'] == '1.3.6.1.2.1.25.2.3.1.4'
+
+    def test_a_scaling_column_that_is_not_an_oid_is_dropped(self):
+        """It is walked against the device; a name would be walked as nothing."""
+        m = profiles.normalise_metric(_metric(key='x', oid=None, walk='1.3.6.1',
+                                              scale_by='hrStorageAllocationUnits'))
+        assert 'scale_by' not in m
+
+    def test_the_shipped_storage_profile_lets_the_device_say_it(self):
+        """Both the used and the total, or a volume would be charted in units against a
+        capacity in bytes — two lines that cannot be compared on one axis."""
+        prof = profiles.catalog()['hr_storage']
+        by = {m['key']: m.get('scale_by') for m in prof['metrics']}
+        assert by['fs_used'] and by['fs_used'] == by['fs_size']
+
+
+class TestTwoNamelessTablesAreNotOneTable:
+    """Rows are identified by their name, and a table whose rows have none falls back to the
+    SNMP index — where storage row 3 and processor row 3 are not the same row."""
+
+    def test_a_metric_can_say_which_table_it_belongs_to(self):
+        m = profiles.normalise_metric(_metric(key='cpu_load', oid=None,
+                                              walk='1.3.6.1.2.1.25.3.3.1.2', group='cpu'))
+        assert m['group'] == 'cpu'
+
+    def test_a_group_that_is_not_an_identifier_is_dropped(self):
+        """It lands in a result key, which is a path segment."""
+        m = profiles.normalise_metric(_metric(key='x', oid=None, walk='1.3.6.1',
+                                              group='cpu/1'))
+        assert 'group' not in m
+
+    def test_every_shipped_nameless_table_declares_one(self):
+        """The one that does not is the one that will merge with another, silently, on the
+        first device that serves both."""
+        for prof in profiles.catalog().values():
+            for m in prof['metrics']:
+                if 'walk' in m and not m.get('index_label'):
+                    assert m.get('group'), f"{prof['id']}.{m['key']} can collide"
+
+
 class TestNothingUnusableGetsThrough:
 
     @pytest.mark.parametrize('bad', [
@@ -200,18 +250,18 @@ class TestClaimingADevice:
         """A vendor's tree and a model's node under it are both legitimate claims, and the
         more specific one is the one that knows more about the machine."""
         cat = profiles.catalog(custom=[
-            _profile(id='vendor', match={'sysobjectid_prefix': '1.3.6.1.4.1.6574'}),
-            _profile(id='model',  match={'sysobjectid_prefix': '1.3.6.1.4.1.6574.1.2'}),
+            _profile(id='vendor', match={'sysobjectid_prefix': '1.3.6.1.4.1.99991'}),
+            _profile(id='model',  match={'sysobjectid_prefix': '1.3.6.1.4.1.99991.1.2'}),
         ])
-        assert profiles.match_sysobjectid(cat, '1.3.6.1.4.1.6574.1.2.9')['id'] == 'model'
-        assert profiles.match_sysobjectid(cat, '1.3.6.1.4.1.6574.3')['id'] == 'vendor'
+        assert profiles.match_sysobjectid(cat, '1.3.6.1.4.1.99991.1.2.9')['id'] == 'model'
+        assert profiles.match_sysobjectid(cat, '1.3.6.1.4.1.99991.3')['id'] == 'vendor'
 
     def test_a_prefix_matches_on_nodes_and_not_on_digits(self):
         """`1.3.6.1.4.1.657` must not claim `1.3.6.1.4.1.6574`: they are different vendors and
         the string is a prefix of the other."""
         cat = profiles.catalog(custom=[
-            _profile(id='other', match={'sysobjectid_prefix': '1.3.6.1.4.1.657'})])
-        assert profiles.match_sysobjectid(cat, '1.3.6.1.4.1.6574.1') is None
+            _profile(id='other', match={'sysobjectid_prefix': '1.3.6.1.4.1.9999'})])
+        assert profiles.match_sysobjectid(cat, '1.3.6.1.4.1.99991.1') is None
 
     def test_an_unknown_device_claims_nothing(self):
         assert profiles.match_sysobjectid(profiles.catalog(), '1.3.6.1.4.1.99999.1') is None
@@ -231,3 +281,80 @@ class TestWhatTheChartsGet:
         """A name and a model are what make a machine recognisable, not something to plot."""
         fields = profiles.history_fields(profiles.catalog()['sys_generic'])
         assert 'sys_name' not in fields and 'uptime' in fields
+
+
+class TestAProbeHasToBeAnswerable:
+    """A probe is a GET, and a GET against a table COLUMN answers nothing — the column has no
+    instance, only its rows do. A profile whose probe is one of its own walked columns would
+    validate, load, sit in the catalogue and never be detected: assigned by hand it measures
+    perfectly, which is exactly the failure that is hardest to notice."""
+
+    def test_no_shipped_probe_is_a_bare_column(self):
+        for pid, prof in profiles.catalog().items():
+            probe = (prof.get('match') or {}).get('probe')
+            if not probe:
+                continue
+            columns = {m['walk'] for m in prof['metrics'] if 'walk' in m}
+            assert probe not in columns, (
+                f'{pid} probes {probe}, which is a column: a GET on it answers nothing')
+
+    def test_a_table_only_profile_probes_one_of_its_rows(self):
+        """The row is the condition worth testing anyway: a machine with no disks should not
+        be offered a disk profile, and an instance OID says both things at once."""
+        prof = profiles.catalog()['disk_io']
+        probe = prof['match']['probe']
+        assert any(probe.startswith(m['walk'].rsplit('.', 1)[0] + '.')
+                   for m in prof['metrics'] if 'walk' in m)
+
+
+class TestAVendorProfileDisplacesAGenericOne:
+    """A Synology runs net-snmp underneath, so it answers the UCD disk-I/O probe AND its own —
+    and both measure the same disks. Without this, detection proposes the pair and an admin who
+    accepts both charts every disk twice under two sets of names, with the two lines disagreeing
+    by whatever the two MIBs count differently."""
+
+    def test_a_profile_can_declare_what_it_replaces(self):
+        m = profiles.normalise(_profile(match={'sysobjectid_prefix': '1.3.6.1.4.1.6574',
+                                               'supersedes': ['disk_io']}))
+        assert m['match']['supersedes'] == ['disk_io']
+
+    def test_a_replacement_list_that_is_not_a_list_of_ids_is_dropped(self):
+        m = profiles.normalise(_profile(match={'probe': '1.3.6.1', 'supersedes': 'disk_io'}))
+        assert 'supersedes' not in m['match']
+        m2 = profiles.normalise(_profile(match={'probe': '1.3.6.1', 'supersedes': ['a/b', '']}))
+        assert 'supersedes' not in m2['match']
+
+    def test_the_shipped_vendor_io_profile_replaces_the_generic_one(self):
+        syno = profiles.catalog()['synology_storageio']
+        assert syno['match']['supersedes'] == ['disk_io']
+
+    def test_everything_superseded_exists(self):
+        """A profile replacing one that was renamed away would silently stop replacing it, and
+        the double-charting would come back with nothing to say why."""
+        cat = profiles.catalog()
+        for pid, prof in cat.items():
+            for other in (prof.get('match') or {}).get('supersedes') or ():
+                assert other in cat, f'{pid} supersedes {other!r}, which does not exist'
+
+
+class TestOneProfileOneSubject:
+    """Profiles are assigned SEVERAL at a time, so they have to be disjoint. Two of them
+    reporting the same value is not redundancy — it is one measurement charted twice under two
+    names, and the day they disagree there is nothing to say which is right."""
+
+    def test_the_storage_profile_only_measures_storage(self):
+        """CPU and memory belong to a system profile, and a NAS running net-snmp gets that
+        one too. Reporting them here as well is where the double-counting starts."""
+        prof = profiles.catalog()['hr_storage']
+        assert {m['key'] for m in prof['metrics']} == {'fs_used', 'fs_size'}
+
+    def test_no_two_shipped_profiles_measure_the_same_thing(self):
+        """A metric key IS the history field, so two profiles sharing one write to one
+        series — and the chart becomes whichever of them the loop reached last."""
+        seen = {}
+        for pid, prof in profiles.catalog().items():
+            for m in prof['metrics']:
+                if m['key'] in seen:
+                    raise AssertionError(
+                        f"{pid} and {seen[m['key']]} both record {m['key']!r}")
+                seen[m['key']] = pid

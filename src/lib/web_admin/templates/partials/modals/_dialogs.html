@@ -48,6 +48,11 @@
             </div>
             <div class="modal-body">
                 <p class="mb-0" id="confirmModalMsg"></p>
+                <div id="confirmModalCheckWrap" class="form-check mt-2" style="display:none">
+                    <input class="form-check-input" type="checkbox" id="confirmModalCheck">
+                    <label class="form-check-label small" for="confirmModalCheck"
+                           id="confirmModalCheckLabel"></label>
+                </div>
                 <div id="confirmModalReasonWrap" class="mt-2" style="display:none">
                     <input id="confirmModalReason" class="form-control form-control-sm" autocomplete="off">
                     <div id="confirmModalReasonErr" class="small text-danger mt-1" style="display:none">{{ i18n.reason_required }}</div>

@@ -8,6 +8,602 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.98] - 2026-08-21
+
+### Added
+- **An import brings in MIBs, and puts them where they came from.** Three things went
+  wrong on the way in, and every one of them was silent.
+  - **A name is not evidence.** Net-SNMP's `mibs/` folder ships `nodemap`, `rfclist`,
+    `ianalist`, `mibfetch` and `smistrip` — lists and shell scripts — and a `Makefile.mib`,
+    which is a Makefile wearing the one extension the filter trusted most. All of them landed
+    in the list as MIBs that would never compile. What decides now is the file itself: it has
+    to declare a module. Names still matter as an optimisation — a request not made against an
+    anonymous rate limit of sixty an hour — but **which** names belongs to the SOURCE, in its
+    own JSON: this module has no business knowing what net-snmp keeps beside its MIBs, and the
+    next source somebody adds will keep something else. Only the furniture every repository
+    has (readme, licence, makefile) stays in the code, because that is knowledge about git.
+    The same check now guards a single-URL import, a manual upload and an archive member,
+    because the answer does not depend on how the bytes arrived.
+  - **Everything landed in the root.** Ninety files from one source with no vendor beside
+    them, and the next source shipping an ENTITY-MIB of its own silently overwriting this
+    one's. A source declares its folder; anything else is named after its repository.
+  - **And files were refused as "rejected", a different handful every run.** `_confined_path`
+    resolved both sides with `pathlib.Path.resolve()`, which on Windows returns an
+    extended-length path for one it can open and a plain one for one it cannot — so with
+    sixteen threads importing into a folder they are also creating, a security check answered
+    according to what happened to exist at that instant. Three to six of seventy-nine, with
+    nothing in the message to say the path was fine and the comparison was not.
+- **A MIB can be corrected, and taken back.** Vendors ship broken MIBs — SYNOLOGY-SMB-MIB
+  has never compiled anywhere, because every descriptor in it starts with an uppercase letter,
+  which in SMI is a type reference and not a value — and there was nothing to do about that
+  from here but say so. The source viewer edits now, with every version kept: a correction
+  nobody can undo is one nobody dares make, so the history is the feature and the pencil is
+  only the button. Restoring writes the old content out as a NEW version rather than winding
+  the history back, because going back is a thing that happened and it happened at a time.
+  - **The file on disk stays the working copy.** pysmi is handed directories and compiles
+    what it finds in them, so an edit that lived only in the database would be an edit nothing
+    ever compiled — indistinguishable, from the outside, from the save not having worked. A
+    save writes both; if only one can happen, the version goes in first, because an edit
+    recorded and not written is recoverable and the other way round is not.
+  - **The first edit keeps what the vendor shipped**, as version 1, and pruning never touches
+    it: it is the one version that cannot be reconstructed from anywhere, since the file it
+    came from has been overwritten by every save since. That is what "no stored version means
+    the original" amounts to — until somebody edits there is nothing stored, and the moment
+    they do, the original is kept.
+  - **A version can say what it was for**, and two of them can be compared. The note is
+    asked for beside Save rather than in a dialog afterwards, because what a change is for is
+    known while it is being made. The diff is computed server-side — the version list is
+    deliberately shipped without content, so diffing in the page would mean fetching two whole
+    files to throw most of them away — and the second side defaults to the file as it is now,
+    which is the comparison anybody actually wants. It is coloured by a third CodeMirror mode,
+    three rules long and the one that earns the most: a wall of monospace where the +/- at
+    column zero is the whole message is exactly what an eye cannot scan.
+  - **"Compile all" said neither of the two things it could have meant.** It walked every
+    MIB and let pysmi skip the up-to-date ones, so it did not recompile everything and it did
+    not compile only what needed it: with twenty files nobody notices, with two thousand the
+    progress bar reads 0/2000 while the real work is three files. And there was no way at all
+    to force a rebuild for the case pysmi's timestamp check cannot see — pysmi itself
+    upgraded, or a dependency changed. It is a split button now: **compile pending** walks
+    what has no compiled module or one older than its source, and **rebuild everything** walks
+    the lot and forces it, behind the dropdown and behind a confirmation because it is slow
+    and almost never what you want. Finding nothing to do is said out loud rather than ending
+    instantly and silently, which is how a working button reads as a broken one.
+  - The job now compiles **exactly what it counted**. The scope narrowed the number and not
+    the work: the compiler was only told which MIBs to walk when the caller had asked for
+    specific files, so with a scope it re-derived its own list from the directory — everything
+    — while the job reported the narrowed total. On screen, 'Compiling 28 / 3' and a progress
+    bar at 933%. Two derivations of what to compile that can disagree is one too many.
+  - **A module compiled from bytes that are gone is its own state now.** Editing a MIB
+    produces exactly that every time: the row read "compiled" and meant "compiled from
+    something else", which sends somebody looking for a bug in the sampler instead of pressing
+    compile. As a flag on "compiled" it also sat inside that count, so the chips could read
+    "Pending 0, Compiled 97" while the compile button set off to do three files — the list and
+    the button disagreeing about the same question, in the same modal. The chips partition the
+    list now (pending, outdated, errors, compiled, dependencies), their sum is the total, and
+    pending + outdated + errors is exactly what the button walks — which it says on its face,
+    before it is pressed. Editing a MIB produces exactly
+    that every time: the row read "compiled" and meant "compiled from something else", which
+    sends somebody looking for a bug in the sampler instead of pressing compile.
+  - **The list groups by folder once it stops fitting.** Twenty MIBs are a list; a
+    repository import brings two thousand, and a flat list of two thousand is unreadable
+    however fast it draws. The folders the import already keeps are the structure that was
+    there all along, so the list uses them: a folder selector with counts, and collapsible
+    group headers when there is more than a screenful. Below sixty rows nothing changes —
+    grouping twenty files is pure overhead, and the headers exist for the case that does not
+    fit, not to tax the case that does. A search opens the folders it matched in, because
+    typing something that exists and being shown nothing reads as a broken search.
+    Dependencies get a group of their own: pysmi pulled them in resolving an IMPORTS, they
+    came from nowhere in the tree, and filing them under the top level puts files nobody
+    chose among the ones somebody did.
+  - **A folder header counts what is left, not what is there.** `78` says nothing about a
+    folder of seventy-eight; `60/78` says where the work is and which vendor to open, and
+    the badge turns green when a folder is finished, so fifteen of them can be read at a
+    glance. A stale module does not count as done — it was compiled from bytes that are no
+    longer there, which is the whole reason that state exists.
+  - **A folder header selects its folder.** Compiling or deleting a vendor's worth of
+    MIBs is one of the few things anybody does in bulk here, and doing it by ticking six
+    hundred boxes is not doing it. It ticks what is VISIBLE in that folder — with a state
+    chip or a search active, a tick beside four rows must not quietly select the six
+    hundred behind them — and a half-selected folder shows as half-selected rather than
+    as untouched.
+  - **The list says which MIBs are no longer the vendor's.** A row reading "compiled, 6.0 KB"
+    cannot tell an untouched file from one somebody fixed three weeks ago, which is the first
+    thing worth knowing when it misbehaves. An edited MIB wears its version; an untouched one
+    wears nothing, because a number on every row would make the one that matters invisible.
+  - The history lives in the **shared database**, through the module-table mechanism the DB
+    manager already exposed and nothing had used yet (`mod_snmp_mib_versions`). A file beside
+    the MIBs would be per-container, and a deployment with a web container and a worker
+    container shares the database, not the disk. Each version records who wrote it, which
+    needed the actor to reach a module action at all — the audit log answers "who" one row
+    per action, not per record.
+- **A device profile stops being a declaration.** The previous build could assign profiles to a
+  machine and show what they contained; nothing read them. This one asks the device and records
+  the numbers, which is what turns the catalogue into charts.
+  - **A server with profiles and no OID checks is now work.** Checks and sampling are
+    independent: a check says whether something is TRUE of a device, sampling says what it is
+    DOING, and plenty of hardware deserves the second without anybody having written the first.
+    Both share the module's thread pool — it is the same conversation with the same devices, and
+    a second pool would double the sockets against a network sized for one.
+  - **Walking one column.** The discovery walk sweeps two fixed subtrees, truncates values at
+    120 characters and swallows errors, because what it produces is a list somebody picks from.
+    A sampled metric needs the opposite of all three: the column its profile named, the value
+    whole (a truncated counter is a wrong number, not a shortened one), and to know when the
+    device did not answer — an empty table and an unreachable device look identical otherwise,
+    and one means "assign a different profile" while the other means "check the cable". Bounded
+    at 512 rows, which fits real hardware and keeps a chassis switch from owning the cycle.
+  - **A row keeps the name the device gave it.** Tables are walked per SNMP index, which is not
+    the port on the front of the switch and does not survive a device renumbering. The
+    profile's `index_label` column is walked beside the data — once, however many metrics share
+    it — and each row is filed under what the device calls it, with its metrics together: in,
+    out and errors of one interface are one result, not three charts of a third of a port.
+  - **The previous sample outlives the process.** A counter only means something as a
+    difference, and the monitor builds a fresh Watchful every cycle — a fresh PROCESS under
+    systemd one-shot. The last reading is kept in the status store, next to `fail_streak` and
+    for the same reason; on the instance, every cycle would look like the first and no counter
+    would ever be chartable.
+  - **Partial answers cost only themselves.** A profile assigned to a device that serves half of
+    it is normal — a switch with no UCD agent still has interfaces worth charting. A device that
+    answers *nothing* is reported once for the device rather than once per metric (forty alerts
+    about one unplugged cable is how somebody learns to ignore alerts), after two cycles of
+    grace, because a lost UDP datagram is not an outage.
+- **Six more shipped profiles — nine in total, all from standard MIBs.** `hr_storage`
+  (HOST-RESOURCES-MIB: usage and capacity per volume), `ip_stats` (IP-MIB: what the IP layer
+  did with the packets — delivered, forwarded, discarded, fragmented), `icmp_stats` (ICMP-MIB:
+  echoes, unreachables and time exceededs), `tcp_udp_stats` (TCP/UDP-MIB: established
+  connections, retransmissions, resets, datagrams to closed ports), `disk_io` (UCD-SNMP-MIB:
+  bytes and operations per second per block device) and `lm_sensors` (LM-SENSORS-MIB:
+  temperatures, fans and voltages, one row per probe). The interface counters say how much
+  traffic there was; `ip_stats` says what happened to it, and the retransmissions in
+  `tcp_udp_stats` are the number that says a link is bad long before it is down.
+  - **They are disjoint on purpose.** Profiles are assigned several at a time, so two of them
+    reporting the same value is not redundancy — it is one measurement charted twice under two
+    names, and the day they disagree nothing says which is right. `hr_storage` is storage and
+    nothing else; CPU and memory stay with `ucd_linux`, which a NAS running net-snmp gets
+    anyway. A test fails if any two shipped profiles ever share a metric key.
+  - **A probe has to be something a GET can answer.** A probe against a table COLUMN answers
+    nothing — the column has no instance, only its rows do — so a table-only profile probes one
+    of its rows, which is the condition worth testing anyway: a machine with no disks should
+    not be offered a disk profile. A profile whose probe was a bare column would validate,
+    load, sit in the catalogue and never be detected, while measuring perfectly when assigned
+    by hand.
+  - Writing the storage one forced two additions to the profile format, both of which any
+    storage profile needs:
+  - **`scale_by`: the factor comes from another column, per row.** A filesystem table reports
+    its size in *allocation units* and puts the size of a unit in a column beside it — 4096 on
+    most agents, 512 or 65536 on plenty. A profile that guessed would report a NAS as sixteen
+    times smaller than it is, with nothing on screen saying so. A missing factor leaves the
+    reading alone (it is a detail ABOUT the value; a device that answered the value but not the
+    unit has still answered it) and a zero is refused, because multiplying by it would chart
+    every volume as empty, which looks like data rather than like a bad reading.
+  - **`group`: two nameless tables are not one table.** A row is identified by its name, and a
+    table whose rows have none falls back to the SNMP index — where storage row 3 and processor
+    row 3 are not the same row and were silently merging into one. Named tables do not need it;
+    the name is the identity.
+- **A module may work out its history fields at run time** — `discover_history_fields()`, the
+  mirror of `discover_db_tables()`. What a module charts is declared in its schema, which is
+  right until the answer depends on data the installation supplies: SNMP records whatever its
+  profiles declare, and one of those was written for the box in somebody's rack after this
+  release shipped. A schema cannot name a field that did not exist when it was written. The
+  static declaration still wins over the discovered one — it is the one somebody wrote down on
+  purpose — and a hook that fails costs its own labels, never the History page.
+
+- **Fifteen Synology profiles, written from the OIDs in the vendor's own MIB archive.**
+  System (chassis temperature, power, fans, model, serial, DSM), disks (temperature, bad
+  sectors, remaining life, health), volumes and RAID, disk and volume I/O, UPS, service users,
+  SMART, SSD cache, iSCSI LUNs, expansion units, high availability, NFS, GPU and Ethernet
+  ports. The generic profiles measure what any device does; these measure what only a Synology
+  reports about itself — a fan that stopped, a disk reallocating sectors, a UPS with eleven
+  minutes left.
+  - **A vendor profile displaces the generic one it duplicates** (`match.supersedes`). A
+    Synology runs net-snmp underneath, so it answers the UCD disk-I/O probe AND its own, and
+    both measure the same disks: proposing the pair would chart every disk twice under two sets
+    of names that disagree by whatever the two MIBs count differently.
+  - **A declared probe governs over the vendor's claim.** A profile naming an OID has made the
+    more specific statement about itself, so a model of the right make that does not answer it
+    is not offered the profile — which also stops it displacing the generic profile that does
+    work on that model. Found by a test written for an older DiskStation.
+  - **A row can need two columns to have a name** (`index_label` accepts a list). A SMART table
+    has one row per (disk, attribute), and either column alone names several rows —
+    "Reallocated_Sector_Ct" exists on every disk in the box, and merging them would chart one
+    disk's sectors as all of them.
+  - The RAID sizes are read as gauges although the MIB declares them `Counter64`: they are
+    sizes, and differentiated they would chart the growth of the disk rather than its capacity.
+  - Synology joins the known MIB sources, so its MIBs can be imported and compiled for the MIB
+    browser. The profiles do not need them — they carry numeric OIDs on purpose, and work on an
+    installation with no MIBs compiled at all.
+
+- **A vendor's MIB archive is a source, and importing it compares first.** Projects that host
+  MIBs publish a directory; vendors publish one ZIP, and the catalogue only knew how to read the
+  first. A source can now declare an `archive` alongside (or instead of) its `folder` — Synology
+  declares both, its own archive plus the LibreNMS mirror as a dependency source for compiling.
+  - **Comparison, not overwrite.** Every MIB carries the `LAST-UPDATED` its author wrote, which
+    is the only thing that says whether an archive is ahead of what is installed; the file's own
+    timestamp says when it was downloaded. Each member comes back `new`, `updated`, `unchanged`
+    or `older`, **Compare** reports all of it and writes nothing — "is it worth updating" should
+    not cost the update — and an `older` member is skipped unless forced. Re-importing last
+    year's archive over a MIB somebody fixed by hand is a downgrade whose symptom turns up much
+    later, as an OID that stopped resolving.
+  - A MIB with no stamp cannot be compared, so a difference is simply a difference: refusing it
+    would make those files un-updatable forever.
+  - Synology is declared as an archive and nothing else. Dependency templates resolve a module
+    a MIB IMPORTS and does not have, and not one of the twenty Synology MIBs imports another
+    SYNOLOGY-* module — everything they import is standard SNMPv2-*, which the default mirror
+    already serves. Templates pointing at a partial mirror could never resolve anything and
+    would 404 on every try; a folder entry for that mirror was worse still, offering three of
+    the twenty MIBs from the place that looks like the main way in.
+
+### Fixed
+- **Leaving the editor stopped rebuilding the modal around you.** Cancelling an edit re-fetched
+  the file and re-rendered everything, which threw away the tab you were on, where you had
+  scrolled to and the editor itself — to put back a value already sitting in memory. On screen
+  that is the whole modal flashing to show you what you were already looking at, and it landed
+  you back on the Declarations tab, which is neither where you were nor what you were doing.
+  Cancelling now restores the content it was handed, and saving or restoring redraws the one
+  pane that actually went stale.
+- **The Declarations tab could come up blank.** With no objects the pane rendered nothing at
+  all, which reads as a screen that failed to load — and a MIB whose syntax breaks mid-file
+  really does declare nothing the parser can see. It says so now, which also points at the
+  source tab next door, where the answer is.
+- **A version records the base it was written on.** The history was a flat list of
+  contents: v2 is "the fix", and nothing said the fix to WHAT. That is the question the day a
+  vendor ships a new release — what is worth having then is not v2's content but the CHANGE
+  v1 → v2, and that is only a change if you know where it started. Each version now stores the
+  sha of what it replaced, resolved to a version number when read, so the list says "v2 ← v1"
+  and its diff button shows what that version changed rather than how it compares to whatever
+  is on disk today. An import records what it wrote over, which is how "your fix was replaced"
+  stops being an inference.
+- **A history belongs to the module, not to the file name.** It was keyed on the file's
+  stem, so renaming a MIB — or moving it to another vendor folder — lost everything recorded
+  about it, and renaming a file is not editing it. The key now comes from inside the file
+  (`X-MIB DEFINITIONS ::= BEGIN`), which is the identity everything else already uses: pysmi
+  compiles by module name, writes `<NAME>.py`, and resolves every IMPORTS by name. In the
+  normal case the two coincide, so nothing moves; when they do not, the linter now says so —
+  a file not named after its module is one that everything importing it fails to find, and the
+  failure lands on THEM, naming symbols they cannot resolve, with nothing pointing here.
+- **A stored secret is no longer written as a password input.** Reported from the panel:
+  Firefox offered to save a login on every reload — user `1`, password `public`, which are an
+  SNMP version and a device's community string. The password manager had found an
+  `<input type="password">`, taken the field beside it for a username and decided the page was
+  a sign-in form. The prompt was the harmless half: the same machinery FILLS those fields, and
+  a saved password pasted into a community box is a value on its way to a device and then into
+  the configuration. None of this panel's secrets — community strings, webhook signing keys,
+  API tokens, the password used to test an LDAP bind — are this site's credentials. They are
+  masked from the stylesheet now, on a plain text input nothing recognises as one, and the
+  browser's own field type is kept only as the fallback where that masking is unsupported:
+  losing the masking would be far worse than the prompt it avoids. The panel's actual logins —
+  signing in, changing a password, creating a user — are untouched, because that is exactly
+  where a password manager should work.
+- **A MIB is found by one name and compiled into another, and the panel now knows it.**
+  `trunk.mib` in a switch vendor's archive declares IEEE8023-LAG-MIB. pysmi LOCATES a source by
+  the file's name and WRITES the module's, which is also what it resolves every `IMPORTS` by —
+  so "is this compiled?" asked with the file name asks about a `.py` nothing will ever write.
+  The MIB compiled perfectly, the compiler answered "already up to date", and the row said
+  pending for ever, every run doing the work again. On a real library that was **132 pending of
+  which 117 were an illusion**, 97 modules labelled as dependencies pysmi had supposedly fetched
+  when the user had shipped them, and 6 duplicates where there were 30. The module is read from
+  inside the file now (cached on mtime and size), pending is settled against `<MODULE>.py` while
+  still answering the file name the compiler needs, and a row is keyed by module with the file
+  name beside it when the two differ. The compile button counts the list the server will walk
+  rather than its own rows — a row is a module and the job walks files, which in a vendor
+  archive is rarely the same number.
+- **A delete can take one half of a row.** A row is a module and stands for two files: the
+  source somebody wrote and the `.py` pysmi made from it. Together is right almost always, and
+  the two cases where it is not are the ones that matter — a compiled module is an OUTPUT, so
+  dropping it is how you ask for it to be built again from a source that changed underneath
+  it, and a source can go while the `.py` stays loaded. The trash is a split button now
+  (everything / only the compilation / only the source) on rows that really hold both, and the
+  same menu sits on the selection. Each question says what SURVIVES, which is the half people
+  get wrong: delete the source and the compiled module stays in use, looking like nothing
+  happened until the next compile. The stored history is offered only when the source is what
+  goes — it is the history of the source, and nobody ever edited a `.py`.
+- **A test proves the device answers; it no longer harvests everything it has.** Reported:
+  "test server" on a NAS with only SNMP and profiles sat on «testing…» and never came back. It
+  was not hung. Metric sampling reads every metric of every profile assigned to a device —
+  fifteen Synology profiles is 135 walks, each hundreds of round trips on a real NAS — and a
+  probe records none of it: `ProbeMonitor` has no history to write to, so the whole harvest was
+  thrown away. The monitor now says which kind of run this is (`is_probe`), and sampling stops
+  at the first metric that answers when it is a test: 135 walks became 2, and 6.9s became 0.1s
+  on the bench. It still answers — a host with only profiles and no checks has to produce
+  something in the test, which was a decision made earlier and is still guarded — and a
+  scheduled cycle still reads everything, because that is what fills the graphs.
+- **The repository ZIP is used when the walk is the wrong tool, not only when GitHub refuses.**
+  Reported: LibreNMS still fetched files one by one and failed. The fallback was wired to a
+  REFUSAL, and with allowance left the walk does not fail — it truncates at its own ceiling,
+  comes back with the first forty folders and looks like it worked. A recursive import of the
+  folder a source publishes now goes straight to the archive it declares (0 API requests, 23s,
+  1997 files for LibreNMS); a vendor sub-folder still walks, because one request lists it and
+  86 MB to fetch ten files would be trading one waste for a bigger one; and any walk that did
+  not finish — refused or truncated — is finished from the same archive.
+- **Which ZIP, and which folder of it, is the source's to declare.** `librenms.json` now names
+  the codeload archive and the `archive_only` path its MIBs live under, beside the folder URL it
+  already had — both routes stay, because the API one is cheaper for anything it can do. The
+  module knows how to use an archive; it does not know that LibreNMS keeps its MIBs in `mibs/`,
+  and it should not: the next source will publish a release tarball, or another branch, or a
+  mirror, and a URL assembled here would find none of them. Asked for a sub-folder of a declared
+  source the fallback keeps the sub-folder, so `mibs/synology` imports ten files and not four
+  thousand.
+- **A GitHub import no longer needs a token at all: it can finish from the repository's ZIP.**
+  `codeload` serves a repository as one file and is not the API — no allowance to spend — which
+  is the way past a limit that a folder-per-request walk cannot get past. So when GitHub
+  refuses, the same import finishes from the ZIP and is reported as one import, which is what
+  it was. It is not what happens first: the ZIP costs a whole-repository download to pick one
+  folder out of (86 MB for LibreNMS), and for anything the API can do one request lists a
+  folder while the files themselves never touch the allowance. The archive importer took the
+  changes that made this possible — a folder filter, so only what was asked for comes out of a
+  zip holding sixteen thousand files; streaming to a temporary file rather than reading tens of
+  megabytes into memory; and a file ceiling that counts what is imported instead of what the
+  zip contains, and says how many were left out. LibreNMS ships 4830 MIBs and 396 MB of them,
+  which is a decision somebody should get to make rather than discover.
+- **A GitHub import can carry a token, and stops the moment GitHub says no.** Importing
+  LibreNMS' `mibs/` gave 389 files and 25 failed folders, every one of them
+  `HTTP Error 403: rate limit exceeded`. GitHub allows sixty requests an hour without a token
+  and the walk spends one per folder; LibreNMS has some four hundred. Once the allowance is
+  gone every remaining call fails identically, so walking the queue to prove it turned one
+  condition into twenty-five rows that read like twenty-five broken vendors. The walk stops at
+  the first refusal now — recognised by the header GitHub sends with it, not by the 403, which
+  a private repository also answers — and says when the allowance comes back and what to do
+  about it. The module takes an optional **GitHub token**: a read-only one raises the
+  allowance to five thousand an hour, and the folder cap moves with it (40 → 500). It is a
+  declared secret, encrypted at rest and masked in the API.
+- **A module's own secrets now reach its actions.** The browser holds `null` for every secret
+  it was sent, and an action given the configuration from the page received nothing — so a
+  module-level secret was, in effect, unusable. Item-level secrets were already restored from
+  the store before an action ran; module-level ones are too now. A token that silently does
+  not apply looks exactly like a rate limit nobody can explain.
+- **The words a module wrote in an audit entry are translated by that module.** `action:
+  compile_mibs_status` and `failed_detail` were reaching the audit screen as identifiers. The
+  core ships no string that names a module, so it asks the module — its own `ui` block, under
+  the same `audit_f_`/`audit_v_` names, core first so nobody can rename `error` or `user` for
+  everybody. `<field>_truncated` is read back generically, because the core is what adds it
+  when it caps a list.
+- **Seven MIBs that stayed pending, compiled without error, and stayed pending.** Both
+  halves were the file-name/module-name split again, on the two sides of the same conversation
+  with pysmi. It resolves an `IMPORTS` by trying the module name as a FILE name, which in a
+  vendor archive finds nothing — `DIFFSERV-DSCP-TC` lives in `diffserv-dscp-tc-rfc3289.mib`,
+  `DNS-SERVER-MIB` in `rfc1611.mib`, every Linksys module in an `ls*.mib` — so each import came
+  back "missing" and took the MIB that needed it down with it. There is an index of module to
+  file now, offered to pysmi as a source and asked before the directories, which makes a vendor
+  archive self-sufficient: 204 modules from 204 files. And the failure itself was invisible,
+  because pysmi answers with EITHER name depending on how it went — what it compiled under the
+  module's name, what it could not parse under the name it was handed, never having read the
+  module out of the file. The verdict was looked up under the file name only: no error, no
+  compiled module, pending for ever. It is looked up under both now and reported under the
+  module's, which is what the rows and the stored reasons are keyed by — and `attempted`, the
+  list that clears those stored reasons, was always empty for the same reason, so a MIB that
+  had since compiled kept its old red row.
+- **A MIB that is only macros is never compiled, whoever ships a copy of it.** Reported from
+  the panel: `Bad grammar near offset 285 at MIB RFC-1212`, on every run, with nothing anybody
+  could do about it. RFC-1212 and RFC-1215 define grammar for other MIBs to use and nothing
+  else — pysmi cannot compile them into anything, and pysnmp has them built in, which is why
+  they were stubbed. But the stub list was filtered by "not present in raw_dir": right for the
+  ordinary built-ins, where dropping SNMPv2-MIB.txt in means you want it compiled, and wrong
+  for these two, where no copy of them compiles at all. A vendor archive shipping MG-Soft's
+  variant — whose entire body is `SMI OBJECT-TYPE`, an SMIC directive pysmi has never heard of
+  — cancelled its own stub and earned a permanent error. They are now left out of the work
+  list rather than only stubbed (asked for by name, pysmi parses the source before it consults
+  any searcher, so a stub cannot get in front of it), recognised by their module name rather
+  than their file's, and drawn as a state of their own: no `.py` is produced for them and none
+  is missing.
+- **Two files sharing a module name are two different problems, and the screen no longer
+  gives them one answer.** They are either copies of one MIB or different MIBs whose first line
+  was copy-pasted — a vendor archive produces the second by itself: three LINKSYS files with
+  10, 60 and 122 objects, not one name in common, all of them declaring `rlBrgMulticast`. Told
+  to "pick the one that stays", somebody deletes two real MIBs. The listing now measures what
+  the copies actually declare: copies of one module share their descriptors whatever changed
+  between vintages (an IF-MIB against an older IF-MIB comes out at 98%), and files that only
+  share a header share none. At zero the screen says so, says why, and points at the fix — the
+  module name on line 1 — instead of offering a diff of two unrelated files, which is a full
+  rewrite and reads as a comparison gone wrong.
+- **A duplicated module shows the date each copy declares for itself.** `LAST-UPDATED` is
+  what actually decides which of two copies of a standard MIB stays — 2002 against 1999 in the
+  pair that prompted this — and it was only visible twenty lines into the diff. It sits in the
+  comparison table now, beside the size and the hash, with the newest marked when the dates
+  differ and nothing claimed when they do not. A quarter of a real library declares no date at
+  all, so the column appears only when something fills it, and a copy that does not say is
+  shown as not saying rather than as older. It costs no extra read: the date and the module
+  name come out of the same header, in the same cached pass.
+- **A compiled module can outlive the file it was made from, and now says so.** Deleting one
+  copy of a module that arrived twice leaves the `.py` behind — deliberately: it is what pysnmp
+  loads, and dropping it would take the module out of service over a tidy-up. But nothing is
+  newer than anything afterwards, so no timestamp can notice, and the row read "compiled" while
+  what was loaded came from a file nobody could open any more. pysmi records the source path in
+  the header of everything it writes, which makes it the one fact available: a module whose
+  recorded source is no longer there is outdated, with a badge that says which kind of outdated
+  it is, and the server counts it as pending so the chips and the compile button cannot
+  disagree about it.
+- **`×3` says how many files, and now also whether it matters.** pysmi resolves an imported
+  module BY NAME: of several files called `SNMPv2-TC` it reads exactly one, compiles that, and
+  never mentions the rest. Vendor archives ship their own copy of the standard MIBs, so this
+  arrives by itself — and a stripped copy winning over the real one breaks not that MIB but
+  every module importing it, three steps from where anybody looks. What decided it was the
+  order of a directory walk, which is to say the alphabet. The badge now says whether the
+  copies differ at all, and opens onto the comparison: every copy with its size and a hash of
+  its content, which one pysmi actually reads, a unified diff between any two of them, and a
+  delete for the ones that lose. Identical copies say so and are left alone — they are
+  clutter, not a decision. The listing hashes only the colliding names, so the cost is the
+  size of the ambiguity and not the size of the library, and the eye on a duplicated row now
+  opens the copy in use rather than the first one alphabetically.
+- **A history with no file behind it is a row of its own.** Deleting a MIB keeps its
+  versions, which is right — losing an edit because somebody removed a file to re-import it
+  clean is the opposite of what a history is for — but kept and never drawn is a thing that
+  exists, cannot be seen, cannot be brought back and cannot be cleared out. It has a state and
+  a chip now, and the row offers the only two things that apply to it: put the file back where
+  it lived (a version knows its path, the only record of it left) or let the history go. And
+  the delete confirmation offers to take the history along, never ticked by default, asked at
+  the moment of deciding rather than in a dialog once the moment has passed. That needed one
+  opt-in checkbox on the shared confirm modal — the same shape its reason field already had.
+- **Deleting a MIB keeps its history**, and single versions can be deleted by hand. Deleting a
+  MIB to re-import it clean is the ordinary way out of a mess, and exactly when the edit that
+  came before is worth still having — but a version somebody knows is junk should not have to
+  stay for ever either. Deleting v1 says what it is: the only copy of the file as the vendor
+  shipped it, since the file it came from has been overwritten by every save since.
+- **The same bytes are not filed twice.** Every version has carried a sha256 since the first
+  row and nothing ever read it. Unread, the ordinary cycle — fix a MIB, the vendor file comes
+  back, restore the fix, it comes back again — files two distinct documents as four, then six;
+  and at the cap it is the versions that mean something that get pushed out to make room for
+  copies of ones already there. An import whose content the history already holds now files
+  nothing and still reports the replacement, because not storing it twice is a storage decision
+  and an edit was still overwritten. The file on disk was already compared in full before being
+  rewritten — that one is not a hash but the whole content, and it is deliberate: not rewriting
+  keeps the mtime, and the mtime is what decides whether the MIB needs compiling again.
+- **An import that writes over an edit says so, and keeps what it replaced.** Re-downloading
+  a source put the vendor's file back over a MIB somebody had corrected, silently: the fix was
+  still in the history, but the file on disk was the broken one again, the row read "outdated",
+  and the next compile failed with the error the fix had removed. The import still wins — a
+  newer vendor MIB is usually the point of asking for one — but what it replaces now becomes
+  the next version, with a note saying an import did it, and the run reports which edited MIBs
+  it wrote over. Going back to the fix is one restore. Only MIBs with a history are recorded:
+  filing every file of every import would bury the versions that mean something under vendor
+  copies nobody asked to keep.
+- **A MIB says why it will not compile, before the compiler says it badly.** Two vendor MIBs
+  broke here within a day and both broke the same two ways: a type used and never imported, and
+  a descriptor starting with a capital (in SMI the case of the first letter IS the meaning —
+  uppercase names a type, lowercase a value). What pysmi answers lands one step away from the
+  cause: `Bad grammar near offset 558` says where it gave up, and `Unknown parents for symbols:
+  …` names the symbols it could not place rather than the import that is missing. A linter now
+  reads the file the same way and says the thing itself, with the line and the name it should
+  have had. It runs from the editor before a save, and fills in the failure modal beside the
+  compiler's own message — read at that moment rather than stored with the error, because an
+  error kept from last week beside hints from last week is two stale things agreeing.
+
+  The bar for it was silence, not findings: a first draft flagged 74 of 98 real MIBs and was
+  worth less than nothing. It flags one — the one that does not compile, for the two reasons
+  it does not compile.
+- **On Windows, a compiled MIB could not be compiled again.** pysmi writes a module to a
+  temporary file and moves it into place with `os.rename`, which overwrites on POSIX and
+  **raises** on Windows when the destination exists. So it could never replace a module it had
+  already written: an edited MIB stayed outdated for ever and "rebuild everything" could not
+  rebuild anything. It surfaced as two MIBs stuck on "outdated" with no other clue — and the
+  reason was sitting, verbatim, in the failure store added the same day for something else.
+  pysmi's writer now gets an `os` proxy whose rename is `os.replace`, for the length of a
+  compilation only.
+- **A MIB that will not compile is its own state now, and the reason outlives the modal.**
+  It read as "pending", which is also what a MIB nobody has compiled yet says — two states
+  that need opposite things done to them, painted the same. A failure has its own state, its
+  own chip (so "what failed" is one click after a run of two hundred, not a scroll) and its
+  own badge, which opens the compiler's message verbatim. The reason is written down beside
+  the MIBs rather than held in the page, because a compile of two hundred is not watched to
+  the end and the failures are exactly what you come back for — after the modal closed, after
+  a reload, tomorrow. An entry stops being true in three ways and is dropped on read for each
+  of them: the MIB compiled since, its source was replaced (a fixed MIB is a different file
+  under the same name), or the source is gone. Pruning on read rather than on write means a
+  file dropped into the folder by hand counts too.
+- **The MIB source is an editor now, not a wall of text.** The compiler reports a failure BY
+  LINE — "Bad grammar near offset 558 … line 21" — and a `<pre>` has no lines to count, so
+  the one number that made the message actionable was the one thing the viewer could not
+  show. Both viewers (the raw ASN.1 and the Python module pysmi writes) use CodeMirror, which
+  the panel already carried for the notification-template editor; its loader moves to core,
+  since a watchful reaching into a config tab for a function is a dependency nobody would
+  look for. Arriving from a failure the viewer opens ON the failing line, highlighted.
+  CodeMirror 5 ships no mode for ASN.1/SMI or for Python here, so this module defines both —
+  lexers rather than parsers, deliberately: they have to colour a file that DOES NOT PARSE,
+  which is precisely when somebody is reading it. In SMI the case of an identifier's first
+  letter IS its meaning, so the two are coloured apart — which is the very thing the broken
+  vendor MIB gets wrong, visible at a glance.
+- **The detail modal is two tabs**: what the file declares, and what it says. It was a stack
+  of collapsibles — imports, objects and the source each opening over the others — where a
+  four-thousand-line MIB got a box of a fixed height. Each half now gets the whole modal.
+- **A MIB that will not compile now says why, instead of reading as "pending" forever.** pysmi
+  hangs the cause off its status object as `.error` and the status itself only ever says
+  *that* it failed; that field was dropped on the floor, so a malformed vendor file looked
+  exactly like a MIB nobody had compiled yet — and the difference is everything: one needs a
+  click, the other will never compile until the file changes. The reason now travels the three
+  hops from the compiler to the row (classify, job, poll) and the row wears it as an error
+  badge with the message in its tooltip. Found through SYNOLOGY-SMB-MIB, which Synology ships
+  malformed — every descriptor in it starts with an uppercase letter, which in SMI is a type
+  reference and not a value, so the parser stops at the first table definition. A job's verdict
+  replaces the reasons for the modules it covered and no others, so compiling one row does not
+  clear what is known about the rest.
+- **"Compiling 0/20" forever: a mirror stopped answering and nothing was in a hurry.** Every
+  vendor MIB imports the standard SNMPv2-SMI/-TC/-CONF, and the single default source for them
+  had gone unresponsive — so on an installation with no local copy, nothing compiled at all. The
+  per-request timeout did not save it either: pysmi asks each source for several name variants
+  of every missing module and swallows the error between tries, so an unreachable host is paid
+  for once per variant, per module. The defaults are now a list with Net-SNMP's own repository
+  first (the one that answers) and the old mirror behind it in case it returns, and a source
+  that will not talk is written off after two consecutive failures — one answer, a 404 included,
+  resets it, because a mirror that does not host one MIB may host the next. A timeout bounds one
+  request, not the work: when the caller retries in a loop and swallows the errors, it is the
+  size of the step and not of the journey.
+- **Once the MIBs were in folders, nothing could see them.** The count reported zero, the
+  compile job found no work and finished instantly, and "select all → Compile" read as a button
+  that does nothing — because three separate scans still listed the raw directory flat, and an
+  installation whose MIBs all arrived inside a vendor archive has nothing at the top level. None
+  of the three failed loudly: empty is a legitimate answer everywhere they are used. They now go
+  through one shared walker, and a test refuses a direct scan of that directory anywhere in the
+  module. The compile filter also drops the folder before matching: the panel selects FILES,
+  which carry their path, and pysmi compiles module NAMES, which never do.
+- **The lists did not refresh after an import**, because the refresh was called by a name no
+  function had.
+- **An imported repository lost its folders, and two vendors' MIBs became one.** Everything
+  landed flat in `raw/`, so importing LibreNMS — which publishes one directory per vendor — put
+  every `ENTITY-MIB` in the same place, where one silently overwrote the others and the panel
+  showed a single entry that was not the one you thought it was. Files now keep the path they
+  came from: the import carries it, the listing shows it, deletion and reading accept it, and
+  the compiler gets one file source per directory (pysmi resolves an imported module by name
+  against the directories it was given and knows nothing about a tree, so a vendor MIB in a
+  sub-folder could not import the standard one sitting beside it). Every segment is validated on
+  its own and still passes through the confinement check, and an archive's own packaging wrapper
+  is dropped when all its members share it — Synology's is called "MIB files", and keeping it
+  would bury every MIB a level deeper and, the day the vendor renames it, land the next import
+  beside the old one instead of updating it.
+- **Everything was measured, stored and named correctly, and the screen was empty.** A host with
+  device profiles showed no metrics at all in Infrastructure, and its "Latest data" was just as
+  empty — no error, no failed request, nothing in the log. What joins a module's results to the
+  items bound to a host knew two key shapes: the key that IS the item, and the older
+  `<item>_<suffix>` derived form. Sampling emits the COMPOSITE shape — `<item>/metrics`,
+  `<item>/eth0` — which is the convention the rest of the product already speaks (history's
+  `check_label` resolves it exactly that way), and every sampled row was dropped on the way to
+  the screen built to show it. The join now tries all three, most specific first, and has the
+  tests it never had — including that only the FIRST segment is the item (proxmox emits
+  `<uid>/node/pve04`) and that `srv-uid2` is not `srv-uid`, which a `startswith` would have made
+  it. A convention two parts of the product each interpret on their own is not a convention yet.
+- **Detection carried a list of profile names, and the profile added beside it was invisible.**
+  *Detect* proposed "the generic ones" from a hardcoded list in the action, so `hr_storage`
+  measured a NAS perfectly when assigned by hand and did not exist when detected — reported
+  against a Synology, which is exactly the device it was written for. Which profiles are
+  candidates is now declared by the profiles: `match.sysobjectid_prefix` says who made the
+  device and the new `match.probe` names an OID it must answer, and detection asks the
+  catalogue rather than itself. Only a probe can settle "does this implement
+  HOST-RESOURCES-MIB" — a Synology, a Linux box and a Windows server all do, and their
+  sysObjectIDs have nothing in common. Answering at all is the signal, because a threshold
+  here would be the action deciding something about a profile it should know nothing about;
+  the probe count is capped so a large catalogue cannot turn one button into a minute of round
+  trips; and the screen now says WHY each profile was ticked, so a suggestion can be argued
+  with instead of only trusted. Every shipped profile declares how to recognise it, and a test
+  fails if one does not — a profile the catalogue cannot detect is one an admin has to already
+  know exists, which is the failure this replaced.
+
+
+### Changed
+- **The MIB manager lists modules, not files — and the list reaches the bottom of the modal.**
+  Two columns, raw on the left and compiled on the right, are the same MIB seen twice:
+  `SYNOLOGY-DISK-MIB.txt` beside `SYNOLOGY-DISK-MIB.py`, so "is this one compiled?" was
+  answered by reading both lists and comparing by eye. There is one list now, keyed the way
+  pysmi is keyed — by module name — with the file pair as a state on the row and chips that
+  carry the counts, so what is still pending is on screen before anything is typed. Two raw
+  files that share a module name (two vendors each shipping SNMPv2-SMI) are one row, because
+  they are one thing to compile.
+  - **The height.** The lists were pinned at `max-height: 35vh` and the modal BODY was what
+    scrolled — right at exactly one dialog size and wrong at every other, and this dialog can
+    be dragged to a new size and maximized to 95vh, where the list used a third of the height
+    and the rest sat empty. It now uses the fill chain the rest of the panel uses
+    (`.ss-vfill` down to one `.ss-vscroll`), so the list is as tall as the dialog turns out to
+    be. That retired the per-id CSS that sized this modal, and added the one generic rule the
+    chain needs inside a modal: a body that is the top of a chain must not be what scrolls.
+  - **Importing is folded away.** Four always-open import rows (upload, URL, GitHub folder,
+    vendor archive) took half the modal for a step taken once in a while. They are one
+    collapsed panel; the progress bar stays outside it, so a job started from the panel still
+    reports while it is closed.
+- **Chips show what a thing is called, not the id it is stored under.** A multi-value field
+  stores identifiers, which is the right thing to store: they survive a rename, they are what
+  the API speaks and what a bug report quotes. They are not what a person reads — a row of
+  `hr_storage`, `if_generic`, `ucd_linux` on a host form says nothing about what is being
+  measured, to somebody deciding whether the assignment is right. The chips renderer now asks a
+  registry (`CHIP_LABELS`, keyed by `<module>|<field>` so both panes that draw chips reach it)
+  and the id stays in the tooltip. A catalogue that cannot be read leaves the ids on screen,
+  which is the old behaviour and a working screen.
+
 ## [0.0.1+build.97] - 2026-08-20
 
 ### Added

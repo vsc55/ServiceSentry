@@ -1,0 +1,104 @@
+{
+    "id": "ip_stats",
+    "label": {
+        "en_EN": "IP statistics (IP-MIB)",
+        "es_ES": "Estadísticas IP (IP-MIB)"
+    },
+    "description": {
+        "en_EN": "What the IP layer did with the packets: delivered, forwarded, discarded, fragmented. The interface counters say how much traffic there was; these say what happened to it.",
+        "es_ES": "Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados. Los contadores de interfaz dicen cuánto tráfico hubo; éstos dicen qué pasó con él."
+    },
+    "match": {
+        "probe": "1.3.6.1.2.1.4.3.0"
+    },
+    "metrics": [
+        {
+            "key": "ip_in",
+            "label": {"en_EN": "Datagrams received", "es_ES": "Datagramas recibidos"},
+            "oid": "1.3.6.1.2.1.4.3.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_delivered",
+            "label": {"en_EN": "Delivered locally", "es_ES": "Entregados localmente"},
+            "oid": "1.3.6.1.2.1.4.9.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_out",
+            "label": {"en_EN": "Datagrams sent", "es_ES": "Datagramas enviados"},
+            "oid": "1.3.6.1.2.1.4.10.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_forwarded",
+            "label": {"en_EN": "Forwarded", "es_ES": "Reenviados"},
+            "oid": "1.3.6.1.2.1.4.6.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_in_discards",
+            "label": {"en_EN": "Discarded on input", "es_ES": "Descartados de entrada"},
+            "oid": "1.3.6.1.2.1.4.8.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_out_discards",
+            "label": {"en_EN": "Discarded on output", "es_ES": "Descartados de salida"},
+            "oid": "1.3.6.1.2.1.4.11.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_hdr_errors",
+            "label": {"en_EN": "Header errors", "es_ES": "Errores de cabecera"},
+            "oid": "1.3.6.1.2.1.4.4.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_addr_errors",
+            "label": {"en_EN": "Address errors", "es_ES": "Errores de dirección"},
+            "oid": "1.3.6.1.2.1.4.5.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_no_routes",
+            "label": {"en_EN": "No route", "es_ES": "Sin ruta"},
+            "oid": "1.3.6.1.2.1.4.12.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_reasm_fails",
+            "label": {"en_EN": "Reassembly failures", "es_ES": "Fallos de reensamblado"},
+            "oid": "1.3.6.1.2.1.4.16.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip_frag_fails",
+            "label": {"en_EN": "Fragmentation failures", "es_ES": "Fallos de fragmentación"},
+            "oid": "1.3.6.1.2.1.4.18.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        }
+    ]
+}
