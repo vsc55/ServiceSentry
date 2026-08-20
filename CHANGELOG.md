@@ -8,6 +8,37 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.96] - 2026-08-20
+
+### Added
+- **Infrastructure is a section of its own** (`/infra`), beside Overview / History / Syslog.
+  System › Infrastructure answers "what have I declared" — machines, clusters, which module
+  watches what, with which credential. What it could never answer is the other half: **what
+  those machines are doing**, because the panel arranged that by CHECK (Status) and by SERIES
+  (History) and never by machine. This is that arrangement, and it is the first slice of a
+  larger plan (SNMP device profiles — an OID matrix — come next).
+  - **Read-only by construction**: the domain has no write route at all, so the section can be
+    left open on a screen and handed to whoever watches it without handing over the registry.
+    Its own flag, `infra_view`, for the same reason — reading the live state and editing the
+    registry that defines it are different acts wanted by different people.
+  - The fleet lists **worst first**: this screen is opened when something is wrong, and a list
+    that answers "which machine is in trouble" by making you read forty rows only works on the
+    days nothing is happening. A machine **nobody watches** is its own state and its own
+    number, not a blank that reads as healthy.
+  - A machine's view shows what every check bound to it last returned, and the **numbers**
+    among them — each with the label and unit the producing module declares in `__history__`,
+    the same declaration that makes the value chartable, so the section names nothing itself
+    and a module that starts recording a field appears here without a line of core code.
+  - The payload is a **whitelist projection**: `profiles` — the bound credential of every
+    protocol that reaches a machine — is not in it at all, rather than masked on the way out.
+  - It **refreshes**: opening the section always asks the server (nothing on this screen is
+    edited here, so "I already have a fleet" is never a reason to believe it is the current
+    one), and it carries the same auto-refresh control as the other five live sections — how
+    stale a wall screen may be is a decision about the room, not a number in a file.
+  - No store of its own: hosts owns the machines, the check state owns what a check last said,
+    history owns the series. A fourth copy would be a fourth thing to keep in step, and the
+    first to drift would be the one people are watching.
+
 ## [0.0.1+build.95] - 2026-08-20
 
 ### Changed

@@ -148,6 +148,14 @@
 {% include "partials/servers/_checks.html" %}
 {% include "partials/servers/_save.html" %}
 {# ================================================================
+   Infrastructure section (root, /infra) — the fleet as it IS right now.
+   System owns the registry; this owns what those machines are doing.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/infra/_views.html" %}
+{% include "partials/infra/_render.html" %}
+{% include "partials/infra/_list.html" %}
+{# ================================================================
    Cluster tab — multi-bind checks (table + edit modal).
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}

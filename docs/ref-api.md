@@ -341,6 +341,15 @@ poner una cabecera `Authorization`— y la respuesta no lleva cookie de sesión.
 | PUT | `/api/v1/groups/<uid>` | `groups_edit` | Actualizar etiqueta/desc/roles/miembros |
 | DELETE | `/api/v1/groups/<uid>` | `groups_delete` | Borrar grupo |
 
+## Infraestructura (vivo) — [lib/core/infra/routes.py](../src/lib/core/infra/routes.py)
+
+Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo que las define vive en el registro (`/api/v1/hosts`), tras los permisos que el registro ya tiene.
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/api/v1/infra/hosts` | `infra_view` | La flota: una fila por máquina, **peor primero**, con su estado y cuánto de ella se vigila. Proyección en lista blanca: los `profiles` (credencial de cada protocolo) no viajan |
+| GET | `/api/v1/infra/hosts/<uid>` | `infra_view` | Una máquina: lo que devolvió cada check (`results`) y los números que su módulo **declaró** como medida (`metrics`), cada uno con etiqueta, unidad y las coordenadas de su serie |
+
 ## Sesiones — [lib/core/sessions/routes.py](../src/lib/core/sessions/routes.py)
 
 | Método | Ruta | Permiso | Propósito |

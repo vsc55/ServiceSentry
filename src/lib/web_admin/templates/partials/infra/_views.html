@@ -1,0 +1,19 @@
+{# ================================================================
+   Infrastructure — the view registry.
+
+   Cards lead, and that is a decision about where this section is READ: it is the one screen
+   somebody leaves open on a wall, and a grid of machines with a coloured edge answers "is
+   anything red" from across the room, which a table of rows does not. The table is what you
+   switch to once you are sitting in front of it and want to sort, filter and compare.
+   ================================================================ #}
+
+const INFRA_VIEWS = [
+    { id: 'card',  label_key: 'infra_view_cards', icon: 'bi-grid-3x3-gap', render: '_infraCardsBody', mode: 'cards' },
+    { id: 'table', label_key: 'infra_view_table', icon: 'bi-table',        render: null,              mode: 'table' },
+];
+
+const _infraView = createViewState('ss_infra_view', INFRA_VIEWS, () => {
+    _persistTableConfig();
+    _infraRender();
+});
+function setInfraView(id) { _infraView.set(id); }

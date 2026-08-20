@@ -8032,3 +8032,41 @@ existe para encontrar. Cuatro copias de esa regla se desvían, y la que dejara d
 | `TestTheViewIsWired::*` (6) | Está en el registro como `summary` (recibe **todas** las sesiones que dejó en pie la franja de filtro, no la página en pantalla, así que filtrar por una cuenta muestra el tráfico de esa cuenta); su JS se incluye; el *feed* **solo se pide desde la vista que lo lee**; cambiar a ella la carga; el sondeo de la pestaña y el botón Actualizar la mantienen fresca; y la vista **dice lo que no registra** —quien no lo lea tomaría un *feed* vacío por «no pasó nada» en vez de «no pasó nada registrable»— |
 | `TestTheRowActions::*` (2) | El botón de historial es **una función** que pintan la tabla y la rejilla de tarjetas (dos copias es una vista libre de ofrecer una acción que la otra no), y **leer se ofrece a quien puede ver la lista**: leer lo que hizo una sesión es la pregunta de `sessions_view`, cortarla es la de `sessions_revoke` |
 | `TestTheStatusColoursAreDefinedOnce::*` (4) | Las celdas compartidas existen, se incluyen antes de que nadie pinte una tabla, **ninguna tabla pinta un estado a mano** (la regresión que la guarda vigila) y las cuatro las usan —un ayudante compartido que nadie llama no está compartido, está muerto— |
+
+
+---
+
+**Archivo:** `tests/integration/test_wa_infra.py` — 16 tests
+
+**Infraestructura (vivo)** — la flota tal como ESTÁ, al lado del registro que dice cómo
+debería estar. Sistema › Infraestructura contesta «qué he declarado»: máquinas, clústeres, qué
+módulo vigila qué y con qué credencial. Lo que no podía contestar es la otra mitad —**qué están
+haciendo esas máquinas**— porque el panel ordenaba eso por CHECK (Estado) y por SERIE
+(Historial), nunca por máquina. La sección es esa ordenación, y es de **sólo lectura por
+construcción**: el dominio no tiene una sola ruta que escriba, así que se le puede dar a quien
+mira las pantallas sin darle el registro con ella.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheFleet::*` (5) | Pide sesión; lista las máquinas con su estado; **no lleva nunca las credenciales** —el registro enmascara los secretos dentro de `profiles`, aquí `profiles` no viaja en absoluto: una pantalla que sólo enseña estado no tiene por qué cargar con la credencial de cada protocolo que llega a la máquina, y una proyección en **lista blanca** no puede empezar a llevarla porque alguien añada un campo—; una máquina **que nadie vigila es un estado propio** y no un «ok» (pintarla verde sería la sección mintiendo sobre lo único que existe para enseñar), con su propio número en la cabecera donde «31 OK» la habría escondido; y los recuentos cuadran con la lista |
+| `TestOneMachine::*` (3) | Contesta qué es y qué dijo cada check; una máquina desconocida es 404; y tampoco por ahí salen las credenciales |
+| `TestWhoMaySeeIt::*` (3) | `infra_view` y no `servers_view`: leer el estado en vivo y editar el registro que lo define son actos distintos que quiere gente distinta. Un rol sin la bandera recibe 403, un *viewer* lo lee, y **no existe `infra_edit`** —lo que hay que cambiar vive en el registro, tras los permisos que el registro ya tiene— |
+| `TestTheViewModel::*` (5) | Las reglas donde están escritas: **la peor máquina va primero** (esta lista se abre cuando algo va mal; el orden alfabético contesta «cuál está en problemas» obligándote a leer las cuarenta filas); y un valor es una **medida sólo si su módulo lo dijo** —`other_data` es una bolsa de lo que al módulo le apeteció guardar, así que la sección no adivina cuál de esas claves es una medida ni le inventa un nombre: lee la declaración `__history__` del propio módulo, la misma que hace el valor graficable en Historial—. Un texto bajo una clave declarada no llega a un eje, un booleano tampoco (en Python `True` es un entero, así que una bandera de estado se pintaría como una línea en 1 y se leería como dato), y cada medida viaja con las **coordenadas de su serie** para que la pantalla pueda graficarla sin saber nada del módulo |
+
+---
+
+**Archivo:** `tests/meta/test_wa_infra_section.py` — 17 tests
+
+El cableado que una **sección raíz** necesita para existir. No es un fichero: es una entrada en
+el registro de páginas (que es lo que le da URL, ruta, filtro por permiso y entrada en la barra
+lateral), un panel en el armazón donde pintar, su JavaScript en el bundle y una función de
+render cuyo nombre nombra el registro. Sáltate la entrada y no hay URL; sáltate el panel y la
+sección abre sobre nada; sáltate el `include` y la barra lateral ofrece una sección cuyo
+renderizador no está definido. Todos fallan **en silencio**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSectionIsWiredEndToEnd::*` (5) | La entrada del registro (URL, permiso, render, panel), el panel en el armazón y su activación en `/infra`, los tres `include`, que `renderInfra` exista y que las rutas estén registradas e indexadas |
+| `TestItIsTheSharedMachinery::*` (3) | Sale de `createListTable` con persistencia y franja de filtro, toda columna ordenable tiene valor de orden, y las vistas vienen del registro compartido |
+| `TestItDoesNotGoStale::*` (5) | Reportado desde el panel: una máquina dada de alta en Sistema no aparecía aquí. La primera versión pedía la flota **sólo si no tenía ninguna**, que es la caché que una sección se puede permitir mientras es lo único que escribe sus propios datos — y ésta no escribe ninguno: todo lo que hay en pantalla se edita en otro sitio, así que «ya tengo una flota» nunca es motivo para creer que es la de ahora. Se guarda que el punto de entrada pregunta siempre, que los redibujados baratos (filtro, orden, página) **no** tocan la red, que lleva el control de auto-refresco compartido en vez de un intervalo escrito a mano, que el tick para cuando la sección no está en pantalla y que el intervalo elegido sobrevive a una recarga |
+| `TestItShowsWithoutHandingOver::*` (4) | La proyección es **lista blanca**; el dominio **no escribe** (ni un POST/PUT/DELETE/PATCH: `infra_view` no puede ser un rodeo a los permisos del registro); **no tiene almacén propio** —cada dato es de alguien: hosts, estado de checks, historial, y una cuarta copia sería una cuarta cosa que mantener en hora, y la primera en desviarse sería la que la gente está mirando—; y el **vocabulario de estado es el del registro**, porque un segundo juego de nombres sería una segunda definición de «máquina rota» |

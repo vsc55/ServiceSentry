@@ -127,6 +127,12 @@
         {% if not standalone %}
         {% include "partials/status/_pane.html" %}
 
+        <!-- ==================== Infrastructure Tab ==================== -->
+        {% endif %}
+        {% if not standalone or standalone == 'infra' %}
+        {# Full-bleed: the fleet fills the pane, and the machine view replaces it in place. #}
+        {% include "partials/infra/_pane.html" %}
+
         <!-- ==================== History Tab ==================== -->
         {% endif %}
         {% if not standalone or standalone == 'history' %}
