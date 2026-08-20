@@ -37,6 +37,8 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
 
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({
         'discover',
+        'list_profiles',
+        'detect_profiles',
         'list_mibs',
         'compile_mibs',
         'compile_mibs_start',
@@ -57,6 +59,8 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
     # Actions that produce no side effects — audit logging is suppressed for them.
     READ_ONLY_ACTIONS: frozenset[str] = frozenset({
         'discover',
+        'list_profiles',
+        'detect_profiles',
         'list_mibs',
         'get_mib_details',
         'get_raw_mib_details',
@@ -71,6 +75,8 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, ModuleBase):
          'onclick': 'openFileManagerModal'},
         {'icon': 'bi-diagram-3',     'label_key': 'mib_browser',
          'onclick': 'openMibBrowserModal'},
+        {'icon': 'bi-grid-3x3-gap',  'label_key': 'device_profiles',
+         'onclick': 'openSnmpProfilesModal'},
     )
 
     # Legacy compat alias so ModuleBase helpers that expect _DEFAULTS still work

@@ -24,7 +24,8 @@
         "oid":                  "OID",
         "operator":             "Operator",
         "value":                "Expected Value",
-        "alert":                "Alert threshold"
+        "alert":                "Alert threshold",
+        "device_profiles":      "Device profiles"
     },
     "hints": {
         "enabled":              "Enable or disable this entry.",
@@ -49,7 +50,8 @@
         "oid":                  "OID to query in dotted-decimal notation (e.g. 1.3.6.1.2.1.1.1.0 for sysDescr). Use Discover to browse available OIDs.",
         "operator":             "Comparison operator. Use 'any' to check reachability only.",
         "value":                "Expected value for the comparison. Numeric operators (gt/lt/gte/lte) cast the OID value to float.",
-        "alert":                "Consecutive failures before triggering an alert."
+        "alert":                "Consecutive failures before triggering an alert.",
+        "device_profiles":      "What this device IS, in terms of what it can answer: a server, a switch and a NAS do not measure the same things. A profile is a list of OIDs with their unit and chart type, and several are assigned — the generic ones (MIB-II, interfaces) plus whatever belongs to the model. Empty: the device is not sampled, only its OID checks run."
     },
     "option_labels": {
         "snmpv3_level": {
@@ -61,6 +63,24 @@
     "new_item_key_label":       "Entry name or identifier:",
     "rename_item_prompt":       "Enter new entry name or identifier:",
     "ui": {
+        "device_profiles":        "Device profiles",
+        "device_profiles_pick":   "Choose device profiles",
+        "profile_search":         "Search profile, metric or OID…",
+        "profile_detect":         "Detect",
+        "profile_detect_none":    "No profile claims this device. The generic ones still apply; anything specific needs one written for it.",
+        "profile_dir":            "Own profiles",
+        "profile_metric":         "Metric",
+        "profile_metrics":        "metrics",
+        "profile_kind":           "Type",
+        "profile_unit":           "Unit",
+        "profile_table":          "One row per element of the device (interface, disk…)",
+        "profile_match":          "Claims devices whose sysObjectID starts like this",
+        "profile_src_shipped":    "Shipped",
+        "profile_src_custom":     "Own",
+        "profile_kind_gauge":     "Gauge",
+        "profile_kind_counter":   "Counter",
+        "profile_kind_text":      "Text",
+        "profile_interfaces":     "interfaces",
         "discover_title":        "Discover OIDs",
         "discover_error":        "Could not connect to any configured server.",
         "item_added":            "OID check '{}' added.",
@@ -144,7 +164,8 @@
     },
     "group_labels": {
         "connection": "Connection",
-        "auth":       "Authentication"
+        "auth":       "Authentication",
+        "device":     "Device"
     },
     "collections": {
         "servers": "Servers",

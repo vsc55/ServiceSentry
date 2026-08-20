@@ -45,7 +45,7 @@
     },
     "servers": {
         "__new_item_fields__": ["host", "community"],
-        "__field_order__": ["enabled", "host", "port", "timeout", "retries", "version", "community", "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key", "snmpv3_auth_protocol", "snmpv3_priv_protocol", "checks"],
+        "__field_order__": ["enabled", "host", "port", "timeout", "retries", "version", "community", "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key", "snmpv3_auth_protocol", "snmpv3_priv_protocol", "device_profiles", "checks"],
         "enabled":              {"type": "bool", "default": true},
         "host":                 {"type": "str",  "default": "", "placeholder": "192.168.1.1", "group": "connection"},
         "port":                 {"type": "int",  "default": 161,   "min": 1,  "max": 65535, "group": "connection"},
@@ -58,6 +58,7 @@
         "snmpv3_priv_key":      {"type": "str",  "default": "",    "secret": true, "show_when": {"version": ["3"]}, "group": "auth"},
         "snmpv3_auth_protocol": {"type": "str",  "default": "MD5", "options": ["MD5", "SHA", "SHA-224", "SHA-256", "SHA-384", "SHA-512", "none"], "show_when": {"version": ["3"]}, "group": "auth"},
         "snmpv3_priv_protocol": {"type": "str",  "default": "DES", "options": ["DES", "3DES", "AES-128", "AES-192", "AES-256", "none"],          "show_when": {"version": ["3"]}, "group": "auth"},
+        "device_profiles":      {"type": "str",  "default": "", "multi": true, "group": "device"},
         "checks": {
             "type":                 "sub_collection",
             "__discovery__":        "discover",

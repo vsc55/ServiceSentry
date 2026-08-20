@@ -8,6 +8,80 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.97] - 2026-08-20
+
+### Added
+- **SNMP device profiles — the OID matrix.** An agent answers `1.3.6.1.4.1.2021.11.9.0` with a
+  `7`. It does not say that this is the CPU, that seven is a percentage, or that the number
+  beside it is a byte counter which means nothing until it is differentiated. A profile carries
+  exactly that: a named list of metrics mapping each OID to a key, a label, a unit, a kind and
+  how it should be drawn. This build adds the engine — the catalogue and the maths — and the
+  screen that makes it reachable: the catalogue can be read, and a device can be told which of
+  it applies. The sampling that turns those declarations into charted values comes next.
+  - Profiles are **data, not code**: JSON files in `watchfuls/snmp/profiles/`. Three ship, all
+    from standard MIBs so they work on anything — `sys_generic` (MIB-II: name, description,
+    uptime), `if_generic` (IF-MIB: per-interface traffic, with the 64-bit columns) and
+    `ucd_linux` (UCD-SNMP-MIB: CPU, load and memory, which is what most Linux, BSD and a good
+    number of NAS boxes serve). An installation can add its own or **override a shipped one by
+    reusing its id** — what somebody does when a firmware release moved an OID and the fix
+    cannot wait for the next version of this product.
+  - **Nothing a profile can contain stops the monitor.** A malformed metric costs its own line,
+    a malformed profile costs that profile, a broken file costs only itself. A device that goes
+    unmeasured is visible on its own screen; a check cycle that does not run is not.
+  - **Counters are turned into rates**, because charted raw they are a line that only ever goes
+    up, on which an outage is a flat spot nobody notices. The hard case is a value smaller than
+    the last one, which means either a wrap or a reboot and looks identical: the rule is the
+    declared width — 32-bit counters wrap constantly (~34 seconds on a gigabit link) so a
+    backwards step is assumed to be one, and 64-bit counters do not wrap in any practical sense
+    (~4.6 years at a terabit) so a backwards step is a reboot and the sample is dropped. An
+    optional `max_rate` settles the one case the width cannot. Either way the new baseline is
+    stored: losing a point costs a point, inventing one costs the chart.
+  - A table metric declares the column that **names its rows**, so eight interfaces are not
+    eight SNMP indices — which are not the ports on the front of the switch, and are the first
+    thing somebody assumes they are.
+  - A profile's fields come out in the shape the history metadata already speaks, so a value
+    that arrives without a name becomes chartable and nameable through the same path a module's
+    static `__history__` declaration uses.
+  - **Where a profile is associated: on the device.** SNMP servers carry a `device_profiles`
+    field, because what a machine IS does not change when somebody adds a fourth OID check to
+    it. It holds **several** profiles and not one — a NAS is the generic MIB-II profile, plus
+    the interfaces, plus its own disks — which is also why the shipped profiles are small and
+    composable instead of one monolith per model. It is the profile set that says "this is a
+    switch"; no new taxonomy of device types was needed, and one would have had to be kept
+    correct forever.
+  - **The catalogue is browsable, and the same screen is the picker.** A toolbar entry beside
+    the MIB browser opens the whole matrix: every profile, where it came from, and the metrics
+    it carries with their type, unit, OID and — for a table — the column that names its rows.
+    Opened from the field instead, the rows are ticked rather than typed: a profile id typed
+    from memory is a device that measures nothing until somebody notices the spelling. Both
+    panes that draw the field get it — the Modules tab and, more to the point, the host modal,
+    which is where somebody actually says "this box is a NAS".
+  - **Every row says whether it shipped or was written here.** An installation's own profiles
+    live under the data directory (`snmp_profiles/`, beside its own MIBs) so a package upgrade
+    cannot take them, and reusing a shipped id overrides it. That override is the reason the
+    source is on screen at all: when a device measures wrong, which of the two profiles with
+    that id is actually in use is the first question, and the id alone cannot answer it.
+  - **A device can be asked what it is.** *Detect* reads sysObjectID, sysDescr and ifNumber —
+    all MIB-II, so it works against hardware the catalogue has never heard of — and ticks what
+    fits. It proposes and never assigns: a wrong profile does not fail, it measures numbers
+    that look fine, which is exactly the failure that has to pass through somebody. A device
+    that answers nothing is reported as unreachable rather than as a device no profile claims;
+    those read the same on screen and call for opposite actions.
+
+### Changed
+- **A picker belongs to a KIND of field, not to one item, and a multi-value field may have
+  one.** `FIELD_PICKERS` was keyed by exact path, which works for a config option
+  (`web_admin|backup_dir`) and never for an item's field: the path carries the item's uid, so
+  every server has a different one and no registration could match. Lookups now fall back to
+  the schema key, which is what the registration always meant. And the multi-value branch
+  returned before a picker was ever looked up, so several values meant typing them by hand.
+- **The host modal draws multi-value fields as fields and not as text boxes.** It renders the
+  same schema through its own renderer, which knew nothing about `multi` — so a list declared
+  by a module was a bare input on the one screen where a host is actually bound to it. It now
+  draws the chips and offers the picker from the same registry, opened with a callback because
+  what it is editing is a draft that has not been saved: a picker writing straight into
+  `modulesData` would leave the value somewhere this pane never reads.
+
 ## [0.0.1+build.96] - 2026-08-20
 
 ### Added

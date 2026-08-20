@@ -900,6 +900,80 @@ sub-colección de **checks** (OIDs a comprobar):
 > schema-driven, ver [explica-seguridad.md](explica-seguridad.md)). El módulo es 100 % independiente
 > del core.
 
+### Perfiles de dispositivo (la matriz de OIDs)
+
+Un agente SNMP contesta `1.3.6.1.4.1.2021.11.9.0` con un `7`. **No dice** que eso sea la CPU,
+que el siete sea un porcentaje, ni que el número de al lado sea un contador de bytes que no
+significa nada hasta derivarlo. Eso es un **perfil**: una lista de métricas que mapea cada OID a
+una clave, una etiqueta, una unidad, un tipo y cómo se dibuja.
+
+Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/profiles/`:
+
+```json
+{
+  "id": "if_generic",
+  "label": {"en_EN": "Network interfaces", "es_ES": "Interfaces de red"},
+  "match": {"sysobjectid_prefix": "1.3.6.1.4.1.8072"},
+  "metrics": [
+    {"key": "if_in", "walk": "1.3.6.1.2.1.2.2.1.10", "kind": "counter", "unit": "B/s",
+     "width": 32, "index_label": "1.3.6.1.2.1.2.2.1.2", "chart": "line"}
+  ]
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `key` | Identificador de la métrica: acaba siendo el nombre del campo en el historial |
+| `oid` / `walk` | Un valor suelto **o** una columna de una tabla indexada. Uno de los dos, nunca ambos |
+| `kind` | `gauge` (el valor **es** la medida), `counter` (sólo significa algo como **diferencia**), `text` (no es una medida: nombre, modelo, número de serie) |
+| `unit` | La unidad en la que queda tras `scale` |
+| `scale` | Multiplicador: centisegundos→segundos, KB→bytes, décimas de grado→grados |
+| `width` | 32 o 64 bits del contador — **es lo que distingue una vuelta de un reinicio** |
+| `max_rate` | Techo opcional: una tasa imposible para ese enlace se descarta |
+| `index_label` | La columna que **nombra** cada fila de una tabla (sin ella, ocho interfaces son ocho números de índice, que no son el puerto del frontal) |
+| `chart` | `line`, `area`, `value` o `none` |
+| `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina |
+| `match.sysobjectid_prefix` | Qué aparatos reclama el perfil; gana el prefijo **más específico** |
+
+**Los contadores mienten de dos formas opuestas.** Un valor nuevo menor que el anterior es una
+**vuelta** del contador (uno de octetos de 32 bits se llena en ~34 s en un enlace de gigabit) o
+un **reinicio** del aparato, y desde aquí son idénticos. Confundirlos no es un error de
+redondeo: tratar un reinicio como una vuelta mete un pico de cuatro mil millones en un
+intervalo, que reescala el eje y esconde detrás todos los valores reales de la pantalla. La
+regla es el ancho: **32 bits → se asume vuelta** (pasa constantemente), **64 bits → se asume
+reinicio y se descarta la muestra** (a un terabit tardaría 4,6 años en dar la vuelta). En ambos
+casos se guarda la nueva referencia: perder un punto cuesta un punto; inventarlo cuesta la
+gráfica.
+
+Se envían tres perfiles genéricos —`sys_generic` (MIB-II: nombre, descripción, uptime),
+`if_generic` (IF-MIB: tráfico por interfaz, con las columnas de 64 bits) y `ucd_linux`
+(UCD-SNMP-MIB: CPU, carga y memoria)— y una instalación puede añadir los suyos o **sustituir uno
+enviado reutilizando su `id`**, que es lo que se hace cuando una versión de firmware mueve un
+OID y el arreglo no puede esperar a la siguiente versión de este producto.
+
+#### Dónde se asocia un perfil
+
+**En el aparato, no en la comprobación.** Cada servidor SNMP lleva un campo `device_profiles`:
+lo que una máquina *es* no cambia porque alguien le añada un cuarto OID que vigilar. Y lleva
+**varios**, no uno — un NAS es el genérico de MIB-II, más las interfaces, más sus discos —, que
+es también la razón de que los perfiles enviados sean pequeños y componibles en lugar de un
+monolito por modelo. El conjunto asignado *es* la clasificación: no hace falta una taxonomía de
+tipos de aparato (y habría que mantenerla correcta para siempre).
+
+El botón del campo abre el catálogo con las filas marcables, y el mismo catálogo se abre en modo
+lectura desde la barra del módulo, al lado del navegador de MIBs. Se marca, no se teclea: un `id`
+de perfil escrito de memoria es un aparato que no mide nada hasta que alguien nota la errata.
+
+**Detectar** lee `sysObjectID`, `sysDescr` e `ifNumber` —todo MIB-II, así que funciona contra
+hardware que el catálogo no ha visto nunca— y marca lo que encaja. Propone y nunca asigna: un
+perfil equivocado no falla, mide números que parecen buenos, y ése es justo el fallo que tiene
+que pasar por una persona. Un aparato que no contesta se informa como inalcanzable y no como un
+aparato que ningún perfil reclama: en pantalla se leen igual y piden acciones opuestas.
+
+Los perfiles propios de la instalación van en `<var_dir>/snmp_profiles/`, junto a sus MIBs, para
+que una actualización del paquete no se los lleve. Cada fila del catálogo dice si viene enviada o
+escrita aquí, que es lo primero que hay que mirar cuando un aparato mide mal.
+
 ### Gestión de MIBs
 
 El módulo expone acciones de UI (vía `/api/v1/modules/watchfuls/snmp/<action>`) para

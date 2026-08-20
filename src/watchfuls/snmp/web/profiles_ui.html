@@ -1,0 +1,307 @@
+{# ================================================================
+   SNMP device profiles — the screen for the OID matrix.
+
+   An agent answers `1.3.6.1.4.1.2021.11.9.0` with a `7`. A profile is what says that this
+   is the CPU and that seven is a percentage. Until this file existed the catalogue was real
+   but invisible: three JSON files and a validator, and nothing an admin could open.
+
+   Two modes, one list. Browsing (from the module toolbar) answers "what does this thing know
+   how to measure"; assigning (from a server's `device_profiles` field) answers "and which of
+   it is true of THIS box" — a server, a switch and a NAS take different sets, which is the
+   whole reason the association is a list and not a type.
+   ================================================================ #}
+
+// ── State ───────────────────────────────────────────────────────────────────
+let _snmpProfMod      = 'snmp';   // module name (API version comes from its schema)
+let _snmpProfPath     = null;     // field path when assigning; null while browsing
+let _snmpProfItems    = null;     // the catalogue, as list_profiles returned it
+let _snmpProfSel      = new Set();
+let _snmpProfExpanded = new Set();
+let _snmpProfGen      = 0;        // bumped per open — a late fetch for a closed modal is dropped
+let _snmpProfOnPick   = null;     // where the selection goes, when it is not a modulesData path
+
+function _snmpProfT(key, fallback) { return _modUiStr(_snmpProfMod, key, fallback); }
+
+function _snmpActionUrl(modName, action) {
+    const ver = (ITEM_SCHEMAS[`${modName}|__module__`] || {})['api_ver'] || 'v1';
+    return `/api/${ver}/modules/watchfuls/${modName}/${action}`;
+}
+
+/** A profile's or metric's name in the reader's language, however it names itself.
+ *
+ *  `'*'` is the profile format's "same in every language": a profile written for one rack in
+ *  one company should not have to be bilingual to show up with a name. */
+function _snmpProfLabel(obj, fallback) {
+    const l = (obj && obj.label) || {};
+    if (typeof l === 'string') return l;
+    return l[CURRENT_LANG] || l[SYSTEM_DEFAULT_LANG] || l['en_EN'] || l['*'] || fallback || '';
+}
+
+function _snmpProfDesc(obj) {
+    const d = (obj && obj.description) || {};
+    if (typeof d === 'string') return d;
+    return d[CURRENT_LANG] || d[SYSTEM_DEFAULT_LANG] || d['en_EN'] || d['*'] || '';
+}
+
+// ── Opening it ──────────────────────────────────────────────────────────────
+
+/** Toolbar entry: read the catalogue. Nothing is selectable — this is the reference. */
+function openSnmpProfilesModal(modName) {
+    _snmpProfOpen(modName || 'snmp', null, '');
+}
+
+/** Field entry: the same list, with the ones this device carries ticked.
+ *
+ *  `onPick` is how one picker serves two panes. The Modules tab has a path into
+ *  `modulesData` and needs nothing else; the host modal is editing a draft that has not been
+ *  saved, so it hands over a callback and keeps the writing to itself. */
+function _snmpProfOpenFor(pathStr, current, onPick) {
+    _snmpProfOpen(String(pathStr || '').split('|')[0] || 'snmp', pathStr, current, onPick);
+}
+
+function _snmpProfOpen(modName, pathStr, current, onPick) {
+    _snmpProfMod  = modName;
+    _snmpProfPath = pathStr || null;
+    _snmpProfOnPick = (typeof onPick === 'function') ? onPick : null;
+    _snmpProfItems = null;
+    _snmpProfExpanded = new Set();
+    _snmpProfSel = new Set(_snmpProfList(current).map(s => s.toLowerCase()));
+    const gen = ++_snmpProfGen;
+
+    const titleEl = document.getElementById('snmpProfilesTitle');
+    const cntEl   = document.getElementById('snmpProfilesCount');
+    const srchEl  = document.getElementById('snmpProfilesSearch');
+    const bodyEl  = document.getElementById('snmpProfilesBody');
+    const dirEl   = document.getElementById('snmpProfilesDir');
+    const detBtn  = document.getElementById('snmpProfilesDetectBtn');
+    const detLbl  = document.getElementById('snmpProfilesDetectLabel');
+    const detBox  = document.getElementById('snmpProfilesDetected');
+
+    if (titleEl) titleEl.textContent = _snmpProfPath
+        ? _snmpProfT('device_profiles_pick', 'Device profiles')
+        : _snmpProfT('device_profiles', 'Device profiles');
+    if (cntEl)  { cntEl.textContent = ''; cntEl.style.display = 'none'; }
+    if (srchEl) { srchEl.value = ''; srchEl.placeholder = _snmpProfT('profile_search', 'Search…'); }
+    if (dirEl)  dirEl.textContent = '';
+    if (detBox) { detBox.style.display = 'none'; detBox.innerHTML = ''; }
+    // Detection needs a device to ask, so it exists only when a server is on the other end.
+    if (detBtn) detBtn.style.display = _snmpProfPath ? '' : 'none';
+    if (detLbl) detLbl.textContent = _snmpProfT('profile_detect', 'Detect');
+    if (bodyEl) bodyEl.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('snmpProfilesModal')).show();
+    _snmpProfFetch(gen);
+}
+
+async function _snmpProfFetch(gen) {
+    const res = await apiPost(_snmpActionUrl(_snmpProfMod, 'list_profiles'), {});
+    if (gen !== _snmpProfGen) return;       // the modal was closed or reopened meanwhile
+    const d = res && res.data;
+    const bodyEl = document.getElementById('snmpProfilesBody');
+    if (!d || !d.ok) {
+        if (bodyEl) bodyEl.innerHTML = `<div class="alert alert-danger mb-0 small">
+            ${esc((d && d.message) || t('error') || 'Error')}</div>`;
+        return;
+    }
+    _snmpProfItems = Array.isArray(d.items) ? d.items : [];
+    // Where an installation's own profiles go — the answer to "and how do I add one",
+    // which is otherwise a documentation lookup from a screen that already knows.
+    const dirEl = document.getElementById('snmpProfilesDir');
+    if (dirEl && d.dir) {
+        dirEl.innerHTML = `<i class="bi bi-folder2-open me-1"></i>${esc(_snmpProfT('profile_dir', 'Own profiles'))}: <code>${esc(d.dir)}</code>`;
+    }
+    _snmpProfRender();
+}
+
+// ── Drawing it ──────────────────────────────────────────────────────────────
+
+function _snmpProfList(csv) {
+    return String(csv == null ? '' : csv).split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+}
+
+function _snmpProfKindBadge(kind) {
+    // What the value IS, which is the one thing the protocol never says: a measurement, a
+    // measurement that only means something as a difference, or not a measurement at all.
+    const map = {gauge:   ['bg-info',      'profile_kind_gauge',   'Gauge'],
+                 counter: ['bg-warning',   'profile_kind_counter', 'Counter'],
+                 text:    ['bg-secondary', 'profile_kind_text',    'Text']};
+    const [cls, key, fb] = map[kind] || map.gauge;
+    return `<span class="badge ${cls} ss-fs-1">${esc(_snmpProfT(key, fb))}</span>`;
+}
+
+function _snmpProfMetricsHtml(prof) {
+    let h = `<div class="table-responsive"><table class="table table-sm mb-0 ss-fs-2">
+        <thead><tr>
+            <th>${esc(_snmpProfT('profile_metric', 'Metric'))}</th>
+            <th>${esc(_snmpProfT('profile_kind', 'Type'))}</th>
+            <th>${esc(_snmpProfT('profile_unit', 'Unit'))}</th>
+            <th>OID</th>
+        </tr></thead><tbody>`;
+    for (const m of prof.metrics || []) {
+        const oid = m.walk || m.oid || '';
+        // A walked column is a TABLE of values, one per row of the device — and the column
+        // that names those rows travels with it, because eight interfaces are otherwise
+        // eight SNMP indices, which are not the ports on the front of the switch.
+        const tableMark = m.walk
+            ? `<i class="bi bi-list-ol text-muted ms-1" title="${escAttr(_snmpProfT('profile_table', 'One value per row'))}"></i>`
+            : '';
+        const width = m.width ? `<span class="badge bg-secondary bg-opacity-50 text-body ss-fs-1 ms-1">${m.width}b</span>` : '';
+        h += `<tr>
+            <td><div class="d-flex align-items-center gap-1">
+                    <span>${esc(_snmpProfLabel(m, m.key))}</span>${tableMark}
+                </div>
+                <code class="text-muted ss-fs-1">${esc(m.key)}</code></td>
+            <td>${_snmpProfKindBadge(m.kind)}${width}</td>
+            <td>${esc(m.unit || '—')}</td>
+            <td><code class="ss-fs-1">${esc(oid)}</code></td>
+        </tr>`;
+    }
+    h += '</tbody></table></div>';
+    return h;
+}
+
+function _snmpProfRender() {
+    const bodyEl = document.getElementById('snmpProfilesBody');
+    if (!bodyEl || !_snmpProfItems) return;
+    const filter = (document.getElementById('snmpProfilesSearch')?.value || '').toLowerCase();
+
+    const rows = _snmpProfItems.filter(p => {
+        if (!filter) return true;
+        const hay = [p.id, _snmpProfLabel(p, p.id), _snmpProfDesc(p),
+                     ...(p.metrics || []).map(m => m.key + ' ' + _snmpProfLabel(m, ''))].join(' ').toLowerCase();
+        return hay.includes(filter);
+    });
+
+    const cntEl = document.getElementById('snmpProfilesCount');
+    if (cntEl) {
+        cntEl.style.display = '';
+        cntEl.textContent = _snmpProfPath
+            ? `${_snmpProfSel.size} / ${_snmpProfItems.length}`
+            : String(_snmpProfItems.length);
+    }
+
+    if (!rows.length) {
+        bodyEl.innerHTML = `<div class="text-center py-4 text-muted">${esc(t('no_items') || 'No items')}</div>`;
+        return;
+    }
+
+    const pick = !!_snmpProfPath;
+    let h = '<div class="d-flex flex-column gap-1">';
+    for (const p of rows) {
+        const sel  = _snmpProfSel.has(String(p.id).toLowerCase());
+        const open = _snmpProfExpanded.has(p.id);
+        const own  = p.source === 'custom';
+        const nMetrics = (p.metrics || []).length;
+        const tick = pick
+            ? `<i class="bi ${sel ? 'bi-check-square text-primary' : 'bi-square text-secondary'} flex-shrink-0 ss-fs-4"></i>`
+            : `<i class="bi bi-grid-3x3-gap text-secondary flex-shrink-0 ss-fs-4"></i>`;
+        const head = pick ? `onclick="_snmpProfToggle(${jsStr(p.id)})"` : '';
+        h += `<div class="border rounded${sel ? ' border-primary' : ''}" style="background:var(--bs-body-bg)">
+            <div class="d-flex align-items-center gap-2 px-2 py-1" style="${pick ? 'cursor:pointer' : ''}" ${head}>
+                ${tick}
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="fw-semibold text-truncate">${esc(_snmpProfLabel(p, p.id))}</span>
+                        <code class="text-muted ss-fs-1">${esc(p.id)}</code>
+                        ${own ? `<span class="badge bg-primary ss-fs-1">${esc(_snmpProfT('profile_src_custom', 'Own'))}</span>`
+                              : `<span class="badge bg-secondary bg-opacity-50 text-body ss-fs-1">${esc(_snmpProfT('profile_src_shipped', 'Shipped'))}</span>`}
+                        <span class="badge bg-secondary bg-opacity-50 text-body ss-fs-1">${nMetrics} ${esc(_snmpProfT('profile_metrics', 'metrics'))}</span>
+                        ${p.match ? `<code class="text-muted ss-fs-1" title="${escAttr(_snmpProfT('profile_match', 'Claims devices under this sysObjectID'))}">${esc(p.match)}</code>` : ''}
+                    </div>
+                    ${_snmpProfDesc(p) ? `<div class="text-muted ss-fs-2">${esc(_snmpProfDesc(p))}</div>` : ''}
+                </div>
+                <button class="btn btn-sm btn-secondary flex-shrink-0" type="button"
+                        title="${escAttr(_snmpProfT('profile_metrics', 'metrics'))}"
+                        onclick="event.stopPropagation();_snmpProfExpand(${jsStr(p.id)})">
+                    <i class="bi ${open ? 'bi-chevron-up' : 'bi-chevron-down'}"></i></button>
+            </div>
+            ${open ? `<div class="border-top px-2 py-1">${_snmpProfMetricsHtml(p)}</div>` : ''}
+        </div>`;
+    }
+    h += '</div>';
+    bodyEl.innerHTML = h;
+}
+
+function _snmpProfExpand(id) {
+    if (_snmpProfExpanded.has(id)) _snmpProfExpanded.delete(id);
+    else _snmpProfExpanded.add(id);
+    _snmpProfRender();
+}
+
+// ── Assigning ───────────────────────────────────────────────────────────────
+
+function _snmpProfToggle(id) {
+    const k = String(id).toLowerCase();
+    if (_snmpProfSel.has(k)) _snmpProfSel.delete(k);
+    else _snmpProfSel.add(k);
+    _snmpProfCommit();
+    _snmpProfRender();
+}
+
+/** Write the selection back into the field, in catalogue order.
+ *
+ *  Every tick saves: the modal has no OK button because it has nothing to confirm — the
+ *  field behind it shows the chips changing, and the page's own save is what commits. */
+function _snmpProfCommit() {
+    if (!_snmpProfPath) return;
+    const order = (_snmpProfItems || []).map(p => p.id)
+        .filter(id => _snmpProfSel.has(String(id).toLowerCase()));
+    const value = order.join(', ');
+    if (_snmpProfOnPick) { _snmpProfOnPick(value); return; }
+    updateField('modules', _snmpProfPath, value);
+    if (typeof renderChips === 'function') renderChips(_snmpProfPath);
+}
+
+// ── Asking the device what it is ────────────────────────────────────────────
+
+/** Read sysObjectID/sysDescr/ifNumber off the device and TICK what fits.
+ *
+ *  A proposal, applied to the selection so it is visible and undoable in the same list —
+ *  not an assignment behind the admin's back. A wrong profile does not fail; it measures
+ *  numbers that look fine, and that is the failure worth making somebody confirm. */
+async function _snmpProfDetect(btn) {
+    if (!_snmpProfPath) return;
+    const itemPath = _snmpProfPath.split('|').slice(0, -1).join('|');
+    const cfg = getPath(modulesData, itemPath.split('|')) || {};
+    const box = document.getElementById('snmpProfilesDetected');
+    const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
+    const res = await apiPost(_snmpActionUrl(_snmpProfMod, 'detect_profiles'), {...cfg});
+    done();
+    const d = res && res.data;
+    if (!d || !d.ok) {
+        if (box) {
+            box.style.display = '';
+            box.innerHTML = `<div class="alert alert-danger py-1 mb-0 small">
+                <i class="bi bi-exclamation-triangle me-1"></i>${esc((d && d.message) || t('error') || 'Error')}</div>`;
+        }
+        return;
+    }
+    for (const id of (d.items || [])) _snmpProfSel.add(String(id).toLowerCase());
+    _snmpProfCommit();
+    if (box) {
+        box.style.display = '';
+        const bits = [];
+        if (d.sysname)     bits.push(`<strong>${esc(d.sysname)}</strong>`);
+        if (d.sysobjectid) bits.push(`<code>${esc(d.sysobjectid)}</code>`);
+        if (d.interfaces)  bits.push(`${d.interfaces} ${esc(_snmpProfT('profile_interfaces', 'interfaces'))}`);
+        // What it says about itself is often the only thing that identifies a box whose
+        // sysObjectID nobody has claimed — and it is what somebody writes a profile from.
+        const descr = d.sysdescr ? `<div class="text-muted ss-fs-2 mt-1">${esc(d.sysdescr)}</div>` : '';
+        const none = !(d.items || []).length
+            ? `<div class="ss-fs-2 mt-1">${esc(_snmpProfT('profile_detect_none', 'No profile claims this device.'))}</div>` : '';
+        box.innerHTML = `<div class="alert alert-info py-1 mb-0 small">
+            <div class="d-flex align-items-center gap-2 flex-wrap"><i class="bi bi-magic"></i>${bits.join(' · ')}</div>
+            ${descr}${none}</div>`;
+    }
+    _snmpProfRender();
+}
+
+// ── The field this picker belongs to ────────────────────────────────────────
+// Registered against the FIELD KIND (`snmp|servers|device_profiles`) and not one item's
+// path: every server draws the same field, and each has its own uid in the path.
+FIELD_PICKERS['snmp|servers|device_profiles'] = {
+    icon:  'bi-grid-3x3-gap',
+    // A function because the module's i18n block is not loaded when this line runs.
+    title: () => _modUiStr('snmp', 'device_profiles_pick', 'Device profiles'),
+    open:  (pathStr, current, onPick) => _snmpProfOpenFor(pathStr, current, onPick),
+};

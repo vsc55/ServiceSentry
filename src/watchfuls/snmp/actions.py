@@ -13,8 +13,17 @@ what the audit log should say once one has run.
 import os
 
 from . import mib_resolver as _mib_resolver
+from . import profiles as _profiles
 from .client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
+
+# What every SNMP agent answers, and therefore what a device can be asked before anybody has
+# decided what it is: its identity (sysObjectID), how it describes itself (sysDescr) and
+# whether it has interfaces worth charting (ifNumber).
+_OID_SYSOBJECTID = '1.3.6.1.2.1.1.2.0'
+_OID_SYSDESCR    = '1.3.6.1.2.1.1.1.0'
+_OID_SYSNAME     = '1.3.6.1.2.1.1.5.0'
+_OID_IFNUMBER    = '1.3.6.1.2.1.2.1.0'
 
 
 class SnmpActions:
@@ -193,3 +202,122 @@ class SnmpActions:
                 })
 
         return results
+
+
+    # -- Web UI - device profiles -------------------------------------------
+
+    @classmethod
+    def list_profiles(cls, config: dict | None = None) -> dict:
+        """The whole device-profile catalogue, as the panel needs to show it.
+
+        Both sources in one list, each row saying which it came from: the profiles that ship
+        with the product and the ones this installation wrote, where reusing a shipped id
+        overrides it. The screen shows that distinction because a profile that answers
+        differently from the documented one is the first thing to suspect when a device
+        measures wrong, and nothing else would say so.
+        """
+        cfg = config or {}
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        cdir = _profiles.custom_dir(var_dir)
+        catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+
+        items = []
+        for pid in sorted(catalog):
+            prof = catalog[pid]
+            metrics = []
+            for m in prof.get('metrics') or ():
+                row = {'key': m['key'], 'label': m.get('label') or {},
+                       'kind': m.get('kind', 'gauge'), 'unit': m.get('unit', ''),
+                       'chart': m.get('chart', 'line'),
+                       'oid': m.get('oid', ''), 'walk': m.get('walk', '')}
+                for opt in ('index_label', 'width', 'scale', 'max_rate', 'role'):
+                    if m.get(opt) not in (None, ''):
+                        row[opt] = m[opt]
+                metrics.append(row)
+            items.append({
+                'id':          pid,
+                'label':       prof.get('label') or {},
+                'description': prof.get('description') or {},
+                'source':      prof.get('source', 'shipped'),
+                'match':       (prof.get('match') or {}).get('sysobjectid_prefix', ''),
+                'metrics':     metrics,
+            })
+        return {'ok': True, 'items': items, 'dir': cdir}
+
+    @classmethod
+    def detect_profiles(cls, config: dict | None = None) -> dict:
+        """Ask ONE device what it is, and propose the profiles that fit it.
+
+        A proposal and never an assignment: the box in the rack is always the one nobody wrote
+        a profile for, and a wrong profile does not fail - it measures numbers that look fine.
+        The admin confirms.
+
+        Three questions, all from MIB-II, so this works against a device the catalogue has
+        never heard of: who it says it is, how it describes itself, and whether it has
+        interfaces at all.
+        """
+        cfg = config or {}
+        if not _HAS_PYSNMP:
+            return {'ok': False, 'message': 'pysnmp is not installed', 'items': []}
+
+        host = str(cfg.get('host', '') or '').strip()
+        if not host:
+            return {'ok': False, 'message': 'no host', 'items': []}
+
+        conn = dict(
+            host=host,
+            port=int(cfg.get('port', _SERVER_DEFAULTS['port']) or _SERVER_DEFAULTS['port']),
+            version=str(cfg.get('version', _SERVER_DEFAULTS['version'])
+                        or _SERVER_DEFAULTS['version']).strip(),
+            community=str(cfg.get('community', _SERVER_DEFAULTS['community'])
+                          or _SERVER_DEFAULTS['community']).strip(),
+            timeout=max(1, int(cfg.get('timeout', _SERVER_DEFAULTS['timeout'])
+                               or _SERVER_DEFAULTS['timeout'])),
+            retries=max(0, int(cfg.get('retries', _SERVER_DEFAULTS['retries'])
+                               or _SERVER_DEFAULTS['retries'])),
+            v3_username=str(cfg.get('snmpv3_username', '') or ''),
+            v3_auth_key=str(cfg.get('snmpv3_auth_key', '') or ''),
+            v3_priv_key=str(cfg.get('snmpv3_priv_key', '') or ''),
+            v3_auth_proto=str(cfg.get('snmpv3_auth_protocol',
+                                      _SERVER_DEFAULTS['snmpv3_auth_protocol'])
+                              or _SERVER_DEFAULTS['snmpv3_auth_protocol']),
+            v3_priv_proto=str(cfg.get('snmpv3_priv_protocol',
+                                      _SERVER_DEFAULTS['snmpv3_priv_protocol'])
+                              or _SERVER_DEFAULTS['snmpv3_priv_protocol']),
+        )
+
+        sysoid, err = cls._snmp_get(oid=_OID_SYSOBJECTID, **conn)
+        if err:
+            # The device did not answer the one OID every agent has. Nothing below would mean
+            # anything, and "no profile matches" would read as a device with nothing to measure.
+            return {'ok': False, 'message': str(err), 'items': []}
+        sysdescr, _e1 = cls._snmp_get(oid=_OID_SYSDESCR, **conn)
+        sysname,  _e2 = cls._snmp_get(oid=_OID_SYSNAME,  **conn)
+        ifnumber, _e3 = cls._snmp_get(oid=_OID_IFNUMBER, **conn)
+
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        cdir = _profiles.custom_dir(var_dir)
+        catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+
+        # MIB-II first: every agent answers it, so it is what makes a device measurable before
+        # anybody has decided anything about it.
+        proposed = ['sys_generic'] if 'sys_generic' in catalog else []
+        try:
+            interfaces = int(str(ifnumber or '0').strip() or 0)
+        except (TypeError, ValueError):
+            interfaces = 0
+        if interfaces > 0 and 'if_generic' in catalog:
+            proposed.append('if_generic')
+        matched = _profiles.match_sysobjectid(catalog, str(sysoid or ''))
+        if matched and matched['id'] not in proposed:
+            proposed.append(matched['id'])
+
+        return {
+            'ok':          True,
+            'items':       proposed,
+            'sysobjectid': str(sysoid or ''),
+            'sysdescr':    str(sysdescr or ''),
+            'sysname':     str(sysname or ''),
+            'interfaces':  interfaces,
+            'matched':     matched['id'] if matched else '',
+        }

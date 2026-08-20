@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~5.630 tests** (5632 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-20). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~5.660 tests** (5661 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-20). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -3524,6 +3524,64 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 ---
 
 ## 66. Watchful: snmp
+
+**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 27 tests
+
+**La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
+deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
+ficheros, y alguno lo editará alguien a mano a las tres de la mañana: una métrica mal escrita
+cuesta su línea, un perfil mal escrito cuesta ese perfil, y un aparato sin medir se ve en su
+propia pantalla —mucho mejor fallo que un ciclo de checks que no corre—) y que una instalación
+pueda **sustituir lo que el producto envía** (el aparato del rack siempre es el que nadie
+perfiló, y cuando un firmware mueve un OID el arreglo no espera a la siguiente versión).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatShips::*` (5) | El catálogo carga; **cada perfil enviado pasa su propia validación** (son ficheros del repositorio: nada más notaría una errata hasta que un aparato dejara de medirse); el genérico no necesita fabricante; el de interfaces declara las columnas de **64 bits** además de las de 32, con su ancho; y toda métrica de tabla dice **qué nombra sus filas** |
+| `TestNothingUnusableGetsThrough::*` (6) | Métrica sin nombre, con nombre que no es identificador, sin OID, con OID **y** walk (quien lo escribió no decidió), con un nombre MIB en vez de un número, con un `kind` inventado; un perfil **sin métricas usables no es un perfil**; una métrica rota no se lleva el perfil; una clave duplicada se descarta (dos métricas bajo una clave escribirían en una serie, y la gráfica sería la que el bucle alcanzara última); un fichero roto cuesta sólo su perfil; y un directorio que no existe es un catálogo vacío, no un fallo |
+| `TestTheInstallationsOwn::*` (3) | Los perfiles propios entran en el catálogo, reutilizar un `id` enviado lo **sustituye**, y uno roto se ignora |
+| `TestWhereAnInstallationKeepsItsOwn::*` (5) | Un directorio se lee en orden de fichero; uno que nadie creó es una lista vacía y no un error (la carpeta aparece la primera vez que alguien deja un perfil, y hasta entonces el catálogo enviado es todo el catálogo); lo que no es un perfil se ignora (una carpeta que se edita a mano acumula notas y ficheros a medias); viven **bajo el directorio de datos** y no junto a los enviados (una actualización del paquete reemplaza el directorio de la aplicación, y el perfil que alguien escribió para el aparato de su rack tiene que sobrevivir a eso); y sin directorio de datos no hay carpeta en vez de una relativa (que resolvería contra el directorio de trabajo del servicio, que no es donde nadie dejó un fichero) |
+| `TestNames::*` (3) | Una cadena suelta vale como nombre en todos los idiomas (un perfil para un rack de una empresa no tiene por qué ser bilingüe); gana el idioma del lector con respaldo; y una métrica sin etiqueta se sigue leyendo |
+| `TestClaimingADevice::*` (3) | Gana el prefijo **más específico** (el árbol del fabricante y el nodo del modelo son reclamaciones legítimas, y la concreta sabe más); casa por **nodos y no por dígitos** (`…657` no puede reclamar `…6574`: son fabricantes distintos); y un aparato desconocido no reclama nada |
+| `TestWhatTheChartsGet::*` (2) | Los campos salen con la **forma que habla el historial** —la misma que produce el `__history__` estático de un módulo, porque es lo que hace un valor graficable y nombrable, y un perfil es exactamente esa declaración para un valor que llega sin ninguna— y lo que la máquina **es** (nombre, modelo) no es una serie |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 17 tests
+
+**El catálogo, tal y como lo recibe el panel** — y preguntarle a un aparato qué es. Hasta que
+estas dos acciones existieron, la matriz de OIDs era real e invisible: tres ficheros JSON, un
+validador y nada que un administrador pudiera abrir. Cada una tiene una propiedad que decide si
+la pantalla vale para algo: `list_profiles` dice **de dónde sale cada fila** (enviado o escrito
+aquí — porque un perfil que contesta distinto del documentado es lo primero que hay que
+sospechar cuando un aparato mide mal, y el `id` solo no dice cuál de los dos está en uso), y
+`detect_profiles` **propone y nunca asigna** (un perfil equivocado no falla: mide números que
+parecen buenos, y ése es justo el fallo que tiene que confirmar una persona).
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheCatalogueOnScreen::*` (8) | Lista lo que se envía; **cada fila dice su origen**; los perfiles propios de la instalación salen al lado de los enviados; reutilizar un `id` enviado se ve como **propio** y no duplica la fila; la pantalla dice **dónde van los perfiles propios** (si no, «¿y cómo añado uno?» es una consulta a la documentación desde una pantalla que ya sabe la respuesta); sin directorio de datos sale el catálogo enviado y no un error; la fila trae lo que la pantalla dibuja (tipo, unidad, ancho del contador y **qué nombra las filas** de una tabla); y los nombres viajan en todos los idiomas que tenga el perfil, porque un catálogo contesta a todas las sesiones |
+| `TestAskingTheDeviceWhatItIs::*` (9) | A cualquier aparato que conteste se le propone el genérico (MIB-II es lo que sirve todo agente); uno con interfaces se lleva el perfil de interfaces y uno sin ellas no se lleva una tabla de nada; un aparato reclamado se lleva el perfil que lo reclama; la propuesta no repite; un aparato que **no contesta es un error y no una respuesta vacía** («ningún perfil casa» se leería como un aparato sin nada que medir, y son dos cosas distintas para quien lo lee); sin host no se pregunta nada; vuelve lo que el aparato **dice de sí mismo** (el `sysDescr` suele ser lo único que identifica una caja que nadie ha reclamado, y es de donde se escribe un perfil); y una respuesta ilegible de cuatro no es una detección fallida |
+
+---
+
+**Archivo:** `watchfuls/snmp/tests/test_metrics.py` — 28 tests
+
+**Los contadores, y las dos formas en que mienten.** Un contador de bytes es acumulativo:
+dibujado en crudo es una línea que sólo sube, en la que una caída de servicio es un tramo plano
+que no ve nadie. Lo que quiere la gráfica de un enlace es la **tasa** entre muestras, y
+calcularla tiene exactamente un caso difícil: el valor nuevo es menor que el viejo. Pasa por dos
+razones opuestas —el contador **dio la vuelta** o el aparato **se reinició**— y desde aquí son
+idénticas.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestScaling::*` (4) | Centisegundos→segundos y KB→bytes; **un entero sigue siendo entero** («41» se lee como una lectura, «41.0» como el resultado de una cuenta); la basura no es un número; y un `scale` roto **no pierde la lectura** (el factor viene de un perfil, la lectura del aparato) |
+| `TestTheRate::*` (7) | Es la diferencia entre el tiempo; dos muestras sin tiempo entre medias no son una tasa; **32 bits hacia atrás = vuelta** (descartarla sería perder una muestra cada pocos minutos en un enlace ocupado); **64 bits hacia atrás = reinicio** y se descarta; un techo `max_rate` resuelve el único caso que el ancho no puede (32 bits tras un reinicio); y un techo absurdo no tira la muestra |
+| `TestOneSample::*` (8) | Un `gauge` es su valor y **no guarda estado**; la **primera muestra de un contador es sólo una referencia** (no hay de qué restar: guardar un valor ahí pondría el uptime entero de la máquina como el tráfico de un segundo); la segunda ya es tasa; una muestra descartada **mueve igualmente la referencia** (si no, la siguiente se calcula contra un valor de antes del reinicio y una lectura mala se convierte en dos); un contador que contesta basura no guarda nada; el texto nunca es un número; y la tasa se escala como cualquier valor |
+| `TestAttributes::*` (3) | Los bytes se vuelven nombre, el relleno no es parte del nombre (el nombre es por lo que agrupa la pantalla) y «nada» es un nombre vacío, no la palabra `None` |
+
+---
 
 **Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 135 tests
 
@@ -8052,6 +8110,24 @@ mira las pantallas sin darle el registro con ella.
 | `TestOneMachine::*` (3) | Contesta qué es y qué dijo cada check; una máquina desconocida es 404; y tampoco por ahí salen las credenciales |
 | `TestWhoMaySeeIt::*` (3) | `infra_view` y no `servers_view`: leer el estado en vivo y editar el registro que lo define son actos distintos que quiere gente distinta. Un rol sin la bandera recibe 403, un *viewer* lo lee, y **no existe `infra_edit`** —lo que hay que cambiar vive en el registro, tras los permisos que el registro ya tiene— |
 | `TestTheViewModel::*` (5) | Las reglas donde están escritas: **la peor máquina va primero** (esta lista se abre cuando algo va mal; el orden alfabético contesta «cuál está en problemas» obligándote a leer las cuarenta filas); y un valor es una **medida sólo si su módulo lo dijo** —`other_data` es una bolsa de lo que al módulo le apeteció guardar, así que la sección no adivina cuál de esas claves es una medida ni le inventa un nombre: lee la declaración `__history__` del propio módulo, la misma que hace el valor graficable en Historial—. Un texto bajo una clave declarada no llega a un eje, un booleano tampoco (en Python `True` es un entero, así que una bandera de estado se pintaría como una línea en 1 y se leería como dato), y cada medida viaja con las **coordenadas de su serie** para que la pantalla pueda graficarla sin saber nada del módulo |
+
+---
+
+**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 16 tests
+
+**La pantalla del catálogo de perfiles**: el cableado que hace visible un catálogo. Un watchful
+trae su propia interfaz en tres ficheros que una convención recoge, y una pantalla hecha así
+falla de maneras que Python no ve nunca: un modal cuyo `id` busca el JS pero no declara el HTML
+es un botón que no hace nada; un picker registrado contra una ruta que ningún campo tiene es un
+campo sin botón; y una cadena que el JS pide y no tiene ningún idioma es una etiqueta que se lee
+como su propia clave.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheScreenIsWired::*` (4) | Los ficheros se llaman como la convención los recoge (`*_ui.html` / `*_modals.html`: uno con otro nombre no se inyecta y el fallo es un botón que no hace nada); **cada elemento que el script busca existe en el marcado**; el botón de la barra llama a una función que existe (el módulo declara el botón, y el core no sabe qué abre); y las dos acciones están declaradas y son de **sólo lectura** (una fuera de `WATCHFUL_ACTIONS` es un 404, y una fuera de `READ_ONLY_ACTIONS` exige permiso de edición para *mirar* el catálogo, y audita cada vistazo) |
+| `TestTheFieldThatAssignsThem::*` (5) | El aparato lleva sus perfiles —en el **servidor** y no en una comprobación: lo que una máquina *es* no cambia porque alguien le añada un cuarto OID—; es una **lista y no una elección** (un NAS es el genérico más las interfaces más sus discos; un perfil por aparato obligaría a un perfil monolítico por modelo); el picker se registra contra la **clase de campo** y no contra la ruta de un item (cada servidor dibuja el mismo campo con su propio uid dentro de la ruta); el renderizador busca por esa clave; y **un campo multivalor también puede tener picker** (la rama de chips devolvía antes de mirarlo, así que varios valores significaba teclearlos — y un `id` de perfil escrito de memoria es un aparato que no mide nada hasta que alguien nota la errata) |
+| `TestTheHostModalIsWhereItIsActuallyBound::*` (5) | La pestaña Modules edita la config de un módulo; **el modal del host es donde alguien dice «esta caja es un NAS»**, y dibuja los mismos campos del schema con OTRO renderizador que no sabía nada de campos multivalor ni de pickers — así que el campo que en una pantalla tenía chips y selector, en la que importa era una caja de texto. Aquí también es chips; ofrece el picker del **mismo registro** (un segundo registro serían dos sitios donde equivocarse); la clave es `módulo|colección|campo` (la misma identidad a la que la pestaña Modules llega vía `_schemaKeyOf`, construida a mano porque un borrador de host no tiene ruta en `modulesData`); el picker se abre **con un callback** (escribir directo en `modulesData` dejaría el valor donde este panel no lo lee, y el campo volvería vacío al repintar); y el picker de perfiles **respeta ese callback** — si no, el botón abre, las marcas se ven bien y no se asocia nada |
+| `TestNothingReadsAsItsOwnKey::*` (2) | Cada cadena que pide la pantalla existe en **los dos idiomas** (la que falta se muestra como su clave literal); y el campo tiene etiqueta, texto de ayuda y nombre de grupo en ambos |
 
 ---
 
