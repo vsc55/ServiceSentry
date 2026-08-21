@@ -11,8 +11,10 @@ what the audit log should say once one has run.
 """
 
 import os
+import re
 
 from . import mib_resolver as _mib_resolver
+from . import profile_store as _profile_store
 from . import profiles as _profiles
 from .client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
@@ -103,8 +105,21 @@ class SnmpActions:
             detail['name'] = f'{result.get("mib", "")} v{_v}' if _v else str(result.get('mib', ''))
             if result.get('unchanged'):
                 detail['name'] += ' (no change)'
+        elif action == 'build_oid_index':
+            detail['name'] = f'{result.get("count", 0)} OIDs'
+        elif action == 'clean_library':
+            detail['name'] = (f'{result.get("compiled_deleted", 0)} compiled, '
+                              f'{result.get("folders_removed", 0)} folder(s)')
         else:
-            detail['name'] = action
+            # WHAT it was done to. The fallback used to repeat the action's own identifier,
+            # which the screen already says in words — so the row read "Delete a MIB file"
+            # and stopped exactly where the reader's question starts. Every one of these
+            # results names its subject; it is a matter of asking in the right order, from
+            # the most specific handle to the least.
+            _subject = next((result[k] for k in ('filename', 'name', 'mib', 'relpath')
+                             if isinstance(result.get(k), str) and result[k]), '')
+            if _subject:
+                detail['name'] = _subject
         return detail
 
     # ── Discovery ──────────────────────────────────────────────────────────────
@@ -232,7 +247,7 @@ class SnmpActions:
         cfg = config or {}
         var_dir = str(cfg.get('__var_dir__') or '').strip()
         cdir = _profiles.custom_dir(var_dir)
-        catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+        catalog = cls._catalog(cfg)
 
         items = []
         for pid in sorted(catalog):
@@ -247,15 +262,284 @@ class SnmpActions:
                     if m.get(opt) not in (None, ''):
                         row[opt] = m[opt]
                 metrics.append(row)
-            items.append({
+            row = {
                 'id':          pid,
                 'label':       prof.get('label') or {},
                 'description': prof.get('description') or {},
                 'source':      prof.get('source', 'shipped'),
                 'match':       (prof.get('match') or {}).get('sysobjectid_prefix', ''),
+                # The other half of how a device is recognised. Shown nowhere on the row — a
+                # bare OID beside a name says nothing to a reader — but the editor prefills
+                # from this list, and a field it cannot read is one that empties itself the
+                # first time somebody opens the form to change the name.
+                'probe':       (prof.get('match') or {}).get('probe', ''),
                 'metrics':     metrics,
-            })
+            }
+            # A group says what it holds AND what that adds up to. Both, because they answer
+            # different questions — "which profiles am I assigning" and "how much is this
+            # going to measure" — and the second is the one that surprises people.
+            if _profiles.is_group(prof):
+                resolved = _profiles.expand(catalog, [pid])
+                row['includes'] = list(prof.get('includes') or ())
+                row['resolved'] = resolved
+                row['resolved_metrics'] = sum(
+                    len(catalog[m].get('metrics') or ()) for m in resolved)
+            items.append(row)
         return {'ok': True, 'items': items, 'dir': cdir}
+
+    # -- Web UI - the catalogue this installation writes ---------------------
+    #
+    # Three sources reach the catalogue: the profiles that ship, the files under
+    # `<var_dir>/snmp_profiles`, and everything written in the panel — which lives in the
+    # database, because a deployment with a web container and a worker container shares the
+    # database and not the disk. What the panel writes is a *document*, the same shape the
+    # shipped files hold, and `profiles.normalise` is the one thing that decides whether it
+    # is usable. A group and a profile differ only in what their members are.
+
+    @classmethod
+    def _written_store(cls, cfg: dict):
+        db = (cfg or {}).get('__connector__')
+        return _profile_store.CatalogStore(db) if db is not None else None
+
+    @classmethod
+    def _catalog(cls, cfg: dict) -> dict:
+        """Everything assignable, as this installation has it: the profiles that ship, the
+        files it wrote, and what was written in the panel.
+
+        One assembly point, so a screen and the sampler cannot disagree about what exists.
+        """
+        var_dir = str((cfg or {}).get('__var_dir__') or '').strip()
+        cdir = _profiles.custom_dir(var_dir)
+        store = cls._written_store(cfg or {})
+        return _profiles.catalog(
+            custom=_profiles.load_dir(cdir) if cdir else None,
+            written=store.documents() if store is not None else None)
+
+    # ── What every write has to agree about ──────────────────────────────────
+
+    @staticmethod
+    def _metric_why(raw) -> str:
+        """WHY `normalise_metric` refused one. Asked only after it has refused.
+
+        The verdict is always its own — this only puts a word to a "no" that has already been
+        given, so the two cannot drift into disagreeing. A form that answers "not usable" to
+        a metric somebody has just typed is a form they have to bisect by hand.
+        """
+        if not isinstance(raw, dict):
+            return 'not a metric'
+        if not _profile_store.ID_RE.match(str(raw.get('key') or '').strip().lower()):
+            return 'the key is not an identifier'
+        oid, walk = str(raw.get('oid') or '').strip(), str(raw.get('walk') or '').strip()
+        if not oid and not walk:
+            return 'no OID'
+        if oid and walk:
+            return 'both an OID and a column'
+        if not _profiles._OID_RE.match(oid or walk):
+            return 'the OID is not a dotted number'
+        if str(raw.get('kind') or 'gauge').strip().lower() not in _profiles.KINDS:
+            return 'unknown type'
+        return 'invalid'
+
+    @classmethod
+    def _written_head(cls, cfg: dict) -> tuple:
+        """The store, the id and the name — the three things every write needs, checked.
+
+        Everything refused here is refused because of what the id IS downstream: the value a
+        server keeps in its ``device_profiles`` field.
+
+        * it has the shape every catalogue id has, because it lands in a JSON key and a chip;
+        * it does not name something that already exists, because that entry would shadow it
+          and silently unmeasure whatever it used to measure. Overriding a shipped profile is
+          a deliberate act, performed by putting a file on the machine;
+        * the kind behind an id never changes: a device assigned `mis_linux` when it was a
+          group would go on sampling whatever a profile of that name now measures.
+
+        Returns ``(store, pid, label, description, catalog, existing, error)`` — *error* being
+        the answer to send back when it is not None.
+        """
+        store = cls._written_store(cfg)
+        if store is None:
+            return (None,) * 6 + ({'ok': False, 'message': 'database not available'},)
+        pid = str(cfg.get('id') or '').strip().lower()
+        label = str(cfg.get('label') or '').strip()[:_profile_store.MAX_LABEL_CHARS]
+        desc = str(cfg.get('description') or '').strip()[:_profile_store.MAX_DESC_CHARS]
+        if not _profile_store.ID_RE.match(pid):
+            return (store, pid) + (None,) * 4 + ({'ok': False, 'message': 'invalid id'},)
+        if not label:
+            return (store, pid, label) + (None,) * 3 + (
+                {'ok': False, 'message': 'a name is required'},)
+        catalog = cls._catalog(cfg)
+        existing = store.get(pid)
+        if existing is None and pid in catalog:
+            return (store, pid, label, desc, catalog, existing,
+                    {'ok': False, 'message': 'that id already names a profile'})
+        return store, pid, label, desc, catalog, existing, None
+
+    @classmethod
+    def _written_save(cls, cfg: dict, store, pid: str, body: dict, existing) -> dict:
+        """Write it, having agreed it is writable. The row, plus what the screen needs."""
+        row = store.save(pid, body, author=str(cfg.get('__user__') or ''))
+        out = dict(row)
+        out['ok'] = True
+        out['created'] = existing is None
+        out['name'] = cls._entry_name(body)
+        return out
+
+    @staticmethod
+    def _entry_name(body) -> str:
+        """What to call this entry in a toast and in the audit log.
+
+        The panel writes ONE name — somebody typed it — while a shipped file carries one per
+        language. Both are legal in the same field, and `label_of` reads the second shape.
+        """
+        label = (body or {}).get('label')
+        if isinstance(label, str):
+            return label
+        return _profiles.label_of(body or {}, 'en_EN')
+
+    # ── A group: members that are other entries ──────────────────────────────
+
+    @classmethod
+    def save_profile_group(cls, config: dict | None = None) -> dict:
+        """Create or update one grouping.
+
+        Beyond what every write agrees about: its members exist (a group of nothing is a chip
+        that samples nothing), and it does not end up inside itself. Two groups naming each
+        other is a reasonable thing to write by mistake, once, in a form — and it costs a
+        recursion error in the middle of a monitoring cycle rather than here.
+        """
+        cfg = config or {}
+        store, pid, label, desc, catalog, existing, err = cls._written_head(cfg)
+        if err:
+            return err
+        if existing is not None and not _profiles.is_group(existing['body']):
+            return {'ok': False, 'message': 'that id is a profile, not a group'}
+
+        raw = cfg.get('members')
+        if isinstance(raw, str):
+            raw = [p for p in re.split(r'[,\s]+', raw) if p]
+        members, seen = [], set()
+        for m in (raw or ()):
+            mid = str(m or '').strip().lower()
+            if mid and mid != pid and mid not in seen:
+                seen.add(mid)
+                members.append(mid)
+        members = members[:_profile_store.MAX_MEMBERS]
+        if not members:
+            return {'ok': False, 'message': 'a group with no profiles measures nothing'}
+        unknown = [m for m in members if m not in catalog]
+        if unknown:
+            return {'ok': False, 'message': 'unknown profiles: ' + ', '.join(unknown)}
+
+        # Asked of the catalogue as it WOULD be and not as it is: the loop a save creates is
+        # the one that has to be refused, and it does not exist until the save happens.
+        probe = dict(catalog)
+        probe[pid] = {'id': pid, 'label': {'*': label}, 'metrics': [], 'includes': members}
+        if _profiles.reaches(probe, members, pid):
+            return {'ok': False, 'message': 'a group cannot contain itself'}
+
+        body = {'id': pid, 'label': label, 'description': desc, 'includes': members}
+        return cls._written_save(cfg, store, pid, body, existing)
+
+    # ── A profile: members that are OIDs ─────────────────────────────────────
+
+    @classmethod
+    def save_profile(cls, config: dict | None = None) -> dict:
+        """Create or update one profile — the OID matrix itself, written in the panel.
+
+        The metrics are checked **one by one and by name**, because that is the difference
+        between a form somebody can correct and one they have to bisect: `normalise` drops
+        what it cannot use and keeps the rest, which is exactly right when reading a file
+        somebody edited at 3am and exactly wrong when answering a person who is looking at
+        the row they just typed.
+
+        A duplicate key is its own refusal rather than a silent drop, for the same reason: two
+        metrics under one key are two series filed as one, and which of them survives is not
+        something to decide on somebody's behalf.
+        """
+        cfg = config or {}
+        store, pid, label, desc, catalog, existing, err = cls._written_head(cfg)
+        if err:
+            return err
+        if existing is not None and _profiles.is_group(existing['body']):
+            return {'ok': False, 'message': 'that id is a group, not a profile'}
+
+        raw = cfg.get('metrics')
+        if not isinstance(raw, (list, tuple)) or not raw:
+            return {'ok': False, 'message': 'a profile with no metrics measures nothing'}
+        if len(raw) > _profile_store.MAX_METRICS:
+            return {'ok': False,
+                    'message': f'more than {_profile_store.MAX_METRICS} metrics'}
+        metrics, seen, bad = [], set(), []
+        for i, m in enumerate(raw):
+            norm = _profiles.normalise_metric(m)
+            name = str((m or {}).get('key') or '').strip() if isinstance(m, dict) else ''
+            name = name or f'#{i + 1}'
+            if norm is None:
+                bad.append(f'{name}: {cls._metric_why(m)}')
+                continue
+            if norm['key'] in seen:
+                bad.append(f'{name}: repeated')
+                continue
+            seen.add(norm['key'])
+            metrics.append(m)
+        if bad:
+            return {'ok': False, 'message': '; '.join(bad)}
+
+        body = {'id': pid, 'label': label, 'description': desc, 'metrics': metrics}
+        # How a device is recognised as one of these. Optional — a profile assigned by hand
+        # needs none — and refused rather than dropped when it is there and wrong, because a
+        # prefix with a typo is a profile that is never proposed and never says why.
+        match = {}
+        for key in ('sysobjectid_prefix', 'probe'):
+            val = str(cfg.get(key) or '').strip()
+            if not val:
+                continue
+            if not _profiles._OID_RE.match(val):
+                return {'ok': False, 'message': f'{key} is not a dotted OID'}
+            match[key] = val
+        if match:
+            body['match'] = match
+        # Last: what the panel wrote has to be something the catalogue would accept, and the
+        # one authority on that is the same function that reads the shipped files.
+        if _profiles.normalise(body) is None:
+            return {'ok': False, 'message': 'not a usable profile'}
+        return cls._written_save(cfg, store, pid, body, existing)
+
+    # ── Taking one back ──────────────────────────────────────────────────────
+
+    @classmethod
+    def _written_delete(cls, cfg: dict, want_group: bool) -> dict:
+        """Forget one entry.
+
+        The devices that referenced it keep the id in their field. It stops resolving, exactly
+        as a deleted shipped profile does, and shows there as a chip named after itself —
+        rewriting other people's configuration because somebody deleted an entry is the larger
+        surprise, and the field is where it is visible.
+        """
+        store = cls._written_store(cfg)
+        if store is None:
+            return {'ok': False, 'message': 'database not available'}
+        pid = str(cfg.get('id') or '').strip().lower()
+        row = store.get(pid)
+        if row is None:
+            return {'ok': False, 'message': 'no such entry'}
+        if _profiles.is_group(row['body']) != want_group:
+            return {'ok': False, 'message': 'that id is the other kind'}
+        store.delete(pid)
+        return {'ok': True, 'id': pid, 'name': cls._entry_name(row['body']) or pid}
+
+    @classmethod
+    def delete_profile_group(cls, config: dict | None = None) -> dict:
+        """Forget one grouping."""
+        return cls._written_delete(config or {}, True)
+
+    @classmethod
+    def delete_profile(cls, config: dict | None = None) -> dict:
+        """Forget one profile written in the panel. The shipped ones are not this
+        installation's to delete: a file that a release puts back is not something the panel
+        can take away."""
+        return cls._written_delete(config or {}, False)
 
     @classmethod
     def detect_profiles(cls, config: dict | None = None) -> dict:
@@ -314,9 +598,7 @@ class SnmpActions:
         sysdescr, _e1 = cls._snmp_get(oid=_OID_SYSDESCR, **conn)
         sysname,  _e2 = cls._snmp_get(oid=_OID_SYSNAME,  **conn)
 
-        var_dir = str(cfg.get('__var_dir__') or '').strip()
-        cdir = _profiles.custom_dir(var_dir)
-        catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+        catalog = cls._catalog(cfg)
 
         # Who made it: every profile whose sysObjectID prefix claims this device. Several,
         # because a vendor's system, disks and volumes are three subjects and three profiles,
@@ -366,6 +648,19 @@ class SnmpActions:
         if replaced:
             proposed = [p for p in proposed if p not in replaced]
             reasons = {k: v for k, v in reasons.items() if k not in replaced}
+
+        # Thirteen profiles is a correct answer to a question nobody asked. Where a grouping
+        # already holds exactly what was found, the grouping IS the answer: the same profiles
+        # are sampled, there is one thing to read in the field, and one thing to change when
+        # the family grows a fourteenth. Only a group whose members are ALL present may stand
+        # for them — a partial cover would assign profiles this device did not answer, which
+        # is the failure this whole flow exists to avoid.
+        grouped = _profiles.collapse(catalog, proposed)
+        for gid in grouped:
+            if gid not in reasons:
+                reasons[gid] = 'group'
+        reasons = {k: v for k, v in reasons.items() if k in set(grouped)}
+        proposed = grouped
 
         return {
             'ok':          True,

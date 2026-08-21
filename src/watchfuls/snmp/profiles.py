@@ -46,6 +46,11 @@ _ID_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 # with no MIBs compiled at all.
 _OID_RE = re.compile(r'^\d+(\.\d+)+$')
 
+# How deep a group may name another group. Nesting is useful exactly once or twice — "every
+# Linux profile" inside "every server we run" — and past that a person cannot say what a group
+# holds by looking at it, which is the whole point of one.
+MAX_GROUP_DEPTH = 8
+
 KINDS = ('gauge', 'counter', 'text')
 # How a metric wants to be drawn. The section decides what to do with it — this is the profile
 # saying what the value IS, not how many pixels it gets.
@@ -155,9 +160,17 @@ def normalise_metric(raw) -> dict | None:
 def normalise(raw) -> dict | None:
     """One profile, checked into shape (``None`` when it is not usable).
 
-    A profile with no usable metric is not a profile: it would sit in the catalogue, be
-    assignable to a machine, and measure nothing — which reads as a device that answers
-    nothing rather than as a declaration somebody got wrong.
+    A profile carries **metrics**, or **members** (``includes``), or both. One with neither is
+    not a profile: it would sit in the catalogue, be assignable to a machine, and measure
+    nothing — which reads as a device that answers nothing rather than as a declaration
+    somebody got wrong.
+
+    A profile that names members is what the panel calls a **group**. It is not a second kind
+    of thing with a table and a screen of its own: thirteen Synology profiles assigned one by
+    one to every NAS in the rack is thirteen chips saying what one word says, and the shape
+    that fixes it already existed — an entry in the catalogue with an id, a name and something
+    to sample. What a group holds is other entries' ids instead of OIDs, and everything
+    downstream (assigning, detecting, charting) goes on speaking about ids.
     """
     if not isinstance(raw, dict):
         return None
@@ -171,13 +184,27 @@ def normalise(raw) -> dict | None:
             continue                    # a duplicate key would overwrite its twin's series
         seen.add(norm['key'])
         metrics.append(norm)
-    if not metrics:
+    # Members: ids, checked for shape only. Whether they EXIST is not knowable here — a
+    # profile is normalised on its own, before the catalogue it belongs to is assembled, and
+    # a group written against a custom profile that has not loaded yet is not malformed. The
+    # resolution drops what it cannot find (:func:`expand`), which is also what happens when
+    # somebody deletes a profile a group named a year ago.
+    includes, seen_i = [], set()
+    for m in (raw.get('includes') or []):
+        mid = str(m or '').strip().lower()
+        if not _ID_RE.match(mid) or mid in seen_i or mid == pid:
+            continue                    # naming itself is a loop with one link in it
+        seen_i.add(mid)
+        includes.append(mid)
+    if not metrics and not includes:
         return None
     out = {
         'id':      pid,
         'label':   _label(raw.get('label'), pid.replace('_', ' ').capitalize()),
         'metrics': metrics,
     }
+    if includes:
+        out['includes'] = includes
     # What this profile is FOR, and how a device is recognised as one of them. Two ways,
     # because devices answer two different questions about themselves:
     #
@@ -262,12 +289,20 @@ def shipped(directory: str | None = None) -> dict:
     return out
 
 
-def catalog(custom=None, directory: str | None = None) -> dict:
-    """Every profile available, by id — shipped first, the installation's own last.
+def catalog(custom=None, directory: str | None = None, written=None) -> dict:
+    """Every profile available, by id — shipped first, the installation’s own last.
 
     Custom last so an installation can **override** a shipped profile by reusing its id, which
     is what somebody does when the vendor changed an OID in a firmware release and the fix
     cannot wait for the next version of this product.
+
+``written`` is everything written in the panel, which lives in the database rather than
+    in a file: a deployment with a web container and a worker container shares the database and
+    not the disk, and what somebody writes in the panel has to be what the worker samples. It
+    arrives last for the same reason the custom files do — but it may **not** take an id that
+    already names something. Overriding a profile is a deliberate act performed by putting a
+    file on the machine; doing it by accident from a form, and silently unmeasuring whatever
+    that id used to measure, is not the same act at all.
     """
     out = shipped(directory)
     for raw in (custom or []):
@@ -275,6 +310,139 @@ def catalog(custom=None, directory: str | None = None) -> dict:
         if prof:
             prof['source'] = 'custom'
             out[prof['id']] = prof
+    for raw in (written or []):
+        prof = normalise(raw)
+        if not prof or prof['id'] in out:
+            continue
+        prof['source'] = 'db'
+        out[prof['id']] = prof
+    return out
+
+
+def is_group(profile) -> bool:
+    """Does this entry stand for others? A group is what it holds, not a flag it carries."""
+    return bool((profile or {}).get('includes'))
+
+
+def expand(profiles: dict, ids) -> list:
+    """The ids to actually sample for *ids*, with every group resolved to its members.
+
+    The one place a group stops being one. Everything upstream — the field on a server, the
+    chips, the detection, the backup — deals in whatever ids somebody chose; everything
+    downstream deals in profiles that have metrics. Which means a group can be renamed, have a
+    profile added to it, or be deleted, and nothing but this function has to know.
+
+    Members come out before the group itself (which contributes only when it also declares
+    metrics of its own), in declaration order, deduplicated: two groups that share a profile
+    must not sample it twice, which would chart every one of its series against itself.
+
+    Cycle-safe and depth-capped. A group that names another group is a reasonable thing to
+    write — "every Linux profile" inside "every server we run" — and a pair that name each
+    other is a reasonable thing to write **by mistake**, once, in a form. One of them costs a
+    recursion error in the middle of a monitoring cycle; both cost nothing here.
+    """
+    out: list = []
+    seen: set = set()
+    path: set = set()
+
+    def walk(pid: str, depth: int) -> None:
+        if depth > MAX_GROUP_DEPTH or pid in path:
+            return
+        prof = profiles.get(pid)
+        if prof is None:
+            return                      # a member somebody deleted is not a member
+        path.add(pid)
+        for member in prof.get('includes') or ():
+            walk(member, depth + 1)
+        path.discard(pid)
+        if prof.get('metrics') and pid not in seen:
+            seen.add(pid)
+            out.append(pid)
+
+    for raw in (ids or ()):
+        walk(str(raw or '').strip().lower(), 0)
+    return out
+
+
+def reaches(profiles: dict, ids, target: str) -> bool:
+    """Is *target* anywhere below *ids*? The question a save has to answer before it saves.
+
+    Not the same question :func:`expand` answers: expansion returns what can be SAMPLED, and
+    a group has no metrics, so a group is never in its output. What a loop is made of is
+    groups.
+    """
+    target = str(target or '').strip().lower()
+    path: set = set()
+
+    def walk(pid: str, depth: int) -> bool:
+        if depth > MAX_GROUP_DEPTH or pid in path:
+            return False
+        if pid == target:
+            return True
+        prof = profiles.get(pid)
+        if prof is None:
+            return False
+        path.add(pid)
+        found = any(walk(m, depth + 1) for m in prof.get('includes') or ())
+        path.discard(pid)
+        return found
+
+    return any(walk(str(p or '').strip().lower(), 0) for p in (ids or ()))
+
+
+def collapse(profiles: dict, ids) -> list:
+    """*ids*, with every run of them that a group already covers replaced by that group.
+
+    A detection against a Synology proposes the thirteen profiles written for it, and putting
+    thirteen chips in the field is a correct answer to a question nobody asked. If a group
+    holds exactly those thirteen, the group IS the answer — same profiles sampled, one thing
+    to read, and one thing to change when the family grows a fourteenth.
+
+    Only a group whose members are **all** present may stand for them. A partial cover would
+    quietly assign profiles the device did not answer, which is the failure this whole flow
+    exists to avoid: a wrong profile does not fail, it measures numbers that look fine.
+
+    Biggest cover first, ties by id, and a member spent on one group is not available to
+    another — so a device that answers both a vendor family and the generic set gets the two
+    groups rather than the larger one plus the pieces of the smaller.
+    """
+    have: list = []
+    for raw in (ids or ()):
+        pid = str(raw or '').strip().lower()
+        if pid and pid not in have:
+            have.append(pid)
+    present = set(have)
+
+    covers = []
+    for gid, prof in profiles.items():
+        if not is_group(prof) or gid in present:
+            continue
+        cover = set(expand(profiles, [gid]))
+        if cover and cover <= present:
+            covers.append((gid, cover))
+    covers.sort(key=lambda c: (-len(c[1]), c[0]))
+
+    chosen: list = []
+    spent: set = set()
+    for gid, cover in covers:
+        if cover & spent:
+            continue
+        chosen.append((gid, cover))
+        spent |= cover
+    if not chosen:
+        return have
+
+    # Each group lands where its first member was, so what comes out reads in the order the
+    # detection found things rather than in the order the catalogue happens to be in.
+    out: list = []
+    for pid in have:
+        if pid not in spent:
+            out.append(pid)
+            continue
+        for gid, cover in chosen:
+            if pid in cover and gid not in out:
+                out.append(gid)
+                break
     return out
 
 

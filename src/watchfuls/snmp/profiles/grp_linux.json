@@ -1,0 +1,22 @@
+{
+  "id": "grp_linux",
+  "label": {
+    "en_EN": "Linux / BSD server (net-snmp)",
+    "es_ES": "Servidor Linux / BSD (net-snmp)"
+  },
+  "description": {
+    "en_EN": "What a machine running net-snmp answers: system, network interfaces, CPU, load and memory, filesystems, disk I/O, sensors, and the IP, TCP/UDP and ICMP counters.",
+    "es_ES": "Lo que responde una máquina con net-snmp: sistema, interfaces de red, CPU, carga y memoria, sistemas de ficheros, E/S de disco, sensores y los contadores IP, TCP/UDP e ICMP."
+  },
+  "includes": [
+    "sys_generic",
+    "if_generic",
+    "ucd_linux",
+    "hr_storage",
+    "disk_io",
+    "lm_sensors",
+    "ip_stats",
+    "tcp_udp_stats",
+    "icmp_stats"
+  ]
+}

@@ -6,7 +6,10 @@
         "render": "renderSnmpMibsPage",
         "views": [
             {"slug": "library", "icon": "bi-hdd-stack", "label": "view_mibs"},
-            {"slug": "import", "icon": "bi-cloud-download", "label": "view_import"}
+            {"slug": "import", "icon": "bi-cloud-download", "label": "view_import"},
+            {"slug": "compile", "icon": "bi-gear", "label": "view_compile"},
+            {"slug": "browser", "icon": "bi-diagram-3", "label": "view_browser"},
+            {"slug": "profiles", "icon": "bi-grid-3x3-gap", "label": "view_profiles"}
         ]
     },
     "__module__": {

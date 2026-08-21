@@ -23,6 +23,7 @@
     },
     "collections": {"list": "Procesos"},
     "ui": {
+        "audit_v_discover":                 "Descubrir procesos en ejecución",
         "discover_title": "Procesos en Ejecución",
         "discover_error": "No se pudo cargar la lista de procesos en ejecución",
         "item_added":     "Proceso \"{}\" añadido"

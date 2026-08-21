@@ -799,12 +799,17 @@ class TestMibCatalog:
     pysnmp module on each open (the slow path that scaled with MIB count)."""
 
     _SYMS = [
+        # `type` is the pysnmp wrapper — one value or one per row of a table — and `syntax`
+        # is the SMI type it carries. Two different questions, and the profile editor asks
+        # both: the first decides `oid` against `walk`, the second decides gauge against
+        # counter and how wide the counter is.
         {'name': 'sysDescr', 'oid': '1.3.6.1.2.1.1.1', 'module': 'SNMPv2-MIB',
-         'type': 'DisplayString', 'base_category': 'string', 'enum_values': [],
+         'type': 'MibScalar', 'syntax': 'DisplayString',
+         'base_category': 'string', 'enum_values': [],
          'range_min': None, 'range_max': None, 'status': 'current',
          'access': 'read-only', 'units': '', 'desc': 'A description'},
         {'name': 'ifOperStatus', 'oid': '1.3.6.1.2.1.2.2.1.8', 'module': 'IF-MIB',
-         'type': 'Integer32', 'base_category': 'enum',
+         'type': 'MibTableColumn', 'syntax': 'Integer32', 'base_category': 'enum',
          'enum_values': [{'name': 'up', 'value': 1}, {'name': 'down', 'value': 2}],
          'range_min': 1, 'range_max': 6, 'status': 'current',
          'access': 'read-only', 'units': '', 'desc': ''},
@@ -816,6 +821,90 @@ class TestMibCatalog:
     def test_write_read_roundtrip(self, tmp_path):
         n = mib_catalog.write_catalog(str(tmp_path), self._SYMS)
         assert n == 2
+        assert mib_catalog.read_catalog(str(tmp_path)) == self._SYMS
+
+    def test_the_syntax_is_read_off_the_syntax_and_not_the_wrapper(self):
+        """Everything a symbol says about its VALUE — its named values, its range, its type
+        name — lives on the syntax inside it, not on the `MibTableColumn` around it. Read off
+        the wrapper, the type name is always "MibScalar" or "MibTableColumn", so the category
+        was `other` for all nine thousand symbols in a real catalogue and not one enum or one
+        range was ever extracted. Nothing failed: the browser showed a column of blanks that
+        looked like MIBs which carry no enums."""
+        class _Syntax:
+            namedValues = {'up': 1, 'down': 2}
+
+        class _Column:
+            syntax = _Syntax()
+
+        _enum, _rmin, _rmax, _cat, _syn = mib_catalog._sym_type_info(_Column())
+        assert _syn == '_Syntax', 'the wrapper is still what names the type'
+        assert _cat == 'boolean' and [e['name'] for e in _enum] == ['up', 'down']
+
+    def test_a_range_is_the_narrowest_one_declared(self):
+        """A constraint set is ITERABLE, not a thing with `.components` — reading the
+        attribute that does not exist ended the walk at the outermost set every time. And a
+        set holds more than one: an Integer32 restricted to 1..100 carries its own restriction
+        beside the base type's full -2^31..2^31-1, and the base type describing itself is not
+        a fact about this object."""
+        class _Range:
+            def __init__(self, start, stop):
+                self.start, self.stop = start, stop
+
+        class _Set(list):
+            pass
+
+        class _Syntax:
+            subtypeSpec = _Set([_Range(-2147483648, 2147483647),
+                                _Set([_Range(1, 100)])])
+
+        class _Scalar:
+            syntax = _Syntax()
+
+        _enum, rmin, rmax, _cat, _syn = mib_catalog._sym_type_info(_Scalar())
+        assert (rmin, rmax) == (1, 100)
+
+    def test_a_counter64_range_does_not_fit_and_is_dropped(self):
+        """2**64-1 is not a SQLite INTEGER, and a bound that wide is the base type describing
+        itself rather than the MIB restricting anything. A wrong number would be worse than
+        no number."""
+        class _Range:
+            def __init__(self, start, stop):
+                self.start, self.stop = start, stop
+
+        class _Syntax:
+            subtypeSpec = [_Range(0, 2 ** 64 - 1)]
+
+        class _Scalar:
+            syntax = _Syntax()
+
+        _enum, rmin, rmax, _cat, _syn = mib_catalog._sym_type_info(_Scalar())
+        assert rmin is None and rmax is None
+
+    def test_a_catalogue_of_the_wrong_shape_is_rebuilt(self, tmp_path):
+        """The staleness rule is "older than any compiled MIB", which never fires for a change
+        to the extraction itself — no MIB was touched. Without a version, a column added here
+        stays empty until somebody happens to compile something."""
+        mib_catalog.write_catalog(str(tmp_path), self._SYMS)
+        assert mib_catalog.catalog_needs_rebuild(str(tmp_path)) is False
+        import sqlite3
+        con = sqlite3.connect(mib_catalog.catalog_path(str(tmp_path)))
+        con.execute("UPDATE meta SET value = '0' WHERE key = 'schema'")
+        con.commit()
+        con.close()
+        assert mib_catalog.catalog_needs_rebuild(str(tmp_path)) is True
+
+    def test_a_table_that_predates_a_column_is_replaced_and_not_filled(self, tmp_path):
+        """`CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it was, so a
+        catalogue written before a column existed fails its next insert rather than gaining
+        the column. This is a full replace; it replaces the table too."""
+        import sqlite3
+        p = mib_catalog.catalog_path(str(tmp_path))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        con = sqlite3.connect(p)
+        con.execute('CREATE TABLE symbols (oid TEXT, name TEXT)')
+        con.commit()
+        con.close()
+        assert mib_catalog.write_catalog(str(tmp_path), self._SYMS) == 2
         assert mib_catalog.read_catalog(str(tmp_path)) == self._SYMS
 
     def test_read_caches_by_mtime(self, tmp_path):

@@ -938,6 +938,7 @@ Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/prof
 | `match.sysobjectid_prefix` | **Quién fabricó** el aparato: qué aparatos reclama el perfil; gana el prefijo **más específico** |
 | `match.probe` | **Qué sirve** el aparato: un OID que, si contesta, hace que el perfil aplique. Es el que importa para los genéricos — «¿implementa la HOST-RESOURCES-MIB?» no lo puede contestar un `sysObjectID`: un Synology, un Linux y un Windows la implementan y sus `sysObjectID` no tienen nada que ver |
 | `match.supersedes` | Qué perfiles genéricos **desplaza** éste en los aparatos que reclama: un Synology contesta el sondeo de E/S de UCD y el suyo, y los dos miden los mismos discos |
+| `includes` | Ids de **otras entradas** del catálogo en lugar de OIDs: eso es un **grupo** (más abajo). Una entrada lleva métricas, miembros, o las dos cosas; ninguna de las dos y no es una entrada |
 
 **Los contadores mienten de dos formas opuestas.** Un valor nuevo menor que el anterior es una
 **vuelta** del contador (uno de octetos de 32 bits se llena en ~34 s en un enlace de gigabit) o
@@ -949,8 +950,9 @@ reinicio y se descarta la muestra** (a un terabit tardaría 4,6 años en dar la 
 casos se guarda la nueva referencia: perder un punto cuesta un punto; inventarlo cuesta la
 gráfica.
 
-Se envían **nueve** perfiles, todos de MIBs estándar para que funcionen sin saber quién
-fabricó el aparato, y **disjuntos** entre sí:
+Se envían **nueve** perfiles genéricos, todos de MIBs estándar para que funcionen sin saber
+quién fabricó el aparato, y **disjuntos** entre sí (más los quince de Synology, y los grupos de
+más abajo):
 
 | Perfil | MIB | Qué mide |
 |---|---|---|
@@ -999,6 +1001,102 @@ mismo valor no es redundancia — es una medida graficada dos veces con dos nomb
 Los perfiles propios de la instalación van en `<var_dir>/snmp_profiles/`, junto a sus MIBs, para
 que una actualización del paquete no se los lleve. Cada fila del catálogo dice si viene enviada o
 escrita aquí, que es lo primero que hay que mirar cuando un aparato mide mal.
+
+#### Agrupaciones
+
+Un Synology contesta **quince** perfiles: sistema, discos, SMART, volúmenes y RAID, E/S de
+discos y de volúmenes, caché SSD, puertos, unidades de expansión, iSCSI, NFS, GPU, alta
+disponibilidad, SAI y usuarios por servicio. Cada uno es correctamente un perfil aparte, porque
+son asuntos aparte. Asignarlos de uno en uno a cada NAS del rack son quince chips en un campo
+diciendo lo que dice la palabra «Synology», y quince cosas que recordar cuando la familia
+crezca un decimosexto.
+
+Un **grupo** es una entrada del mismo catálogo cuyo `includes` nombra otras entradas:
+
+```json
+{
+  "id": "grp_synology",
+  "label": {"es_ES": "NAS Synology (todo)"},
+  "includes": ["synology_system", "synology_disks", "…"],
+  "match": {"sysobjectid_prefix": "1.3.6.1.4.1.6574", "supersedes": ["synology_system", "…"]}
+}
+```
+
+No es un tipo nuevo de cosa, y ahí está todo el diseño: asignar, detectar, graficar, respaldar
+y el muestreador siguen hablando de **ids**, y una sola función (`profiles.expand`) sabe que un
+grupo no es un perfil. Por eso un grupo se puede renombrar, ganar un perfil o desaparecer sin
+que nada más se entere. La expansión deduplica, así que dos grupos que compartan un perfil no
+lo muestrean dos veces, y es a prueba de ciclos y con tope de profundidad — un par de grupos
+que se nombran mutuamente es algo razonable de escribir por error, una vez, en un formulario.
+
+Un grupo puede además **reclamar aparatos** como cualquier perfil. Si lo hace, desplaza lo que
+contiene (`supersedes`), o la detección propondría el grupo *y* sus quince miembros, que es
+peor que cualquiera de las dos cosas por separado. Y aunque no reclame nada, la detección
+**colapsa**: si un grupo cubre exactamente lo encontrado, se propone el grupo. Sólo cuando lo
+cubre **entero** — una cobertura parcial asignaría perfiles que el aparato no contestó, que es
+justo el fallo que la detección existe para evitar.
+
+Se envían tres: `grp_synology`, `grp_linux` (lo que contesta una máquina con net-snmp) y
+`grp_network` (las preguntas estándar de cualquier equipo de red gestionable, el punto de
+partida para uno sin perfil de fabricante).
+
+#### Lo que se escribe en el panel
+
+Al catálogo llegan **tres** fuentes, y cada una está donde está por una razón:
+
+| Fuente | Dónde | Para qué |
+|---|---|---|
+| enviada | ficheros del módulo | se revisan en commits, viajan con la versión, una actualización del paquete las repone |
+| propia | ficheros en `<var_dir>/snmp_profiles/` | las de esta instalación, editadas en la máquina; sobreviven a una actualización |
+| escrita | **la base de datos** | todo lo que se escribe en el panel: grupos y perfiles |
+
+La tercera es la BD y no una cuarta carpeta por una razón que no es de orden: un despliegue con
+contenedor web y contenedor worker **comparte la base de datos, no el disco**. Un perfil escrito
+en el panel que el muestreador no pudiera leer sería un aparato al que se le asignó algo que no
+mide nada, sin error en ninguna parte. Va en el respaldo de la BD por lo mismo (tabla
+`mod_snmp_catalog`).
+
+**Una tabla para dos cosas que son una.** Un grupo es una entrada cuyos miembros son ids de
+otras entradas; un perfil es una entrada cuyos miembros son OIDs. Todo lo de abajo ya los trata
+igual —`profiles.normalise` valida cualquiera de los dos, el catálogo es un mapa, la pantalla
+es una lista, el muestreador resuelve ids—, así que guardarlos aparte sería el único sitio del
+producto que insistiera en que son distintos. Lo que guarda una fila es el **documento**, la
+misma forma que tienen los ficheros enviados.
+
+El formulario del perfil es ese documento campo a campo, y lo valida **la misma función que lee
+los ficheros enviados**: una segunda validación en el formulario serían dos declaraciones de
+las mismas reglas, y discreparían en cuanto una ganara un campo. Lo que sí añade es el motivo:
+una métrica se rechaza **por su nombre y diciendo qué le pasa**, porque `normalise` descarta lo
+que no puede usar y se queda con el resto —que está bien leyendo un fichero que alguien editó a
+las 3 de la mañana, y mal contestando a una persona que está mirando la fila que acaba de
+escribir—. El motivo se pregunta sólo **después** de que la validación haya dicho que no, así
+que no puede discrepar de ella.
+
+Los tres campos de OID del formulario **abren los MIB compilados** en vez de pedir que
+alguien recuerde `1.3.6.1.4.1.6574.2.1.1.6`: cada dígito cuenta y ninguno lo comprueba nada
+hasta que un aparato contesta —o no—. Y lo que aporta elegir por encima de pegar no es
+comodidad, es el **SYNTAX**: `Counter64` rellena «contador, 64 bits», `Gauge32` rellena medida,
+`DisplayString` rellena texto-y-no-se-dibuja, y un enumerado rellena la presentación de valor
+que usan los perfiles enviados para un estado. Es lo único de una métrica que nadie acierta
+mirando el OID, y lo que convierte una vuelta de contador en un aparato reiniciado. Un
+**escalar se pide por su instancia** (`sysDescr` se convierte en `1.3.6.1.2.1.1.1.0`), que es
+la forma más común de que un perfil escrito a mano esté vacío en silencio; una columna de tabla
+se convierte en un `walk`; y la columna que nombra las filas se busca **entre las columnas de
+esa tabla**, no entre nueve mil símbolos.
+
+Cualquier perfil se puede **duplicar**, y es como se escribe uno de verdad: una matriz de OIDs
+desde un formulario en blanco es una tarde, y esa misma matriz con tres OIDs cambiados son
+cinco minutos. Lo que no se copia es cómo se reconoce el original —dos perfiles reclamando un
+aparato es una detección proponiendo lo mismo dos veces.
+
+**El id no se edita**, ni el de un grupo ni el de un perfil. Es el valor que guarda cada
+aparato, así que renombrarlo no renombraría nada: dejaría a cada aparato que lo referenciaba
+apuntando a nada. El nombre —lo que se lee— se cambia siempre que se quiera. Y la **clase**
+detrás de un id tampoco cambia: un aparato al que se le asignó `mis_linux` cuando era un grupo
+seguiría muestreando lo que midiera un perfil que se llamara así después.
+
+Borrar tampoco reescribe la configuración de nadie: los aparatos conservan el id, que deja de
+resolver, exactamente igual que un perfil enviado que desaparece.
 
 #### El muestreo
 

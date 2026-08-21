@@ -25,6 +25,7 @@
     },
     "collections": {"list": "Sensors"},
     "ui": {
+        "audit_v_discover":                 "Discover temperature sensors",
         "discover_title": "Discover Sensors",
         "discover_error": "Could not load the list of temperature sensors",
         "item_added":     "Sensor \"{}\" added"

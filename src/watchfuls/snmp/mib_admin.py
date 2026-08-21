@@ -2105,7 +2105,10 @@ class MibAdmin:
             store = cls._versions_store(cfg)
             if store is not None:
                 dropped = store.drop_all(_mib)
-        return {'ok': True, 'history_deleted': dropped}
+        # WHAT was deleted, said by the action that deleted it. The audit hook is handed
+        # the RESULT and never the request, so a result that does not name its subject is an
+        # entry that reads "a MIB file was deleted" and nothing more.
+        return {'ok': True, 'name': name, 'kind': kind, 'history_deleted': dropped}
 
     # ── What a deletion leaves behind ──────────────────────────────────────────
     #
