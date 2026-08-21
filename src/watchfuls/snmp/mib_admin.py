@@ -18,6 +18,7 @@ are libraries; this is the admin surface the panel drives.
 import concurrent.futures
 import difflib
 import glob
+import hashlib
 import io
 import json
 import logging
@@ -93,22 +94,37 @@ def _safe_mib_filename(name: str, kind: str = 'raw') -> str | None:
 _SAFE_DIRNAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+-]*$')
 
 
-def _text_of(path: str) -> str | None:
-    """A MIB file as text with its line endings normalised, or ``None``.
+def _normalized(text: str) -> str:
+    """The text of a MIB, as the only thing worth comparing two copies by.
 
-    Normalised because everything downstream compares LINES: :func:`difflib.unified_diff`
-    works on ``splitlines()`` and never sees a CRLF. Two copies that differ only in how their
-    lines end would otherwise be reported as different and then diff to nothing — an answer
-    that sends you looking for a difference that was never there.
+    Line endings out, because they are not content: a vendor ships CRLF, the panel writes
+    what it was handed, and a byte comparison then says "different" about two files that are
+    the same MIB. Everything downstream already works this way — :func:`difflib.unified_diff`
+    compares ``splitlines()`` and never sees a CRLF — so a comparison that does not is one
+    that reports a difference and then diffs to nothing.
     """
+    return '\n'.join(str(text or '').splitlines())
+
+
+def _text_of(path: str) -> str | None:
+    """A MIB file as text with its line endings normalised, or ``None``."""
     if not path or not os.path.isfile(path):
         return None
     try:
         with io.open(path, encoding='utf-8-sig', errors='replace') as fh:
-            return '\n'.join(fh.read().splitlines())
+            return _normalized(fh.read())
     except OSError:
         return None
 
+
+# Beside the tree and not inside it: `raw/` is the library, and a bookkeeping file in it
+# would be one more thing every listing has to know to skip.
+_REPAIR_MARK = '.line-endings-repaired'
+
+# Archive imports in flight, by job id. Beside `_github_jobs` and kept apart from it: they
+# report different things, and one dict answering two questions is how a poll for one job
+# ends up reading the other one's numbers.
+_archive_jobs: dict = {}
 
 # The content hash of a raw MIB, cached on (mtime, size). The listing hashes every copy of
 # every duplicated module on every refresh, and on a library where thirty modules arrive twice
@@ -215,36 +231,194 @@ def _safe_mib_relpath(name: str, kind: str = 'raw') -> str | None:
     return '/'.join(parts)
 
 
-def _download_archive(url: str, max_bytes: int):
-    """Stream *url* to a temporary file. Returns ``(path, '')`` or ``(None, message)``.
+def _archive_cache_dir(var_dir: str) -> str:
+    """Where a downloaded archive is kept between uses. Beside the library, not inside it."""
+    return os.path.join(var_dir, 'snmp_mibs', _ARCHIVE_CACHE) if var_dir else ''
+
+
+def _cache_slot(cache_dir: str, url: str):
+    """``(zip_path, etag_path)`` for *url*, or ``('', '')`` with no cache."""
+    if not cache_dir:
+        return '', ''
+    key = hashlib.sha1(url.encode('utf-8', 'replace')).hexdigest()[:16]
+    return os.path.join(cache_dir, key + '.zip'), os.path.join(cache_dir, key + '.etag')
+
+
+def _prune_archive_cache(cache_dir: str, keep: int = 2, max_age_days: int = 7) -> None:
+    """Keep the last few archives and nothing old.
+
+    A cached archive is 86 MB of somebody's disk; keeping every one ever downloaded is a
+    cache that only grows. Two is the flow this exists for — compare, then import — with room
+    for a second source in between.
+    """
+    if not cache_dir or not os.path.isdir(cache_dir):
+        return
+    try:
+        names = os.listdir(cache_dir)
+        # A download that died half way leaves its `.part`. Anything older than an hour is
+        # not somebody's download in flight, it is somebody's crash.
+        stale = time.time() - 3600
+        for f in names:
+            p = os.path.join(cache_dir, f)
+            if f.endswith('.part') and os.path.getmtime(p) < stale:
+                _rm_quiet(p)
+        zips = [os.path.join(cache_dir, f) for f in names if f.endswith('.zip')]
+        zips.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        cutoff = time.time() - max_age_days * 86400
+        for i, p in enumerate(zips):
+            if i < keep and os.path.getmtime(p) >= cutoff:
+                continue
+            _rm_quiet(p)
+            _rm_quiet(p[:-4] + '.etag')
+    except OSError:
+        pass
+
+
+def _download_archive(url: str, max_bytes: int, on_progress=None, cache_dir: str = '',
+                      fresh: bool = False):
+    """Stream *url* to a file. Returns ``(path, '')`` or ``(None, message)``.
+
+    **Kept and revalidated.** Comparing an archive and then importing it is the same 86 MB
+    twice, and pressing Compare first is exactly what the panel asks you to do — the second
+    download answers a question the first one already answered. So the file is kept beside the
+    library with the ETag the server gave it, and every use asks the server whether that copy
+    is still current: a 304 costs one request and no megabytes, and a server that does not do
+    conditional requests simply sends the file again, which is what happened before.
+
+    *fresh* asks for the file itself and not for an opinion about it: no conditional
+    request, and whatever comes back replaces what was there. Reusing is the right default —
+    the server is asked every time and a changed archive downloads by itself — but "ask
+    again" and "fetch it again" are different requests, and only one of them can be made by
+    pressing the same button twice.
+
+    Returns ``(path, message, from_cache)``. The path may be the cached copy — the caller
+    prunes the cache, it does not delete what it was handed — and *from_cache* is what lets
+    the report say why it was instant.
 
     To a file and not to memory, because the thing this exists for is a whole-repository zip
     of tens of megabytes — and because :class:`zipfile.ZipFile` wants to seek, which is what a
     file gives it for free.
+
+    *on_progress* is called with ``(bytes_so_far, bytes_total)`` once per chunk. It is the
+    only thing that can be said honestly while this runs: 86 MB over somebody's line is a
+    minute of a button that otherwise looks stuck. ``bytes_total`` is 0 when the server sends
+    no ``Content-Length`` — a bar with no end is still a bar that is moving.
     """
     import tempfile           # noqa: PLC0415
+    import urllib.error       # noqa: PLC0415
     import urllib.request     # noqa: PLC0415
 
-    fd, path = tempfile.mkstemp(prefix='ss-mib-archive-', suffix='.zip')
+    cached, etag_path = _cache_slot(cache_dir, url)
+    etag = ''
+    if fresh:
+        _rm_quiet(cached)
+        _rm_quiet(etag_path)
+    elif cached and os.path.isfile(cached) and os.path.isfile(etag_path):
+        try:
+            with io.open(etag_path, encoding='utf-8') as fh:
+                etag = fh.read().strip()
+        except OSError:
+            etag = ''
+
+    # IN the cache directory, and this is not a detail: `os.replace` cannot move a file
+    # across volumes on Windows, and the system temp is on C: while somebody's data directory
+    # is on D:. Every download went to C:, every rename failed, the failure was swallowed as
+    # "then keep the temp file" — so nothing was ever cached, every use downloaded again, and
+    # each one left 86 MB behind. Born on the destination volume, the rename is a rename.
+    if cache_dir:
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except OSError:
+            cache_dir, cached, etag_path = '', '', ''
+    fd, path = tempfile.mkstemp(prefix='ss-mib-archive-', suffix='.part',
+                                dir=cache_dir or None)
     total = 0
+    _last_etag = ''
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': APP_NAME})
-        with urllib.request.urlopen(req, timeout=180) as r, os.fdopen(fd, 'wb') as out:
+        headers = {'User-Agent': APP_NAME}
+        if etag:
+            headers['If-None-Match'] = etag
+        req = urllib.request.Request(url, headers=headers)
+        # The file object FIRST, so the descriptor is adopted before anything can raise.
+        # Opened inside the same `with` as the request, it is never adopted at all when the
+        # request throws — and an unclosed handle on Windows is a file that cannot be
+        # deleted, which is how a 304 (an exception, in urllib) left its empty `.part`.
+        with os.fdopen(fd, 'wb') as out, urllib.request.urlopen(req, timeout=180) as r:
+            # Defensively: a response without headers is not a reason to lose the
+            # download, it is a reason to have no total.
+            try:
+                _h = getattr(r, 'headers', None) or {}
+                expected = int(_h.get('Content-Length') or 0)
+                _last_etag = _h.get('ETag') or ''
+            except (AttributeError, TypeError, ValueError):
+                expected = 0
             while True:
                 chunk = r.read(1 << 20)
                 if not chunk:
                     break
                 total += len(chunk)
                 if total > max_bytes:
-                    return None, 'Archive too large'
+                    # Out of the loop rather than out of the function: the temp file is still
+                    # open here, and on Windows a delete under an open handle fails — which
+                    # is how a refused download used to leave its half behind.
+                    break
                 out.write(chunk)
+                if on_progress is not None:
+                    on_progress(total, expected)
+    except urllib.error.HTTPError as exc:
+        _rm_quiet(path)
+        # 304: the copy on disk IS the answer. Anything else is a failure like any other.
+        if exc.code == 304 and cached and os.path.isfile(cached):
+            return cached, '', True
+        return None, str(exc), False
     except Exception as exc:   # pylint: disable=broad-except
         _rm_quiet(path)
-        return None, str(exc)
+        return None, str(exc), False
     if total > max_bytes:
         _rm_quiet(path)
-        return None, 'Archive too large'
-    return path, ''
+        return None, 'Archive too large', False
+    if not cached:
+        return path, '', False
+    # Into the cache with the tag that identifies it, so the next use can ask instead of
+    # downloading. A cache that cannot be revalidated is a guess with a disk cost.
+    try:
+        os.replace(path, cached)
+        new_etag = str(_last_etag or '').strip()
+        if new_etag:
+            with io.open(etag_path, 'w', encoding='utf-8') as fh:
+                fh.write(new_etag)
+        else:
+            _rm_quiet(etag_path)
+        return cached, '', False
+    except OSError:
+        # Could not be filed. The file is still the answer to THIS call — the caller deletes
+        # it, having been handed something that is not in the cache.
+        return path, '', False
+
+
+# How much of a file is enough to see what it is. A licence banner is fifty lines; a
+# readme says what it is in the first three.
+_PREVIEW_LINES = 80
+_PREVIEW_BYTES = 8192
+
+
+def _head_lines(text: str, lines: int = _PREVIEW_LINES) -> str:
+    """The first *lines* of *text*, for a row that has to justify itself."""
+    return '\n'.join(str(text or '').splitlines()[:lines])
+
+
+def _member_head(zf, member) -> str:
+    """The start of an archive member WITHOUT reading the member.
+
+    The one case that needs this is the file refused for being too large: reading it whole is
+    exactly what was refused, and eight kilobytes of it is what says whether the refusal was
+    right.
+    """
+    try:
+        with zf.open(member) as fh:
+            return _head_lines(fh.read(_PREVIEW_BYTES).decode('utf-8', errors='replace'))
+    except Exception:  # pylint: disable=broad-except
+        return ''
 
 
 def _rm_quiet(path: str) -> None:
@@ -409,8 +583,21 @@ _LAST_UPDATED_RE = re.compile(r'LAST-UPDATED\s+"([0-9]{10,13}Z)"', re.IGNORECASE
 # carries twenty thousand files that have nothing to do with MIBs, and counting those against
 # a ceiling meant for the import would truncate it before reaching them.
 _MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
-_MAX_ARCHIVE_FILES = 2000
-_MAX_MEMBER_BYTES = 4 * 1024 * 1024
+# No ceiling on how many files an archive may hold. There was one — two thousand — and
+# LibreNMS ships 4830 MIBs, so the comparison answered about less than half of the archive
+# and said so in a footnote. A ceiling that turns the main use of a feature into a footnote is
+# not protecting anything: the download is already bounded by _MAX_ARCHIVE_BYTES, the work
+# runs in the background with progress and a Stop, and the reader wanted the whole answer.
+#
+# Nor on how big one file may be. That one refused ALAXALA's AX-SMC-MIB — 11.2 MiB and a
+# perfectly real MIB — for being what it is. What remains is not a policy about MIBs but a
+# memory guard: nothing is read into memory that is bigger than the archive it arrived in.
+_MAX_MEMBER_BYTES = _MAX_ARCHIVE_BYTES
+# How many rows of a comparison carry their diff. Enough to read a report; not so many that
+# an archive whose every file differs answers with a megabyte of diff nobody opened.
+_MAX_DIFFS = 60
+# Where downloaded archives wait between a comparison and the import that follows it.
+_ARCHIVE_CACHE = '.archive-cache'
 
 
 def _mib_last_updated(text: str) -> str:
@@ -536,13 +723,18 @@ def _parse_github_folder(url: str):
     return None
 
 
-# What a MIB says about itself in its first line of substance. Every other rule here is a
-# guess about a NAME; this one reads the file — and a name is exactly what the offenders are
-# good at: net-snmp's `mibs/` folder ships `nodemap`, `rfclist`, `ianalist`, `mibfetch` and
-# `smistrip`, none of which is a MIB and all of which look like one from outside.
-_MIB_HEADER_RE = re.compile(
-    r'^\s*[A-Za-z][\w-]*\s+DEFINITIONS\s*(?:IMPLICIT\s+TAGS\s*)?::=\s*BEGIN',
-    re.MULTILINE)
+# What a MIB says about itself. Every other rule here is a guess about a NAME; this one
+# reads the file — and a name is exactly what the offenders are good at: net-snmp's `mibs/`
+# folder ships `nodemap`, `rfclist`, `ianalist`, `mibfetch` and `smistrip`, none of which is a
+# MIB and all of which look like one from outside.
+#
+# Asked of the parser that already answers it, rather than with a second regex of its own.
+# The second regex was wrong in a way only real files show: it read the RAW text, so
+# `NAME`, a comment, and then `DEFINITIONS ::= BEGIN` on the next line did not match — and
+# ASN.1 does not care where a comment falls between two tokens. LibreNMS ships several
+# written that way (FROGFOOT-RESOURCES-MIB, ADIC-INTELLIGENT-STORAGE-MIB), and every import
+# quietly refused them as "not a MIB" while the panel's own module-name reader, which blanks
+# comments first, read their names perfectly well.
 
 
 def _is_mib_source(text: str) -> bool:
@@ -552,9 +744,7 @@ def _is_mib_source(text: str) -> bool:
     archive — because the answer does not depend on how they arrived, and a check written
     once per importer is a check that is right in two of them.
     """
-    # A MIB header appears in the first few hundred lines; a legal preamble can be long, a
-    # file that has not said it by then is not a MIB that lost its way.
-    return bool(_MIB_HEADER_RE.search((text or '')[:200000]))
+    return bool(_mib_lint.module_name(text or ''))
 
 
 def _looks_like_mib_file(name: str, skip: frozenset = frozenset()) -> bool:
@@ -715,17 +905,12 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
         # not change. Re-importing a folder to pick up a handful of new MIBs invalidated
         # every one already compiled from it, which is how a second import came to cost as
         # much as the first.
-        try:
-            if os.path.isfile(dest):
-                # errors='replace' because this is a COMPARISON, not a read: a file with a
-                # stray byte would otherwise raise UnicodeDecodeError — which is not an
-                # OSError, so it escaped this guard and failed the import of a file that was
-                # merely unusual.
-                with open(dest, encoding='utf-8', errors='replace') as fh:
-                    if fh.read() == content:
-                        return True
-        except OSError:
-            pass
+        # …compared as CONTENT and not as bytes (see :func:`_normalized`). Read with
+        # errors='replace' because this is a COMPARISON, not a read: a file with a stray byte
+        # would otherwise raise UnicodeDecodeError — which is not an OSError, so it escaped
+        # this guard and failed the import of a file that was merely unusual.
+        if _text_of(dest) == _normalized(content):
+            return True
         # About to replace a file somebody may have corrected by hand. The import still
         # wins — it is what was asked for, and a vendor's newer MIB is usually the point —
         # but an edit that disappears without a word is an edit you find out about the next
@@ -735,7 +920,9 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
                 on_overwrite(rel, content)
             except Exception:  # pylint: disable=broad-except
                 pass
-        with open(dest, 'w', encoding='utf-8') as fh:
+        # newline='' or Windows translates every '\n' on the way out: a CRLF
+        # file arrives as '\r\n' and would be stored as '\r\r\n'.
+        with open(dest, 'w', encoding='utf-8', newline='') as fh:
             fh.write(content)
         return True
 
@@ -1404,62 +1591,92 @@ class MibAdmin:
         and a stripped copy replacing the real one breaks the MIBs that import it, three
         modules from where anybody would look.
 
-        Only the colliding names are hashed, so the cost is the size of the ambiguity and
-        not the size of the library.
+        WHICH modules collide is free — it is a grouping of facts the listing already has.
+        Everything else about them is not, and this used to do all of it on every load, for
+        panels nobody had opened:
+
+        * hashing every copy and comparing what each declares (257 collisions over 529 files);
+        * and, for the ones with nothing compiled yet, asking pysmi which file it WOULD read.
+          That one is not merely slow, it is quadratic in disguise: the reader tries every
+          name variant in every directory it was given, so 151 lookups over a library of 408
+          folders came to **1.19 million** filesystem checks and **four minutes** — measured,
+          not guessed. One of those lookups, for one module, is a quarter of a second.
+
+        Both answers moved to :meth:`mib_dupe_details`, which is asked when somebody opens a
+        group. What is left here reads nothing at all.
         """
         by_module: dict = {}
         for f in raw_files:
             by_module.setdefault(f['module'], []).append(f)
 
         out: dict = {}
-        unresolved: dict = {}
         for mib, files in by_module.items():
             if len(files) < 2:
                 continue
-            entries = []
-            for f in sorted(files, key=lambda x: x['name']):
-                entries.append({
-                    'name': f['name'],
-                    'size': f['size'],
-                    'updated': f.get('updated', ''),
-                    'sha':  _sha_of_file(
-                        _confined_path(raw_dir, *f['name'].split('/')) or ''),
-                })
+            entries = [{'name': f['name'], 'size': f['size'],
+                        'updated': f.get('updated', '')}
+                       for f in sorted(files, key=lambda x: x['name'])]
             # Which copy the compiled module was ACTUALLY built from, read off the .py
             # where pysmi records it. A fact, where 'which one would pysmi read' is a
             # prediction — and the two disagree exactly when it matters, because a vendor
             # archive landing beside an older library changes the second and not the first.
             used = _mib_resolver.compiled_source(compiled_dir, mib)
+            out[mib] = {
+                'files': entries,
+                'used':  used,
+                'compiled_from': bool(used),
+            }
+        return out
+
+    @classmethod
+    def mib_dupe_details(cls, config: dict | None = None) -> dict:
+        """What the copies of ONE module actually hold: their hashes, whether they are the
+        same content, and whether they are versions of each other at all.
+
+        Split off the listing because of what it costs: hashing every colliding file, reading
+        each of them and comparing what they declare took four minutes on a library with
+        LibreNMS in it — 257 collisions across 529 files — and it was paid on every load of
+        the section, for panels nobody had opened. Which modules collide is a grouping of
+        facts already in hand; this is the part that reads.
+        """
+        cfg = config or {}
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        mib = str(cfg.get('mib') or '').strip()
+        names = [str(n) for n in (cfg.get('names') or []) if str(n).strip()]
+        if not var_dir or not mib or not names:
+            return {'ok': False, 'message': 'Missing arguments'}
+        raw_dir = os.path.join(var_dir, 'snmp_mibs', 'raw')
+        paths, shas = [], {}
+        for name in sorted(names):
+            p = _confined_path(raw_dir, *name.split('/'))
+            if not p:
+                return {'ok': False, 'message': 'Invalid filename'}
+            paths.append(p)
+            shas[name] = _sha_of_file(p)
+        # Which copy pysmi would read, when nothing has been compiled from any of them —
+        # the only answer available then, and it costs a walk of the whole tree, which is
+        # why it is here and not in the listing.
+        used = str(cfg.get('used') or '')
+        if not used:
+            stems = sorted({os.path.splitext(os.path.basename(n))[0] for n in names})
+            found = _mib_resolver.resolve_raw_sources(raw_dir, stems)
+            for stem in stems:
+                if found.get(stem):
+                    used = found[stem]
+                    break
+        return {
+            'ok': True,
+            'mib': mib,
+            'used': used,
+            'sha': shas,
+            # Same CONTENT, not the same bytes — see :func:`_text_of`.
+            'same': len(set(shas.values())) == 1 and all(shas.values()),
             # Whether these are copies at all. The panel offered one answer — "pick the one
             # that stays" — to two different problems, and for the second one it is the wrong
             # answer: deleting either of two MIBs that only share a header loses everything
             # that MIB declares.
-            kin = _kinship([_confined_path(raw_dir, *e['name'].split('/')) or ''
-                            for e in entries])
-            out[mib] = {
-                'files': entries,
-                # Same CONTENT, not the same bytes — see :func:`_text_of`.
-                'same':  len({e['sha'] for e in entries}) == 1
-                         and all(e['sha'] for e in entries),
-                'used':  used,
-                'compiled_from': bool(used),
-                'kinship': kin,
-            }
-            if not used:
-                for e in entries:
-                    _stem = os.path.splitext(os.path.basename(e['name']))[0]
-                    unresolved[_stem] = mib
-
-        # Nothing compiled yet: then the only answer available is pysmi's, asked the way
-        # the compiler asks it — by FILE name, which is how it locates a source. One batch,
-        # because the reader re-walks the tree on every single lookup.
-        if unresolved:
-            found = _mib_resolver.resolve_raw_sources(raw_dir, sorted(unresolved))
-            for stem, rel in found.items():
-                mib = unresolved.get(stem)
-                if mib and not out[mib]['used']:
-                    out[mib]['used'] = rel
-        return out
+            'kinship': _kinship(paths),
+        }
 
     @classmethod
     def diff_mib_files(cls, config: dict | None = None) -> dict:
@@ -1490,6 +1707,11 @@ class MibAdmin:
         var_dir = str(cfg.get('__var_dir__') or '').strip()
         raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')      if var_dir else ''
         compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled') if var_dir else ''
+        cls._repair_line_endings(raw_dir)
+        # What was read out of every file last time, if it is still true. Five thousand
+        # headers is most of what opening this section costs, and none of it changes while
+        # the files do not.
+        _mib_resolver.facts_cache_load(raw_dir)
 
         def _listdir(path):
             if not path or not os.path.isdir(path):
@@ -1511,11 +1733,13 @@ class MibAdmin:
 
         _facts = _mib_resolver.raw_facts
 
+        _walk = _mib_resolver.iter_raw_mibs(raw_dir)
+
         def _list_raw(path):
             # Recursive: an imported repository or vendor archive keeps its own folders, and a
             # listing that showed only the top level would hide everything that was imported.
             items = []
-            for rel, full in _mib_resolver.iter_raw_mibs(path):
+            for rel, full in _walk:
                 if os.path.basename(rel).startswith('__'):
                     continue
                 try:
@@ -1528,12 +1752,12 @@ class MibAdmin:
                               # therefore the only name "is this compiled?" can be asked
                               # about. `trunk.mib` is IEEE8023-LAG-MIB; `rfc2011.mib` is
                               # IP-MIB. The file name is how the file is found, no more.
-                              'module': _facts(full)['module'] or
+                              'module': _facts(full, st)['module'] or
                                         os.path.splitext(os.path.basename(rel))[0],
                               # The date the MIB declares for itself. Free here (same read,
                               # same cache) and it is what decides which of two copies of a
                               # standard module is the one to keep.
-                              'updated': _facts(full)['updated']})
+                              'updated': _facts(full, st)['updated']})
             return items
 
         raw_files      = _list_raw(raw_dir)
@@ -1568,6 +1792,7 @@ class MibAdmin:
         _known |= {os.path.splitext(f['name'])[0] for f in compiled_files}
         orphans = {m: v for m, v in edited.items() if m not in _known}
 
+        _mib_resolver.facts_cache_save(raw_dir)
         return {
             'ok':              True,
             'raw':             raw_files,
@@ -1580,7 +1805,8 @@ class MibAdmin:
             # it. The panel used to count its own pending ROWS instead — one row per module,
             # where the job walks one unit per file NAME — so the button promised 14 and the
             # bar went to 15. Counting the work and doing the work must be one answer.
-            'pending':         _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir),
+            'pending':         _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir,
+                                                                files=_walk),
             # The modules that are macros and nothing else: no .py is produced for them and
             # none is missing. A row with no compiled module and no error reads as a compile
             # that quietly did nothing.
@@ -1590,6 +1816,76 @@ class MibAdmin:
             'compiled_dir':    compiled_dir,
             'known_repos':     _KNOWN_MIB_REPOS,
             'mib_repos':       cls._repo_templates(cfg),
+        }
+
+    @classmethod
+    def _repair_line_endings(cls, raw_dir: str) -> int:
+        """Undo, once, what a broken writer left in the library.
+
+        Every file imported before this was fixed went out through Python's text mode, which
+        on Windows adds a ``\r`` to every line terminator on the way out: an LF file was
+        stored as CRLF, and a CRLF file as ``\r\r\n``. Nothing crashed and nothing said so:
+        the compiler does not mind whitespace. What it cost was everything that COMPARES the
+        file — the source viewer showed a blank line between every line, and the archive
+        report called every MIB in the library "newer than installed", forever, because
+        importing it could not make the bytes match either.
+
+        So the undo is the exact inverse — **one** ``\r`` removed from each line terminator —
+        and not "collapse ``\r\r\n``". That distinction is not academic: some MIBs really
+        do ship with ``\r\r\n`` (LibreNMS carries a few dozen), and collapsing theirs
+        deletes a blank line the vendor wrote. Removing exactly what was added restores the
+        bytes that arrived, whatever they were.
+
+        In place, and keeping the modification time. The change is whitespace, so the
+        compiled module is still current — and touching two thousand mtimes would order a
+        rebuild of the whole library: hours of ASN.1 for a repair no compiler can see.
+
+        Once, guarded by a marker beside the tree: whatever arrives afterwards is written
+        correctly, so there is nothing to look for on every listing.
+        """
+        if not raw_dir or not os.path.isdir(raw_dir):
+            return 0
+        mark = os.path.join(os.path.dirname(raw_dir), _REPAIR_MARK)
+        if os.path.exists(mark):
+            return 0
+        fixed = 0
+        for _rel, full in _mib_resolver.iter_raw_mibs(raw_dir):
+            try:
+                with open(full, 'rb') as fh:
+                    blob = fh.read()
+                # One CR off each terminator, however many it has: `\r\n` → `\n`,
+                # `\r\r\n` → `\r\n`, `\n` → untouched.
+                repaired = re.sub(rb'\r(\r*\n)', rb'\1', blob)
+                if repaired == blob:
+                    continue
+                st = os.stat(full)
+                with open(full, 'wb') as fh:
+                    fh.write(repaired)
+                os.utime(full, (st.st_atime, st.st_mtime))
+                fixed += 1
+            except OSError:
+                continue
+        try:
+            with open(mark, 'w', encoding='utf-8') as fh:
+                fh.write('')
+        except OSError:
+            pass
+        return fixed
+
+    @classmethod
+    def list_mib_sources(cls, config: dict | None = None) -> dict:
+        """Where MIBs can be imported FROM: the known repositories and archives.
+
+        The same two keys `list_mibs` ends with, and none of what it does to get there.
+        That answer walks the whole raw tree, reads a header out of every file, hashes the
+        colliding ones and works out what is pending — seconds on a library that has had
+        LibreNMS imported into it — and the import screen was asking for all of it to fill
+        two dropdowns. This reads a list that is already in memory.
+        """
+        return {
+            'ok':          True,
+            'known_repos': _KNOWN_MIB_REPOS,
+            'mib_repos':   cls._repo_templates(config or {}),
         }
 
     @classmethod
@@ -1810,6 +2106,151 @@ class MibAdmin:
             if store is not None:
                 dropped = store.drop_all(_mib)
         return {'ok': True, 'history_deleted': dropped}
+
+    # ── What a deletion leaves behind ──────────────────────────────────────────
+    #
+    # Deleting a source does not delete what was made from it, and it cannot: the compiled
+    # module is a file of its own, flat in `compiled/`, named after the MODULE and carrying
+    # no trace of the folder its source came from — nothing in the library's shape says
+    # "these 381 .py files belong to the vendor folder you just removed". So they stay,
+    # loadable, uncompilable and unaccounted for.
+    #
+    # pysmi does record where it read from, in a header of its own that
+    # :func:`mib_resolver.compiled_source` knows how to read — which is what makes the
+    # leftovers findable at all.
+
+    @staticmethod
+    def _declared_modules(raw_dir: str) -> set:
+        """Every module name the raw library declares — from inside the files, not from
+        their names. `trunk.mib` is IEEE8023-LAG-MIB, and a compiled module is named after
+        what it declares, so this is the only set the two sides can be compared on."""
+        out = set()
+        for rel, full in _mib_resolver.iter_raw_mibs(raw_dir):
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            out.add(_mib_resolver.raw_facts(full, st)['module']
+                    or os.path.splitext(os.path.basename(rel))[0])
+        return out
+
+    @classmethod
+    def _stray_compiled(cls, raw_dir: str, compiled_dir: str) -> list:
+        """Compiled modules whose source is no longer in the library.
+
+        Two answers are NOT strays, and both would be destructive to treat as one:
+
+        * a module some raw file still declares — the source is there, whatever the file is
+          called and whichever folder it moved to;
+        * one pysmi did not read out of `raw/` at all — a dependency it resolved from its own
+          bundled MIBs or over HTTP. Nothing can rebuild those, and the modules that import
+          them stop loading the moment they go.
+        """
+        if not os.path.isdir(compiled_dir):
+            return []
+        _mib_resolver.facts_cache_load(raw_dir)
+        declared = cls._declared_modules(raw_dir)
+        _mib_resolver.facts_cache_save(raw_dir)
+        out = []
+        for f in sorted(os.listdir(compiled_dir)):
+            if not f.endswith('.py') or f.startswith('__') or f.startswith('.'):
+                continue
+            mib = f[:-3]
+            if mib in declared:
+                continue
+            src = _mib_resolver.compiled_source(compiled_dir, mib)
+            if not src:
+                continue
+            try:
+                size = os.path.getsize(os.path.join(compiled_dir, f))
+            except OSError:
+                continue
+            out.append({'name': f, 'mib': mib, 'source': src, 'size': size})
+        return out
+
+    @staticmethod
+    def _empty_raw_dirs(raw_dir: str) -> list:
+        """Folders under `raw/` with no file anywhere beneath them.
+
+        Deleting every MIB in a vendor folder leaves the folder: `os.remove` removes files.
+        A folder is empty here when nothing under it is a file — a parent whose only content
+        is empty folders is empty too, which is why this asks about the whole subtree
+        instead of walking bottom-up and stopping at the first branch.
+        """
+        if not os.path.isdir(raw_dir):
+            return []
+        seen, keep = set(), set()
+        for root, _dirs, files in os.walk(raw_dir):
+            if root != raw_dir:
+                seen.add(root)
+            if not files:
+                continue
+            node = root
+            while len(node) > len(raw_dir):
+                keep.add(node)
+                node = os.path.dirname(node)
+        return sorted(os.path.relpath(d, raw_dir).replace(os.sep, '/')
+                      for d in seen - keep)
+
+    @classmethod
+    def library_leftovers(cls, config: dict | None = None) -> dict:
+        """What is left over from deleting MIBs, without deleting any of it."""
+        cfg     = config or {}
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        if not var_dir:
+            return {'ok': False, 'message': 'Invalid parameters'}
+        raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')
+        compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled')
+        stray = cls._stray_compiled(raw_dir, compiled_dir)
+        dirs  = cls._empty_raw_dirs(raw_dir)
+        return {
+            'ok':          True,
+            'stray':       stray,
+            'stray_bytes': sum(e['size'] for e in stray),
+            'empty_dirs':  dirs,
+        }
+
+    @classmethod
+    def clean_library(cls, config: dict | None = None) -> dict:
+        """Delete the leftovers :meth:`library_leftovers` reports, and nothing else.
+
+        It re-reads them rather than taking a list from the caller: between the report and
+        the click somebody may have imported the very sources that would make a stray a
+        source again, and a delete list from a minute ago cannot know that.
+        """
+        cfg     = config or {}
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        if not var_dir:
+            return {'ok': False, 'message': 'Invalid parameters'}
+        raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')
+        compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled')
+        removed = 0
+        for entry in cls._stray_compiled(raw_dir, compiled_dir):
+            # From `os.listdir` of that one directory: a name, never a path.
+            path = os.path.join(compiled_dir, os.path.basename(entry['name']))
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError:
+                pass
+        # Deepest first: a parent is only empty once its children are gone.
+        folders = 0
+        for rel in sorted(cls._empty_raw_dirs(raw_dir),
+                          key=lambda r: r.count('/'), reverse=True):
+            target = _confined_path(raw_dir, *rel.split('/'))
+            if not target:
+                continue
+            try:
+                os.rmdir(target)
+                folders += 1
+            except OSError:
+                pass
+        if removed:
+            # The symbol catalogue names modules that are no longer there. Discarded, not
+            # rebuilt: the next MIB Browser open pays for one rebuild, this click does not.
+            _mib_catalog.discard(var_dir)
+        _mib_resolver.invalidate_cache()
+        return {'ok': True, 'compiled_deleted': removed, 'folders_removed': folders}
 
     @classmethod
     def get_mib_details(cls, config: dict | None = None) -> dict:
@@ -2076,7 +2517,7 @@ class MibAdmin:
         dest = _confined_path(raw_dir, filename)
         if not dest:
             return {'ok': False, 'message': 'Invalid filename'}
-        with open(dest, 'w', encoding='utf-8') as fh:
+        with open(dest, 'w', encoding='utf-8', newline='') as fh:
             fh.write(content if isinstance(content, str) else '')
         return {'ok': True, 'filename': filename}
 
@@ -2145,7 +2586,7 @@ class MibAdmin:
         if not dest:
             return {'ok': False, 'message': 'Invalid filename'}
         try:
-            with open(dest, 'w', encoding='utf-8') as fh:
+            with open(dest, 'w', encoding='utf-8', newline='') as fh:
                 fh.write(content)
         except OSError as exc:
             return {'ok': False, 'message': f'Save failed: {exc}'}
@@ -2345,7 +2786,7 @@ class MibAdmin:
     # ── Importing a vendor's archive ──────────────────────────────────────────
 
     @classmethod
-    def import_mib_archive(cls, config: dict | None = None) -> dict:
+    def import_mib_archive(cls, config: dict | None = None, on_progress=None) -> dict:
         """Download a ZIP of MIBs and compare it against what is already here.
 
         A vendor publishes its MIBs as one archive, and this is the other half of the known
@@ -2355,10 +2796,13 @@ class MibAdmin:
         **Comparison, not overwrite.** Every MIB carries a ``LAST-UPDATED`` stamp written by
         its author, and that is what says whether the archive is newer than what is installed —
         the file's own timestamp says only when it was downloaded. Each member comes back
-        labelled `new`, `updated`, `unchanged` or `older`, and:
+        labelled `new`, `updated`, `same_version`, `unchanged` or `older`, and:
 
         * `dry_run` reports all of that and writes nothing, which is the answer to "is it worth
           updating";
+        * every member is looked at — there is no ceiling on how many files an archive may
+          hold, because the one that was here answered about 2000 of LibreNMS's 4830 and
+          called the rest a footnote;
         * an `older` member is **skipped** unless `force` is set. Re-importing last year's
           archive over a MIB somebody updated by hand is a silent downgrade, and the symptom
           shows up much later as an OID that stopped resolving.
@@ -2370,6 +2814,9 @@ class MibAdmin:
         var_dir = str(cfg.get('__var_dir__') or '').strip()
         if not var_dir:
             return {'ok': False, 'message': 'No data directory', 'items': []}
+        # Before comparing anything against the library: a file this never touched would
+        # come back as a difference that no import can settle.
+        cls._repair_line_endings(os.path.join(var_dir, 'snmp_mibs', 'raw'))
         url = str(cfg.get('url') or '').strip()
         subdir = str(cfg.get('subdir') or '').strip()
         # A known source can be named instead of pasting its URL, so the panel offers the
@@ -2396,13 +2843,18 @@ class MibAdmin:
         # a single path.
         only = str(cfg.get('only') or '').strip().strip('/')
 
-        path, err = _download_archive(url, _MAX_ARCHIVE_BYTES)
+        _say = on_progress if callable(on_progress) else (lambda *_a: None)
+        _cache = _archive_cache_dir(var_dir)
+        _fresh = _truthy_import(cfg.get('redownload', False)) and 'redownload' in cfg
+        path, err, from_cache = _download_archive(
+            url, _MAX_ARCHIVE_BYTES, cache_dir=_cache, fresh=_fresh,
+            on_progress=lambda done, total: _say('downloading', done, total))
         if path is None:
             return {'ok': False, 'message': err, 'items': []}
 
         raw_dir = os.path.join(var_dir, 'snmp_mibs', 'raw')
         items, written, skipped = [], 0, 0
-        truncated, found = False, 0
+        found = 0
         try:
             with zipfile.ZipFile(path) as zf:
                 members = [m for m in zf.infolist()
@@ -2416,26 +2868,52 @@ class MibAdmin:
                                if _member_inner(m, strip).startswith(_pref)]
                     strip = f'{strip}/{only}'.strip('/')
                 found = len(members)
-                if found > _MAX_ARCHIVE_FILES:
-                    members = members[:_MAX_ARCHIVE_FILES]
-                    truncated = True
-                for member in members:
+                # Every member is a file read off the disk and compared, so a vendor
+                # library is thousands of them: what phase it is in and how far it has got
+                # are the two things anybody watching wants.
+                _phase = 'comparing' if dry_run else 'importing'
+                # "The content differs" is a claim, and the row could not back it up: same
+                # module, same LAST-UPDATED, and no way to see what the difference was. The
+                # diff is free here — both texts are already in hand — and capped, because
+                # four thousand of them is a payload nobody asked for.
+                _diffs = 0
+                for _i, member in enumerate(members):
+                    _say(_phase, _i, len(members))
                     row = cls._archive_member(zf, member, raw_dir, subdir, dry_run, force,
-                                              strip)
+                                              strip, want_diff=dry_run and _diffs < _MAX_DIFFS)
+                    if row.get('diff'):
+                        _diffs += 1
                     items.append(row)
                     if row.get('written'):
                         written += 1
                     elif row['state'] in ('older', 'rejected'):
                         skipped += 1
         except zipfile.BadZipFile:
+            # A kept copy that will not open is not an answer, it is a dead end: the button
+            # would report "Not a ZIP archive" for ever with nothing to press. Thrown away and
+            # fetched again, once — if the SERVER is serving something that is not a zip, the
+            # second attempt says so and stops.
+            if from_cache:
+                _rm_quiet(path)
+                return cls.import_mib_archive({**cfg, 'redownload': True}, on_progress)
             return {'ok': False, 'message': 'Not a ZIP archive', 'items': []}
         finally:
-            _rm_quiet(path)
+            # The cached copy is NOT deleted: the import that usually follows a comparison is
+            # about to want exactly this file. Anything that did not end up in the cache is —
+            # it is nobody's, and 86 MB of nobody's is what filled a disk with 93 of them.
+            # A `.part` is a download that never became a cache entry — the rename failed,
+            # or there was no cache to file it in. Either way it is nobody's.
+            if path and (path.endswith('.part') or not _cache):
+                _rm_quiet(path)
+            _prune_archive_cache(_cache)
 
         if written:
             _mib_resolver.invalidate_cache()
         items.sort(key=lambda i: i['name'])
         changed = [i for i in items if i['state'] in ('new', 'updated')]
+        # Counted apart, and said out loud: "0 newer" with twenty rows on screen reads as a
+        # report that contradicts itself.
+        same_ver = [i for i in items if i['state'] == 'same_version']
         return {
             'ok':       True,
             'items':    items,
@@ -2446,20 +2924,68 @@ class MibAdmin:
             'dry_run':  dry_run,
             'subdir':   subdir,
             'only':     only,
-            'truncated': truncated,
+            # How many members of the archive were MIB-shaped. Every one of them is
+            # looked at now; the number is still worth answering, because "4830 seen, 7
+            # differ" is a different report from "7 differ".
             'found':    found,
-            # The number that was there, not the number that fit: "stopped at 2000" reads as
-            # a ceiling somebody chose, and what the reader needs to know is how much is left
-            # — LibreNMS ships 4830 MIBs and 396 MB of them, which is a decision and not a
-            # detail. The way out is the vendor folder, which is one URL down.
+            'same_version': len(same_ver),
+            # Why it was instant. Comparing and then importing is the same archive twice, and
+            # the second time it is not downloaded at all.
+            'cached':   from_cache,
             'message':  ((f'{len(changed)} of {len(items)} MIB(s) newer than installed'
                           if dry_run else f'{written} MIB file(s) imported')
-                         + (f' — stopped at {_MAX_ARCHIVE_FILES} of {found}; '
-                            'import a vendor sub-folder for the rest' if truncated else '')),
+                         + (f' — {len(same_ver)} differ with no new version' if same_ver else '')),
         }
 
     @classmethod
-    def _archive_member(cls, zf, member, raw_dir, subdir, dry_run, force, strip='') -> dict:
+    def import_mib_archive_start(cls, config: dict | None = None) -> dict:
+        """Start the archive import in the background and return a job_id to poll.
+
+        The same shape as the GitHub import, and for the same reason: the work is a download
+        of tens of megabytes followed by thousands of comparisons, and a request that answers
+        when all of it is over is a screen with nothing to say for a minute or two.
+        """
+        cfg = config or {}
+        if not str(cfg.get('__var_dir__') or '').strip():
+            return {'ok': False, 'message': 'No data directory'}
+
+        job_id = uuid.uuid4().hex[:12]
+        _archive_jobs[job_id] = {'done': False, 'phase': 'downloading',
+                                 'completed': 0, 'total': 0, 'result': None}
+
+        def _progress_cb(phase, completed, total):
+            job = _archive_jobs.get(job_id)
+            if job is not None:
+                job['phase'], job['completed'], job['total'] = phase, completed, total
+
+        def _run():
+            try:
+                result = cls.import_mib_archive(cfg, on_progress=_progress_cb)
+            except Exception as exc:  # pylint: disable=broad-except
+                result = {'ok': False, 'message': str(exc), 'items': []}
+            job = _archive_jobs.get(job_id)
+            if job is not None:
+                job.update({'done': True, 'result': result})
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {'ok': True, 'job_id': job_id, 'done': False}
+
+    @classmethod
+    def import_mib_archive_status(cls, config: dict | None = None) -> dict:
+        """Poll an archive import started by *_start; the finished report arrives here."""
+        job_id = str((config or {}).get('job_id') or '').strip()
+        if job_id not in _archive_jobs:
+            return {'ok': False, 'message': 'Job not found or already collected'}
+        job = dict(_archive_jobs[job_id])
+        if not job.get('done'):
+            job.pop('result', None)
+            return {'ok': True, **job}
+        del _archive_jobs[job_id]          # cleanup on the first done-read
+        return {**(job.get('result') or {}), 'done': True}
+
+    @classmethod
+    def _archive_member(cls, zf, member, raw_dir, subdir, dry_run, force, strip='',
+                        want_diff=False) -> dict:
         """One file out of the archive: what it is, what is here, and what was done."""
         name = os.path.basename(member.filename)
         # The archive's own folders are kept — a vendor lays its MIBs out for a reason — under
@@ -2473,35 +2999,45 @@ class MibAdmin:
                                          for seg in inner.split('/')]) if p]
         rel = _safe_mib_relpath('/'.join(parts + [name]), 'raw')
         row = {'name': '/'.join(parts + [name]), 'state': 'rejected', 'written': False,
-               'version': '', 'installed': ''}
-        if not rel or member.file_size > _MAX_MEMBER_BYTES:
+               'version': '', 'installed': '', 'size': int(member.file_size or 0)}
+        # WHY, because "rejected" on its own is a word, not an answer — and the three
+        # reasons want three different things done about them.
+        if not rel:
+            row['reason'] = 'name'
+            return row
+        if member.file_size > _MAX_MEMBER_BYTES:
+            row['reason'] = 'too_big'
+            row['limit'] = _MAX_MEMBER_BYTES
+            row['preview'] = _member_head(zf, member)
             return row
         dest = _confined_path(raw_dir, *rel.split('/'))
         if not dest:
+            row['reason'] = 'path'
             return row
         row['name'] = rel
         try:
             incoming = zf.read(member).decode('utf-8', errors='replace')
         except Exception:  # pylint: disable=broad-except
+            row['reason'] = 'unreadable'
             return row
         # A vendor archive carries its own readme, its licence and sometimes a spreadsheet.
         # None of them is a MIB, and the name is not what settles that.
         if not _is_mib_source(incoming):
             row['state'] = 'not_a_mib'
+            # The file itself, so the call can be checked instead of trusted. A vendor
+            # archive carries readmes and licences — and it also carries MIBs written in a
+            # shape a detector had not met, which is how this one was found.
+            row['preview'] = _head_lines(incoming)
             return row
 
         row['version'] = _mib_last_updated(incoming)
-        current = None
-        if os.path.isfile(dest):
-            try:
-                with open(dest, encoding='utf-8', errors='replace') as fh:
-                    current = fh.read()
-            except OSError:
-                current = None
+        # As CONTENT, not as bytes: the same MIB shipped with CRLF and stored with LF is the
+        # same MIB, and comparing the bytes said "newer" about every one of them, forever.
+        current = _text_of(dest)
 
         if current is None:
             row['state'] = 'new'
-        elif current == incoming:
+        elif current == _normalized(incoming):
             row['state'] = 'unchanged'
         else:
             row['installed'] = _mib_last_updated(current)
@@ -2510,8 +3046,23 @@ class MibAdmin:
             # file cannot be compared at all — a difference is then simply a difference.
             if row['version'] and row['installed'] and row['installed'] > row['version']:
                 row['state'] = 'older'
+            elif row['version'] and row['installed'] == row['version']:
+                # The content differs and the author calls it the same revision. Saying
+                # "updated" there claims something nobody claimed: 201505011057Z →
+                # 201505011057Z is not an update, whatever it is. It is still imported — a
+                # vendor does re-cut a MIB without touching the stamp — but the row says what
+                # it actually is, and the summary does not count it as newer.
+                row['state'] = 'same_version'
             else:
                 row['state'] = 'updated'
+            # What the difference IS. The row claimed one and could not back it up: same
+            # module, same date, and no way to see what had changed. Free here — both texts
+            # are already in hand — and asked for by the caller, because the budget belongs
+            # to the report and not to one member of it.
+            if want_diff:
+                _d = _unified_diff(current, 'installed', _normalized(incoming), 'archive')
+                row['diff'] = _d['diff']
+                row['diff_truncated'] = _d['truncated']
 
         if dry_run or row['state'] == 'unchanged':
             return row
@@ -2519,7 +3070,7 @@ class MibAdmin:
             return row
         try:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, 'w', encoding='utf-8') as fh:
+            with open(dest, 'w', encoding='utf-8', newline='') as fh:
                 fh.write(incoming)
             row['written'] = True
         except OSError as exc:

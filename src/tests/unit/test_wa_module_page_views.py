@@ -60,13 +60,11 @@ class TestTheScanItself:
 
 class TestTheLayoutsBelongToTheCore:
 
-    def test_no_shipped_module_declares_its_own_page_renderer(self):
-        """A module CAN ship one — the mechanism stays — but none does today, and the one
-        that did had drifted into an older copy of the core's. A new one appearing is worth
-        a conversation, not a silent second implementation."""
+    def _own_renderers(self):
+        """Every module that declares a page renderer of its own, as (module, function)."""
         import json                                          # noqa: PLC0415
         wf = os.path.join(SRC, 'watchfuls')
-        offenders = []
+        out = []
         for entry in sorted(os.listdir(wf)):
             sp = os.path.join(wf, entry, 'schema.json')
             if not os.path.isfile(sp):
@@ -76,10 +74,49 @@ class TestTheLayoutsBelongToTheCore:
             except ValueError:
                 continue
             if isinstance(decl, dict) and decl.get('render'):
-                offenders.append(f"{entry} -> {decl['render']}")
-        assert not offenders, (
-            'these ship their own page renderer instead of using the core one: '
-            + ', '.join(offenders) + ' — the core one already lays out this exact shape')
+                out.append((entry, decl['render']))
+        return out
+
+    def test_a_module_renderer_is_for_a_shape_the_core_has_none_of(self):
+        """The rule this file exists for, stated where the line actually is.
+
+        The core's four layouts are for the core's SHAPE: sections of rows, each with a
+        state, a message and what the check measured. A module answering that shape gets
+        them for free and must not paint its own — that is how m365 ended up shipping an
+        older copy of them.
+
+        A module whose page is not that shape has nothing to reuse. The MIB manager is one:
+        a toolbar, an import panel, a compile job with a progress bar and a file list with
+        editors behind it — there are no sections, no rows and no measurements. What makes it
+        legitimate is precisely that it does NOT answer the generic hook: a module that
+        supplies `page_data` has declared the core's shape, and then a renderer of its own is
+        a second implementation of something that already exists.
+        """
+        for module, fn in self._own_renderers():
+            hook = os.path.join(SRC, 'watchfuls', module, 'page.py')
+            has_page_data = os.path.isfile(hook) and 'def page_data' in _read(hook)
+            assert not has_page_data, (
+                f'{module} answers page_data AND ships {fn}: the core already lays out that '
+                'shape, and a copy of it is the thing this file is here to prevent')
+
+    def test_a_module_renderer_does_not_copy_the_core_layouts(self):
+        """The failure mode m365 had: a renderer that started as the core's and stopped
+        tracking it. Reusing the core's helpers is fine; re-implementing them is the copy."""
+        for module, _fn in self._own_renderers():
+            ui = os.path.join(SRC, 'watchfuls', module, 'web', '_ui.html')
+            if not os.path.isfile(ui):
+                continue
+            src = _read(ui)
+            for own in ('function _mpRow(', 'function _mpViewCards(', '_MP_STATE_CLS ='):
+                assert own not in src, f'{module} re-implements the core layout: {own}'
+
+    def test_a_declared_renderer_exists(self):
+        """A page whose render is a name nobody defined is a section that opens on nothing —
+        and it fails in the browser, where no Python test would ever see it."""
+        for module, fn in self._own_renderers():
+            ui = os.path.join(SRC, 'watchfuls', module, 'web', '_ui.html')
+            assert os.path.isfile(ui), f'{module} declares {fn} and ships no web/_ui.html'
+            assert f'function {fn}(' in _read(ui), f'{module} declares {fn}, which is not defined'
 
     def test_the_retired_renderer_is_really_gone(self):
         """Deleted, not merely unreferenced: a dead copy left in the tree is the one the

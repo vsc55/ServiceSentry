@@ -330,6 +330,7 @@ etiqueta, los datos y (si quiere) el renderizador.
 | `icon`, `order` | icono BI de la sidebar y posición entre las secciones (las del core usan 10/20/30). |
 | `render` | nombre de la función JS que el cableado llama al abrir el panel; el módulo la envía en su `web/_ui.html`, igual que el `fn` de un `CONFIG_ACTION`. Vacío = el core pinta solo con los datos del hook. |
 | `perm` | permiso que protege **la ruta y** la entrada de la sidebar. Por defecto `modules_view`: un watchful no tiene manifiesto Python, así que **no posee flags propios** y debe reutilizar uno existente. |
+| `placement` | **dónde** va la entrada: `section` (por defecto) de primer nivel, o `system` dentro del acordeón del panel. La distinción es qué se hace con la sección: una que se **mira** va arriba con los paneles; una que se **administra** —la biblioteca de MIBs de `snmp`— va donde ya están Servicios, Módulos y Credenciales. El core la coloca y sigue sin saber qué módulo la pidió; el panel, el permiso, el cableado y las vistas son los mismos en las dos. |
 | `views` | las **vistas** de la sección, con dos o más. Un módulo con dos cosas que enseñar no reclama una segunda sección —serían dos entradas de sidebar, dos permisos que mantener a la par, dos paneles y dos rutas para algo que el lector piensa como un sitio— sino que declara sus vistas aquí: la entrada pasa a ser un padre con flyout (el patrón que ya usan Infraestructura y Acceso) y cada vista es un sub-path que comparte panel y permiso. |
 
 El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una clave del core.
@@ -345,7 +346,9 @@ El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una 
   `WATCHFUL_ACTIONS` y sirve él mismo. Devolviendo la misma forma que `page_data`, la página tiene
   **un solo renderizador**, no dos.
 
-**Vistas.** Cuando el módulo tiene más de una cosa que enseñar no reclama una segunda sección
+**Vistas.** (Valen igual con `placement: "system"`: la entrada del panel se convierte en el
+mismo padre con flyout.) Cuando el módulo tiene más de una cosa que enseñar no reclama una
+segunda sección
 —serían dos entradas de menú, dos permisos que mantener a la par, dos paneles y dos rutas para
 algo que el lector piensa como un sitio— sino que declara `views`. La entrada pasa a ser un padre
 con flyout (el patrón de Infraestructura y Acceso) y cada vista es un **sub-path**

@@ -39,7 +39,14 @@ function _mpActiveView(spec) {
  *  open, so this is the same entry point without the tab machinery. */
 function renderModulePageView(pageId) {
     const spec = (window.SS_STANDALONE_PAGES || []).find(p => p.id === pageId);
-    if (spec) renderModulePage(spec);
+    if (!spec) return;
+    // A section that ships its own renderer draws its own views too. The core knows the
+    // pane, the URL and which view the URL points at; what goes in it was never its
+    // business, and calling the generic renderer here painted the core's layout over a
+    // module page that had already declared it draws itself.
+    const own = spec.render ? window[spec.render] : null;
+    if (typeof own === 'function') return own();
+    renderModulePage(spec);
 }
 
 /** Section entry point for every module page without its own renderer. The wiring

@@ -43,6 +43,7 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
         'list_profiles',
         'detect_profiles',
         'list_mibs',
+        'list_mib_sources',
         'compile_mibs',
         'compile_mibs_start',
         'compile_mibs_status',
@@ -54,6 +55,8 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
         'import_mib_from_github_start',
         'import_mib_from_github_status',
         'import_mib_archive',
+        'import_mib_archive_start',
+        'import_mib_archive_status',
         'get_mib_details',
         'get_raw_mib_details',
         'get_all_symbols',
@@ -67,8 +70,11 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
         'delete_mib_version',
         'orphan_versions',
         'diff_mib_files',
+        'mib_dupe_details',
         'restore_orphan',
         'forget_mib_versions',
+        'library_leftovers',
+        'clean_library',
     })
 
     # Actions that produce no side effects — audit logging is suppressed for them.
@@ -77,6 +83,7 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
         'list_profiles',
         'detect_profiles',
         'list_mibs',
+        'list_mib_sources',
         'get_mib_details',
         'get_raw_mib_details',
         'get_all_symbols',
@@ -86,6 +93,8 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
         'lint_mib_source',
         'orphan_versions',
         'diff_mib_files',
+        'mib_dupe_details',
+        'library_leftovers',
     })
 
 

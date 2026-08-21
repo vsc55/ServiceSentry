@@ -239,17 +239,24 @@ class TestTheMibManagerScreen:
         is a dependency source for compiling, not the place to import from. Listed in the
         folder dropdown it looks like the main way in, and it is the small version."""
         js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
-        block = js.split('function _mibPopulateGithub')[1].split('function ')[0]
+        block = js.split('function _mibPopulateRepoSelect')[1].split('function ')[0]
         assert 'if (!r.folder) continue' in block
 
-    def test_the_import_report_cannot_push_the_dialog_open(self):
-        """A first import is twenty "new" rows. Left to grow, the list pushes the buttons
-        that act on it off the bottom of the screen — at the one moment they are needed."""
+    def test_the_import_report_is_read_at_the_height_of_the_page(self):
+        """It used to cap itself: a first import is twenty "new" rows, and inside a dialog a
+        list left to grow pushes the buttons that act on it off the bottom of the screen.
+
+        The cap was the dialog's fault, and the dialog is gone — importing is a view of the
+        section now, precisely because comparing against LibreNMS answers four thousand rows
+        and no capped box is a way to read that. So the report fills instead: `.ss-vfill`
+        down to one `.ss-vscroll`, header and count pinned, only the list scrolling."""
         js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
         fn = _fn(js, '_mibArchiveReport')
-        assert 'ss-scroll-box' in fn
+        assert 'ss-vfill' in fn and 'ss-vscroll' in fn
+        assert 'ss-scroll-box' not in fn, 'still capped at the height of a dialog'
         css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
-        assert '.ss-scroll-box' in css, 'the class the report relies on does not exist'
+        assert '.ss-vfill' in css and '.ss-vscroll' in css, \
+            'the chain the report relies on does not exist'
 
     def test_the_bounded_box_is_a_reusable_class_and_not_an_id(self):
         """The panel has one rule about layout CSS: a generic class, never a per-id rule."""

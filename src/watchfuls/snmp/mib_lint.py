@@ -83,8 +83,18 @@ _SEQ_BODY_RE = re.compile(
     r'^[ \t]*[A-Za-z][A-Za-z0-9_-]*\s*::=\s*SEQUENCE\s*\{(.*?)\}', re.MULTILINE | re.DOTALL)
 _SEQ_FIELD_RE = re.compile(r'([A-Za-z][A-Za-z0-9_-]*)\s+([A-Za-z][A-Za-z0-9_-]*)')
 
-_COMMENT_RE = re.compile(r'--.*?(?:--|$)', re.MULTILINE)
-_STRING_RE = re.compile(r'"(?:[^"]|"")*"', re.DOTALL)
+# Comments and strings are found by SCANNING, not by two regexes taking turns. The turns
+# were the bug: strings were blanked first, so a stray `"` inside a comment —
+#
+#     --     configuration information. "
+#
+# opened a string that ran to the next quote hundreds of lines later, and everything in
+# between disappeared, module declaration included. Two real MIBs in LibreNMS are written
+# that way (DELL-NETWORKING-DCB-MIB, DSR4410MD-MIB) and both were refused as "not a MIB".
+#
+# Doing it the other way round only swaps which mistake is made: a `--` inside a DESCRIPTION
+# would then start a comment. Whichever opens FIRST wins, which is what a lexer does and what
+# this is.
 
 
 _MODULE_NAME_RE = re.compile(
@@ -100,7 +110,32 @@ def module_name(text: str) -> str:
     A file can be renamed or moved between vendor folders; what it calls itself cannot change
     without it becoming a different module.
     """
-    m = _MODULE_NAME_RE.search(_blank(text or '')[:200000])
+    return _in_header(text, lambda t: _first(_MODULE_NAME_RE, _blank(t)))
+
+
+# How much of a file to look at before looking at more. A MIB says what it is in its first
+# lines; a legal preamble can be long, and ADIC's runs to a hundred and sixteen. Reading the
+# whole 200 KB to answer a question the first 16 KB answers is what made opening the section
+# take a minute — over five thousand files, the difference is the wait.
+_HEADER_WINDOWS = (16000, 64000, 200000)
+
+
+def _in_header(text: str, answer):
+    """Ask *answer* about the head of *text*, widening only while it says nothing."""
+    src = text or ''
+    prev = 0
+    for size in _HEADER_WINDOWS:
+        if prev >= len(src):
+            break
+        got = answer(src[:size])
+        if got:
+            return got
+        prev = size
+    return ''
+
+
+def _first(rx, text: str) -> str:
+    m = rx.search(text)
     return m.group(1) if m else ''
 
 
@@ -122,10 +157,9 @@ def last_updated(text: str) -> str:
     # Comments blanked, STRINGS KEPT: the date lives inside a quoted string, and _blank()
     # takes those out too — it exists for the linter, which reads code and must not read
     # prose. Here the prose is the answer.
-    m = _LAST_UPDATED_RE.search(_no_comments((text or '')[:200000]))
-    if not m:
+    d = _in_header(text, lambda t: _first(_LAST_UPDATED_RE, _no_comments(t)))
+    if not d:
         return ''
-    d = m.group(1)
     if len(d) == 10:                            # YYMMDDHHMM
         yy = int(d[:2])
         d = ('19' if yy >= 70 else '20') + d
@@ -145,7 +179,7 @@ def declared_names(text: str) -> set:
 
 def _no_comments(text: str) -> str:
     """The file with its comments blanked out. Strings survive."""
-    return _COMMENT_RE.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+    return _mask(text, strings=False)
 
 
 def _blank(text: str) -> str:
@@ -154,9 +188,76 @@ def _blank(text: str) -> str:
     Line numbers have to survive — a finding without the right line is a finding somebody has
     to go and find — so everything is replaced by spaces of the same length rather than cut.
     """
-    def _keep_lines(m):
-        return re.sub(r'[^\n]', ' ', m.group(0))
-    return _COMMENT_RE.sub(_keep_lines, _STRING_RE.sub(_keep_lines, text))
+    return _mask(text, strings=True)
+
+
+def _mask(text: str, strings: bool) -> str:
+    """One left-to-right pass, blanking comments and (optionally) quoted text.
+
+    Same length, same newlines: every masked character becomes a space, so a line number is
+    still a line number afterwards.
+
+    ASN.1's two rules, applied in the only order that is not a guess — whichever opens first:
+    a comment runs from ``--`` to the next ``--`` or the end of its line; a string runs from
+    ``"`` to the next ``"``, may span lines, and doubles the quote to escape it.
+    """
+    src = text or ''
+    n = len(src)
+    if n == 0:
+        return src
+    # Jumped, not walked: `_OPENS` finds the next `"` or `--` at C speed and everything
+    # between two of them is copied in one slice. A character-at-a-time loop over the 200 KB
+    # of every file in a five-thousand-MIB library is a minute of somebody's afternoon.
+    out = []
+    at = 0
+    i = 0
+    while i < n:
+        m = _OPENS.search(src, i)
+        if m is None:
+            break
+        i = m.start()
+        if src[i] == '"':
+            j = i + 1
+            while True:
+                k = src.find('"', j)
+                if k < 0:
+                    j = n
+                    break
+                if k + 1 < n and src[k + 1] == '"':      # "" — an escaped quote
+                    j = k + 2
+                    continue
+                j = k + 1
+                break
+            if not strings:
+                i = j
+                continue
+        else:
+            end = src.find('\n', i + 2)
+            end = n if end < 0 else end
+            k = src.find('--', i + 2)
+            j = k + 2 if 0 <= k < end else end
+        out.append(src[at:i])
+        out.append(_spaces(src[i:j]))
+        at = j
+        i = j
+    out.append(src[at:])
+    return ''.join(out)
+
+
+# The two things that open something in ASN.1. Whichever comes first wins — that is the whole
+# rule, and it is the one the two-regex version could not express.
+_OPENS = re.compile(r'"|--')
+
+
+def _spaces(chunk: str) -> str:
+    """*chunk* with every character but the newlines turned into a space.
+
+    The length and the lines have to survive: a finding is reported at a line number, and one
+    reported at the wrong line is one somebody has to go and find.
+    """
+    if '\n' not in chunk:
+        return ' ' * len(chunk)
+    return '\n'.join(' ' * len(part) for part in chunk.split('\n'))
 
 
 def _line_of(text: str, pos: int) -> int:

@@ -34,6 +34,10 @@
     background: var(--bs-body-secondary-bg, var(--bs-secondary-bg));
 }
 
+/* The diff of one row of a comparison report. A height, because `.mib-src .CodeMirror`
+   fills what it is given and a box with no height is an editor of no lines. */
+.mib-arch-diff { height: 14rem; }
+
 /* The line a compiler named. Painted on the line background rather than the gutter: the
    gutter number is what you searched for, the line is what you came to read. */
 .mib-src-badline { background: rgba(var(--bs-danger-rgb), .18); }
@@ -44,8 +48,10 @@
 /* MIB Manager — hidden native file input (button is the label) */
 #mibFileInput { display: none; }
 
-/* MIB Manager — stop compile button (shown only during compilation) */
-#mibStopBtn { display: none; }
+/* MIB Manager — stop button (shown only while a cancellable job is running).  A class and
+   not an id: there are two of them now — the section's, for a compile, and the import
+   dialog's, for a download — and they are the same button in two places. */
+.mib-stop { display: none; }
 
 /* MIB Manager — pysmi availability status badge */
 #mibPysmiStatus { font-size: .72rem; }
@@ -63,16 +69,17 @@
 /* MIB Manager — URL import input (fills remaining flex space) */
 #mibImportUrlInput { min-width: 0; flex: 1; }
 
-/* MIB Manager — compilation progress section (shown during compile jobs) */
-#mibProgressSection { display: none; }
+/* MIB Manager — a job's progress, wherever it is being watched: the section paints one
+   under its toolbar for compiling, the import dialog paints its own for a download.  Hidden
+   until a job starts (the JS sets an explicit `display:block`, never ''). */
+.mib-progress { display: none; }
 
-/* MIB Manager — progress label and percentage text */
-#mibProgressLabel,
-#mibProgressPct { font-size: .78rem; }
+/* …its label and percentage */
+.mib-progress-text { font-size: .78rem; }
 
-/* MIB Manager — progress bar track dimensions */
-#mibProgressSection .progress { height: 5px; border-radius: 3px; }
+/* …its track */
+.mib-progress .progress { height: 5px; border-radius: 3px; }
 
-/* MIB Manager — progress bar initial width (JS updates style.width at runtime) */
-#mibProgressBar { width: 0%; }
+/* …and its bar, empty until the first tick (JS updates style.width at runtime) */
+.mib-progress .progress-bar { width: 0%; }
 </style>

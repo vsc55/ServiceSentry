@@ -38,6 +38,34 @@ from lib.core.overview.discovery import discover_overview_widgets_public as _dis
 from ..constants import page_label, standalone_pages
 
 
+def _panel_tabs(wa, lang: str) -> list:
+    """Every entry of the System panel, translated and in alphabetical order.
+
+    The core's own tabs plus the pages a module declared belong here
+    (``__page__`` with ``"placement": "system"``). Merged before sorting rather than appended
+    after: a module section pinned to the end reads as an afterthought, and where a thing
+    came from is not what somebody scanning a menu is looking for.
+    """
+    from lib.web_admin.constants import (PANEL_TABS, page_label,  # noqa: PLC0415
+                                         standalone_pages, tab_sort_key)
+    out = [{'id': t['id'], 'icon': t['icon'], 'label': wa._t(t['label_key'])}
+           for t in PANEL_TABS]
+    for p in standalone_pages():
+        sa = p.get('standalone') or {}
+        if sa.get('placement') != 'system':
+            continue
+        # `url` and `views` travel with it: a module section HAS a URL of its own, and a
+        # section with several views is several destinations. Placement decides where the
+        # entry is drawn, never what it is — the flyout that lists the views of a top-level
+        # section is the same flyout here.
+        out.append({'id': p['id'], 'icon': sa.get('icon', 'bi-grid-1x2'),
+                    'label': page_label(p, lang), 'url': p['url'],
+                    'views': _view_specs(p, lang),
+                    'module': sa.get('module', ''), 'perm': sa.get('perm', '')})
+    out.sort(key=lambda t: tab_sort_key(t['label']))
+    return out
+
+
 def _view_specs(page: dict, lang: str) -> list:
     """A section's views, with each label resolved for this language.
 
@@ -90,6 +118,11 @@ def register(app, wa):
             # ships them all and the client decides — `module` travels on the spec, the
             # sidebar puts it on the entry as data-nav-module, and syncModuleSections() is
             # what hides or reveals it.
+            # The System panel's entries, resolved and sorted HERE because both are
+            # language-dependent: the label is a translation and alphabetical is a property
+            # of the translated word. Core tabs and module-contributed ones are one list —
+            # a reader looking for "SNMP" should not have to know it came from a module.
+            panel_tabs=_panel_tabs(wa, _lang),
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
                                'views': _view_specs(p, _lang),
                                'label': (wa._t(p['standalone']['nav_label_key'])

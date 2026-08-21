@@ -156,6 +156,11 @@ class TestTheListCarriesThem:
         assert out['errors'] == {}
 
     def test_an_untouched_mib_is_not_reported_as_edited(self, tmp_path):
+        """The list has to be able to tell the vendor's own file from one somebody fixed
+        three weeks ago, and with no database behind it the honest answer is 'nobody has'."""
+        assert MA.list_mibs(self._tree(tmp_path))['edited'] == {}
+
+    def test_an_untouched_mib_is_not_reported_as_edited(self, tmp_path):
         """The list has to tell the vendor's own file from one somebody fixed three weeks
         ago, and with no database behind it the honest answer is that nobody has."""
         assert MA.list_mibs(self._tree(tmp_path))['edited'] == {}

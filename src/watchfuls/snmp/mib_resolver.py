@@ -359,12 +359,15 @@ def iter_raw_mibs(raw_dir: str) -> list:
         if depth >= RAW_MAX_DEPTH:
             dirs[:] = []
         dirs[:] = sorted(d for d in dirs if not d.startswith('.') and not d.startswith('__'))
+        rel_root = root[len(base):].lstrip(os.sep).replace(os.sep, '/')
         for f in sorted(files):
             if f.startswith('.'):
                 continue
-            full = os.path.join(root, f)
-            if os.path.isfile(full):
-                out.append((os.path.relpath(full, base).replace(os.sep, '/'), full))
+            # No `isfile` here: `os.walk` has already separated the files from the
+            # directories, and asking the filesystem again is five thousand more calls on a
+            # library with LibreNMS in it. Whatever is left (a broken link) fails its `stat`
+            # at the one place that needs one, and is skipped there.
+            out.append((f'{rel_root}/{f}' if rel_root else f, os.path.join(root, f)))
     return out
 
 
@@ -523,7 +526,7 @@ _MODULE_NAME_CACHE: dict = {}
 MACRO_ONLY_MIBS: tuple = ('RFC-1212', 'RFC-1215')
 
 
-def raw_facts(path: str) -> dict:
+def raw_facts(path: str, st=None) -> dict:
     """What a raw MIB DECLARES about itself: its module name and its date.
 
     One read for both, because they come out of the same header and the listing asks for both
@@ -531,8 +534,11 @@ def raw_facts(path: str) -> dict:
     """
     if not path:
         return {'module': '', 'updated': ''}
+    # *st* is the caller's stat when it already has one: the listing stats every file to
+    # show its size, and asking again for the cache key is a second five thousand calls for
+    # an answer already in hand.
     try:
-        st = os.stat(path)
+        st = st if st is not None else os.stat(path)
         key = (st.st_mtime, st.st_size)
     except OSError:
         return {'module': '', 'updated': ''}
@@ -563,6 +569,68 @@ def raw_module_name(path: str) -> str:
 # Enough of a file to find its header past any preamble. Vendor MIBs open with licences of
 # two hundred lines; nothing puts the declaration further in than this.
 _MODULE_NAME_READ = 200000
+
+
+# ── What was read out of each file, kept between runs ────────────────────────────────
+# The in-memory cache above answers the second question about a file; this one answers the
+# first, after a restart. A library with LibreNMS in it is five thousand files, and reading
+# the head of every one of them is most of the time the section takes to open — a wait paid
+# again on every restart, for facts that only change when a file does.
+#
+# Keyed by path RELATIVE to the raw folder so a data directory that moves does not invalidate
+# everything, and validated on (mtime, size) exactly like the memory cache: this is a
+# shortcut, never an authority.
+_FACTS_FILE = '.facts-cache.json'
+
+
+def _facts_cache_path(raw_dir: str) -> str:
+    return os.path.join(os.path.dirname(raw_dir), _FACTS_FILE) if raw_dir else ''
+
+
+def facts_cache_load(raw_dir: str) -> None:
+    """Prime the fact cache from disk. Silent about everything: a cache that fails is a
+    cache that is not there, which is a slower answer and never a wrong one."""
+    path = _facts_cache_path(raw_dir)
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        with io.open(path, encoding='utf-8') as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    for rel, row in data.items():
+        try:
+            mtime, size, module, updated = row
+            full = os.path.join(raw_dir, *str(rel).split('/'))
+            _MODULE_NAME_CACHE.setdefault(
+                full, ((float(mtime), int(size)),
+                       {'module': str(module), 'updated': str(updated)}))
+        except (TypeError, ValueError):
+            continue
+
+
+def facts_cache_save(raw_dir: str) -> None:
+    """Write back what is known about the files that are still there."""
+    path = _facts_cache_path(raw_dir)
+    if not path:
+        return
+    base = os.path.abspath(raw_dir)
+    out = {}
+    for full, (key, facts) in list(_MODULE_NAME_CACHE.items()):
+        ap = os.path.abspath(full)
+        if not ap.startswith(base):
+            continue
+        rel = os.path.relpath(ap, base).replace(os.sep, '/')
+        out[rel] = [key[0], key[1], facts.get('module', ''), facts.get('updated', '')]
+    try:
+        tmp = path + '.part'
+        with io.open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(out, fh, separators=(',', ':'))
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 # Which raw file a compiled module was built from, cached on (mtime, size): a .py only
@@ -600,8 +668,12 @@ def compiled_source(compiled_dir: str, mib: str) -> str:
     return rel
 
 
-def pending_raw_mibs(raw_dir: str, compiled_dir: str) -> list:
+def pending_raw_mibs(raw_dir: str, compiled_dir: str, files=None) -> list:
     """Names of raw MIBs with no compiled module, or one older than the source.
+
+    *files* is the walk of the raw tree, when the caller already has one: the listing needs
+    the same five thousand entries this does, and walking twice is a second helping of the
+    most expensive thing either of them does.
 
     Per FILE, where :func:`raw_dir_has_new_mibs` answers per DIRECTORY against the newest
     compiled module of them all. That coarser answer is what made the automatic compile an
@@ -621,7 +693,7 @@ def pending_raw_mibs(raw_dir: str, compiled_dir: str) -> list:
     # Which files carry which module, because both questions below are about the module and
     # neither is about the file's name.
     by_module: dict = {}
-    for rel, path in iter_raw_mibs(raw_dir):
+    for rel, path in (iter_raw_mibs(raw_dir) if files is None else files):
         by_module.setdefault(
             raw_module_name(path) or os.path.splitext(os.path.basename(rel))[0], []
         ).append((rel, path))

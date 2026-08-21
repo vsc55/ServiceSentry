@@ -57,6 +57,21 @@ def _dupes(cfg):
     return MA.list_mibs(cfg)['dupes']
 
 
+def _details(cfg, mib):
+    """What the copies of one module hold — asked of the action that reads them.
+
+    Split from the listing on purpose: WHICH modules collide is a grouping of facts the
+    listing already has, and what is IN each copy costs a read of every one. On a library
+    with LibreNMS in it that was four minutes, paid on every load, for panels nobody opened.
+    """
+    group = _dupes(cfg)[mib]
+    out = MA.mib_dupe_details({**cfg, 'mib': mib,
+                               'names': [f['name'] for f in group['files']]})
+    assert out['ok'], out
+    return {**group, **out,
+            'files': [{**f, 'sha': out['sha'][f['name']]} for f in group['files']]}
+
+
 def _mib(name, body=''):
     return f'{name} DEFINITIONS ::= BEGIN\n{body}END\n'
 
@@ -100,14 +115,14 @@ class TestWhetherTheyDiffer:
     def test_identical_copies_say_so(self, tree):
         _put(tree, 'net/X-MIB.txt', _mib('X-MIB'))
         _put(tree, 'vendor/X-MIB.my', _mib('X-MIB'))
-        d = _dupes(tree)['X-MIB']
+        d = _details(tree, 'X-MIB')
         assert d['same'] is True
         assert len({f['sha'] for f in d['files']}) == 1
 
     def test_different_copies_say_so(self, tree):
         _put(tree, 'net/X-MIB.txt', _mib('X-MIB'))
         _put(tree, 'vendor/X-MIB.my', _mib('X-MIB', 'xThing OBJECT-TYPE\n'))
-        d = _dupes(tree)['X-MIB']
+        d = _details(tree, 'X-MIB')
         assert d['same'] is False
         assert len({f['sha'] for f in d['files']}) == 2
 
@@ -117,14 +132,14 @@ class TestWhetherTheyDiffer:
         a difference that was never there."""
         _put(tree, 'net/X-MIB.txt', _mib('X-MIB'), newline='\n')
         _put(tree, 'vendor/X-MIB.my', _mib('X-MIB'), newline='\r\n')
-        assert _dupes(tree)['X-MIB']['same'] is True
+        assert _details(tree, 'X-MIB')['same'] is True
 
     def test_the_answer_agrees_with_the_diff(self, tree):
         """Two askings of one question: 'are these different' and 'what is the difference'
         cannot be allowed to disagree."""
         _put(tree, 'net/X-MIB.txt', _mib('X-MIB'), newline='\r\n')
         _put(tree, 'vendor/X-MIB.my', _mib('X-MIB'), newline='\n')
-        same = _dupes(tree)['X-MIB']['same']
+        same = _details(tree, 'X-MIB')['same']
         diff = MA.diff_mib_files({**tree, 'a': 'net/X-MIB.txt', 'b': 'vendor/X-MIB.my'})
         assert same is diff['identical']
 
@@ -154,12 +169,16 @@ class TestWhichCopyIsUsed:
 
     def test_with_nothing_compiled_yet_pysmi_is_asked_instead(self, tree):
         """There is no record to read, so the only answer left is the prediction — asked the
-        way the compiler asks it, by FILE name, which is how a source is located."""
+        way the compiler asks it, by FILE name, which is how a source is located.
+
+        Asked when a group is OPENED and not while the list is drawn: the reader tries every
+        name variant in every directory it was given, which on a real library came to 1.19
+        million filesystem checks and four minutes before a single row appeared."""
         pytest.importorskip('pysmi')
         _put(tree, 'net/X-MIB.txt', _mib('X-MIB'))
         _put(tree, 'vendor/X-MIB.my', _mib('X-MIB', 'x\n'))
-        d = _dupes(tree)['X-MIB']
-        assert d['compiled_from'] is False
+        assert _dupes(tree)['X-MIB']['compiled_from'] is False
+        d = _details(tree, 'X-MIB')
         assert d['used'] in ('net/X-MIB.txt', 'vendor/X-MIB.my')
 
     def test_what_it_names_is_a_file_that_is_there(self, tree):
@@ -207,13 +226,13 @@ class TestWhetherTheyAreTheSameMibAtAll:
     def test_copies_of_one_mib_are_kin(self, tree):
         _put(tree, 'net/X-MIB.txt', _mib('X-MIB', 'xA OBJECT-TYPE\nxB OBJECT-TYPE\n'))
         _put(tree, 'vendor/X-MIB.my', _mib('X-MIB', 'xA OBJECT-TYPE\nxB OBJECT-TYPE\nxC OBJECT-TYPE\n'))
-        assert _dupes(tree)['X-MIB']['kinship'] == 100
+        assert _details(tree, 'X-MIB')['kinship'] == 100
 
     def test_a_shared_header_over_different_mibs_is_not(self, tree):
         """The one that matters: nothing in common means deleting either loses a whole MIB."""
         _put(tree, 'v/lsInventoryEnt.mib', _mib('L-MIB', 'rlInventoryEntTable OBJECT-TYPE\n'))
         _put(tree, 'v/lsbrgmulticast.mib', _mib('L-MIB', 'rlBrgMulticastMibVersion OBJECT-TYPE\n'))
-        assert _dupes(tree)['L-MIB']['kinship'] == 0
+        assert _details(tree, 'L-MIB')['kinship'] == 0
 
     def test_it_is_measured_against_the_smaller_one(self, tree):
         """A ten-object MIB fully contained in a hundred-object one is a copy that grew, not a
@@ -222,14 +241,14 @@ class TestWhetherTheyAreTheSameMibAtAll:
         big = _mib('X-MIB', ''.join(f'x{i} OBJECT-TYPE\n' for i in 'ABCDEFGHIJ'))
         _put(tree, 'a/X-MIB.txt', small)
         _put(tree, 'b/X-MIB.my', big)
-        assert _dupes(tree)['X-MIB']['kinship'] == 100
+        assert _details(tree, 'X-MIB')['kinship'] == 100
 
     def test_a_mib_that_declares_nothing_has_no_answer(self, tree):
         """A percentage of nothing would be an answer where there is none, and 0 would read
         as "these are unrelated" about a file that simply says nothing."""
         _put(tree, 'a/X-MIB.txt', _mib('X-MIB'))
         _put(tree, 'b/X-MIB.my', _mib('X-MIB', 'xA OBJECT-TYPE\n'))
-        assert _dupes(tree)['X-MIB']['kinship'] == -1
+        assert _details(tree, 'X-MIB')['kinship'] == -1
 
 
 class TestTheDateEachCopyDeclares:
@@ -297,4 +316,34 @@ class TestTheDiffBetweenTwoFiles:
 
     def test_it_needs_a_var_dir(self, tree):
         out = MA.diff_mib_files({'a': 'net/X-MIB.txt', 'b': 'net/Y-MIB.txt'})
+        assert out['ok'] is False
+
+
+class TestTheListingDoesNotReadTheFiles:
+    """The whole point of the split, and the thing that will quietly come back: somebody adds
+    "just one more field" to the listing and the section takes four minutes again."""
+
+    def test_the_listing_answers_which_ones_collide_and_no_more(self, tree):
+        _put(tree, 'net/X-MIB.txt', _mib('X-MIB', 'xA OBJECT-TYPE\n'))
+        _put(tree, 'vendor/X-MIB.my', _mib('X-MIB', 'xB OBJECT-TYPE\n'))
+        d = _dupes(tree)['X-MIB']
+        assert [f['name'] for f in d['files']] == ['net/X-MIB.txt', 'vendor/X-MIB.my']
+        for absent in ('same', 'kinship'):
+            assert absent not in d, f'the listing is computing {absent} again'
+        assert not any('sha' in f for f in d['files'])
+
+    def test_the_details_are_asked_for_by_name(self, tree):
+        """One group at a time, and only the group somebody opened."""
+        _put(tree, 'net/X-MIB.txt', _mib('X-MIB'))
+        _put(tree, 'vendor/X-MIB.my', _mib('X-MIB'))
+        out = MA.mib_dupe_details({**tree, 'mib': 'X-MIB',
+                                   'names': ['net/X-MIB.txt', 'vendor/X-MIB.my']})
+        assert out['ok'] and out['same'] is True and set(out['sha']) == {
+            'net/X-MIB.txt', 'vendor/X-MIB.my'}
+
+    def test_it_refuses_a_name_that_escapes_the_library(self, tree):
+        """The same rule every other path here follows: a name is a name under raw/."""
+        _put(tree, 'net/X-MIB.txt', _mib('X-MIB'))
+        out = MA.mib_dupe_details({**tree, 'mib': 'X-MIB',
+                                   'names': ['../../../etc/passwd']})
         assert out['ok'] is False

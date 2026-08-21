@@ -8,6 +8,180 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.99] - 2026-08-21
+
+### Added
+- **A tidy-up for what deleting MIBs leaves behind.** `compiled/` is flat and every file in
+  it is named after the MODULE, so deleting a folder of sources cannot take its compilations
+  with it — nothing in the library's shape says which `.py` came from where. On a library
+  that had LibreNMS imported and then removed, 374 compiled modules stayed: loadable,
+  impossible to rebuild, and counted as "dependencies pysmi pulled in" beside the three real
+  ones. The one record of where a `.py` came from is the header pysmi writes into it, and it
+  is what tells the two apart: a path under `raw/` that is not there any more is a leftover
+  and nothing needs it; no path under `raw/` at all means pysmi resolved it from its own
+  bundled MIBs or over HTTP, which cannot be rebuilt either and whose importers stop loading
+  the day it goes. Leftovers are a state of their own now — their own chip, their own group,
+  and a broom in the toolbar that reports what it would remove (compiled modules with no
+  source, and the folders emptied of their files, parents included) before removing any of
+  it.
+
+### Changed
+- **The MIB manager is a section of the System panel, not a modal.** It sat beside Services,
+  Modules and Credentials in everything but location: a library you administer, opened from a
+  button on a module card and thrown over whatever you were doing. The modal was also the
+  constraint the last three builds kept fighting — a list that had to reach the bottom of a
+  dialog somebody can drag, a source viewer three levels deep, a diff inside a tab inside it.
+  It fills the screen now, and its fill chain comes from the shell rather than from
+  `modal-dialog-scrollable`, so the list reaches the actual bottom of the viewport.
+- **Importing MIBs is a view of the section, not a panel over the list.** The three ways in —
+  a URL, a repository folder, a vendor archive — lived in a folded `<details>` at the top of
+  the MIB list, which is the compromise you make when there is nowhere else to put them.
+  What settled where they belong is what "Compare" answers: one row per file in the vendor's
+  archive, which against LibreNMS is four thousand of them. A folded panel showed nine of
+  them and a dialog thirty — that is a page. The section declares two views now (`MIBs` and
+  `Import`), the sidebar lists them in its flyout, and each has a sub-path somebody can send
+  (`/module/snmp/import`). The comparison report fills the page and scrolls itself; a
+  download started on the import view keeps counting after switching back to the list.
+- **A vendor archive says what it is doing while it does it.** Comparing against LibreNMS is
+  an 86 MB download followed by one disk read per file in the archive, and all of it sat
+  behind a single request: the button did nothing visible for a minute or two, which from
+  outside is a button that is stuck. It is a background job now, like the GitHub folder
+  import — started, polled and collected — and it reports the two things it can report
+  honestly: megabytes while it downloads, files while it compares. There is no percentage
+  for the download of a GitHub repository and there cannot be — codeload zips it on the fly
+  and answers `Transfer-Encoding: chunked`, so the server does not know the size either — but
+  the megabytes go up, which is the whole difference between "working" and "hung"; a vendor
+  archive that is a file on a server does send a length and gets its percentage. Stop stops
+  the watching; the job finishes server-side, as it always did.
+- **Opening the import view stopped paying for the MIB library.** It asked `list_mibs` —
+  every file in the raw tree, a header read out of each one, the colliding ones hashed and
+  the pending set worked out — to fill two dropdowns of repositories and archives. On a
+  library with LibreNMS in it that is seconds of waiting for a list that was already in
+  memory: `list_mib_sources` answers the same two keys and touches nothing. Two other costs
+  went with it — opening a section fires its render more than once, so the expensive read now
+  collapses to one call instead of racing itself, and an import no longer re-reads the whole
+  library from the view that does not show it.
+- **A module section can declare views wherever it is placed.** `__page__.views` gave a
+  top-level section a flyout and left a System-panel one without: same declaration, same
+  mechanism, different sidebar branch — so a section that moved into the panel silently lost
+  its views. The panel's entries carry their views and their URL now, and a section that
+  ships its own renderer draws its own views too (switching view called the core's generic
+  renderer, which painted the core's layout over a page that had declared it draws itself).
+- **A module page declares WHERE it belongs.** `__page__` has always let a module contribute a
+  section; every one of them landed in the same place — a top-level entry beside Overview —
+  which is right for something you watch and wrong for something you administer. The
+  declaration takes a `placement` now (`section`, the default, or `system`), and the core
+  places it without learning which module asked: the sidebar renders it inside the System
+  accordion with the permission the module declared, the pane is generated like any other
+  module page, and the wiring calls the module's render whichever button opened it.
+- **The System panel's entries are in alphabetical order, in the reader's language.** Thirteen
+  of them in a hand-picked order is thirteen positions to learn; sorted there is nothing to
+  learn. It had to be the TRANSLATED label — the order is different in Spanish and English —
+  so the list stopped being a literal in the sidebar template and became a registry the
+  renderer sorts, folding accents and case out of the comparison (a reader looking for
+  "Índice" looks under I, not after Z). Module-contributed tabs are merged in before the sort
+  rather than appended after it: where an entry came from is not what somebody scanning a menu
+  is looking for.
+- **Leaving the manager no longer offers to cancel a compile.** The modal asked "cancel the
+  ongoing compilation and close?" because closing it stopped the poll loop and a compile with
+  nobody watching looked stopped. A compile has never been something the browser was doing —
+  it runs server-side under a job id — so walking away is now walking away, and coming back to
+  the section picks the progress up where it is. Stopping is the Stop button, which says so.
+- **"All" and "None" wrap together or not at all.** The two selection buttons were separate
+  items of the toolbar's wrapping row, so a narrow window broke the pair in half and left
+  "None" alone on a line of its own. They are one group now: a choice of two reads as two,
+  and when the row runs out of width both go down together.
+
+### Fixed
+- **Opening the MIB section took four minutes; it takes three and a half seconds.** Measured
+  on a library with LibreNMS in it (4970 files): 257 s, of which 248 s were one thing — for
+  every duplicated module with nothing compiled from it yet, the listing asked pysmi which
+  file it WOULD read, and that reader tries every name variant in every directory it was
+  given. 151 lookups over 408 folders came to 1.19 million filesystem checks, paid on every
+  load, to fill duplicate panels nobody had opened. The listing now answers what it already
+  knows — which modules collide is a grouping of facts in hand — and everything that has to
+  read a file (the hashes, whether the copies are the same content, whether they are versions
+  of each other at all, and that prediction) is a separate action asked when a group is
+  opened, for that group. Around it: masking comments and strings jumps from token to token
+  instead of walking character by character, only the head of a file is looked at until it
+  answers, what was read out of each file survives a restart, and the tree is walked once
+  instead of twice. A section that never came back also stopped saying just "Error": a
+  request that dies now says that it did.
+- **A MIB compared against its own version no longer reads as an update.** The vendor-archive
+  report labelled `201505011057Z → 201505011057Z` as "updates", and importing never settled
+  it. Two defects held each other up: every raw-MIB writer opened its destination in text
+  mode, which on Windows turns each `\n` on the way out into `\r\n` — so a file that arrives
+  with CRLF was stored with `\r\r\n` — and the archive comparison compared BYTES, so two
+  copies of one MIB differing only in how their lines end came back "newer than installed",
+  forever, because importing damaged them again. Writers keep what they were handed
+  (`newline=''`), comparisons go through the one definition of "the same content" the diff
+  and the duplicate detector already used, and the library damaged by the old writer is
+  repaired once in place — as the exact inverse of what the writer did, one `\r` off each
+  line terminator, and keeping each file's modification time, because staleness is decided by
+  comparing mtimes and touching two thousand of them would have queued a rebuild of the whole
+  library. The inverse and not "collapse `\r\r\n`": a few dozen MIBs really do ship that
+  way, and collapsing theirs deletes a blank line the vendor wrote — which the comparison
+  then reports as a difference, forever.
+- **The two ceilings the MIB importer put on a vendor archive are gone.** It looked at the
+  first 2000 files of an archive — LibreNMS ships 4830 — so the comparison answered about
+  less than half of it and said so in a footnote; and it refused any file over 4 MiB, which
+  is how ALAXALA's AX-SMC-MIB (11.2 MiB, and a perfectly real MIB) came back as "rejected".
+  A ceiling that turns the main use of a feature into a footnote is protecting nobody: the
+  download is bounded by its own size limit, and the work runs in the background with
+  progress and a Stop. What remains in place of the per-file limit is not a policy about MIBs
+  but a memory guard — nothing is read into memory that is bigger than the archive it arrived
+  in.
+- **Real MIBs were being refused as "not a MIB", and two separate reasons were doing it.**
+  The importer had its own regex for "does this define a MIB module", applied to the raw
+  text, so a file whose name and `DEFINITIONS ::= BEGIN` have a comment between them did not
+  match — ASN.1 does not care where a comment falls between two tokens, and LibreNMS ships
+  several written that way. It now asks the parser that already answers that question. That
+  parser had a defect of its own: it blanked strings before comments, so a stray `"` inside a
+  comment opened a string that ran to the next quote hundreds of lines later and swallowed
+  the module declaration. Comments and strings are found by one left-to-right scan now —
+  whichever opens first wins, which is what a lexer does — so a `--` inside a DESCRIPTION is
+  prose and a quote inside a comment is a quote.
+- **A refused file says why, and can be looked at.** "Rejected" on its own is a word, not an
+  answer: over the per-file size limit is a decision somebody can take, a name that cannot be
+  made into a safe path is not, and they read the same on screen. The row now carries the
+  reason, the size against the limit, and the file itself — the head of it read without
+  reading the whole thing, which is what was refused in the first place. That is how the two
+  wrongly-refused MIBs above were found.
+- **A vendor archive is downloaded once, not once per button.** Comparing and then importing
+  was the same 86 MB twice, and pressing Compare first is exactly what the panel asks you to
+  do. The download is kept beside the library with the ETag the server gave it and
+  revalidated on every use: a 304 costs one request and no megabytes, a server that does not
+  do conditional requests just sends it again, and the report says when nothing had to be
+  downloaded. The cache keeps the last two archives and nothing older than a week.
+
+  The download is written INSIDE the cache directory, which is not a detail: `os.replace`
+  cannot move a file across volumes on Windows, and the system temp is on C: while a data
+  directory is on D:. Written to the temp and renamed, every rename failed, the failure read
+  as "then keep the temp file" — so nothing was ever cached, every use downloaded again, and
+  each one left its 86 MB behind (93 of them, 7.4 GB, before anybody looked). The descriptor
+  is also adopted before the request rather than after, so a 304 — an exception, in urllib —
+  cannot leave an open handle on a file Windows will then refuse to delete.
+
+  Which of the two the buttons offer is a decision, and it went this way round: "Compare"
+  means go and look, so it fetches the archive, and reusing what was downloaded before is the
+  shortcut in the dropdown beside it. The import that usually follows a comparison takes the
+  copy that comparison just left, so the pair still costs one download. A kept copy that will
+  not open is thrown away and fetched once more by itself, rather than answering "Not a ZIP
+  archive" for ever with nothing to press.
+- **The comparison report is written in the reader's language.** Its headline came from the
+  server, in English, under a Spanish panel — and it now says the same things from the same
+  numbers: how many are newer, how many carry the same version, how many are unchanged, where
+  it stopped and whether it had to download anything at all.
+- **A row that says the content differs can show what differs.** The comparison against a
+  vendor archive claimed a difference and gave no way to look at it: same module, same
+  `LAST-UPDATED`, no diff. Each differing row now carries one — computed where both texts
+  were already open, so it costs nothing — capped in number, and only for a comparison: an
+  import has already decided.
+- **"Same version" is now a state of its own.** Content that differs while the author's
+  `LAST-UPDATED` is identical is not an update and not "unchanged" — it is imported like any
+  other difference (a vendor does re-cut a MIB without touching the stamp), the row says what
+  it is, and the summary does not count it among the ones that are newer.
+
 ## [0.0.1+build.98] - 2026-08-21
 
 ### Added

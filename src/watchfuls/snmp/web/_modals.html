@@ -75,146 +75,206 @@
     </div>
 </div>
 
+{# ── The import view, as MARKUP ──────────────────────────────────────────────
+   The three ways in — a URL, a repository folder, a vendor archive — were a folded
+   `<details>` at the top of the MIB list, then a dialog. Both were the same compromise:
+   somewhere to PUT it. What settled it is what "Compare" answers — a table with one row
+   per file in the archive, which for LibreNMS is four thousand of them. That is a page,
+   not a panel and not a dialog: it wants the width and it wants the height.
+
+   So the section declares two views (schema.json → `__page__.views`) and this is the
+   second one. Same pane, same permission, its own sub-path — `/module/snmp/import`, which
+   is a link somebody can send. Progress and Stop carry the SAME ids as the library view
+   on purpose: a `<template>` is inert, only the cloned one is ever in the document, and a
+   download started here stays watchable after switching back to the list. #}
+<template id="snmpImportPageTpl">
+<div class="ss-vfill p-3">
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0">
+                <!-- The way back, where the way in was: the sidebar flyout has both views,
+                     and a section you can only leave through the sidebar is a dead end. -->
+                <button class="btn btn-sm btn-secondary" id="mibBackToListBtn"
+                        onclick="openMibLibraryPage()">
+                    <i class="bi bi-chevron-left me-1"></i><span id="mibBackToListLabel"></span>
+                </button>
+            </div>
+            <!-- Import row 1 - a single URL -->
+            <div class="d-flex gap-2 mb-2 flex-shrink-0">
+                <input type="url" id="mibImportUrlInput" class="form-control form-control-sm"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromUrl();}">
+                <button class="btn btn-sm btn-secondary flex-shrink-0" id="mibImportUrlBtn"
+                        onclick="_importMibFromUrl()">
+                    <i class="bi bi-cloud-download me-1"></i><span id="mibImportUrlBtnLabel"></span>
+                </button>
+            </div>
+            <!-- Import row 2 - a GitHub folder (single line) -->
+            <div class="d-flex gap-2 mb-2 align-items-center flex-shrink-0">
+                <select id="mibGithubRepoSel" class="form-select form-select-sm flex-shrink-0"
+                        style="width:150px" onchange="_mibGithubRepoPick()"></select>
+                <input type="url" id="mibGithubUrlInput" class="form-control form-control-sm flex-grow-1"
+                       style="min-width:80px"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromGithub();}">
+                <div class="form-check form-switch flex-shrink-0 m-0">
+                    <input class="form-check-input" type="checkbox" id="mibGithubRecursive" checked>
+                    <label class="form-check-label small text-nowrap" for="mibGithubRecursive"
+                           id="mibGithubRecursiveLabel"></label>
+                </div>
+                <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap" id="mibGithubImportBtn"
+                        onclick="_importMibFromGithub()">
+                    <i class="bi bi-github me-1" id="mibGithubImportIcon"></i><span id="mibGithubImportBtnLabel"></span>
+                </button>
+            </div>
+            <!-- Import row 3 - a vendor's own MIB archive.  Compare first: an import
+                 is not automatically an update, and knowing whether it is worth doing
+                 should not cost the update. -->
+            <div class="d-flex gap-2 mb-2 align-items-center flex-shrink-0" id="mibArchiveRow"
+                 style="display:none">
+                <select id="mibArchiveSel" class="form-select form-select-sm flex-shrink-0"
+                        style="width:150px"></select>
+                <span class="small text-muted flex-grow-1" id="mibArchiveHint"></span>
+                <!-- Two questions, not one with a footnote — and this is the order they
+                     go in: "Compare" means go and look, so it fetches the archive. Reusing
+                     what was downloaded before is the shortcut, and a shortcut is something
+                     you ask for. (The import that usually follows takes the copy this one
+                     just left, so the pair still costs one download.) -->
+                <div class="btn-group btn-group-sm flex-shrink-0">
+                    <button class="btn btn-sm btn-secondary text-nowrap"
+                            id="mibArchiveCompareBtn" onclick="_mibArchiveRun(true, true)">
+                        <i class="bi bi-search me-1"></i><span id="mibArchiveCompareLabel"></span>
+                    </button>
+                    <button class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split"
+                            type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                            id="mibArchiveMoreBtn"></button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><button class="dropdown-item" onclick="_mibArchiveRun(true)">
+                            <i class="bi bi-lightning-charge me-1"></i>
+                            <span id="mibArchiveCachedLabel"></span>
+                        </button></li>
+                    </ul>
+                </div>
+                <button class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
+                        id="mibArchiveImportBtn" onclick="_mibArchiveRun(false)">
+                    <i class="bi bi-box-arrow-in-down me-1"></i><span id="mibArchiveImportLabel"></span>
+                </button>
+            </div>
+            <!-- A download in progress, and the Stop beside the number it is counting. -->
+            <div id="mibProgressSection" class="mib-progress mb-2 flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+                    <small class="text-muted mib-progress-text" id="mibProgressLabel"></small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="fw-semibold text-muted mib-progress-text" id="mibProgressPct"></small>
+                        <button class="btn btn-sm btn-danger mib-stop" id="mibStopBtn"
+                                onclick="_mibStopCompile()">
+                            <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                         id="mibProgressBar" role="progressbar"
+                         aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+            </div>
+            <!-- What "Compare" answers, and the reason this is a page: one row per file in
+                 the archive.  It fills what is left and scrolls itself. -->
+            <div id="mibArchiveResult" class="ss-vfill" style="display:none"></div>
+</div>
+</template>
+
 {# MIB Manager modal #}
 {# `modal-dialog-scrollable` is here for its HEIGHT, not its scrolling: it is what gives the
    dialog a size to fill, and the .ss-vfill chain below hands that height down to the list so
    it reaches the bottom edge — at the default size, resized by hand, or maximized to 95vh. #}
-<div class="modal fade" id="mibManagerModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h6 class="modal-title">
-                    <i class="bi bi-database-gear me-1"></i>
-                    <span id="mibManagerTitle"></span>
-                </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"
-                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+{# ── The MIB manager, as MARKUP ────────────────────────────────────────────────
+   It was a modal, and the modal was the constraint: a list that had to reach the
+   bottom of a dialog somebody can drag, three levels of nesting to place a diff, and
+   every screen of it competing for the same 90vh. It is a SECTION now — declared in
+   schema.json as a page that belongs in the System panel — and this is what the
+   section paints.
+
+   In a <template> because the pane it goes into is generated by the core: the
+   content is inert until `renderSnmpMibsPage()` clones it, so there is never a
+   second copy of these ids in the document, and the markup stays markup. #}
+<template id="snmpMibsPageTpl">
+<div class="ss-vfill p-3">
+            <!-- What you DO to the MIBs you can see.  Labels are filled by
+                 _snmpMibsPageLabels() from the module's own i18n. -->
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0">
+                <label class="btn btn-sm btn-secondary mb-0" id="mibUploadLabel">
+                    <i class="bi bi-upload me-1"></i><span id="mibUploadTextLabel"></span>
+                    <input type="file" id="mibFileInput" accept=".mib,.txt,.my" multiple
+                           onchange="_uploadMibFiles(this.files)">
+                </label>
+                <!-- The other way in: a view of this section, not a panel over it. -->
+                <button class="btn btn-sm btn-secondary" id="mibImportBtn"
+                        onclick="openMibImportPage()">
+                    <i class="bi bi-cloud-download me-1"></i><span id="mibImportBtnLabel"></span>
+                </button>
+                <!-- Two actions, not one with a footnote. "Pending" walks what has no
+                     compiled module or one older than its source; "rebuild everything"
+                     walks the lot AND forces it, which is the case pysmi's timestamp
+                     check cannot see (pysmi upgraded, a dependency changed). -->
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-sm btn-secondary" id="mibCompileBtn"
+                            onclick="_compileMibs(null, 'pending')">
+                        <i class="bi bi-gear me-1"></i><span id="mibCompileBtnLabel"></span>
+                    </button>
+                    <button class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split"
+                            type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                            id="mibCompileMoreBtn"></button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><button class="dropdown-item" onclick="_mibRebuildAll()">
+                            <i class="bi bi-arrow-repeat me-1"></i>
+                            <span id="mibCompileAllLabel"></span>
+                        </button></li>
+                    </ul>
+                </div>
+                <button class="btn btn-sm btn-secondary" id="mibCompileSelBtn"
+                        style="display:none" onclick="_compileSelected()">
+                    <i class="bi bi-gear me-1"></i><span id="mibCompileSelCount">0</span>
+                </button>
+                <button class="btn btn-sm btn-danger mib-stop" id="mibStopBtn"
+                        onclick="_mibStopCompile()">
+                    <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
+                </button>
+                <button class="btn btn-sm btn-secondary" id="mibRefreshBtn"
+                        onclick="_mibLoad()" title="">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <!-- What a deletion left behind. Always here, because an empty folder is
+                     not something the listing can count, and the report is the answer to
+                     "is there anything?" rather than the question. -->
+                <button class="btn btn-sm btn-secondary" id="mibCleanBtn"
+                        onclick="_mibCleanLibrary()" title="">
+                    <i class="bi bi-eraser"></i><span class="ms-1" id="mibCleanCount"></span>
+                </button>
+                <span id="mibPysmiStatus" class="badge rounded-pill"></span>
+                <span class="ms-auto text-muted" id="mibDirInfo"></span>
             </div>
-            <div class="modal-body p-3 ss-vfill">
-                <!-- What you DO to the MIBs you can see.  Labels are filled by
-                     openMibManagerModal() from the module's own i18n. -->
-                <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0">
-                    <label class="btn btn-sm btn-secondary mb-0" id="mibUploadLabel">
-                        <i class="bi bi-upload me-1"></i><span id="mibUploadTextLabel"></span>
-                        <input type="file" id="mibFileInput" accept=".mib,.txt,.my" multiple
-                               onchange="_uploadMibFiles(this.files)">
-                    </label>
-                    <!-- Two actions, not one with a footnote. "Pending" walks what has no
-                         compiled module or one older than its source; "rebuild everything"
-                         walks the lot AND forces it, which is the case pysmi's timestamp
-                         check cannot see (pysmi upgraded, a dependency changed). -->
-                    <div class="btn-group btn-group-sm">
-                        <button class="btn btn-sm btn-secondary" id="mibCompileBtn"
-                                onclick="_compileMibs(null, 'pending')">
-                            <i class="bi bi-gear me-1"></i><span id="mibCompileBtnLabel"></span>
-                        </button>
-                        <button class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split"
-                                type="button" data-bs-toggle="dropdown" aria-expanded="false"
-                                id="mibCompileMoreBtn"></button>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><button class="dropdown-item" onclick="_mibRebuildAll()">
-                                <i class="bi bi-arrow-repeat me-1"></i>
-                                <span id="mibCompileAllLabel"></span>
-                            </button></li>
-                        </ul>
-                    </div>
-                    <button class="btn btn-sm btn-secondary" id="mibCompileSelBtn"
-                            style="display:none" onclick="_compileSelected()">
-                        <i class="bi bi-gear me-1"></i><span id="mibCompileSelCount">0</span>
-                    </button>
-                    <button class="btn btn-sm btn-danger" id="mibStopBtn"
-                            onclick="_mibStopCompile()">
-                        <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
-                    </button>
-                    <button class="btn btn-sm btn-secondary" id="mibRefreshBtn"
-                            onclick="_mibLoad()" title="">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
-                    <span id="mibPysmiStatus" class="badge rounded-pill"></span>
-                    <span class="ms-auto text-muted" id="mibDirInfo"></span>
+            <!-- Compile dependency sources (resolve IMPORTS during compilation) -->
+            <details class="mb-2 flex-shrink-0">
+                <summary class="small text-muted" id="mibDepSrcSummary"
+                         style="cursor:pointer"></summary>
+                <div class="small text-muted mt-1" id="mibDepSrcHint"></div>
+                <div id="mibDepSrcList" class="d-flex flex-column gap-1 mt-2 ps-1"></div>
+            </details>
+            <!-- Compilation progress (shown while a compile job is running) -->
+            <div id="mibProgressSection" class="mib-progress mb-2 flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <small class="text-muted mib-progress-text" id="mibProgressLabel"></small>
+                    <small class="fw-semibold text-muted mib-progress-text" id="mibProgressPct"></small>
                 </div>
-                <!-- Getting MIBs IN.  Folded away by default: importing is something you do
-                     once in a while, and open it costs the list half its height. -->
-                <details class="mb-2 flex-shrink-0" id="mibImportPanel">
-                    <summary class="small text-muted" id="mibImportSummary"
-                             style="cursor:pointer"></summary>
-                    <div class="mt-2">
-                    <!-- Import row 1 — a single URL -->
-                    <div class="d-flex gap-2 mb-2">
-                        <input type="url" id="mibImportUrlInput" class="form-control form-control-sm"
-                               onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromUrl();}">
-                        <button class="btn btn-sm btn-secondary flex-shrink-0" id="mibImportUrlBtn"
-                                onclick="_importMibFromUrl()">
-                            <i class="bi bi-cloud-download me-1"></i><span id="mibImportUrlBtnLabel"></span>
-                        </button>
-                    </div>
-                    <!-- Import row 2 — a GitHub folder (single line) -->
-                    <div class="d-flex gap-2 mb-2 align-items-center">
-                        <select id="mibGithubRepoSel" class="form-select form-select-sm flex-shrink-0"
-                                style="width:150px" onchange="_mibGithubRepoPick()"></select>
-                        <input type="url" id="mibGithubUrlInput" class="form-control form-control-sm flex-grow-1"
-                               style="min-width:80px"
-                               onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromGithub();}">
-                        <div class="form-check form-switch flex-shrink-0 m-0">
-                            <input class="form-check-input" type="checkbox" id="mibGithubRecursive" checked>
-                            <label class="form-check-label small text-nowrap" for="mibGithubRecursive"
-                                   id="mibGithubRecursiveLabel"></label>
-                        </div>
-                        <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap" id="mibGithubImportBtn"
-                                onclick="_importMibFromGithub()">
-                            <i class="bi bi-github me-1" id="mibGithubImportIcon"></i><span id="mibGithubImportBtnLabel"></span>
-                        </button>
-                    </div>
-                    <!-- Import row 3 — a vendor's own MIB archive.  Compare first: an import
-                         is not automatically an update, and knowing whether it is worth doing
-                         should not cost the update. -->
-                    <div class="d-flex gap-2 mb-2 align-items-center" id="mibArchiveRow"
-                         style="display:none">
-                        <select id="mibArchiveSel" class="form-select form-select-sm flex-shrink-0"
-                                style="width:150px"></select>
-                        <span class="small text-muted flex-grow-1" id="mibArchiveHint"></span>
-                        <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap"
-                                id="mibArchiveCompareBtn" onclick="_mibArchiveRun(true)">
-                            <i class="bi bi-search me-1"></i><span id="mibArchiveCompareLabel"></span>
-                        </button>
-                        <button class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
-                                id="mibArchiveImportBtn" onclick="_mibArchiveRun(false)">
-                            <i class="bi bi-box-arrow-in-down me-1"></i><span id="mibArchiveImportLabel"></span>
-                        </button>
-                    </div>
-                    <div id="mibArchiveResult" class="mb-2" style="display:none"></div>
-                    </div>
-                </details>
-                <!-- Compile dependency sources (resolve IMPORTS during compilation) -->
-                <details class="mb-2 flex-shrink-0">
-                    <summary class="small text-muted" id="mibDepSrcSummary"
-                             style="cursor:pointer"></summary>
-                    <div class="small text-muted mt-1" id="mibDepSrcHint"></div>
-                    <div id="mibDepSrcList" class="d-flex flex-column gap-1 mt-2 ps-1"></div>
-                </details>
-                <!-- Compilation progress (shown while a compile job is running) -->
-                <div id="mibProgressSection" class="mb-2 flex-shrink-0">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <small class="text-muted" id="mibProgressLabel"></small>
-                        <small class="fw-semibold text-muted" id="mibProgressPct"></small>
-                    </div>
-                    <div class="progress">
-                        <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
-                             id="mibProgressBar" role="progressbar"
-                             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                    </div>
-                </div>
-                <!-- The list — one row per MIB module, and the only part of the modal
-                     that grows.  Everything above it is flex-shrink-0. -->
-                <div id="mibManagerBody" class="ss-vfill">
-                    <div class="text-center py-4">
-                        <div class="spinner-border spinner-border-sm"></div>
-                    </div>
+                <div class="progress">
+                    <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                         id="mibProgressBar" role="progressbar"
+                         aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
             </div>
-            <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            <!-- The list — one row per MIB module, and the only part of the modal
+                 that grows.  Everything above it is flex-shrink-0. -->
+            <div id="mibManagerBody" class="ss-vfill">
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </div>
             </div>
-        </div>
-    </div>
 </div>
+</template>

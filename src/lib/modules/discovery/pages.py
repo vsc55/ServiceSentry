@@ -111,11 +111,20 @@ def _page_spec(module: str, d: dict) -> dict | None:
     pid = str(d.get('id') or module).strip().lower()
     if not _ID_RE.match(pid) or pid in _RESERVED:
         return None
+    # WHERE the page belongs, declared rather than assumed. A section of its own is the
+    # right home for something an operator watches — m365's status, azure's — and the wrong
+    # one for something an operator ADMINISTERS: the MIB library is managed beside Services,
+    # Modules and Credentials, not beside the dashboards. The core places it; it still has no
+    # idea which module asked.
+    placement = str(d.get('placement') or 'section').strip().lower()
+    if placement not in ('section', 'system'):
+        placement = 'section'
     return {
         'id':     pid,
         'module': module,
         'icon':   str(d.get('icon') or 'bi-grid-1x2'),
         'order':  int(d.get('order') or 100),
+        'placement': placement,
         'render': str(d.get('render') or ''),      # '' = core renders from page_data alone
         'refresh': str(d.get('refresh') or ''),    # watchful action for the live refresh
         'perm':   str(d.get('perm') or 'modules_view'),

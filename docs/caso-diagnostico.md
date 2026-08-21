@@ -19,6 +19,172 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## La sección de MIBs tardaba cuatro minutos en abrir
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_duplicate_sources`,
+`mib_resolver.py::resolve_raw_sources`, `mib_lint.py::_mask`
+
+**Síntoma** — «Sistema / SNMP / MIBs tarda muchísimo en cargar»; el rueda de carga se queda
+girando y al final la sección pinta un **«⚠ Error»** sin texto. La biblioteca tenía 4970
+ficheros (LibreNMS entero, tras quitar el tope de 2000).
+
+**Diagnóstico** — Cronometrar por fases, y luego `cProfile` sobre la llamada real:
+
+```console
+list_mibs                       257.9 s
+└─ _duplicate_sources           248.1 s
+   └─ resolve_raw_sources       248.1 s
+      └─ pysmi get_data (151×)  246.7 s
+         └─ nt._path_exists × 1.193.019 → 226.5 s
+```
+
+El resto —recorrer el árbol, leer la cabecera de cada fichero, calcular pendientes— sumaba
+menos de 10 s.
+
+**Causa raíz** — Para cada módulo duplicado **sin compilar**, el listado le preguntaba a pysmi
+*«¿qué fichero leerías tú?»*. El lector de pysmi prueba cada variante de nombre en **cada
+directorio** que se le da: 151 consultas sobre una biblioteca de 408 carpetas = 1,19 millones
+de comprobaciones de existencia. Y eso se pagaba **en cada carga de la sección**, para rellenar
+paneles de duplicados que nadie había abierto. La petición acababa muriendo, y morir sin
+cuerpo es el «Error» sin texto.
+
+**Solución** — El listado contesta lo que ya sabe: **qué** módulos colisionan es agrupar
+hechos que ya tiene. Lo que cuesta leer —los hashes, si el contenido es el mismo, el
+parentesco y la predicción de pysmi— se calcula en una acción aparte (`mib_dupe_details`)
+cuando alguien abre un grupo, y para ese grupo solo. De paso: el enmascarado de comentarios y
+cadenas salta de token en token en vez de ir carácter a carácter (12 ms → 1,6 ms por fichero),
+sólo se mira la cabecera (16 KB, ampliando si no aparece), lo leído de cada fichero
+**sobrevive al reinicio** en `.facts-cache.json`, y el árbol se recorre **una vez** en lugar de
+dos.
+
+**Resultado medido**: **257 s → 3,6 s**, y abrir un grupo de duplicados cuesta ahora lo que
+antes se pagaba 257 veces sin pedirlo.
+
+**Lección** — Un listado no debe contestar preguntas que nadie ha hecho todavía, sobre todo si
+la respuesta se lee del disco. Y para saber dónde está el tiempo, cronómetro y perfil: el
+sospechoso obvio (hashear 529 ficheros) resultó ser una fracción, y el culpable estaba a tres
+saltos de distancia dentro de una librería de terceros.
+
+---
+
+## Una caché que no guardaba nada, y 7,4 GB en el temporal
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_download_archive`
+
+**Síntoma** — Se pulsa **Comparar** contra el archivo de LibreNMS (86 MB), y a continuación
+**Actualizar**: se vuelve a descargar entero. La caché recién escrita no reutilizaba nada.
+
+**Diagnóstico** — Lo primero, descartar al servidor: `codeload` **sí** revalida.
+
+```console
+$ ETag: "cef4c89153bbf45c9b0d2fa69f68d1c43548d36cf2f79a91c94285617dda15f9"
+$ (segunda petición con If-None-Match) -> HTTPError 304
+```
+
+Entonces se miró el disco:
+
+```console
+$ ls data/snmp_mibs/.archive-cache/     # vacío
+$ ls %TEMP%/ss-mib-archive-*.zip | wc -l
+93                                       # 7,4 GB
+```
+
+**Causa raíz** — El temporal se creaba con `tempfile.mkstemp()`, o sea en `%TEMP%` (C:), y la
+caché vive junto al directorio de datos (D:). **`os.replace` no mueve ficheros entre
+volúmenes en Windows**: lanzaba `OSError`, y el `except OSError` lo interpretaba como «pues me
+quedo con el temporal». Resultado: no se guardaba nada, cada uso volvía a descargar, y cada
+descarga dejaba 86 MB en C:. Encima, en la rama del 304 —que en `urllib` es una excepción— el
+descriptor de `mkstemp` no llegaba a adoptarlo ningún objeto fichero, así que quedaba
+**abierto**: en Windows un fichero con manejador abierto no se puede borrar, y el `.part`
+vacío se quedaba también.
+
+**Solución** — El temporal nace **dentro del directorio de la caché**, así que el `os.replace`
+es un renombrado en el mismo volumen —atómico, que es justo para lo que se usa—; el descriptor
+se adopta **antes** de la petición (`with os.fdopen(fd,'wb') as out, urlopen(...) as r`), de
+modo que se cierra pase lo que pase; lo que no acaba siendo entrada de caché (un `.part`) lo
+borra quien lo pidió; y la poda barre los `.part` de más de una hora, que no son descargas en
+curso sino cuelgues.
+
+**Lección** — `os.replace` es atómico **dentro de un volumen** y un error fuera de él: un
+temporal que va a acabar en un sitio se crea en ese sitio, no en `%TEMP%`. Y un `except OSError`
+que convierte un fallo en «sigo sin caché» es un fallo que no se nota nunca — sólo se ve
+mirando lo que hay en el disco, que es lo que hubo que hacer.
+
+---
+
+## «Actualiza» de un MIB a su misma versión, y una biblioteca entera con `\r\r\n`
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_archive_member`,
+`_normalized` / `_text_of`, y los cuatro escritores de MIB en crudo
+
+**Síntoma** — Comparar contra el archivo del fabricante devuelve
+`librenms/2n/TEL2N-MIB — 201505011057Z → 201505011057Z` etiquetado **«actualiza»**. La misma
+versión declarada a los dos lados, y aun así dice que hay algo más nuevo. Importar no lo
+arregla: a la siguiente comparación vuelve a salir.
+
+**Diagnóstico** — Se miró el fichero instalado en bytes, no en texto:
+
+```console
+$ od -c raw/librenms/2n/TEL2N-MIB | head -2
+0000000  \r  \r  \n   T   E   L   2   N   -   M   I   B ...
+$ tr -cd '\r' < f | wc -c   # 284
+$ tr -cd '\n' < f | wc -c   # 142
+```
+
+Dos CR por cada LF. Y no era ese fichero: **2137 de 2137**. Un `open(p,'w',encoding='utf-8')`
+en Windows lo reproduce exacto — `a\r\nb` se guarda como `a\r\r\nb`.
+
+**Causa raíz** — Dos defectos que se sostenían el uno al otro:
+
+1. *Escribir.* Los cuatro escritores de MIB en crudo (importar de URL, de carpeta de GitHub,
+   de archivo comprimido y subir un fichero) abrían el destino en **modo texto**. En Windows
+   eso traduce cada `\n` de salida a `\r\n`, así que un fichero que llega con CRLF se
+   guarda con `\r\r\n`. Nada falla: el compilador no mira los espacios en blanco.
+2. *Comparar.* `_archive_member` comparaba **byte a byte** el miembro del archivo con el
+   fichero instalado. Dos copias del mismo MIB que sólo difieren en cómo terminan sus líneas
+   son el mismo MIB — pero nunca eran iguales, así que **todos** salían «más nuevo que el
+   instalado», y como importarlos volvía a dañarlos, para siempre.
+
+Y encima de los dos, un tercer defecto de vocabulario: con las dos versiones declaradas
+idénticas, la clasificación caía en el `else` y decía «actualiza», que afirma algo que no
+afirmó nadie.
+
+**Solución** — Los escritores usan `newline=''` (se guarda lo que llegó); las comparaciones
+pasan por `_normalized()`, que es **la** definición de «el mismo contenido» y es la que ya
+usaban el diff y el detector de duplicados; un contenido distinto con el mismo `LAST-UPDATED`
+tiene su propio estado, `same_version` («misma versión»), que se importa igual pero no se
+cuenta como más nuevo; y la biblioteca ya dañada se repara **una vez** en sitio
+(`_repair_line_endings`), **conservando el mtime** — el cambio es espacio en blanco, el
+módulo compilado sigue vigente, y tocar dos mil mtimes habría encargado una recompilación
+completa: horas de ASN.1 para un cambio que ningún compilador ve.
+
+**Segunda vuelta** — La primera versión de esa reparación colapsaba `\r\r\n` → `\r\n`, y
+eso está mal por un motivo que sólo se ve mirando el origen:
+
+```console
+$ # lo que sirve LibreNMS, comparado con nuestra copia
+2n/TEL2N-MIB         remoto CR= 142 LF= 142 rr=  0     # CRLF normal: el `\r\r\n` era NUESTRO
+alcatel/HPOV-NNM-MIB remoto CR= 504 LF= 252 rr=252     # el fabricante lo escribe así
+adva/CM-FACILITY-MIB remoto CR=   0 LF=29698 rr=  0    # LF puro; nosotros lo guardamos CRLF
+```
+
+Hay MIBs que **vienen con `\r\r\n` de origen**. Colapsarlos borra una línea en blanco que
+escribió el fabricante, y ese fichero difiere para siempre del archivo del que salió — que es
+exactamente lo que apareció después como tres filas «misma versión» que no se iban. La undo
+correcta es el **inverso exacto** de lo que hacía el escritor roto: quitar **un** `\r` de
+cada final de línea, sea `\r\n` → `\n`, `\r\r\n` → `\r\n` o `\r\r\r\n` → `\r\r\n`.
+Reconstruye los bytes que llegaron, vinieran como vinieran.
+
+**Lección** — En Windows, escribir texto que ya trae sus saltos de línea **exige**
+`newline=''`; el modo texto no es «guardar lo que me diste». Comparar ficheros de texto por
+sus bytes responde a una pregunta que nadie hizo: lo que se quiere saber es si es el mismo
+contenido, y esa comparación tiene que estar escrita **una vez** — este repositorio ya la
+tenía en `_text_of`, y el fallo fue que la ruta de importación no la usaba. Y al reparar datos
+ya dañados: la reparación es **el inverso de la transformación**, no «lo que deja el fichero
+bonito». Lo segundo no distingue el daño propio del contenido ajeno, y lo borra.
+
+---
+
 ## «Probar servidor» que no vuelve, contra un NAS que sólo tiene SNMP
 
 **Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/sampler.py::_sample_server`,

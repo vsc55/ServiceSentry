@@ -13,7 +13,8 @@ finding only means "go and look at that line" while findings are rare. Both clas
 it produced are pinned below, because both were invisible until it was run over real files.
 """
 
-from watchfuls.snmp.mib_lint import declared_names, last_updated, lint_mib
+from watchfuls.snmp.mib_lint import (_blank, declared_names, last_updated,
+                                    lint_mib, module_name)
 
 
 def _codes(text):
@@ -217,3 +218,46 @@ class TestTheTwoWaysVendorMibsActuallyBreak:
         text = text.replace('    exIndex OBJECT-TYPE', '    ExIndex OBJECT-TYPE')
         lines = [f['line'] for f in lint_mib(text)]
         assert lines == sorted(lines)
+
+
+class TestReadingAMibIsLexingIt:
+    """Comments and strings were found by two regexes taking turns, and the turns were the
+    bug. Both shapes below are in LibreNMS, and both were being read wrong."""
+
+    def test_a_quote_inside_a_comment_does_not_open_a_string(self):
+        """DELL-NETWORKING-DCB-MIB has `--     configuration information. "` in its header.
+        Blanking strings FIRST made that quote open one, which ran to the next quote hundreds
+        of lines later and took the module declaration with it — so a real MIB came back
+        nameless, and the importer refused it as "not a MIB"."""
+        text = ('-- some prose. "\n'
+                '-- and more\n'
+                'DELL-NETWORKING-DCB-MIB DEFINITIONS ::= BEGIN\n'
+                'END\n')
+        assert module_name(text) == 'DELL-NETWORKING-DCB-MIB'
+
+    def test_a_double_dash_inside_a_string_does_not_open_a_comment(self):
+        """The mistake the other order would make instead. A DESCRIPTION is prose, and prose
+        has dashes in it — whichever token opens FIRST wins, which is what a lexer does."""
+        text = ('X-MIB DEFINITIONS ::= BEGIN\n'
+                'x OBJECT-TYPE\n'
+                '    DESCRIPTION "ranges 1--10 apply"\n'
+                '    ::= { y 1 }\n'
+                'END\n')
+        masked = _blank(text)
+        assert '::= { y 1 }' in masked, 'the rest of the file was eaten as a comment'
+
+    def test_the_date_survives_a_comment_that_opens_a_quote(self):
+        """`last_updated` keeps strings (the date lives in one) and blanks comments, and it
+        reads them with the same scanner — the stray quote used to hide the date too."""
+        text = ('-- header. "\n'
+                'X-MIB DEFINITIONS ::= BEGIN\n'
+                '    LAST-UPDATED "201204160000Z"\n'
+                'END\n')
+        assert last_updated(text) == '2012-04-16'
+
+    def test_masking_never_moves_a_line(self):
+        """Every finding is reported at a line number. Blanking that changed the length of
+        the file would report every one of them somewhere else."""
+        text = 'A\n-- c "\nB "s -- t"\nC\n'
+        assert len(_blank(text)) == len(text)
+        assert _blank(text).count('\n') == text.count('\n')
