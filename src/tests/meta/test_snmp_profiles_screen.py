@@ -60,16 +60,216 @@ class TestTheScreenIsWired:
         """`getElementById` on a missing id returns null, and this screen fills a dozen of
         them by hand. The failure is a modal that opens empty."""
         js, html = _read(UI), _read(MODALS)
-        wanted = set(re.findall(r"getElementById\('(snmpProfiles\w+)'\)", js))
-        assert wanted, 'the script looks up no element of its own modal'
+        # Through the resolver now, and each name exists TWICE — once in the dialog and
+        # once in the view, which is what the suffix is for.
+        wanted = set(re.findall(r"_profEl\('(snmpProfiles\w+)'\)", js))
+        wanted |= set(re.findall(r"getElementById\('(snmpProfiles\w+)'\)", js))
+        assert wanted, 'the script looks up no element of its own screen'
         for eid in sorted(wanted):
             assert f'id="{eid}"' in html, f'{eid} is looked up but never declared'
+            # …except the ones that only make sense with a device on the other end. The
+            # catalogue is the reference: there is nothing to ask, so there is no Detect and
+            # nowhere to put its answer, and the lookups return null and do nothing.
+            if eid not in ('snmpProfilesModal', 'snmpProfilesDetectBtn',
+                           'snmpProfilesDetectLabel', 'snmpProfilesDetected'):
+                assert f'id="{eid}View"' in html, f'{eid} has no copy in the view'
 
-    def test_the_toolbar_button_calls_a_function_that_exists(self):
-        """The module declares the button; nothing in the core knows what it opens."""
+    def test_the_catalogue_is_a_view_and_not_a_button_on_a_card(self):
+        """It was a button on the module's card in Modules, throwing a dialog over whatever
+        was on screen. A card in a list of modules is where you configure a module, not where
+        you read its reference — so the catalogue is a view of the SNMP section, declared the
+        way the other four are, and the module ships no toolbar at all any more."""
+        import json
         init = _read(os.path.join(SNMP, '__init__.py'))
-        assert "'onclick': 'openSnmpProfilesModal'" in init
-        assert 'function openSnmpProfilesModal(' in _read(UI)
+        assert 'WATCHFUL_TOOLBAR: tuple[dict, ...] = ()' in init, \
+            'the module card launches screens again'
+        with open(os.path.join(SNMP, 'schema.json'), encoding='utf-8') as fh:
+            views = (json.load(fh)['__page__'].get('views') or [])
+        assert 'profiles' in [v['slug'] for v in views]
+        assert 'function _snmpProfViewLoad(' in _read(UI)
+
+    def test_the_picker_is_still_a_dialog(self):
+        """One list read twice, and the second reading is a question a server's field asks —
+        opened from inside another dialog, over the screen that asked. Only that one shows a
+        modal, and it says which copy it is drawing before anything is looked up."""
+        js = _read(UI)
+        body = _fn(js, '_snmpProfOpen')
+        assert 'if (pathStr) _snmpProfScope' in body, 'the picker can draw into the view'
+        assert 'if (_snmpProfPath) {' in body, 'the catalogue still opens a dialog'
+
+    def test_the_catalogue_has_the_panel_s_rail_and_the_picker_does_not(self):
+        """Twenty-seven rows of which three are groups read as one list of twenty-seven, which
+        is what a group exists not to be. The rail is the same one the library uses — one
+        selected line, mutually exclusive — and it answers the two questions this list is
+        asked: what an entry IS, and which group holds it.
+
+        The picker keeps the plain list on purpose. It is a dialog opened from a field of a
+        server to make one assignment, and a navigation column inside it would be a second
+        place to get lost in on the way to ticking a box."""
+        js, html = _read(UI), _read(MODALS)
+        assert 'function _snmpProfRailPaint(' in js
+        assert "getElementById('snmpProfRailBody')" in js
+        # The body is raised by the shared shell, not built into the template — a rail in the
+        # markup would be inside the pane it is supposed to sit beside.
+        assert 'snmpProfRailBody' not in html
+        assert '_snmpProfRailPaint()' in _fn(js, '_snmpProfRender')
+
+    def test_the_rail_is_one_choice_and_never_two(self):
+        """A column where some lines are a choice and others are switches behaves in two ways
+        without saying so. This list is only ever asked "which of them"."""
+        js = _read(UI)
+        assert 'let _snmpProfRail ' in js, 'the selection is not a single value'
+        assert '_snmpProfRail = key' in _fn(js, '_snmpProfSetRail')
+
+    def test_a_line_that_would_filter_nothing_is_not_drawn(self):
+        """"Not in any group" with no groups is a line that says what "All" says; a Source
+        block whose every line reads "Shipped" filters nothing. Both are noise that looks like
+        navigation."""
+        body = _fn(_read(UI), '_snmpProfRailDefs')
+        assert 'groups.length && loose.length' in body
+        assert 'bySource.length < 2' in body
+
+    def test_the_count_says_what_is_on_screen(self):
+        """Saying "27" while nine rows are drawn is the count answering somebody else's
+        question. On the picker it stays the other number — how many are ticked — because
+        that is what somebody assigning profiles is keeping track of."""
+        body = _fn(_read(UI), '_snmpProfRender')
+        assert 'rows.length === _snmpProfItems.length' in body
+        assert '_snmpProfSel.size' in body
+
+    def test_the_list_says_where_the_groups_end(self):
+        """Only while both kinds are on screen: under a rail line that already says which kind
+        this is, a heading would be repeating the rail."""
+        body = _fn(_read(UI), '_snmpProfRender')
+        assert 'const mixed =' in body and 'rows.some(_snmpProfIsGroup)' in body
+
+    def test_the_picker_starts_from_everything(self):
+        """It has no rail and no way to change it, so a line left selected in the catalogue
+        would be a picker silently hiding most of the catalogue."""
+        assert '_snmpProfRail = ' in _fn(_read(UI), '_snmpProfOpen')
+
+    def test_the_panel_writes_profiles_and_not_only_groups(self):
+        """Writing a profile used to mean putting a JSON file on the machine, which rules it
+        out for the box in the rack nobody wrote a profile for — the person who has that box
+        is not always the person with a shell on the server. Both buttons are on the
+        catalogue and neither is in the picker: a field of a server is where an assignment is
+        made, not where the catalogue is decided."""
+        js, html = _read(UI), _read(MODALS)
+        assert 'id="snmpPrfNewBtn"' in html and 'id="snmpGrpNewBtn"' in html
+        assert 'function _snmpPrfOpen(' in js and 'function _snmpPrfSave(' in js
+        assert "_snmpProfPath ? 'none' : ''" in _fn(js, '_snmpProfOpen'), \
+            'the picker offers to edit the catalogue'
+
+    def test_the_form_is_checked_by_the_thing_that_reads_the_shipped_files(self):
+        """One authority on what a profile is. The action hands the document to
+        `profiles.normalise`, and the reason a metric was refused is asked for only AFTER
+        `normalise_metric` has already said no — so the explanation cannot drift into
+        disagreeing with the verdict."""
+        acts = _read(os.path.join(SNMP, 'actions.py'))
+        # `_fn` reads JavaScript; this one is Python, so the method is sliced out by hand.
+        start = acts.index('    def save_profile(cls')
+        body = acts[start:acts.index('    # ── Taking one back', start)]
+        assert '_profiles.normalise_metric(m)' in body
+        assert 'cls._metric_why(m)' in body
+        assert 'if norm is None' in body, 'the reason is asked before the verdict'
+        assert '_profiles.normalise(body) is None' in body
+
+    def test_typing_never_redraws_the_metrics(self):
+        """The inputs are the working copy. Anything that re-draws the list — adding a row,
+        removing one, switching a value to a column — harvests them first, or it throws away
+        whatever was being typed. A keystroke redrawing would take the cursor with it."""
+        js = _read(UI)
+        for fn in ('_snmpPrfAddMetric', '_snmpPrfDropMetric', '_snmpPrfToggleAdv',
+                   '_snmpPrfSave'):
+            assert '_snmpPrfHarvest()' in _fn(js, fn), f'{fn} redraws over what was typed'
+        assert 'oninput="_snmpPrfRedraw' not in js, 'a keystroke redraws the list'
+
+    def test_a_field_that_is_not_on_screen_keeps_what_it_had(self):
+        """The less-used fields live behind a toggle. Rebuilding each metric from the inputs
+        alone threw them away the moment anything redrew — and losing `width` on a 32-bit
+        counter is not cosmetic: it is what tells a counter wrapping around from a device that
+        rebooted, and without it every wrap is a four-billion spike that rescales the chart.
+
+        An EMPTY input is not the same thing. That is somebody clearing a field."""
+        body = _fn(_read(UI), '_snmpPrfHarvest')
+        assert 'if (!el(f)) continue;' in body, 'a hidden field is harvested as empty'
+        assert 'if (v(f)) m[f] = v(f); else delete m[f];' in body, 'a cleared field survives'
+        # …and switching a column back to a single value leaves the column that named its
+        # rows meaning nothing, so those go with it.
+        assert "['index_label', 'scale_by', 'group'].includes(f)" in body
+
+    def test_a_copy_carries_the_matrix_and_not_the_identity(self):
+        """An OID matrix from a blank form is an afternoon; the same matrix with three OIDs
+        changed is five minutes. What must NOT come along is how the original is recognised —
+        two profiles claiming one device is a detection proposing the same thing twice."""
+        body = _fn(_read(UI), '_snmpPrfOpen')
+        assert "set('snmpPrfPrefix', (cur && !copy)" in body
+        assert "set('snmpPrfProbe', (cur && !copy)" in body
+        assert 'JSON.parse(JSON.stringify(cur.metrics' in body, \
+            'the copy shares the original metric objects'
+
+    def test_the_path_to_the_profile_folder_is_gone_from_the_screen(self):
+        """It was the answer to "and how do I add one" when the only answer was a file on the
+        machine. There are two buttons now, so it was a line that answered nothing anybody
+        asks while looking at it."""
+        js, html = _read(UI), _read(MODALS)
+        assert 'snmpProfilesDir' not in html and 'snmpProfilesDir' not in js
+
+    def test_an_oid_is_chosen_and_not_remembered(self):
+        """Typing `1.3.6.1.4.1.6574.2.1.1.6` from memory is how a profile ends up measuring
+        nothing and saying nothing about it: every digit is load-bearing and none is checked
+        by anything until a device answers, or does not. The MIBs are compiled and their
+        symbols are already in a catalogue, so all three OID fields ask them."""
+        js, html = _read(UI), _read(MODALS)
+        assert 'id="snmpOidPickModal"' in html
+        assert 'function _snmpOidPick(' in js
+        body = _fn(js, '_snmpPrfRender')
+        for field in ("'oid'", "'index_label'", "'scale_by'"):
+            assert f'_snmpPrfOidField(i, {field}' in body, f'{field} is typed from memory'
+
+    def test_what_a_pick_adds_over_a_paste_is_the_syntax(self):
+        """A symbol carries its SMI type, and that is what says whether the value is a counter
+        — and how wide — a gauge, or not a number at all. It is the one thing about a metric
+        nobody gets right from the OID, and the one that turns a counter wrapping around into
+        a device that rebooted."""
+        body = _fn(_read(UI), '_snmpOidMetricFrom')
+        assert "out.kind = 'counter'; out.width = 64" in body
+        assert "out.kind = 'counter'; out.width = 32" in body
+        assert "out.kind = 'text'; out.chart = 'none'" in body
+
+    def test_a_scalar_is_asked_for_its_instance(self):
+        """A scalar's OID names the OBJECT; what an agent answers is its single instance,
+        `.0`. Left off, the metric asks for a node and gets nothing — the most common way a
+        hand-written profile is silently empty."""
+        body = _fn(_read(UI), '_snmpOidMetricFrom')
+        assert "{oid: sy.oid + '.0'}" in body
+        assert '{walk: sy.oid}' in body, 'a table column is asked for an instance too'
+
+    def test_only_what_can_be_read_is_offered(self):
+        """A table and its row are structure, an object group is paperwork, and a
+        not-accessible column is one the agent will never answer. Offering any of them is
+        offering a metric that returns nothing for ever."""
+        body = _fn(_read(UI), '_snmpOidUsable')
+        assert "'MibScalar'" in body and "'MibTableColumn'" in body
+        assert "!== 'not-accessible'" in body
+
+    def test_the_column_that_names_the_rows_is_looked_for_among_the_siblings(self):
+        """It is a column of THAT table. Nine thousand symbols is not a list to search for one
+        of five siblings."""
+        body = _fn(_read(UI), '_snmpOidPick')
+        assert "field !== 'oid' && m.walk" in body
+        assert "_snmpOidScope" in _fn(_read(UI), '_snmpOidRows')
+
+    def test_the_two_copies_cannot_be_confused(self):
+        """Both can be in the document at once. Two live copies of an id is a control that
+        fills one box and reads the other, so the view suffixes its ids and every lookup
+        goes through the resolver."""
+        js, html = _read(UI), _read(MODALS)
+        assert 'const _profEl = id =>' in js
+        assert "document.getElementById('snmpProfilesBody')" not in js, \
+            'a lookup bypasses the resolver'
+        for eid in ('snmpProfilesBodyView', 'snmpProfilesSearchView', 'snmpProfilesTitleView'):
+            assert f'id="{eid}"' in html, f'{eid} is not in the view template'
 
     def test_both_actions_are_declared_and_read_only(self):
         """An action absent from WATCHFUL_ACTIONS is a 404, and one absent from

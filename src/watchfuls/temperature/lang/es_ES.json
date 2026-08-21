@@ -25,6 +25,7 @@
     },
     "collections": {"list": "Sensores"},
     "ui": {
+        "audit_v_discover":                 "Descubrir sensores de temperatura",
         "discover_title": "Descubrir Sensores",
         "discover_error": "No se pudo cargar la lista de sensores de temperatura",
         "item_added":     "Sensor \"{}\" a\u00f1adido"

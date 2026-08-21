@@ -16,6 +16,7 @@ import re
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
+from . import profile_store as _profile_store
 from . import profiles as _profiles
 from .actions import SnmpActions
 from .client import SnmpClient, _HAS_PYSNMP
@@ -42,6 +43,10 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
         'discover',
         'list_profiles',
         'detect_profiles',
+        'save_profile_group',
+        'delete_profile_group',
+        'save_profile',
+        'delete_profile',
         'list_mibs',
         'list_mib_sources',
         'compile_mibs',
@@ -98,16 +103,13 @@ class Watchful(MibAdmin, SnmpClient, SnmpActions, SnmpSampler, ModuleBase):
     })
 
 
-    # Toolbar buttons injected into the module card body by the dashboard.
-    # Each entry is rendered as a generic button — no module-specific code in web_admin.
-    WATCHFUL_TOOLBAR: tuple[dict, ...] = (
-        {'icon': 'bi-database-gear', 'label_key': 'file_manager',
-         'onclick': 'openFileManagerModal'},
-        {'icon': 'bi-diagram-3',     'label_key': 'mib_browser',
-         'onclick': 'openMibBrowserModal'},
-        {'icon': 'bi-grid-3x3-gap',  'label_key': 'device_profiles',
-         'onclick': 'openSnmpProfilesModal'},
-    )
+    # No toolbar. All three of these used to be buttons on the module's card in Modules,
+    # each throwing a dialog over whatever was on screen — the library, the symbol browser
+    # and the profile catalogue. They are the SNMP section now, and its views: a card in a
+    # list of modules is where you configure a module, not where you administer what it
+    # holds. The profile picker is still a dialog, because it is opened from inside another
+    # one (a server's `device_profiles` field) and answers to it.
+    WATCHFUL_TOOLBAR: tuple[dict, ...] = ()
 
     # Legacy compat alias so ModuleBase helpers that expect _DEFAULTS still work
     _DEFAULTS        = _CHECK_DEFAULTS
@@ -336,9 +338,10 @@ def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
 def discover_db_tables():
     """The tables this module keeps in the shared database.
 
-    Edited MIB sources and their history. On the general connector rather than a file beside
-    the MIBs because a deployment with a web container and a worker container shares the
-    database and not the disk — and a MIB corrected in the panel has to be the MIB the worker
-    compiles.
+    Edited MIB sources and their history, and the profile groupings written in the panel. On
+    the general connector rather than files beside the MIBs because a deployment with a web
+    container and a worker container shares the database and not the disk — and a MIB
+    corrected in the panel has to be the MIB the worker compiles, exactly as a grouping made
+    in the panel has to be the one the worker samples.
     """
-    return [_mib_versions.SCHEMA]
+    return [_mib_versions.SCHEMA, _profile_store.SCHEMA]

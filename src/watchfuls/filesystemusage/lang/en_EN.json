@@ -27,6 +27,7 @@
         "list": "Partitions"
     },
     "ui": {
+        "audit_v_discover":                 "Discover filesystems",
         "discover_title": "Discover Partitions",
         "discover_error": "Could not load the list of mounted partitions",
         "item_added":     "Partition \"{}\" added"

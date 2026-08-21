@@ -1,6 +1,9 @@
 {
     "pretty_name": "Sitios Web",
     "module_description": "Monitoriza endpoints HTTP/HTTPS. Verifica códigos de estado, contenido de respuesta opcional y autenticación básica. Soporta métodos GET, HEAD y POST.",
+    "ui": {
+        "audit_v_test_connection":          "Probar la conexión"
+    },
     "labels": {
         "enabled":          "Habilitado",
         "label":            "Etiqueta",

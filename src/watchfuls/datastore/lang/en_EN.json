@@ -1,6 +1,10 @@
 {
     "pretty_name": "Database Connectivity",
     "module_description": "Monitors connectivity to database servers including MySQL, PostgreSQL, MongoDB, Redis, and more. Supports TCP, Unix socket, and SSH tunnel connections.",
+    "ui": {
+        "audit_v_list_databases":           "List the server's databases",
+        "audit_v_test_connection":          "Test the connection"
+    },
     "labels": {
         "enabled":      "Enabled",
         "threads":      "Threads",

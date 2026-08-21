@@ -227,11 +227,25 @@ class TestAskingTheDeviceWhatItIs:
         assert {'synology_system', 'synology_disks', 'synology_raid'} <= set(got)
 
     def test_a_synology_is_offered_its_own_profiles(self, acts):
+        """As ONE proposal, not fifteen. The profiles are still fifteen — a NAS's system, its
+        disks and its volumes are three subjects and three profiles — but what a person is
+        asked to confirm is "this is a Synology", and the group is what says that.
+
+        The reason travels with it, because a proposal nobody can argue with is one they can
+        only trust or ignore.
+        """
+        from watchfuls.snmp import profiles as _p
         acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
                          self.DESCR: ('Linux nas-01 DSM', None),
                          '1.3.6.1.4.1.6574.1.5.1.0': ('DS920+', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
-        assert {'synology_system', 'synology_disks', 'synology_raid'} <= set(res['items'])
+        assert 'grp_synology' in res['items']
+        assert res['reasons'].get('grp_synology') == 'sysobjectid'
+        # …and none of what it holds is proposed beside it: that is what the group is FOR.
+        assert not [p for p in res['items'] if p.startswith('synology_')]
+        # What is assigned is unchanged — the fifteen are still sampled, through the one id.
+        assert {'synology_system', 'synology_disks', 'synology_raid'} <= set(
+            _p.expand(_p.catalog(), res['items']))
 
     def test_a_vendor_profile_displaces_the_generic_one_it_replaces(self, acts):
         """A Synology answers both the UCD disk-I/O probe and its own. Proposing both would
@@ -241,8 +255,12 @@ class TestAskingTheDeviceWhatItIs:
                          '1.3.6.1.4.1.6574.1.5.1.0': ('DS920+', None),
                          '1.3.6.1.4.1.6574.101.1.1.1.0': ('0', None),
                          '1.3.6.1.4.1.2021.13.15.1.1.1.1': ('1', None)}
+        from watchfuls.snmp import profiles as _p
         items = acts.detect_profiles({'host': '10.0.0.1'})['items']
-        assert 'synology_storageio' in items and 'disk_io' not in items
+        # The vendor profile is reached through the group that now stands for it; the generic
+        # one it replaces is gone from the proposal either way, which is the point.
+        assert 'synology_storageio' in _p.expand(_p.catalog(), items)
+        assert 'disk_io' not in items and 'disk_io' not in _p.expand(_p.catalog(), items)
 
     def test_a_generic_profile_survives_where_the_vendor_one_does_not_apply(self, acts):
         """Only what was PROPOSED supersedes: a Synology profile the device does not serve
@@ -286,9 +304,31 @@ class TestAskingTheDeviceWhatItIs:
 
     def test_every_shipped_profile_says_how_to_recognise_it(self):
         """A profile the catalogue cannot detect is one an admin has to know exists — which is
-        the failure this whole mechanism replaced."""
+        the failure this whole mechanism replaced.
+
+        Groups are exempt, and not by oversight: a group is not something a device answers, it
+        is a name somebody put on a set of things it answers. It is also the first row of the
+        list and reads as a sentence ("Linux / BSD server"), so it is precisely the entry that
+        does not have to be known about in advance. The ones that CAN be recognised say so
+        like anything else — `grp_synology` claims the vendor tree — and the guard below holds
+        them to the same rule as their members.
+        """
         from watchfuls.snmp import profiles as _p
-        for pid, prof in _p.catalog().items():
+        catalog = _p.catalog()
+        for pid, prof in catalog.items():
+            if _p.is_group(prof):
+                continue
             match = prof.get('match') or {}
             assert match.get('probe') or match.get('sysobjectid_prefix'), \
                 f'{pid} can never be detected'
+
+    def test_a_group_that_claims_a_device_stands_for_what_it_holds(self):
+        """A claim without `supersedes` proposes the group AND its fifteen members, which is
+        worse than either alone. Whatever a shipped group claims, it displaces."""
+        from watchfuls.snmp import profiles as _p
+        for pid, prof in _p.catalog().items():
+            match = prof.get('match') or {}
+            if not _p.is_group(prof) or not match.get('sysobjectid_prefix'):
+                continue
+            assert set(prof['includes']) <= set(match.get('supersedes') or ()), \
+                f'{pid} claims devices but leaves its members proposed beside it'

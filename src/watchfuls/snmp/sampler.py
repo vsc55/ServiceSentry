@@ -33,6 +33,7 @@ import time
 from lib.debug import DebugLevel
 
 from . import metrics as _metrics
+from . import profile_store as _profile_store
 from . import profiles as _profiles
 from .defaults import _SERVER_DEFAULTS
 
@@ -87,7 +88,14 @@ class SnmpSampler:
             return cached
         var_dir = str(getattr(self._monitor, 'dir_var', '') or '').strip()
         cdir = _profiles.custom_dir(var_dir)
-        catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+        # What the panel wrote is part of the catalogue here too. It lives in the shared
+        # database precisely so this side sees it: a deployment with a web container and a
+        # worker container shares one, and a profile or a grouping made in the panel that the
+        # sampler could not read would be a device assigned nothing at all.
+        db = getattr(self, 'db', None)
+        written = _profile_store.CatalogStore(db).documents() if db is not None else None
+        catalog = _profiles.catalog(
+            custom=_profiles.load_dir(cdir) if cdir else None, written=written)
         self._prof_cache = catalog
         return catalog
 
@@ -124,7 +132,9 @@ class SnmpSampler:
     def _sample_server(self, srv_key: str, server: dict, label: str) -> None:
         """Read every metric of every profile assigned to *server* and record the values."""
         catalog = self._profile_catalog()
-        assigned = [catalog[p] for p in self.profiles_of(server) if p in catalog]
+        # `expand` is where a group stops being one: what comes back is profiles with metrics
+        # in them, deduplicated, so two groups that share a profile do not sample it twice.
+        assigned = [catalog[p] for p in _profiles.expand(catalog, self.profiles_of(server))]
         if not assigned:
             return
 

@@ -27,6 +27,7 @@
         "list": "Particiones"
     },
     "ui": {
+        "audit_v_discover":                 "Descubrir sistemas de ficheros",
         "discover_title": "Descubrir Particiones",
         "discover_error": "No se pudo cargar la lista de particiones montadas",
         "item_added":     "Partición \"{}\" añadida"

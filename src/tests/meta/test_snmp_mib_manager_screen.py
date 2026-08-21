@@ -58,6 +58,17 @@ def _import_markup() -> str:
     return src[i:src.index('</template>', i)]
 
 
+COMPILE_TPL_ID = 'snmpCompilePageTpl'
+
+
+def _compile_markup() -> str:
+    """The compile VIEW's markup. It was a button, a fold and a bar stacked over the list;
+    it is a place of its own now, and the same kind of inert `<template>` as the others."""
+    src = _read(MODALS)
+    i = src.index('id="%s"' % COMPILE_TPL_ID)
+    return src[i:src.index('</template>', i)]
+
+
 def _manager_markup() -> str:
     """The manager's markup only — the file also holds the browser and details modals.
 
@@ -116,7 +127,8 @@ class TestTheListReachesTheBottom:
         # Only the manager's own renderers: the same file also builds the browser tree and
         # the details tables, which are capped modals of their own.
         ui = _strip_comments(_read(UI))
-        parts += [_fn(ui, name) for name in ('_mibRender', '_mibListHeader', '_mibRow')]
+        parts += [_fn(ui, name) for name in
+                  ('_mibRender', '_mibListBarHtml', '_mibRailHtml', '_mibRow')]
         for src in parts:
             hits = re.findall(r'(?:max-)?height\s*:\s*\d+vh', src)
             assert not hits, f'a viewport height is pinned in the manager: {hits}'
@@ -141,13 +153,93 @@ class TestTheListReachesTheBottom:
         list squashes the buttons instead of scrolling — so the fixed parts say so."""
         markup = _manager_markup()
         body = markup[markup.index('ss-vfill'):]
-        # The direct children of the body that are not the list itself.
+        # The direct children of the body that are not the part that grows.
         fixed = re.findall(r'\n            <(?:div|details)[^>]*class="([^"]*)"', body)
         assert fixed, 'the body has no direct children — this guard needs rewriting'
         for cls in fixed:
-            if 'ss-vfill' in cls:
-                continue          # the list: the one thing allowed to grow
+            # The two things allowed to grow: a column that fills, and the ROW of columns
+            # the rail and the list sit in.
+            if 'ss-vfill' in cls or 'ss-hfill' in cls:
+                continue
             assert 'flex-shrink-0' in cls, f'a fixed row can shrink instead: {cls}'
+
+    def test_the_rail_is_the_panel_s_rail_and_not_a_second_one(self):
+        """`ssRailShell` is what Configuration and Backups are built on: a `<nav>` down the
+        left of the pane, flush to the top, with the section's head and body beside it. A
+        module drawing its own would be two rails that should look identical and will not."""
+        ui = _read(UI)
+        assert 'ssRailShell(' in _fn(ui, '_snmpRailShell')
+        assert 'ss-rail-item' in _fn(ui, '_mibRailItem')
+        assert 'ss-rail-head' in _fn(ui, '_mibRailHtml')
+        styles = _strip_comments(_read(STYLES))
+        assert '.mib-rail' not in styles, 'the module keeps a copy of the shared rail'
+
+    def test_a_pane_that_already_bleeds_does_not_bleed_twice(self):
+        """The shell cancels the container's gutters and its top padding with negative
+        margins. A module's pane is `.ss-fullbleed` and has cancelled the same ones, so a
+        shell inside one hangs a gutter past both edges of the window."""
+        css = _read(CSS)
+        assert re.search(r'\.ss-fullbleed\s*>\s*\.ss-shell\s*\{[^}]*margin:\s*0', css)
+
+    def test_the_rail_goes_up_with_the_view_that_has_a_list(self):
+        """A rail filters a list, and importing and compiling have no list — and it
+        restructures the pane around the container the templates are cloned into, so it moves
+        once per view change and never under a list being drawn."""
+        ui = _read(UI)
+        assert "_snmpRailShell(view)" in _fn(ui, 'renderSnmpMibsPage')
+        body = _fn(ui, '_snmpRailShell')
+        # Which views have one is decided in ONE place, by naming the body each fills.
+        assert "'mibRailBody'" in body and "'snmpProfRailBody'" in body
+        assert ": ''" in body, 'every view gets a rail, including the ones with no list'
+
+    def test_the_two_railed_views_share_one_shell(self):
+        """The shell restructures the pane; two of them would be two rails in one pane, drawn
+        at different heights by whichever ran last. What differs is the CONTENT, so the body
+        is replaced when the view changes — and left alone when it does not, because a rail
+        rebuilt on every render loses the scroll position of a four-hundred-folder tree."""
+        body = _fn(_read(UI), '_snmpRailShell')
+        assert 'dataset.snmpRail !== view' in body, 'the rail is rebuilt on every render'
+        assert 'dataset.snmpRail = view' in body
+
+    def test_the_search_box_is_built_once(self):
+        """It lives in the rail, and the rail is repainted on every keystroke: rebuilt with
+        it, the cursor leaves the box being typed in. The BODY is what gets repainted."""
+        ui = _read(UI)
+        assert "getElementById('mibRailBody')" in _fn(ui, '_mibFilterLists')
+        assert "'mibRailBody'" in _fn(ui, '_snmpRailShell')
+
+
+class TestTheMarkupCloses:
+    """A stray `</div>` is invisible in a diff and unmistakable on screen. This one closed
+    the padded column immediately after opening it: everything below landed outside it, the
+    now-empty column kept its `.ss-vfill` and grew to fill the pane, and the section became a
+    header, a hole the height of the viewport, and a list with no margins. All three views at
+    once, from one edit that removed a block and left its closing tag behind.
+
+    Counting tags is not parsing HTML — but the failure mode here is exactly a count, and the
+    browser will not complain: it re-nests silently and paints something almost right.
+    """
+
+    def test_every_view_balances_its_divs(self):
+        for name, markup in (('library', _manager_markup()),
+                             ('import', _import_markup()),
+                             ('compile', _compile_markup())):
+            opens = len(re.findall(r'<div\b', markup))
+            closes = len(re.findall(r'</div>', markup))
+            assert opens == closes, (
+                f'{name}: {opens} <div> and {closes} </div> — a view whose columns do not '
+                'close where they should paints a hole and loses its margins')
+
+    def test_the_padded_column_holds_the_view(self):
+        """The head and the progress strip are outside it on purpose — they belong to the
+        frame — and everything the view is ABOUT is inside it. An empty one is the shape the
+        bug took."""
+        for markup in (_manager_markup(), _import_markup(), _compile_markup()):
+            i = markup.index('class="ss-vfill p-3"')
+            rest = markup[i:]
+            assert rest.count('<div') > 3, 'the padded column is empty'
+            assert 'ss-toolbar' not in rest, 'the head is inside the padding'
+            assert 'mibProgressSection' not in rest, 'the progress strip is inside the padding'
 
 
 class TestOneRowPerModule:
@@ -185,10 +277,10 @@ class TestOneRowPerModule:
         assert 'let _mibSelection = new Set();' in _read(UI)
         assert '_mibFilterLists();' in _fn(_read(UI), '_mibRefreshCompiled')
 
-    def test_the_state_chips_carry_the_counts(self):
-        """"What is still pending" is the question this modal exists to answer, so it is on
+    def test_the_states_carry_the_counts(self):
+        """"What is still pending" is the question this screen exists to answer, so it is on
         screen before anything is typed or clicked."""
-        body = _fn(_read(UI), '_mibChips')
+        body = _fn(_read(UI), '_mibStateDefs')
         for state in ('pending', 'compiled', 'dep'):
             assert "'%s'" % state in body
 
@@ -208,9 +300,9 @@ class TestAFailureIsItsOwnState:
         body = _fn(_read(UI), '_mibRows')
         assert "'failed'" in body, 'a recorded failure has to be its own state'
 
-    def test_it_has_a_chip_of_its_own(self):
+    def test_it_has_a_line_of_its_own(self):
         """After a run of two hundred, "what failed" has to be one click, not a scroll."""
-        assert "'failed'" in _fn(_read(UI), '_mibChips')
+        assert "'failed'" in _fn(_read(UI), '_mibStateDefs')
         assert 'failed: 0' in _fn(_read(UI), '_mibCounts')
 
     def test_the_reason_outlives_the_page(self):
@@ -485,7 +577,7 @@ class TestNothingIsKeptWhereItCannotBeReached:
         assert 'orphan' in _fn(_read(UI), '_mibCounts')
 
     def test_it_has_a_chip_so_it_can_be_found(self):
-        assert "'orphan'" in _fn(_read(UI), '_mibChips')
+        assert "'orphan'" in _fn(_read(UI), '_mibStateDefs')
 
     def test_the_row_offers_the_two_things_that_apply_to_it(self):
         """There is no file: compiling, viewing the source and deleting the file are all
@@ -656,7 +748,7 @@ class TestWhatDeletingLeavesBehind:
         that partitions the list is what makes "is there anything to clean?" answerable
         without clicking anything."""
         ui = _read(UI)
-        assert 'mib_filter_stray' in _fn(ui, '_mibChips')
+        assert 'mib_filter_stray' in _fn(ui, '_mibStateDefs')
         assert "stray: 0" in _fn(ui, '_mibCounts')
         assert 'mib_stray' in _fn(ui, '_mibStateBadge')
 
@@ -676,6 +768,27 @@ class TestWhatDeletingLeavesBehind:
         assert 'library_leftovers' in body and 'clean_library' not in body
         assert 'showConfirmModal' in body
         assert 'clean_library' in _fn(ui, '_mibCleanConfirmed')
+
+    def test_the_broom_is_where_the_compiling_happens(self):
+        """What it sweeps is compiled OUTPUT — a module whose source was deleted, and the
+        folder that source lived in. In the library's head it was an action on the library
+        about something the library does not do."""
+        assert 'id="mibCleanBtn"' in _compile_markup()
+        assert 'mibCleanBtn' not in _manager_markup()
+        assert 'mib_clean_btn' in _fn(_read(UI), '_snmpCompilePageLabels')
+
+    def test_it_only_shows_up_when_there_is_something_to_sweep(self):
+        """A broom on a tidy library is a button whose whole answer is "nothing"."""
+        body = _fn(_read(UI), '_mibUpdateCleanBtn')
+        assert "btn.style.display = n ? '' : 'none'" in body
+        assert '_mibUpdateCleanBtn(' in _fn(_read(UI), '_mibCompileRender')
+
+    def test_the_library_says_it_without_offering_to_do_it(self):
+        """The notice is the "no source" line in the rail, with its count and the rows
+        behind it — which is a thing to look at, not a second place to act."""
+        ui = _read(UI)
+        assert 'mib_filter_stray' in _fn(ui, '_mibStateDefs')
+        assert '_mibUpdateCleanBtn' not in _fn(ui, '_mibFilterLists')
 
     def test_a_dependency_is_never_swept_up_with_them(self):
         """A compiled module pysmi did not read out of `raw/` cannot be rebuilt from
@@ -722,6 +835,181 @@ class TestWhatDeletingLeavesBehind:
         ro = init[init.index('READ_ONLY_ACTIONS'):]
         ro = ro[:ro.index('})')]
         assert "'library_leftovers'" in ro and "'clean_library'" not in ro
+
+
+class TestCompilingIsAPlaceAndNotAButton:
+    """It was a button, a fold and a progress bar stacked over the list: two rows of the
+    library spent on it whether anything was compiling or not, and the two things anybody
+    needs when a compile goes wrong were the two hardest to reach — which sources resolve an
+    IMPORTS was folded into a `<details>`, and what failed was a chip away from four thousand
+    rows.
+
+    It reads the same payload the library does and draws none of it: how much there is to do,
+    and what failed with the reason beside it."""
+
+    def test_the_view_holds_what_the_list_used_to_carry(self):
+        markup = _compile_markup()
+        for el in ('mibDepSrcList', 'mibCompileErrors', 'mibProgressSection', 'mibStopBtn'):
+            assert 'id="%s"' % el in markup, f'{el} is not in the compile view'
+
+    def test_none_of_it_is_left_over_the_library(self):
+        """The point of moving it: the library's height goes to the library."""
+        markup = _manager_markup()
+        for el in ('mibDepSrcList', 'mibCompileErrors', 'mibCompileBtn'):
+            assert 'id="%s"' % el not in markup, f'{el} is still stacked over the list'
+
+    def test_the_fold_became_a_heading(self):
+        """A `<details>` costs a row whether it is open or not, and what is inside it decides
+        whether a compile can resolve an IMPORTS at all."""
+        assert '<details' not in _compile_markup()
+        assert "getElementById('mibDepSrcTitle')" in _fn(_read(UI), '_mibDepSrcRefreshSummary')
+
+    def test_a_failure_carries_the_reason_and_the_line(self):
+        """pysmi says "Bad grammar near offset 558 … line 21". The number is the difference
+        between "this file is broken" and being able to look at what is broken."""
+        body = _fn(_read(UI), '_mibErrorRow')
+        assert '_mibErrorLine' in body and '_mibShowRawDetails' in body
+        assert '_compileMibs(' in body, 'a fixed file cannot be tried again from here'
+
+    def test_pending_comes_from_the_server_and_not_from_the_rows(self):
+        """A row is a module and the job walks file NAMES: the two differ whenever a module
+        arrives twice under different names, which in a vendor archive is most of them. The
+        panel once promised 14 and the bar went to 15."""
+        body = _fn(_read(UI), '_mibCompileRender')
+        assert '_mibData.pending' in body
+
+    def test_the_view_paints_no_list(self):
+        """It reads the whole inventory and shows none of it — the library is where rows
+        live, and two screens drawing the same four thousand rows is one too many."""
+        body = _fn(_read(UI), '_mibCompileRender')
+        assert '_mibRow(' not in body
+        assert 'id="mibList"' not in _compile_markup()
+
+    def test_a_job_started_anywhere_is_watchable_everywhere(self):
+        """A compile runs server-side under a job id; the three views carry the same progress
+        ids on purpose, because a `<template>` is inert and only the clone is ever live."""
+        for markup in (_manager_markup(), _import_markup(), _compile_markup()):
+            assert 'id="mibProgressBar"' in markup
+
+
+class TestEachWayInSaysWhatItIs:
+    """Three rows of controls stacked in a column read as one form with too many boxes: a
+    URL field, a repo picker with a switch beside it, and a vendor archive with two buttons
+    that mean different things. Nothing on the page said which was which, or that they were
+    three separate ways in at all."""
+
+    def test_every_source_is_a_card_with_a_name_on_it(self):
+        markup = _import_markup()
+        assert markup.count('class="card h-100"') + markup.count('class="card"') >= 4
+        for title in ('mibUploadTitle', 'mibImportUrlTitle', 'mibGithubTitle', 'mibArchiveTitle'):
+            assert 'id="%s"' % title in markup, f'{title} has no heading'
+
+    def test_the_names_come_from_the_module_and_not_the_core(self):
+        body = _fn(_read(UI), '_snmpImportPageLabels')
+        for key in ('mib_upload_title', 'mib_import_url_title', 'mib_github_title',
+                    'mib_archive_title'):
+            assert key in body
+        import json
+        for lang in ('es_ES', 'en_EN'):
+            with open(os.path.join(SRC, 'watchfuls', 'snmp', 'lang', lang + '.json'),
+                      encoding='utf-8') as fh:
+                ui = json.load(fh).get('ui') or {}
+            for key in ('mib_upload_title', 'mib_import_url_title', 'mib_github_title',
+                        'mib_archive_title', 'view_compile'):
+                assert ui.get(key), f'{key} has no word in {lang}'
+
+    def test_the_report_still_gets_the_rest_of_the_page(self):
+        """The cards are the top of the page and refuse to grow; what "Compare" answers is
+        four thousand rows and takes everything that is left."""
+        markup = _import_markup()
+        i = markup.index('id="mibArchiveResult"')
+        assert 'flex-shrink-0' in markup[:i]
+        assert 'class="ss-vfill"' in markup[i:i + 120]
+
+
+class TestNarrowingAListYouAreAlreadyLookingAt:
+    """The rail answers WHICH rows; the bar over the list answers how many of them you are
+    looking at, in what order, and what you do with the ones you ticked.
+
+    Two of the rail's lines are not states — a duplicated module is still compiled or
+    pending, and so is one somebody edited here — and they were tried as toggles over the
+    list, which would have let the two kinds combine. They read as two behaviours in one
+    screen: eight lines you pick one of, and two switches somewhere else. They are lines of
+    the same list now, behaving the same way, LAST so the partition above them stays one."""
+
+    def test_what_cuts_across_the_states_comes_after_them(self):
+        body = _fn(_read(UI), '_mibStateDefs')
+        i = body.index("'stray'") if "'stray'" in body else body.index("'builtin'")
+        for key in ("'dupe'", "'edited'"):
+            assert body.index(key) > i, f'{key} is inside the partition'
+
+    def test_edited_is_a_line_and_not_a_badge_you_have_to_hunt_for(self):
+        """The first thing worth knowing about a MIB that started misbehaving after somebody
+        fixed it, and it could only be read one row at a time as a `v3` badge."""
+        ui = _read(UI)
+        assert "'edited'" in _fn(ui, '_mibStateDefs')
+        assert 'edited: 0' in _fn(ui, '_mibCounts')
+        assert "_mibFilter === 'edited'" in _fn(ui, '_mibTreeRows')
+
+
+    def test_a_search_looks_at_the_file_names_too(self):
+        """A row is titled by the MODULE, and that is not what anybody types. Searching for
+        `rfc` in a library holding eight files called `rfc*.mib` found nothing, because every
+        one of them declares a module named after what it describes — `rfc2011.mib` is IP-MIB
+        and `rfc2737.mib` is ENTITY-MIB."""
+        body = _fn(_read(UI), '_mibMatches')
+        assert 'r.raws' in body, 'the file names are not searched'
+        assert 'r.key' in body
+
+    def test_a_second_word_narrows(self):
+        """Typing another one is how somebody says "not those": as one long substring the
+        second word could only ever match less by accident of order."""
+        ui = _read(UI)
+        assert 'terms.every' in _fn(ui, '_mibMatches')
+        assert 'split(' in _fn(ui, '_mibTreeRows')
+
+    def test_the_box_is_over_the_list_it_narrows(self):
+        """It was at the top of the rail, which is where the states and the folders are —
+        the two things you PICK. Free text narrows what is already on screen, so it sits
+        with the count of what is on screen."""
+        markup = _manager_markup()
+        i = markup.index('id="mibSearch"')
+        assert i > markup.index('id="mibManagerBody"') - 4000  # same block as the list bar
+        assert 'id="mibListBar"' in markup
+        assert markup.index('id="mibSearch"') < markup.index('id="mibListBar"')
+        assert "id=\"mibSearch\"" not in _fn(_read(UI), '_snmpRailShell'), \
+            'the rail builds a second search box'
+
+    def test_the_order_is_about_the_list_and_not_about_the_data(self):
+        """Sorting cannot decide what belongs in the list, so it happens after the filtering
+        — and by name is the order the library HAS, which is why it is the one that changes
+        nothing."""
+        ui = _read(UI)
+        vis = _fn(ui, '_mibVisibleRows')
+        assert '_mibSortRows(' in vis and '_mibInFolder' in vis
+        body = _fn(ui, '_mibSortRows')
+        assert "'size'" in body and "'date'" in body
+        assert 'rows.slice()' in body, 'sorting in place reorders the caller\'s array'
+        assert body.rstrip().endswith('return rows;'), 'by name is not the untouched order'
+
+    def test_the_bar_separates_what_you_see_from_what_you_ticked(self):
+        """Two different subjects on one row: the left is the list, the right is the
+        selection. Mixed, "None" reads as a filter."""
+        body = _fn(_read(UI), '_mibListBarHtml')
+        i = body.index('ms-auto')
+        for before in ('_mibSetSort', 'mib_showing'):
+            assert body.index(before) < i, f'{before} is on the selection side'
+        for after in ('_mibSelectAll', '_mibDeselectAll', 'mibDeleteSelGroup'):
+            assert body.index(after) > i, f'{after} is on the list side'
+
+    def test_what_appears_with_a_selection_does_not_shove_what_is_always_there(self):
+        """"All" and "None" are the buttons somebody is clicking AT THE TIME. Rendered before
+        the two that come and go with the selection, every tick and untick slid them
+        sideways under the cursor."""
+        body = _fn(_read(UI), '_mibListBarHtml')
+        for moves in ('mibCompileSelBtn', 'mibDeleteSelGroup'):
+            assert body.index(moves) < body.index('_mibSelectAll'), \
+                f'{moves} pushes "All" and "None" when it appears'
 
 
 class TestSeveralFilesOneModule:
@@ -775,15 +1063,17 @@ class TestSeveralFilesOneModule:
         assert 'def resolve_raw_sources' in res, 'one name at a time is one walk at a time'
 
     def test_the_filter_is_not_a_state(self):
-        """A duplicated module is still compiled, or pending, or failed. Folded into the
-        state chips it would have to steal rows from them to exist."""
-        assert "_mibFilter === 'dupe'" in _fn(_read(UI), '_mibVisibleRows')
-        assert 'c.dupe' in _fn(_read(UI), '_mibCounts')
+        """A duplicated module is still compiled, or pending, or failed — so it is asked for
+        the way the states are, but it is not one of them: it comes after them, and the rows
+        it answers with are rows the lines above already counted."""
+        ui = _read(UI)
+        body = _fn(ui, '_mibTreeRows')
+        assert "_mibFilter === 'dupe'" in body and 'r.state === _mibFilter' in body
+        assert 'c.dupe' in _fn(ui, '_mibCounts')
 
-    def test_the_chip_is_only_there_when_it_counts_something(self):
-        """A chip that always reads zero is a chip nobody reads."""
-        body = _fn(_read(UI), '_mibChips')
-        assert 'if (c.dupe)' in body
+    def test_the_line_is_only_there_when_it_counts_something(self):
+        """A line that always reads zero is a line nobody reads."""
+        assert 'if (c.dupe)' in _fn(_read(UI), '_mibStateDefs')
 
     def test_deleting_a_copy_says_the_module_needs_compiling_again(self):
         """Delete the copy that was being compiled and another takes over — the compiled
@@ -891,7 +1181,7 @@ class TestDeletingIsNotOneThing:
         that drift."""
         ui = _read(UI)
         assert '_mibDeleteMenu' in _fn(ui, '_mibDeleteBtn')
-        assert '_mibDeleteMenu' in _fn(ui, '_mibListHeader')
+        assert '_mibDeleteMenu' in _fn(ui, '_mibListBarHtml')
 
     def test_the_question_says_what_SURVIVES(self):
         """What goes is half of it; what stays is the half somebody gets wrong. Deleting the
@@ -976,10 +1266,42 @@ class TestManyMibsStayWorkable:
         assert '_MIB_AUTO_EXPAND' in _fn(ui, '_mibListHtml')
         assert 'shown.map(r => _mibRow(r))' in _fn(ui, '_mibListHtml')
 
-    def test_one_folder_is_not_a_choice(self):
-        """A selector offering the only option there is, is a permanent reminder of a tree
-        with no branches."""
-        assert 'groups.size < 2' in _fn(_read(UI), '_mibFolderSelect')
+    def test_the_folders_are_a_tree_and_not_a_flat_list(self):
+        """`librenms/nokia/aos6` is three folders, and four hundred of them flattened into a
+        `<select>` in alphabetical order is a control you can only use if you already know
+        the answer. Split on the separator, nested, and each node counting its whole
+        subtree."""
+        body = _fn(_read(UI), '_mibFolderTree')
+        assert "split('/')" in body and 'kids' in body
+
+    def test_choosing_a_folder_shows_what_is_under_it(self):
+        """A node that counted its subtree and then showed only its own direct children
+        would be a number beside a folder that looks empty."""
+        body = _fn(_read(UI), '_mibInFolder')
+        assert "startsWith(_mibFolder + '/')" in body
+        assert '_mibInFolder' in _fn(_read(UI), '_mibVisibleRows')
+
+    def test_the_root_folder_is_not_the_same_thing_as_every_folder(self):
+        """Both were the empty string: the rows directly under `raw/` carry `group === ''`,
+        and so does "no folder chosen". Picking the root therefore selected all of them and
+        lit up both lines at once. It gets a key of its own, like the other two
+        pseudo-folders, and the filter knows what it means."""
+        ui = _read(UI)
+        assert '_MIB_ROOT_GROUP' in ui
+        assert '_MIB_ROOT_GROUP' in _fn(ui, '_mibFolderTree')
+        body = _fn(ui, '_mibInFolder')
+        assert '_mibFolder === _MIB_ROOT_GROUP' in body and 'return !r.group' in body
+
+    def test_opening_a_folder_and_picking_it_are_two_answers(self):
+        """The twist is its own control, so it stops the click reaching the row — and a row
+        picked inside a closed parent opens every level above it, or the selection is
+        somewhere nobody can see."""
+        ui = _read(UI)
+        item = _fn(ui, '_mibRailItem')
+        assert 'event.stopPropagation()' in item and '_mibToggleFolder' in item
+        assert '<button' not in item, 'a control inside a control: the browser picks a winner'
+        assert 'role="button"' in item, 'the rail is not reachable by keyboard'
+        assert '_mibOpenFolders.add' in _fn(ui, '_mibSetFolder')
 
     def test_a_search_opens_the_folders_it_matched_in(self):
         """Typing something that exists and being shown nothing, because the match is inside
@@ -1019,11 +1341,14 @@ class TestManyMibsStayWorkable:
         assert "r.py && r.state !== 'stale'" in body
         assert '${done}/${rs.length}' in body
 
-    def test_the_counts_are_of_the_folder_and_not_of_the_moment(self):
-        """A count that moves as you type is one nobody can use to decide where to look —
-        which is the only thing the number is for."""
-        body = _fn(_read(UI), '_mibFilterLists')
-        assert '_mibFolderSelect(all)' in body, 'the folder counts follow the filter'
+    def test_the_tree_counts_what_the_filter_left_and_not_what_the_folder_holds(self):
+        """"Where is the work" is what a tree beside a state filter is asked, and a count of
+        everything answers a different question. It must NOT follow the folder, though: the
+        branch you are standing on would be the only one with a number on it."""
+        ui = _read(UI)
+        assert '_mibTreeRows()' in _fn(ui, '_mibRailHtml')
+        assert '_mibInFolder' not in _fn(ui, '_mibTreeRows')
+        assert '_mibRailHtml(all)' in _fn(ui, '_mibFilterLists')
 
 
 class TestTheCompileButtonSaysWhatItDoes:
@@ -1032,13 +1357,19 @@ class TestTheCompileButtonSaysWhatItDoes:
 
     def test_the_default_action_is_the_pending_one(self):
         """It is what somebody presses without reading it, so it had better be the one that
-        does the work and not the inventory."""
-        assert "_compileMibs(null, 'pending')" in _manager_markup()
+        does the work and not the inventory — and it is the primary button of the view."""
+        markup = _compile_markup()
+        assert "_compileMibs(null, 'pending')" in markup
+        assert 'btn-primary' in markup[:markup.index("_compileMibs(null, 'pending')")]
 
-    def test_rebuilding_everything_is_behind_the_dropdown_and_asks(self):
+    def test_rebuilding_everything_is_the_second_button_and_asks(self):
         """Slow, almost never wanted, and indistinguishable from the fast one once it is
-        running."""
-        assert 'dropdown-toggle-split' in _manager_markup()
+        running. It was a dropdown item over the list; with a view of its own there is room
+        to write it out, and what it costs is still a question before it starts."""
+        markup = _compile_markup()
+        assert '_mibRebuildAll()' in markup
+        i, j = markup.index("_compileMibs(null, 'pending')"), markup.index('_mibRebuildAll()')
+        assert i < j, 'the slow one comes first'
         assert 'showConfirmModal' in _fn(_read(UI), '_mibRebuildAll')
 
     def test_the_two_labels_stay_on_their_own_buttons(self):
@@ -1102,13 +1433,14 @@ class TestImportingIsItsOwnView:
     A view and not a second section: same pane, same permission, a sub-path of its own
     (`/module/snmp/import`) that a person can send to somebody else."""
 
-    def test_the_section_declares_both_views(self):
-        """The module says it has two and names them in its own lang file — the core ships
+    def test_the_section_declares_its_views(self):
+        """The module says which it has and names them in its own lang file — the core ships
         no string that names a module's view."""
         import json
         with open(os.path.join(SRC, 'watchfuls', 'snmp', 'schema.json'), encoding='utf-8') as fh:
             views = (json.load(fh)['__page__'].get('views') or [])
-        assert [v['slug'] for v in views] == ['library', 'import']
+        assert [v['slug'] for v in views] == ['library', 'import', 'compile',
+                                              'browser', 'profiles']
         for lang in ('es_ES', 'en_EN'):
             with open(os.path.join(SRC, 'watchfuls', 'snmp', 'lang', lang + '.json'),
                       encoding='utf-8') as fh:
@@ -1138,17 +1470,49 @@ class TestImportingIsItsOwnView:
         assert IMPORT_TPL_ID in fn and TPL_ID in fn
         assert 'box.dataset.snmpView' in fn, 'nothing remembers which view is painted'
 
-    def test_both_ways_in_lead_to_the_same_place(self):
-        """The toolbar button and the sidebar's flyout entry are one destination: the button
-        navigates to the view instead of painting it, so the URL, the highlight and the
-        breadcrumb are what they would be either way."""
+    def test_the_menu_is_the_way_in_and_the_bar_does_not_repeat_it(self):
+        """The section's views are in the sidebar's flyout, all three of them. A toolbar
+        button beside them is a second door onto the same room — and it was the first thing
+        to wrap when the window narrowed. What is left in the library's bar is what is about
+        the LIBRARY: whether pysmi is there, where the files are, re-read, tidy up."""
         ui = _read(UI)
         assert '_navPageView(' in _fn(ui, '_snmpGoToView')
         assert '_snmpGoToView(' in _fn(ui, 'openMibImportPage')
-        assert 'openMibImportPage()' in _manager_markup(), 'the library has no way in'
-        assert 'openMibLibraryPage()' in _import_markup(), 'the import view is a dead end'
-        # …and both say the same word, because two names for one place is two places.
-        assert "'view_import'" in _fn(ui, '_snmpMibsPageLabels')
+        # Neither way round: no button into a view, and no button back out of one either —
+        # the flyout holds all three and is the same one click from anywhere.
+        for markup in (_manager_markup(), _import_markup(), _compile_markup()):
+            for gone in ('openMibImportPage()', 'openMibCompilePage()',
+                         'openMibLibraryPage()'):
+                assert gone not in markup, f'a view repeats the menu: {gone}'
+        assert 'mibFileInput' not in _manager_markup(), 'the library still uploads'
+
+    def test_every_view_wears_the_panel_s_head(self):
+        """Configuration and Backups open with a bar: what you are looking at on the left,
+        what you can do to it on the right. Three screens of one section that each invent
+        their own top edge are three screens that look like three sections."""
+        for markup, title in ((_manager_markup(), 'mibLibTitle'),
+                              (_import_markup(), 'mibImportTitle'),
+                              (_compile_markup(), 'mibCompileTitle')):
+            assert 'ss-toolbar ss-toolbar-plain ss-toolbar-flush' in markup
+            assert 'id="%s"' % title in markup, f'{title} has no head to sit in'
+            # …and what is on the right is a GROUP with its own `ms-auto`. The toolbar pushes
+            # its second child right, and the second child was the pysmi badge — hidden
+            # whenever pysmi is installed, so the margin that does the pushing sat on an
+            # element with no width and the whole right-hand end stayed by the title.
+            if 'mibRefreshBtn' in markup:
+                i = markup.index('ms-auto')
+                assert i < markup.index('mibRefreshBtn'), 'the right-hand end is not pushed'
+        css = _read(CSS)
+        css = _read(CSS)
+        m = re.search(r'\.ss-toolbar\.ss-toolbar-flush\s*\{([^}]*)\}', css)
+        assert m, 'the flush toolbar variant is gone'
+        assert 'border-radius: 0' in m.group(1)
+
+    def test_uploading_a_file_is_one_of_the_ways_a_mib_gets_in(self):
+        """It sat in the library's toolbar, which is where you look at MIBs and not where
+        you add them — three ways in on one page and a fourth on another."""
+        assert 'id="mibFileInput"' in _import_markup()
+        assert 'mibUploadTitle' in _fn(_read(UI), '_snmpImportPageLabels')
 
     def test_the_comparison_report_fills_the_page(self):
         """The whole reason this is a page. `.ss-vfill` down to one `.ss-vscroll`: the header

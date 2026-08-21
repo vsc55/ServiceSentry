@@ -1,6 +1,10 @@
 {
     "pretty_name": "Conectividad de Bases de Datos",
     "module_description": "Monitoriza la conectividad con servidores de bases de datos como MySQL, PostgreSQL, MongoDB, Redis y otros. Compatible con conexiones TCP, socket Unix y túnel SSH.",
+    "ui": {
+        "audit_v_list_databases":           "Listar las bases de datos del servidor",
+        "audit_v_test_connection":          "Probar la conexión"
+    },
     "labels": {
         "enabled":      "Habilitado",
         "threads":      "Hilos",

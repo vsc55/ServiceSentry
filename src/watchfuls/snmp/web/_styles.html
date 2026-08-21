@@ -69,10 +69,21 @@
 /* MIB Manager — URL import input (fills remaining flex space) */
 #mibImportUrlInput { min-width: 0; flex: 1; }
 
-/* MIB Manager — a job's progress, wherever it is being watched: the section paints one
-   under its toolbar for compiling, the import dialog paints its own for a download.  Hidden
-   until a job starts (the JS sets an explicit `display:block`, never ''). */
-.mib-progress { display: none; }
+/* MIB Manager — a job's progress, in the ONE place it is ever drawn: a strip directly under
+   the section's head, in all three views. It used to be painted wherever each view had room
+   — under the library's toolbar, below the compile buttons, beneath the import cards — so
+   walking between them while a compile ran moved the bar around the screen, and a thing that
+   moves when you navigate reads as three things rather than one.
+
+   Shaped like the head above it, because that is what it is: a second row of the frame that
+   is there while something is running and gone when it is not. Hidden until a job starts
+   (the JS sets an explicit `display:block`, never ''). */
+.mib-progress {
+    display: none;
+    padding: .4rem 1rem .5rem;
+    background: var(--bs-tertiary-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+}
 
 /* …its label and percentage */
 .mib-progress-text { font-size: .78rem; }
@@ -82,4 +93,11 @@
 
 /* …and its bar, empty until the first tick (JS updates style.width at runtime) */
 .mib-progress .progress-bar { width: 0%; }
+
+/* The search box over the list: wide enough for a vendor name, and it does not grow with the
+   bar — what grows is the row of toggles beside it. */
+.mib-search { width: 15rem; }
+
+/* The source picker of an import card: a fixed width so the field beside it is what grows. */
+.mib-src-pick { width: 150px; flex-shrink: 0; }
 </style>

@@ -23,6 +23,7 @@
     },
     "collections": {"list": "Processes"},
     "ui": {
+        "audit_v_discover":                 "Discover running processes",
         "discover_title": "Running Processes",
         "discover_error": "Could not load the list of running processes",
         "item_added":     "Process \"{}\" added"

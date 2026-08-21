@@ -1,0 +1,48 @@
+{
+  "id": "grp_synology",
+  "label": {
+    "en_EN": "Synology NAS (everything)",
+    "es_ES": "NAS Synology (todo)"
+  },
+  "description": {
+    "en_EN": "Every profile written for a Synology: system, disks, SMART, volumes and RAID, disk and volume I/O, SSD cache, Ethernet ports, expansion units, iSCSI, NFS, GPU, high availability, UPS and service users.",
+    "es_ES": "Todos los perfiles escritos para un Synology: sistema, discos, SMART, volúmenes y RAID, E/S de discos y volúmenes, caché SSD, puertos Ethernet, unidades de expansión, iSCSI, NFS, GPU, alta disponibilidad, SAI y usuarios por servicio."
+  },
+  "includes": [
+    "synology_system",
+    "synology_disks",
+    "synology_smart",
+    "synology_raid",
+    "synology_storageio",
+    "synology_spaceio",
+    "synology_flashcache",
+    "synology_ethports",
+    "synology_ebox",
+    "synology_iscsi",
+    "synology_nfs",
+    "synology_gpu",
+    "synology_ha",
+    "synology_ups",
+    "synology_services"
+  ],
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.6574",
+    "supersedes": [
+      "synology_system",
+      "synology_disks",
+      "synology_smart",
+      "synology_raid",
+      "synology_storageio",
+      "synology_spaceio",
+      "synology_flashcache",
+      "synology_ethports",
+      "synology_ebox",
+      "synology_iscsi",
+      "synology_nfs",
+      "synology_gpu",
+      "synology_ha",
+      "synology_ups",
+      "synology_services"
+    ]
+  }
+}

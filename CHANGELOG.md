@@ -8,6 +8,192 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.100] - 2026-08-21
+
+### Added
+- **One word instead of fifteen profiles.** A Synology answers fifteen SNMP profiles — its
+  system, its disks, its SMART attributes, its volumes, its UPS — and every one of them is
+  correctly a separate profile, because they are separate subjects. Assigning them one by one
+  to every NAS in the rack was fifteen chips in a field saying what the word "Synology" says,
+  and fifteen things to remember when the family grows a sixteenth. A **group** is an entry in
+  the same catalogue whose members are other entries' ids instead of OIDs, and that is the
+  whole design: assigning, detecting, charting, backing up and the sampler all go on speaking
+  about ids, and exactly one function knows a group is not a profile — so a group can be
+  renamed, gain a profile or be deleted without anything else finding out. Three ship
+  (`grp_synology`, `grp_linux` for anything running net-snmp, `grp_network` for a managed
+  network device nobody wrote a vendor profile for), and an installation writes its own in the
+  panel: a name, an id and the profiles it holds.
+- **Detection proposes the grouping, not the pile.** A Synology used to come back as fifteen
+  ticks and five generic ones; it comes back as two rows now. Two mechanisms, both already in
+  the product: a shipped group may claim a vendor tree like any profile and displace what it
+  holds, and any group — including one somebody wrote this morning — stands for a set of
+  proposals it covers **entirely**. Only entirely: a partial cover would quietly assign
+  profiles the device did not answer, and a wrong profile does not fail, it measures numbers
+  that look fine.
+- **A profile is written in the panel too, not only a file on the machine.** The OID matrix
+  — what says that `1.3.6.1.4.1.2021.11.9.0` is the CPU and that seven is a percentage — was
+  only ever a JSON file you put on the server, which rules it out for the box in the rack
+  nobody wrote a profile for: the person who has that box is not always the person with a
+  shell on the machine. The form is that same document field by field, and it is checked by
+  **the same function that reads the shipped files** — a second validator in the form would
+  be a second declaration of the same rules, and the two would disagree the first time one of
+  them gained a field. What the form adds is the reason: a metric is refused **by name and
+  with a reason**, because `normalise` drops what it cannot use and keeps the rest, which is
+  right when reading a file somebody edited at 3am and wrong when answering a person looking
+  at the row they just typed. Any profile can be **duplicated**, which is how one actually
+  gets written: an OID matrix from a blank form is an afternoon, the same matrix with three
+  OIDs changed is five minutes.
+- **An OID is chosen, not remembered.** Typing `1.3.6.1.4.1.6574.2.1.1.6` from memory is
+  how a profile ends up measuring nothing and saying nothing about it: every digit is
+  load-bearing and none of them is checked by anything until a device answers, or does not.
+  All three OID fields of the metric form now open the compiled MIBs. What a pick adds over a
+  paste is the **SYNTAX**: `Counter64` fills in "counter, 64 bits", `Gauge32` fills in gauge,
+  `DisplayString` fills in text-and-not-charted, and an enum fills in the value display the
+  shipped profiles use for a state — the one thing about a metric nobody gets right from the
+  OID, and the one that turns a counter wrapping around into a device that rebooted. A
+  **scalar is asked for its instance** (`sysDescr` becomes `1.3.6.1.2.1.1.1.0`), which is the
+  most common way a hand-written profile is silently empty; a table column becomes a walk;
+  and the column that names a table's rows is looked for among that table's own columns
+  rather than among nine thousand symbols.
+- **A group is written in the panel and lives in the database**, unlike the installation's own
+  profiles, which are files. The asymmetry is deliberate: an OID matrix is written in an
+  editor by somebody who knows what a walk is, and a grouping is made of things that already
+  exist, in three clicks, by whoever is adding the device. And what is written in the panel has
+  to be somewhere the panel is not the only reader of — a deployment with a web container and
+  a worker container shares the database and not the disk, so a grouping the sampler could not
+  read would be a device assigned nothing at all. It rides the database backup for the same
+  reason. One table holds both: a group is an entry whose members are other entries' ids and a
+  profile is one whose members are OIDs, and everything downstream already treats them as one
+  kind — storing them apart would be the only place in the product insisting they are
+  different. The **id cannot be edited**, and neither can the KIND behind it: it is the value
+  every device stores, so renaming one would not rename anything, it would leave every device
+  that referenced it pointing at nothing — and a device assigned `mis_linux` when it was a
+  group would go on sampling whatever a profile of that name measured afterwards. Deleting
+  does not rewrite anybody's configuration either: the devices keep the id, which stops
+  resolving, exactly as a deleted shipped profile does.
+
+### Changed
+- **The MIB manager takes the shape of the rest of the panel.** Three screens of one section
+  had each invented their own top edge: the library opened with nine controls in a row that
+  wrapped, importing was three cramped rows of fields, and compiling was a button, a folded
+  `<details>` and a progress bar stacked over the list — two rows of the library spent on it
+  whether anything was compiling or not. They are one section with three views now, each
+  wearing the bar Configuration and Backups wear: what you are looking at on the left, what
+  you can do to it on the right.
+- **The filters are a rail, and the folders are a tree.** Eleven state chips shared a wrapping
+  row with the search box, the folder picker and the selection buttons, so which of them you
+  could see depended on how wide the window happened to be — and the folder picker was a
+  `<select>` of four hundred vendor folders in alphabetical order, which is a control you can
+  only use if you already know the answer. Both moved into the panel's own navigation rail
+  (`ssRailShell`, the one Configuration and Backups are built on): the states down a column
+  with their counts, and the folders as a tree that splits `librenms/nokia/aos6` into the
+  three folders it is. Picking one shows everything under it; the counts follow the state and
+  the search, because "where is the work" is what a tree beside a filter is asked.
+- **Compiling is a place.** Its own view, with how much there is to do, the sources that
+  resolve an `IMPORTS` (a heading now, not a fold), and what failed with pysmi's own reason
+  and line beside it — and the two things anybody does next: open the source at that line, or
+  try it again. It draws no rows of its own: the library is where rows live.
+- **Each way in says what it is.** A URL, a folder of a repository and a vendor's whole
+  archive are three different things, and stacked as three rows of controls they read as one
+  form with too many boxes. Each is a card with a name and a sentence now — including
+  uploading a file, which had been sitting in the library's toolbar, where you look at MIBs
+  rather than add them.
+- **The views are in the menu, so the toolbars stopped repeating them.** The sidebar's flyout
+  lists all three; a button beside a menu entry is a second door onto the same room, and it
+  was the first thing to wrap when the window narrowed. What is left in the library's bar is
+  about the library: whether pysmi is there, where the files are, re-read, tidy up.
+- **The bar over the list narrows the list.** It said "13 of 144" and offered All/None, and
+  nothing else — every filter was in the rail. But the rail answers "which of them": the
+  states partition the library and you pick one. The other kind of question is the properties
+  that cut ACROSS the states, and there were two of them in the wrong place. "Duplicated" was
+  a state, so it stole its rows from the one the module is actually in — "Pending 130" and
+  "Duplicated 40" over the same files, with no way to ask for the forty that are both. And
+  "edited here", the first thing worth knowing about a MIB that started misbehaving after
+  somebody fixed it, could only be read one row at a time as a `v3` badge. Both are lines of
+  the rail now, LAST, after the ones that do partition it — a column where eight lines are a
+  choice and two are switches is a column that behaves in two ways without saying so. What
+  the bar got instead is the order of the list: by name, largest first, newest first — after
+  the filtering, because sorting does not decide what belongs in a list. And it has a side
+  each: what you are looking at on the left, what you do with what you ticked on the right,
+  with the buttons that come and go with a selection to the LEFT of the two that are always
+  there — drawn after them, every tick slid "All" and "None" sideways under the cursor that
+  was clicking them.
+- **The module's card stops being a launcher, and the two screens it launched are views.**
+  A card in the Modules list is where you configure a module — the MIB library, the symbol
+  browser and the profile catalogue were three buttons on it, each throwing a dialog over
+  whatever was on screen. They are the SNMP section now: five views under one sidebar entry.
+  The profile PICKER is still a dialog, because it is opened from inside another one (a
+  server's `device_profiles` field) and answers to it — so the catalogue and the picker are
+  the same renderer with two hosts, and the view suffixes its ids because both can be in the
+  document at once.
+- **A button for what a compile does at the end.** The OID index every check resolves through
+  and the symbol catalogue the browser opens on are rebuilt when a compile finishes — but
+  they are derived from `compiled/`, not from the run that happened to change it, so they can
+  be out of step with it: a tidy-up discards the catalogue instead of paying to rebuild it,
+  and a `.py` copied in by hand never went through a compile at all. Doing it by hand had no
+  button; it is one now, beside the two that produce what it indexes.
+- **The audit log says WHAT it was done to.** The row printed the verb and stopped exactly
+  where the reader's question starts — "Delete a MIB file", and never which one. The module's
+  own summary goes on the row beside the verb, and the actions that did not name their
+  subject now do: deleting a MIB says which file, the tidy-up says how much went, and
+  rebuilding the index says how many OIDs it indexed.
+- **The audit log stopped printing identifiers where a module had words for them.** An
+  entry for a module action is `{module, action, …}` and the action is an identifier —
+  `restore_orphan`, `clean_library`. The core ships no string that names a module's action on
+  purpose, so the panel asks the module, under `audit_v_<action>` in its own `ui` block. Both
+  halves of that were broken: the ROW of the log printed the name the route composes for it
+  (`snmp / delete_mib`) and never looked the action up, while the modal three clicks away read
+  it correctly — and eight modules had at least one action with no word in either language.
+  The row translates through the module now, with the module's name beside the verb, and a
+  guard checks every state-changing action of every module in both languages.
+- **The section's three views line up.** A bar is as tall as its tallest child, so a head with
+  buttons in it was 47px and one with only a title was 40 — three views of one section, none
+  of them meeting the next. The shared flush toolbar states the height once.
+- **A running job reports in one place.** The progress bar was painted wherever each view had
+  room — under the library's toolbar, below the compile buttons, beneath the import cards — so
+  walking between views while a compile ran moved it around the screen, and a thing that moves
+  when you navigate reads as three things rather than one. It is a strip directly under the
+  head in all three, shaped like the head, there while something is running and gone when it
+  is not; and Stop is inside it, because Stop belongs to the job and not to a toolbar.
+- **The tidy-up moved to where compiling happens.** What it sweeps is compiled OUTPUT — a
+  module whose source was deleted, and the folder that source lived in — and it was a button
+  in the library's head: an action on the library about something the library does not do. It
+  is in the compile view now, beside the two buttons that produce what it removes, and it
+  only appears when there is something to sweep. The library still says so, the way a library
+  should: a "no source" line in its rail, with the count and the rows behind it.
+- **Searching looks at the file names too.** A row is titled by the MODULE, which is not
+  what anybody types: `rfc` found nothing in a library holding eight files called `rfc*.mib`,
+  because each of them declares a module named after what it describes — `rfc2011.mib` is
+  IP-MIB, `rfc2737.mib` is ENTITY-MIB. The file names are searched now, and a second word
+  narrows instead of widening, which is what typing one is for. The box moved out of the rail
+  and sits over the list it narrows, beside the count of what is on screen: the rail is where
+  the things you PICK live.
+- **A MIB whose file was deleted is not in the root folder.** It has no folder at all — it
+  has no file — and it was landing among the ones that really do sit directly under `raw/`.
+  It gets a group of its own beside "dependencies" and "source deleted", the other two rows
+  that are not in any folder.
+- **"History only" is called "recoverable".** It named what was LEFT rather than what the
+  row is: a MIB whose file has been deleted and whose saved versions are still there. What
+  matters about it is that it can be brought back — which is what the row's own buttons do —
+  so that is what it says now.
+- **Picking the root folder no longer picks every folder.** Both were the empty string —
+  the files directly under `raw/` carry no folder, and neither does "show me everything" — so
+  the root line selected all 144 MIBs and lit up beside "All folders". It is a folder like
+  any other now, with a key of its own.
+- **The head's right-hand end is on the right.** The shared toolbar pushes its second child
+  over, and the second child was the pysmi badge, which is hidden whenever pysmi is
+  installed: the margin doing the pushing sat on an element with no width, and the path and
+  the buttons stayed huddled against the title.
+- **A sidebar menu opens where there is room for it.** The flyout of a section with several
+  views was placed at its parent item's top, which is only right while there is room below
+  it: SNMP sits near the foot of the rail and carries five views, so its last entries were
+  drawn past the bottom of the screen, behind the taskbar — unreachable, and with no
+  scrollbar anywhere to say there was more menu, because a `position: fixed` layer scrolls
+  with nothing. The parent's rectangle is a preference now and the viewport is the
+  constraint: the menu slides up until it fits, and when it is taller than the screen at all
+  it pins to the top and scrolls itself. The same on the other axis, so a narrow window opens
+  a menu to the left of its item rather than off the edge.
+
 ## [0.0.1+build.99] - 2026-08-21
 
 ### Added

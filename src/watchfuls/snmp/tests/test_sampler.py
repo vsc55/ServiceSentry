@@ -150,6 +150,58 @@ class TestWhichDevicesAreSampled:
         assert res == {} and dev.asked == []
 
 
+class TestAGroupIsResolvedBeforeAnythingIsAsked:
+    """A device is assigned ids; some of them stand for other ids. The sampler is where that
+    stops mattering — everything below it sees profiles with metrics in them."""
+
+    def _group(self, tmp_path, gid, members):
+        (tmp_path / 'snmp_profiles' / f'{gid}.json').write_text(
+            json.dumps({'id': gid, 'label': gid, 'includes': members}), encoding='utf-8')
+
+    def test_a_device_assigned_a_group_is_asked_what_the_group_holds(self, env, tmp_path):
+        env.profile('p1', [GAUGE])
+        env.profile('p2', [NAME])
+        self._group(tmp_path, 'g1', ['p1', 'p2'])
+        dev = _Dev(gets={GAUGE['oid']: ('41', None), NAME['oid']: ('nas-01', None)})
+        res, _mon = env.run(_server(device_profiles='g1'), dev)
+        assert res['srv/metrics']['other_data']['cpu'] == 41
+        assert res['srv/metrics']['other_data']['_attrs'] == {'name': 'nas-01'}
+
+    def test_a_group_written_in_the_panel_reaches_the_worker(self, env, tmp_path):
+        """The reason it is in the database and not in a file: a deployment with a web
+        container and a worker container shares the database and not the disk, and a grouping
+        made in the panel that the sampler could not read would be a device assigned nothing
+        at all."""
+        from lib.db.sqlite import SQLiteConnector
+        from watchfuls.snmp.profile_store import CatalogStore
+        env.profile('p1', [GAUGE])
+        db = SQLiteConnector(str(tmp_path / 'test.db'))
+        CatalogStore(db).save('mine', {'label': 'Mine', 'includes': ['p1']})
+        mon = env.monitor(_server(device_profiles='mine'))
+        mon.db = db
+        dev = _Dev(gets={GAUGE['oid']: ('41', None)})
+        res, _mon = env.run(_server(device_profiles='mine'), dev, monitor=mon)
+        assert res['srv/metrics']['other_data']['cpu'] == 41
+
+    def test_a_profile_two_groups_share_is_asked_once(self, env, tmp_path):
+        """Twice would chart every one of its series against itself."""
+        env.profile('p1', [COUNTER])
+        self._group(tmp_path, 'g1', ['p1'])
+        self._group(tmp_path, 'g2', ['p1'])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '100'}, None),
+                          COUNTER['index_label']: ({'1': 'eth0'}, None)})
+        env.run(_server(device_profiles='g1, g2, p1'), dev)
+        assert dev.walk_count(COUNTER['walk']) == 1
+
+    def test_a_group_whose_members_are_all_gone_is_a_device_with_nothing_to_ask(
+            self, env, tmp_path):
+        """Not an error, and not a cycle that stops: the same thing a deleted profile does."""
+        self._group(tmp_path, 'g1', ['nowhere'])
+        dev = _Dev(gets={GAUGE['oid']: ('41', None)})
+        res, _mon = env.run(_server(device_profiles='g1'), dev)
+        assert res == {} and dev.asked == []
+
+
 class TestCountersAcrossCycles:
 
     def test_the_first_cycle_records_a_baseline_and_no_value(self, env):
