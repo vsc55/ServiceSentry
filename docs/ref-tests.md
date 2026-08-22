@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.360 tests** (6330 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.370 tests** (6340 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -5256,6 +5256,33 @@ se incluye da un panel vacío sin error en ninguna parte.
 | `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
 | `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
 | `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 97. SNMP contesta por sí mismo
+
+**Archivo:** `tests/integration/test_wa_snmp_routes.py` — 9 tests
+
+La biblioteca, el catálogo y preguntarle a un dispositivo sólo eran alcanzables en
+`/api/v1/modules/watchfuls/snmp/<acción>`: una ruta que describía dónde vivía el código en vez
+de de qué va el endpoint, y una puerta (`modules_view`) que no sabía distinguir «deja a esta
+persona compilar MIB» de «deja a esta persona ver todos los módulos del panel».
+
+Lo que fijan estos tests es **la puerta**, porque es la parte que cuesta cuando está mal: una
+operación alcanzable por quien no debería, o una lectura que exige permisos de escritura y
+escribe una fila de auditoría por cada vistazo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSurfaceExists::test_a_read_only_action_answers` | La ruta existe y contesta |
+| `TestTheSurfaceExists::test_it_also_answers_a_get` | La ruta de módulo lo hacía y no valía la pena estrechar la capacidad de paso: listar una biblioteca es una lectura |
+| `TestTheSurfaceExists::test_an_unknown_action_is_a_404_and_not_a_500` | Una acción que no existe se contesta, no se revienta |
+| `TestTheSurfaceExists::test_an_action_of_the_module_is_not_reachable_here` | `discover` busca OIDs para el campo de un check, así que sigue siendo del check. Una superficie que aceptara las dos cosas dejaría esa línea sin significado |
+| `TestTheGate::test_anonymous_is_refused` | Sin sesión no se entra |
+| `TestTheGate::test_a_viewer_may_read_the_library` | Leer una biblioteca de MIB dice qué sabe medir el panel: el mismo tipo de hecho que el resto de lo que ve un viewer |
+| `TestTheGate::test_a_viewer_may_not_change_it` | **El que importa.** Compilar, importar, borrar y escribir perfiles son `snmp_manage`; un flag de solo-lectura que dejara pasar cualquiera de ellos sería una escritura que puede hacer cualquiera que pueda mirar |
+| `TestTheGate::test_an_editor_may_change_it` | Y que la puerta no se pase de celosa |
+| `TestTheGate::test_the_modules_permission_no_longer_opens_it` | **El corte limpio.** Un rol con `modules_view` y nada más alcanzaba toda la superficie SNMP, porque un watchful no tiene flags propios — que es justo lo que hacía imposible decir «dale la biblioteca de MIB» |
 
 ---
 

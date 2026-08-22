@@ -162,7 +162,10 @@ function _ms(key, fallback) {
 // module's own __module__ schema entry (api_ver), defaulting to 'v1'.
 function _mibApiUrl(modName, action) {
     const ver = (ITEM_SCHEMAS[`${modName}|__module__`] || {})['api_ver'] || 'v1';
-    return `/api/${ver}/modules/watchfuls/${modName}/${action}`;
+    // The core's own surface: these operations are about the library, the catalogue
+    // and the device, none of which a check owns. `modName` is still taken so the
+    // callers read the same, and so a module that embeds these screens keeps working.
+    return `/api/${ver}/snmp/${action}`;
 }
 
 // ── Module-level rendering helpers ────────────────────────────────

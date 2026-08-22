@@ -437,8 +437,9 @@ class TestTheSourcesAreCheapToAsk:
         """An action outside WATCHFUL_ACTIONS is a 404; one outside READ_ONLY_ACTIONS asks
         for edit permission to LOOK at a list of repositories, and audits every look."""
         from watchfuls.snmp import Watchful
-        assert 'list_mib_sources' in Watchful.WATCHFUL_ACTIONS
-        assert 'list_mib_sources' in Watchful.READ_ONLY_ACTIONS
+        from lib.core.snmp.manifest import ACTIONS, READ_ONLY   # noqa: PLC0415
+        assert 'list_mib_sources' in ACTIONS
+        assert 'list_mib_sources' in READ_ONLY
 
 
 class TestTheSameFileIsNotAnUpdate:

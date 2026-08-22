@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_76_flags(self):
+    def test_permissions_tuple_has_78_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 76
+        assert len(PERMISSIONS) == 78
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -46,6 +46,10 @@ class TestPermissionsConstants:
             'diagnostics_view',
             'modules_view', 'modules_add', 'modules_edit', 'modules_delete',
             'servers_view', 'servers_add', 'servers_edit', 'servers_delete',
+            # SNMP's own, rather than the modules flags the library used to hang off:
+            # the MIB library could not be granted without granting every module in
+            # the panel, nor withheld from somebody who needed the rest.
+            'snmp_view', 'snmp_manage',
             'clusters_view', 'clusters_add', 'clusters_edit', 'clusters_delete',
             'credentials_view', 'credentials_add', 'credentials_edit', 'credentials_delete',
             'config_view', 'config_edit', 'db_maintenance', 'checks_delete',

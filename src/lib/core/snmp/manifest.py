@@ -54,3 +54,78 @@ HOST_PROFILE: dict = {
         {'name': 'device_profiles', 'type': 'str', 'default': '', 'multi': True},
     ],
 }
+
+
+# ── The operations the panel may invoke ──────────────────────────────────────────────────
+#
+# Reachable at ``/api/v1/snmp/<action>`` (lib/core/snmp/routes.py). They used to be watchful
+# actions, dispatched at ``/api/v1/modules/watchfuls/snmp/<action>`` — a path that described
+# where the code lived rather than what the endpoint is about. Compiling a MIB or writing a
+# device profile is not something a *check* does.
+#
+# ``discover`` is deliberately absent: it finds OIDs for the field of a check, so it is a
+# check's action and stays with the watchful. The split is by what an operation is ABOUT.
+ACTIONS: frozenset[str] = frozenset({
+    # the MIB library
+    'list_mibs', 'list_mib_sources', 'get_mib_details', 'get_raw_mib_details',
+    'get_all_symbols', 'build_oid_index', 'upload_mib', 'delete_mib',
+    'compile_mibs', 'compile_mibs_start', 'compile_mibs_status', 'compile_mibs_cancel',
+    'import_mib_from_url', 'import_mib_from_github', 'import_mib_from_github_start',
+    'import_mib_from_github_status', 'import_mib_archive', 'import_mib_archive_start',
+    'import_mib_archive_status', 'save_mib_source', 'lint_mib_source',
+    # its edit history
+    'list_mib_versions', 'get_mib_version', 'diff_mib_versions', 'restore_mib_version',
+    'delete_mib_version', 'forget_mib_versions', 'orphan_versions', 'restore_orphan',
+    # what a library is holding that nobody wants
+    'diff_mib_files', 'mib_dupe_details', 'library_leftovers', 'clean_library',
+    # the device-profile catalogue
+    'list_profiles', 'save_profile', 'save_profile_group',
+    'delete_profile', 'delete_profile_group',
+    # …and asking a device about it
+    'detect_profiles', 'test_profiles', 'test_profiles_start', 'test_profiles_status',
+})
+
+#: Operations that change nothing. They need only ``snmp_view``, and are not audited — an
+#: audit log that records every read is one nobody reads.
+READ_ONLY: frozenset[str] = frozenset({
+    'list_mibs', 'list_mib_sources', 'get_mib_details', 'get_raw_mib_details',
+    'get_all_symbols', 'lint_mib_source',
+    'list_mib_versions', 'get_mib_version', 'diff_mib_versions', 'orphan_versions',
+    'diff_mib_files', 'mib_dupe_details', 'library_leftovers',
+    'list_profiles',
+    'detect_profiles', 'test_profiles', 'test_profiles_start', 'test_profiles_status',
+})
+
+
+# ── Permissions this package owns (see lib.core.permissions) ─────────────────────────────
+#
+# Its own, rather than borrowing the modules flags it used to hang off. That was never a
+# decision: a watchful owns no permission flags, so everything SNMP offered was gated by
+# "can this person see modules" — which meant the MIB library could not be granted to
+# somebody without granting them every module in the panel, and could not be withheld from
+# somebody who needed the rest.
+MODULE_PERMISSIONS = {
+    'group': 'perm_group_snmp',
+    'order': 165,                 # beside Servers (160): what the devices there are made of
+    'permissions': (
+        # Reading the library and the catalogue, and asking a device what it serves — the
+        # last one talks to the network but changes nothing, here or on the device.
+        {'flag': 'snmp_view',   'roles': ('editor', 'viewer')},
+        # Compiling, importing, deleting, editing a MIB source, and writing device profiles.
+        {'flag': 'snmp_manage', 'roles': ('editor',)},
+    ),
+}
+
+
+# ── What this package writes to the audit log ────────────────────────────────────────────
+#
+# Declared rather than derived from the name: the badge is the only thing a glance down two
+# hundred rows gives you, and deriving it from a noun makes the colour depend on what
+# somebody called the event.
+#
+# Muted, like the module action it replaces. It is one row per operation, and the operations
+# people run in bulk — compiling a library, importing an archive — would otherwise paint a
+# page of warnings for work that went fine.
+AUDIT_EVENTS = [
+    {'key': 'snmp_action', 'severity': 'muted'},
+]

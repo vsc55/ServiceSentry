@@ -43,16 +43,40 @@ def _frozenset_names(src: str, name: str) -> set:
 
 
 def _modules() -> list:
+    """``[(vocabulary, [state-changing actions])]`` for every surface the audit log names.
+
+    Two sources now, one rule. A watchful declares its actions in its ``__init__``; a CORE
+    package that owns a surface declares them in its manifest — SNMP's library and catalogue
+    operations moved there when they stopped being a check's business. Both end up in the
+    same audit row, read through the same module vocabulary, so both are checked here.
+    """
     out = []
     for mod in sorted(os.listdir(MODULES)):
         init = os.path.join(MODULES, mod, '__init__.py')
         if not os.path.isfile(init):
             continue
         src = _read(init)
-        changing = _frozenset_names(src, 'WATCHFUL_ACTIONS') \
-            - _frozenset_names(src, 'READ_ONLY_ACTIONS')
+        changing = _frozenset_names(src, 'WATCHFUL_ACTIONS')             - _frozenset_names(src, 'READ_ONLY_ACTIONS')
         if changing:
             out.append((mod, sorted(changing)))
+    out.extend(_core_surfaces())
+    return out
+
+
+def _core_surfaces() -> list:
+    """The same, for core packages whose manifest declares ``ACTIONS``.
+
+    The vocabulary is still the module's lang file — that is where these words live and where
+    the audit renderer reads them — so the pair is ``(module_name, actions)`` exactly as
+    above. This is about which words must exist, not about who runs the operation.
+    """
+    from lib.discovery import scan          # noqa: PLC0415
+    ro = dict(scan('READ_ONLY'))
+    out = []
+    for pkg, actions in scan('ACTIONS'):
+        changing = sorted(set(actions) - set(ro.get(pkg) or ()))
+        if changing:
+            out.append((pkg, changing))
     return out
 
 

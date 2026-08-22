@@ -8,6 +8,38 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.108] - 2026-08-22
+
+### Changed
+- **SNMP answers for itself: `/api/v1/snmp/<action>`.** The MIB library, the device-profile
+  catalogue and asking a device what it serves were reachable only at
+  `/api/v1/modules/watchfuls/snmp/<action>` — a path describing where the code lived rather
+  than what the endpoint is about. 42 operations moved; `discover` did not, because it finds
+  OIDs for the field of a check and that is a check's business. The split is by what an
+  operation is ABOUT, not by where the code ended up.
+- **Its own permissions, `snmp_view` and `snmp_manage`.** Everything SNMP offered was gated by
+  "can this person see modules", which was never a decision — a watchful owns no permission
+  flags. That meant the MIB library could not be granted to somebody without granting them
+  every module in the panel, and could not be withheld from somebody who needed the rest.
+- **BREAKING, deliberately: `modules_view` no longer opens any of it.** A CUSTOM role that
+  relied on it needs `snmp_view` (and `snmp_manage` to change anything) — the built-in roles
+  get both from the manifest. No compatibility bridge: a flag that never bites is a flag that
+  cannot restrict, which is half of what it is for.
+- The section's page follows the same gate. `__page__` already accepted a `perm` of its own
+  and defaulted to `modules_view` only because watchful modules had no flags to name.
+- The route's pipeline is deliberately the one a watchful action already went through —
+  masked secrets restored, bound host resolved server-side, named credential over inline
+  values. The operations are the same functions, and an operation that behaved differently
+  depending on which URL reached it would be worse than either behaviour.
+
+### Fixed
+- The audit row for an SNMP operation reads its verb from a module's vocabulary, and the new
+  route was not saying whose. It would have printed the raw identifier (`clean_library`)
+  where a sentence belongs. The words have not moved yet, so neither has the attribution.
+- The guard that every state-changing action has a word in both languages only scanned
+  watchful modules, so 42 actions would have left its sight in silence. It reads core
+  package manifests too now.
+
 ## [0.0.1+build.107] - 2026-08-22
 
 ### Changed

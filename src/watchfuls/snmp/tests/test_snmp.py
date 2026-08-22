@@ -539,8 +539,9 @@ class TestImportFromGithub:
         for a in ('import_mib_from_github',
                   'import_mib_from_github_start',
                   'import_mib_from_github_status'):
-            assert a in Watchful.WATCHFUL_ACTIONS
-            assert a not in Watchful.READ_ONLY_ACTIONS
+            from lib.core.snmp.manifest import ACTIONS, READ_ONLY   # noqa: PLC0415
+            assert a in ACTIONS
+            assert a not in READ_ONLY
 
 
 class TestTheRepositoryTreeSurvivesTheImport:
@@ -1211,8 +1212,9 @@ class TestCompileCancel:
         mib_admin._compile_jobs.clear()
 
     def test_action_registered_and_not_read_only(self):
-        assert 'compile_mibs_cancel' in Watchful.WATCHFUL_ACTIONS
-        assert 'compile_mibs_cancel' not in Watchful.READ_ONLY_ACTIONS
+        from lib.core.snmp.manifest import ACTIONS, READ_ONLY   # noqa: PLC0415
+        assert 'compile_mibs_cancel' in ACTIONS
+        assert 'compile_mibs_cancel' not in READ_ONLY
 
     def test_cancel_sets_job_event(self):
         import threading

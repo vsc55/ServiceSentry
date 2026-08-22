@@ -2,7 +2,7 @@
     "__icon__": "bi-hdd-stack",
     "__page__": {
         "id": "snmp", "icon": "bi-hdd-stack", "order": 25,
-        "placement": "system", "perm": "modules_view",
+        "placement": "system", "perm": "snmp_view",
         "render": "renderSnmpMibsPage",
         "views": [
             {"slug": "library", "icon": "bi-hdd-stack", "label": "view_mibs"},

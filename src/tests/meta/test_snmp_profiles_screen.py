@@ -42,6 +42,16 @@ HOST_MODAL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
 FIELD = 'device_profiles'
 PICKER_KEY = 'snmp|servers|device_profiles'
 
+def _snmp_actions():
+    """``(ACTIONS, READ_ONLY)`` — the operations the panel may invoke, and which change
+    nothing.  Declared in ``lib/core/snmp/manifest.py`` since the library and the catalogue
+    stopped being a check's business; asked of it rather than sliced out of source text,
+    which is what these guards used to do when the only place to declare them was a module."""
+    from lib.core.snmp.manifest import ACTIONS, READ_ONLY      # noqa: PLC0415
+    return ACTIONS, READ_ONLY
+
+
+
 
 def _schema():
     with io.open(os.path.join(SNMP, 'schema.json'), encoding='utf-8') as fh:
@@ -299,12 +309,10 @@ class TestTheScreenIsWired:
         """An action absent from WATCHFUL_ACTIONS is a 404, and one absent from
         READ_ONLY_ACTIONS demands edit rights to LOOK at the catalogue — and writes an audit
         entry for every look."""
-        init = _read(os.path.join(SNMP, '__init__.py'))
-        actions = init.split('WATCHFUL_ACTIONS')[1].split('})')[0]
-        read_only = init.split('READ_ONLY_ACTIONS')[1].split('})')[0]
+        actions, read_only = _snmp_actions()
         for name in ('list_profiles', 'detect_profiles'):
-            assert f"'{name}'" in actions, f'{name} is not callable'
-            assert f"'{name}'" in read_only, f'{name} demands edit rights to read'
+            assert name in actions, f'{name} is not callable'
+            assert name in read_only, f'{name} demands edit rights to read'
 
 
 class TestTheFieldThatAssignsThem:
@@ -645,10 +653,10 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         """A NAS with a family group is a minute of work on a bad day, and a spinner held for
         a minute is indistinguishable from a hung screen. What somebody watching wants to know
         is WHICH step is slow — a fact the server had and was throwing away."""
-        init = _read(os.path.join(SNMP, '__init__.py'))
-        for action in ("'test_profiles_start'", "'test_profiles_status'"):
-            assert action in init.split('WATCHFUL_ACTIONS')[1].split('})')[0], action
-            assert action in init.split('READ_ONLY_ACTIONS')[1].split('})')[0], action
+        actions, read_only = _snmp_actions()
+        for action in ('test_profiles_start', 'test_profiles_status'):
+            assert action in actions, action
+            assert action in read_only, action
         body = _fn(_strip_comments(_read(UI)), '_snmpTestRun')
         assert "'test_profiles_start'" in body and "'test_profiles_status'" in body
         assert 'st.done' in body, 'the poll never ends'
@@ -681,10 +689,8 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         """An action absent from `WATCHFUL_ACTIONS` is a 404 whatever the UI calls it. And it
         reads a device and writes nothing, which is what puts it among the read-only ones —
         the same rights that already let somebody discover the device's OIDs."""
-        init = _read(os.path.join(SNMP, '__init__.py'))
-        acts = init.split('WATCHFUL_ACTIONS')[1].split('})')[0]
-        read_only = init.split('READ_ONLY_ACTIONS')[1].split('})')[0]
-        assert "'test_profiles'" in acts and "'test_profiles'" in read_only
+        actions, read_only = _snmp_actions()
+        assert 'test_profiles' in actions and 'test_profiles' in read_only
 
     def test_what_the_profile_reads_is_not_reported_as_uncaptured(self):
         """The column that NAMES the rows and the one that scales them are values this

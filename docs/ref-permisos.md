@@ -75,6 +75,8 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `modules_edit` | Guardar cambios en módulos |
 | | `modules_delete` | Eliminar entradas de módulo |
 | **Servers** | `servers_view` `servers_add` `servers_edit` `servers_delete` | CRUD del registro de hosts |
+| **SNMP** | `snmp_view` | Acceder a la sección SNMP: biblioteca de MIB, navegador de símbolos y catálogo de perfiles de dispositivo. Incluye preguntarle a un dispositivo qué sirve — habla con la red, no cambia nada |
+| | `snmp_manage` | Compilar, importar, editar y borrar MIB; escribir perfiles en el catálogo. **Corte limpio:** `modules_view` ya no abre nada de esto, así que un rol personalizado que dependiera de él necesita el flag nuevo |
 | **Clusters** | `clusters_view` `clusters_add` `clusters_edit` `clusters_delete` | CRUD de clusters (checks multi-bind) |
 | **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de credenciales reutilizables: identidades SSH y registros de aplicación de Entra ID (`azure_app`, `m365_app`), tokens de API (Proxmox, NUT, HTTP, datastore). Sección propia dentro de System |
 | **Config** | `config_view` | Leer configuración sin poder editarla |

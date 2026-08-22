@@ -39,6 +39,15 @@ MIB_ADMIN = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'admin.py')
 SNMP_INIT = os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py')
 LINT = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'lint.py')
 
+def _snmp_actions():
+    """``(ACTIONS, READ_ONLY)`` — the operations the panel may invoke, and which change
+    nothing.  Declared in ``lib/core/snmp/manifest.py`` since the library stopped being a
+    check's business; asked of it rather than sliced out of source text."""
+    from lib.core.snmp.manifest import ACTIONS, READ_ONLY      # noqa: PLC0415
+    return ACTIONS, READ_ONLY
+
+
+
 TPL_ID = 'snmpMibsPageTpl'
 
 
@@ -386,10 +395,8 @@ class TestTheCompilerIsNotTheOnlyThingThatReadsTheFile:
     def test_it_reads_and_does_not_write(self):
         """Checking a file must never be a thing that changes it — and it audits a row per
         look unless it is declared read-only."""
-        init = _read(SNMP_INIT)
-        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
-        ro = acts[acts.index('READ_ONLY_ACTIONS'):]
-        assert "'lint_mib_source'" in acts and "'lint_mib_source'" in ro
+        acts, ro = _snmp_actions()
+        assert 'lint_mib_source' in acts and 'lint_mib_source' in ro
 
 
 class TestTheSourceIsReadableAgainstTheError:
@@ -835,13 +842,9 @@ class TestWhatDeletingLeavesBehind:
 
     def test_the_report_is_read_only_and_the_sweep_is_not(self):
         """One of them deletes files. The audit log is the difference."""
-        init = _read(SNMP_INIT)
-        i = init.index('WATCHFUL_ACTIONS')
-        actions = init[i:init.index('READ_ONLY_ACTIONS')]
-        assert "'clean_library'" in actions and "'library_leftovers'" in actions
-        ro = init[init.index('READ_ONLY_ACTIONS'):]
-        ro = ro[:ro.index('})')]
-        assert "'library_leftovers'" in ro and "'clean_library'" not in ro
+        actions, ro = _snmp_actions()
+        assert 'clean_library' in actions and 'library_leftovers' in actions
+        assert 'library_leftovers' in ro and 'clean_library' not in ro
 
 
 class TestCompilingIsAPlaceAndNotAButton:
@@ -1089,11 +1092,9 @@ class TestSeveralFilesOneModule:
         assert 'mib_dupe_deleted_used' in body
 
     def test_it_is_a_declared_action(self):
-        init = _read(SNMP_INIT)
-        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
-        assert "'diff_mib_files'" in acts
-        assert "'diff_mib_files'" in acts[acts.index('READ_ONLY_ACTIONS'):], \
-            'reading a diff writes nothing'
+        acts, ro = _snmp_actions()
+        assert 'diff_mib_files' in acts
+        assert 'diff_mib_files' in ro, 'reading a diff writes nothing'
 
 
 class TestTwoProblemsAreNotOneProblem:
@@ -1222,18 +1223,16 @@ class TestTheHistoryIsServerSide:
         assert 'mib_versions.SCHEMA' in init
 
     def test_editing_needs_edit_rights_and_reading_does_not(self):
-        """`READ_ONLY_ACTIONS` is what the route checks to decide whether `modules_view` is
-        enough. A write action listed there is a write anybody who can look can do."""
-        init = _read(SNMP_INIT)
-        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
-        ro = acts[acts.index('READ_ONLY_ACTIONS'):]
+        """`READ_ONLY` is what the route checks to decide whether `snmp_view` is enough.
+        A write action listed there is a write anybody who can look can do."""
+        acts, ro = _snmp_actions()
         for a in ('save_mib_source', 'restore_mib_version', 'list_mib_versions',
                   'get_mib_version'):
-            assert f"'{a}'" in acts, f'{a} is not a declared action — the route 404s'
+            assert a in acts, f'{a} is not a declared action — the route 404s'
         for a in ('save_mib_source', 'restore_mib_version'):
-            assert f"'{a}'" not in ro, f'{a} is marked read-only — anyone who can look can write'
+            assert a not in ro, f'{a} is marked read-only — anyone who can look can write'
         for a in ('list_mib_versions', 'get_mib_version'):
-            assert f"'{a}'" in ro, f'{a} audits a row for every look'
+            assert a in ro, f'{a} audits a row for every look'
 
     def test_the_actor_reaches_the_module(self):
         """A history that says only WHAT changed answers half the question on a panel with

@@ -42,74 +42,15 @@ class Watchful(MibAdmin, SnmpChecks, SnmpClient, SnmpActions, SnmpSampler,
     MISSING_DEPS: list[str]  = [] if _HAS_PYSNMP else ['pysnmp']
     PARTIAL_DEPS: list[str]  = [] if _HAS_PYSMI  else ['pysmi']
 
-    WATCHFUL_ACTIONS: frozenset[str] = frozenset({
-        'discover',
-        'list_profiles',
-        'detect_profiles',
-        'test_profiles',
-        'test_profiles_start',
-        'test_profiles_status',
-        'save_profile_group',
-        'delete_profile_group',
-        'save_profile',
-        'delete_profile',
-        'list_mibs',
-        'list_mib_sources',
-        'compile_mibs',
-        'compile_mibs_start',
-        'compile_mibs_status',
-        'compile_mibs_cancel',
-        'delete_mib',
-        'upload_mib',
-        'import_mib_from_url',
-        'import_mib_from_github',
-        'import_mib_from_github_start',
-        'import_mib_from_github_status',
-        'import_mib_archive',
-        'import_mib_archive_start',
-        'import_mib_archive_status',
-        'get_mib_details',
-        'get_raw_mib_details',
-        'get_all_symbols',
-        'build_oid_index',
-        'save_mib_source',
-        'diff_mib_versions',
-        'restore_mib_version',
-        'list_mib_versions',
-        'get_mib_version',
-        'lint_mib_source',
-        'delete_mib_version',
-        'orphan_versions',
-        'diff_mib_files',
-        'mib_dupe_details',
-        'restore_orphan',
-        'forget_mib_versions',
-        'library_leftovers',
-        'clean_library',
-    })
+    # One action, and it is the only one that was ever about a check: `discover` finds the
+    # OIDs to build a check's field from. Everything else this module used to answer for —
+    # the MIB library, the profile catalogue, asking a device what it serves — is the core's
+    # and answers at /api/v1/snmp/<action>. They were listed here because that was the only
+    # place a panel operation could be listed, not because a check owned them.
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
 
     # Actions that produce no side effects — audit logging is suppressed for them.
-    READ_ONLY_ACTIONS: frozenset[str] = frozenset({
-        'discover',
-        'list_profiles',
-        'detect_profiles',
-        'test_profiles',
-        'test_profiles_start',
-        'test_profiles_status',
-        'list_mibs',
-        'list_mib_sources',
-        'get_mib_details',
-        'get_raw_mib_details',
-        'get_all_symbols',
-        'list_mib_versions',
-        'get_mib_version',
-        'diff_mib_versions',
-        'lint_mib_source',
-        'orphan_versions',
-        'diff_mib_files',
-        'mib_dupe_details',
-        'library_leftovers',
-    })
+    READ_ONLY_ACTIONS: frozenset[str] = frozenset({'discover'})
 
 
     # No toolbar. All three of these used to be buttons on the module's card in Modules,
