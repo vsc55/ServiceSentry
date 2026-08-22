@@ -3017,6 +3017,20 @@ LANG = {
     # Core built-in SSH connection-profile field labels + auth-method options
     # (the SSH profile is core-owned, not a module, so its i18n lives here; see
     # lib/core/hosts/profiles.py, which reads these to build the profile field meta).
+    'snmp_profile': {
+        'labels': {
+            'host':                 'Host / IP',
+            'port':                 'Port',
+            'version':              'SNMP Version',
+            'community':            'Community',
+            'snmpv3_username':      'Username',
+            'snmpv3_auth_key':      'Auth Key',
+            'snmpv3_priv_key':      'Privacy Key',
+            'snmpv3_auth_protocol': 'Auth Protocol',
+            'snmpv3_priv_protocol': 'Privacy Protocol',
+            'device_profiles':      'Device profiles',
+        },
+    },
     'ssh_profile': {
         'labels': {
             'ssh_port':        'SSH port',

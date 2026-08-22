@@ -3018,6 +3018,20 @@ LANG = {
     # Etiquetas de campos del perfil SSH core + opciones de método de autenticación
     # (el perfil SSH es del core, no un módulo, así que su i18n vive aquí; lo lee
     # lib/core/hosts/profiles.py para construir el meta de los campos del perfil).
+    'snmp_profile': {
+        'labels': {
+            'host':                 'Host / IP',
+            'port':                 'Puerto',
+            'version':              'Versión SNMP',
+            'community':            'Comunidad',
+            'snmpv3_username':      'Usuario',
+            'snmpv3_auth_key':      'Clave de autenticación',
+            'snmpv3_priv_key':      'Clave de privacidad',
+            'snmpv3_auth_protocol': 'Protocolo de autenticación',
+            'snmpv3_priv_protocol': 'Protocolo de privacidad',
+            'device_profiles':      'Perfiles de dispositivo',
+        },
+    },
     'ssh_profile': {
         'labels': {
             'ssh_port':        'Puerto SSH',

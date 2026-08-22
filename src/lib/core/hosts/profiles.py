@@ -28,20 +28,26 @@ from __future__ import annotations
 import json
 import os
 
+from lib.discovery import scan
 from lib.i18n import TRANSLATIONS
 from lib.modules import ModuleBase
 
 
-def _profile_label(key: str) -> dict:
-    """Build ``{lang: text}`` for a core SSH-profile field *key* from the lang
-    files (``ssh_profile.labels``) — the profile is core-owned, so its i18n lives
-    in lib/i18n like every other translation, not inline here."""
+def _section_label(section: str, key: str) -> dict:
+    """Build ``{lang: text}`` for a core profile field from the lang files
+    (``<section>.labels``) — a core-owned profile takes its words from core i18n
+    like every other translation, not inline here."""
     out = {}
     for lang, data in TRANSLATIONS.items():
-        txt = ((data.get('ssh_profile') or {}).get('labels') or {}).get(key)
+        txt = ((data.get(section) or {}).get('labels') or {}).get(key)
         if isinstance(txt, str) and txt:
             out[lang] = txt
     return out
+
+
+def _profile_label(key: str) -> dict:
+    """The SSH profile's own labels (``ssh_profile.labels``)."""
+    return _section_label('ssh_profile', key)
 
 
 def _profile_options(keys: tuple[str, ...]) -> dict:
@@ -186,6 +192,31 @@ def host_profiles_catalog(watchfuls_dir: str | None = None) -> dict:
         'address_field': _BUILTIN_SSH['address_field'],
         'fields':        [dict(f) for f in _BUILTIN_SSH['fields']],
     }
+    # …and any protocol a CORE package declares, the same way and for the same reason. A
+    # protocol whose profile only exists while some module happens to be installed is a
+    # property of that module; these are properties of the device. They override a
+    # module-declared profile of the same key, which a module may still declare so its own
+    # checks inherit the fields (see resolve_host).
+    for pkg, decl in scan('HOST_PROFILE'):
+        if not isinstance(decl, dict) or not decl.get('key'):
+            continue
+        section = decl.get('i18n') or ''
+        fields = []
+        for f in (decl.get('fields') or []):
+            if not isinstance(f, dict) or not f.get('name'):
+                continue
+            f = dict(f)
+            if section:
+                label = _section_label(section, f['name'])
+                if label:
+                    f['label_i18n'] = label
+            fields.append(f)
+        catalog[decl['key']] = {
+            'module':        decl.get('module') or pkg,
+            'builtin':       True,
+            'address_field': decl.get('address_field'),
+            'fields':        fields,
+        }
     return catalog
 
 

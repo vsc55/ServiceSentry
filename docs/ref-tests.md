@@ -5259,6 +5259,32 @@ se incluye da un panel vacío sin error en ninguna parte.
 
 ---
 
+## 99. Meta — Una conexión SNMP descrita dos veces
+
+**Archivo:** `tests/meta/test_snmp_host_profile_agrees.py` — 5 tests
+
+`lib/core/snmp/manifest.py` declara el perfil que lleva un **host**: lo que dibuja el
+formulario de Servidores y lo que hereda cualquier check atado a ese host.
+`watchfuls/snmp/schema.json` declara los mismos campos en un ítem *server*, porque un check
+contra una IP suelta tiene que seguir siendo posible sin dar de alta el dispositivo.
+
+Ninguna se puede derivar de la otra: la del core es Python que se lee antes de cargar ningún
+módulo, la del módulo es dato que renderiza el navegador. Así que están escritas dos veces, y
+esto es lo que impide que eso sea un bug esperando: un `show_when` que se separa esconde un
+campo en una pantalla y no en la otra, un `options` que se separa ofrece un protocolo de
+autenticación que el check no sabe usar, y un `secret` que se separa **deja de cifrar una
+contraseña** — y nada de eso levanta un error en ninguna parte.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTwoDescriptionsAgree::test_every_core_field_exists_on_the_check` | Un check inline puede decir todo lo que puede decir un host, o el caso «IP suelta» es de segunda y no sabe hacer SNMPv3 |
+| `TestTheTwoDescriptionsAgree::test_the_metadata_matches_field_by_field` | Tipo, default, opciones, `show_when`, `secret`, `multi`, mín/máx. El `placeholder` queda fuera a propósito: es una pista de una caja vacía y cada formulario puede redactarla a su manera |
+| `TestTheTwoDescriptionsAgree::test_the_module_still_inherits_them_when_bound` | El módulo conserva su `__host_profile__`: es la declaración que hace que un check atado a un host herede estos campos en vez de repetirlos |
+| `TestTheTwoDescriptionsAgree::test_the_core_declaration_is_the_one_the_form_draws` | La recoge el escáner compartido de `manifest.py`, así que el catálogo la ofrece esté o no instalado el watchful — que es justo el objetivo |
+| `TestTheTwoDescriptionsAgree::test_every_field_is_named_in_both_languages` | Una etiqueta que falta pone el nombre crudo del campo en pantalla, y eso solo se ve mirando la página |
+
+---
+
 ## 99a. Meta — Los dos valores por defecto que tienen que coincidir
 
 **Archivo:** `tests/meta/test_snmp_defaults_agree.py` — 4 tests

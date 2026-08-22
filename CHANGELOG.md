@@ -8,6 +8,32 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.106] - 2026-08-22
+
+### Changed
+- **The SNMP host profile is declared by the core**, the way SSH already was and for the same
+  reason: it describes the DEVICE — its address, its port, the identity it answers to, what it
+  declares itself to be — none of which stops being true when no check exists. Until now the
+  watchful declared it, which had a consequence past tidiness: the host form could only offer
+  a protocol whose module happened to be installed, and core code that needed to know what an
+  SNMP connection looks like had to go and read a module's `schema.json`.
+- No new mechanism for it. `lib/discovery.py` already scans each core package's `manifest.py`
+  for a named constant — the same scanner that finds permissions and Overview widgets — so
+  the profile is a `HOST_PROFILE` declaration in `lib/core/snmp/manifest.py` and the catalogue
+  picks it up without naming anybody. The next core protocol needs no edit in `hosts`.
+- Its labels come from core i18n (`snmp_profile.labels`), like the SSH profile's.
+- The module keeps its own `__host_profile__` and its inline fields: the first is how a CHECK
+  bound to a host inherits these, the second is what keeps a check against a bare IP possible
+  without registering the device first.
+
+### Added
+- A guard that the two descriptions of an SNMP connection do not drift
+  (`test_snmp_host_profile_agrees.py`). Neither can be derived from the other — one is Python
+  read before any module loads, the other is data the browser renders — and every way they can
+  disagree is silent: a `show_when` that drifts hides a field on one screen only, an `options`
+  list offers an auth protocol the check cannot use, and a `secret` flag that drifts stops
+  encrypting a password.
+
 ## [0.0.1+build.105] - 2026-08-22
 
 ### Changed
