@@ -8,6 +8,28 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.107] - 2026-08-22
+
+### Changed
+- **A device is a host that carries an SNMP profile, not a module entry about one.** Giving a
+  host a community and a set of device profiles used to buy nothing until a SECOND thing
+  existed: an entry in the SNMP module pointing back at that host. The device held the
+  configuration and the module decided whether anybody read it. The host registry answers it
+  now — a host with an `snmp` profile and at least one device profile assigned is sampled,
+  with nothing else present.
+- Three things it deliberately does not do. It does not resume a device somebody switched
+  off: a module item bound to a host covers that host **even when disabled**, because
+  disabling it is somebody saying "not this one" and quietly resuming because the
+  configuration now lives elsewhere would be an upgrade undoing a decision. It does not take
+  the maintenance decision — the synthetic item goes through the same `resolve_host` a check
+  does, so there is one place that gate lives. And it returns an ITEM, not a connection:
+  building one here would be a second implementation of a merge that already exists.
+- **A result whose key begins `host.` belongs to a host rather than to a check**, and the
+  Servers tab reads it. Without that a device could be sampled, found down, and still show a
+  neutral dash — the column would be answering "how many checks did you configure" while
+  looking like it answers "is this machine all right". The convention lives with the host
+  registry and names no module: any module may file a result that way.
+
 ## [0.0.1+build.106] - 2026-08-22
 
 ### Changed

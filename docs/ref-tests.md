@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.330 tests** (6300 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.360 tests** (6330 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -3562,7 +3562,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 35 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 42 tests
 
 **Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
 veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
@@ -4187,7 +4187,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ## 76. Hosts — Primitivas de resolución (lib/hosts/resolve.py)
 
-**Archivo:** `tests/unit/test_hosts_resolve.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_resolve.py` — 11 tests
 
 ### `TestHostProfileSpecs` — Normalización de specs de perfil
 
@@ -5256,6 +5256,37 @@ se incluye da un panel vacío sin error en ninguna parte.
 | `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
 | `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
 | `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 98. Un dispositivo es un host, no una entrada de módulo sobre uno
+
+**Archivo:** `tests/unit/test_snmp_devices.py` — 16 tests
+
+Es la conducta que hace verdad la frase «SNMP es configuración del dispositivo». Antes de
+esto, darle a un host una comunidad y un juego de perfiles no compraba nada hasta que
+existía una **segunda** cosa: una entrada en el módulo SNMP apuntando de vuelta a ese host.
+El dispositivo guardaba la configuración y el módulo decidía si alguien la leía.
+
+Ahora contesta el registro de hosts: un host con perfil `snmp` y al menos un perfil de
+dispositivo asignado **es** un dispositivo, y se muestrea. No hace falta nada más.
+
+Las tres cosas que esto deliberadamente **no** hace pesan tanto como la que hace:
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatCountsAsADevice::test_a_host_with_profiles_assigned_is_sampled` | Un host configurado se muestrea sin ninguna entrada de módulo |
+| `TestWhatCountsAsADevice::test_a_host_with_a_community_but_nothing_assigned_is_not` | Alcanzable no es lo mismo que digno de graficar: sin perfiles no hay nada que medir, y muestrearlo registraría nada con pinta de haber funcionado |
+| `TestWhatItRefusesToDecide::test_a_host_an_item_already_speaks_for_is_left_alone` | Muestrearlo dos veces serían dos respuestas a «qué está haciendo este dispositivo», con dos líneas base de contador independientes |
+| `TestWhatItRefusesToDecide::test_maintenance_is_not_decided_here` | Lo decide `resolve_host`, por donde pasa todo ítem muestreado: un sitio donde un host en mantenimiento deja de leerse, no dos que tengan que coincidir |
+| `TestWhatItRefusesToDecide::test_it_returns_an_item_and_not_a_connection` | Construir aquí la conexión sería una segunda implementación de la mezcla que ya hace `resolve_host`, y las dos discreparían en cuanto cambiara una |
+| `TestItCannotTakeACycleDown::*` (×4) | Un registro ilegible significa cero dispositivos extra este ciclo — el mismo resultado que no tener ninguno, y no vale un ciclo de monitorización caído |
+| `TestTheKeyIsStable::*` (×3) | El estado de contadores y las filas de historial se archivan bajo esa clave: si cambiara entre ciclos reiniciaría cada tasa y partiría cada gráfica |
+
+Y en `tests/unit/test_hosts_resolve.py`, la convención que lo sostiene: un resultado cuya
+clave empieza por `host.` pertenece a un **host** y no a un check, que es lo que permite a la
+pestaña de Servidores atribuirlo. Sin eso un dispositivo puede muestrearse, darse por caído, y
+seguir enseñando un guion neutro.
 
 ---
 
