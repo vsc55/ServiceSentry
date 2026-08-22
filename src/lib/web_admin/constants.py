@@ -13,6 +13,7 @@ web_admin for them.  Only genuinely web-facing constants remain here.
 __all__ = [
     'HOME_PAGES', 'home_pages', 'page_label', 'home_page_ids',
     'landing_pages', 'landing_options', 'standalone_pages', 'standalone_page',
+    'PANEL_TABS', 'tab_sort_key',
 ]
 
 from lib.modules.discovery.pages import module_pages_catalog
@@ -39,6 +40,10 @@ HOME_PAGES = (
      'standalone': {'pane': 'tab-overview', 'render': 'renderOverview',
                     'perm': 'overview_view', 'icon': 'bi-speedometer2',
                     'nav_label_key': 'tab_overview'}},
+    {'id': 'infra',    'url': '/infra',    'label_key': 'landing_infra',
+     'standalone': {'pane': 'tab-infra', 'render': 'renderInfra',
+                    'perm': 'infra_view', 'icon': 'bi-hdd-network',
+                    'nav_label_key': 'tab_infra'}},
     {'id': 'history',  'url': '/history',  'label_key': 'landing_history',
      'standalone': {'pane': 'tab-history', 'render': 'renderHistory',
                     'perm': 'history_view', 'icon': 'bi-graph-up',
@@ -49,6 +54,41 @@ HOME_PAGES = (
                     'nav_label_key': 'tab_syslog'}},
     {'id': 'status',   'url': '/status',   'label_key': 'landing_status'},
 )
+
+
+# ── The System panel's tabs ───────────────────────────────────────────────────────────
+# The admin panel's own sections, as data. They were a literal in the sidebar template, which
+# was fine while the order was hand-picked — and stopped being fine the moment the order had
+# to be ALPHABETICAL, because alphabetical is a property of the translated label and a
+# template cannot sort by a string it is about to look up.
+#
+# Ordering is not declared here for the same reason: whoever renders knows the language.
+PANEL_TABS = (
+    {'id': 'services',    'icon': 'bi-hdd-rack',         'label_key': 'tab_services'},
+    {'id': 'modules',     'icon': 'bi-puzzle',           'label_key': 'tab_modules'},
+    {'id': 'servers',     'icon': 'bi-hdd-network',      'label_key': 'tab_infrastructure'},
+    {'id': 'credentials', 'icon': 'bi-key',              'label_key': 'tab_credentials'},
+    {'id': 'status',      'icon': 'bi-activity',         'label_key': 'tab_status'},
+    {'id': 'events',      'icon': 'bi-bell',             'label_key': 'tab_events'},
+    {'id': 'ipban',       'icon': 'bi-slash-circle',     'label_key': 'tab_ipban'},
+    {'id': 'config',      'icon': 'bi-gear',             'label_key': 'tab_config'},
+    {'id': 'access',      'icon': 'bi-person-lock',      'label_key': 'tab_access'},
+    {'id': 'audit',       'icon': 'bi-journal-text',     'label_key': 'tab_audit'},
+    {'id': 'backup',      'icon': 'bi-archive',          'label_key': 'tab_backup'},
+    {'id': 'diagnostic',  'icon': 'bi-clipboard-pulse',  'label_key': 'tab_diagnostic'},
+)
+
+
+def tab_sort_key(label: str) -> str:
+    """How the panel's entries are ordered: by the WORD the reader sees.
+
+    Accents folded away, because a Spanish reader looking for "Índice" looks under I and not
+    after Z — which is where the raw code point puts it. Case folded for the same reason:
+    `fail2ban` is a name and not a section that sorts before every capital letter.
+    """
+    import unicodedata                                        # noqa: PLC0415
+    n = unicodedata.normalize('NFKD', str(label or ''))
+    return ''.join(c for c in n if not unicodedata.combining(c)).casefold()
 
 
 def _module_home_pages(watchfuls_dir: str | None = None) -> list:
@@ -76,6 +116,9 @@ def _module_home_pages(watchfuls_dir: str | None = None) -> list:
             'standalone': {'pane': 'tab-' + spec['id'], 'render': spec['render'],
                            'refresh': spec['refresh'],
                            'perm': spec['perm'], 'icon': spec['icon'],
+                           # Where the sidebar puts it: a section of its own, or an entry in
+                           # the System panel beside Services and Credentials.
+                           'placement': spec['placement'],
                            # The section's views, when it has more than one. They share
                            # this page's pane and permission and differ only by a
                            # sub-path, so they add no route and no second descriptor.

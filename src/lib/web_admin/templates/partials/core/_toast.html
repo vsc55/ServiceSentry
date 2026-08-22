@@ -9,6 +9,17 @@ let _confirmModalCallback = null;
 // input and the callback receives its value. Reset by showConfirmModal + on confirm.
 let _confirmModalReasonOpts = null;
 
+// When set (by showConfirmModal's opts), the modal shows one opt-in checkbox and the
+// callback receives whether it was ticked. Same shape as the reason field above, for the same
+// reason: a second, bolder action that belongs to THIS confirmation and nowhere else — asking
+// it in its own dialog afterwards is asking it once the moment has passed.
+let _confirmModalCheckOpts = null;
+
+function _confirmModalCheckToggle(show) {
+    const wrap = document.getElementById('confirmModalCheckWrap');
+    if (wrap) wrap.style.display = show ? '' : 'none';
+}
+
 function _confirmModalReasonToggle(show) {
     const wrap = document.getElementById('confirmModalReasonWrap');
     if (wrap) wrap.style.display = show ? '' : 'none';
@@ -16,10 +27,20 @@ function _confirmModalReasonToggle(show) {
     if (err) err.style.display = 'none';
 }
 
-function showConfirmModal(msg, callback) {
+/** Confirm modal.  `opts.check = {label, checked}` adds ONE opt-in checkbox and the callback
+ *  receives its state — for the extra, heavier thing a confirmation sometimes has to offer. */
+function showConfirmModal(msg, callback, opts = {}) {
     _confirmModalCallback = callback;
     _confirmModalReasonOpts = null;
     _confirmModalReasonToggle(false);
+    _confirmModalCheckOpts = opts.check || null;
+    _confirmModalCheckToggle(!!_confirmModalCheckOpts);
+    const _chk = document.getElementById('confirmModalCheck');
+    const _lbl = document.getElementById('confirmModalCheckLabel');
+    if (_confirmModalCheckOpts) {
+        if (_chk) _chk.checked = !!_confirmModalCheckOpts.checked;
+        if (_lbl) _lbl.textContent = _confirmModalCheckOpts.label || '';
+    }
     document.getElementById('confirmModalMsg').textContent = msg;
     const _m = document.getElementById('confirmModal');
     // Focus the confirm button once shown so the FIRST Enter applies (otherwise
@@ -34,6 +55,8 @@ function showConfirmModal(msg, callback) {
 function showReasonModal(msg, callback, opts = {}) {
     _confirmModalCallback = callback;
     _confirmModalReasonOpts = { required: opts.required !== false, placeholder: opts.placeholder || '' };
+    _confirmModalCheckOpts = null;
+    _confirmModalCheckToggle(false);
     document.getElementById('confirmModalMsg').textContent = msg;
     _confirmModalReasonToggle(true);
     const input = document.getElementById('confirmModalReason');

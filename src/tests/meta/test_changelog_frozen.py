@@ -46,6 +46,23 @@ def _sections(text: str) -> dict:
     return out
 
 
+def _working_changelog() -> str:
+    """The working copy, read the same way HEAD is: byte for byte.
+
+    ``newline=''`` and not the default, which is the whole point. Python's universal
+    newlines turn a lone CR into a newline on the way in, and `git show` hands back the blob
+    untouched — so a file holding a bare CR compares unequal to ITSELF, section by section,
+    and the guard reports every entry as edited.
+
+    It is not hypothetical and it is not exotic: build.101 documents the removal of DOS
+    line-ending bytes and quotes one, so the CHANGELOG contains a literal carriage return
+    inside a code span. That entry is committed and frozen — correctly — which would have
+    left this guard failing for ever on a file nobody may touch.
+    """
+    with io.open(CHANGELOG, encoding='utf-8', newline='') as fh:
+        return fh.read()
+
+
 def _head_changelog() -> str | None:
     """CHANGELOG.md as of HEAD, or None when there is no history to compare against."""
     try:
@@ -83,7 +100,7 @@ class TestCommittedSectionsAreFrozen:
     def test_no_committed_section_was_edited(self, head_text):
         """The failure this exists for: appending to a build after committing it, so the
         section describes work that is not in the commit it names."""
-        head, now = _sections(head_text), _sections(io.open(CHANGELOG, encoding='utf-8').read())
+        head, now = _sections(head_text), _sections(_working_changelog())
         changed = [name for name, body in head.items()
                    if name in now and now[name] != body]
         assert not changed, (
@@ -94,14 +111,14 @@ class TestCommittedSectionsAreFrozen:
     def test_no_committed_section_disappeared(self, head_text):
         """Renaming or deleting a published build rewrites history just as much as editing
         one, and is easier to do by accident with a scripted edit."""
-        head, now = _sections(head_text), _sections(io.open(CHANGELOG, encoding='utf-8').read())
+        head, now = _sections(head_text), _sections(_working_changelog())
         gone = [name for name in head if name not in now]
         assert not gone, 'committed sections removed from the CHANGELOG: ' + ', '.join(gone)
 
     def test_the_working_copy_only_ever_adds_sections(self, head_text):
         """Stated as the invariant rather than as two checks: HEAD's sections are a subset
         of the working copy's, unchanged."""
-        head, now = _sections(head_text), _sections(io.open(CHANGELOG, encoding='utf-8').read())
+        head, now = _sections(head_text), _sections(_working_changelog())
         assert all(now.get(k) == v for k, v in head.items())
 
 
@@ -118,7 +135,7 @@ class TestOneBuildPerCommit:
     """
 
     def test_at_most_one_section_is_unpublished(self, head_text):
-        head, now = _sections(head_text), _sections(io.open(CHANGELOG, encoding='utf-8').read())
+        head, now = _sections(head_text), _sections(_working_changelog())
         pending = [name for name in now if name not in head]
         assert len(pending) <= 1, (
             'these builds are all uncommitted: ' + ', '.join(pending)

@@ -38,6 +38,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
 | [Perfiles de host](#5-perfiles-de-host-__host_profile__) | `schema.json` · `__host_profile__` | `watchfuls/*` | `lib.core.hosts.profiles` | sección Servers (formularios por protocolo) |
 | [Tablas de módulo](#6-tablas-de-módulo-discover_db_tables) | `__init__.py` · `discover_db_tables()` | `watchfuls/*` | `reconcile_module_tables()` | BD general (crea/migra `mod_<m>_<n>`) |
+| [Campos de historial en caliente](#6c-campos-de-historial-en-caliente-discover_history_fields) | `__init__.py` · `discover_history_fields()` | `watchfuls/*` | `module_history_fields()` | leyenda y eje de las gráficas de History e Infraestructura |
 | [Provisión Entra](#7-provisión-entra-__entraid_provision__) | `schema.json`/OIDC · `__entraid_provision__` | `watchfuls/*` + config OIDC | `normalize_entraid_provision()` | asistente device-code → registro de app en Graph |
 | [Páginas de módulo](#2c-una-sección-propia-aportada-por-un-módulo-__page__) | `schema.json` · `__page__` | `watchfuls/*` | `module_pages_catalog()` | sección propia: URL + entrada de sidebar + panel |
 | [Registro de config](#8-registro-de-config-spec-y-layout) | `spec.py` (`Cfg`) + `layout.py` (`TABS`/`CARDS`) | — (registro central, no escaneo) | `config_layout()` / `cfg_meta()` | pantalla de config renderizada desde datos |
@@ -329,6 +330,7 @@ etiqueta, los datos y (si quiere) el renderizador.
 | `icon`, `order` | icono BI de la sidebar y posición entre las secciones (las del core usan 10/20/30). |
 | `render` | nombre de la función JS que el cableado llama al abrir el panel; el módulo la envía en su `web/_ui.html`, igual que el `fn` de un `CONFIG_ACTION`. Vacío = el core pinta solo con los datos del hook. |
 | `perm` | permiso que protege **la ruta y** la entrada de la sidebar. Por defecto `modules_view`: un watchful no tiene manifiesto Python, así que **no posee flags propios** y debe reutilizar uno existente. |
+| `placement` | **dónde** va la entrada: `section` (por defecto) de primer nivel, o `system` dentro del acordeón del panel. La distinción es qué se hace con la sección: una que se **mira** va arriba con los paneles; una que se **administra** —la biblioteca de MIBs de `snmp`— va donde ya están Servicios, Módulos y Credenciales. El core la coloca y sigue sin saber qué módulo la pidió; el panel, el permiso, el cableado y las vistas son los mismos en las dos. |
 | `views` | las **vistas** de la sección, con dos o más. Un módulo con dos cosas que enseñar no reclama una segunda sección —serían dos entradas de sidebar, dos permisos que mantener a la par, dos paneles y dos rutas para algo que el lector piensa como un sitio— sino que declara sus vistas aquí: la entrada pasa a ser un padre con flyout (el patrón que ya usan Infraestructura y Acceso) y cada vista es un sub-path que comparte panel y permiso. |
 
 El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una clave del core.
@@ -344,7 +346,9 @@ El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una 
   `WATCHFUL_ACTIONS` y sirve él mismo. Devolviendo la misma forma que `page_data`, la página tiene
   **un solo renderizador**, no dos.
 
-**Vistas.** Cuando el módulo tiene más de una cosa que enseñar no reclama una segunda sección
+**Vistas.** (Valen igual con `placement: "system"`: la entrada del panel se convierte en el
+mismo padre con flyout.) Cuando el módulo tiene más de una cosa que enseñar no reclama una
+segunda sección
 —serían dos entradas de menú, dos permisos que mantener a la par, dos paneles y dos rutas para
 algo que el lector piensa como un sitio— sino que declara `views`. La entrada pasa a ser un padre
 con flyout (el patrón de Infraestructura y Acceso) y cada vista es un **sub-path**
@@ -537,6 +541,43 @@ flowchart TB
   copia y restauración no pueden discrepar sobre dónde están los ficheros. Al restaurar se
   vuelcan donde el módulo dice **hoy** que viven; si el módulo ya no está instalado, su parte se
   salta en vez de desempaquetarse en un directorio que nadie lee.
+
+---
+
+## 6c. Campos de historial en caliente (`discover_history_fields`)
+
+Lo que un módulo grafica se declara en su `schema.json` (`__history__.fields`: nombre, etiqueta
+y unidad de cada valor), y eso basta mientras la respuesta sea la misma en todas las
+instalaciones. Deja de bastar en cuanto depende de datos que aporta la instalación: el módulo
+SNMP graba **lo que declaren sus perfiles de dispositivo**, y alguno lo escribió alguien para el
+aparato de su rack después de publicarse esta versión. Un schema no puede nombrar un campo que
+no existía cuando se escribió.
+
+**Descriptor** (en `watchfuls/<m>/__init__.py`): una función
+`discover_history_fields(lang, var_dir='')` que devuelve `{campo: {label, unit}}` — la misma
+forma que produce el `__history__` estático, porque es lo que hace un valor **graficable y
+nombrable**. Recibe el idioma del lector y el directorio de datos (donde viven los ficheros que
+aporta la instalación); una función que sólo necesite el idioma puede aceptar sólo ese.
+
+**Flujo y datos:**
+
+```mermaid
+flowchart TB
+    stat["schema.json · __history__.fields<br/>(lo que el módulo graba SIEMPRE)"]
+    dyn["watchfuls/&lt;m&gt;/__init__.py · discover_history_fields(lang, var_dir)<br/>(lo que depende de los datos instalados)"]
+    dyn --> merge["history_meta(): dinámicos primero, estáticos encima"]
+    stat --> merge
+    merge --> ui(["leyenda, etiqueta y unidad en History y en Infraestructura"])
+```
+
+- **Gana el estático**: es el que alguien escribió a propósito, y un descubrimiento en caliente
+  que lo renombrara en silencio convertiría el schema en una mentira que se lee como correcta.
+- **Fallar es un mapa vacío, nunca una excepción.** Estos nombres deciden lo que dice la leyenda
+  de una gráfica; un módulo que no sepa contestar cuesta *sus etiquetas* — los valores se siguen
+  grabando y graficando, leídos por su nombre crudo— y eso no es motivo para que la pantalla de
+  History devuelva un 500.
+- **Dónde acaba:** `lib/modules/history_fields.py` lo resuelve y
+  `lib.core.history.service.history_meta()` lo mezcla.
 
 ---
 
@@ -886,6 +927,7 @@ flowchart TB
 | Un tipo de credencial para un módulo | `schema.json` → `__credential__` (+ campos en schema/lang) |
 | Un protocolo de conexión de host | `schema.json` → `__host_profile__` |
 | Una tabla propia de un módulo | `discover_db_tables()` en el `__init__.py` del módulo |
+| Que un módulo nombre campos de historial que sólo conoce en caliente | `discover_history_fields(lang, var_dir)` en su `__init__.py` — ver §6c |
 | Que el backup incluya los ficheros de un módulo | `schema.json` → `__backup_part__` — ver §6b |
 | Registrar una app de Entra para un módulo | `schema.json` → `__entraid_provision__` |
 | Una opción de configuración | `Cfg(...)` en `spec.py` (+ entrada en `CARDS` de `layout.py`) |

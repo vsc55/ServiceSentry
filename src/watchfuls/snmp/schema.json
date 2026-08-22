@@ -1,11 +1,24 @@
 {
     "__icon__": "bi-hdd-stack",
+    "__page__": {
+        "id": "snmp", "icon": "bi-hdd-stack", "order": 25,
+        "placement": "system", "perm": "modules_view",
+        "render": "renderSnmpMibsPage",
+        "views": [
+            {"slug": "library", "icon": "bi-hdd-stack", "label": "view_mibs"},
+            {"slug": "import", "icon": "bi-cloud-download", "label": "view_import"},
+            {"slug": "compile", "icon": "bi-gear", "label": "view_compile"},
+            {"slug": "browser", "icon": "bi-diagram-3", "label": "view_browser"},
+            {"slug": "profiles", "icon": "bi-grid-3x3-gap", "label": "view_profiles"}
+        ]
+    },
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},
         "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50},
         "mib_dirs": {"type": "str",  "default": ""},
-        "mib_repos": {"type": "str", "default": "", "hidden": true}
+        "mib_repos": {"type": "str", "default": "", "hidden": true},
+        "github_token": {"type": "str", "default": "", "secret": true}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
     "__backup_part__": {"id": "mibs", "dir": "snmp_mibs/raw",
@@ -45,7 +58,7 @@
     },
     "servers": {
         "__new_item_fields__": ["host", "community"],
-        "__field_order__": ["enabled", "host", "port", "timeout", "retries", "version", "community", "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key", "snmpv3_auth_protocol", "snmpv3_priv_protocol", "checks"],
+        "__field_order__": ["enabled", "host", "port", "timeout", "retries", "version", "community", "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key", "snmpv3_auth_protocol", "snmpv3_priv_protocol", "device_profiles", "checks"],
         "enabled":              {"type": "bool", "default": true},
         "host":                 {"type": "str",  "default": "", "placeholder": "192.168.1.1", "group": "connection"},
         "port":                 {"type": "int",  "default": 161,   "min": 1,  "max": 65535, "group": "connection"},
@@ -58,6 +71,7 @@
         "snmpv3_priv_key":      {"type": "str",  "default": "",    "secret": true, "show_when": {"version": ["3"]}, "group": "auth"},
         "snmpv3_auth_protocol": {"type": "str",  "default": "MD5", "options": ["MD5", "SHA", "SHA-224", "SHA-256", "SHA-384", "SHA-512", "none"], "show_when": {"version": ["3"]}, "group": "auth"},
         "snmpv3_priv_protocol": {"type": "str",  "default": "DES", "options": ["DES", "3DES", "AES-128", "AES-192", "AES-256", "none"],          "show_when": {"version": ["3"]}, "group": "auth"},
+        "device_profiles":      {"type": "str",  "default": "", "multi": true, "group": "device"},
         "checks": {
             "type":                 "sub_collection",
             "__discovery__":        "discover",

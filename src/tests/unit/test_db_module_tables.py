@@ -93,9 +93,26 @@ class TestReconcile:
         assert con.fetchall("SELECT oid, name FROM mod_snmp_mib_symbols") == [('1.3.6.1', 'sysDescr')]
 
     def test_reconcile_module_tables_real_dir_is_safe(self):
-        # No shipped module declares tables yet → empty result, never raises.
+        """The walk over the SHIPPED modules reconciles whatever they declare and never
+        raises. It used to assert an empty result — "no module declares tables yet" — which
+        was a statement about the day it was written, and stopped being true the first time
+        one did."""
         con = get_connector(None, default_sqlite_path=':memory:')
-        assert reconcile_module_tables(con) == []
+        done = reconcile_module_tables(con)
+        assert isinstance(done, list)
+        assert all(n.startswith('mod_') for n in done),             'a module table that is not namespaced can collide with a core one'
+
+    def test_a_declared_table_really_gets_created(self):
+        """The mechanism end to end on the real package: SNMP keeps its edited MIB sources
+        and their history here, and a table that reconciles into nothing is a feature that
+        fails on the first save."""
+        con = get_connector(None, default_sqlite_path=':memory:')
+        assert 'mod_snmp_mib_versions' in reconcile_module_tables(con)
+        con.execute("INSERT INTO mod_snmp_mib_versions (uid, mib, version, content) "
+                    "VALUES (?, ?, ?, ?)", ('u1', 'A-MIB', 1, 'x'))
+        con.commit()
+        assert con.fetchall(
+            "SELECT mib, version FROM mod_snmp_mib_versions") == [('A-MIB', 1)]
 
     def test_collect_module_tables_real_dir(self):
         # The walk over the real watchfuls package must return a list (no crash).

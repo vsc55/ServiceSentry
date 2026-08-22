@@ -35,6 +35,7 @@
         "remediation": "Automatically starts or stops the service to restore the expected state."
     },
     "ui": {
+        "audit_v_discover":                 "Discover services",
         "discover_title": "Discover System Services",
         "discover_error": "Could not load the list of system services",
         "item_added":     "Service \"{}\" added"

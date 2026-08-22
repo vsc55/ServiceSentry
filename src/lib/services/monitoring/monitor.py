@@ -54,6 +54,11 @@ __status__ = "Development"
 
 
 class Monitor(ObjectBase):
+    # A real run: results are recorded, notifications go out, history grows. The probe
+    # behind "test this host" says otherwise (see ProbeMonitor), and a module that does
+    # work whose ONLY purpose is to feed the history has somewhere to ask.
+    is_probe = False
+
     """ Monitor class to check the status of the system. """
 
     _DEFAULT_THREADS = 5     # Number of threads to use for parallel processing as default value.

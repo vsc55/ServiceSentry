@@ -1,7 +1,8 @@
 {# ================================================================
    Config — Notifications tab: HTML body template editor + CodeMirror.
-   _HTML_VAR_DESC_KEYS, _notifHtmlState, _cmEditor, _cmLoadPromise,
-   _cmLoadAsset, _ensureCodeMirror, _cmFormatHtml, _cmToggleWrap,
+   The loader itself (_cmLoadAsset / _ensureCodeMirror) is core now — see
+   partials/core/_codemirror.html; the MIB source viewer wants the same one.
+   _HTML_VAR_DESC_KEYS, _notifHtmlState, _cmEditor, _cmFormatHtml, _cmToggleWrap,
    _cmUpdateWrapBtn, _cmShowHint, _notifHtmlMaybeInitEditor,
    _renderNotifHtmlSection, _notifHtmlLoad, _notifHtmlRefresh,
    _notifHtmlInsertVar, _notifHtmlToggleFullscreen,
@@ -32,97 +33,9 @@ let _notifHtmlState = {
     vars: {},         // {type: [var1, var2]} — loaded from server
 };
 
-/** CodeMirror instance (null = not yet initialized or CM unavailable). */
+/** CodeMirror instance (null = not yet initialized or CM unavailable).
+    The LOADER is core (`partials/core/_codemirror.html`); this is just this editor's. */
 let _cmEditor = null;
-/** Pending load promise — prevents double-loading. */
-let _cmLoadPromise = null;
-
-/** Inject a <script> or <link> tag and return a Promise that resolves when loaded. */
-function _cmLoadAsset(src, isStyle) {
-    return new Promise((resolve, reject) => {
-        const selector = isStyle ? `link[href="${src}"]` : `script[src="${src}"]`;
-        if (document.querySelector(selector)) { resolve(); return; }
-        const el = document.createElement(isStyle ? 'link' : 'script');
-        if (isStyle) { el.rel = 'stylesheet'; el.href = src; }
-        else         { el.src = src; }
-        el.onload = resolve;
-        el.onerror = () => reject(new Error('Failed to load ' + src));
-        document.head.appendChild(el);
-    });
-}
-
-/**
- * Lazy-load CodeMirror 5 from local static assets.
- * Safe to call multiple times — loads only once.
- * Returns true on success, false if any asset fails.
- */
-async function _ensureCodeMirror() {
-    if (typeof CodeMirror !== 'undefined') return true;
-    if (_cmLoadPromise) return _cmLoadPromise;
-    _cmLoadPromise = (async () => {
-        try {
-            // All CSS assets (non-blocking; browser parallelises link tags)
-            [
-                '/static/css/codemirror/codemirror.min.css',
-                '/static/css/codemirror/cm-theme-material-darker.min.css',
-                '/static/css/codemirror/cm-theme-eclipse.min.css',
-                '/static/css/codemirror/cm-show-hint.min.css',
-                '/static/css/codemirror/cm-foldgutter.min.css',
-            ].forEach(u => _cmLoadAsset(u, true));
-
-            // Core JS — must be first
-            await _cmLoadAsset('/static/js/codemirror/codemirror.min.js', false);
-
-            // Mode dependencies (parallel); htmlmixed needs all three
-            await Promise.all([
-                _cmLoadAsset('/static/js/codemirror/cm-xml.min.js', false),
-                _cmLoadAsset('/static/js/codemirror/cm-css.min.js', false),
-                _cmLoadAsset('/static/js/codemirror/cm-javascript.min.js', false),
-            ]);
-            await _cmLoadAsset('/static/js/codemirror/cm-htmlmixed.min.js', false);
-
-            // Addons — all can load in parallel after htmlmixed
-            await Promise.all([
-                _cmLoadAsset('/static/js/codemirror/cm-matchbrackets.min.js',  false),
-                _cmLoadAsset('/static/js/codemirror/cm-closebrackets.min.js',  false),
-                _cmLoadAsset('/static/js/codemirror/cm-closetag.min.js',       false),
-                _cmLoadAsset('/static/js/codemirror/cm-activeline.min.js',     false),
-                // Hints
-                _cmLoadAsset('/static/js/codemirror/cm-show-hint.min.js',      false),
-                // Folding (foldcode must precede gutter/xml/brace)
-            ]);
-            // Folding: foldcode base first, then gutter + range finders
-            await _cmLoadAsset('/static/js/codemirror/cm-foldcode.min.js', false);
-            await Promise.all([
-                _cmLoadAsset('/static/js/codemirror/cm-foldgutter.min.js', false),
-                _cmLoadAsset('/static/js/codemirror/cm-xml-fold.min.js',   false),
-                _cmLoadAsset('/static/js/codemirror/cm-brace-fold.min.js', false),
-            ]);
-            // Hint engines (depend on show-hint + mode files)
-            await Promise.all([
-                _cmLoadAsset('/static/js/codemirror/cm-html-hint.min.js', false),
-                _cmLoadAsset('/static/js/codemirror/cm-css-hint.min.js',  false),
-            ]);
-            // Search & Replace (dialog must load before search)
-            _cmLoadAsset('/static/css/codemirror/cm-dialog.min.css', true);
-            await _cmLoadAsset('/static/js/codemirror/cm-dialog.min.js', false);
-            await Promise.all([
-                _cmLoadAsset('/static/js/codemirror/cm-searchcursor.min.js',  false),
-                _cmLoadAsset('/static/js/codemirror/cm-comment.min.js',       false),
-            ]);
-            await _cmLoadAsset('/static/js/codemirror/cm-search.min.js', false);
-            await _cmLoadAsset('/static/js/codemirror/cm-jump-to-line.min.js', false);
-            // HTML Beautify
-            await _cmLoadAsset('/static/js/codemirror/beautify-html.min.js', false);
-            return true;
-        } catch (e) {
-            console.warn(`[${APP_NAME}] CodeMirror could not be loaded:`, e);
-            _cmLoadPromise = null; // allow retry
-            return false;
-        }
-    })();
-    return _cmLoadPromise;
-}
 
 /** Format/beautify the HTML in the editor using js-beautify. */
 async function _cmFormatHtml() {

@@ -1,0 +1,6 @@
+{
+    "order": 4,
+    "name": "Synology",
+    "archive": "https://global.download.synology.com/download/Document/Software/DeveloperGuide/Firmware/SynologyOS/All/enu/Synology_MIB_File.zip",
+    "subdir": "synology"
+}

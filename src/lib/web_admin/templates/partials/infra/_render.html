@@ -1,0 +1,211 @@
+{# ================================================================
+   Infrastructure — the section shell: its entry point, its state and the machine view.
+
+   Two screens and one pane. The fleet is a list (infra/_list.html, built by the shared
+   factory like every other list in the panel); opening a machine replaces it with that
+   machine's own view and a way back. No URL of its own yet — a core section has one path,
+   and a per-host path is worth having only once there is more on this screen than a host
+   fits in.
+
+   WHAT THIS SECTION IS NOT: it does not compute anything. Every number on it was produced by
+   a module and every state by the host registry; the section arranges them by MACHINE, which
+   is the one arrangement neither of those two can offer. That is also why it is read-only —
+   see lib/core/infra/routes.py.
+   ================================================================ #}
+
+let _infraHosts   = [];          // the fleet, worst first (the server orders it)
+let _infraSummary = {};          // counts by state, for the header
+let _infraHost    = '';          // the machine that is open, '' = the fleet
+let _infraDetail  = null;        // its payload, kept so a redraw does not refetch
+let _infraTimer   = null;        // auto-refresh {_id, _interval}
+
+/** The section's entry point (declared in HOME_PAGES → standalone.render).
+ *
+ *  It ALWAYS asks the server. Reported from the panel: a machine added in System did not
+ *  appear here. The first version fetched only when it had nothing, which is the cache a
+ *  section gets away with while it is the only thing that writes its own data — and this one
+ *  writes none of it: everything on this screen is edited somewhere else. So the entry point
+ *  refetches, and the cheap redraws (a filter, a sort, a page) go through `_infraRender()`,
+ *  which is the factory's and touches no network.
+ */
+async function renderInfra() {
+    const pane = document.getElementById('infra-container');
+    if (!pane) return;
+    const data = await apiGet('/api/v1/infra/hosts');
+    if (data) {
+        _infraHosts   = data.hosts || [];
+        _infraSummary = data.summary || {};
+    }
+    if (_infraHost) return _infraOpenView(pane);
+    // The factory owns its own container INSIDE the pane, so switching to a machine and back
+    // does not tear down the table's state (columns, filters, page) along with the markup.
+    if (!document.getElementById('infra-fleet')) pane.innerHTML = '<div id="infra-fleet"></div>';
+    _infraRender();
+}
+
+/** Open one machine (or, with no uid, go back to the fleet). */
+async function infraOpen(uid) {
+    _infraHost   = uid || '';
+    _infraDetail = null;
+    const pane = document.getElementById('infra-container');
+    if (!pane) return;
+    if (!_infraHost) {
+        pane.innerHTML = '<div id="infra-fleet"></div>';
+        return _infraRender();
+    }
+    // The machine's own payload, not the fleet's: opening one is not a reason to re-ask for
+    // the other forty.
+    return _infraOpenView(pane);
+}
+
+async function _infraOpenView(pane) {
+    if (!_infraDetail) {
+        pane.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+        _infraDetail = await apiGet(`/api/v1/infra/hosts/${encodeURIComponent(_infraHost)}`);
+        if (!_infraDetail) { _infraHost = ''; return renderInfra(); }
+    }
+    pane.innerHTML = _infraHostHtml(_infraDetail);
+}
+
+/** Auto-refresh, the same control the other five live sections carry.
+ *
+ *  A poll and not a hardcoded interval: this is the screen somebody leaves open on a wall,
+ *  where "how stale is this" is a decision about the room it is in — and the panel already
+ *  owns that decision as a control (core/_auto_refresh.html), with its own persistence and
+ *  the same menu everywhere. A number written into this file would be a sixth answer.
+ */
+function setInfraAutoRefresh(seconds) {
+    if (_infraTimer) { clearInterval(_infraTimer._id); _infraTimer = null; }
+    try { localStorage.setItem('ss_infra_auto', String(seconds || 0)); } catch (_) {}
+    if (seconds > 0)
+        _infraTimer = { _id: setInterval(_infraAutoTick, seconds * 1000), _interval: seconds };
+    _infraRender();                 // the control redraws with the interval it now has
+}
+
+/** One tick. Only while the section is on screen: a timer that keeps polling a hidden pane is
+ *  a section that costs traffic for nobody's benefit. */
+function _infraAutoTick() {
+    const pane = document.getElementById('tab-infra');
+    if (!pane || !pane.classList.contains('active')) return;
+    if (_infraHost) _infraDetail = null;    // the open machine ages too
+    renderInfra();
+}
+
+// The saved interval, restored once the panel is up (the section may never be opened).
+(() => {
+    let saved = 0;
+    try { saved = parseInt(localStorage.getItem('ss_infra_auto') || '0', 10) || 0; } catch (_) {}
+    if (saved > 0) setTimeout(() => setInfraAutoRefresh(saved), 0);
+})();
+
+/** The state of a machine, as a badge. `''` is NOT "fine": a host with no enabled check has
+ *  no state at all, and painting it green would be the section telling you something nobody
+ *  is checking. */
+function _infraStateBadge(status, maintenance) {
+    if (maintenance)
+        return `<span class="badge text-bg-secondary"><i class="bi bi-tools me-1"></i>${esc(t('infra_maintenance'))}</span>`;
+    const map = {
+        ok:      ['text-bg-success',   'bi-check-circle',        t('status_ok')],
+        warning: ['text-bg-warning',   'bi-exclamation-triangle', t('status_warning')],
+        error:   ['text-bg-danger',    'bi-x-circle',            t('status_error')],
+    };
+    const [cls, icon, label] = map[status] || ['text-bg-secondary', 'bi-dash-circle', t('infra_unwatched')];
+    return `<span class="badge ${cls}"><i class="bi ${icon} me-1"></i>${esc(label)}</span>`;
+}
+
+/** One machine: what it is, what it measures, and what its checks said. */
+function _infraHostHtml(d) {
+    const h = d.host || {};
+    const metrics = d.metrics || [];
+    const results = d.results || [];
+    const canRegistry = new Set(currentUser.permissions || []).has('servers_view');
+    const tags = (h.tags || []).map(tg =>
+        `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${esc(tg)}</span>`).join('');
+    return `<div class="ss-vfill ss-vscroll">
+        <div class="d-flex align-items-center gap-2 flex-wrap px-3 py-2 border-bottom">
+            <button class="btn btn-sm btn-secondary" onclick="infraOpen('')">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('infra_view_fleet'))}</button>
+            <span class="fw-semibold ss-fs-5">${esc(h.name || '')}</span>
+            <code class="text-muted">${esc(h.address || '')}</code>
+            ${_infraStateBadge(h.status, h.maintenance)}
+            ${h.virtual ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"><i class="bi bi-hdd-stack me-1"></i>${esc(t('host_virtual') || 'virtual')}</span>` : ''}
+            ${tags}
+            <div class="ms-auto d-flex gap-1">
+                <button class="btn btn-sm btn-secondary" onclick="_infraDetail=null;renderInfra()"
+                    title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise"></i></button>
+                ${canRegistry ? `<a class="btn btn-sm btn-secondary" href="/admin?tab=servers" data-nav-section
+                    title="${escAttr(t('infra_registry'))}"><i class="bi bi-gear"></i></a>` : ''}
+            </div>
+        </div>
+        ${metrics.length ? `<div class="px-3 py-3 border-bottom">
+            <div class="text-muted ss-fs-2 text-uppercase mb-2">${esc(t('infra_metrics'))}</div>
+            <div class="d-flex flex-wrap gap-2">${metrics.map(_infraMetricCard).join('')}</div>
+        </div>` : ''}
+        <div class="px-3 py-3">
+            <div class="text-muted ss-fs-2 text-uppercase mb-2">${esc(t('infra_results'))}</div>
+            ${results.length ? _infraResultsTable(results) : `<div class="text-muted small">${esc(t('infra_no_checks'))}</div>`}
+        </div>
+    </div>`;
+}
+
+/** A measurement: the number, its unit, and what produced it.
+ *
+ *  The label and the unit come from the MODULE — it declares them in `__history__`, which is
+ *  the same declaration that makes the value chartable in History. The section names nothing
+ *  itself, so a module that starts recording a new field shows up here without a line of core
+ *  code (and, later, so does an SNMP profile: an OID matrix is exactly this declaration for a
+ *  value that arrives without one).
+ */
+function _infraMetricCard(m) {
+    const canHistory = new Set(currentUser.permissions || []).has('history_view');
+    const href = `/history?module=${encodeURIComponent(m.series.module)}`
+               + `&key=${encodeURIComponent(m.series.key || '')}`
+               + `&field=${encodeURIComponent(m.series.field || '')}`;
+    return `<div class="rounded-3 border px-3 py-2" style="min-width:9rem;background:var(--bs-tertiary-bg)">
+        <div class="text-muted ss-fs-1 text-truncate" title="${escAttr(m.item || '')}">${esc(m.item || '')}</div>
+        <div class="d-flex align-items-baseline gap-1">
+            <span class="fw-semibold ss-fs-5">${esc(_fmtNum(m.value))}</span>
+            <span class="text-muted ss-fs-2">${esc(m.unit || '')}</span>
+        </div>
+        <div class="ss-fs-2">${canHistory
+            ? `<a href="${href}" data-nav-section class="text-decoration-none">${esc(m.label)}<i class="bi bi-graph-up ms-1"></i></a>`
+            : esc(m.label)}</div>
+    </div>`;
+}
+
+/** Numbers as a person reads them: two decimals at most, and none when there are none to
+ *  show — "41" and not "41.00", "0.75" and not "0.7500000000000001". */
+function _fmtNum(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? '');
+    return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+function _infraResultsTable(rows) {
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead class="ss-thead"><tr>
+            <th>${esc(t('col_module'))}</th>
+            <th>${esc(t('col_name'))}</th>
+            <th>${esc(t('col_status'))}</th>
+            <th>${esc(t('col_detail'))}</th>
+            <th class="text-end">${esc(t('col_last_seen'))}</th>
+        </tr></thead>
+        <tbody>${rows.map(r => `<tr>
+            <td class="text-nowrap"><code class="ss-fs-2">${esc(r.module || '')}</code></td>
+            <td>${esc(r.name || '')}</td>
+            <td class="text-nowrap">${_infraLevelBadge(r.level)}</td>
+            <td class="small text-muted">${esc(r.message || '')}</td>
+            <td class="text-end text-nowrap small text-muted">${esc(_fmtDateTime(r.ts))}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+function _infraLevelBadge(level) {
+    const map = {
+        ok:      ['text-bg-success', t('status_ok')],
+        warning: ['text-bg-warning', t('status_warning')],
+        error:   ['text-bg-danger',  t('status_error')],
+    };
+    const [cls, label] = map[level] || ['text-bg-secondary', level || ''];
+    return `<span class="badge ${cls}">${esc(label)}</span>`;
+}

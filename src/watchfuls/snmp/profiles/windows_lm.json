@@ -1,0 +1,85 @@
+{
+  "id": "windows_lm",
+  "label": {
+    "en_EN": "Windows (LAN Manager MIB)",
+    "es_ES": "Windows (MIB de LAN Manager)"
+  },
+  "description": {
+    "en_EN": "What any Windows says about itself through the LAN Manager MIB: the domain it belongs to and the one it logs on to, the network I/O of the SMB stack, and the operating state of every service it has installed.",
+    "es_ES": "Lo que dice de si mismo cualquier Windows por la MIB de LAN Manager: el dominio al que pertenece y aquel por el que autentica, la E/S de red de la pila SMB, y el estado de funcionamiento de cada servicio instalado."
+  },
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.311",
+    "probe": "1.3.6.1.4.1.77.1.1.5.0"
+  },
+  "metrics": [
+    {
+      "key": "win_domain",
+      "label": {
+        "en_EN": "Domain",
+        "es_ES": "Dominio"
+      },
+      "oid": "1.3.6.1.4.1.77.1.4.1.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "domain"
+    },
+    {
+      "key": "win_logon_domain",
+      "label": {
+        "en_EN": "Logon domain",
+        "es_ES": "Dominio de autenticacion"
+      },
+      "oid": "1.3.6.1.4.1.77.1.4.2.0",
+      "kind": "text",
+      "chart": "none"
+    },
+    {
+      "key": "win_net_io",
+      "label": {
+        "en_EN": "Network operations",
+        "es_ES": "Operaciones de red"
+      },
+      "oid": "1.3.6.1.4.1.77.1.1.5.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_net_io_failed_start",
+      "label": {
+        "en_EN": "Operations that failed to start",
+        "es_ES": "Operaciones que no arrancaron"
+      },
+      "oid": "1.3.6.1.4.1.77.1.1.6.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_net_io_failed_end",
+      "label": {
+        "en_EN": "Operations that failed to finish",
+        "es_ES": "Operaciones que no terminaron"
+      },
+      "oid": "1.3.6.1.4.1.77.1.1.7.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_service_state",
+      "label": {
+        "en_EN": "Service",
+        "es_ES": "Servicio"
+      },
+      "walk": "1.3.6.1.4.1.77.1.2.3.1.3",
+      "index_label": "1.3.6.1.4.1.77.1.2.3.1.1",
+      "kind": "gauge",
+      "chart": "value"
+    }
+  ]
+}

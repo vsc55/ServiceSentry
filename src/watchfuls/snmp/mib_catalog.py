@@ -34,11 +34,23 @@ _lock: threading.Lock = threading.Lock()
 _cache: dict[str, tuple[float, list]] = {}
 
 # Columns persisted per symbol.  ``enum_values`` is stored as a JSON string.
+#
+# ``type`` is the pysnmp WRAPPER (``MibScalar``, ``MibTableColumn``) — which is what says
+# whether a symbol is one value or one per row of a table. ``syntax`` is the SMI type the
+# symbol actually carries (``Counter32``, ``Gauge32``, ``DisplayString``…), which is what
+# says whether the number means anything on its own. They are two different questions and
+# both are asked: reading the first where the second was meant is what left `base_category`
+# saying "other" for every symbol in the catalogue.
 _COLUMNS = (
-    'oid', 'name', 'module', 'type', 'base_category',
+    'oid', 'name', 'module', 'type', 'syntax', 'base_category',
     'enum_values', 'range_min', 'range_max',
     'status', 'access', 'units', 'desc',
 )
+
+# Bumped whenever the shape above changes. A catalogue is a derived cache and the staleness
+# rule is "older than any compiled MIB" — which never fires for a schema change, since no
+# MIB was touched. Without this, a new column stays empty until somebody happens to compile.
+_SCHEMA_VERSION = 2
 
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS symbols (
@@ -48,6 +60,7 @@ CREATE TABLE IF NOT EXISTS symbols (
 );
 CREATE INDEX IF NOT EXISTS idx_symbols_oid    ON symbols(oid);
 CREATE INDEX IF NOT EXISTS idx_symbols_module ON symbols(module);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -55,12 +68,33 @@ def catalog_path(var_dir: str) -> str:
     return os.path.join(var_dir, 'snmp_mibs', _CATALOG_DB)
 
 
+def _stored_version(path: str) -> int:
+    """The schema version a catalogue was written with. Zero when it predates the marker."""
+    try:
+        con = sqlite3.connect(path)
+        try:
+            row = con.execute("SELECT value FROM meta WHERE key = 'schema'").fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            con.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return 0
+
+
 def catalog_needs_rebuild(var_dir: str, compiled_dir: str | None = None) -> bool:
-    """True if the catalog DB is missing or older than any compiled MIB file."""
+    """True if the catalog DB is missing, written to an older shape, or older than any
+    compiled MIB file.
+
+    The shape matters as much as the age: a catalogue that gained a column holds nothing in
+    it, and the age rule never fires for a change to this file — no MIB was touched. Without
+    the version, a new column stays empty until somebody happens to compile something.
+    """
     if not var_dir:
         return False
     p = catalog_path(var_dir)
     if not os.path.isfile(p):
+        return True
+    if _stored_version(p) != _SCHEMA_VERSION:
         return True
     db_mtime = os.path.getmtime(p)
     cdir = compiled_dir or os.path.join(var_dir, 'snmp_mibs', 'compiled')
@@ -88,10 +122,21 @@ def _sa(obj, *attrs) -> str:
 
 
 def _sym_type_info(sym_obj):
-    """Extract (enum_values, range_min, range_max, base_category) from a symbol."""
+    """Extract (enum_values, range_min, range_max, base_category, syntax) from a symbol.
+
+    Everything here is a property of the symbol's **syntax**, not of the symbol: a
+    ``MibTableColumn`` is a wrapper, and its named values, its range and its type name all
+    live on the ``Counter32`` or ``Integer32`` inside it. Read off the wrapper, the type name
+    is always "MibScalar" or "MibTableColumn" — so the category was ``other`` for all nine
+    thousand symbols, and not one enum or range was ever extracted. Nothing failed; the
+    browser simply showed a column of blanks that looked like MIBs that carry no enums.
+    """
+    syn = getattr(sym_obj, 'syntax', None)
+    if syn is None:
+        syn = sym_obj
     # Named values (enums / booleans)
-    _nv = (getattr(sym_obj, 'namedValues', None) or
-           getattr(type(sym_obj), 'namedValues', None))
+    _nv = (getattr(syn, 'namedValues', None) or
+           getattr(type(syn), 'namedValues', None))
     enum_vals: list[dict] = []
     if _nv and hasattr(_nv, 'items'):
         try:
@@ -102,25 +147,43 @@ def _sym_type_info(sym_obj):
         except Exception:  # pylint: disable=broad-except
             pass
 
-    # Integer range (ValueRangeConstraint in subtypeSpec)
+    # Integer range (ValueRangeConstraint in subtypeSpec).
+    #
+    # A constraint set is ITERABLE, not a thing with `.components` — reading the attribute
+    # that does not exist ended the walk at the outermost set every time, which is why no
+    # symbol in the catalogue carried a range. And a set holds MORE than one: an Integer32
+    # restricted to 1..2147483647 carries its own restriction beside the base type's full
+    # -2^31..2^31-1. The narrowest is the one the MIB actually said.
     rmin = rmax = None
     try:
-        _spec = (getattr(sym_obj, 'subtypeSpec', None) or
-                 getattr(type(sym_obj), 'subtypeSpec', None))
-        if _spec:
-            _stack = [_spec]
-            while _stack:
-                _c = _stack.pop()
-                if hasattr(_c, 'components'):
-                    _stack.extend(list(_c.components))
-                elif hasattr(_c, 'start') and hasattr(_c, 'stop'):
-                    rmin, rmax = int(_c.start), int(_c.stop)
-                    break
+        _spec = (getattr(syn, 'subtypeSpec', None) or
+                 getattr(type(syn), 'subtypeSpec', None))
+        _found: list = []
+        _stack = [_spec] if _spec is not None else []
+        while _stack:
+            _c = _stack.pop()
+            if hasattr(_c, 'start') and hasattr(_c, 'stop'):
+                _found.append((int(_c.start), int(_c.stop)))
+                continue
+            try:
+                _stack.extend(list(_c))
+            except TypeError:
+                pass
+        # A Counter64 says it goes up to 2**64-1, which does not fit in a SQLite INTEGER —
+        # and a bound that wide is the base type describing itself, not the MIB restricting
+        # anything. Dropped rather than clamped: a wrong number is worse than no number.
+        _lim = 2 ** 63 - 1
+        _found = [r for r in _found if -_lim <= r[0] <= _lim and -_lim <= r[1] <= _lim]
+        # An enum's range is the base type describing itself: `up(1), down(2)` is constrained
+        # by the names, and "-2147483648 to 2147483647" beside them is noise that reads as a
+        # fact about this object.
+        if _found and not enum_vals:
+            rmin, rmax = min(_found, key=lambda r: r[1] - r[0])
     except Exception:  # pylint: disable=broad-except
         pass
 
     # Base category
-    _tn = type(sym_obj).__name__
+    _tn = type(syn).__name__
     _is_bool = (
         len(enum_vals) == 2 and {ev['value'] for ev in enum_vals} == {1, 2}
         and any(
@@ -144,7 +207,7 @@ def _sym_type_info(sym_obj):
         cat = 'integer'
     else:
         cat = 'other'
-    return enum_vals, rmin, rmax, cat
+    return enum_vals, rmin, rmax, cat, _tn
 
 
 def extract_symbols(mib_builder) -> list[dict]:
@@ -165,12 +228,13 @@ def extract_symbols(mib_builder) -> list[dict]:
                 )
                 if not oid_str or not re.match(r'^\d[\d.]*\d$', oid_str):
                     continue
-                _enum, _rmin, _rmax, _cat = _sym_type_info(sym_obj)
+                _enum, _rmin, _rmax, _cat, _syn = _sym_type_info(sym_obj)
                 symbols.append({
                     'name':          sym_name,
                     'oid':           oid_str,
                     'module':        mod_name,
                     'type':          type(sym_obj).__name__,
+                    'syntax':        _syn,
                     'base_category': _cat,
                     'enum_values':   _enum,
                     'range_min':     _rmin,
@@ -203,13 +267,17 @@ def write_catalog(var_dir: str, symbols: list[dict]) -> int:
     ]
     con = sqlite3.connect(p)
     try:
-        con.executescript(_SCHEMA)
-        con.execute('DELETE FROM symbols')
+        # Dropped and recreated, not emptied: `CREATE TABLE IF NOT EXISTS` leaves an
+        # existing table exactly as it was, so a catalogue written before a column existed
+        # fails the insert rather than gaining the column. A full replace is what this is.
+        con.executescript('DROP TABLE IF EXISTS symbols; ' + _SCHEMA)
         con.executemany(
             f"INSERT INTO symbols ({', '.join(_COLUMNS)}) "
             f"VALUES ({', '.join('?' for _ in _COLUMNS)})",
             rows,
         )
+        con.execute('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)',
+                    ('schema', str(_SCHEMA_VERSION)))
         con.commit()
     finally:
         con.close()
@@ -285,6 +353,7 @@ def read_catalog(var_dir: str) -> list[dict]:
                 'oid':           row[col_idx['oid']],
                 'module':        row[col_idx['module']],
                 'type':          row[col_idx['type']],
+                'syntax':        row[col_idx['syntax']],
                 'base_category': row[col_idx['base_category']],
                 'enum_values':   enum,
                 'range_min':     row[col_idx['range_min']],

@@ -1,0 +1,19 @@
+{#
+   Infrastructure section: the markup of its tab pane.
+
+   System › Infrastructure is the registry — what has been declared. This is the other half:
+   what those machines are DOING. Read-only, so it can be left open on a screen and handed to
+   whoever watches it without handing over the registry as well.
+
+   Full-bleed like the other sections: the fleet fills the pane edge to edge instead of
+   floating in a card.
+#}
+<div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'infra' %} show active{% endif %}" id="tab-infra">
+    <div id="infra-container">
+        {% if not standalone %}   {# see #overview-container #}
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm"></div>
+        </div>
+        {% endif %}
+    </div>
+</div>

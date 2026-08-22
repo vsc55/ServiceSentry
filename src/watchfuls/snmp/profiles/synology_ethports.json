@@ -1,0 +1,40 @@
+{
+    "id": "synology_ethports",
+    "label": {
+        "en_EN": "Synology — Ethernet ports (SYNOLOGY-PORT-MIB)",
+        "es_ES": "Synology — puertos Ethernet (SYNOLOGY-PORT-MIB)"
+    },
+    "description": {
+        "en_EN": "Link state and negotiated speed per physical port. A 10G port that quietly negotiated 1G is a cable, and nothing else on the box reports it.",
+        "es_ES": "Estado de enlace y velocidad negociada por puerto físico. Un puerto de 10G que ha negociado 1G en silencio es un cable, y nada más en la caja lo dice."
+    },
+    "match": {
+        "sysobjectid_prefix": "1.3.6.1.4.1.6574",
+        "probe": "1.3.6.1.4.1.6574.109.1.1.2.1"
+    },
+    "metrics": [
+        {
+            "key": "syno_port_status",
+            "label": {
+                "en_EN": "Link status",
+                "es_ES": "Estado del enlace"
+            },
+            "kind": "gauge",
+            "walk": "1.3.6.1.4.1.6574.109.1.1.2",
+            "chart": "value",
+            "group": "ethport"
+        },
+        {
+            "key": "syno_port_speed",
+            "label": {
+                "en_EN": "Negotiated speed",
+                "es_ES": "Velocidad negociada"
+            },
+            "kind": "gauge",
+            "walk": "1.3.6.1.4.1.6574.109.1.1.3",
+            "unit": "Mbps",
+            "chart": "line",
+            "group": "ethport"
+        }
+    ]
+}

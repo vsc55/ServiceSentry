@@ -1,0 +1,190 @@
+{
+  "id": "apc_ups",
+  "label": {
+    "en_EN": "APC UPS (PowerNet)",
+    "es_ES": "SAI APC (PowerNet)"
+  },
+  "description": {
+    "en_EN": "An APC UPS through its network management card: what it is running on, how long it would last, and the state of the line on both sides of it.",
+    "es_ES": "Un SAI de APC a través de su tarjeta de red: de qué está tirando, cuánto aguantaría, y el estado de la línea a un lado y al otro."
+  },
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.318",
+    "probe": "1.3.6.1.4.1.318.1.1.1.2.2.1.0"
+  },
+  "metrics": [
+    {
+      "key": "apc_ups_model",
+      "label": {"en_EN": "Model", "es_ES": "Modelo"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.1.1.1.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "model"
+    },
+    {
+      "key": "apc_ups_serial",
+      "label": {"en_EN": "Serial number", "es_ES": "Número de serie"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.1.2.3.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "serial"
+    },
+    {
+      "key": "apc_ups_firmware",
+      "label": {"en_EN": "Firmware", "es_ES": "Firmware"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.1.2.1.0",
+      "kind": "text",
+      "chart": "none",
+      "role": "firmware"
+    },
+    {
+      "key": "apc_ups_status",
+      "label": {"en_EN": "Output state", "es_ES": "Estado de la salida"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.4.1.1.0",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "apc_ups_battery_status",
+      "label": {"en_EN": "Battery state", "es_ES": "Estado de la batería"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.1.1.0",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "apc_ups_battery_replace",
+      "label": {"en_EN": "Battery needs replacing", "es_ES": "Batería para cambiar"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.2.4.0",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "apc_ups_selftest",
+      "label": {"en_EN": "Last self-test", "es_ES": "Última autoprueba"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.7.2.3.0",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "apc_ups_alarms",
+      "label": {"en_EN": "Alarm level", "es_ES": "Nivel de alarma"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.11.1.2.0",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "apc_ups_charge",
+      "label": {"en_EN": "Battery charge", "es_ES": "Carga de la batería"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.2.1.0",
+      "kind": "gauge",
+      "unit": "%",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_runtime",
+      "label": {"en_EN": "Runtime remaining", "es_ES": "Autonomía restante"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.2.3.0",
+      "kind": "gauge",
+      "unit": "s",
+      "scale": 0.01,
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_temp",
+      "label": {"en_EN": "Internal temperature", "es_ES": "Temperatura interna"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.2.2.0",
+      "kind": "gauge",
+      "unit": "°C",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_battery_voltage",
+      "label": {"en_EN": "Battery bus voltage", "es_ES": "Tensión del bus de baterías"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.2.8.0",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_time_on_battery",
+      "label": {"en_EN": "Time on battery", "es_ES": "Tiempo en batería"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.2.1.2.0",
+      "kind": "gauge",
+      "unit": "s",
+      "scale": 0.01,
+      "chart": "area"
+    },
+    {
+      "key": "apc_ups_input_voltage",
+      "label": {"en_EN": "Input voltage", "es_ES": "Tensión de entrada"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.3.2.1.0",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_input_frequency",
+      "label": {"en_EN": "Input frequency", "es_ES": "Frecuencia de entrada"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.3.2.4.0",
+      "kind": "gauge",
+      "unit": "Hz",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_input_min_voltage",
+      "label": {"en_EN": "Lowest input voltage seen", "es_ES": "Mínima tensión de entrada vista"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.3.2.3.0",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_input_max_voltage",
+      "label": {"en_EN": "Highest input voltage seen", "es_ES": "Máxima tensión de entrada vista"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.3.2.2.0",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_load",
+      "label": {"en_EN": "Load", "es_ES": "Carga"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.4.2.3.0",
+      "kind": "gauge",
+      "unit": "%",
+      "chart": "area"
+    },
+    {
+      "key": "apc_ups_output_voltage",
+      "label": {"en_EN": "Output voltage", "es_ES": "Tensión de salida"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.4.2.1.0",
+      "kind": "gauge",
+      "unit": "V",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_output_frequency",
+      "label": {"en_EN": "Output frequency", "es_ES": "Frecuencia de salida"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.4.2.2.0",
+      "kind": "gauge",
+      "unit": "Hz",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_output_current",
+      "label": {"en_EN": "Output current", "es_ES": "Corriente de salida"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.4.2.4.0",
+      "kind": "gauge",
+      "unit": "A",
+      "chart": "line"
+    },
+    {
+      "key": "apc_ups_output_power",
+      "label": {"en_EN": "Output active power", "es_ES": "Potencia activa de salida"},
+      "oid": "1.3.6.1.4.1.318.1.1.1.4.2.8.0",
+      "kind": "gauge",
+      "unit": "W",
+      "chart": "line"
+    }
+  ]
+}

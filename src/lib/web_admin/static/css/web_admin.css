@@ -271,6 +271,20 @@
 }
 /* Already inside a sticky wrapper — sticking twice buys nothing. */
 .ss-toolbar.ss-toolbar-plain { position: static; }
+/* …and the variant for a pane that is already full-bleed. `.ss-bleed-top` is how a bar is
+   pinned to the top EDGE of a section, and it spends negative margins doing it — a module's
+   pane is `.ss-fullbleed` and has spent them already, so applying it there moves the bar off
+   the edge by exactly the amount it was meant to reach. What is left to do is the other half
+   of that class: drop the frame a floating bar draws for itself. */
+.ss-toolbar.ss-toolbar-flush {
+    margin-bottom: 0; border-top: 0; border-left: 0; border-right: 0; border-radius: 0;
+    /* One height whatever it holds. A bar is as tall as its tallest child, so a section with
+       buttons in its head got 47px and one with only a title got 40 — three views of the
+       same section, none of them lining up with the next. The height of a `btn-sm` in this
+       bar's padding, stated once, so a head is a head whether or not it has anything in it
+       besides its name. */
+    min-height: 3rem;
+}
 
 /* Card header zone — title + action buttons */
 .ss-card-header {
@@ -388,6 +402,23 @@
    table body wants none of it, which is why this is a separate class and not part of
    .ss-vscroll. */
 .ss-scroll-pad { padding: .75rem .5rem 1rem 0; }
+/* .ss-scroll-box : a result panel that reports a LIST whose length is not the caller's to
+   choose — an import of twenty files, a check of forty rows. Left to grow it pushes everything
+   below it out of the dialog and the buttons that acted on it end up off screen, which is the
+   one moment somebody needs them. Caps itself and scrolls its own overflow instead.
+   Generic on purpose: nothing here knows what the list is of. */
+.ss-scroll-box { max-height: 14rem; overflow-y: auto; }
+/* .ss-vfill on a MODAL BODY: the body becomes the top of the fill chain, so it must not be
+   what scrolls — the .ss-vscroll inside it is. Bootstrap's .modal-dialog-scrollable puts
+   `overflow-y: auto` here, which is exactly the opposite: the body grows with its content
+   and the list inside it never learns how tall it is allowed to be. Pair it with
+   .modal-dialog-scrollable, which is what gives the dialog a height to hand down. */
+.modal-body.ss-vfill { overflow: hidden; }
+/* .ss-vfill on a TAB PANE: Bootstrap's `.tab-content > .active { display: block }` outranks a
+   class-only `display: flex`, so a pane meant to be the middle of a chain silently becomes a
+   block and the chain stops there — the class is in the markup, the layout ignores it, and
+   nothing says so. Naming the active pane wins the specificity back. */
+.tab-content > .tab-pane.active.ss-vfill { display: flex; flex-direction: column; }
 /* .ss-qr : a QR code drawn to be READ OFF A SCREEN, not to fill one.
    The SVG is deliberately shipped with a viewBox and no width or height — a square sized by
    the server is one that does not fit somebody's phone at arm's length — which means it
@@ -2031,6 +2062,11 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .ss-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
              margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
 .ss-shell-main > .ss-bleed-top { margin: 0; }
+/* …and NOT when the pane already bled. A module's section is `.ss-fullbleed` (plus
+   `-top`), which cancels exactly the same paddings: a shell inside one would cancel them a
+   second time and hang a gutter past both edges of the window. The pane spent them; the
+   shell has nothing left to spend. */
+.ss-fullbleed > .ss-shell { margin: 0; }
 /* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
    the index's border and the first card rather than a strip of page background. */
 .ss-shell-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
@@ -2255,6 +2291,13 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .ss-rail-item:hover { background: var(--bs-secondary-bg); }
 .ss-rail-item.active { background: var(--bs-primary); color: #fff; }
 .ss-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
+/* A rail whose items are a TREE: the twist that opens a node, and the same width where there
+   is nothing to twist — a leaf whose name starts where its siblings' names start is a tree;
+   one that starts a notch to the left is a list. Its own control, so opening a branch and
+   choosing it stay two answers. */
+.ss-rail-twist { width: .85rem; flex-shrink: 0; font-size: .6rem; opacity: .7;
+                  display: inline-flex; align-items: center; justify-content: center; }
+.ss-rail-twist:hover { opacity: 1; }
 @media (max-width: 991.98px) {
     .ss-shell { flex-direction: column; }
     .ss-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
@@ -2331,3 +2374,14 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .db-opt-icon { flex: 0 0 1rem; font-size: .85rem; text-align: center; }
 .db-opt-spin { animation: db-opt-spin 1s linear infinite; }
 @keyframes db-opt-spin { to { transform: rotate(360deg); } }
+
+/* .ss-masked : a secret shown masked WITHOUT being a password input. Browsers hunt for
+   `input[type=password]` to autofill and to offer "save this login", which is wrong for every
+   secret in this panel — none of them is a login here, and a manager filling one writes a
+   saved password into a value that is about to be sent to a device. Applied only where the
+   browser supports it: `fieldCtl()` feature-detects and falls back to a real password input,
+   because losing the masking would be far worse than the prompt it avoids. */
+.ss-masked {
+    -webkit-text-security: disc;
+    text-security: disc;
+}

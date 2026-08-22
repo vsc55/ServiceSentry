@@ -162,7 +162,7 @@ function _hostFieldControl(f, val, onch, ctx) {
     }
     if (f.secret || f.sensitive) {
         return fieldCtl({kind: 'secret',
-            inputAttrs: ` autocomplete="new-password" placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}"`,
+            inputAttrs: ` placeholder="${val === null ? escAttr(t('secret_defined') || '••••••') : ''}"`,
             onChange: `${onch}this.value)`});
     }
     // Placeholder: the 'label' field (or a schema placeholder of '__key__')
@@ -205,7 +205,54 @@ function _hostFieldControl(f, val, onch, ctx) {
         }
         return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`, trailing: _btn});
     }
+    // Multi-value field declared by the schema (`meta.multi`), e.g. the SNMP device
+    // profiles. This is where a server, a switch or a NAS is actually bound, so a field
+    // that renders here as a bare text box is a list nobody can pick from — the Modules
+    // tab drew chips and a picker for the same field, and this pane drew a text input.
+    if (f.multi && ctx && ctx.idx != null) {
+        const _mKey = ctx.mod + '|' + ctx.idx + '|' + f.name;
+        registerFieldAdapter(_mKey,
+            () => { const it = _hostChecks[ctx.mod] && _hostChecks[ctx.mod].items[ctx.idx];
+                    return it ? (it.fields[f.name] || '') : ''; },
+            v => _setHostCheckField(ctx.mod, ctx.idx, f.name, v));
+        return fieldCtl({kind: 'multi', key: _mKey, value: val,
+            placeholder: (f.placeholder != null ? String(f.placeholder) : ''),
+            trailing: _hostFieldPickerBtn(ctx.mod, ctx.idx, f.name)});
+    }
     return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`});
+}
+
+/** The picker button for a check field, when the module registered one for that KIND of
+ *  field. Same registry the Modules tab reads; the difference is only where the value is
+ *  written back, which is why the picker is opened with a callback here. */
+function _hostFieldPickerBtn(mod, idx, name) {
+    const key = _hostFieldSchemaKey(mod, name);
+    const fp = (typeof _fieldPickerFor === 'function') ? _fieldPickerFor(key) : null;
+    if (!fp) return '';
+    return `<button class="btn btn-secondary" type="button"
+            title="${escAttr(_fieldPickerTitle(fp))}"
+            onclick="_hostFieldPickerOpen(${jsStr(mod)},${idx},${jsStr(name)})">
+            <i class="bi ${escAttr(fp.icon)}"></i></button>`;
+}
+
+/** `<module>|<collection>|<field>` — the identity a picker is registered against. */
+function _hostFieldSchemaKey(mod, name) {
+    const coll = (_hostChecks[mod] || {}).collection || '';
+    return coll ? `${mod}|${coll}|${name}` : '';
+}
+
+function _hostFieldPickerOpen(mod, idx, name) {
+    const key = _hostFieldSchemaKey(mod, name);
+    const fp = _fieldPickerFor(key);
+    if (!fp) return;
+    const it = (_hostChecks[mod] || {}).items[idx];
+    const cur = (it && it.fields[name]) || '';
+    // The callback is what makes one picker serve both panes: the Modules tab writes into
+    // modulesData by path, and here the value belongs to a draft that is not saved yet.
+    fp.open(key, cur, (v) => {
+        _setHostCheckField(mod, idx, name, v);
+        if (typeof renderChips === 'function') renderChips(mod + '|' + idx + '|' + name);
+    });
 }
 
 // Action label from the module's i18n (action_labels), like the Modules tab.

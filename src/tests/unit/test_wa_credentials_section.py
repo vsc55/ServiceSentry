@@ -58,11 +58,13 @@ class TestTheScanItself:
 
 class TestItIsATopLevelSection:
 
-    def test_the_sidebar_lists_it_among_the_panel_tabs(self):
-        src = _strip_comments(_read(SIDEBAR))
-        tabs = re.search(r'set panel_tabs = \[(.*?)\]', src, re.S)
-        assert tabs, 'panel_tabs is gone — this guard needs updating'
-        assert "'id': 'credentials'" in tabs.group(1)
+    def test_the_panel_registry_lists_it(self):
+        """The tabs moved out of the sidebar template and into a registry: their ORDER is
+        alphabetical by the translated label, and a template cannot sort by a string it has
+        not looked up yet. What this guards is unchanged — Credentials is a section of the
+        System panel and not a sub-tab of something else."""
+        from lib.web_admin.constants import PANEL_TABS       # noqa: PLC0415
+        assert any(t['id'] == 'credentials' for t in PANEL_TABS)
 
     def test_it_declares_no_sub_tabs(self):
         """A section with sub-tabs is a container. This one holds a single list."""

@@ -900,6 +900,317 @@ sub-colección de **checks** (OIDs a comprobar):
 > schema-driven, ver [explica-seguridad.md](explica-seguridad.md)). El módulo es 100 % independiente
 > del core.
 
+### Perfiles de dispositivo (la matriz de OIDs)
+
+Un agente SNMP contesta `1.3.6.1.4.1.2021.11.9.0` con un `7`. **No dice** que eso sea la CPU,
+que el siete sea un porcentaje, ni que el número de al lado sea un contador de bytes que no
+significa nada hasta derivarlo. Eso es un **perfil**: una lista de métricas que mapea cada OID a
+una clave, una etiqueta, una unidad, un tipo y cómo se dibuja.
+
+Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/profiles/`:
+
+```json
+{
+  "id": "if_generic",
+  "label": {"en_EN": "Network interfaces", "es_ES": "Interfaces de red"},
+  "match": {"sysobjectid_prefix": "1.3.6.1.4.1.8072"},
+  "metrics": [
+    {"key": "if_in", "walk": "1.3.6.1.2.1.2.2.1.10", "kind": "counter", "unit": "B/s",
+     "width": 32, "index_label": "1.3.6.1.2.1.2.2.1.2", "chart": "line"}
+  ]
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `key` | Identificador de la métrica: acaba siendo el nombre del campo en el historial |
+| `oid` / `walk` | Un valor suelto **o** una columna de una tabla indexada. Uno de los dos, nunca ambos |
+| `kind` | `gauge` (el valor **es** la medida), `counter` (sólo significa algo como **diferencia**), `text` (no es una medida: nombre, modelo, número de serie). Un `text` viaja como **atributo** al lado de los números de su fila, nunca como serie — así que la regla de no medir un mismo valor dos veces no le aplica, y merece la pena capturar la identidad: no gasta ninguna gráfica y es lo que da contexto a lo que sí se mide |
+| `unit` | La unidad en la que queda tras `scale` |
+| `scale` | Multiplicador: centisegundos→segundos, KB→bytes, décimas de grado→grados |
+| `width` | 32 o 64 bits del contador — **es lo que distingue una vuelta de un reinicio** |
+| `max_rate` | Techo opcional: una tasa imposible para ese enlace se descarta |
+| `index_label` | La columna que **nombra** cada fila de una tabla (sin ella, ocho interfaces son ocho números de índice, que no son el puerto del frontal) |
+| `scale_by` | La columna que da el factor, **por fila**, cuando lo decide el aparato y no el perfil (el tamaño de bloque de un sistema de ficheros) |
+| `group` | A qué **tabla** pertenece la métrica, para las tablas cuyas filas no tienen nombre: la identidad de una fila es su nombre, y sin él dos tablas caen a su índice SNMP — donde almacenamiento fila 3 y procesador fila 3 no son la misma fila |
+| `chart` | `line`, `area`, `value` o `none` |
+| `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina. **Un papel por perfil**: la fila tiene una casilla por papel, así que dos textos que pidan `model` son el segundo pisando al primero sin decirlo |
+| `match.sysobjectid_prefix` | **Quién fabricó** el aparato: qué aparatos reclama el perfil; gana el prefijo **más específico** |
+| `match.probe` | **Qué sirve** el aparato: un OID que, si contesta, hace que el perfil aplique. Es el que importa para los genéricos — «¿implementa la HOST-RESOURCES-MIB?» no lo puede contestar un `sysObjectID`: un Synology, un Linux y un Windows la implementan y sus `sysObjectID` no tienen nada que ver |
+| `match.supersedes` | Qué perfiles genéricos **desplaza** éste en los aparatos que reclama: un Synology contesta el sondeo de E/S de UCD y el suyo, y los dos miden los mismos discos |
+| `includes` | Ids de **otras entradas** del catálogo en lugar de OIDs: eso es un **grupo** (más abajo). Una entrada lleva métricas, miembros, o las dos cosas; ninguna de las dos y no es una entrada |
+
+**Los contadores mienten de dos formas opuestas.** Un valor nuevo menor que el anterior es una
+**vuelta** del contador (uno de octetos de 32 bits se llena en ~34 s en un enlace de gigabit) o
+un **reinicio** del aparato, y desde aquí son idénticos. Confundirlos no es un error de
+redondeo: tratar un reinicio como una vuelta mete un pico de cuatro mil millones en un
+intervalo, que reescala el eje y esconde detrás todos los valores reales de la pantalla. La
+regla es el ancho: **32 bits → se asume vuelta** (pasa constantemente), **64 bits → se asume
+reinicio y se descarta la muestra** (a un terabit tardaría 4,6 años en dar la vuelta). En ambos
+casos se guarda la nueva referencia: perder un punto cuesta un punto; inventarlo cuesta la
+gráfica.
+
+Se envían **nueve** perfiles genéricos, todos de MIBs estándar para que funcionen sin saber
+quién fabricó el aparato, y **disjuntos** entre sí (más `hr_system` —carga por procesador,
+procesos y usuarios, el complemento de `hr_storage`—, los quince de Synology, el de los SAI de
+APC, el de los switches de Linksys, el de RouterOS de MikroTik, los tres de Windows, y los
+grupos de más abajo):
+
+| Perfil | MIB | Qué mide |
+|---|---|---|
+| `sys_generic` | MIB-II | Nombre, descripción, ubicación, contacto, uptime |
+| `if_generic` | IF-MIB | Tráfico, paquetes, errores y descartes por interfaz **en las dos direcciones** (columnas de 32 y 64 bits), más velocidad y estado administrativo |
+| `ip_stats` | IP-MIB | Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados. **En los dos anchos y para las dos familias** — los escalares de RFC 1213 son sólo IPv4 y de 32 bits (en una máquina con 700 GB movidos ya han dado la vuelta 167 veces, y el grupo viejo no tiene contador de octetos siquiera); la tabla propia de IP-MIB informa por familia y a 64 bits |
+| `icmp_stats` | ICMP-MIB | Ecos, inalcanzables y TTL agotado, de entrada y de salida |
+| `tcp_udp_stats` | TCP-MIB, UDP-MIB | Conexiones establecidas, retransmisiones, resets, datagramas a puertos cerrados |
+| `ucd_linux` | UCD-SNMP-MIB | CPU, carga y memoria |
+| `hr_storage` | HOST-RESOURCES-MIB | Uso y capacidad por volumen |
+| `disk_io` | UCD-SNMP-MIB | Bytes y operaciones por segundo, por dispositivo de bloque |
+| `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+
+Los contadores de interfaz dicen *cuánto* tráfico hubo; `ip_stats` dice *qué pasó* con él, y las
+retransmisiones de `tcp_udp_stats` son el número que avisa de que un enlace va mal mucho antes
+de que esté caído. Una instalación puede añadir los suyos o **sustituir uno
+enviado reutilizando su `id`**, que es lo que se hace cuando una versión de firmware mueve un
+OID y el arreglo no puede esperar a la siguiente versión de este producto.
+
+#### Dónde se asocia un perfil
+
+**En el aparato, no en la comprobación.** Cada servidor SNMP lleva un campo `device_profiles`:
+lo que una máquina *es* no cambia porque alguien le añada un cuarto OID que vigilar. Y lleva
+**varios**, no uno — un NAS es el genérico de MIB-II, más las interfaces, más sus discos —, que
+es también la razón de que los perfiles enviados sean pequeños y componibles en lugar de un
+monolito por modelo. El conjunto asignado *es* la clasificación: no hace falta una taxonomía de
+tipos de aparato (y habría que mantenerla correcta para siempre).
+
+El botón del campo abre el catálogo con las filas marcables, y el mismo catálogo se abre en modo
+lectura desde la barra del módulo, al lado del navegador de MIBs. Se marca, no se teclea: un `id`
+de perfil escrito de memoria es un aparato que no mide nada hasta que alguien nota la errata.
+
+**Detectar** lee la identidad del aparato (`sysObjectID`, `sysDescr`) y luego pregunta lo que
+**cada perfil dice que hay que preguntarle**: su `match.probe`. Los candidatos los declara el
+catálogo, no el código — una lista de «los genéricos» escrita dentro de la acción se queda
+caducada en cuanto alguien añade un perfil, que es exactamente lo que pasó con el de
+almacenamiento. Propone y nunca asigna: un perfil equivocado no falla, mide números que parecen
+buenos, y ése es justo el fallo que tiene que pasar por una persona. Un aparato que no contesta
+se informa como inalcanzable y no como un aparato que ningún perfil reclama: en pantalla se leen
+igual y piden acciones opuestas.
+
+**Probar** (el botón de al lado) contesta la otra mitad, y es una pregunta que el panel no sabía
+hacer. Una asignación se equivoca en **dos direcciones** y sólo una se veía: un perfil que nombra
+un OID que el aparato no sirve deja una gráfica vacía, y alguien acaba viéndolo; un aparato que
+sirve algo que ningún perfil asignado nombra es **invisible** — no falta nada en ninguna
+pantalla, porque nunca nadie dijo que pudiera estar. Así que la prueba lee las dos:
+
+- **lo que la asignación recoge**, métrica a métrica, con **lo que dijo el aparato al lado de lo
+  que significa**: `405` y `40,5 °C`. Una escala equivocada por diez enseña una temperatura
+  plausible, y el crudo es lo único que la delata. Un contador trae su total y ningún valor,
+  porque un contador *es* la diferencia entre dos lecturas y aquí sólo hay una. Se lee con
+  `sampler.read_metric`, la misma función con la que muestrea el planificador: lo que enseña la
+  pantalla es lo que se va a registrar, y no puede derivar en otra lectura distinta;
+- **lo que el aparato manda y nadie lee**. Eso no se deduce del catálogo — es un hecho sobre la
+  caja —, así que se recorre el aparato y se le resta todo lo que la asignación ya lee. Sale
+  agrupado **por el objeto**, con el nombre que le den los MIB compilados: cuarenta y ocho líneas
+  diciendo `…2.2.1.16.<n>` son una frase repetida cuarenta y ocho veces, y una sola que diga
+  `ifOutOctets (IF-MIB) × 48` con un valor de ejemplo es la que se puede leer.
+
+La prueba **cuenta lo que va haciendo**: corre en segundo plano y el diálogo la sondea,
+dibujando seis pasos con su contador — conectar, resolver los perfiles asignados, **preguntar
+cuáles sirve** el dispositivo (su `match.probe`), leer sus métricas, **recorrer el árbol SNMP
+entero** y restar lo que ya se captura. Cada transición va también al log del servidor, y la
+consola del navegador recibe lo mismo más la respuesta completa en dos tablas ordenables. Es
+una pantalla de diagnóstico: poder leerla por los dos extremos es justo de lo que va.
+
+El recorrido va **por ramas y con reparto**: el árbol estándar (`1.3.6.1.2.1`) y el del
+fabricante (`1.3.6.1.4.1`) tienen cada uno su parte, como suelo y no como cupo — lo que una no
+gasta lo heredan las siguientes. Un bote único se lo come mib-2: en un Synology de verdad los
+tres mil OIDs se fueron enteros en la tabla de rutas, la tabla ARP y una fila por conexión TCP
+abierta, y el árbol del fabricante no se llegó a preguntar. Que es justo donde está lo que se
+viene a leer.
+
+La lectura va **en paralelo y en dos pasadas**: primero las columnas que nombran y escalan
+las filas, una vez cada una (siete métricas contra un mismo `ifDescr` son un recorrido y no
+siete), y precargarlas es también lo que hace seguro leer las métricas a la vez — ya nadie
+escribe en la caché compartida. De una en una, un NAS con «NAS Synology (todo)» no cabía en su
+propio reloj: ciento cincuenta y siete métricas, y cada una que el modelo no sirva cuesta el
+timeout por los reintentos.
+
+Una fila **sin nombre no es un misterio, es un MIB que falta**: sin TCP-MIB compilado, cada
+conexión abierta vuelve como una fila propia —no hay ninguna columna de la que ser instancia— y
+cuarenta filas iguales se leen como cuarenta problemas. La pantalla dice cuántas hay, y lo que
+hay que hacer es importar ese MIB.
+
+Lo que un perfil lee como **columna** se compara por prefijo y nunca por igualdad (comparando
+cadenas, cada interfaz del switch saldría como no capturada), y las columnas que **nombran** y
+**escalan** las filas cuentan como capturadas: son valores que la asignación ya está usando, y
+listarlas mandaría a alguien a escribir una métrica para un número que ya tiene. El recorrido
+tiene tope y **avisa cuando lo toca**, en vez de informar de un aparato más pequeño de lo que es.
+
+Sin ningún perfil asignado, la prueba es la lista de todo lo que ese aparato se puede medir —
+que es donde más vale: la caja del rack para la que nadie ha escrito un perfil todavía.
+
+Y los perfiles son **disjuntos a propósito**: se asignan varios a la vez, así que dos que den el
+mismo valor no es redundancia — es una medida graficada dos veces con dos nombres. Por eso
+`hr_storage` mide sólo volúmenes y deja la CPU y la memoria a `ucd_linux`. Por eso mismo un Synology lleva `ucd_linux`: **es una máquina Linux con net-snmp**, sirve el árbol UCD entero (CPU repartida, medias de carga, memoria y swap) y ningún MIB de fabricante da eso — y por eso mismo el perfil del fabricante *no* mide la CPU, que sería el mismo dato peor contado.
+
+Los perfiles propios de la instalación van en `<var_dir>/snmp_profiles/`, junto a sus MIBs, para
+que una actualización del paquete no se los lleve. Cada fila del catálogo dice si viene enviada o
+escrita aquí, que es lo primero que hay que mirar cuando un aparato mide mal.
+
+#### Agrupaciones
+
+Un Synology contesta **quince** perfiles: sistema, discos, SMART, volúmenes y RAID, E/S de
+discos y de volúmenes, caché SSD, puertos, unidades de expansión, iSCSI, NFS, GPU, alta
+disponibilidad, SAI y usuarios por servicio. Cada uno es correctamente un perfil aparte, porque
+son asuntos aparte. Asignarlos de uno en uno a cada NAS del rack son quince chips en un campo
+diciendo lo que dice la palabra «Synology», y quince cosas que recordar cuando la familia
+crezca un decimosexto.
+
+Un **grupo** es una entrada del mismo catálogo cuyo `includes` nombra otras entradas:
+
+```json
+{
+  "id": "grp_synology",
+  "label": {"es_ES": "NAS Synology (todo)"},
+  "includes": ["synology_system", "synology_disks", "…"],
+  "match": {"sysobjectid_prefix": "1.3.6.1.4.1.6574", "supersedes": ["synology_system", "…"]}
+}
+```
+
+No es un tipo nuevo de cosa, y ahí está todo el diseño: asignar, detectar, graficar, respaldar
+y el muestreador siguen hablando de **ids**, y una sola función (`profiles.expand`) sabe que un
+grupo no es un perfil. Por eso un grupo se puede renombrar, ganar un perfil o desaparecer sin
+que nada más se entere. La expansión deduplica, así que dos grupos que compartan un perfil no
+lo muestrean dos veces, y es a prueba de ciclos y con tope de profundidad — un par de grupos
+que se nombran mutuamente es algo razonable de escribir por error, una vez, en un formulario.
+
+Un grupo puede además **reclamar aparatos** como cualquier perfil. Si lo hace, desplaza lo que
+contiene (`supersedes`), o la detección propondría el grupo *y* sus quince miembros, que es
+peor que cualquiera de las dos cosas por separado. Y aunque no reclame nada, la detección
+**colapsa**: si un grupo cubre exactamente lo encontrado, se propone el grupo. Sólo cuando lo
+cubre **entero** — una cobertura parcial asignaría perfiles que el aparato no contestó, que es
+justo el fallo que la detección existe para evitar.
+
+Se envían nueve. Cinco son de fabricante o de familia —`grp_synology`, `grp_mikrotik`,
+`grp_linksys`, `grp_linux` y `grp_network`— y cuatro son de Windows, y éstos enseñan lo que un
+grupo puede hacer que un perfil no: **un grupo contiene otro grupo**.
+
+`grp_windows` es la base —lo que contesta cualquier Windows: MIB-II, HOST-RESOURCES y la MIB de
+LAN Manager— y los papeles la contienen entera y añaden lo suyo: `grp_windows_workstation` le
+suma el redirector, `grp_windows_server` el servicio de servidor, y `grp_windows_dc` contiene al
+de servidor y nada más, porque un controlador de dominio **es** un servidor y lo único distinto
+es el número con el que se presenta.
+
+Y ahí está la gracia: Windows dice qué papel tiene **en su propio `sysObjectID`**. Microsoft
+numera `workstation`, `server` y `dc` como 1, 2 y 3 bajo `{ windowsNT }`, así que cada grupo
+reclama su número, el más específico gana por prefijo más largo, y la base recoge lo que no sea
+ninguno de los tres.
+
+Todos reclaman su rama y **desplazan lo que contienen**, así que un aparato reconocido se
+propone como **una sola fila**. Comprobado sobre el catálogo real, nueve casos:
+
+| Aparato | Se propone |
+|---|---|
+| Windows estación de trabajo | `grp_windows_workstation` |
+| Windows servidor | `grp_windows_server` |
+| Windows controlador de dominio | `grp_windows_dc` |
+| Synology | `grp_synology` |
+| MikroTik | `grp_mikrotik` |
+| Linksys | `grp_linksys` |
+| Linux con net-snmp | `grp_linux` |
+| SAI de APC | `grp_network` + `apc_ups` |
+| Un switch de cualquier otro | `grp_network` |
+
+#### Lo que se escribe en el panel
+
+Al catálogo llegan **tres** fuentes, y cada una está donde está por una razón:
+
+| Fuente | Dónde | Para qué |
+|---|---|---|
+| enviada | ficheros del módulo | se revisan en commits, viajan con la versión, una actualización del paquete las repone |
+| propia | ficheros en `<var_dir>/snmp_profiles/` | las de esta instalación, editadas en la máquina; sobreviven a una actualización |
+| escrita | **la base de datos** | todo lo que se escribe en el panel: grupos y perfiles |
+
+La tercera es la BD y no una cuarta carpeta por una razón que no es de orden: un despliegue con
+contenedor web y contenedor worker **comparte la base de datos, no el disco**. Un perfil escrito
+en el panel que el muestreador no pudiera leer sería un aparato al que se le asignó algo que no
+mide nada, sin error en ninguna parte. Va en el respaldo de la BD por lo mismo (tabla
+`mod_snmp_catalog`).
+
+**Una tabla para dos cosas que son una.** Un grupo es una entrada cuyos miembros son ids de
+otras entradas; un perfil es una entrada cuyos miembros son OIDs. Todo lo de abajo ya los trata
+igual —`profiles.normalise` valida cualquiera de los dos, el catálogo es un mapa, la pantalla
+es una lista, el muestreador resuelve ids—, así que guardarlos aparte sería el único sitio del
+producto que insistiera en que son distintos. Lo que guarda una fila es el **documento**, la
+misma forma que tienen los ficheros enviados.
+
+El formulario del perfil es ese documento campo a campo, y lo valida **la misma función que lee
+los ficheros enviados**: una segunda validación en el formulario serían dos declaraciones de
+las mismas reglas, y discreparían en cuanto una ganara un campo. Lo que sí añade es el motivo:
+una métrica se rechaza **por su nombre y diciendo qué le pasa**, porque `normalise` descarta lo
+que no puede usar y se queda con el resto —que está bien leyendo un fichero que alguien editó a
+las 3 de la mañana, y mal contestando a una persona que está mirando la fila que acaba de
+escribir—. El motivo se pregunta sólo **después** de que la validación haya dicho que no, así
+que no puede discrepar de ella.
+
+Los tres campos de OID del formulario **abren los MIB compilados** en vez de pedir que
+alguien recuerde `1.3.6.1.4.1.6574.2.1.1.6`: cada dígito cuenta y ninguno lo comprueba nada
+hasta que un aparato contesta —o no—. Y lo que aporta elegir por encima de pegar no es
+comodidad, es el **SYNTAX**: `Counter64` rellena «contador, 64 bits», `Gauge32` rellena medida,
+`DisplayString` rellena texto-y-no-se-dibuja, y un enumerado rellena la presentación de valor
+que usan los perfiles enviados para un estado. Es lo único de una métrica que nadie acierta
+mirando el OID, y lo que convierte una vuelta de contador en un aparato reiniciado. Un
+**escalar se pide por su instancia** (`sysDescr` se convierte en `1.3.6.1.2.1.1.1.0`), que es
+la forma más común de que un perfil escrito a mano esté vacío en silencio; una columna de tabla
+se convierte en un `walk`; y la columna que nombra las filas se busca **entre las columnas de
+esa tabla**, no entre nueve mil símbolos.
+
+Cualquier perfil se puede **duplicar**, y es como se escribe uno de verdad: una matriz de OIDs
+desde un formulario en blanco es una tarde, y esa misma matriz con tres OIDs cambiados son
+cinco minutos. Lo que no se copia es cómo se reconoce el original —dos perfiles reclamando un
+aparato es una detección proponiendo lo mismo dos veces.
+
+**El id no se edita**, ni el de un grupo ni el de un perfil. Es el valor que guarda cada
+aparato, así que renombrarlo no renombraría nada: dejaría a cada aparato que lo referenciaba
+apuntando a nada. El nombre —lo que se lee— se cambia siempre que se quiera. Y la **clase**
+detrás de un id tampoco cambia: un aparato al que se le asignó `mis_linux` cuando era un grupo
+seguiría muestreando lo que midiera un perfil que se llamara así después.
+
+Borrar tampoco reescribe la configuración de nadie: los aparatos conservan el id, que deja de
+resolver, exactamente igual que un perfil enviado que desaparece.
+
+#### El muestreo
+
+Un check pregunta un OID y compara la respuesta con algo; el muestreo pregunta **un perfil
+entero** y guarda los números. Son independientes: un check dice si algo *es cierto* del
+aparato, el muestreo dice lo que *está haciendo*, y una máquina puede merecer lo uno sin lo
+otro — un servidor con perfiles y **cero checks** ya es trabajo del ciclo.
+
+Por cada aparato con perfiles y por ciclo:
+
+- las métricas de valor suelto (`oid`) salen en **un resultado** por aparato, con clave
+  `<servidor>/metrics`;
+- las de tabla (`walk`) salen en **un resultado por fila**, con clave `<servidor>/<nombre>` —
+  donde el nombre es el que da el propio aparato en la columna `index_label`, no el índice SNMP.
+  Las métricas de una misma fila viajan juntas: entrada, salida y errores de una interfaz son
+  un resultado, no tres gráficas de un tercio de puerto cada una.
+
+**La muestra anterior sobrevive al proceso.** Un contador sólo significa algo como diferencia,
+y el monitor construye un `Watchful` nuevo cada ciclo (en modo systemd one-shot, un **proceso**
+nuevo). La lectura previa se guarda donde vive `fail_streak` —el `check_state` de la BD— por esa
+razón exacta: en el objeto, cada ciclo parecería el primero y ningún contador se graficaría
+jamás.
+
+**Respuestas parciales son normales.** Un perfil asignado a un aparato que sirve la mitad cuesta
+esas métricas y nada más; un switch sin agente UCD sigue teniendo interfaces que graficar. Y un
+aparato que no contesta **nada** se informa una vez por aparato (no una por métrica: cuarenta
+avisos de un cable desenchufado es como se aprende a ignorar los avisos), con dos ciclos de
+gracia, porque un datagrama UDP perdido no es una caída.
+
+Los campos que salen de un perfil se nombran solos en las gráficas: el módulo los declara en
+caliente con `discover_history_fields()` — ver
+[explica-descubrimiento.md](explica-descubrimiento.md#6c-campos-de-historial-en-caliente-discover_history_fields).
+
 ### Gestión de MIBs
 
 El módulo expone acciones de UI (vía `/api/v1/modules/watchfuls/snmp/<action>`) para

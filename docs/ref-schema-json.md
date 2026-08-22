@@ -738,8 +738,9 @@ Ver [explica-descubrimiento.md §6b](explica-descubrimiento.md#6b-partes-de-back
 
 ### `__page__`
 
-Declara que el módulo reclama una **sección de primer nivel propia**, al lado de Overview,
-Historial y Syslog: su URL, su entrada en la barra lateral y su panel.
+Declara que el módulo reclama una **sección propia**: su URL, su entrada en la barra lateral
+y su panel. Por defecto, de primer nivel al lado de Overview, Historial y Syslog; con
+`"placement": "system"`, dentro del panel de System al lado de Servicios y Credenciales.
 
 ```json
 "__page__": {"id": "azure", "icon": "bi-cloud-haze2", "order": 45,
@@ -754,7 +755,8 @@ Historial y Syslog: su URL, su entrada en la barra lateral y su panel.
 | `render` | `""` | Función JS que pinta la sección; el módulo la envía en su `web/_ui.html`. **Vacío = la pinta el renderizador genérico del core** a partir de `page_data`, y el módulo no necesita nada de frontend |
 | `refresh` | `""` | Acción de watchful que el botón de refresco en vivo invoca (debe estar en `WATCHFUL_ACTIONS`). Vacío = la página es solo caché |
 | `perm` | `modules_view` | Permiso que protege la ruta **y** la entrada de la barra lateral. Un watchful no posee flags propios, así que debe reutilizar uno existente |
-| `views` | `[]` | Las **vistas** de la sección. Con dos o más, la entrada de la barra lateral pasa a ser un padre con flyout y cada vista es un **sub-path** (`/module/m365/storage`): comparten panel, permiso y descriptor, y entre todas cuestan **una** ruta más. Con menos de dos se ignora — un padre con un solo hijo es un menú que gasta un clic |
+| `placement` | `section` | **Dónde** va la entrada. `section` = de primer nivel, que es lo correcto para algo que se **mira** (el estado de m365). `system` = dentro del acordeón del panel, que es donde vive lo que se **administra** (la biblioteca de MIBs, al lado de Servicios, Módulos y Credenciales). El core la coloca sin saber de quién es; todo lo demás —panel, permiso, cableado, vistas— es idéntico en las dos |
+| `views` | `[]` | Las **vistas** de la sección. Con dos o más, la entrada de la barra lateral pasa a ser un padre con flyout y cada vista es un **sub-path** (`/module/m365/storage`): comparten panel, permiso y descriptor, y entre todas cuestan **una** ruta más. Con menos de dos se ignora — un padre con un solo hijo es un menú que gasta un clic. Independiente de `placement`: las vistas son de la sección, y dónde la dibuja la barra lateral no es propiedad de nada |
 
 **Cada vista** (`views[]`): `slug` (apto para URL, obligatorio), `icon`, `label` (clave en el
 fichero de idioma **del módulo** — el core no tiene cadenas que nombren la vista de un módulo),

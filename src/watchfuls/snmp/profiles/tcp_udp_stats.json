@@ -1,0 +1,127 @@
+{
+    "id": "tcp_udp_stats",
+    "label": {
+        "en_EN": "TCP and UDP (TCP-MIB, UDP-MIB)",
+        "es_ES": "TCP y UDP (TCP-MIB, UDP-MIB)"
+    },
+    "description": {
+        "en_EN": "Established connections, retransmissions, resets and datagrams to closed ports. Retransmissions are the number that says a link is bad long before it is down.",
+        "es_ES": "Conexiones establecidas, retransmisiones, resets y datagramas a puertos cerrados. Las retransmisiones son el número que dice que un enlace va mal mucho antes de que esté caído."
+    },
+    "match": {
+        "probe": "1.3.6.1.2.1.6.10.0"
+    },
+    "metrics": [
+        {
+            "key": "tcp_estab",
+            "label": {"en_EN": "Established connections", "es_ES": "Conexiones establecidas"},
+            "oid": "1.3.6.1.2.1.6.9.0",
+            "kind": "gauge",
+            "unit": "conn"
+        },
+        {
+            "key": "tcp_in_segs",
+            "label": {"en_EN": "Segments received", "es_ES": "Segmentos recibidos"},
+            "oid": "1.3.6.1.2.1.6.10.0",
+            "kind": "counter",
+            "unit": "seg/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_out_segs",
+            "label": {"en_EN": "Segments sent", "es_ES": "Segmentos enviados"},
+            "oid": "1.3.6.1.2.1.6.11.0",
+            "kind": "counter",
+            "unit": "seg/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_retrans",
+            "label": {"en_EN": "Retransmitted segments", "es_ES": "Segmentos retransmitidos"},
+            "oid": "1.3.6.1.2.1.6.12.0",
+            "kind": "counter",
+            "unit": "seg/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_in_errs",
+            "label": {"en_EN": "Segments received with errors", "es_ES": "Segmentos recibidos con error"},
+            "oid": "1.3.6.1.2.1.6.14.0",
+            "kind": "counter",
+            "unit": "seg/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_resets",
+            "label": {"en_EN": "Resets sent", "es_ES": "Resets enviados"},
+            "oid": "1.3.6.1.2.1.6.15.0",
+            "kind": "counter",
+            "unit": "seg/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_estab_resets",
+            "label": {"en_EN": "Established connections reset", "es_ES": "Conexiones establecidas cortadas"},
+            "oid": "1.3.6.1.2.1.6.8.0",
+            "kind": "counter",
+            "unit": "conn/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_active_opens",
+            "label": {"en_EN": "Outgoing connections opened", "es_ES": "Conexiones salientes abiertas"},
+            "oid": "1.3.6.1.2.1.6.5.0",
+            "kind": "counter",
+            "unit": "conn/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_passive_opens",
+            "label": {"en_EN": "Incoming connections accepted", "es_ES": "Conexiones entrantes aceptadas"},
+            "oid": "1.3.6.1.2.1.6.6.0",
+            "kind": "counter",
+            "unit": "conn/s",
+            "width": 32
+        },
+        {
+            "key": "tcp_failed_opens",
+            "label": {"en_EN": "Failed connection attempts", "es_ES": "Intentos de conexión fallidos"},
+            "oid": "1.3.6.1.2.1.6.7.0",
+            "kind": "counter",
+            "unit": "conn/s",
+            "width": 32
+        },
+        {
+            "key": "udp_in",
+            "label": {"en_EN": "Datagrams received", "es_ES": "Datagramas recibidos"},
+            "oid": "1.3.6.1.2.1.7.1.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "udp_out",
+            "label": {"en_EN": "Datagrams sent", "es_ES": "Datagramas enviados"},
+            "oid": "1.3.6.1.2.1.7.4.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "udp_no_ports",
+            "label": {"en_EN": "To a closed port", "es_ES": "A un puerto cerrado"},
+            "oid": "1.3.6.1.2.1.7.2.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "udp_in_errors",
+            "label": {"en_EN": "Received with errors", "es_ES": "Recibidos con error"},
+            "oid": "1.3.6.1.2.1.7.3.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        }
+    ]
+}

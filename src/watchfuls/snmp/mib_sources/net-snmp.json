@@ -2,6 +2,8 @@
     "order": 1,
     "name": "Net-SNMP",
     "folder": "https://github.com/net-snmp/net-snmp/tree/master/mibs",
+    "subdir": "net-snmp",
+    "skip_names": ["nodemap", "rfclist", "ianalist", "mibfetch", "smistrip"],
     "dep_templates": [
         "https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/@mib@.txt",
         "https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/@mib@.mib",

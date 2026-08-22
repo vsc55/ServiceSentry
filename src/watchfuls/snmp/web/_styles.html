@@ -16,11 +16,31 @@
 /* MIB Browser — scrollable OID tree */
 #mibBrowserTree { overflow-y: auto; max-height: 65vh; }
 
-/* MIB Manager — modal content minimum height */
-#mibManagerModal .modal-content { min-height: 60vh; }
+/* MIB Manager — the height chain is .modal-dialog-scrollable + .ss-vfill/.ss-vscroll in the
+   markup, not CSS pinned to this modal's id: the list has to reach the bottom edge at the
+   default size, at a size the user dragged, and at the 95vh the maximize button sets. */
 
-/* MIB Manager — modal body fills remaining height */
-#mibManagerModal .modal-body { flex: 1 1 auto; overflow-y: auto; }
+/* MIB source viewer — the editor fills the panel it was given; the height is the modal's to
+   set, not the editor's. A viewer of a 200-line MIB and one of a 4000-line MIB are the same
+   box, because the thing that varies is the scroll and not the frame. */
+.mib-src .CodeMirror { height: 100%; font-size: .72rem; }
+
+/* …and the same box when CodeMirror will not load: a viewer that fails to be pretty must not
+   fail to be a viewer. */
+.mib-src-plain {
+    font-size: .70rem;
+    max-height: 45vh;
+    overflow: auto;
+    background: var(--bs-body-secondary-bg, var(--bs-secondary-bg));
+}
+
+/* The diff of one row of a comparison report. A height, because `.mib-src .CodeMirror`
+   fills what it is given and a box with no height is an editor of no lines. */
+.mib-arch-diff { height: 14rem; }
+
+/* The line a compiler named. Painted on the line background rather than the gutter: the
+   gutter number is what you searched for, the line is what you came to read. */
+.mib-src-badline { background: rgba(var(--bs-danger-rgb), .18); }
 
 /* MIB Manager — file upload label */
 #mibUploadLabel { cursor: pointer; }
@@ -28,8 +48,10 @@
 /* MIB Manager — hidden native file input (button is the label) */
 #mibFileInput { display: none; }
 
-/* MIB Manager — stop compile button (shown only during compilation) */
-#mibStopBtn { display: none; }
+/* MIB Manager — stop button (shown only while a cancellable job is running).  A class and
+   not an id: there are two of them now — the section's, for a compile, and the import
+   dialog's, for a download — and they are the same button in two places. */
+.mib-stop { display: none; }
 
 /* MIB Manager — pysmi availability status badge */
 #mibPysmiStatus { font-size: .72rem; }
@@ -47,16 +69,35 @@
 /* MIB Manager — URL import input (fills remaining flex space) */
 #mibImportUrlInput { min-width: 0; flex: 1; }
 
-/* MIB Manager — compilation progress section (shown during compile jobs) */
-#mibProgressSection { display: none; }
+/* MIB Manager — a job's progress, in the ONE place it is ever drawn: a strip directly under
+   the section's head, in all three views. It used to be painted wherever each view had room
+   — under the library's toolbar, below the compile buttons, beneath the import cards — so
+   walking between them while a compile ran moved the bar around the screen, and a thing that
+   moves when you navigate reads as three things rather than one.
 
-/* MIB Manager — progress label and percentage text */
-#mibProgressLabel,
-#mibProgressPct { font-size: .78rem; }
+   Shaped like the head above it, because that is what it is: a second row of the frame that
+   is there while something is running and gone when it is not. Hidden until a job starts
+   (the JS sets an explicit `display:block`, never ''). */
+.mib-progress {
+    display: none;
+    padding: .4rem 1rem .5rem;
+    background: var(--bs-tertiary-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+}
 
-/* MIB Manager — progress bar track dimensions */
-#mibProgressSection .progress { height: 5px; border-radius: 3px; }
+/* …its label and percentage */
+.mib-progress-text { font-size: .78rem; }
 
-/* MIB Manager — progress bar initial width (JS updates style.width at runtime) */
-#mibProgressBar { width: 0%; }
+/* …its track */
+.mib-progress .progress { height: 5px; border-radius: 3px; }
+
+/* …and its bar, empty until the first tick (JS updates style.width at runtime) */
+.mib-progress .progress-bar { width: 0%; }
+
+/* The search box over the list: wide enough for a vendor name, and it does not grow with the
+   bar — what grows is the row of toggles beside it. */
+.mib-search { width: 15rem; }
+
+/* The source picker of an import card: a fixed width so the field beside it is what grows. */
+.mib-src-pick { width: 150px; flex-shrink: 0; }
 </style>

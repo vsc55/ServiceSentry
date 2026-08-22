@@ -177,6 +177,20 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         return _int(glob, schema_default)
 
     @property
+    def is_probe(self) -> bool:
+        """True when this run is a test and nothing it produces will be kept.
+
+        For work that exists ONLY to feed the history. Metric sampling reads every value
+        of every profile a device has, and its answer is a graph: in a probe that is
+        hundreds of round trips thrown away — against the device somebody is waiting on,
+        with the panel showing "testing…" until the last one comes back. A check is the
+        opposite: proving that it answers IS the test.
+        """
+        # `is True` and not truthiness: a test double answers yes to everything it is asked,
+        # and a run that quietly believes it is a rehearsal is one that skips real work.
+        return getattr(self._monitor, 'is_probe', False) is True if self.is_monitor_exist else False
+
+    @property
     def is_monitor_exist(self) -> bool:
         """ Check if the Monitor object exists and is valid. """
         return bool(self._monitor and isinstance(self._monitor, lib.Monitor))

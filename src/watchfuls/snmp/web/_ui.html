@@ -12,13 +12,48 @@ let _mibData = null;    // last loaded data — kept for live filtering
 let _mibCompileAbort = false;       // set to true to cancel the polling loop
 let _mibCompileInProgress = false;  // true while a compile job is running (a Refresh
                                     // mid-compile must not re-enable the Compile button)
-let _mibCompileInterceptor = null;  // hide.bs.modal handler active during compilation
 let _mibGithubAbort = false;        // set to true to cancel the GitHub import poll loop
 let _mibGithubInProgress = false;   // true while a GitHub import job is running
 let _mibCompileJobId = null;        // active compile job id (for server-side cancel)
 let _mibCompileCancelling = false;  // true after Stop is pressed, until the job ends
-let _mibRawStems = new Set();       // raw MIB stems — to tag compiled deps vs requested
-let _mibSelection = {raw: new Set(), compiled: new Set()};
+let _mibRawModules = new Set();     // modules the raw files declare — to tag compiled deps
+let _mibSelection = new Set();      // selected MODULE names — a row is a module, not a file
+let _mibFilter = 'all';             // active state chip: all | pending | compiled | dep
+let _mibFolder = '';                // active folder ('' = every one of them)
+let _mibOpenGroups = new Set();     // folder groups the user has opened by hand
+let _mibOpenFolders = new Set();    // rail tree nodes the user has twisted open
+// Two of the rail's lines are not states at all: a duplicated module is still compiled, or
+// pending, or failed, and so is one somebody has edited here. They live in the same list and
+// behave the same way — one at a time, like the states — because a column where eight lines
+// are a choice and two are switches is a column that behaves in two ways without saying so.
+// What it costs is asking for both at once ("the pending ones that are also duplicated");
+// what it buys is a rail nobody has to be told how to read.
+let _mibSort = 'name';              // name | size | date
+
+// Below this many rows the grouping is pure overhead: everything is expanded and the list
+// behaves exactly as it did when a MIB tree meant twenty files. The point of the headers is
+// a repository import that brings two thousand, where a flat list is unreadable however fast
+// it draws.
+const _MIB_AUTO_EXPAND = 60;
+// The group a dependency goes in. It has no folder — pysmi pulled it in resolving an IMPORTS
+// and it came from nowhere in the tree — and leaving it in the root group would put files
+// nobody chose among the ones somebody did. A key no folder can have, so it sorts last.
+const _MIB_DEP_GROUP = '\u0000deps';
+const _MIB_STRAY_GROUP = '\u0000stray';
+// The rail's name for the top of the tree. The rows in it carry `group === ''` — and so
+// does "every folder", which is what an empty `_mibFolder` means: sharing the string made
+// picking the root select all of them and light up both lines at once. A key of its own,
+// like the other two pseudo-folders, so the two answers stop being one.
+const _MIB_ROOT_GROUP = '\u0000root';
+// …and the third: a MIB whose file was deleted has no folder either. It was landing in
+// the ROOT one, among the files that really do sit directly under `raw/` — a row with no
+// file in it, filed as if somebody had put it there. Where it USED to live is knowable
+// (its versions carry the path), but that is a question for the moment it comes back, not
+// a folder to list it in while it is gone.
+const _MIB_ORPHAN_GROUP = '\u0000orphan';
+// Why each MIB refused to compile lives WITH the MIBs, not in this page: a compile of two
+// hundred is not something anyone watches to the end, and the failures are what you come back
+// for — after the modal closed, after a reload, tomorrow. list_mibs answers with them.
 let _mibRefreshingCompiled = false; // guard: prevents concurrent list_mibs during polling
 let _mibDetailsData = null;         // {type:'compiled'|'raw', rows:[...]} for sortable viewer
 let _mibDetailsSort = {col: null, asc: true};
@@ -137,10 +172,11 @@ function _mibSz(n) {
          : (n / 1048576).toFixed(1) + ' MB';
 }
 
-// A compiled .py is a *dependency* (auto-pulled by pysmi) when its stem isn't
-// among the raw MIBs the user actually has/requested.
+// A compiled .py is a *dependency* (auto-pulled by pysmi) when no raw file here DECLARES
+// it. Compared against file names instead, every MIB whose file is not named after its module
+// looked like something pysmi had gone and fetched by itself.
 function _mibIsDependency(name) {
-    return _mibRawStems.size > 0 && !_mibRawStems.has(name.replace(/\.py$/, ''));
+    return _mibRawModules.size > 0 && !_mibRawModules.has(name.replace(/\.py$/, ''));
 }
 
 // Break the compiled set into {requested, deps, total} for the post-compile toast.
@@ -151,85 +187,1010 @@ function _mibCompiledBreakdown() {
     return { total: compiled.length, deps, requested: compiled.length - deps };
 }
 
-function _mibFileRow(f, kind) {
-    const icon    = kind === 'raw' ? 'bi-file-earmark-text text-primary' : 'bi-file-earmark-code text-success';
-    const checked = _mibSelection[kind].has(f.name) ? ' checked' : '';
-    const depBadge = (kind === 'compiled' && _mibIsDependency(f.name))
-        ? `<span class="badge bg-secondary flex-shrink-0" style="font-size:.6rem"
-                 title="${escAttr(_ms('mib_dep_tooltip', 'Dependency pulled in automatically'))}">${esc(_ms('mib_dep_badge', 'dep'))}</span>`
+// ── The list model ────────────────────────────────────────────────
+// The API answers two lists of FILES — `raw` (.mib/.txt, with the folder it was imported
+// into) and `compiled` (.py).  They are the same MIB seen twice: SYNOLOGY-DISK-MIB.txt on
+// one side and SYNOLOGY-DISK-MIB.py on the other, and answering "is this compiled?" meant
+// reading both and comparing by eye.  So the list is keyed by what pysmi itself is keyed by
+// — the MODULE name — and the file pair becomes a state on one row.
+//
+// Two raw files can share a module name (two vendors each shipping SNMPv2-SMI): that is ONE
+// module to compile, which is why `raws` is a list and not a path.
+function _mibRows() {
+    if (!_mibData) return [];
+    const _stem = n => n.replace(/\.[^./]+$/, '');
+    const rows  = new Map();
+    for (const f of (_mibData.raw || [])) {
+        const parts = String(f.name).split('/');
+        const file  = parts.pop();
+        // Keyed by the MODULE the file declares, not by the file's name. They are routinely
+        // different — `trunk.mib` is IEEE8023-LAG-MIB, `rfc2011.mib` is IP-MIB — and pysmi
+        // knows only the module: it writes `<MODULE>.py` and resolves every IMPORTS by it.
+        // Keyed by the file name, such a MIB compiles perfectly and shows as pending for
+        // ever, because the row is looking for a `.py` that will never be written.
+        const mib = f.module || _stem(file);
+        let r = rows.get(mib);
+        if (!r) { r = {mib, dir: parts.join('/'), raws: [], files: [], py: null, size: 0};
+                  rows.set(mib, r); }
+        r.raws.push(f.name);
+        r.files.push(file);
+        r.rawMtime = Math.max(r.rawMtime || 0, f.mtime || 0);
+        if (f.size > r.size) r.size = f.size;
+    }
+    for (const f of (_mibData.compiled || [])) {
+        // A .py IS its module name — that is how pysmi writes them — so this side needs no
+        // translation and never did. The raw side was the one speaking a different language.
+        const mib = _stem(f.name);
+        let r = rows.get(mib);
+        if (!r) { r = {mib, dir: '', raws: [], files: [], py: null, size: 0}; rows.set(mib, r); }
+        r.py = f.name;
+        r.pyMtime = f.mtime || 0;
+        r.pySource = f.source || '';   // the raw file it was built from, per pysmi
+        if (!r.raws.length) r.size = f.size;   // a dependency has no source to size
+    }
+    // History with no file behind it. It is kept on purpose — deleting a MIB to re-import it
+    // clean is the ordinary way out of a mess — but kept and never drawn is a thing that
+    // exists and cannot be reached: no row, no way back, no way to clear it out.
+    for (const [mib, version] of Object.entries(_mibData.orphans || {})) {
+        if (!rows.has(mib)) {
+            rows.set(mib, {mib, dir: '', raws: [], files: [], py: null, size: 0,
+                           rawMtime: 0, pyMtime: 0, orphanVersion: version});
+        }
+    }
+
+    const out = [];
+    const errs   = (_mibData.errors || {});
+    const edited = (_mibData.edited || {});
+    for (const r of rows.values()) {
+        r.key = (r.dir ? r.dir + '/' : '') + r.mib;
+        // The file it came from, when that is not what the module is called. Shown, because
+        // a row that says IEEE8023-LAG-MIB while the folder holds `trunk.mib` is a row nobody
+        // can match to a file — and matching them is most of what this screen is for.
+        r.file = (r.files.length === 1 && _stem(r.files[0]) !== r.mib) ? r.files[0] : '';
+        // A recorded failure is its OWN state, not a flavour of pending: "pending" is also
+        // what a MIB nobody has compiled yet says, and the two need opposite things done to
+        // them — one a click, the other a file that is not broken.  Given a chip of its own,
+        // "what failed" is one click away after a run of two hundred.
+        const e = errs[r.mib];
+        r.error = (e && e.error) || '';
+        r.errorAt = (e && e.at) || 0;
+        // The version the file is AT. Absent means nobody has edited it, so it is still the
+        // vendor's own — which is why an untouched MIB wears no badge rather than a "v1":
+        // a number on every row would make the one that matters invisible.
+        r.version = edited[r.mib] || 0;
+        // Several files carrying this module name — pysmi reads ONE of them and says nothing
+        // about the rest, so which one, and whether they even differ, is the row's business.
+        r.dupe = (_mibData.dupes || {})[r.mib] || null;
+        // Stale is a STATE, not a footnote on 'compiled'. As a flag it sat inside the
+        // compiled count, so the chips said "Pending 0, Compiled 97" while the compile button
+        // set off to do three files — the row and the button disagreeing about the same
+        // question. The chips partition the list now, and pending + stale + failed is exactly
+        // what "compile pending" walks.
+        // MACRO DEFINITIONS and nothing else — RFC-1212 and RFC-1215. No .py is produced
+        // for them and none is missing: pysnmp has them built in, and there is nothing in
+        // them to compile. Left as "pending" the row is a number that never goes down.
+        r.state = (_mibData.macro_only || []).includes(r.mib) && r.raws.length ? 'builtin'
+                : r.orphanVersion ? 'orphan'
+                // A .py with no source. WHICH kind is the difference between junk and the
+                // only copy of something: pysmi wrote into it where it read from, and a path
+                // under `raw/` that is not there any more is a compilation that outlived the
+                // file it was made from — deleting a folder is exactly how that happens, and
+                // nothing in `compiled/` says which folder anything came from. No path at all
+                // means pysmi resolved it elsewhere (its own bundled MIBs, or over HTTP):
+                // that one is a dependency, it cannot be rebuilt, and the modules importing
+                // it stop loading the day it goes.
+                : !r.raws.length ? (r.pySource ? 'stray' : 'dep')
+                : !r.py          ? (r.error ? 'failed' : 'pending')
+                : r.rawMtime > r.pyMtime ? 'stale'
+                :                  'compiled';
+        // A compiled module whose SOURCE is gone. Nothing about it is newer than anything —
+        // the file it was made from was deleted, so no timestamp can say so — and left alone
+        // the row reads "compiled" while what is compiled came from a file nobody can open
+        // any more. Deleting one copy of a duplicated module is exactly how this happens.
+        if (r.state === 'compiled' && r.pySource && r.raws.length
+                && !r.raws.some(p => p.toLowerCase() === r.pySource.toLowerCase())) {
+            r.state = 'stale';
+            r.staleGone = true;
+        }
+        // AFTER the state, which is what decides it: a dependency has no folder of its own.
+        r.group = r.state === 'dep'    ? _MIB_DEP_GROUP
+                : r.state === 'stray'  ? _MIB_STRAY_GROUP
+                : r.state === 'orphan' ? _MIB_ORPHAN_GROUP
+                :                        (r.dir || '');
+        out.push(r);
+    }
+    // Dependencies last: pysmi pulled them in, nobody asked for them.
+    const _last = r => r.state === 'dep' ? 2 : r.state === 'stray' ? 1 : 0;
+    out.sort((a, b) => _last(a) - _last(b)
+                    || a.key.toLowerCase().localeCompare(b.key.toLowerCase()));
+    return out;
+}
+
+function _mibCounts(rows) {
+    const c = {all: rows.length, pending: 0, stale: 0, compiled: 0, failed: 0, dep: 0,
+               orphan: 0, builtin: 0, stray: 0, dupe: 0, dupediff: 0, edited: 0};
+    for (const r of rows) {
+        c[r.state]++;
+        // Cross-cutting, not a state: a duplicated module is still compiled, or pending, or
+        // failed. It is counted apart because "which of these is the one being used" is a
+        // question about the file and not about the compilation.
+        if (r.dupe) { c.dupe++; if (!r.dupe.same) c.dupediff++; }
+        // Not the vendor's file any more. Cross-cutting for the same reason, and the first
+        // thing worth knowing about a MIB that misbehaves after somebody "fixed" it.
+        if (r.version > 1) c.edited++;
+    }
+    return c;
+}
+
+// Everything the state and the search left, wherever it lives. This is what the folder
+// tree counts: picking a folder must not change the tree that offers the folders, or the
+// branch you are standing on is the only one with a number on it.
+function _mibTreeRows() {
+    const terms = (document.getElementById('mibSearch')?.value || '')
+        .toLowerCase().split(/\s+/).filter(Boolean);
+    const rows = _mibRows().filter(r => _mibFilter === 'all'    ? true
+                                      : _mibFilter === 'dupe'   ? !!r.dupe
+                                      : _mibFilter === 'edited' ? r.version > 1
+                                      : r.state === _mibFilter);
+    return terms.length ? rows.filter(r => _mibMatches(r, terms)) : rows;
+}
+
+// What a row is FOUND by. It used to be the module name and its folder, which is a row's
+// title and not what it is made of: typing `rfc` found nothing in a library holding eight
+// files called `rfc*.mib`, because every one of them declares a module named after what it
+// describes — `rfc2011.mib` is IP-MIB and `rfc2737.mib` is ENTITY-MIB. The file names are in
+// now, and every term has to match SOMETHING: two words narrow instead of widening, which is
+// what typing a second one is for.
+function _mibMatches(r, terms) {
+    const hay = (r.key + ' ' + r.raws.join(' ') + ' ' + (r.py || '')).toLowerCase();
+    return terms.every(t => hay.includes(t));
+}
+
+// The rows the user can actually see: state, facets, search, and then the folder they are
+// in — sorted last, because sorting is about the list and not about what belongs in it.
+function _mibVisibleRows() {
+    return _mibSortRows(_mibTreeRows().filter(_mibInFolder));
+}
+
+// By name is the order the library HAS. The other two are questions about a list somebody is
+// already looking at — "what is the big one" and "what changed last" — so they answer
+// largest and newest first: the row being looked for is at the top either way.
+function _mibSortRows(rows) {
+    if (_mibSort === 'size') return rows.slice().sort((a, b) => (b.size || 0) - (a.size || 0));
+    if (_mibSort === 'date') return rows.slice().sort(
+        (a, b) => Math.max(b.rawMtime || 0, b.pyMtime || 0)
+                - Math.max(a.rawMtime || 0, a.pyMtime || 0));
+    return rows;
+}
+
+function _mibSetSort(how) {
+    _mibSort = how || 'name';
+    _mibFilterLists();
+}
+
+// Every file a row stands for — what a delete actually removes. A row is a MODULE and
+// stands for two different things: the source somebody wrote and the .py pysmi produced from
+// it. *scope* picks one of them; without it, both.
+function _mibArtifacts(rows, scope) {
+    const out = [];
+    for (const r of rows) {
+        if (scope !== 'compiled') for (const p of r.raws) out.push({name: p, kind: 'raw'});
+        if (scope !== 'raw' && r.py) out.push({name: r.py, kind: 'compiled'});
+    }
+    return out;
+}
+
+function _mibStateBadge(r) {
+    const state = r.state;
+    // A parser message is a sentence with an offset in it — too long for a row and too
+    // important to truncate, so the badge opens it.
+    if (r.error) return `<button type="button"
+            class="badge bg-danger flex-shrink-0 border-0"
+            style="font-size:.6rem;cursor:pointer"
+            onclick="_mibShowError(${jsStr(r.mib)})"
+            title="${escAttr(r.error)}">${esc(_ms('mib_state_failed', 'error'))}</button>`;
+    if (state === 'builtin') return `<span class="badge bg-secondary flex-shrink-0"
+             style="font-size:.6rem"
+             title="${escAttr(_ms('mib_builtin_tooltip', 'Macro definitions only — pysnmp has this one built in, and there is nothing in it to compile'))}">${esc(_ms('mib_builtin', 'built in'))}</span>`;
+    if (state === 'orphan') return `<span class="badge bg-info text-dark flex-shrink-0"
+             style="font-size:.6rem"
+             title="${escAttr(_ms('mib_orphan_tooltip', 'The file is gone, but versions of it were kept: it can be brought back from them'))}">${esc(_ms('mib_orphan', 'recoverable'))}</span>`;
+    if (state === 'stale') return `<span class="badge bg-warning text-dark flex-shrink-0"
+             style="font-size:.6rem"
+             title="${escAttr(r.staleGone
+                 ? _ms('mib_stale_gone_tooltip', 'Compiled from a file that is no longer here — compile it again to use the one that is')
+                 : _ms('mib_stale_tooltip', 'The source is newer than the compiled module — compile it again'))}">${esc(_ms('mib_stale', 'outdated'))}</span>`;
+    if (state === 'stray') return `<span class="badge bg-danger flex-shrink-0"
+             style="font-size:.6rem"
+             title="${escAttr(_ms('mib_stray_tooltip', 'Compiled from a file that is no longer in the library — it cannot be compiled again')
+                        + (r.pySource ? `: ${r.pySource}` : ''))}">${esc(_ms('mib_stray', 'no source'))}</span>`;
+    if (state === 'compiled') return `<span class="badge bg-success flex-shrink-0" style="font-size:.6rem">${esc(_ms('mib_state_compiled', 'compiled'))}</span>`;
+    if (state === 'pending')  return `<span class="badge bg-warning text-dark flex-shrink-0" style="font-size:.6rem">${esc(_ms('mib_state_pending', 'pending'))}</span>`;
+    return `<span class="badge bg-secondary flex-shrink-0" style="font-size:.6rem"
+                  title="${escAttr(_ms('mib_dep_tooltip', 'Dependency pulled in automatically'))}">${esc(_ms('mib_dep_badge', 'dep'))}</span>`;
+}
+
+// ── Several files, one module name ────────────────────────────────
+//
+// pysmi resolves an imported module BY NAME: of several files called SNMPv2-TC it reads
+// exactly one and never mentions the others. Vendor archives ship their own copy of the
+// standard MIBs, so this happens by itself — and a stripped copy winning over the real one
+// breaks the MIBs that import it, three modules away from where anybody would look. What
+// decides it today is the order of a directory walk, which is to say the alphabet.
+let _mibDupMib = '';
+
+// Opened, then asked. Which modules collide comes with the listing — it is a grouping of
+// what the listing already knows — but what is IN each copy is read from disk, and reading
+// 529 files to fill panels nobody had opened was four minutes on every load of the section.
+// So the answer is fetched here, once per group, and kept on the group.
+async function _mibDupesShow(mib) {
+    const d = (_mibData && _mibData.dupes && _mibData.dupes[mib]) || null;
+    if (!d) return;
+    _mibDupMib = mib;
+    const titleEl = document.getElementById('mibDetailsTitle');
+    const bodyEl  = document.getElementById('mibDetailsBody');
+    if (titleEl) titleEl.textContent = mib;
+    // Shown before the answer arrives: hashing a handful of files is quick, and a dialog
+    // that opens when it is ready is a button that did nothing.
+    if (bodyEl && !d._detailed) {
+        bodyEl.innerHTML = `<div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm"></div></div>`;
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibDetailsModal')).show();
+    if (!d._detailed) {
+        const modName = _mibManagerModuleName;
+        const res = await apiPost(_mibApiUrl(modName, 'mib_dupe_details'),
+                                  { ...(modulesData[modName] || {}), mib,
+                                    names: d.files.map(f => f.name) });
+        const det = res && res.data;
+        if (!det || !det.ok) {
+            if (bodyEl) bodyEl.innerHTML = `<div class="text-danger text-center py-3 small">
+                ${esc((det && det.message) || t('error') || 'Error')}</div>`;
+            return;
+        }
+        d.same = det.same;
+        d.kinship = det.kinship;
+        d.files.forEach(f => { f.sha = (det.sha || {})[f.name] || ''; });
+        d._detailed = true;
+    }
+    if (bodyEl) bodyEl.innerHTML = _mibDupesHtml(mib, d);
+    _mibSrcEditor = null;
+    // Different content is the case that needs looking at, so it opens looking at it: the
+    // copy in use against the first one that is not the same as it. Unless they are not
+    // versions of each other at all, where a diff is a full rewrite and says nothing.
+    if (!d.same && d.kinship !== 0) {
+        const a = d.used || d.files[0].name;
+        const other = d.files.find(f => f.name !== a
+                                   && f.sha !== (d.files.find(x => x.name === a) || {}).sha);
+        if (other) _mibDupDiff(a, other.name);
+    }
+}
+
+function _mibDupesHtml(mib, d) {
+    const same = d.same;
+    const badge = same
+        ? `<span class="badge bg-success">${esc(_ms('mib_dupe_same', 'Same content'))}</span>`
+        : `<span class="badge bg-warning text-dark">${esc(_ms('mib_dupe_diff', 'Different content'))}</span>`;
+    const opts = d.files.map(f =>
+        `<option value="${escAttr(f.name)}">${esc(f.name)}</option>`).join('');
+    // Do these files even declare the same things? Copies of one module share their
+    // descriptors whatever changed between vintages; two MIBs that merely share a first line
+    // share none, and telling somebody to pick which one stays would cost them everything the
+    // other one declares. A vendor archive produces this by copy-pasting a header.
+    const _strangers = d.kinship === 0;
+    const _partial = d.kinship > 0 && d.kinship < 90;
+    // The date the MIBs declare for themselves, when any of them does. It is the thing that
+    // actually decides which copy stays — the diff shows it too, twenty lines in, and having
+    // to read a diff to find out which of two files is the older one is the long way round.
+    // Absent from a quarter of them (SNMPv2-TC carries textual conventions and no
+    // MODULE-IDENTITY at all), so the column only exists when there is something in it.
+    const _dates = d.files.map(f => f.updated || '');
+    const _hasDates = _dates.some(Boolean);
+    const _newest = _hasDates && new Set(_dates.filter(Boolean)).size > 1
+        ? _dates.slice().sort().pop() : '';
+    return `<div class="d-flex align-items-center gap-2 mb-2 p-2 rounded flex-shrink-0"
+                 style="background:var(--bs-secondary-bg);font-size:.82rem">
+        <i class="bi ${_strangers ? 'bi-exclamation-octagon text-danger' : 'bi-files text-warning'} flex-shrink-0"></i>
+        <span>${esc(_ms('mib_dupe_head', '{n} files carry the module {name} — only one is compiled')
+                    .replace('{n}', d.files.length).replace('{name}', mib))}</span>
+        <span class="ms-auto">${badge}</span>
+    </div>
+    <div class="table-responsive flex-shrink-0 mb-2">
+    <table class="table table-sm table-hover align-middle mb-0" style="font-size:.78rem">
+        <tbody>${d.files.map(f => _mibDupRow(f, d, _hasDates, _newest)).join('')}</tbody>
+    </table>
+    </div>
+    ${_strangers ? `<div class="alert alert-warning py-2 px-2 mb-2 flex-shrink-0"
+         style="font-size:.8rem">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <span class="fw-semibold">${esc(_ms('mib_dupe_strangers', 'These are not copies of one MIB.'))}</span>
+        ${esc(_ms('mib_dupe_strangers_hint',
+            'They declare nothing in common — they are different MIBs whose first line says the '
+            + 'same module name, which is what a vendor archive does by copy-pasting a header. '
+            + 'Deleting one would lose everything it declares: correct the module name on line 1 '
+            + 'of the ones that are wrong instead.'))}
+    </div>` : ''}
+    ${_partial ? `<div class="small text-muted flex-shrink-0 mb-2">
+        <i class="bi bi-info-circle me-1"></i>${esc(_ms('mib_dupe_partial',
+            'They share {n}% of what they declare — far apart for two versions of one MIB.')
+            .replace('{n}', d.kinship))}
+    </div>` : ''}
+    ${same ? `<div class="small text-muted flex-shrink-0">
+        <i class="bi bi-info-circle me-1"></i>${esc(_ms('mib_dupe_same_hint',
+            'The copies are identical, so which one is used makes no difference — deleting the spares only tidies the listing.'))}
+    </div>` : `
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0">
+        <select class="form-select form-select-sm" style="width:auto" id="mibDupA">${opts}</select>
+        <i class="bi bi-arrow-right text-muted"></i>
+        <select class="form-select form-select-sm" style="width:auto" id="mibDupB">${opts}</select>
+        <button class="btn btn-sm btn-secondary" onclick="_mibDupDiffPicked()">
+            <i class="bi bi-file-diff me-1"></i>${esc(_ms('mib_dupe_compare', 'Compare'))}</button>
+        <span id="mibDupDiffNote" class="small text-muted"></span>
+    </div>
+    <div class="mib-src ss-vfill" id="mibDupDiffBox"></div>`}`;
+}
+
+function _mibDupRow(f, d, hasDates, newest) {
+    const inUse = f.name === d.used;
+    // A file with no date among files that have one is not a blank cell: it is a MIB that
+    // does not say, and saying so is what stops it being read as "older".
+    const _date = hasDates ? `<td class="text-nowrap ${f.updated ? '' : 'text-muted'}"
+            style="font-size:.72rem"
+            title="${escAttr(f.updated
+                ? _ms('mib_dupe_updated_tooltip', 'The date the MIB declares for itself (LAST-UPDATED)')
+                : _ms('mib_dupe_no_updated', 'This MIB declares no LAST-UPDATED'))}">${esc(f.updated || '—')}${
+        f.updated && f.updated === newest
+            ? ` <span class="badge bg-success" style="font-size:.6rem">${esc(_ms('mib_dupe_newest', 'newest'))}</span>`
+            : ''}</td>` : '';
+    return `<tr>
+        <td class="text-nowrap">${inUse
+            ? `<span class="badge bg-primary" title="${escAttr(_ms('mib_dupe_used_tooltip',
+                  'The one pysmi reads for this module'))}">${esc(_ms('mib_dupe_used', 'in use'))}</span>`
+            : ''}</td>
+        <td class="w-100 text-break">${esc(f.name)}</td>
+        <td class="text-nowrap text-muted">${_mibSz(f.size)}</td>
+        ${_date}
+        <td class="text-nowrap text-muted"><code style="font-size:.72rem">${esc(f.sha)}</code></td>
+        <td class="text-nowrap">
+            <button class="btn btn-sm btn-secondary py-0 px-1"
+                    title="${escAttr(_ms('mib_view_raw', 'View source file'))}"
+                    onclick="_mibShowRawDetails(${jsStr(f.name)})">
+                <i class="bi bi-eye" style="font-size:.75rem"></i></button>
+            <button class="btn btn-sm btn-danger py-0 px-1"
+                    title="${escAttr(t('delete') || 'Delete')}"
+                    onclick="_mibDupDelete(${jsStr(f.name)},${inUse})">
+                <i class="bi bi-trash3" style="font-size:.75rem"></i></button>
+        </td>
+    </tr>`;
+}
+
+function _mibDupDiffPicked() {
+    const a = document.getElementById('mibDupA');
+    const b = document.getElementById('mibDupB');
+    if (a && b) _mibDupDiff(a.value, b.value);
+}
+
+async function _mibDupDiff(a, b) {
+    const selA = document.getElementById('mibDupA');
+    const selB = document.getElementById('mibDupB');
+    if (selA) selA.value = a;
+    if (selB) selB.value = b;
+    const note = document.getElementById('mibDupDiffNote');
+    const box  = document.getElementById('mibDupDiffBox');
+    if (!box) return;
+    if (a === b) {
+        if (note) note.textContent = _ms('mib_dupe_pick_two', 'Pick two different files');
+        return;
+    }
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'diff_mib_files'),
+                              { ...(modulesData[modName] || {}), a, b });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    if (note) {
+        note.textContent = d.identical
+            ? _ms('mib_dupe_identical', 'These two are identical')
+            : (d.truncated ? _ms('mib_version_diff_big', 'shown in part') : '');
+    }
+    _mibSrcEditor = null;
+    await _mibRenderSource(box, d.diff || '', 0, 'mibdiff');
+}
+
+// Deleting one copy — the file, and nothing else. The history belongs to the MODULE and
+// survives whichever copy goes, so it is not offered here the way it is on the row.
+function _mibDupDelete(name, inUse) {
+    const msg = inUse
+        ? _ms('mib_dupe_delete_used_confirm',
+              'Delete {name}? It is the copy being compiled — another one takes its place.')
+        : _ms('mib_dupe_delete_confirm', 'Delete {name}?');
+    showConfirmModal(msg.replace('{name}', name), () => _mibDupDeleteConfirmed(name, inUse));
+}
+
+async function _mibDupDeleteConfirmed(name, inUse) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'delete_mib'),
+                              { ...(modulesData[modName] || {}), name, kind: 'raw' });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    // What was compiled came from the file that just went: saying so here is the difference
+    // between a stale module and a stale module somebody knows about.
+    showToast(inUse
+        ? _ms('mib_dupe_deleted_used', 'Deleted — another copy takes over, compile it again')
+        : _ms('mib_n_deleted', '{n} file(s) deleted').replace('{n}', 1));
+    await _mibLoad();
+    const left = (_mibData && _mibData.dupes && _mibData.dupes[_mibDupMib]) || null;
+    if (left) _mibDupesShow(_mibDupMib);
+    else bootstrap.Modal.getOrCreateInstance(
+        document.getElementById('mibDetailsModal')).hide();
+}
+
+// A history whose file is gone: put the file back, or let the history go. Both need the
+// MODULE name and nothing else — there is no file to resolve anything from, which is exactly
+// what makes these rows the ones that could not be reached before.
+async function _mibOrphanRestore(mib) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'restore_orphan'),
+                              { ...(modulesData[modName] || {}), mib });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    showToast(_ms('mib_orphan_restored', '{name} is back — compile it again')
+              .replace('{name}', d.relpath || mib));
+    await _mibLoad();
+}
+
+function _mibOrphanForget(mib, versions) {
+    showConfirmModal(
+        _ms('mib_orphan_forget_confirm',
+            'Delete the {n} stored version(s) of {name}? The file is already gone, so this '
+            + 'is the last copy.')
+            .replace('{n}', versions).replace('{name}', mib),
+        () => _mibOrphanForgetConfirmed(mib));
+}
+
+async function _mibOrphanForgetConfirmed(mib) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'forget_mib_versions'),
+                              { ...(modulesData[modName] || {}), mib });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    showToast(_ms('mib_version_deleted', 'Version deleted'));
+    await _mibLoad();
+}
+
+// The line a compiler named, if it named one.  pysmi says "…, line 21"; that number is the
+// difference between "this file is broken" and being able to look at what is broken.
+function _mibErrorLine(msg) {
+    const m = /\bline\s+(\d+)/i.exec(String(msg || ''));
+    return m ? parseInt(m[1], 10) : 0;
+}
+
+function _mibRow(r) {
+    const checked = _mibSelection.has(r.mib) ? ' checked' : '';
+    const icon = r.state === 'builtin' ? 'bi-file-earmark-lock text-secondary'
+               : r.state === 'orphan'  ? 'bi-clock-history text-info'
+               : r.state === 'failed'  ? 'bi-file-earmark-x text-danger'
+               : r.state === 'pending' ? 'bi-file-earmark-text text-warning'
+               : r.state === 'stale'   ? 'bi-file-earmark-diff text-warning'
+               : r.state === 'stray'   ? 'bi-file-earmark-excel text-danger'
+               : r.state === 'dep'     ? 'bi-file-earmark-code text-secondary'
+               :                         'bi-file-earmark-check text-success';
+    // Copies of the same module. Amber when they are not the same file: identical copies are
+    // clutter, different ones are a decision waiting to be made — and until it is made, which
+    // one gets compiled is decided by the alphabet.
+    const copies = r.raws.length > 1
+        ? `<button type="button" class="badge border-0 flex-shrink-0 ${r.dupe && !r.dupe.same ? 'bg-warning text-dark' : 'bg-secondary'}"
+                 style="font-size:.6rem;cursor:pointer"
+                 onclick="_mibDupesShow(${jsStr(r.mib)})"
+                 title="${escAttr(r.dupe
+                     ? (r.dupe.same
+                        ? _ms('mib_dupe_same_tooltip', 'Copies of the same module, all with the same content')
+                        : _ms('mib_dupe_diff_tooltip', 'Copies of the same module with DIFFERENT content — only one is compiled'))
+                     : r.raws.join(' · '))}">&times;${r.raws.length}</button>`
         : '';
+    const btn = 'btn btn-sm btn-secondary py-0 px-1 flex-shrink-0';
     return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border"
                  style="background:var(--bs-body-bg)">
         <input type="checkbox" class="form-check-input flex-shrink-0"${checked}
-               onchange="_mibToggleSelect(${jsStr(f.name)},${jsStr(kind)})">
+               onchange="_mibToggleSelect(${jsStr(r.mib)})">
         <i class="bi ${icon} flex-shrink-0" style="font-size:.9rem"></i>
         <span class="flex-grow-1 text-truncate" style="font-size:.8rem"
-              title="${escAttr(f.name)}">${esc(f.name)}</span>
-        ${depBadge}
-        <span class="text-muted flex-shrink-0" style="font-size:.72rem">${_mibSz(f.size)}</span>
-        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
-                title="${escAttr(_ms('mib_details_view', 'View details'))}"
-                onclick="${kind === 'compiled'
-                    ? `_mibShowDetails(${jsStr(f.name)})`
-                    : `_mibShowRawDetails(${jsStr(f.name)})`}">
+              title="${escAttr(r.key + (r.file ? ` — ${r.file}` : ''))}">${r.dir ? `<span class="text-muted">${esc(r.dir)}/</span>` : ''}${esc(r.mib)}${r.file ? `<span class="text-muted ms-1" style="font-size:.72rem">(${esc(r.file)})</span>` : ''}</span>
+        ${copies}
+        ${r.version > 1 ? `<span class="badge bg-info text-dark flex-shrink-0"
+                 style="font-size:.6rem"
+                 title="${escAttr(_ms('mib_edited_tooltip', 'Edited here — v1 is the file as the vendor shipped it'))}">v${r.version}</span>` : ''}
+        ${_mibStateBadge(r)}
+        <span class="text-muted flex-shrink-0" style="font-size:.72rem">${_mibSz(r.size)}</span>
+${(() => {
+        if (!r.raws.length) return '';
+        // Arriving from a failure, the viewer opens ON the line rather than at the top: the
+        // whole value of the reason is the line, and scrolling to it by hand loses it.
+        const ln = _mibErrorLine(r.error);
+        // The copy pysmi would read, when there is more than one: opening the first by
+        // alphabet shows a file that may have nothing to do with what got compiled.
+        const shown = (r.dupe && r.dupe.used) || r.raws[0];
+        return `
+        <button class="${btn}" title="${escAttr(ln
+                    ? _ms('mib_view_raw_at', 'View source at the failing line')
+                    : _ms('mib_view_raw', 'View source file'))}"
+                onclick="_mibShowRawDetails(${jsStr(shown)}${ln ? ', ' + ln : ''})">
             <i class="bi bi-eye" style="font-size:.75rem"></i>
-        </button>
-        ${kind === 'raw' ? `
-        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
-                title="${escAttr(_ms('mib_compile_one', 'Compile'))}"
+        </button>`;
+    })()}
+        ${r.py ? `
+        <button class="${btn}" title="${escAttr(_ms('mib_view_symbols', 'View compiled symbols'))}"
+                onclick="_mibShowDetails(${jsStr(r.py)})">
+            <i class="bi bi-diagram-3" style="font-size:.75rem"></i>
+        </button>` : ''}
+        ${r.raws.length && r.state !== 'builtin' ? `
+        <button class="${btn}" title="${escAttr(_ms('mib_compile_one', 'Compile'))}"
                 ${_mibData && !_mibData.pysmi_available ? 'disabled' : ''}
-                onclick="_compileMibs([${jsStr(f.name)}])">
+                onclick="_compileMibs([${jsStr(r.raws[0])}])">
             <i class="bi bi-gear" style="font-size:.75rem"></i>
         </button>` : ''}
-        <button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0"
-                title="${escAttr(t('delete') || 'Delete')}"
-                onclick="_mibDelete(${jsStr(f.name)},${jsStr(kind)})">
-            <i class="bi bi-trash3" style="font-size:.75rem"></i>
+        ${r.state === 'orphan' ? `
+        <button class="${btn}" title="${escAttr(_ms('mib_orphan_restore', 'Bring the file back from its history'))}"
+                onclick="_mibOrphanRestore(${jsStr(r.mib)})">
+            <i class="bi bi-arrow-counterclockwise" style="font-size:.75rem"></i>
         </button>
+        <button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0"
+                title="${escAttr(_ms('mib_orphan_forget', 'Delete this history'))}"
+                onclick="_mibOrphanForget(${jsStr(r.mib)},${r.orphanVersion})">
+            <i class="bi bi-trash3" style="font-size:.75rem"></i>
+        </button>` : `
+        ${_mibDeleteBtn(r)}`}
     </div>`;
 }
 
-function _mibColHeader(icon, label, totalCount, searchId, kind) {
-    const delTitle = escAttr(_ms('mib_delete_selected', 'Delete selected'));
-    return `<div class="d-flex align-items-center gap-1 mb-1"
-          style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--bs-secondary-color)">
-        <i class="bi ${icon}"></i>${esc(label)}
-        <span class="badge bg-secondary rounded-pill ms-1" id="${searchId}-badge"
-              style="font-size:.68rem">${totalCount}</span>
-    </div>
-    <div class="mb-1">
-        <input type="search" id="${searchId}" class="form-control form-control-sm"
-               placeholder="${escAttr(_ms('mib_search', 'Search…'))}"
-               autocomplete="off" oninput="_mibFilterLists()">
-    </div>
-    <div class="d-flex align-items-center gap-1 mb-2">
-        <button class="btn btn-sm btn-secondary py-0 px-1"
-                onclick="_mibSelectAll(${jsStr(kind)})">
-            <i class="bi bi-check2-all me-1"></i>${esc(_ms('mib_select_all', 'All'))}
-        </button>
-        <button class="btn btn-sm btn-secondary py-0 px-1"
-                onclick="_mibDeselectAll(${jsStr(kind)})">
-            <i class="bi bi-square me-1"></i>${esc(_ms('mib_deselect_all', 'None'))}
-        </button>
-        ${kind === 'raw' ? `
-        <button class="btn btn-sm btn-secondary py-0 px-1"
-                title="${escAttr(_ms('mib_select_uncompiled', 'Select uncompiled'))}"
-                onclick="_mibSelectUncompiled()">
-            <i class="bi bi-exclamation-circle"></i>
-        </button>
-        <button class="btn btn-sm btn-secondary py-0 px-1"
-                id="mibCompileSelBtn" style="display:none"
-                title="${escAttr(_ms('mib_compile_selected', 'Compile selected'))}"
-                onclick="_compileSelected()">
-            <i class="bi bi-gear me-1"></i><span id="mibCompileSelCount">0</span>
-        </button>` : ''}
-        <button class="btn btn-sm btn-danger py-0 px-1 ms-auto flex-shrink-0"
-                id="mibDeleteSelBtn-${kind}" style="display:none"
-                title="${delTitle}"
-                onclick="_mibDeleteSelected(${jsStr(kind)})">
-            <i class="bi bi-trash3 me-1"></i><span id="mibDeleteSelCount-${kind}">0</span>
-        </button>
+// A compiled module is an OUTPUT: deleting it is how you ask for it to be made again, which
+// is the way out of a .py built from a file that is no longer the one that would be compiled
+// today. And a source can go while the .py it produced stays loaded — worth being able to do
+// on purpose, and worth never doing by accident. The menu only appears when the row really
+// holds both: with one file there is nothing to choose and a caret would say there is.
+function _mibDeleteBtn(r) {
+    const one = `<button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0"
+                title="${escAttr(t('delete') || 'Delete')}"
+                onclick="_mibDeleteRow(${jsStr(r.mib)})">
+            <i class="bi bi-trash3" style="font-size:.75rem"></i>
+        </button>`;
+    if (!r.raws.length || !r.py) return one;
+    return `<div class="btn-group btn-group-sm flex-shrink-0">${one}
+        <button class="btn btn-sm btn-danger dropdown-toggle dropdown-toggle-split py-0 px-1"
+                type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                title="${escAttr(_ms('mib_delete_what', 'What to delete'))}"></button>
+        ${_mibDeleteMenu(`_mibDeleteRow(${jsStr(r.mib)},`)}
     </div>`;
+}
+
+// The three choices, written once: the row and the selection ask the same question of a
+// different set, and two copies of a menu are two menus that drift.
+function _mibDeleteMenu(call) {
+    const item = (scope, icon, label) => `<li><button class="dropdown-item"
+            onclick="${call}'${scope}')"><i class="bi ${icon} me-1"></i>${esc(label)}</button></li>`;
+    return `<ul class="dropdown-menu dropdown-menu-end">
+        ${item('all', 'bi-trash3', _ms('mib_delete_everything', 'Everything'))}
+        ${item('compiled', 'bi-gear', _ms('mib_delete_only_compiled', 'Only the compilation'))}
+        ${item('raw', 'bi-file-earmark-text', _ms('mib_delete_only_raw', 'Only the source'))}
+    </ul>`;
+}
+
+// What a compiler will object to, said in the file's own terms and with the line. pysmi
+// answers "Bad grammar near offset 558" and "Unknown parents for symbols: …" — the first says
+// where it gave up, the second names the symbols it could not PLACE rather than the import
+// that is missing. Both are one step away from the thing to fix.
+function _mibLintRows(findings) {
+    return (findings || []).map(f => [`${_ms('mib_error_line', 'line')} ${f.line}`, f.message]);
+}
+
+async function _mibLint(payload) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'lint_mib_source'),
+                              { ...(modulesData[modName] || {}), ...payload });
+    const d = res && res.data;
+    return (d && d.ok) ? (d.findings || []) : null;
+}
+
+// From the editor: on what is on screen, not on what is on disk — the point is to answer
+// before saving, while the change is still a change.
+async function _mibLintNow() {
+    if (!_mibSrcEditor) return;
+    const findings = await _mibLint({name: _mibEditName, content: _mibSrcEditor.getValue()});
+    if (findings === null) { showToast(t('error') || 'Error', 'error'); return; }
+    if (!findings.length) {
+        showToast(_ms('mib_lint_clean', 'Nothing here will stop the compiler'));
+        return;
+    }
+    showInfoModal(_mibEditName, _mibLintRows(findings),
+                  _ms('mib_lint_found', 'These will stop the compiler.'), 'warning');
+}
+
+// The full reason, verbatim.  Nothing is reworded on the way: it is a compiler's message
+// about a specific line of a specific file, and paraphrasing it would cost the one detail
+// that makes it actionable.
+async function _mibShowError(mib) {
+    const r = _mibRows().find(x => x.mib === mib);
+    if (!r || !r.error) return;
+    const rows = [[_ms('mib_error_file', 'File'), r.key]];
+    if (r.errorAt) {
+        rows.push([_ms('mib_error_when', 'Last attempt'),
+                   new Date(r.errorAt * 1000).toLocaleString()]);
+    }
+    rows.push([_ms('mib_error_reason', 'Reason'), r.error]);
+    // The compiler's message says where it stopped; these say what to change. Read now and
+    // not stored with the error, so they are about the file as it is — an error kept from
+    // last week beside hints from last week is two stale things agreeing with each other.
+    const findings = await _mibLint({name: r.raws[0] || ''});
+    for (const f of _mibLintRows(findings)) rows.push(f);
+    showInfoModal(r.mib, rows,
+                  _ms('mib_error_lead', 'This MIB could not be compiled.'), 'danger');
+}
+
+// One folder chosen, or a small enough tree, is a plain list. Otherwise the folders become
+// headers you open — which is the only thing that makes two thousand rows a screen you can
+// actually work in.
+function _mibListHtml(shown) {
+    const groups = _mibGroups(shown);
+    const q = (document.getElementById('mibSearch')?.value || '').trim();
+    // One group is not a grouping, and neither is twenty rows. A FOLDER being selected is
+    // no longer a reason to flatten: `librenms` is two hundred rows in four vendor folders,
+    // and the headers are what tells them apart — picking a leaf leaves one group, which
+    // this already flattens on its own.
+    if (groups.size < 2 || shown.length <= _MIB_AUTO_EXPAND) {
+        return shown.map(r => _mibRow(r)).join('');
+    }
+    let h = '';
+    for (const [g, rs] of groups) {
+        // A search that finds something inside a closed folder and shows nothing is a search
+        // that looks broken, so a match opens the folder it is in.
+        const open = !!q || _mibOpenGroups.has(g);
+        h += _mibGroupHeader(g, rs, open);
+        if (open) h += `<div class="d-flex flex-column gap-1 ps-3">${rs.map(r => _mibRow(r)).join('')}</div>`;
+    }
+    return h;
+}
+
+// The folders, with how many rows each holds — over the WHOLE tree, not over whatever is
+// filtered right now: a folder's size is a property of the folder, and a count that moves as
+// you type is a count nobody can use to decide where to look.
+function _mibGroups(rows) {
+    const out = new Map();
+    for (const r of rows) {
+        if (!out.has(r.group)) out.set(r.group, []);
+        out.get(r.group).push(r);
+    }
+    const rank = k => (k === _MIB_DEP_GROUP ? 3 : k === _MIB_STRAY_GROUP ? 2
+                    : k === _MIB_ORPHAN_GROUP ? 1 : 0);
+    return new Map([...out.entries()].sort(
+        (a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0])));
+}
+
+function _mibGroupLabel(g) {
+    if (g === _MIB_DEP_GROUP) return _ms('mib_group_deps', 'dependencies');
+    if (g === _MIB_STRAY_GROUP) return _ms('mib_group_stray', 'source deleted');
+    if (g === _MIB_ORPHAN_GROUP) return _ms('mib_group_orphan', 'file deleted');
+    return g || _ms('mib_group_root', 'top level');
+}
+
+// Choosing a folder OPENS it, and everything above it: a branch selected inside a closed
+// parent is a selection nobody can see, and the way back up would be a guess.
+function _mibSetFolder(g) {
+    _mibFolder = g || '';
+    let path = '';
+    for (const part of (_mibFolder || '').split('/')) {
+        if (!part) continue;
+        path = path ? path + '/' + part : part;
+        _mibOpenFolders.add(path);
+    }
+    _mibFilterLists();
+}
+
+function _mibToggleFolder(key) {
+    if (_mibOpenFolders.has(key)) _mibOpenFolders.delete(key);
+    else                          _mibOpenFolders.add(key);
+    _mibFilterLists();
+}
+
+function _mibGroupToggle(g) {
+    if (_mibOpenGroups.has(g)) _mibOpenGroups.delete(g);
+    else                       _mibOpenGroups.add(g);
+    _mibFilterLists();
+}
+
+// Selecting a folder is the action the header was missing: compiling or deleting a vendor's
+// worth of MIBs is one of the few things anybody does in bulk here, and doing it by ticking
+// six hundred boxes is not doing it.
+//
+// A row rather than one big button, because a checkbox inside a <button> is a control inside
+// a control: the browser is entitled to swallow the click, and which one wins is not
+// something to leave to chance.
+function _mibGroupHeader(g, rs, open) {
+    const sel = rs.filter(r => _mibSelection.has(r.mib)).length;
+    const all = sel === rs.length && rs.length > 0;
+    // How many are DONE, not how many exist. A folder of six hundred says nothing on its own;
+    // "588/612" says where the work is, and which vendor to open. A stale one does not count:
+    // it has a compiled module, from bytes that are no longer there, and the whole reason
+    // that state exists is that it needs compiling again. Nor does a leftover: it has a
+    // compiled module and no source at all, and a group of them reading "374/374" in green
+    // would be the screen calling a pile of junk finished work.
+    const done = rs.filter(r => r.py && r.state !== 'stale' && r.state !== 'stray').length;
+    return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border"
+                 style="background:var(--bs-secondary-bg);font-size:.78rem">
+        <input type="checkbox" class="form-check-input flex-shrink-0 mib-group-check"
+               data-group="${escAttr(g)}" data-some="${sel > 0 && !all ? '1' : ''}"
+               ${all ? 'checked' : ''}
+               title="${escAttr(_ms('mib_group_select', 'Select every MIB in this folder'))}"
+               onchange="_mibGroupSelect(${jsStr(g)}, this.checked)">
+        <span class="d-flex align-items-center gap-2 flex-grow-1 text-truncate"
+              role="button" tabindex="0" style="cursor:pointer"
+              onclick="_mibGroupToggle(${jsStr(g)})"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_mibGroupToggle(${jsStr(g)});}">
+            <i class="bi ${open ? 'bi-chevron-down' : 'bi-chevron-right'} flex-shrink-0"
+               style="font-size:.7rem"></i>
+            <i class="bi ${g === _MIB_DEP_GROUP ? 'bi-tools'
+                         : g === _MIB_STRAY_GROUP ? 'bi-folder-x'
+                         : g === _MIB_ORPHAN_GROUP ? 'bi-arrow-counterclockwise'
+                         : 'bi-folder2'} flex-shrink-0"></i>
+            <span class="fw-semibold text-truncate">${esc(_mibGroupLabel(g))}</span>
+        </span>
+        ${sel ? `<span class="badge bg-primary rounded-pill flex-shrink-0"
+              style="font-size:.62rem">${sel}</span>` : ''}
+        <span class="badge ${done === rs.length ? 'bg-success' : 'bg-secondary'} rounded-pill flex-shrink-0"
+              style="font-size:.62rem"
+              title="${escAttr(_ms('mib_group_done_tooltip', 'Compiled and up to date, of the total'))}">${done}/${rs.length}</span>
+    </div>`;
+}
+
+// Only what is VISIBLE in that folder: with a state chip or a search active, the header ticks
+// what the person can see and not what the folder happens to hold — selecting six hundred
+// rows nobody is looking at is not what a tick beside four of them means.
+function _mibGroupSelect(g, on) {
+    for (const r of _mibVisibleRows()) {
+        if (r.group !== g) continue;
+        if (on) _mibSelection.add(r.mib);
+        else    _mibSelection.delete(r.mib);
+    }
+    _mibFilterLists();
+}
+
+// `indeterminate` is a property and not an attribute, so it cannot be written into the markup
+// — and a half-selected folder showing an empty box is a folder that looks untouched.
+function _mibGroupCheckStates() {
+    for (const el of document.querySelectorAll('.mib-group-check')) {
+        el.indeterminate = el.dataset.some === '1';
+    }
+}
+
+// The states, with their counts, down the rail. They were chips in a row that also held
+// the search box, the folder picker and the selection buttons — eleven of them by the time
+// "no source" arrived, on a row that wraps, so which ones you could see depended on how wide
+// the window happened to be. Down a column they are a list of the same length always, and
+// the count sits where a count belongs: at the end of the line it counts.
+function _mibStateDefs(c) {
+    const defs = [
+        ['all',      _ms('mib_filter_all', 'All'),           c.all,      'bi-collection'],
+        ['pending',  _ms('mib_filter_pending', 'Pending'),   c.pending,  'bi-file-earmark-text'],
+        ['stale',    _ms('mib_filter_stale', 'Outdated'),    c.stale,    'bi-file-earmark-diff'],
+        ['failed',   _ms('mib_filter_failed', 'Errors'),     c.failed,   'bi-file-earmark-x'],
+        ['compiled', _ms('mib_filter_compiled', 'Compiled'), c.compiled, 'bi-file-earmark-check'],
+        ['dep',      _ms('mib_filter_dep', 'Dependencies'),  c.dep,      'bi-file-earmark-code'],
+        ['orphan',   _ms('mib_filter_orphan', 'Recoverable'), c.orphan, 'bi-arrow-counterclockwise'],
+    ];
+    // Only when there are any: a line that always reads zero is a line nobody reads.
+    if (c.builtin) defs.push(['builtin', _ms('mib_filter_builtin', 'Built in'), c.builtin,
+                              'bi-file-earmark-lock']);
+    if (c.stray) defs.push(['stray', _ms('mib_filter_stray', 'No source'), c.stray,
+                            'bi-file-earmark-excel']);
+    // …and LAST, what cuts across all of it. Everything above adds up to the library exactly
+    // once — every MIB is in one of those lines and no other. These two are a different kind
+    // of question about the same rows: a duplicated module is still compiled or pending, and
+    // so is one somebody edited here. Last, so the partition above stays a partition.
+    if (c.dupe) defs.push(['dupe', _ms('mib_filter_dupe', 'Duplicated'), c.dupe, 'bi-files']);
+    if (c.edited) defs.push(['edited', _ms('mib_facet_edited', 'Edited'), c.edited,
+                             'bi-pencil']);
+    return defs;
+}
+
+// One line of the rail, in the panel's own shape (`.ss-rail-item`, same as Configuration
+// and Backups). A div and not a <button>, because a folder that has children carries a twist
+// of its own — opening it and choosing it are two different answers — and a control inside a
+// control is one the browser is entitled to swallow.
+function _mibRailItem(o) {
+    const twist = o.twistKey
+        ? `<span class="ss-rail-twist" role="button" tabindex="-1"
+                 onclick="event.stopPropagation();_mibToggleFolder(${jsStr(o.twistKey)})"><i
+                 class="bi ${o.open ? 'bi-chevron-down' : 'bi-chevron-right'}"></i></span>`
+        : '<span class="ss-rail-twist"></span>';
+    return `<div class="ss-rail-item${o.active ? ' active' : ''}" role="button" tabindex="0"
+            onclick="${o.onclick}"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${o.onclick}}"
+            ${o.pad ? `style="padding-left:${o.pad}rem"` : ''}
+            title="${escAttr(o.title || o.label)}">
+        ${twist}
+        <i class="bi ${o.icon} flex-shrink-0"></i>
+        <span class="flex-grow-1 text-truncate min-w-0">${esc(o.label)}</span>
+        <span class="badge text-bg-secondary">${o.count}</span>
+    </div>`;
+}
+
+// The rail is the PANEL's rail: `ssRailShell` is what Configuration and Backups are built
+// on — a `<nav>` down the left of the pane, flush to the top, with the section's head and
+// body beside it. A second one under a module's own name is how two lists that should look
+// identical stop looking identical.
+//
+// Two of the five views have a list to narrow — the library and the profile catalogue — and
+// they share ONE shell, because the shell restructures the pane and two of them would be two
+// rails in one pane. What differs is what is inside it, so the body is replaced when the view
+// changes and left alone when it does not: a rail rebuilt on every render loses the scroll
+// position of a four-hundred-folder tree.
+//
+// Importing and compiling have no list and no rail. It holds navigation and nothing else —
+// states and folders on one, what an entry IS and which group holds it on the other. The
+// search box sits over the list it narrows, which is where somebody looking at the list
+// reaches for it.
+function _snmpRailShell(view) {
+    const spec = (window.SS_STANDALONE_PAGES || [])
+        .find(p => p.render === 'renderSnmpMibsPage') || {};
+    const box = document.getElementById((spec.id || 'snmp') + '-container');
+    if (!box || typeof ssRailShell !== 'function') return null;
+    const body = view === 'library'  ? 'mibRailBody'
+               : view === 'profiles' ? 'snmpProfRailBody' : '';
+    const rail = ssRailShell(box, !!body, _ms(
+        view === 'profiles' ? 'view_profiles' : 'view_mibs', 'MIBs'));
+    if (rail && rail.dataset.snmpRail !== view) {
+        rail.innerHTML = `<div id="${body}"></div>`;
+        rail.dataset.snmpRail = view;
+    }
+    return rail;
+}
+
+function _mibRailHtml(all) {
+    const c = _mibCounts(all);
+    let h = `<div class="ss-rail-group">
+        <div class="ss-rail-head">${esc(_ms('mib_rail_states', 'State'))}</div>`;
+    for (const d of _mibStateDefs(c)) {
+        h += _mibRailItem({active: _mibFilter === d[0], icon: d[3], label: d[1], count: d[2],
+                           onclick: `_mibSetFilter(${jsStr(d[0])})`});
+    }
+    h += '</div>';
+    // The folders of whatever the state and the search left — "where is the work" is the
+    // question a tree beside a filter is asked, and a count of everything answers a
+    // different one. Which folders EXIST does not change; how many of them still have
+    // something pending in them is the whole reason to look.
+    const rows = _mibTreeRows();
+    h += `<div class="ss-rail-group">
+        <div class="ss-rail-head">${esc(_ms('mib_rail_folders', 'Folders'))}</div>`;
+    h += _mibRailItem({active: _mibFolder === '', icon: 'bi-folder2-open', count: rows.length,
+                       label: _ms('mib_folder_all', 'All folders'),
+                       onclick: `_mibSetFolder('')`});
+    const tree = _mibFolderTree(rows);
+    for (const kid of tree.kids.values()) h += _mibTreeHtml(kid, 0);
+    return h + '</div>';
+}
+
+// The folders as they are: a path is a path, and `librenms/nokia/aos6` is three of them.
+// Flattened into a `<select>` it was four hundred entries in alphabetical order — a control
+// you can only use if you already know the answer.
+function _mibFolderTree(rows) {
+    const root = {key: '', label: '', count: 0, kids: new Map()};
+    const add = (key, label, r) => {
+        if (!root.kids.has(key))
+            root.kids.set(key, {key, label, count: 0, kids: new Map(), flat: true});
+        root.kids.get(key).count++;
+    };
+    for (const r of rows) {
+        // Dependencies and leftovers are not folders and never were: one is what pysmi
+        // pulled in, the other what a deleted folder left behind. They sit at the top level
+        // with no path under them, and their keys cannot collide with a real one.
+        if (r.group === _MIB_DEP_GROUP || r.group === _MIB_STRAY_GROUP
+                || r.group === _MIB_ORPHAN_GROUP) {
+            add(r.group, _mibGroupLabel(r.group), r);
+            continue;
+        }
+        if (!r.group) { add(_MIB_ROOT_GROUP, _mibGroupLabel(''), r); continue; }
+        let node = root, path = '';
+        for (const part of r.group.split('/')) {
+            path = path ? path + '/' + part : part;
+            if (!node.kids.has(path))
+                node.kids.set(path, {key: path, label: part, count: 0, kids: new Map()});
+            node = node.kids.get(path);
+            node.count++;
+        }
+    }
+    // Real folders first and in order; the two pseudo-folders last, because nobody came
+    // here for them.
+    const rank = k => (k === _MIB_DEP_GROUP ? 4 : k === _MIB_STRAY_GROUP ? 3
+                    : k === _MIB_ORPHAN_GROUP ? 2 : k === _MIB_ROOT_GROUP ? 1 : 0);
+    root.kids = new Map([...root.kids.entries()].sort(
+        (a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0])));
+    return root;
+}
+
+function _mibTreeHtml(node, depth) {
+    const open = _mibOpenFolders.has(node.key);
+    const kids = [...node.kids.values()];
+    // A twist that opens nothing is a control that lies; a leaf gets the same indent from an
+    // empty box of the same width, so the names still line up.
+    let h = _mibRailItem({
+        active: _mibFolder === node.key, count: node.count, open,
+        twistKey: kids.length ? node.key : '',
+        icon: node.key === _MIB_DEP_GROUP ? 'bi-tools'
+            : node.key === _MIB_STRAY_GROUP ? 'bi-folder-x'
+            : node.key === _MIB_ORPHAN_GROUP ? 'bi-arrow-counterclockwise'
+            : node.key === _MIB_ROOT_GROUP ? 'bi-folder-symlink'
+            : kids.length ? 'bi-folder2' : 'bi-folder',
+        label: node.label,
+        // The pseudo-folders' keys are control characters, not paths: a tooltip is the
+        // place a full path belongs, and there is none to show for those.
+        title: node.key.charCodeAt(0) ? node.key : node.label,
+        pad: depth ? (0.5 + depth * 0.75) : 0,
+        onclick: `_mibSetFolder(${jsStr(node.key)})`,
+    });
+    if (open) for (const k of kids) h += _mibTreeHtml(k, depth + 1);
+    return h;
+}
+
+// Clicking a folder shows what is IN it, all the way down: `librenms` is where a vendor's
+// worth of MIBs is, and a node that only counted its own direct children would be a number
+// beside a folder that shows nothing.
+function _mibInFolder(r) {
+    if (!_mibFolder) return true;
+    // The top of the tree is a folder like any other: the files directly under `raw/`, and
+    // not everything that happens to be below it.
+    if (_mibFolder === _MIB_ROOT_GROUP) return !r.group;
+    return r.group === _mibFolder || r.group.startsWith(_mibFolder + '/');
+}
+
+function _mibSetFilter(id) {
+    _mibFilter = id;
+    _mibFilterLists();
+}
+
+// Over the list: how much of it you are looking at, in what order, and what has been
+// ticked. WHICH rows is the rail's question — the states and the folders — and the search
+// box beside this one is written into the markup rather than rendered here, because a bar
+// repainted on every keystroke cannot hold the box being typed in.
+function _mibListBarHtml(all, shown) {
+    const sortOpt = (how, label) =>
+        `<option value="${how}"${_mibSort === how ? ' selected' : ''}>${esc(label)}</option>`;
+    return `<span class="text-muted small flex-shrink-0">
+            ${esc(_ms('mib_showing', '{n} of {total}')
+                    .replace('{n}', shown.length).replace('{total}', all.length))}</span>
+        <select class="form-select form-select-sm w-auto py-0 flex-shrink-0"
+                title="${escAttr(_ms('mib_sort', 'Order'))}"
+                onchange="_mibSetSort(this.value)">
+            ${sortOpt('name', _ms('mib_sort_name', 'By name'))}
+            ${sortOpt('size', _ms('mib_sort_size', 'Largest first'))}
+            ${sortOpt('date', _ms('mib_sort_date', 'Newest first'))}
+        </select>
+        <span class="ms-auto"></span>
+        <!-- What appears when something is ticked goes to the LEFT of the two that are
+             always there: added after them, every selection and deselection shoved "All" and
+             "None" sideways — and they are the buttons somebody is clicking at the time. -->
+        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0" id="mibCompileSelBtn"
+                style="display:none" onclick="_compileSelected()"
+                title="${escAttr(_ms('mib_compile_selected', 'Compile selected'))}">
+            <i class="bi bi-gear me-1"></i><span id="mibCompileSelCount">0</span>
+        </button>
+        <div class="btn-group btn-group-sm flex-shrink-0"
+             id="mibDeleteSelGroup" style="display:none">
+            <button class="btn btn-sm btn-danger py-0 px-1" id="mibDeleteSelBtn"
+                    title="${escAttr(_ms('mib_delete_selected', 'Delete selected'))}"
+                    onclick="_mibDeleteSelected()">
+                <i class="bi bi-trash3 me-1"></i><span id="mibDeleteSelCount">0</span>
+            </button>
+            <button class="btn btn-sm btn-danger dropdown-toggle dropdown-toggle-split py-0 px-1"
+                    type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                    title="${escAttr(_ms('mib_delete_what', 'What to delete'))}"></button>
+            ${_mibDeleteMenu('_mibDeleteSelected(')}
+        </div>
+        <div class="btn-group btn-group-sm flex-shrink-0">
+            <button class="btn btn-sm btn-secondary py-0 px-1" onclick="_mibSelectAll()">
+                <i class="bi bi-check2-all me-1"></i>${esc(_ms('mib_select_all', 'All'))}
+            </button>
+            <button class="btn btn-sm btn-secondary py-0 px-1" onclick="_mibDeselectAll()">
+                <i class="bi bi-square me-1"></i>${esc(_ms('mib_deselect_all', 'None'))}
+            </button>
+        </div>`;
 }
 
 function _mibEmptyBox(msg) {
@@ -251,66 +1212,238 @@ function _mibNoMatch() {
 // Generic entry point called by the dashboard's file_manager button.
 // The function name is fixed so the web_admin generic code can call it
 // without any module-specific knowledge.
-async function openFileManagerModal(modName) {
-    _mibManagerModuleName = modName;
+// ── The MIB manager, as a section of the System panel ─────────────────────────
+//
+// It was a modal, opened from a button on the module card, and the modal was the constraint:
+// a list that had to reach the bottom of a dialog somebody can drag, a source viewer three
+// levels deep, a diff inside a tab inside a dialog. The module declares a page now
+// (schema.json → `__page__`, placement "system"), the core gives it a pane beside Services
+// and Credentials, and this paints it.
+//
+// The markup is cloned from a <template> rather than built here: it is markup, and 120 lines
+// of it inside a JavaScript string is 120 lines nobody can read as HTML again.
+async function renderSnmpMibsPage() {
+    // Which module this page belongs to, asked of the registry instead of written down: the
+    // page descriptor names its own render function, so the entry that points here is the
+    // entry that says whose it is.
+    const spec = (window.SS_STANDALONE_PAGES || [])
+        .find(p => p.render === 'renderSnmpMibsPage') || {};
+    const box = document.getElementById((spec.id || 'snmp') + '-container');
+    if (!box) return;
+    _mibManagerModuleName = spec.module || 'snmp';
+
+    // WHICH view: the section declares three (the library, importing and compiling) and
+    // the URL is what says which one — resolved by the core, because a view is a sub-path and
+    // the path is the core's business. Asked rather than remembered here, so a link somebody
+    // sends lands on the view it names.
+    const view = ((typeof _sbPageView === 'function') ? _sbPageView(spec.id || 'snmp') : '')
+                 || 'library';
+
+    // Painted once PER VIEW. Coming back to the library re-reads the MIBs, but rebuilding the
+    // whole panel would throw away the folder that was open, the filter and the search box —
+    // the same thing that made leaving the editor feel like a page reload.
+    if (box.dataset.snmpView !== view) {
+        const tpl = document.getElementById(
+            view === 'import'   ? 'snmpImportPageTpl'   :
+            view === 'compile'  ? 'snmpCompilePageTpl'  :
+            view === 'browser'  ? 'snmpBrowserPageTpl'  :
+            view === 'profiles' ? 'snmpProfilesPageTpl' : 'snmpMibsPageTpl');
+        if (!tpl) return;
+        box.replaceChildren(tpl.content.cloneNode(true));
+        box.dataset.snmpView = view;
+        // The rail belongs to the library. Raised and torn down HERE, once per view change,
+        // because it restructures the pane around the container the templates are cloned
+        // into — doing it on every render would move the DOM under a list being drawn.
+        _snmpRailShell(view);
+        // The browser and the catalogue write their own words as they load — they are the
+        // same screens the dialogs draw, and those have always labelled themselves.
+        if (view === 'import') _snmpImportPageLabels();
+        else if (view === 'compile') _snmpCompilePageLabels();
+        else if (view === 'library') _snmpMibsPageLabels();
+        // A job started on the other view is still running and still has its widgets here —
+        // same ids, one document. Repaint its state instead of showing an empty bar.
+        if (_mibCompileInProgress || _mibGithubInProgress || _mibArchiveInProgress)
+            _mibProgressBegin();
+    }
+
+    if (view === 'import') return _mibImportViewLoad();
+    // Two screens the module already had, in the section they belong to instead of over
+    // whatever was on screen. The library's payload is not theirs — each asks for its own.
+    if (view === 'browser') return _mibBrowserViewLoad(_mibManagerModuleName);
+    if (view === 'profiles') return _snmpProfViewLoad(_mibManagerModuleName);
+
     _mibData = null;
     _mibCompileAbort = false;
-    _mibProgressHide();
-
-    const _set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-    _set('mibManagerTitle',    _ms('file_manager', 'MIB Manager') + ' — ' + modulePrettyName(modName, modulesData[modName] || {}));
-    _set('mibUploadTextLabel', _ms('mib_upload',  'Upload .mib'));
-    _set('mibCompileBtnLabel', _ms('mib_compile_all', 'Compile all'));
-    _set('mibImportUrlBtnLabel', _ms('mib_import_url_btn', 'Import'));
-    _set('mibStopBtnLabel', _ms('mib_stop_compile', 'Stop'));
-    _set('mibGithubImportBtnLabel', _ms('mib_github_import_btn', 'Import folder'));
-    _set('mibGithubRecursiveLabel', _ms('mib_github_recursive', 'Recursive'));
-    _set('mibDepSrcHint', _ms('mib_dep_src_hint',
-        'Checked repositories are queried over HTTP to resolve imported MIBs that are not present locally during compilation.'));
-    const _refBtn = document.getElementById('mibRefreshBtn');
-    if (_refBtn) _refBtn.title = _ms('mib_refresh', 'Refresh');
-    const _urlInput = document.getElementById('mibImportUrlInput');
-    if (_urlInput) { _urlInput.placeholder = _ms('mib_import_url_placeholder', 'GitHub or raw URL…'); _urlInput.value = ''; }
-    const _ghInput = document.getElementById('mibGithubUrlInput');
-    if (_ghInput) { _ghInput.placeholder = _ms('mib_github_url_placeholder', 'github.com/owner/repo/tree/branch/mibs'); _ghInput.value = ''; }
-    const _ghRec = document.getElementById('mibGithubRecursive');
-    if (_ghRec) _ghRec.checked = true;
-
-    const body = document.getElementById('mibManagerBody');
-    if (body) body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
-    const fi = document.getElementById('mibFileInput');
-    if (fi) fi.value = '';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibManagerModal')).show();
+    if (!_mibCompileInProgress && !_mibGithubInProgress && !_mibArchiveInProgress)
+        _mibProgressHide();
     await _mibLoad();
 }
 
+// Which view is on screen. Read off the container the core gave the section, which is
+// where `renderSnmpMibsPage` wrote it: a second copy in a variable of this file is a second
+// answer, and the two would drift the first time a render is skipped.
+function _mibView() {
+    const spec = (window.SS_STANDALONE_PAGES || [])
+        .find(p => p.render === 'renderSnmpMibsPage') || {};
+    const box = document.getElementById((spec.id || 'snmp') + '-container');
+    return (box && box.dataset.snmpView) || 'library';
+}
+
+// What the import view needs is two lists of sources — and it used to ask `list_mibs` for
+// them, which is the whole inventory: every file in the tree, a header read out of each one,
+// the colliding ones hashed and the pending set worked out. Seconds, on a library with
+// LibreNMS in it, to fill two dropdowns. `list_mib_sources` answers the same two keys off a
+// list that is already in memory.
+async function _mibImportViewLoad() {
+    const modName = _mibManagerModuleName;
+    if (!modName) return;
+    const res = await apiPost(_mibApiUrl(modName, 'list_mib_sources'),
+                              modulesData[modName] || {});
+    const d = res && res.data;
+    if (!d || !d.ok) return;
+    // NOT into `_mibData`: that is the library's payload and half of it is missing here.
+    // Whoever reads it next must find the whole thing or nothing.
+    _mibPopulateImportSources(d);
+}
+
+// Every string on the page, from the MODULE's own i18n. Set after cloning rather than
+// written into the template, because the template is shipped once and the language is a
+// per-request thing.
+function _snmpMibsPageLabels() {
+    const _set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    _set('mibLibTitle', _ms('view_mibs', 'MIBs'));
+    const _srch = document.getElementById('mibSearch');
+    if (_srch) _srch.placeholder = _ms('mib_search', 'Search…');
+    _set('mibStopBtnLabel', _ms('mib_stop_compile', 'Stop'));
+    _set('mibRefreshLabel', _ms('mib_refresh', 'Refresh'));
+}
+
+function _snmpCompilePageLabels() {
+    const _set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    _set('mibCompileTitle', _ms('view_compile', 'Compile'));
+    _set('mibRefreshLabel', _ms('mib_refresh', 'Refresh'));
+    _set('mibCompileBtnLabel', _ms('mib_compile_pending', 'Compile pending'));
+    _set('mibCompileAllLabel', _ms('mib_compile_all', 'Rebuild everything'));
+    _set('mibStopBtnLabel', _ms('mib_stop_compile', 'Stop'));
+    _set('mibErrorsTitle', _ms('mib_compile_errors', 'What failed'));
+    _set('mibCleanLabel', _ms('mib_clean_btn', 'Tidy up'));
+    _set('mibReindexLabel', _ms('mib_reindex', 'Rebuild the index'));
+    const _idxBtn = document.getElementById('mibReindexBtn');
+    if (_idxBtn) _idxBtn.title = _ms('mib_reindex_hint',
+        'Rebuild the OID index and the symbol catalogue from what is compiled');
+    const _clnBtn = document.getElementById('mibCleanBtn');
+    if (_clnBtn) _clnBtn.title = _ms('mib_clean', 'Clean up what deleting left behind');
+    _set('mibDepSrcHint', _ms('mib_dep_src_hint',
+        'Checked repositories are queried over HTTP to resolve imported MIBs that are not present locally during compilation.'));
+}
+
+// The three views, as destinations. A module names no URL and no pane: it asks the registry
+// which section is its own and lets the core navigate — the same call the sidebar's flyout
+// makes, so the button, the menu entry and a pasted link all end in one place.
+function _snmpPageId() {
+    return ((window.SS_STANDALONE_PAGES || [])
+        .find(p => p.render === 'renderSnmpMibsPage') || {}).id || 'snmp';
+}
+function openMibImportPage()  { _snmpGoToView('import'); }
+function openMibCompilePage() { _snmpGoToView('compile'); }
+function openMibLibraryPage() { _snmpGoToView('library'); }
+function _snmpGoToView(slug) {
+    if (typeof _navPageView === 'function') return _navPageView(_snmpPageId(), slug);
+    return renderSnmpMibsPage();   // no sidebar (a standalone page): just repaint
+}
+
+// The import view's strings, from the MODULE's own i18n. Set when the view is painted,
+// exactly like the library's: a view is markup cloned from a template, and a template ships
+// no words — the language is a per-request thing.
+function _snmpImportPageLabels() {
+    const _set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    _set('mibImportTitle', _ms('view_import', 'Import'));
+    _set('mibUploadTitle', _ms('mib_upload_title', 'From this computer'));
+    _set('mibUploadHint', _ms('mib_upload_hint', 'One .mib you already have, or several.'));
+    _set('mibUploadTextLabel', _ms('mib_upload', 'Upload .mib'));
+    // An empty dropdown looks like a list with nothing in it; say it is being fetched.
+    for (const id of ['mibGithubRepoSel', 'mibArchiveSel']) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = `<option>${esc(t('loading') || 'Loading…')}</option>`;
+    }
+    _set('mibImportUrlTitle', _ms('mib_import_url_title', 'From a URL'));
+    _set('mibImportUrlHint', _ms('mib_import_url_hint',
+        'A single .mib file, or a .zip holding several.'));
+    _set('mibGithubTitle', _ms('mib_github_title', 'A folder of a repository'));
+    _set('mibGithubHint', _ms('mib_github_hint',
+        'Pick a known repository or paste the URL of a folder.'));
+    _set('mibArchiveTitle', _ms('mib_archive_title', "A vendor's whole archive"));
+    _set('mibImportUrlBtnLabel', _ms('mib_import_url_btn', 'Import'));
+    _set('mibGithubImportBtnLabel', _ms('mib_github_import_btn', 'Import folder'));
+    _set('mibGithubRecursiveLabel', _ms('mib_github_recursive', 'Recursive'));
+    _set('mibArchiveCompareLabel', _ms('mib_archive_compare', 'Compare'));
+    _set('mibArchiveCachedLabel',
+         _ms('mib_archive_compare_cached', 'Compare without downloading'));
+    _set('mibArchiveImportLabel', _ms('mib_archive_import', 'Update'));
+    _set('mibStopBtnLabel', _ms('mib_stop_compile', 'Stop'));
+    const _urlInput = document.getElementById('mibImportUrlInput');
+    if (_urlInput) _urlInput.placeholder = _ms('mib_import_url_placeholder', 'GitHub or raw URL…');
+    const _ghInput = document.getElementById('mibGithubUrlInput');
+    if (_ghInput) _ghInput.placeholder = _ms('mib_github_url_placeholder',
+                                             'github.com/owner/repo/tree/branch/mibs');
+}
+
+// The module card's button still opens the manager — it just goes to the section now
+// instead of throwing a dialog over what you were doing.
+function openFileManagerModal(modName) {
+    _mibManagerModuleName = modName || _mibManagerModuleName;
+    const spec = (window.SS_STANDALONE_PAGES || [])
+        .find(p => p.render === 'renderSnmpMibsPage') || {};
+    const btn = document.getElementById('btn-tab-' + (spec.id || 'snmp'));
+    if (btn) return btn.click();
+    return renderSnmpMibsPage();
+}
+
+// Reading the library is the expensive call in this module — the whole tree, one header per
+// file — and opening a section fires the render more than once (the tab shows, and the view
+// is resolved), which used to be two of them racing. One in flight is one answer: the second
+// caller waits for the first instead of asking again.
+let _mibLoadInFlight = null;
 async function _mibLoad() {
     const modName = _mibManagerModuleName;
     if (!modName) return;
-    _mibSelection = {raw: new Set(), compiled: new Set()};
+    if (_mibLoadInFlight) return _mibLoadInFlight;
+    _mibSelection = new Set();
     const modCfg = modulesData[modName] || {};
-    const res = await apiPost(_mibApiUrl(modName, 'list_mibs'), modCfg);
+    _mibLoadInFlight = apiPost(_mibApiUrl(modName, 'list_mibs'), modCfg);
+    let res = null;
+    try { res = await _mibLoadInFlight; } finally { _mibLoadInFlight = null; }
     _mibRender(res && res.data);
 }
 
 function _mibRender(data) {
-    const body = document.getElementById('mibManagerBody');
+    // Whichever view is on screen: the library paints a list, the compile view paints what
+    // there is to do. Both are the same payload read differently, and both have to be able
+    // to say that the read failed.
+    const body = document.getElementById('mibManagerBody')
+              || document.getElementById('mibCompileStats');
     if (!body) return;
 
     if (!data || !data.ok) {
         _mibData = null;
+        // A bare "Error" is what the panel showed when the request itself died — no payload,
+        // no message, nothing to act on. The two cases are different and read differently:
+        // the server refusing says why, and the server never answering is worth saying so.
+        const msg = (data && data.message) || _ms('mib_list_failed',
+            'The MIB list could not be read — the request did not come back.');
         body.innerHTML = `<div class="text-danger text-center py-3 small">
-            <i class="bi bi-exclamation-triangle me-1"></i>${esc((data && data.message) || t('error') || 'Error')}
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(msg)}
         </div>`;
         return;
     }
 
     _mibData = data;
 
-    // Stems of the raw MIBs (name minus extension) — a compiled .py whose stem
-    // is NOT here was pulled in by pysmi as a dependency, not requested by the
-    // user.  Used to tag those rows and break down the post-compile count.
-    _mibRawStems = new Set((data.raw || []).map(f => f.name.replace(/\.[^.]*$/, '')));
+    // The modules the raw files declare — a compiled .py that is not one of them was pulled
+    // in by pysmi as a dependency and not asked for. Used to tag those rows and to break down
+    // the post-compile count.
+    _mibRawModules = new Set((data.raw || []).map(
+        f => f.module || f.name.replace(/\.[^.]*$/, '')));
 
     // GitHub import dropdown + compile dependency-source toggles
     _mibPopulateGithub(data);
@@ -345,78 +1478,632 @@ function _mibRender(data) {
     // (compile or GitHub import) is running.
     const stopBtnR = document.getElementById('mibStopBtn');
     if (stopBtnR) stopBtnR.style.display =
-        (_mibCompileInProgress || _mibGithubInProgress) ? 'inline-block' : 'none';
+        (_mibCompileInProgress || _mibGithubInProgress || _mibArchiveInProgress)
+            ? 'inline-block' : 'none';
     const compLblR = document.getElementById('mibCompileBtnLabel');
     if (compLblR && _mibCompileInProgress) compLblR.textContent = _ms('mib_compiling', 'Compiling…');
     const compSelBtnR = document.getElementById('mibCompileSelBtn');
     if (compSelBtnR && _mibCompileInProgress) compSelBtnR.disabled = true;
 
-    // Preserve search queries across reloads (upload / delete / compile)
-    const _sq_raw = document.getElementById('mibSearchRaw')?.value || '';
-    const _sq_cmp = document.getElementById('mibSearchCompiled')?.value || '';
+    // Compiling reads the same inventory and shows none of it: how much there is to do,
+    // and what failed with the reason beside it.
+    if (_mibView() === 'compile') return _mibCompileRender();
 
-    // Build skeleton: column headers with search inputs + empty list containers
-    let h = '<div class="row g-3">';
-
-    h += '<div class="col-md-6">';
-    h += _mibColHeader('bi-file-earmark-text', _ms('mib_manager_raw', 'Raw (.mib)'), data.raw.length, 'mibSearchRaw', 'raw');
-    h += `<div id="mibRawList" class="d-flex flex-column gap-1"
-               style="max-height:35vh;overflow-y:auto"></div>`;
-    h += '</div>';
-
-    h += '<div class="col-md-6">';
-    h += _mibColHeader('bi-file-earmark-code', _ms('mib_manager_compiled', 'Compiled (.py)'), data.compiled.length, 'mibSearchCompiled', 'compiled');
-    h += `<div id="mibCompiledList" class="d-flex flex-column gap-1"
-               style="max-height:35vh;overflow-y:auto"></div>`;
-    h += '</div>';
-
-    h += '</div>';
-    body.innerHTML = h;
-
-    // Restore search values, then populate lists
-    const rawIn = document.getElementById('mibSearchRaw');
-    if (rawIn && _sq_raw) rawIn.value = _sq_raw;
-    const cmpIn = document.getElementById('mibSearchCompiled');
-    if (cmpIn && _sq_cmp) cmpIn.value = _sq_cmp;
+    // The bar and the rail are fixed and the list is the .ss-vscroll under them: that is what
+    // makes the list end at the bottom edge of the viewport instead of at a height of its own.
+    // The search box lives in the rail and is never re-rendered, so what was typed in it
+    // survives an upload, a delete or a compile without being carried across by hand.
+    body.innerHTML = '<div id="mibList" class="ss-vscroll d-flex flex-column gap-1"></div>';
 
     _mibFilterLists();
+}
+
+// ── Compiling, as a view ──────────────────────────────────────────────────────
+//
+// It was a button with a fold under it and a bar over the list: two rows of the library
+// spent on it whether anything was compiling or not, and the two things that matter when a
+// compile goes wrong — which sources resolve an IMPORTS, and what failed and why — either
+// folded away or scattered through four thousand rows behind a chip.
+function _mibCompileRender() {
+    const rows = _mibRows();
+    const c    = _mibCounts(rows);
+    const stats = document.getElementById('mibCompileStats');
+    if (stats) {
+        // Pending comes from the SERVER's count and not from the rows: a row is a module and
+        // the job walks file names, and the two differ whenever a module arrives twice under
+        // different names — which in a vendor archive is most of them.
+        const pending = (_mibData && _mibData.pending) ? _mibData.pending.length : c.pending;
+        stats.innerHTML = [
+            [_ms('mib_filter_pending', 'Pending'),   pending,    pending ? 'text-warning' : ''],
+            [_ms('mib_filter_stale', 'Outdated'),    c.stale,    c.stale ? 'text-warning' : ''],
+            [_ms('mib_filter_failed', 'Errors'),     c.failed,   c.failed ? 'text-danger' : ''],
+            [_ms('mib_filter_compiled', 'Compiled'), c.compiled, 'text-success'],
+        ].map(d => `<div class="d-flex flex-column">
+            <span class="fs-4 fw-semibold ${d[2]}">${d[1]}</span>
+            <span class="small text-muted">${esc(d[0])}</span>
+        </div>`).join('');
+    }
+    const box = document.getElementById('mibCompileErrors');
+    if (box) {
+        const bad = rows.filter(r => r.error);
+        box.innerHTML = bad.length
+            ? bad.map(r => _mibErrorRow(r)).join('')
+            : _mibEmptyBox(_ms('mib_no_errors', 'Nothing failed to compile'));
+    }
+    _mibUpdateCompileBtn();
+    _mibUpdateCleanBtn(rows);
+}
+
+// A failure, with the file it is about and the two things anybody does next: read the line
+// pysmi named, or try it again once the file has been fixed.
+function _mibErrorRow(r) {
+    const ln    = _mibErrorLine(r.error);
+    const shown = (r.dupe && r.dupe.used) || r.raws[0] || '';
+    const btn   = 'btn btn-sm btn-secondary py-0 px-1 flex-shrink-0';
+    return `<div class="d-flex align-items-start gap-2 px-2 py-1 rounded border"
+                 style="background:var(--bs-body-bg)">
+        <i class="bi bi-file-earmark-x text-danger flex-shrink-0" style="font-size:.9rem"></i>
+        <span class="flex-grow-1" style="min-width:0">
+            <span style="font-size:.8rem">${r.dir ? `<span class="text-muted">${esc(r.dir)}/</span>` : ''}${esc(r.mib)}</span>
+            <span class="d-block text-danger text-truncate" style="font-size:.72rem"
+                  title="${escAttr(r.error)}">${esc(r.error)}</span>
+        </span>
+        ${shown ? `
+        <button class="${btn}" title="${escAttr(ln
+                    ? _ms('mib_view_raw_at', 'View source at the failing line')
+                    : _ms('mib_view_raw', 'View source file'))}"
+                onclick="_mibShowRawDetails(${jsStr(shown)}${ln ? ', ' + ln : ''})">
+            <i class="bi bi-eye" style="font-size:.75rem"></i>
+        </button>
+        <button class="${btn}" title="${escAttr(_ms('mib_compile_one', 'Compile'))}"
+                ${_mibData && !_mibData.pysmi_available ? 'disabled' : ''}
+                onclick="_compileMibs([${jsStr(shown)}])">
+            <i class="bi bi-gear" style="font-size:.75rem"></i>
+        </button>` : ''}
+    </div>`;
 }
 
 // Apply search filters and re-render both file lists.
 // Called on every keystroke and after each data reload.
 function _mibFilterLists() {
     if (!_mibData) return;
-    const rawQ = (document.getElementById('mibSearchRaw')?.value  || '').toLowerCase();
-    const cmpQ = (document.getElementById('mibSearchCompiled')?.value || '').toLowerCase();
+    // A compile that finishes while the compile view is open re-reads the library through
+    // here too: the counts it shows are the same counts, and they move for the same reason.
+    if (_mibView() === 'compile') return _mibCompileRender();
+    const all   = _mibRows();
+    const shown = _mibVisibleRows();
 
-    const _filter = (files, q) => q ? files.filter(f => f.name.toLowerCase().includes(q)) : files;
-    const rawF = _filter(_mibData.raw,      rawQ);
-    const cmpF = _filter(_mibData.compiled, cmpQ);
+    // The rail carries the counts, so it is re-rendered whenever they can have changed —
+    // which includes mid-compile, as pending rows turn into compiled ones.
+    const rail = document.getElementById('mibRailBody');
+    if (rail) rail.innerHTML = _mibRailHtml(all);
 
-    const rawList = document.getElementById('mibRawList');
-    if (rawList) {
-        if (!rawF.length && !rawQ) rawList.innerHTML = _mibEmptyBox(_ms('mib_no_raw', 'No .mib files yet — upload one to get started'));
-        else if (!rawF.length)     rawList.innerHTML = _mibNoMatch();
-        else                       rawList.innerHTML = rawF.map(f => _mibFileRow(f, 'raw')).join('');
+    const bar = document.getElementById('mibListBar');
+    if (bar) bar.innerHTML = _mibListBarHtml(all, shown);
+
+    const list = document.getElementById('mibList');
+    if (list) {
+        if (!all.length)      list.innerHTML = _mibEmptyBox(
+            _ms('mib_no_raw', 'No .mib files yet — upload one to get started'));
+        else if (!shown.length) list.innerHTML = _mibNoMatch();
+        else                  list.innerHTML = _mibListHtml(shown);
     }
+    _mibGroupCheckStates();
+    _mibUpdateCompileBtn();
+    _mibUpdateDeleteBtn();
+}
 
-    const cmpList = document.getElementById('mibCompiledList');
-    if (cmpList) {
-        if (!cmpF.length && !cmpQ) cmpList.innerHTML = _mibEmptyBox(_ms('mib_no_compiled', 'No compiled MIBs'));
-        else if (!cmpF.length)     cmpList.innerHTML = _mibNoMatch();
-        else                       cmpList.innerHTML = cmpF.map(f => _mibFileRow(f, 'compiled')).join('');
+// Half the leftovers ARE countable from the listing — a compiled module with no source is a
+// row. The other half (a vendor folder emptied of its files) is not: the listing is a list of
+// files and an empty folder holds none. So the button carries the number it has and asks the
+// server for the rest when it is pressed.
+//
+// And it only appears when there is something to sweep: a broom on a tidy library is a
+// button whose whole answer is "nothing". The library says so in its own way — a "no source"
+// line in the rail, with the rows behind it — which is a notice and not an action.
+function _mibUpdateCleanBtn(rows) {
+    const n   = rows.filter(r => r.state === 'stray').length;
+    const btn = document.getElementById('mibCleanBtn');
+    const cnt = document.getElementById('mibCleanCount');
+    if (btn) btn.style.display = n ? '' : 'none';
+    if (cnt) cnt.textContent = n ? String(n) : '';
+}
+
+// ── The MIB source, in an editor instead of a wall of text ────────
+//
+// pysmi reports a failure BY LINE — "Bad grammar near offset 558 … line 21" — and a <pre>
+// has no lines to count: you scroll and guess. CodeMirror is already in the panel (the
+// notification-template editor uses it) and its loader is core, so the numbers cost nothing
+// but the asking. The colour costs one mode, because CodeMirror 5 ships none for ASN.1/SMI.
+//
+// Deliberately a lexer and not a parser: it must colour a file that DOES NOT PARSE, which is
+// exactly when somebody is reading it. A mode that needed the grammar to hold would give up
+// on the one file worth looking at.
+let _mibSrcEditor = null;
+
+// Where the numbering has to be right for: the words that open a definition…
+const _MIB_KEYWORDS = /^(?:DEFINITIONS|BEGIN|END|IMPORTS|EXPORTS|FROM|MACRO|MODULE-IDENTITY|MODULE-COMPLIANCE|OBJECT-TYPE|OBJECT-IDENTITY|OBJECT-GROUP|OBJECT|IDENTIFIER|NOTIFICATION-TYPE|NOTIFICATION-GROUP|TRAP-TYPE|AGENT-CAPABILITIES|TEXTUAL-CONVENTION|SEQUENCE|CHOICE|OF|SYNTAX|WRITE-SYNTAX|MAX-ACCESS|MIN-ACCESS|ACCESS|STATUS|DESCRIPTION|REFERENCE|INDEX|IMPLIED|AUGMENTS|DEFVAL|UNITS|LAST-UPDATED|ORGANIZATION|CONTACT-INFO|REVISION|DISPLAY-HINT|ENTERPRISE|VARIABLES|OBJECTS|NOTIFICATIONS|MODULE|MANDATORY-GROUPS|GROUP|SIZE|SUPPORTS|INCLUDES|PRODUCT-RELEASE|VARIATION|CREATION-REQUIRES)$/;
+// …the built-in types a value can have…
+const _MIB_TYPES = /^(?:INTEGER|Integer32|Unsigned32|Counter|Counter32|Counter64|Gauge|Gauge32|TimeTicks|OCTET|STRING|IpAddress|NetworkAddress|Opaque|BITS|Bits|DisplayString|PhysAddress|MacAddress|TruthValue|RowStatus|TestAndIncr|AutonomousType|InstancePointer|TimeStamp|TimeInterval|DateAndTime|StorageType|TDomain|TAddress)$/;
+// …and the words that say what a thing is FOR, which is what an eye scanning a table wants.
+const _MIB_ATOMS = /^(?:read-only|read-write|read-create|not-accessible|accessible-for-notify|write-only|current|deprecated|obsolete|mandatory|optional|true|false|null)$/;
+
+function _mibDefineMode() {
+    if (typeof CodeMirror === 'undefined' || (CodeMirror.modes && CodeMirror.modes.mib)) return;
+    CodeMirror.defineMode('mib', function () {
+        return {
+            startState: () => ({inString: false}),
+            token: function (stream, state) {
+                // A DESCRIPTION runs over many lines, so the string state outlives the line.
+                if (state.inString) {
+                    while (!stream.eol()) {
+                        if (stream.next() === '"') { state.inString = false; break; }
+                    }
+                    return 'string';
+                }
+                if (stream.eatSpace()) return null;
+                // ASN.1 comments open with `--` and close with `--` or the end of the line.
+                if (stream.match('--')) {
+                    if (!stream.skipTo('--')) stream.skipToEnd();
+                    else stream.match('--');
+                    return 'comment';
+                }
+                if (stream.peek() === '"') {
+                    stream.next();
+                    state.inString = true;
+                    while (!stream.eol()) {
+                        if (stream.next() === '"') { state.inString = false; break; }
+                    }
+                    return 'string';
+                }
+                if (stream.match('::=')) return 'operator';
+                if (stream.match(/^[{}()[\],;|.]/)) return 'bracket';
+                if (stream.match(/^-?\d+/)) return 'number';
+                const w = stream.match(/^[A-Za-z][A-Za-z0-9-_]*/);
+                if (w) {
+                    const t = w[0];
+                    if (_MIB_KEYWORDS.test(t)) return 'keyword';
+                    if (_MIB_TYPES.test(t))    return 'type';
+                    if (_MIB_ATOMS.test(t))    return 'atom';
+                    // In SMI the CASE of the first letter is the meaning: uppercase is a type
+                    // reference, lowercase a value. Colouring them apart is not decoration —
+                    // it is the distinction a malformed vendor MIB gets wrong.
+                    return /^[A-Z]/.test(t) ? 'def' : 'variable';
+                }
+                stream.next();
+                return null;
+            },
+        };
+    });
+}
+
+
+// pysmi writes Python, and CodeMirror 5 ships no mode for that here either (the bundled ones
+// are css, xml, javascript and htmlmixed). Same shape as the MIB mode and for the same
+// reason: a lexer colours a file whatever state it is in.
+const _PY_KEYWORDS = /^(?:def|class|return|yield|if|elif|else|for|while|break|continue|pass|import|from|as|with|try|except|finally|raise|assert|lambda|global|nonlocal|del|and|or|not|in|is|async|await)$/;
+const _PY_ATOMS = /^(?:None|True|False|self|cls)$/;
+
+function _mibDefinePyMode() {
+    if (typeof CodeMirror === 'undefined' || (CodeMirror.modes && CodeMirror.modes.pysnmp)) return;
+    CodeMirror.defineMode('pysnmp', function () {
+        return {
+            startState: () => ({triple: null}),
+            token: function (stream, state) {
+                // A pysmi module is mostly one enormous call chain with docstrings in it; a
+                // triple-quoted string outlives its line the same way a DESCRIPTION does.
+                if (state.triple) {
+                    while (!stream.eol()) {
+                        if (stream.match(state.triple)) { state.triple = null; break; }
+                        stream.next();
+                    }
+                    return 'string';
+                }
+                if (stream.eatSpace()) return null;
+                if (stream.peek() === '#') { stream.skipToEnd(); return 'comment'; }
+                const triple = stream.match(/^(?:'{3}|"{3})/);
+                if (triple) {
+                    state.triple = triple[0];
+                    while (!stream.eol()) {
+                        if (stream.match(state.triple)) { state.triple = null; break; }
+                        stream.next();
+                    }
+                    return 'string';
+                }
+                const q = stream.match(/^[br]?['"]/);
+                if (q) {
+                    const ch = q[0].slice(-1);
+                    while (!stream.eol()) {
+                        const c = stream.next();
+                        if (c === '\\') { stream.next(); continue; }
+                        if (c === ch) break;
+                    }
+                    return 'string';
+                }
+                if (stream.match(/^-?\d[\d_]*(?:\.\d+)?/)) return 'number';
+                if (stream.match(/^@[A-Za-z_]\w*/)) return 'meta';
+                if (stream.match(/^[{}()[\],:;.=+\-*/%<>!|&]/)) return 'bracket';
+                const w = stream.match(/^[A-Za-z_]\w*/);
+                if (w) {
+                    const t = w[0];
+                    if (_PY_KEYWORDS.test(t)) return 'keyword';
+                    if (_PY_ATOMS.test(t))    return 'atom';
+                    return /^[A-Z]/.test(t) ? 'def' : 'variable';
+                }
+                stream.next();
+                return null;
+            },
+        };
+    });
+}
+
+
+// A unified diff, coloured. Three rules and it is done — and of the three modes here it is
+// the one that earns the most: a wall of monospace where the +/- at column zero is the whole
+// message is exactly the thing an eye cannot scan.
+function _mibDefineDiffMode() {
+    if (typeof CodeMirror === 'undefined' || (CodeMirror.modes && CodeMirror.modes.mibdiff)) return;
+    CodeMirror.defineMode('mibdiff', function () {
+        return {
+            token: function (stream) {
+                if (stream.sol()) {
+                    const c = stream.peek();
+                    if (c === '@') { stream.skipToEnd(); return 'meta'; }
+                    if (c === '+') { stream.skipToEnd(); return 'attribute'; }
+                    if (c === '-') { stream.skipToEnd(); return 'string'; }
+                }
+                stream.skipToEnd();
+                return null;
+            },
+        };
+    });
+}
+
+// Draw the source into *el*.  If CodeMirror will not load, the old <pre> is still the answer:
+// a viewer that fails to be pretty must not fail to be a viewer.
+async function _mibRenderSource(el, text, line, mode) {
+    if (!el) return;
+    const ok = await _ensureCodeMirror();
+    if (!ok) {
+        el.innerHTML = `<pre class="rounded p-2 mb-0 mib-src-plain">${esc(text || '')}</pre>`;
+        return;
     }
+    _mibDefineMode();
+    _mibDefinePyMode();
+    _mibDefineDiffMode();
+    el.innerHTML = '';
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    if ((mode || 'mib') === 'mib') _mibSrcOnDisk = text || '';
+    _mibSrcEditor = CodeMirror(el, {
+        value:       text || '',
+        mode:        mode || 'mib',
+        theme:       isDark ? 'material-darker' : 'eclipse',
+        lineNumbers: true,
+        readOnly:    true,
+        lineWrapping: false,
+        viewportMargin: 20,
+    });
+    // The modal is not laid out yet when this runs; CodeMirror measures on creation and
+    // would size itself against nothing.
+    setTimeout(() => {
+        if (!_mibSrcEditor) return;
+        _mibSrcEditor.refresh();
+        if (line > 0) {
+            const i = line - 1;
+            _mibSrcEditor.addLineClass(i, 'background', 'mib-src-badline');
+            _mibSrcEditor.scrollIntoView({line: i, ch: 0}, 120);
+            _mibSrcEditor.setCursor({line: i, ch: 0});
+        }
+    }, 60);
+}
 
-    // Update count badges: show "filtered/total" when a query is active
-    const rawBadge = document.getElementById('mibSearchRaw-badge');
-    if (rawBadge) rawBadge.textContent = rawQ
-        ? `${rawF.length} / ${_mibData.raw.length}`
-        : String(_mibData.raw.length);
+// ── Editing a MIB, and taking it back ─────────────────────────────
+//
+// Vendors ship broken MIBs — SYNOLOGY-SMB-MIB has never compiled anywhere — and there is
+// nothing to do about that from here except let somebody correct it. A correction nobody can
+// undo is one nobody dares make, so the history is the feature and the pencil is the button.
+let _mibEditName = '';        // the raw MIB currently open in the editor
+let _mibEditOn   = false;     // whether it is editable right now
+// What is on disk, as the editor was given it. Leaving edit mode is putting this back — not
+// fetching the file again and rebuilding the modal around it, which threw away the tab, the
+// scroll position and the editor itself to undo something already in memory.
+let _mibSrcOnDisk = '';
+let _mibVersions = [];        // its versions, newest first
 
-    const cmpBadge = document.getElementById('mibSearchCompiled-badge');
-    if (cmpBadge) cmpBadge.textContent = cmpQ
-        ? `${cmpF.length} / ${_mibData.compiled.length}`
-        : String(_mibData.compiled.length);
+function _mibEditReset(name) {
+    _mibEditName = name || '';
+    _mibEditOn   = false;
+    _mibVersions = [];
+}
+
+// The editor is read-only until asked, because this modal is opened to READ far more often
+// than to change anything, and a text box you can type into by accident is a file you can
+// break by accident.
+function _mibEditToggle(on) {
+    if (!_mibSrcEditor) return;
+    _mibEditOn = !!on;
+    _mibSrcEditor.setOption('readOnly', !_mibEditOn);
+    _mibSrcEditor.setOption('styleActiveLine', _mibEditOn);
+    if (_mibEditOn) _mibSrcEditor.focus();
+    _mibEditRenderBar();
+}
+
+function _mibEditRenderBar() {
+    const bar = document.getElementById('mibEditBar');
+    if (!bar) return;
+    const nVer = _mibVersions.length;
+    // The note is asked for HERE and not in a dialog after the fact: what a change is for
+    // is known while it is being made, and a version list of thirty entries that all say
+    // nothing is a list nobody reads twice.
+    bar.innerHTML = _mibEditOn
+        ? `<button class="btn btn-sm btn-primary" onclick="_mibEditSave()">
+               <i class="bi bi-check2 me-1"></i>${esc(_ms('mib_edit_save', 'Save'))}</button>
+           <button class="btn btn-sm btn-secondary" onclick="_mibEditCancel()">
+               <i class="bi bi-x me-1"></i>${esc(t('cancel') || 'Cancel')}</button>
+           <button class="btn btn-sm btn-secondary" onclick="_mibLintNow()">
+               <i class="bi bi-clipboard-check me-1"></i>${esc(_ms('mib_lint', 'Check'))}</button>
+           <input type="text" id="mibEditNote" class="form-control form-control-sm flex-grow-1"
+                  style="min-width:12rem" maxlength="200" autocomplete="off"
+                  placeholder="${escAttr(_ms('mib_edit_note_ph', 'What does this change fix? (optional)'))}"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();_mibEditSave();}">`
+        : `<button class="btn btn-sm btn-secondary" onclick="_mibEditToggle(true)">
+               <i class="bi bi-pencil me-1"></i>${esc(_ms('mib_edit', 'Edit'))}</button>
+           ${nVer ? `<button class="btn btn-sm btn-secondary" onclick="_mibVersionsShow()">
+               <i class="bi bi-clock-history me-1"></i>${esc(_ms('mib_versions', 'Versions'))}
+               <span class="opacity-75 ms-1">${nVer}</span></button>` : ''}`;
+}
+
+function _mibEditCancel() {
+    // Back to what is on disk — which is a value we already hold, so nothing is fetched and
+    // nothing is rebuilt. Leaving the editor is not a request to go and look at something
+    // else, and it should not cost the tab you were on or where you had scrolled to.
+    if (!_mibSrcEditor) return;
+    // Back from a DIFF as well as from an edit: the editor was switched to another language
+    // to show it, and text put back under the wrong mode is coloured as something it is not.
+    _mibSrcEditor.setOption('mode', 'mib');
+    _mibSrcEditor.setValue(_mibSrcOnDisk);
+    _mibEditToggle(false);
+    _mibSrcEditor.refresh();
+}
+
+async function _mibEditSave() {
+    if (!_mibSrcEditor || !_mibEditName) return;
+    const content = _mibSrcEditor.getValue();
+    const note    = (document.getElementById('mibEditNote')?.value || '').trim();
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'save_mib_source'),
+                              { ...(modulesData[modName] || {}),
+                                name: _mibEditName, content, note });
+    const d = res && res.data;
+    if (!d || !d.ok) {
+        showToast((d && d.message) || (t('error') || 'Error'), 'error');
+        return;
+    }
+    if (d.unchanged) {
+        showToast(_ms('mib_edit_unchanged', 'Nothing changed'));
+        _mibEditToggle(false);
+        return;
+    }
+    _mibVersions = d.versions || [];
+    _mibSrcOnDisk = content;          // this IS the file now
+    _mibVersionsDraw();
+    showToast(_ms('mib_edit_saved', 'Saved — the MIB has to be compiled again'));
+    _mibEditToggle(false);
+    // What the file declares has changed, so that tab is quietly wrong — redraw THAT, not
+    // the modal. And the list behind: its compiled module is now older than its source, and
+    // any recorded failure was about bytes that are gone.
+    await _mibDeclRefresh();
+    await _mibLoad();
+}
+
+async function _mibVersionsLoad(name) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'list_mib_versions'),
+                              { ...(modulesData[modName] || {}), name });
+    const d = res && res.data;
+    _mibVersions = (d && d.ok && d.versions) || [];
+    _mibEditRenderBar();
+}
+
+function _mibVersionRow(v) {
+    const when = v.created_at ? new Date(v.created_at * 1000).toLocaleString() : '';
+    const who  = v.author || _ms('mib_version_system', 'system');
+    const note = v.note === 'original' ? _ms('mib_version_original', 'as the vendor shipped it')
+                                       : (v.note || '');
+    return `<div class="d-flex align-items-center gap-2 px-2 py-1 rounded border"
+                 style="background:var(--bs-body-bg)">
+        <span class="badge bg-secondary flex-shrink-0" style="font-size:.62rem">v${v.version}</span>
+        ${v.parent ? `<span class="text-muted flex-shrink-0" style="font-size:.62rem"
+              title="${escAttr(_ms('mib_version_parent_tip', 'The version this one was written on top of'))}">← v${v.parent}</span>` : ''}
+        <span class="flex-grow-1 text-truncate" style="font-size:.78rem">
+            ${esc(when)} <span class="text-muted">· ${esc(who)}</span>
+            ${note ? `<span class="text-muted"> · ${esc(note)}</span>` : ''}
+        </span>
+        <span class="text-muted flex-shrink-0" style="font-size:.72rem">${_mibSz(v.size)}</span>
+        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
+                title="${escAttr(_ms('mib_version_view', 'View this version'))}"
+                onclick="_mibVersionView(${jsStr(v.uid)},${v.version})">
+            <i class="bi bi-eye" style="font-size:.75rem"></i>
+        </button>
+        <button class="btn btn-sm btn-secondary py-0 px-1 flex-shrink-0"
+                title="${escAttr(v.parent
+                    ? _ms('mib_version_diff_parent', 'What this version changed')
+                    : _ms('mib_version_diff', 'Compare with the current file'))}"
+                onclick="_mibVersionDiff(${jsStr(v.uid)},${v.version},${jsStr(_mibParentUid(v))})">
+            <i class="bi bi-file-diff" style="font-size:.75rem"></i>
+        </button>
+        <button class="btn btn-sm btn-warning py-0 px-1 flex-shrink-0"
+                title="${escAttr(_ms('mib_version_restore', 'Restore this version'))}"
+                onclick="_mibVersionRestore(${jsStr(v.uid)},${v.version})">
+            <i class="bi bi-arrow-counterclockwise" style="font-size:.75rem"></i>
+        </button>
+        <button class="btn btn-sm btn-danger py-0 px-1 flex-shrink-0"
+                title="${escAttr(_ms('mib_version_delete', 'Delete this version'))}"
+                onclick="_mibVersionDelete(${jsStr(v.uid)},${v.version},${v.note === 'original'})">
+            <i class="bi bi-trash3" style="font-size:.75rem"></i>
+        </button>
+    </div>`;
+}
+
+function _mibVersionsShow() {
+    const box = document.getElementById('mibVersionsBox');
+    if (!box) return;
+    const open = box.style.display !== 'none';
+    box.style.display = open ? 'none' : '';
+    if (!open) _mibVersionsDraw();
+}
+
+// Redraw the open list in place. A save adds a version, and a list left open showing the
+// state before it is a list that lies about the thing that just happened.
+function _mibVersionsDraw() {
+    const box = document.getElementById('mibVersionsBox');
+    if (!box || box.style.display === 'none') return;
+    box.innerHTML = `<div class="d-flex flex-column gap-1 mt-2 ss-scroll-box">
+        ${_mibVersions.map(v => _mibVersionRow(v)).join('')}</div>`;
+}
+
+async function _mibVersionView(uid, version) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'get_mib_version'),
+                              { ...(modulesData[modName] || {}), uid });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    // Shown in the editor, read-only and clearly labelled: this is NOT what is on disk, and
+    // an old version that looks like the current one is how the wrong file gets compiled.
+    if (_mibSrcEditor) {
+        _mibEditToggle(false);
+        _mibSrcEditor.setOption('mode', 'mib');   // it may be arriving from a diff
+        _mibSrcEditor.setValue(d.source || '');
+        _mibSrcEditor.refresh();
+    }
+    const bar = document.getElementById('mibEditBar');
+    if (bar) {
+        bar.innerHTML = `<span class="badge bg-warning text-dark">
+                ${esc(_ms('mib_version_viewing', 'Viewing v'))}${version}</span>
+            <button class="btn btn-sm btn-warning" onclick="_mibVersionRestore(${jsStr(uid)},${version})">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(_ms('mib_version_restore', 'Restore'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_mibEditCancel()">
+                <i class="bi bi-x me-1"></i>${esc(_ms('mib_version_back', 'Back to the current file'))}</button>`;
+    }
+}
+
+// The uid of the version this one was written on top of, if it is still here. A version is
+// an update on a base, so "what did v2 change?" is the diff base → v2 — and comparing it with
+// whatever is on disk today answers a different question, one that stops being useful the
+// moment the vendor ships a new release.
+function _mibParentUid(v) {
+    if (!v.parent_sha) return '';
+    const p = _mibVersions.find(x => x.sha === v.parent_sha);
+    return p ? p.uid : '';
+}
+
+// What changed between two versions — or, by default, between one and the file as it is
+// now, which is the comparison anybody actually wants ("what did I change since v3?").
+// Computed on the server: the version list is deliberately shipped without content, so
+// diffing here would mean fetching two whole files to throw most of them away.
+async function _mibVersionDiff(uid, version, other, otherVersion) {
+    const modName = _mibManagerModuleName;
+    const cfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'diff_mib_versions'),
+                              { ...cfg, name: _mibEditName, uid, other: other || '' });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    if (d.identical) {
+        showToast(_ms('mib_version_same', 'No differences'));
+        return;
+    }
+    if (_mibSrcEditor) {
+        _mibEditToggle(false);
+        _mibSrcEditor.setOption('mode', 'mibdiff');
+        _mibSrcEditor.setValue(d.diff || '');
+        _mibSrcEditor.refresh();
+    }
+    const bar = document.getElementById('mibEditBar');
+    if (bar) {
+        // Which way round it reads, spelled out: a diff whose direction you have to guess is
+        // one you can read backwards without noticing.
+        bar.innerHTML = `<span class="badge bg-secondary">${esc(d.a)} → ${esc(d.b)}</span>
+            ${d.truncated ? `<span class="badge bg-warning text-dark">${esc(_ms('mib_version_diff_big', 'shown in part'))}</span>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="_mibEditCancel()">
+                <i class="bi bi-x me-1"></i>${esc(_ms('mib_version_back', 'Back to the current file'))}</button>
+            ${_mibVersionsPickHtml(uid, version)}`;
+    }
+}
+
+// The other side of the comparison. Defaults to the file on disk; the rest of the versions
+// are here so "what changed between v2 and v3" does not need a second screen.
+function _mibVersionsPickHtml(uid, version) {
+    const others = _mibVersions.filter(v => v.uid !== uid);
+    if (!others.length) return '';
+    return `<select class="form-select form-select-sm" style="width:auto"
+            onchange="_mibVersionDiff(${jsStr(uid)},${version},this.value)">
+        <option value="">${esc(_ms('mib_version_vs_current', 'vs the current file'))}</option>
+        ${(() => {
+            const me = _mibVersions.find(x => x.uid === uid);
+            const p = me && _mibParentUid(me);
+            return p ? `<option value="${escAttr(p)}" selected>${esc(_ms('mib_version_vs_parent', 'vs its own base'))}</option>` : '';
+        })()}
+        ${others.map(v => `<option value="${escAttr(v.uid)}">${esc(_ms('mib_version_vs', 'vs'))} v${v.version}</option>`).join('')}
+    </select>`;
+}
+
+// Deleting one version. The history is the reason anybody dares edit a vendor MIB, so it is
+// not tidied automatically beyond the cap — but a version somebody knows is junk should not
+// have to stay for ever either.
+function _mibVersionDelete(uid, version, isOriginal) {
+    // Version 1 is the only one that cannot be got back from anywhere: the file it came from
+    // has been overwritten by every save since. Saying so is the difference between a warning
+    // and a warning that means something.
+    const msg = isOriginal
+        ? _ms('mib_version_delete_original_confirm',
+              'Delete v{n}? It is the only copy of this MIB as the vendor shipped it.')
+        : _ms('mib_version_delete_confirm', 'Delete v{n} from the history?');
+    showConfirmModal(msg.replace('{n}', version), () => _mibVersionDeleteConfirmed(uid));
+}
+
+async function _mibVersionDeleteConfirmed(uid) {
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'delete_mib_version'),
+                              { ...(modulesData[modName] || {}), name: _mibEditName, uid });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    _mibVersions = d.versions || [];
+    _mibVersionsDraw();
+    _mibEditRenderBar();
+    showToast(_ms('mib_version_deleted', 'Version deleted'));
+    await _mibLoad();
+}
+
+function _mibVersionRestore(uid, version) {
+    showConfirmModal(
+        _ms('mib_version_restore_confirm', 'Restore v{n}? The current content is kept as a version.')
+            .replace('{n}', version),
+        () => _mibVersionRestoreConfirmed(uid));
+}
+
+async function _mibVersionRestoreConfirmed(uid) {
+    const modName = _mibManagerModuleName;
+    const cfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'restore_mib_version'),
+                              { ...cfg, name: _mibEditName, uid });
+    const d = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    _mibVersions = d.versions || [];
+    // The restored bytes are the file now; put them in the editor rather than reloading the
+    // modal to find out what we just wrote.
+    const back = await apiPost(_mibApiUrl(modName, 'get_mib_version'), { ...cfg, uid });
+    const bd = back && back.data;
+    if (bd && bd.ok && _mibSrcEditor) {
+        _mibSrcOnDisk = bd.source || '';
+        _mibSrcEditor.setValue(_mibSrcOnDisk);
+        _mibSrcEditor.refresh();
+    }
+    showToast(_ms('mib_edit_saved', 'Saved — the MIB has to be compiled again'));
+    _mibEditToggle(false);
+    const box = document.getElementById('mibVersionsBox');
+    if (box) box.style.display = 'none';
+    await _mibDeclRefresh();
+    await _mibLoad();
 }
 
 // ── MIB Browser modal — full OID tree ────────────────────────────
@@ -426,25 +2113,31 @@ let _mibBrowserExpanded   = new Set();
 let _mibBrowserFilter     = '';
 let _mibBrowserSearchTimer = null;  // debounce handle
 
-async function openMibBrowserModal(modName) {
+// WHICH copy of the browser is being drawn: the dialog's, or the section view's. Both can
+// be in the document at once — the dialog is still how the module's own screens open it —
+// and two live copies of an id is a control that fills one box and reads the other. The view
+// suffixes its ids and everything that draws goes through here.
+let _mibBrowserScope = '';
+const _brwEl = id => document.getElementById(id + _mibBrowserScope);
+
+/** The screen itself, wherever it has been mounted: labels, then the symbols. */
+async function _mibBrowserLoad(modName) {
     _mibManagerModuleName = modName;
     _mibBrowserSymbols    = null;
     _mibBrowserTreeRoot   = null;
     _mibBrowserExpanded   = new Set();
     _mibBrowserFilter     = '';
 
-    const titleEl  = document.getElementById('mibBrowserTitle');
-    const countEl  = document.getElementById('mibBrowserCount');
-    const searchEl = document.getElementById('mibBrowserSearch');
-    const treeEl   = document.getElementById('mibBrowserTree');
-    const exAllEl  = document.getElementById('mibBrowserExpandAllLabel');
+    const titleEl  = _brwEl('mibBrowserTitle');
+    const countEl  = _brwEl('mibBrowserCount');
+    const searchEl = _brwEl('mibBrowserSearch');
+    const treeEl   = _brwEl('mibBrowserTree');
+    const exAllEl  = _brwEl('mibBrowserExpandAllLabel');
     if (titleEl)  titleEl.textContent = _ms('mib_browser', 'MIB Browser');
     if (countEl)  { countEl.textContent = ''; countEl.style.display = 'none'; }
     if (searchEl) { searchEl.value = ''; searchEl.placeholder = _ms('mib_browser_search', 'Search…'); }
     if (exAllEl)  exAllEl.textContent = _ms('mib_browser_expand_all', 'Expand all');
     if (treeEl)   treeEl.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
-
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibBrowserModal')).show();
 
     const cfg = modulesData[modName] || {};
     const res = await apiPost(_mibApiUrl(modName, 'get_all_symbols'), {...cfg});
@@ -460,7 +2153,7 @@ async function openMibBrowserModal(modName) {
     _mibBrowserSymbols  = d.symbols || [];
     _mibBrowserTreeRoot = _mibBuildOidTree(_mibBrowserSymbols);
     _snmpRebuildOidMap();
-    const countEl2 = document.getElementById('mibBrowserCount');
+    const countEl2 = _brwEl('mibBrowserCount');
     // Explicit value: CSS hides #mibBrowserCount by default ('' wouldn't show it).
     if (countEl2) { countEl2.textContent = _mibBrowserSymbols.length; countEl2.style.display = 'inline-block'; }
     _mibBrowserRenderTree();
@@ -529,6 +2222,19 @@ function _mibBrowserToggle(oid) {
     _mibBrowserRenderTree();
 }
 
+/** The dialog, as it always was — the module's other screens open it from a button. */
+async function openMibBrowserModal(modName) {
+    _mibBrowserScope = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mibBrowserModal')).show();
+    return _mibBrowserLoad(modName);
+}
+
+/** The view of the section: same screen, no dialog around it. */
+async function _mibBrowserViewLoad(modName) {
+    _mibBrowserScope = 'View';
+    return _mibBrowserLoad(modName);
+}
+
 function _mibBrowserFilterChange(val) {
     _mibBrowserFilter = val.trim();
     clearTimeout(_mibBrowserSearchTimer);
@@ -541,7 +2247,7 @@ function _mibBrowserExpandAll() {
     const allExpanded = allOids.length && allOids.every(o => _mibBrowserExpanded.has(o));
     if (allExpanded) _mibBrowserExpanded.clear();
     else allOids.forEach(o => _mibBrowserExpanded.add(o));
-    const lbl = document.getElementById('mibBrowserExpandAllLabel');
+    const lbl = _brwEl('mibBrowserExpandAllLabel');
     if (lbl) lbl.textContent = _ms(
         _mibBrowserExpanded.size ? 'mib_browser_collapse_all' : 'mib_browser_expand_all',
         _mibBrowserExpanded.size ? 'Collapse all' : 'Expand all'
@@ -550,7 +2256,7 @@ function _mibBrowserExpandAll() {
 }
 
 function _mibBrowserRenderTree() {
-    const treeEl = document.getElementById('mibBrowserTree');
+    const treeEl = _brwEl('mibBrowserTree');
     if (!treeEl) return;
 
     if (!_mibBrowserSymbols) {
@@ -847,6 +2553,23 @@ async function _mibShowDetails(name) {
 
     let h = '';
 
+    // Two tabs, the same pair the raw viewer has: what it declares, and what it says. The
+    // symbol table is what a compiled MIB is opened for; the generated module is the answer
+    // to "did it really compile THAT", which is a question that comes second.
+    h += `<ul class="nav nav-tabs mb-2 flex-shrink-0" role="tablist">
+        <li class="nav-item"><button class="nav-link active"
+                data-bs-toggle="tab" data-bs-target="#mibTabDecl" type="button" role="tab">
+            <i class="bi bi-list-ul me-1"></i>${esc(symLabel)}
+        </button></li>
+        <li class="nav-item"><button class="nav-link" id="mibTabCodeBtn"
+                data-bs-toggle="tab" data-bs-target="#mibTabCode" type="button" role="tab">
+            <i class="bi bi-code-slash me-1"></i>${esc(srcLabel)}
+        </button></li>
+    </ul>
+    <div class="tab-content ss-vfill">
+    <div class="tab-pane fade show active ss-vfill ss-vscroll ss-scroll-pad"
+         id="mibTabDecl" role="tabpanel">`;
+
     // ── Symbol table ──────────────────────────────────────────────
     if (d.symbols && d.symbols.length) {
         _mibDetailsData = {type: 'compiled', rows: d.symbols};
@@ -855,7 +2578,6 @@ async function _mibShowDetails(name) {
             <div class="text-muted mb-1" style="font-size:.78rem">
                 <i class="bi bi-list-ul me-1"></i>${d.symbols.length} ${esc(symLabel)}
             </div>
-            <div style="max-height:45vh;overflow-y:auto">
             <table class="table table-sm table-bordered mb-0" style="font-size:.76rem">
                 <thead id="mibDetailsThead" class="sticky-top"
                        style="background:var(--bs-tertiary-bg);color:var(--bs-emphasis-color)">
@@ -869,28 +2591,113 @@ async function _mibShowDetails(name) {
                 </thead>
                 <tbody id="mibDetailsTbody"></tbody>
             </table>
-            </div>
         </div>`;
     } else {
         _mibDetailsData = null;
         h += `<div class="text-muted mb-3 small"><i class="bi bi-info-circle me-1"></i>${esc(noSyms)}</div>`;
     }
 
-    // ── Source code ───────────────────────────────────────────────
-    h += `<details>
-        <summary class="fw-semibold mb-2" style="font-size:.82rem;cursor:pointer;user-select:none">
-            <i class="bi bi-code-slash me-1"></i>${esc(srcLabel)}
-        </summary>
-        <pre class="rounded p-2 mt-2" style="font-size:.70rem;max-height:45vh;overflow:auto;background:var(--bs-body-secondary-bg,var(--bs-secondary-bg))">${esc(d.source)}</pre>
-    </details>`;
+    // ── …and the module pysmi wrote, in its own tab ───────────────
+    h += `</div>
+    <div class="tab-pane fade ss-vfill" id="mibTabCode" role="tabpanel">
+        <div class="mib-src ss-vfill" id="mibSourceBox"></div>
+    </div>
+    </div>`;
 
     if (bodyEl) {
         bodyEl.innerHTML = h;
         if (_mibDetailsData) _mibRenderDetailsTbody();
+        _mibSrcEditor = null;
+        _mibRenderSource(document.getElementById('mibSourceBox'), d.source, 0, 'pysnmp');
+        // Built behind the other tab it has no size to measure and comes out a few pixels
+        // tall; it has to look again when the tab it is on becomes the open one.
+        const codeBtn = document.getElementById('mibTabCodeBtn');
+        if (codeBtn) {
+            codeBtn.addEventListener('shown.bs.tab', () => {
+                if (_mibSrcEditor) _mibSrcEditor.refresh();
+            });
+        }
     }
 }
 
-async function _mibShowRawDetails(name) {
+// What the file DECLARES — imports and objects — as the inner HTML of its own pane.
+//
+// A function rather than a stretch of the renderer because it has to be redrawn on its own:
+// saving an edit changes what the file declares, and the alternative was rebuilding the whole
+// modal, which threw away the editor, the scroll position and the tab you were on to change
+// one table.
+function _mibDeclHtml(d) {
+    const thStyle  = 'cursor:pointer;user-select:none;white-space:nowrap';
+    const sortIcon = '<i class="mib-sort-icon bi bi-sort ms-1 opacity-25" style="font-size:.75em"></i>';
+    let h = '';
+
+    if (d.imports && d.imports.length) {
+        h += `<details class="mb-3">
+            <summary class="fw-semibold" style="font-size:.82rem;cursor:pointer;user-select:none">
+                <i class="bi bi-box-arrow-in-down me-1"></i>${esc(_ms('mib_details_imports', 'Imports'))}
+                <span class="badge bg-secondary ms-1" style="font-size:.65rem">${d.imports.length}</span>
+            </summary>
+            <div class="mt-2" style="max-height:18vh;overflow-y:auto">`;
+        for (const imp of d.imports) {
+            h += `<div class="mb-1">
+                <span class="badge bg-secondary me-1" style="font-size:.68rem">${esc(imp.module)}</span>
+                <span class="text-muted" style="font-size:.72rem">${imp.symbols.map(s => esc(s)).join(', ')}</span>
+            </div>`;
+        }
+        h += `</div></details>`;
+    }
+
+    const dets = d.objects_detail || [];
+    if (dets.length) {
+        _mibDetailsData = {type: 'raw', rows: dets};
+        _mibDetailsSort = {col: 0, asc: true};
+        h += `<div class="mb-3">
+            <div class="text-muted mb-1" style="font-size:.78rem">
+                <i class="bi bi-list-ul me-1"></i>${dets.length} ${esc(_ms('mib_details_objects', 'objects'))}
+            </div>
+            <table class="table table-sm table-bordered mb-0" style="font-size:.76rem">
+                <thead id="mibDetailsThead" class="sticky-top"
+                       style="background:var(--bs-tertiary-bg);color:var(--bs-emphasis-color)">
+                    <tr>
+                        <th style="${thStyle}" onclick="_mibSortDetails(0)">${esc(_ms('mib_details_th_name','Name'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(1)">${esc(_ms('mib_details_th_syntax','Syntax'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(2)">${esc(_ms('mib_details_th_units','Units'))}${sortIcon}</th>
+                        <th style="${thStyle}" onclick="_mibSortDetails(3)">${esc(_ms('mib_details_th_access','Access'))}${sortIcon}</th>
+                    </tr>
+                </thead>
+                <tbody id="mibDetailsTbody"></tbody>
+            </table>
+        </div>`;
+    } else {
+        // A pane with nothing in it reads as a screen that failed to load, and a MIB whose
+        // syntax broke mid-file really does declare nothing this parser can see — which is
+        // worth saying, since the source tab next door is where the answer is.
+        _mibDetailsData = null;
+        h += `<div class="text-muted text-center py-4" style="font-size:.82rem">
+            <i class="bi bi-list-ul d-block mb-1" style="font-size:1.6rem;opacity:.35"></i>
+            ${esc(_ms('mib_details_none', 'Nothing declared that could be read'))}
+        </div>`;
+    }
+    return h;
+}
+
+// Redraw ONLY that pane, from the file as it is now. Called after a save: what the file
+// declares has changed, and the tab showing the old objects is quietly wrong.
+async function _mibDeclRefresh() {
+    const pane = document.getElementById('mibTabDecl');
+    if (!pane || !_mibEditName) return;
+    const modName = _mibManagerModuleName;
+    const res = await apiPost(_mibApiUrl(modName, 'get_raw_mib_details'),
+                              { ...(modulesData[modName] || {}), name: _mibEditName });
+    const d = res && res.data;
+    if (!d || !d.ok) return;
+    pane.innerHTML = _mibDeclHtml(d);
+    if (_mibDetailsData) _mibRenderDetailsTbody();
+    const cnt = document.getElementById('mibDetailsObjCount');
+    if (cnt) cnt.textContent = `${(d.objects || []).length} ${_ms('mib_details_objects', 'objects')}`;
+}
+
+async function _mibShowRawDetails(name, line) {
     const titleEl = document.getElementById('mibDetailsTitle');
     const bodyEl  = document.getElementById('mibDetailsBody');
     if (titleEl) titleEl.textContent = name;
@@ -915,78 +2722,75 @@ async function _mibShowRawDetails(name) {
 
     let h = '';
 
+    // Which tab opens: what it DECLARES is what a MIB is normally opened for, but arriving
+    // from a compile error the question is already "what is on line 21", and one more click
+    // between the reason and the line is the click that loses it.
+    const codeFirst = line > 0;
+
     // ── Module header ─────────────────────────────────────────────
     if (d.module) {
-        h += `<div class="d-flex align-items-center gap-2 mb-3 p-2 rounded"
+        h += `<div class="d-flex align-items-center gap-2 mb-2 p-2 rounded flex-shrink-0"
                    style="background:var(--bs-secondary-bg);font-size:.82rem">
             <i class="bi bi-diagram-3 text-primary flex-shrink-0"></i>
             <span class="fw-semibold">${esc(d.module)}</span>
-            <span class="text-muted ms-auto">${d.objects.length} ${esc(_ms('mib_details_objects', 'objects'))}</span>
+            <span class="text-muted ms-auto" id="mibDetailsObjCount">${d.objects.length} ${esc(_ms('mib_details_objects', 'objects'))}</span>
         </div>`;
     }
 
-    // ── Imports (collapsible) ─────────────────────────────────────
-    if (d.imports && d.imports.length) {
-        h += `<details class="mb-3">
-            <summary class="fw-semibold" style="font-size:.82rem;cursor:pointer;user-select:none">
-                <i class="bi bi-box-arrow-in-down me-1"></i>${esc(_ms('mib_details_imports', 'Imports'))}
-                <span class="badge bg-secondary ms-1" style="font-size:.65rem">${d.imports.length}</span>
-            </summary>
-            <div class="mt-2" style="max-height:18vh;overflow-y:auto">`;
-        for (const imp of d.imports) {
-            h += `<div class="mb-1">
-                <span class="badge bg-secondary me-1" style="font-size:.68rem">${esc(imp.module)}</span>
-                <span class="text-muted" style="font-size:.72rem">${imp.symbols.map(s => esc(s)).join(', ')}</span>
-            </div>`;
-        }
-        h += `</div></details>`;
-    }
-
-    // ── Objects table ─────────────────────────────────────────────
-    const dets = d.objects_detail || [];
-    if (dets.length) {
-        _mibDetailsData = {type: 'raw', rows: dets};
-        _mibDetailsSort = {col: 0, asc: true};
-        h += `<div class="mb-3">
-            <div class="text-muted mb-1" style="font-size:.78rem">
-                <i class="bi bi-list-ul me-1"></i>${dets.length} ${esc(_ms('mib_details_objects', 'objects'))}
-            </div>
-            <div style="max-height:45vh;overflow-y:auto">
-            <table class="table table-sm table-bordered mb-0" style="font-size:.76rem">
-                <thead id="mibDetailsThead" class="sticky-top"
-                       style="background:var(--bs-tertiary-bg);color:var(--bs-emphasis-color)">
-                    <tr>
-                        <th style="${thStyle}" onclick="_mibSortDetails(0)">${esc(_ms('mib_details_th_name','Name'))}${sortIcon}</th>
-                        <th style="${thStyle}" onclick="_mibSortDetails(1)">${esc(_ms('mib_details_th_syntax','Syntax'))}${sortIcon}</th>
-                        <th style="${thStyle}" onclick="_mibSortDetails(2)">${esc(_ms('mib_details_th_units','Units'))}${sortIcon}</th>
-                        <th style="${thStyle}" onclick="_mibSortDetails(3)">${esc(_ms('mib_details_th_access','Access'))}${sortIcon}</th>
-                    </tr>
-                </thead>
-                <tbody id="mibDetailsTbody"></tbody>
-            </table>
-            </div>
-        </div>`;
-    } else {
-        _mibDetailsData = null;
-    }
-
-    // ── Source code ───────────────────────────────────────────────
-    h += `<details>
-        <summary class="fw-semibold mb-2" style="font-size:.82rem;cursor:pointer;user-select:none">
+    // ── Two tabs: what it declares, and what it says ──────────────
+    h += `<ul class="nav nav-tabs mb-2 flex-shrink-0" role="tablist">
+        <li class="nav-item"><button class="nav-link ${codeFirst ? '' : 'active'}"
+                data-bs-toggle="tab" data-bs-target="#mibTabDecl" type="button" role="tab">
+            <i class="bi bi-list-ul me-1"></i>${esc(_ms('mib_tab_declares', 'Declarations'))}
+        </button></li>
+        <li class="nav-item"><button class="nav-link ${codeFirst ? 'active' : ''}"
+                id="mibTabCodeBtn" data-bs-toggle="tab" data-bs-target="#mibTabCode"
+                type="button" role="tab">
             <i class="bi bi-file-earmark-text me-1"></i>${esc(srcLabel)}
-        </summary>
-        <pre class="rounded p-2 mt-2" style="font-size:.70rem;max-height:45vh;overflow:auto;background:var(--bs-body-secondary-bg,var(--bs-secondary-bg))">${esc(d.source)}</pre>
-    </details>`;
+            ${line > 0 ? `<span class="badge bg-danger ms-1" style="font-size:.62rem">${esc(_ms('mib_error_line', 'line'))} ${line}</span>` : ''}
+        </button></li>
+    </ul>
+    <div class="tab-content ss-vfill">
+    <div class="tab-pane fade ${codeFirst ? '' : 'show active'} ss-vfill ss-vscroll ss-scroll-pad"
+         id="mibTabDecl" role="tabpanel">`;
+
+    h += _mibDeclHtml(d);
+
+    // ── …and the source, in its own tab ───────────────────────────
+    h += `</div>
+    <div class="tab-pane fade ${codeFirst ? 'show active' : ''} ss-vfill"
+         id="mibTabCode" role="tabpanel">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0"
+             id="mibEditBar"></div>
+        <div id="mibVersionsBox" class="flex-shrink-0" style="display:none"></div>
+        <div class="mib-src ss-vfill" id="mibSourceBox"></div>
+    </div>
+    </div>`;
 
     if (bodyEl) {
         bodyEl.innerHTML = h;
         if (_mibDetailsData) _mibRenderDetailsTbody();
+        _mibSrcEditor = null;
+        _mibEditReset(name);
+        _mibEditRenderBar();
+        _mibVersionsLoad(name);
+        _mibRenderSource(document.getElementById('mibSourceBox'), d.source, line);
+        // CodeMirror measures itself when it is built, and a hidden tab has no size to
+        // measure: built behind the other tab it comes out a few pixels tall and stays that
+        // way until something makes it look again.
+        const codeBtn = document.getElementById('mibTabCodeBtn');
+        if (codeBtn) {
+            codeBtn.addEventListener('shown.bs.tab', () => {
+                if (_mibSrcEditor) _mibSrcEditor.refresh();
+            });
+        }
     }
 }
 
-// ── Live compiled-list refresh during compilation ─────────────────
-// Updates only the compiled column without touching the raw column or
-// resetting selection state.  Called (without await) from the poll loop.
+// ── Live list refresh during compilation ──────────────────────────
+// Re-reads the compiled files only, and re-renders.  The selection survives because it is
+// keyed by module name, and a module does not change name by being compiled — which is the
+// whole reason the list is keyed that way.
 async function _mibRefreshCompiled() {
     if (_mibRefreshingCompiled || !_mibData || !_mibManagerModuleName) return;
     _mibRefreshingCompiled = true;
@@ -996,99 +2800,213 @@ async function _mibRefreshCompiled() {
         const d   = res && res.data;
         if (!d || !d.ok || !_mibData) return;
         _mibData.compiled = d.compiled;
-        const cmpQ = (document.getElementById('mibSearchCompiled')?.value || '').toLowerCase();
-        const cmpF = cmpQ ? d.compiled.filter(f => f.name.toLowerCase().includes(cmpQ)) : d.compiled;
-        const cmpList = document.getElementById('mibCompiledList');
-        if (cmpList) {
-            if (!cmpF.length && !cmpQ) cmpList.innerHTML = _mibEmptyBox(_ms('mib_no_compiled', 'No compiled MIBs'));
-            else if (!cmpF.length)     cmpList.innerHTML = _mibNoMatch();
-            else                       cmpList.innerHTML = cmpF.map(f => _mibFileRow(f, 'compiled')).join('');
-        }
-        const cmpBadge = document.getElementById('mibSearchCompiled-badge');
-        if (cmpBadge) cmpBadge.textContent = cmpQ
-            ? `${cmpF.length} / ${d.compiled.length}`
-            : String(d.compiled.length);
+        _mibData.errors   = d.errors || {};
+        _mibFilterLists();
     } finally {
         _mibRefreshingCompiled = false;
     }
 }
 
 // ── Multi-select helpers ──────────────────────────────────────────
-function _mibToggleSelect(name, kind) {
-    if (_mibSelection[kind].has(name)) _mibSelection[kind].delete(name);
-    else                               _mibSelection[kind].add(name);
-    _mibUpdateDeleteBtn(kind);
+function _mibToggleSelect(mib) {
+    if (_mibSelection.has(mib)) _mibSelection.delete(mib);
+    else                        _mibSelection.add(mib);
+    _mibUpdateDeleteBtn();
 }
 
-function _mibUpdateDeleteBtn(kind) {
-    const n   = _mibSelection[kind].size;
-    const btn = document.getElementById('mibDeleteSelBtn-' + kind);
-    const cnt = document.getElementById('mibDeleteSelCount-' + kind);
+// The count on the main compile button: pressing it and being told a number you had no way of
+// predicting is how "compile pending" came to look like it was doing something else.
+function _mibUpdateCompileBtn() {
+    // From the server, which is where the decision is made. A row is a module and the job
+    // walks file names, and the two differ whenever a module arrives twice under different
+    // names — which in a vendor archive is most of them.
+    const n = (_mibData && _mibData.pending)
+        ? _mibData.pending.length : _mibToCompile().length;
+    const lbl = document.getElementById('mibCompileBtnLabel');
+    if (!lbl || _mibCompileInProgress) return;
+    lbl.textContent = _ms('mib_compile_pending', 'Compile pending') + (n ? ` (${n})` : '');
+}
+
+function _mibUpdateDeleteBtn() {
+    const n   = _mibSelection.size;
+    // The GROUP, not the button inside it: hiding the button alone would leave its caret
+    // sitting there on its own.
+    const btn = document.getElementById('mibDeleteSelGroup');
+    const cnt = document.getElementById('mibDeleteSelCount');
     if (btn) btn.style.display = n > 0 ? '' : 'none';
     if (cnt) cnt.textContent = String(n);
-    if (kind === 'raw') _mibUpdateCompileSelBtn();
+    _mibUpdateCompileSelBtn();
 }
 
+// Only a module with a source can be compiled: selecting a dependency (a .py pysmi pulled
+// in, with no .mib of its own) must not offer to compile something that is not there.
 function _mibUpdateCompileSelBtn() {
-    const n   = _mibSelection.raw.size;
+    const n   = _mibRows().filter(r => _mibSelection.has(r.mib) && r.raws.length).length;
     const btn = document.getElementById('mibCompileSelBtn');
     const cnt = document.getElementById('mibCompileSelCount');
     if (btn) btn.style.display = n > 0 ? '' : 'none';
     if (cnt) cnt.textContent = String(n);
 }
 
-function _mibSelectUncompiled() {
-    if (!_mibData) return;
-    const compiledStems = new Set(_mibData.compiled.map(f => f.name.replace(/\.py$/i, '')));
-    _mibData.raw.forEach(f => {
-        const stem = f.name.replace(/\.[^.]+$/, '');
-        if (!compiledStems.has(stem)) _mibSelection.raw.add(f.name);
-    });
+function _mibSelectAll() {
+    _mibVisibleRows().forEach(r => _mibSelection.add(r.mib));
     _mibFilterLists();
-    _mibUpdateDeleteBtn('raw');
 }
 
-function _mibSelectAll(kind) {
-    if (!_mibData) return;
-    const searchId = kind === 'raw' ? 'mibSearchRaw' : 'mibSearchCompiled';
-    const q        = (document.getElementById(searchId)?.value || '').toLowerCase();
-    const files    = kind === 'raw' ? _mibData.raw : _mibData.compiled;
-    const filtered = q ? files.filter(f => f.name.toLowerCase().includes(q)) : files;
-    filtered.forEach(f => _mibSelection[kind].add(f.name));
+function _mibDeselectAll() {
+    _mibSelection.clear();
     _mibFilterLists();
-    _mibUpdateDeleteBtn(kind);
 }
 
-function _mibDeselectAll(kind) {
-    _mibSelection[kind].clear();
-    _mibFilterLists();
-    _mibUpdateDeleteBtn(kind);
+// ── What a deletion left behind ───────────────────────────────────
+//
+// Deleting a folder of sources cannot delete what was compiled from them: a compiled module
+// is a file of its own, flat in `compiled/`, named after the MODULE and carrying no trace of
+// the folder it came from. Nothing in the library's shape says "these 374 .py files were that
+// vendor's" — pysmi's own header does, and that is what this reads.
+// The last thing a compile does, on its own. The index resolves an OID to a name for
+// every check that reads one, and the catalogue is what the MIB Browser opens on: both are
+// built by loading every compiled module, so they belong to `compiled/` and not to the run
+// that happened to change it — which is exactly why they can be out of step with it. A
+// tidy-up discards the catalogue instead of paying to rebuild it, and a `.py` copied in by
+// hand never went through a compile at all.
+async function _mibReindex() {
+    const modName = _mibManagerModuleName;
+    if (!modName) return;
+    const btn = document.getElementById('mibReindexBtn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await apiPost(_mibApiUrl(modName, 'build_oid_index'),
+                                  modulesData[modName] || {});
+        const d = res && res.data;
+        if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+        showToast(_ms('mib_reindex_done', '{n} OID(s) indexed')
+            .replace('{n}', d.count || 0));
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
-function _mibDeleteSelected(kind) {
-    const names = [..._mibSelection[kind]];
-    if (!names.length) return;
-    const confirmMsg = _ms('mib_delete_selected_confirm', 'Delete {n} file(s)?')
-        .replace('{n}', names.length);
-    showConfirmModal(confirmMsg, () => _mibDeleteSelectedConfirmed(kind, names));
+async function _mibCleanLibrary() {
+    const modName = _mibManagerModuleName;
+    if (!modName) return;
+    const cfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'library_leftovers'), cfg);
+    const d   = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    const py   = (d.stray || []).length;
+    const dirs = (d.empty_dirs || []).length;
+    if (!py && !dirs) {
+        showToast(_ms('mib_clean_nothing', 'Nothing left over — the library is tidy'));
+        return;
+    }
+    // What goes, said in the two units it is measured in, and the first few by name: a
+    // number alone is not something anybody can check before agreeing to it.
+    const lines = [];
+    if (py) lines.push(_ms('mib_clean_stray_n', '{n} compiled module(s) with no source ({size})')
+        .replace('{n}', py).replace('{size}', _mibSz(d.stray_bytes || 0)));
+    if (dirs) lines.push(_ms('mib_clean_dirs_n', '{n} empty folder(s)').replace('{n}', dirs));
+    const sample = (d.stray || []).slice(0, 5).map(e => e.mib)
+        .concat((d.empty_dirs || []).slice(0, 5));
+    showConfirmModal(
+        _ms('mib_clean_confirm', 'Delete what is left over? {what}')
+            .replace('{what}', lines.join(' · '))
+        + (sample.length ? ' — ' + sample.join(', ') + (py + dirs > sample.length ? '…' : '') : ''),
+        () => _mibCleanConfirmed());
 }
 
-async function _mibDeleteSelectedConfirmed(kind, names) {
+async function _mibCleanConfirmed() {
+    const modName = _mibManagerModuleName;
+    const cfg = modulesData[modName] || {};
+    const res = await apiPost(_mibApiUrl(modName, 'clean_library'), cfg);
+    const d   = res && res.data;
+    if (!d || !d.ok) { showToast((d && d.message) || (t('error') || 'Error'), 'error'); return; }
+    showToast(_ms('mib_clean_done', '{n} compiled module(s) and {d} folder(s) removed')
+        .replace('{n}', d.compiled_deleted || 0).replace('{d}', d.folders_removed || 0));
+    // The library is a `.py` and a folder lighter, and whichever view is on screen reads the
+    // same inventory to say so.
+    await _mibLoad();
+}
+
+// ── Deleting ──────────────────────────────────────────────────────
+// A row is a module, so deleting one deletes every file it stands for: its source (or
+// sources — two vendors can ship the same module) and its compiled .py.  The count in the
+// confirmation is the count of FILES, because that is what is about to disappear.
+function _mibDeleteSelected(scope) {
+    const items = _mibArtifacts(_mibRows().filter(r => _mibSelection.has(r.mib)), scope);
+    // A selection can hold nothing of the kind asked for — every row picked is still
+    // uncompiled, say. Silence there reads as a click that did not register.
+    if (!items.length) {
+        showToast(_ms('mib_delete_none_of_that', 'Nothing of that kind in the selection'));
+        return;
+    }
+    showConfirmModal(
+        _mibDeleteMsg(scope, true).replace('{n}', items.length),
+        () => _mibDeleteConfirmed(items));
+}
+
+function _mibDeleteRow(mib, scope) {
+    const row = _mibRows().find(r => r.mib === mib);
+    const items = _mibArtifacts(row ? [row] : [], scope);
+    if (!items.length) return;
+    // The history is offered here and NOT taken by default: the ordinary reason to delete a
+    // raw MIB is to import it again cleanly, and that is exactly when the edit that came
+    // before is worth still having. But asking in its own dialog afterwards is asking once
+    // the moment has passed, and never asking is what leaves a history nobody can reach.
+    // …and only when the source is what goes: the history is the history OF the source, and
+    // a .py is not something anybody edited.
+    const opts = (row && row.version > 1 && scope !== 'compiled')
+        ? {check: {label: _ms('mib_delete_with_history', 'Delete its {n} stored version(s) too')
+                          .replace('{n}', row.version), checked: false}}
+        : {};
+    showConfirmModal(
+        _mibDeleteMsg(scope, false).replace('{name}', mib).replace('{n}', items.length),
+        (alsoHistory) => _mibDeleteConfirmed(items, !!alsoHistory),
+        opts);
+}
+
+// What is being deleted is half the question; what SURVIVES is the other half, and it is the
+// half somebody gets wrong. Deleting the source leaves a compiled module that stays in use,
+// which does not look like a deletion at all until the next compile.
+function _mibDeleteMsg(scope, many) {
+    if (scope === 'compiled') {
+        return many
+            ? _ms('mib_delete_sel_compiled_confirm',
+                  'Delete the compiled module of {n} MIB(s)? Their sources stay.')
+            : _ms('mib_delete_compiled_confirm',
+                  'Delete the compiled module of {name}? The source stays — compiling it '
+                  + 'again is what brings it back.');
+    }
+    if (scope === 'raw') {
+        return many
+            ? _ms('mib_delete_sel_raw_confirm',
+                  'Delete the source of {n} MIB(s)? Their compiled modules stay, and stay in use.')
+            : _ms('mib_delete_raw_confirm',
+                  'Delete the source of {name}? The compiled module stays, and stays in use '
+                  + 'until it goes too.');
+    }
+    return many ? _ms('mib_delete_selected_confirm', 'Delete {n} file(s)?')
+                : _ms('mib_delete_module_confirm', 'Delete {name} and its {n} file(s)?');
+}
+
+async function _mibDeleteConfirmed(items, withHistory) {
     const modName = _mibManagerModuleName;
     const cfg     = modulesData[modName] || {};
-    const total   = names.length;
+    const total   = items.length;
     let deleted   = 0;
     const errors  = [];
 
     _mibProgressBegin(false);   // delete is not cancellable → no Stop button
     _mibProgressRender('deleting', 0, total, null, 0);
-    for (let i = 0; i < names.length; i++) {
-        const name = names[i];
-        _mibProgressRender('deleting', i, total, name, 0);
-        const res = await apiPost(_mibApiUrl(modName, 'delete_mib'), { ...cfg, name, kind });
+    for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        _mibProgressRender('deleting', i, total, it.name, 0);
+        const res = await apiPost(_mibApiUrl(modName, 'delete_mib'),
+                                  { ...cfg, name: it.name, kind: it.kind,
+                                    with_history: !!withHistory && it.kind === 'raw' });
         const d   = res && res.data;
         if (d && d.ok) { deleted++; }
-        else { errors.push(name + ': ' + ((d && d.message) || 'Error')); }
+        else { errors.push(it.name + ': ' + ((d && d.message) || 'Error')); }
     }
     _mibProgressRender('deleting', total, total, null, 0);
     await new Promise(r => setTimeout(r, 300));
@@ -1102,21 +3020,9 @@ async function _mibDeleteSelectedConfirmed(kind, names) {
 }
 
 function _compileSelected() {
-    const names = [..._mibSelection.raw];
+    const names = _mibRows().filter(r => _mibSelection.has(r.mib) && r.raws.length)
+                            .map(r => r.raws[0]);
     if (names.length) _compileMibs(names);
-}
-
-async function _mibDelete(name, kind) {
-    const modName = _mibManagerModuleName;
-    const cfg = modulesData[modName] || {};
-    const res = await apiPost(_mibApiUrl(modName, 'delete_mib'), { ...cfg, name, kind });
-    const d = res && res.data;
-    if (d && d.ok) {
-        showToast(_ms('mib_deleted', name + ' deleted'));
-        await _mibLoad();
-    } else {
-        showToast((d && d.message) || (t('error') || 'Error'), 'error');
-    }
 }
 
 // ── Progress helpers (shared by download / compile / index phases) ────────────
@@ -1129,16 +3035,23 @@ function _mibPhaseLabel(phase) {
         compiling:   _ms('mib_phase_compiling',   'Compiling'),
         indexing:    _ms('mib_phase_indexing',    'Indexing…'),
         deleting:    _ms('mib_phase_deleting',    'Deleting'),
+        comparing:   _ms('mib_phase_comparing',   'Comparing'),
+        importing:   _ms('mib_phase_importing',   'Importing'),
         cancelling:  _ms('mib_phase_cancelling',  'Cancelling…'),
     }[phase] || '';
 }
 
+// ONE progress bar, wherever the section happens to be showing. Both views ship the same
+// ids — a `<template>` is inert, so only the view that was cloned is ever in the document —
+// and that is what makes a job survive a change of view: start a download on the import
+// view, go back to the list, and the bar and its Stop are there, counting.
+//
 // Show the progress section.  *withStop* shows the Stop button for cancellable
 // jobs (download / compile / index); pass false for non-cancellable ones (delete).
 function _mibProgressBegin(withStop = true) {
     const sec = document.getElementById('mibProgressSection');
-    // Must be an explicit value: the stylesheet sets `#mibProgressSection
-    // { display:none }`, so clearing the inline style ('') would keep it hidden.
+    // Must be an explicit value: the stylesheet hides `.mib-progress`, so clearing the
+    // inline style ('') would keep it hidden.
     if (sec) sec.style.display = 'block';
     const stop = document.getElementById('mibStopBtn');
     if (stop) stop.style.display = withStop ? 'inline-block' : 'none';
@@ -1146,7 +3059,7 @@ function _mibProgressBegin(withStop = true) {
 
 // Render one progress tick.  Determinate (X / total) when *total* > 0; otherwise
 // an indeterminate full striped bar (discovery / indexing — no known total).
-function _mibProgressRender(phase, completed, total, current, failed) {
+function _mibProgressRender(phase, completed, total, current, failed, unit = '') {
     const name  = _mibPhaseLabel(phase);
     const bar   = document.getElementById('mibProgressBar');
     const lbl   = document.getElementById('mibProgressLabel');
@@ -1154,8 +3067,9 @@ function _mibProgressRender(phase, completed, total, current, failed) {
     if (total > 0) {
         const pct = Math.round((completed / total) * 100);
         if (bar) { bar.style.width = `${pct}%`; bar.setAttribute('aria-valuenow', pct); }
-        if (lbl) lbl.textContent = current ? `${name} ${completed} / ${total} — ${current}`
-                                           : `${name} ${completed} / ${total}`;
+        const count = `${completed} / ${total}${unit ? ' ' + unit : ''}`;
+        if (lbl) lbl.textContent = current ? `${name} ${count} — ${current}`
+                                           : `${name} ${count}`;
         if (pctEl) pctEl.textContent = failed
             ? _ms('mib_github_progress_failed', '{f} failed').replace('{f}', failed)
             : `${pct}%`;
@@ -1188,12 +3102,20 @@ function _mibBreakdownSuffix() {
 }
 
 function _mibHandleCompileResult(d) {
+    if (d.up_to_date) {
+        // A job that finds nothing to do and ends instantly, silently, is a button that
+        // looks broken — which is the exact reading this whole modal has had to unlearn.
+        showToast(_ms('mib_already_uptodate', 'MIBs already up-to-date'));
+        return;
+    }
     if (d.cancelled) {
         showToast(d.message || _ms('mib_compile_cancelled', 'Compilation cancelled'), 'warning');
         return;
     }
+    const _errs = Object.values(d.errors || {});
     if (d.result_ok === false) {
-        showToast(d.message || (t('error') || 'Error'), 'error');
+        showToast(_errs.length === 1 ? _errs[0] : (d.message || (t('error') || 'Error')),
+                  'error');
     } else if (d.partial) {
         const nFailed = (d.failed || []).length;
         const nOk     = (d.total || 0) - nFailed;
@@ -1210,39 +3132,13 @@ function _mibHandleCompileResult(d) {
     }
 }
 
-// Prevent the MIB Manager modal from closing while compilation is running.
-// Installs a hide.bs.modal listener that intercepts the event and asks
-// the user to confirm before aborting.
-function _startCompileInterceptor() {
-    const modal = document.getElementById('mibManagerModal');
-    if (!modal || _mibCompileInterceptor) return;
-    _mibCompileInterceptor = function(e) {
-        e.preventDefault();
-        showConfirmModal(
-            _ms('mib_cancel_confirm', 'Cancel the ongoing compilation and close?'),
-            () => {
-                _stopCompileInterceptor();
-                _mibCompileAbort = true;
-                // Also cancel the job server-side so it stops compiling in the
-                // background after the modal closes.
-                if (_mibCompileJobId) {
-                    const modName = _mibManagerModuleName;
-                    apiPost(_mibApiUrl(modName, 'compile_mibs_cancel'),
-                            { ...(modulesData[modName] || {}), job_id: _mibCompileJobId });
-                }
-                bootstrap.Modal.getOrCreateInstance(modal).hide();
-            },
-        );
-    };
-    modal.addEventListener('hide.bs.modal', _mibCompileInterceptor);
-}
-
-function _stopCompileInterceptor() {
-    const modal = document.getElementById('mibManagerModal');
-    if (_mibCompileInterceptor && modal)
-        modal.removeEventListener('hide.bs.modal', _mibCompileInterceptor);
-    _mibCompileInterceptor = null;
-}
+// Nothing intercepts leaving any more, and that is the point of a section.
+//
+// The modal asked "cancel the ongoing compilation and close?" because closing it stopped the
+// poll loop, and a compile with nobody watching looked stopped. A compile has never been a
+// thing the browser was doing: it runs server-side under a job id, and the panel polls it. So
+// walking away is now walking away — the job carries on, and coming back to the section picks
+// the progress up where it is. Cancelling is the Stop button, which says so.
 
 async function _mibStopCompile() {
     // Stop the active job.  A compile is cancelled SERVER-SIDE (just stopping the
@@ -1264,8 +3160,27 @@ async function _mibStopCompile() {
     }
 }
 
-async function _compileMibs(mibs) {
-    // mibs: optional array of raw filenames to compile; omit/undefined = compile all
+// What "compile pending" will actually walk: everything with a source and no module up to
+// date behind it. The same three states the chips now show, which is the point — the button
+// and the list have to be answering the same question.
+function _mibToCompile() {
+    return _mibRows().filter(
+        r => r.raws.length && (r.state === 'pending' || r.state === 'stale'
+                               || r.state === 'failed'));
+}
+
+// Rebuilding everything is slow and almost never what you want, which is why it is behind
+// the dropdown and says so before it starts.
+function _mibRebuildAll() {
+    const n = _mibRows().filter(r => r.raws.length).length;
+    showConfirmModal(
+        _ms('mib_rebuild_confirm', 'Recompile all {n} MIBs, including the ones already up to date?')
+            .replace('{n}', n),
+        () => _compileMibs(null, 'all'));
+}
+
+async function _compileMibs(mibs, scope) {
+    // mibs: optional array of raw filenames; scope: 'pending' | 'all' when there is no list.
     _mibCompileAbort = false;
     _mibCompileCancelling = false;
     _mibCompileInProgress = true;
@@ -1275,17 +3190,18 @@ async function _compileMibs(mibs) {
     const compSelBtn = document.getElementById('mibCompileSelBtn');
     if (btn)        btn.disabled = true;
     if (label)      label.textContent = _ms('mib_compiling', 'Compiling…');
-    // Explicit value: CSS hides #mibStopBtn by default, so '' would not show it.
+    // Explicit value: CSS hides `.mib-stop` by default, so '' would not show it.
     if (stopBtn)    { stopBtn.style.display = 'inline-block'; stopBtn.disabled = false; }
     if (compSelBtn) compSelBtn.disabled = true;
 
-    _startCompileInterceptor();
     try {
         const modName = _mibManagerModuleName;
         const cfg     = modulesData[modName] || {};
 
         // Start the background compilation job
-        const payload   = mibs && mibs.length ? { ...cfg, mibs } : cfg;
+        const payload = mibs && mibs.length
+            ? { ...cfg, mibs }
+            : { ...cfg, scope: scope || 'pending' };
         const startRes  = await apiPost(_mibApiUrl(modName, 'compile_mibs_start'), payload);
         const startData = startRes && startRes.data;
 
@@ -1341,10 +3257,13 @@ async function _compileMibs(mibs) {
         _mibCompileInProgress = false;
         _mibCompileCancelling = false;
         _mibCompileJobId = null;
-        _stopCompileInterceptor();
         _mibProgressHide();
         if (btn)        btn.disabled = false;
-        if (label)      label.textContent = _ms('mib_compile_all', 'Compile All');
+        // The MAIN button, so its own label — not the one on the dropdown item beside it.
+        // Restoring `mib_compile_all` here renamed 'compile pending' to 'rebuild
+        // everything' the first time anybody compiled, and it stayed renamed: two actions
+        // with one name, and the surviving name was the slow one.
+        if (label)      label.textContent = _ms('mib_compile_pending', 'Compile pending');
         if (stopBtn)    { stopBtn.style.display = 'none'; stopBtn.disabled = false; }
         if (compSelBtn) compSelBtn.disabled = false;
     }
@@ -1368,7 +3287,8 @@ async function _importMibFromUrl() {
     if (d && d.ok) {
         showToast(_ms('mib_import_ok', 'Imported {filename}').replace('{filename}', d.filename));
         if (input) input.value = '';
-        await _mibLoad();
+        // No reload from here: the list is the OTHER view, and it re-reads on the way in.
+        // Asking for it from this one is seconds spent on a screen that does not show it.
     } else {
         showToast((d && d.message) || (t('error') || 'Error'), 'error');
     }
@@ -1391,7 +3311,7 @@ function _mibRepoTemplates(r) {
 // Recompute the summary badge: number of enabled sources (a fully-active known
 // repo counts as one, plus each custom template).
 function _mibDepSrcRefreshSummary() {
-    const sumEl = document.getElementById('mibDepSrcSummary');
+    const sumEl = document.getElementById('mibDepSrcTitle');
     if (!sumEl) return;
     const known  = (_mibData && _mibData.known_repos) || [];
     const active = new Set(_mibReposList(modulesData[_mibManagerModuleName] || {}));
@@ -1408,24 +3328,45 @@ function _mibDepSrcRefreshSummary() {
         + (count ? ` <span class="badge bg-secondary">${count}</span>` : '');
 }
 
+// The two dropdowns of the import view: where to import a FOLDER from, and which vendor
+// archives there are. Split out of _mibPopulateGithub because the import view has these and
+// not the dependency-source list, and because they are all it needs — which is what made a
+// cheap answer possible in the first place.
+function _mibPopulateImportSources(data) {
+    _mibPopulateRepoSelect(data);
+    _mibPopulateArchives(data);
+}
+
 // Populate the known-repo dropdown and the compile dependency-source toggles
 // from the list_mibs payload.  Called on every _mibRender.
 function _mibPopulateGithub(data) {
+    _mibPopulateRepoSelect(data);
+    _mibPopulateArchives(data);
+    _mibPopulateDepSources(data);
+}
+
+function _mibPopulateRepoSelect(data) {
     const sel = document.getElementById('mibGithubRepoSel');
     const known = (data && data.known_repos) || [];
     if (sel) {
         const cur = sel.value;
         let opts = `<option value="">${esc(_ms('mib_github_custom', 'Custom URL…'))}</option>`;
         for (const r of known) {
-            opts += `<option value="${esc(r.folder)}">${esc(r.name || r.folder)}</option>`;
+            // A source may be an archive only; there is no folder to import from it.
+            if (!r.folder) continue;
+            opts += `<option value="${escAttr(r.folder)}">${esc(r.name || r.folder)}</option>`;
         }
         sel.innerHTML = opts;
         // Keep the previous selection if it still exists.
         if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
     }
 
-    // Dependency-source toggles: one checkbox per known repo (toggles ALL of
-    // its templates at once), plus any custom templates already in the config.
+}
+
+// Dependency-source toggles: one checkbox per known repo (toggles ALL of
+// its templates at once), plus any custom templates already in the config.
+function _mibPopulateDepSources(data) {
+    const known = (data && data.known_repos) || [];
     const list = document.getElementById('mibDepSrcList');
     _mibDepSrcRefreshSummary();
     if (!list) return;
@@ -1460,6 +3401,215 @@ function _mibPopulateGithub(data) {
         </div>`;
     }
     list.innerHTML = rows || `<span class="small text-muted">${esc(_ms('mib_dep_src_none', 'No repositories available.'))}</span>`;
+}
+
+// ── A vendor's own MIB archive ───────────────────────────────────────────────
+// The other half of the known sources: projects publish a folder, vendors publish a file.
+// Both end up in the same tree, and both keep the layout they came with.
+
+function _mibPopulateArchives(data) {
+    const row = document.getElementById('mibArchiveRow');
+    const sel = document.getElementById('mibArchiveSel');
+    if (!row || !sel) return;
+    const withArchive = ((data && data.known_repos) || []).filter(r => r.archive);
+    row.style.display = withArchive.length ? '' : 'none';
+    if (!withArchive.length) return;
+    const cur = sel.value;
+    sel.innerHTML = withArchive.map(r =>
+        `<option value="${escAttr(r.name)}">${esc(r.name)}</option>`).join('');
+    if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
+    const hint = document.getElementById('mibArchiveHint');
+    if (hint) hint.textContent = _ms('mib_archive_hint',
+        'Compare the vendor archive against what is installed');
+}
+
+/** Download the archive and either report what would change, or apply it.
+ *
+ *  `compare` runs it as a dry run: nothing is written, and every file comes back labelled
+ *  against the LAST-UPDATED its author wrote — which is the only thing that says whether the
+ *  archive is ahead of what is here. A file's own timestamp says when it was downloaded. */
+// A download of tens of megabytes and one disk read per file in the archive, behind a
+// single request: the button sat there with nothing to say, which from outside is a button
+// that is stuck. It is a background job now — started, polled, collected — and the two things
+// it can honestly report are the megabytes and the file count.
+let _mibArchiveInProgress = false;
+let _mibArchiveLast = null;        // the last comparison, so its rows can show their diff
+
+async function _mibArchiveRun(compare, redownload) {
+    const sel = document.getElementById('mibArchiveSel');
+    const btn = document.getElementById(compare ? 'mibArchiveCompareBtn' : 'mibArchiveImportBtn');
+    if (!sel || !sel.value || _mibArchiveInProgress) return;
+    const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
+    const mod = _mibManagerModuleName;
+    _mibArchiveInProgress = true;
+    _mibGithubAbort = false;
+    _mibProgressBegin();
+    _mibProgressRender('downloading', 0, 0, null, 0);
+    let d = null;
+    try {
+        const started = await apiPost(_mibApiUrl(mod, 'import_mib_archive_start'),
+                                      {source: sel.value, dry_run: !!compare,
+                                       redownload: !!redownload});
+        const job = started && started.data;
+        if (!job || !job.ok || !job.job_id) {
+            d = job;
+        } else {
+            // Stopping stops the WATCHING, not the job: the download and the comparison run
+            // server-side under a job id, and the report is collected by whoever asks next.
+            while (!_mibGithubAbort) {
+                await new Promise(r => setTimeout(r, 600));
+                const st = await apiPost(_mibApiUrl(mod, 'import_mib_archive_status'),
+                                         {job_id: job.job_id});
+                const sd = st && st.data;
+                if (!sd || sd.done || sd.ok === false) { d = sd; break; }
+                _mibArchiveProgress(sd);
+            }
+        }
+    } finally {
+        _mibArchiveInProgress = false;
+        _mibProgressHide();
+        done();
+    }
+    // Asked for again: a job outlives the view it was started from, and the element that was
+    // here when it started may be gone.
+    const box = document.getElementById('mibArchiveResult');
+    if (!box) return;
+    // Kept so a row can open its own diff without asking again: the diffs came with the
+    // report, computed where both texts were already in hand.
+    _mibArchiveLast = d;
+    box.style.display = '';
+    if (!d || !d.ok) {
+        box.innerHTML = `<div class="alert alert-danger py-1 mb-0 small">
+            ${esc((d && d.message) || t('error') || 'Error')}</div>`;
+        return;
+    }
+    box.innerHTML = _mibArchiveReport(d);
+}
+
+// Why a row was refused. "Rejected" on its own is a word and not an answer, and the three
+// reasons want three different things done about them: a MIB too big for the per-file cap is
+// a decision somebody can take, a name that cannot be made into a safe path is not.
+function _mibArchiveReason(i) {
+    if (i.reason === 'too_big') {
+        return `<span class="text-muted text-nowrap">${esc(
+            _ms('mib_archive_too_big', '{size} — over the {max} per-file limit')
+                .replace('{size}', fmtBytes(i.size || 0))
+                .replace('{max}', fmtBytes(i.limit || 0)))}</span>`;
+    }
+    const word = {name: 'mib_archive_bad_name', path: 'mib_archive_bad_name',
+                  unreadable: 'mib_archive_unreadable'}[i.reason];
+    return word ? `<span class="text-muted text-nowrap">${esc(_ms(word, i.reason))}</span>` : '';
+}
+
+// The difference itself, on demand. It travelled with the report — computing it there
+// costs nothing, both texts were open — so opening a row asks nobody anything.
+async function _mibArchiveShowDiff(n) {
+    const box = document.getElementById('mibArchDiff' + n);
+    const moved = (((_mibArchiveLast || {}).items) || []).filter(i => i.state !== 'unchanged');
+    const row = moved[n];
+    if (!box || !row) return;
+    if (box.style.display !== 'none') {          // a toggle: closing frees the editor too
+        box.style.display = 'none';
+        box.innerHTML = '';
+        return;
+    }
+    box.style.display = '';
+    _mibSrcEditor = null;
+    // A diff when there are two texts; the file itself when there is one and the question is
+    // "are you sure this is not a MIB?". Same box, same viewer, different mode.
+    await _mibRenderSource(box, row.diff || row.preview || '', 0,
+                           row.diff ? 'mibdiff' : 'mib');
+}
+
+// What the poll knows: megabytes while it downloads, files while it compares. Rounded to
+// whole megabytes because a bar that counts bytes reads as noise.
+function _mibArchiveProgress(sd) {
+    if (sd.phase === 'downloading') {
+        const MB = 1048576;
+        const at = Math.round((sd.completed || 0) / MB);
+        const of = Math.round((sd.total || 0) / MB);
+        // No percentage when there is no total, and for LibreNMS there never is: codeload
+        // zips the repository on the fly and answers `Transfer-Encoding: chunked`, so the
+        // server does not know the size either. What there is, is megabytes arriving — and a
+        // number going up is the whole difference between "working" and "hung". A vendor
+        // archive that is a file on a server does send a length, and gets its percentage.
+        return _mibProgressRender('downloading', at, of, of ? null : `${at} MiB`, 0, 'MiB');
+    }
+    _mibProgressRender(sd.phase || 'comparing', sd.completed || 0, sd.total || 0, null, 0);
+}
+
+function _mibArchiveStateBadge(state) {
+    const map = {
+        'new':       ['text-bg-success',   'mib_archive_new',       'new'],
+        'updated':   ['text-bg-primary',   'mib_archive_updated',   'updated'],
+        // Different content, same LAST-UPDATED. Not an update — the author did not say it
+        // was one — and not "unchanged" either, which is the pair of claims the row used to
+        // have to choose between.
+        'same_version': ['text-bg-info',   'mib_archive_same_version', 'same version'],
+        'unchanged': ['text-bg-secondary', 'mib_archive_unchanged', 'unchanged'],
+        // Refused on purpose: re-importing an older archive over a MIB somebody fixed by hand
+        // is a downgrade whose symptom turns up much later, as an OID that stopped resolving.
+        'older':     ['text-bg-warning',   'mib_archive_older',     'older'],
+        'rejected':  ['text-bg-danger',    'mib_archive_rejected',  'rejected'],
+        // Not refused, just not one: a vendor archive carries its readme and its licence,
+        // and calling those 'rejected' reads as a MIB that failed to install.
+        'not_a_mib': ['text-bg-secondary', 'mib_archive_not_a_mib', 'not a MIB'],
+    };
+    const [cls, key, fb] = map[state] || map.rejected;
+    return `<span class="badge ${cls} ss-fs-1">${esc(_ms(key, fb))}</span>`;
+}
+
+function _mibArchiveReport(d) {
+    // Only what changed, and a count for the rest: an archive of twenty files where two moved
+    // is a list of two, not a wall of "unchanged" to read past.
+    const moved = (d.items || []).filter(i => i.state !== 'unchanged');
+    const same = (d.items || []).length - moved.length;
+    const rows = moved.map((i, n) => `<div>
+        <div class="d-flex align-items-center gap-2 py-1 ss-fs-2">
+            ${_mibArchiveStateBadge(i.state)}
+            <code class="flex-grow-1 text-truncate">${esc(i.name)}</code>
+            ${_mibArchiveReason(i)}
+            ${i.installed ? `<span class="text-muted">${esc(i.installed)} →</span>` : ''}
+            ${i.version ? `<span class="text-muted">${esc(i.version)}</span>` : ''}
+            ${(i.diff || i.preview) ? `<button class="btn btn-sm btn-secondary py-0 ss-fs-2 flex-shrink-0"
+                    onclick="_mibArchiveShowDiff(${n})"
+                    title="${escAttr(i.diff
+                        ? (i.diff_truncated ? _ms('mib_version_diff_big', 'shown in part')
+                                            : _ms('mib_dupe_compare', 'Compare'))
+                        : _ms('mib_archive_look', 'Look at the file'))}">
+                <i class="bi ${i.diff ? 'bi-file-diff' : 'bi-eye'}"></i></button>` : ''}
+        </div>
+        <div id="mibArchDiff${n}" class="mib-src mib-arch-diff" style="display:none"></div>
+    </div>`).join('');
+    // Written HERE, from the numbers, and not taken from the server: the server answers in
+    // English and this panel is read in whatever language the reader chose. What is NOT in
+    // the list goes in the same sentence — "why is this all there is?" is asked at the top,
+    // and a line at the foot of a box the height of the screen is a line nobody is reading.
+    const bits = [];
+    if (d.dry_run) {
+        bits.push(_ms('mib_archive_sum_newer', '{n} of {total} MIB(s) newer than installed')
+            .replace('{n}', d.changed || 0).replace('{total}', (d.items || []).length));
+    } else {
+        bits.push(_ms('mib_archive_sum_imported', '{n} MIB file(s) imported')
+            .replace('{n}', d.written || 0));
+    }
+    if (d.same_version) {
+        bits.push(_ms('mib_archive_sum_same', '{n} with the same version')
+            .replace('{n}', d.same_version));
+    }
+    if (same) {
+        bits.push(_ms('mib_archive_sum_unchanged', '{n} unchanged').replace('{n}', same));
+    }
+    if (d.cached) bits.push(_ms('mib_archive_sum_cached', 'from the copy already downloaded'));
+    const head = esc(bits.join(' — '));
+    const tail = '';
+    // The header and the count stay put; only the list scrolls — and it scrolls at the
+    // height of the PAGE, which is the reason the import stopped being a dialog: comparing
+    // against LibreNMS answers four thousand rows, and a box capped at 14rem shows nine of
+    // them. `.ss-vfill` down to one `.ss-vscroll`, the same chain the MIB list uses.
+    return `<div class="border rounded p-2 ss-vfill" style="background:var(--bs-body-bg)">
+        <div class="small fw-semibold mb-1 flex-shrink-0">${head}${tail}</div>
+        ${rows ? `<div class="ss-vscroll">${rows}</div>` : ''}</div>`;
 }
 
 // When a known repo is picked, prefill the folder URL field.
@@ -1550,7 +3700,20 @@ async function _importMibFromGithub() {
                      + (shown ? ': ' + shown + (more > 0 ? `, +${more}` : '') : '');
             }
             showToast(msg, sData.failed ? 'warning' : undefined);
-            await _mibLoad();
+            // An import that wrote over a MIB somebody had corrected says so. The import
+            // still wins — a newer vendor MIB is usually the point — but a fix that vanishes
+            // without a word is one you find out about the next time the same compile error
+            // comes back, three weeks later, having forgotten you ever fixed it.
+            const over = sData.replaced_edited || [];
+            if (over.length) {
+                showToast(
+                    _ms('mib_import_replaced_edits',
+                        'Your edits to {names} were replaced — the previous content is '
+                        + 'kept as a version')
+                        .replace('{names}', over.slice(0, 6).join(', ')
+                                 + (over.length > 6 ? `, +${over.length - 6}` : '')),
+                    'warning');
+            }
         }
     } finally {
         _mibGithubInProgress = false;
@@ -1592,17 +3755,8 @@ async function _uploadMibFiles(files) {
 
     if (uploaded) showToast(_ms('mib_uploaded', '{n} file(s) uploaded').replace('{n}', uploaded));
     for (const e of errors) showToast(e, 'error');
-    await _mibLoad();
+    // Only when the list is what you are looking at: uploading happens on the import view,
+    // and re-reading the whole library to repaint a list nobody is on is seconds spent on
+    // nothing.
+    if (_mibView() === 'library') await _mibLoad();
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('mibManagerModal')?.addEventListener('hidden.bs.modal', () => {
-        _stopCompileInterceptor();
-        _mibCompileAbort = true;   // stop any running poll loop
-        _mibGithubAbort  = true;   // stop any running GitHub import poll loop
-        _mibProgressHide();
-        _mibManagerModuleName = null;
-        _mibData = null;
-        _mibSelection = {raw: new Set(), compiled: new Set()};
-    });
-});

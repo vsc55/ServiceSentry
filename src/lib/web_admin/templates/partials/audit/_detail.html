@@ -57,7 +57,11 @@ function formatAuditDetailFull(detail) {
         }
         let html = '';
         if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
-        if (detail.name)     html += `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
+        // A module's entry has no group: its `name` is whatever the module chose to call
+        // the thing it acted on, and labelling it "Group" made every MIB path a group.
+        if (detail.name)     html += detail.module
+            ? `<p class="mb-1"><code>${esc(detail.name)}</code></p>`
+            : `<p class="mb-1"><strong>${t('col_group_name') || 'Group'}:</strong> <code>${esc(detail.name)}</code></p>`;
         if (detail.username) html += `<p class="mb-1"><strong>${t('col_user')}:</strong> ${esc(detail.username)}</p>`;
         if (detail.role)     html += `<p class="mb-1"><strong>${t('col_role') || 'Role'}:</strong> ${esc(detail.role)}</p>`;
         if (detail.auth_source) html += `<p class="mb-1"><strong>${t('col_auth_source') || 'Source'}:</strong> ${esc(detail.auth_source)}</p>`;
@@ -180,9 +184,37 @@ function _auditChangeLabel(field) {
 // lookup falls back to the word itself, so an entry a module wrote — or one from a build newer
 // than the language file — still reads, just untranslated.
 const _AUDIT_ENUM_FIELDS = new Set(['stage', 'error', 'method', 'source', 'result', 'kind',
-                                    'expires_at']);
-const _auditWord = v => I18N['audit_v_' + String(v)] || String(v);
-const _auditFieldLabel = k => I18N['audit_f_' + String(k)] || String(k);
+                                    'expires_at', 'action']);
+
+// …and a fourth kind: the words a MODULE wrote. `action: 'compile_mibs_status'` and
+// `failed_detail` are SNMP's vocabulary, not the core's, and the core ships no string that
+// names a module — so it asks the module, in the module's own `ui` block, under the same
+// `audit_f_`/`audit_v_` names. An entry says which module it was about; that is the whole
+// handle. Core first: a module must not be able to rename `error` or `user` for everybody.
+//
+// Scoped to the object being rendered and put back afterwards, because an entry can hold
+// another module's object inside its own and the words must follow the thing they belong to.
+let _auditMod = '';
+function _auditModWord(key) {
+    return (_auditMod && typeof _modUiStr === 'function')
+        ? (_modUiStr(_auditMod, key, '') || '') : '';
+}
+const _auditWord = v => I18N['audit_v_' + String(v)]
+                     || _auditModWord('audit_v_' + String(v)) || String(v);
+
+// `<field>_truncated` is not anybody's vocabulary — the CORE adds it when it caps a list
+// (see cap_audit_lists), so the core reads it back the same way: the field's own label and
+// what the suffix means. Written out per field, there would be one to forget every time a
+// module adds a list.
+function _auditFieldLabel(k) {
+    const key = String(k);
+    const own = I18N['audit_f_' + key] || _auditModWord('audit_f_' + key);
+    if (own) return own;
+    if (key.endsWith('_truncated')) {
+        return `${_auditFieldLabel(key.slice(0, -'_truncated'.length))} — ${t('audit_f_truncated_suffix')}`;
+    }
+    return key;
+}
 
 // A third kind of value, and the reason it needs its own rule: these are not vocabulary the
 // panel chose, they are PERMISSION FLAGS — the same catalog Access › Permissions and the token
@@ -224,6 +256,9 @@ function renderReadable(v) {
         return v.map(x => renderReadable(x)).join('<hr class="my-1">');
     }
     if (typeof v === 'object') {
+        // Whose words these are, for as long as they are being drawn.
+        const _prevMod = _auditMod;
+        if (typeof v.module === 'string' && v.module) _auditMod = v.module;
         const rows = Object.entries(v).map(([k, val]) =>
             `<tr><td class="pe-3 text-muted small text-nowrap">${esc(_auditFieldLabel(k))}</td><td>${
                 _AUDIT_PERM_FIELDS.has(k)
@@ -232,6 +267,7 @@ function renderReadable(v) {
                         ? esc(_auditWord(val))
                         : renderReadable(val)}</td></tr>`
         ).join('');
+        _auditMod = _prevMod;
         return `<table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
     }
     return esc(String(v));
@@ -266,6 +302,28 @@ function auditSummaryHtml(idx, detail) {
                 : esc(detail.username);
             // Clickable (opens the full modal) when there's a snapshot/changes to show.
             if (!n && !snap) return `<span class="text-muted small">${label}</span>`;
+        } else if (detail.module && detail.action) {
+            // A MODULE's vocabulary, in the row as well as in the modal. The core ships no
+            // string that names an action of a module, so the label comes from the module's
+            // own `ui` block under the same `audit_v_*` name the modal reads — and the row
+            // was printing the identifier the server composed for it (`snmp / delete_mib`)
+            // because nothing on this side ever asked. The module's name goes with the verb:
+            // "Delete a MIB file" on its own says what happened and not what to.
+            const _prevMod = _auditMod;
+            _auditMod = detail.module;
+            const _verb = _auditWord(detail.action);
+            _auditMod = _prevMod;
+            // …and WHAT it was done to. The module's own summary line, when it says more
+            // than the verb already does: "Delete a MIB file" stops exactly where the
+            // reader's question starts, and the answer was in the entry all along.
+            const _subj = (detail.name && detail.name !== detail.action)
+                ? ' · ' + _auditClip(detail.name, 48) : '';
+            label = esc(modulePrettyName(detail.module, {}) + ' · ' + _verb + _subj);
+            // Clickable only when the entry holds more than the row is already showing —
+            // the same rule as everywhere else here.
+            if (!_auditHasMore(detail)) {
+                return `<span class="text-muted small">${label}</span>`;
+            }
         } else if (detail.name) {
             const n = Array.isArray(detail.changes) ? detail.changes.length : 0;
             const snap = !!(detail.before || detail.after);

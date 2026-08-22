@@ -19,6 +19,545 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un MIB que la biblioteca tiene y el compilador se salta
+
+**Fecha:** 2026-08-22 · **Área:** `watchfuls/snmp/mib_resolver.py::compile_raw_mibs_progressive`
+
+**Síntoma.** `custom/Microsoft/SNMP-FRAMEWORK-MIB no compila`. Ni error, ni aviso: pedirle que
+lo compile responde `untouched`, no aparece ningún `.py`, y el fichero se queda pendiente para
+siempre — recompilándose en cada pasada y contestando lo mismo.
+
+**Diagnóstico.** pysnmp trae **27 módulos ya compilados**, y a pysmi se le pasan como *stubs*:
+«esto ya lo tienes, no lo compiles». La regla escrita es que **una copia que el usuario haya
+puesto en su biblioteca gana** —la puso para que se compile—, y la regla se preguntaba por el
+nombre equivocado:
+
+```python
+_raw_mibs_set = set(raw_mibs)          # nombres de FICHERO: 'rfc2571', 'mib_ii', …
+_stubs = [m for m in _builtin_mibs if m not in _raw_mibs_set]   # nombres de MÓDULO
+```
+
+Lo que el usuario coloca es un **fichero**. `rfc2571.mib` no se llama SNMP-FRAMEWORK-MIB, así
+que la copia importada se apuntalaba: nunca se compilaba, no se escribía ningún módulo, y
+`pending_raw_mibs` —que sí razona por nombre de módulo— la veía sin compilar eternamente.
+
+Medido sobre la biblioteca real: **dos ficheros**, los dos del juego que trae Windows —
+`rfc2571.mib` (SNMP-FRAMEWORK-MIB) y `mib_ii.mib` (RFC1213-MIB).
+
+**Causa raíz.** La misma escisión de identidad que atraviesa todo pysmi: **localiza por el
+nombre del fichero y escribe el del módulo**. Era el último sitio que seguía preguntándole al
+fichero una cosa que sólo el módulo contesta.
+
+**Solución.** El conjunto contra el que se decide se construye con los nombres **declarados**,
+no con los de los ficheros. Las dos identidades se calculan en la misma pasada y cada una se
+usa donde toca: el fichero es lo que se le entrega a pysmi, el módulo es lo que decide qué
+existe ya.
+
+**Lección.** Cuando un sistema tiene dos nombres para la misma cosa, cada comparación entre
+conjuntos hay que leerla dos veces: no basta con que los dos lados sean `str`. Aquí los dos
+lados eran conjuntos de cadenas, la operación era un `not in` perfectamente válido, y no había
+error en ninguna parte — sólo un fichero que no se compilaba nunca y no decía por qué.
+
+---
+
+## Los MIB de Windows no compilan: tres bugs de Microsoft, no del compilador
+
+**Fecha:** 2026-08-22 · **Área:** `watchfuls/snmp/mib_admin.py::_without_dos_eof`,
+`mib_admin.py::_strip_dos_eof`, `mib_lint.py::lint_mib`
+
+**Síntoma.** Importados los MIB que vienen con **Windows 10 Pro 22H2**, cuatro de los
+diecisiete fallan al compilar, con tres mensajes que no se parecen entre sí:
+
+```
+FTPSERVER-MIB        no symbol "software" in module "WINS-MIB"
+INTERNETSERVER-MIB   no symbol "software" in module "WINS-MIB"
+HOST-RESOURCES-MIB   Unknown parent symbol: mib_2 at MIB hostmib
+HTTPSERVER-MIB       Bad grammar near offset 21268 at MIB http
+```
+
+**Diagnóstico.** Tres causas distintas, y ninguna en el compilador.
+
+*El offset que no existe.* `http.mib` mide **20760 caracteres**: el offset 21268 está más allá
+del final. En bytes son 21271 (CRLF), y el 21268 es un **`0x1A`** — Ctrl-Z, la marca de fin de
+fichero de DOS — puesto tres bytes después de un `END` perfectamente válido. El único de los
+diecisiete que lo lleva.
+
+*El símbolo que WINS-MIB no tiene.* `inetsrv.mib` importaba `microsoft` y `software` **FROM
+WINS-MIB**, y WINS-MIB no los define: los *importa* de MSFT-MIB, y en SMI un símbolo importado
+no se re-exporta. El FTP era **daño colateral** — no importa `software` de nadie, importa
+`internetServer` de INTERNETSERVER-MIB, así que caía porque caía su dependencia.
+
+*El padre que nadie trajo.* `hostmib.mib` cuelga su árbol de `{ mib-2 25 }` con un `IMPORTS`
+que trae `DisplayString` de RFC1213-MIB y cuatro cosas de RFC1155-SMI, pero **nunca `mib-2`**.
+Quien lo define es RFC1213-MIB, el mismo módulo del que ya importaba otra cosa.
+
+**Causa raíz.** Las tres son erratas de los ficheros que publica Microsoft, vivas en la versión
+que se instala hoy. Lo que las hizo caras no fue encontrarlas, fue que **ninguno de los tres
+mensajes apunta a su causa**: un offset fuera del fichero, un símbolo buscado en el módulo
+equivocado, y un nombre (`mib_2`) que no aparece en ningún sitio del MIB porque el que falta es
+el `IMPORTS` que lo traería.
+
+**Solución.** Los ficheros, corregidos. Y el producto, para que no vuelva a costar lo mismo:
+
+- el `0x1A` **se quita al escribir cualquier MIB** (`_without_dos_eof`) y hay una pasada única
+  sobre lo que ya estaba en la biblioteca (`_strip_dos_eof`, con su propia marca). Aparte de la
+  reparación de finales de línea que tiene al lado, que **debe** correr una sola vez: repetida,
+  le quita un `\r` a cada fichero que legítimamente lleva CRLF. Quitar un byte que no puede
+  formar parte de un MIB es seguro de repetir;
+- el linter tiene una regla nueva, **`unknown-oid-parent`**: un padre de OID que ni se define
+  en el fichero ni se importa. Avisa antes de compilar, en la línea, y diciendo qué hacer.
+
+**Lección.** Un offset mayor que el fichero no es un error de sintaxis: es el parser saliéndose
+por el final. Y al escribir la regla del linter apareció un segundo hallazgo del mismo tipo: la
+expresión que reconocía `nombre OBJECT IDENTIFIER ::=` exigía las dos cosas **en la misma
+línea**, y media biblioteca escribe el nombre en una línea y la asignación en la siguiente
+—así lo hacen los RFC—. Leídas como una sola línea, esas definiciones eran invisibles y todo lo
+que colgaba de ellas parecía huérfano: **24 falsos positivos** en 162 ficheros reales, cada uno
+con su definición tres líneas más arriba. Con el salto de línea admitido, cero.
+
+---
+
+## La sección de MIBs tardaba cuatro minutos en abrir
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_duplicate_sources`,
+`mib_resolver.py::resolve_raw_sources`, `mib_lint.py::_mask`
+
+**Síntoma** — «Sistema / SNMP / MIBs tarda muchísimo en cargar»; el rueda de carga se queda
+girando y al final la sección pinta un **«⚠ Error»** sin texto. La biblioteca tenía 4970
+ficheros (LibreNMS entero, tras quitar el tope de 2000).
+
+**Diagnóstico** — Cronometrar por fases, y luego `cProfile` sobre la llamada real:
+
+```console
+list_mibs                       257.9 s
+└─ _duplicate_sources           248.1 s
+   └─ resolve_raw_sources       248.1 s
+      └─ pysmi get_data (151×)  246.7 s
+         └─ nt._path_exists × 1.193.019 → 226.5 s
+```
+
+El resto —recorrer el árbol, leer la cabecera de cada fichero, calcular pendientes— sumaba
+menos de 10 s.
+
+**Causa raíz** — Para cada módulo duplicado **sin compilar**, el listado le preguntaba a pysmi
+*«¿qué fichero leerías tú?»*. El lector de pysmi prueba cada variante de nombre en **cada
+directorio** que se le da: 151 consultas sobre una biblioteca de 408 carpetas = 1,19 millones
+de comprobaciones de existencia. Y eso se pagaba **en cada carga de la sección**, para rellenar
+paneles de duplicados que nadie había abierto. La petición acababa muriendo, y morir sin
+cuerpo es el «Error» sin texto.
+
+**Solución** — El listado contesta lo que ya sabe: **qué** módulos colisionan es agrupar
+hechos que ya tiene. Lo que cuesta leer —los hashes, si el contenido es el mismo, el
+parentesco y la predicción de pysmi— se calcula en una acción aparte (`mib_dupe_details`)
+cuando alguien abre un grupo, y para ese grupo solo. De paso: el enmascarado de comentarios y
+cadenas salta de token en token en vez de ir carácter a carácter (12 ms → 1,6 ms por fichero),
+sólo se mira la cabecera (16 KB, ampliando si no aparece), lo leído de cada fichero
+**sobrevive al reinicio** en `.facts-cache.json`, y el árbol se recorre **una vez** en lugar de
+dos.
+
+**Resultado medido**: **257 s → 3,6 s**, y abrir un grupo de duplicados cuesta ahora lo que
+antes se pagaba 257 veces sin pedirlo.
+
+**Lección** — Un listado no debe contestar preguntas que nadie ha hecho todavía, sobre todo si
+la respuesta se lee del disco. Y para saber dónde está el tiempo, cronómetro y perfil: el
+sospechoso obvio (hashear 529 ficheros) resultó ser una fracción, y el culpable estaba a tres
+saltos de distancia dentro de una librería de terceros.
+
+---
+
+## Una caché que no guardaba nada, y 7,4 GB en el temporal
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_download_archive`
+
+**Síntoma** — Se pulsa **Comparar** contra el archivo de LibreNMS (86 MB), y a continuación
+**Actualizar**: se vuelve a descargar entero. La caché recién escrita no reutilizaba nada.
+
+**Diagnóstico** — Lo primero, descartar al servidor: `codeload` **sí** revalida.
+
+```console
+$ ETag: "cef4c89153bbf45c9b0d2fa69f68d1c43548d36cf2f79a91c94285617dda15f9"
+$ (segunda petición con If-None-Match) -> HTTPError 304
+```
+
+Entonces se miró el disco:
+
+```console
+$ ls data/snmp_mibs/.archive-cache/     # vacío
+$ ls %TEMP%/ss-mib-archive-*.zip | wc -l
+93                                       # 7,4 GB
+```
+
+**Causa raíz** — El temporal se creaba con `tempfile.mkstemp()`, o sea en `%TEMP%` (C:), y la
+caché vive junto al directorio de datos (D:). **`os.replace` no mueve ficheros entre
+volúmenes en Windows**: lanzaba `OSError`, y el `except OSError` lo interpretaba como «pues me
+quedo con el temporal». Resultado: no se guardaba nada, cada uso volvía a descargar, y cada
+descarga dejaba 86 MB en C:. Encima, en la rama del 304 —que en `urllib` es una excepción— el
+descriptor de `mkstemp` no llegaba a adoptarlo ningún objeto fichero, así que quedaba
+**abierto**: en Windows un fichero con manejador abierto no se puede borrar, y el `.part`
+vacío se quedaba también.
+
+**Solución** — El temporal nace **dentro del directorio de la caché**, así que el `os.replace`
+es un renombrado en el mismo volumen —atómico, que es justo para lo que se usa—; el descriptor
+se adopta **antes** de la petición (`with os.fdopen(fd,'wb') as out, urlopen(...) as r`), de
+modo que se cierra pase lo que pase; lo que no acaba siendo entrada de caché (un `.part`) lo
+borra quien lo pidió; y la poda barre los `.part` de más de una hora, que no son descargas en
+curso sino cuelgues.
+
+**Lección** — `os.replace` es atómico **dentro de un volumen** y un error fuera de él: un
+temporal que va a acabar en un sitio se crea en ese sitio, no en `%TEMP%`. Y un `except OSError`
+que convierte un fallo en «sigo sin caché» es un fallo que no se nota nunca — sólo se ve
+mirando lo que hay en el disco, que es lo que hubo que hacer.
+
+---
+
+## «Actualiza» de un MIB a su misma versión, y una biblioteca entera con `\r\r\n`
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_archive_member`,
+`_normalized` / `_text_of`, y los cuatro escritores de MIB en crudo
+
+**Síntoma** — Comparar contra el archivo del fabricante devuelve
+`librenms/2n/TEL2N-MIB — 201505011057Z → 201505011057Z` etiquetado **«actualiza»**. La misma
+versión declarada a los dos lados, y aun así dice que hay algo más nuevo. Importar no lo
+arregla: a la siguiente comparación vuelve a salir.
+
+**Diagnóstico** — Se miró el fichero instalado en bytes, no en texto:
+
+```console
+$ od -c raw/librenms/2n/TEL2N-MIB | head -2
+0000000  \r  \r  \n   T   E   L   2   N   -   M   I   B ...
+$ tr -cd '\r' < f | wc -c   # 284
+$ tr -cd '\n' < f | wc -c   # 142
+```
+
+Dos CR por cada LF. Y no era ese fichero: **2137 de 2137**. Un `open(p,'w',encoding='utf-8')`
+en Windows lo reproduce exacto — `a\r\nb` se guarda como `a\r\r\nb`.
+
+**Causa raíz** — Dos defectos que se sostenían el uno al otro:
+
+1. *Escribir.* Los cuatro escritores de MIB en crudo (importar de URL, de carpeta de GitHub,
+   de archivo comprimido y subir un fichero) abrían el destino en **modo texto**. En Windows
+   eso traduce cada `\n` de salida a `\r\n`, así que un fichero que llega con CRLF se
+   guarda con `\r\r\n`. Nada falla: el compilador no mira los espacios en blanco.
+2. *Comparar.* `_archive_member` comparaba **byte a byte** el miembro del archivo con el
+   fichero instalado. Dos copias del mismo MIB que sólo difieren en cómo terminan sus líneas
+   son el mismo MIB — pero nunca eran iguales, así que **todos** salían «más nuevo que el
+   instalado», y como importarlos volvía a dañarlos, para siempre.
+
+Y encima de los dos, un tercer defecto de vocabulario: con las dos versiones declaradas
+idénticas, la clasificación caía en el `else` y decía «actualiza», que afirma algo que no
+afirmó nadie.
+
+**Solución** — Los escritores usan `newline=''` (se guarda lo que llegó); las comparaciones
+pasan por `_normalized()`, que es **la** definición de «el mismo contenido» y es la que ya
+usaban el diff y el detector de duplicados; un contenido distinto con el mismo `LAST-UPDATED`
+tiene su propio estado, `same_version` («misma versión»), que se importa igual pero no se
+cuenta como más nuevo; y la biblioteca ya dañada se repara **una vez** en sitio
+(`_repair_line_endings`), **conservando el mtime** — el cambio es espacio en blanco, el
+módulo compilado sigue vigente, y tocar dos mil mtimes habría encargado una recompilación
+completa: horas de ASN.1 para un cambio que ningún compilador ve.
+
+**Segunda vuelta** — La primera versión de esa reparación colapsaba `\r\r\n` → `\r\n`, y
+eso está mal por un motivo que sólo se ve mirando el origen:
+
+```console
+$ # lo que sirve LibreNMS, comparado con nuestra copia
+2n/TEL2N-MIB         remoto CR= 142 LF= 142 rr=  0     # CRLF normal: el `\r\r\n` era NUESTRO
+alcatel/HPOV-NNM-MIB remoto CR= 504 LF= 252 rr=252     # el fabricante lo escribe así
+adva/CM-FACILITY-MIB remoto CR=   0 LF=29698 rr=  0    # LF puro; nosotros lo guardamos CRLF
+```
+
+Hay MIBs que **vienen con `\r\r\n` de origen**. Colapsarlos borra una línea en blanco que
+escribió el fabricante, y ese fichero difiere para siempre del archivo del que salió — que es
+exactamente lo que apareció después como tres filas «misma versión» que no se iban. La undo
+correcta es el **inverso exacto** de lo que hacía el escritor roto: quitar **un** `\r` de
+cada final de línea, sea `\r\n` → `\n`, `\r\r\n` → `\r\n` o `\r\r\r\n` → `\r\r\n`.
+Reconstruye los bytes que llegaron, vinieran como vinieran.
+
+**Lección** — En Windows, escribir texto que ya trae sus saltos de línea **exige**
+`newline=''`; el modo texto no es «guardar lo que me diste». Comparar ficheros de texto por
+sus bytes responde a una pregunta que nadie hizo: lo que se quiere saber es si es el mismo
+contenido, y esa comparación tiene que estar escrita **una vez** — este repositorio ya la
+tenía en `_text_of`, y el fallo fue que la ruta de importación no la usaba. Y al reparar datos
+ya dañados: la reparación es **el inverso de la transformación**, no «lo que deja el fichero
+bonito». Lo segundo no distingue el daño propio del contenido ajeno, y lo borra.
+
+---
+
+## «Probar servidor» que no vuelve, contra un NAS que sólo tiene SNMP
+
+**Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/sampler.py::_sample_server`,
+`lib/modules/module_base.py::is_probe`
+
+**Síntoma** — Se pulsa **Probar servidor** en un NAS con SNMP y perfiles (sin SSH y sin checks
+de OID) y el modal se queda en «Probando…» sin sacar nada. No hay error, no hay resultados.
+
+**Diagnóstico** — `/api/v1/hosts/test` ejecuta cada check enlazado del host, y para SNMP eso
+incluye el **muestreo de perfiles**, cuyo docstring lo dice entero: *«Read every metric of
+every profile assigned to the server»*. Un walk por columna de soporte, por métrica, por
+perfil. Con los quince perfiles de Synology puestos, medido en un banco con walks de 50 ms:
+
+```
+planificador (ciclo normal)    6.9s | walks: 135
+```
+
+Contra un NAS de verdad, donde un walk de la tabla de discos o de interfaces son cientos de
+round-trips, eso son minutos — dentro de una sola petición HTTP y sin nada en pantalla.
+
+**Causa raíz** — El muestreo existe **para escribir historial**, y una sonda no escribe
+historial: `ProbeMonitor._history` es `None` a propósito. Así que en una prueba el trabajo se
+hacía entero y su resultado se tiraba. No era un cuelgue: era una cosecha completa disfrazada
+de comprobación.
+
+**Solución** — El monitor dice de qué clase de ejecución se trata (`Monitor.is_probe = False`,
+`ProbeMonitor.is_probe = True`) y los módulos lo preguntan por `ModuleBase.is_probe`. El
+muestreo SNMP **para en la primera métrica que contesta** cuando es una prueba: 135 walks → 2,
+0.1 s. Sigue contestando —un host con sólo perfiles y ningún check tiene que producir algo en
+el test, que es una decisión anterior y está probada—, pero demuestra en vez de cosechar.
+
+La propiedad compara con `is True` y no por verdad-aproximada: en los tests el monitor es un
+doble que contesta que sí a todo, y un ciclo del planificador que se creyera un ensayo dejaría
+de rellenar las gráficas — el fallo contrario y mucho más difícil de ver.
+
+**Lección** — Antes de optimizar un «cuelgue», mirar **para qué existe** el trabajo que lo
+causa. Éste existía para alimentar un historial que en ese camino no se escribe: no había que
+hacerlo más rápido, había que no hacerlo. Y una ejecución que hace menos tiene que decir por
+qué, o el siguiente que lea el código lo restaura.
+
+---
+
+## Un MIB compilado que salía como pendiente para siempre
+
+**Fecha:** 2026-08-20 · **Área:** `watchfuls/snmp/mib_resolver.py::pending_raw_mibs`,
+`mib_admin.py::list_mibs`
+
+**Síntoma** — `custom/MBs_LGS500_V1_1/trunk.mib` sale **pendiente**. Se pulsa compilar y el
+panel contesta **«los MIB ya estaban actualizados»**. Sigue saliendo pendiente. No hay error
+en ninguna parte: el fichero está bien, el compilador está contento y la lista no se mueve.
+
+**Diagnóstico** — La primera línea del fichero lo dice todo:
+
+```
+$ head -1 trunk.mib
+IEEE8023-LAG-MIB DEFINITIONS ::= BEGIN
+$ ls compiled/ | grep -i lag
+IEEE8023-LAG-MIB.py
+```
+
+El MIB **había compilado**, y en el sitio correcto. Lo que no existía —ni iba a existir— era
+`trunk.py`, que es lo que el panel buscaba para darlo por hecho. Recontado sobre la biblioteca
+real: **132 pendientes de los que 117 eran una ilusión**, 97 módulos etiquetados como
+«dependencia» que los había traído el propio usuario, y 6 duplicados donde había 30.
+
+**Causa raíz** — Un MIB en bruto tiene **dos nombres** y se usaban como si fuera uno. pysmi
+*localiza* el fuente por el nombre del **fichero** (`FileReader` prueba `trunk`, `trunk.txt`,
+`trunk.mib`…) y *escribe* la salida con el nombre del **módulo** que declara dentro
+(`IEEE8023-LAG-MIB.py`), que es además con el que resuelve todo `IMPORTS`. Cualquier pregunta
+del tipo «¿está esto compilado?» hecha con el nombre del fichero pregunta por algo que nadie
+va a producir jamás. Estaba en tres sitios: `pending_raw_mibs`, el índice del listado
+(`raw_index`, y con él los errores, las versiones y los huérfanos) y el modelo de filas del
+navegador. Con nombres de fichero de fabricante (`rfc2011.mib`, `lsInventoryEnt.mib`,
+`draft-ietf-hubmib-etherif-mib-v3-00.mib`) eso es la mitad de la biblioteca.
+
+**Solución** — `raw_module_name(path)`: el módulo se lee **de dentro del fichero**, cacheado
+por `(mtime, size)` porque el listado lo pregunta de todos en cada refresco. Lo pendiente se
+resuelve contra `<MÓDULO>.py` y **sigue contestando el nombre del fichero**, que es lo que el
+compilador necesita para encontrarlo; el listado publica el módulo de cada fichero y el panel
+teclea las filas por él, mostrando el nombre del fichero al lado cuando no coinciden. El botón
+de «compilar pendientes» pasa a contar **la lista que el servidor va a recorrer** en vez de sus
+propias filas: una fila es un módulo y el trabajo va por ficheros, y en un archivo de fabricante
+eso no es lo mismo casi nunca.
+
+**Lección** — Cuando una herramienta *encuentra* algo por un nombre y lo *produce* con otro,
+son dos identidades y hay que nombrarlas por separado desde el primer día. El síntoma no fue
+un error sino una **contradicción entre dos respuestas** («ya estaba actualizado» / «sigue
+pendiente»), y ése es el olor característico de una identidad usada para dos cosas: cada mitad
+del sistema tenía razón sobre la suya.
+
+---
+
+## En Windows, un MIB compilado no se podía volver a compilar
+
+**Fecha:** 2026-08-20 · **Área:** `watchfuls/snmp/mib_resolver.py::_pysmi_overwrites`
+
+**Síntoma** — Dos MIB (`NET-SNMP-MIB`, `NET-SNMP-TC`) aparecen como **desactualizados** y
+siguen así por mucho que se pulse compilar. Ninguna otra pista: el fuente está bien y el
+módulo compilado existe.
+
+**Diagnóstico** — El almacén de motivos de fallo —añadido el mismo día para otra cosa— lo tenía
+escrito palabra por palabra:
+
+```
+failure writing file ...\compiled\NET-SNMP-MIB.py:
+[WinError 183] No se puede crear un archivo que ya existe:
+'...\compiled\tmpagl7873v' -> '...\compiled\NET-SNMP-MIB.py'
+```
+
+Un `grep` por `os.rename` en pysmi da dos resultados, uno de ellos en `writer/pyfile.py`.
+Comprobado en tres líneas: renombrar sobre un fichero que existe lanza `FileExistsError 183`.
+
+**Causa raíz** — pysmi escribe el módulo en un temporal y lo pone en su sitio con
+`os.rename`. En POSIX eso **sobrescribe**; en Windows **falla** si el destino existe. Es
+decir: en Windows pysmi no podía sustituir jamás un módulo que ya hubiera escrito. Las únicas
+víctimas visibles eran los dos MIB cuyo `.py` ya estaba ahí (bajados como dependencia antes de
+que su fuente se importara), pero el alcance real era mayor: **editar un MIB lo dejaba
+desactualizado para siempre, y «recompilar todo» no podía recompilar nada**.
+
+**Solución** — Un `os` proxy para el módulo escritor de pysmi, cuyo `rename` llama a
+`os.replace` —la misma operación con semántica POSIX en las dos plataformas—, instalado sólo
+durante la compilación. Un proxy sobre el módulo y no un parche a `os.rename`, que lo comparte
+el proceso entero.
+
+**Lección** — Una diferencia de plataforma en una llamada de una dependencia produce un fallo
+que no se parece a un fallo de plataforma: aquí se leía como «este MIB está desactualizado»,
+que es una frase sobre el MIB. Lo que acortó el diagnóstico de horas a minutos fue **haber
+guardado el motivo**: el mensaje del compilador, entero y sin reescribir, esperando en un
+fichero. Un estado que sólo dice *qué* pasa cuesta lo que cueste averiguar *por qué*.
+
+## Ficheros «rechazados» al importar, y nunca los mismos
+
+**Fecha:** 2026-08-20 · **Área:** `watchfuls/snmp/mib_admin.py::_confined_path`
+
+**Síntoma** — Importando la carpeta `mibs/` de Net-SNMP (79 ficheros), entre tres y seis
+aparecen como fallidos con el motivo `rejected`. **Un puñado distinto en cada ejecución**, y
+todos con nombres perfectamente normales (`DISMAN-EVENT-MIB.txt`).
+
+**Diagnóstico** — `rejected` sólo lo produce `_save` devolviendo `False`, y sus tres caminos
+son el nombre, la guarda SSRF y `_confined_path`. Se descartaron los dos primeros a mano
+—`validate_external_url` devuelve `None` para esas URL, incluso con 16 hilos a la vez— y se
+instrumentó el tercero: era `_confined_path`. Reducido fuera del panel a 80 hilos escribiendo
+en una carpeta que ellos mismos crean, con las dos rutas impresas:
+
+```
+base   C:\Users\...\snmp_mibs\raw
+target \\?\C:\Users\...\snmp_mibs\raw\net-snmp\F-1.txt
+```
+
+**Causa raíz** — `pathlib.Path.resolve()` en Windows devuelve la ruta con prefijo extendido
+(`\\?\`) cuando puede abrirla, y la forma normal cuando no. La función resolvía **los dos
+lados**, así que `str(target).startswith(str(base) + os.sep)` era falso en cuanto uno de los
+dos existía y el otro no — y con dieciséis hilos de descarga creando la carpeta destino a la
+vez, cuál de los dos era eso cambiaba a cada llamada. Una comprobación de seguridad cuya
+respuesta dependía del reloj.
+
+**Solución** — La base se resuelve una vez (es nuestra y es estable), el destino se une a ella
+y se normaliza **léxicamente**, y sólo se resuelve el destino **cuando existe**, que es el
+único caso en el que un enlace simbólico tiene a dónde apuntar. La comparación pasa por
+`os.path.normcase`. 0 rechazos de 200 en el mismo montaje que producía 5.
+
+**Lección** — Una comprobación de seguridad que responde distinto según lo que haya en disco
+en ese instante no es estricta, es aleatoria: aquí denegaba de más, y una función que se
+equivoca en una dirección puede equivocarse en la otra el día que cambie el sistema de
+ficheros. Y el mensaje lo tapaba todo — `rejected` para una ruta que estaba perfectamente bien,
+sin decir qué la había rechazado.
+
+## Un MIB que no compila y una pantalla que dice «pendiente»
+
+**Fecha:** 2026-08-20 · **Área:** `watchfuls/snmp/mib_resolver.py::_classify_compile_results`
+y la lista del gestor de MIBs
+
+**Síntoma** — Reportado desde el panel: de los 20 MIB de Synology, uno —`SYNOLOGY-SMB-MIB`—
+aparece como pendiente y no compila nunca. Pulsar «compilar» sobre él no cambia nada y no dice
+nada.
+
+**Diagnóstico** — Primero, comprobar el disco en vez de creerse el contador del trabajo: en
+`compiled/` había 21 ficheros, que con dos dependencias son 19 de 20 — uno faltaba de verdad.
+Compilándolo suelto con pysmi a mano, el estado devuelto es `failed`… y nada más. La causa está
+en el objeto, no en la cadena: `getattr(status, 'error', None)` da
+`Bad grammar near offset 558 at MIB SYNOLOGY-SMB-MIB, line 21`. El offset cae exactamente en
+`SMBCpuTable OBJECT-TYPE`.
+
+**Causa raíz** — Dos, en dos sitios distintos. (1) El fichero de Synology está **mal formado**:
+en SMI un descriptor de objeto empieza en minúscula —una inicial mayúscula es una referencia de
+*tipo*, no de valor— y este MIB los escribe todos en mayúscula; encima llama `SMBCpuEntry` a la
+fila y `SMBCpuInfo` al `SEQUENCE`, así que el `SEQUENCE OF` apunta a algo que no es un tipo.
+Bajar las iniciales sólo mueve el error de la línea 21 a la 22. No hay nada que arreglar aquí:
+el fichero viene roto de fábrica. (2) Lo nuestro: **el motivo se tiraba**. El envoltorio de
+resultado llevaba la lista de fallidos y ningún porqué, así que la fila decía «pendiente» — que
+es lo mismo que dice un MIB que nadie ha compilado todavía. Indistinguibles, y con acciones
+opuestas: uno necesita un clic, el otro que el fabricante arregle el fichero.
+
+**Solución** — El motivo viaja los tres saltos (clasificación → trabajo → sondeo) y la fila lo
+lleva como insignia de error con el mensaje en el tooltip. El veredicto de un trabajo sustituye
+los motivos de los módulos que cubrió y de ninguno más, para que compilar una fila no borre lo
+que se sabe de las demás.
+
+**Lección** — Cuando dos estados distintos se pintan igual, el usuario no está viendo un estado:
+está viendo una pantalla rota. «Pendiente» era correcto y aun así era mentira, porque callaba lo
+único que decidía qué hacer a continuación. Y el contador de un trabajo no es una comprobación:
+20 de 20 «procesados» y 19 ficheros en disco conviven sin contradecirse.
+
+## «Compilando 0/20» para siempre: un espejo dejó de contestar y nadie tenía prisa
+
+**Fecha:** 2026-08-20 · **Área:** `watchfuls/snmp/mib_resolver.py::_http_reader_with_timeout`
+y las fuentes HTTP por defecto de la compilación
+
+**Síntoma** — Reportado desde el panel: se importan los 20 MIB de Synology, se seleccionan
+todos, se pulsa Compilar y la barra se queda en `Compilando 0 / 20 — SYNOLOGY-CAM-MIB · 0%`.
+Indefinidamente. Sin error, sin toast, sin nada en el log.
+
+**Diagnóstico** — Primero pareció que el trabajo no arrancaba, porque justo antes se había
+arreglado un escaneo plano del directorio. Se reprodujo fuera del panel llamando a
+`compile_raw_mibs_progressive` con un `progress_cb` que imprime tiempos: el trabajo **sí**
+arrancaba y encontraba los 20. Con `faulthandler.dump_traceback_later(35)` salió el punto
+exacto: `pysmi/reader/httpclient.py::get_data` → `requests` → `urllib3` → `ssl_wrap_socket`.
+Estaba en un handshake TLS. Un `requests.get` a mano lo confirmó:
+`https://mibs.pysnmp.com/asn1/SNMPv2-SMI` agota el tiempo, y el espejo de net-snmp en GitHub
+contesta 200 en 1,2 s.
+
+**Causa raíz** — Dos cosas que solas no bastan y juntas cuelgan la pantalla. (1) El único
+espejo por defecto para los módulos estándar —`SNMPv2-SMI`, `-TC`, `-CONF`— era
+`mibs.pysnmp.com`, y dejó de responder; **todo** MIB de fabricante los importa, así que sin
+copia local no compila nada. (2) El timeout por petición existía (15 s) pero no salva nada:
+`HttpReader.get_data()` pide **varias variantes de nombre** por módulo (`SNMPv2-SMI`, `.txt`,
+`.mib`…) y se traga la excepción entre intentos (`except Exception: continue`), así que un host
+caído se paga una vez por variante, por módulo. Veinte MIB detrás de un host muerto son horas.
+
+**Solución** — Las fuentes por defecto pasan a ser una lista: el repositorio de net-snmp
+primero, que es el que contesta, y el espejo de pysnmp detrás por si vuelve. Y el lector se
+rinde: tras `_HTTP_DEAD_AFTER` fallos **consecutivos** deja de ir a la red y lanza al instante,
+que es lo que pysmi ya sabe manejar; una respuesta —incluido un 404, que es una respuesta—
+reinicia la cuenta. El timeout baja a 8 s. Los 20 MIB compilan en 48 s.
+
+**Lección** — Un timeout acota **una** petición, no el trabajo. Cuando quien llama reintenta en
+bucle y se traga los errores, el timeout es el tamaño del paso y no el del recorrido: hace falta
+además dejar de intentarlo. Y un único origen por defecto para algo que necesita *todo* el
+producto es un punto único de fallo que un día falla — con el agravante de que aquí no fallaba
+rápido, se quedaba pensando.
+
+## Todo se medía, se guardaba y se nombraba bien, y la pantalla estaba vacía
+
+**Fecha:** 2026-08-20 · **Área:** `lib/core/hosts/service.py::build_host_status._matches`
+(el join entre los resultados de un módulo y los items enlazados a un host)
+
+**Síntoma** — Tras cablear el muestreo de perfiles SNMP, un NAS con perfiles asignados aparecía
+en Infraestructura **sin una sola métrica**, y «Últimos datos» del host salía igual de vacío. No
+hay error, no hay petición fallida, no hay nada en el log. La sección se lee como una máquina
+que nunca ha informado de nada.
+
+**Diagnóstico** — Todo lo de aguas arriba estaba bien y eso es lo que costó: los resultados se
+emitían (`res.list` los tenía), se guardaban en `check_state`, el historial los indexaba, y
+`history_meta()` devolvía sus 128 campos con etiqueta y unidad traducidas. Se comprobó cada
+eslabón por separado hasta llegar al único que no tenía tests: el que empareja las claves de
+resultado de un módulo con los items que el host tiene enlazados.
+
+**Causa raíz** — `_matches()` conocía dos formas de clave: la que **es** el item (`<uid>`) y la
+derivada con sufijo (`<uid>_ram`, de ram_swap). El muestreo emite la forma **compuesta** —
+`<uid>/metrics`, `<uid>/eth0`— que es la convención que el resto del producto ya habla
+(`check_label()` del historial la resuelve exactamente así). Al no reconocerla, `base` acababa
+siendo la clave entera, no estaba entre las del host, y la fila se descartaba. Todas.
+
+**Solución** — `_matches()` prueba tres formas, de más específica a menos: la clave exacta, el
+primer segmento antes de `/`, y el sufijo tras el último `_`. Y `tests/unit/test_hosts_status_rows.py`,
+que ese join no tenía: incluye que **sólo** el primer segmento es el item (proxmox emite
+`<uid>/node/pve04`), y que `srv-uid2/metrics` **no** pertenece a `srv-uid` — un `startswith`
+habría hecho que sí.
+
+**Lección** — Un join silencioso necesita tests más que un cálculo. Cuando algo se descarta por
+no encajar, el fallo no se parece a un fallo: se parece a que no había datos, que es
+indistinguible del caso legítimo. Y una convención de claves que dos sitios del producto
+interpretan por su cuenta (`check_label` la entendía, este join no) es una convención que
+todavía no existe — o la comparten, o uno de los dos está equivocado y nadie lo nota.
+
 ## El panel se quedaba en el spinner: un comentario tumbó los 90 ficheros de JS
 
 **Fecha:** 2026-08-19 · **Área:** `web_admin/templates/partials/cfg/auth/_group_role_map.html`

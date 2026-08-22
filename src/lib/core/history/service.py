@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 
+from lib.modules.history_fields import module_history_fields
+
 
 def _pretty_name(modules_dir: str | None, module: str, lang: str) -> str:
     """Return the human-readable module name from its lang JSON, or the raw name."""
@@ -71,7 +73,8 @@ def _history_labels(modules_dir: str | None, module: str, lang: str) -> dict:
     return {}
 
 
-def history_meta(modules_dir: str | None, module: str, lang: str) -> dict:
+def history_meta(modules_dir: str | None, module: str, lang: str,
+                 var_dir: str = '') -> dict:
     """``__history__`` enriched with a resolved per-field ``fields`` map.
 
     ``fields`` is ``{name: {unit, label}}`` for every numeric field the module
@@ -79,12 +82,18 @@ def history_meta(modules_dir: str | None, module: str, lang: str) -> dict:
     Labels come from the module lang ``history`` map, falling back to the
     schema label (primary field) or a prettified field name.  Status-only
     modules (``field: null`` with no ``fields``) get an empty map.
+
+    A module may also work its fields out at RUN time — see
+    :mod:`lib.modules.history_fields`. The SNMP watchful is the case: what it records is
+    decided by the device profiles installed, so no schema written at build time could name
+    them. Those are merged in first and the static declaration wins over them, because the
+    static one is what somebody wrote down on purpose.
     """
     cfg = dict(_history_config(modules_dir, module))
     labels = _history_labels(modules_dir, module, lang)
     declared = cfg.get('fields') if isinstance(cfg.get('fields'), dict) else {}
     primary  = cfg.get('field') if isinstance(cfg.get('field'), str) else None
-    fields: dict = {}
+    fields: dict = dict(module_history_fields(module, lang, var_dir))
     for name, meta in declared.items():
         meta = meta if isinstance(meta, dict) else {}
         fields[name] = {

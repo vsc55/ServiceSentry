@@ -60,8 +60,11 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
                     title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body p-3">
-                <div id="mibDetailsBody">
+            {# Same chain as the manager: the body distributes the height, the pane that is
+               open scrolls. A source listing is the case that needs it — a MIB is four
+               thousand lines and a box of a fixed height is a keyhole. #}
+            <div class="modal-body p-3 ss-vfill">
+                <div id="mibDetailsBody" class="ss-vfill">
                     <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
                 </div>
             </div>
@@ -72,96 +75,366 @@
     </div>
 </div>
 
-{# MIB Manager modal #}
-<div class="modal fade" id="mibManagerModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-xl">
-        <div class="modal-content d-flex flex-column">
-            <div class="modal-header py-2">
-                <h6 class="modal-title">
-                    <i class="bi bi-database-gear me-1"></i>
-                    <span id="mibManagerTitle"></span>
-                </h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"
-                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+{# ── The symbol browser, as a view of the section ────────────────────────────
+   The same screen as the dialog, in a pane. Its ids carry a `View` suffix because both can
+   be in the document at once — the dialog is still how a server's field asks — and two live
+   copies of an id is a control that fills one box and reads the other. Everything that
+   draws into them goes through `_brwEl`, which knows which copy is being drawn. #}
+<template id="snmpBrowserPageTpl">
+<div class="ss-vfill">
+            <div class="ss-toolbar ss-toolbar-plain ss-toolbar-flush flex-shrink-0">
+                <h6 class="mb-0"><i class="bi bi-diagram-3 me-2"></i><span id="mibBrowserTitleView"></span>
+                    <span id="mibBrowserCountView" class="badge bg-secondary ms-1"></span></h6>
+                <span class="ms-auto d-flex align-items-center gap-2">
+                    <div class="input-group input-group-sm mib-search">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="mibBrowserSearchView"
+                               oninput="_mibBrowserFilterChange(this.value)">
+                    </div>
+                    <button class="btn btn-sm btn-secondary text-nowrap" id="mibBrowserExpandAllView"
+                            onclick="_mibBrowserExpandAll()">
+                        <i class="bi bi-arrows-expand me-1"></i>
+                        <span id="mibBrowserExpandAllLabelView"></span>
+                    </button>
+                </span>
             </div>
-            <div class="modal-body p-3">
-                <!-- Toolbar row 1 — labels filled by openMibManagerModal() from module i18n -->
-                <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-                    <label class="btn btn-sm btn-secondary mb-0" id="mibUploadLabel">
-                        <i class="bi bi-upload me-1"></i><span id="mibUploadTextLabel"></span>
-                        <input type="file" id="mibFileInput" accept=".mib,.txt,.my" multiple
-                               onchange="_uploadMibFiles(this.files)">
-                    </label>
-                    <button class="btn btn-sm btn-secondary" id="mibCompileBtn"
-                            onclick="_compileMibs()">
-                        <i class="bi bi-gear me-1"></i><span id="mibCompileBtnLabel"></span>
-                    </button>
-                    <button class="btn btn-sm btn-danger" id="mibStopBtn"
-                            onclick="_mibStopCompile()">
-                        <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
-                    </button>
-                    <button class="btn btn-sm btn-secondary" id="mibRefreshBtn"
-                            onclick="_mibLoad()" title="">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
+            <div class="ss-vfill p-3">
+                <div id="mibBrowserTreeView" class="ss-vscroll"></div>
+            </div>
+</div>
+</template>
+
+{# ── The import view, as MARKUP ──────────────────────────────────────────────
+   The three ways in — a URL, a repository folder, a vendor archive — were a folded
+   `<details>` at the top of the MIB list, then a dialog. Both were the same compromise:
+   somewhere to PUT it. What settled it is what "Compare" answers — a table with one row
+   per file in the archive, which for LibreNMS is four thousand of them. That is a page,
+   not a panel and not a dialog: it wants the width and it wants the height.
+
+   So the section declares two views (schema.json → `__page__.views`) and this is the
+   second one. Same pane, same permission, its own sub-path — `/module/snmp/import`, which
+   is a link somebody can send. Progress and Stop carry the SAME ids as the library view
+   on purpose: a `<template>` is inert, only the cloned one is ever in the document, and a
+   download started here stays watchable after switching back to the list. #}
+<template id="snmpImportPageTpl">
+<div class="ss-vfill">
+            <div class="ss-toolbar ss-toolbar-plain ss-toolbar-flush flex-shrink-0">
+                <h6 class="mb-0"><i class="bi bi-cloud-download me-2"></i><span id="mibImportTitle"></span></h6>
+            </div>
+            <!-- A job runs server-side and is watched from wherever you happen to be, so
+                 it reports in the SAME place in all three views: a strip under the head,
+                 which appears when something starts and is gone when it ends. Painted in
+                 three different corners, following somebody around the section, it read as
+                 three different things happening. Same ids on purpose — a `<template>` is
+                 inert and only the clone is ever in the document. -->
+            <div id="mibProgressSection" class="mib-progress flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+                    <small class="text-muted mib-progress-text" id="mibProgressLabel"></small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="fw-semibold text-muted mib-progress-text" id="mibProgressPct"></small>
+                        <button class="btn btn-sm btn-danger mib-stop" id="mibStopBtn"
+                                onclick="_mibStopCompile()">
+                            <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                         id="mibProgressBar" role="progressbar"
+                         aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+            </div>
+            <div class="ss-vfill p-3">
+            <!-- Three ways in, and they are three DIFFERENT things: a file somebody found,
+                 a folder of a repository, and a vendor's whole archive with a comparison
+                 in front of it. As three rows of controls they read as one form with too
+                 many boxes; each one gets a card that says what it is for. -->
+            <div class="row g-3 mb-3 flex-shrink-0">
+                <div class="col-12 col-xl-4">
+                    <div class="card h-100">
+                        <div class="card-body p-3">
+                            <div class="fw-semibold small mb-1">
+                                <i class="bi bi-upload me-1"></i><span id="mibUploadTitle"></span>
+                            </div>
+                            <div class="small text-muted mb-2" id="mibUploadHint"></div>
+                            <label class="btn btn-sm btn-secondary mb-0" id="mibUploadLabel">
+                                <i class="bi bi-upload me-1"></i><span id="mibUploadTextLabel"></span>
+                                <input type="file" id="mibFileInput" accept=".mib,.txt,.my" multiple
+                                       onchange="_uploadMibFiles(this.files)">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-xl-4">
+                    <div class="card h-100">
+                        <div class="card-body p-3">
+                            <div class="fw-semibold small mb-1">
+                                <i class="bi bi-link-45deg me-1"></i><span id="mibImportUrlTitle"></span>
+                            </div>
+                            <div class="small text-muted mb-2" id="mibImportUrlHint"></div>
+                            <div class="d-flex gap-2">
+                                <input type="url" id="mibImportUrlInput"
+                                       class="form-control form-control-sm"
+                                       onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromUrl();}">
+                                <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap"
+                                        id="mibImportUrlBtn" onclick="_importMibFromUrl()">
+                                    <i class="bi bi-cloud-download me-1"></i><span id="mibImportUrlBtnLabel"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-xl-4">
+                    <div class="card h-100">
+                        <div class="card-body p-3">
+                            <div class="fw-semibold small mb-1">
+                                <i class="bi bi-github me-1"></i><span id="mibGithubTitle"></span>
+                            </div>
+                            <div class="small text-muted mb-2" id="mibGithubHint"></div>
+                            <div class="d-flex gap-2 align-items-center flex-wrap">
+                                <select id="mibGithubRepoSel" class="form-select form-select-sm mib-src-pick"
+                                        onchange="_mibGithubRepoPick()"></select>
+                                <input type="url" id="mibGithubUrlInput"
+                                       class="form-control form-control-sm flex-grow-1">
+                                <div class="form-check form-switch flex-shrink-0 m-0">
+                                    <input class="form-check-input" type="checkbox" id="mibGithubRecursive" checked>
+                                    <label class="form-check-label small text-nowrap" for="mibGithubRecursive"
+                                           id="mibGithubRecursiveLabel"></label>
+                                </div>
+                                <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap"
+                                        id="mibGithubImportBtn" onclick="_importMibFromGithub()">
+                                    <i class="bi bi-github me-1" id="mibGithubImportIcon"></i><span id="mibGithubImportBtnLabel"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12" id="mibArchiveRow" style="display:none">
+                    <div class="card">
+                        <div class="card-body p-3">
+                            <div class="fw-semibold small mb-1">
+                                <i class="bi bi-box-seam me-1"></i><span id="mibArchiveTitle"></span>
+                            </div>
+                            <div class="small text-muted mb-2" id="mibArchiveHint"></div>
+                            <div class="d-flex gap-2 align-items-center flex-wrap">
+                                <select id="mibArchiveSel" class="form-select form-select-sm mib-src-pick"></select>
+                                <span class="flex-grow-1"></span>
+                                <!-- Two questions, not one with a footnote — and this is the
+                                     order they go in: "Compare" means go and look, so it
+                                     fetches the archive. Reusing what was downloaded before
+                                     is the shortcut, and a shortcut is something you ask for.
+                                     (The import that usually follows takes the copy this one
+                                     just left, so the pair still costs one download.) -->
+                                <div class="btn-group btn-group-sm flex-shrink-0">
+                                    <button class="btn btn-sm btn-secondary text-nowrap"
+                                            id="mibArchiveCompareBtn" onclick="_mibArchiveRun(true, true)">
+                                        <i class="bi bi-search me-1"></i><span id="mibArchiveCompareLabel"></span>
+                                    </button>
+                                    <button class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split"
+                                            type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                            id="mibArchiveMoreBtn"></button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><button class="dropdown-item" onclick="_mibArchiveRun(true)">
+                                            <i class="bi bi-lightning-charge me-1"></i>
+                                            <span id="mibArchiveCachedLabel"></span>
+                                        </button></li>
+                                    </ul>
+                                </div>
+                                <button class="btn btn-sm btn-primary flex-shrink-0 text-nowrap"
+                                        id="mibArchiveImportBtn" onclick="_mibArchiveRun(false)">
+                                    <i class="bi bi-box-arrow-in-down me-1"></i><span id="mibArchiveImportLabel"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- What "Compare" answers, and the reason this is a page: one row per file in
+                 the archive.  It fills what is left and scrolls itself. -->
+            <div id="mibArchiveResult" class="ss-vfill" style="display:none"></div>
+            </div>
+</div>
+</template>
+
+{# MIB Manager modal #}
+{# `modal-dialog-scrollable` is here for its HEIGHT, not its scrolling: it is what gives the
+   dialog a size to fill, and the .ss-vfill chain below hands that height down to the list so
+   it reaches the bottom edge — at the default size, resized by hand, or maximized to 95vh. #}
+{# ── The MIB manager, as MARKUP ────────────────────────────────────────────────
+   It was a modal, and the modal was the constraint: a list that had to reach the
+   bottom of a dialog somebody can drag, three levels of nesting to place a diff, and
+   every screen of it competing for the same 90vh. It is a SECTION now — declared in
+   schema.json as a page that belongs in the System panel — and this is what the
+   section paints.
+
+   In a <template> because the pane it goes into is generated by the core: the
+   content is inert until `renderSnmpMibsPage()` clones it, so there is never a
+   second copy of these ids in the document, and the markup stays markup. #}
+<template id="snmpMibsPageTpl">
+<div class="ss-vfill">
+            <!-- The section's head, the shape Configuration and Backups use: what you are
+                 looking at on the left, what you can do to it on the right. Importing and
+                 compiling are NOT here — they are views of this section, the sidebar lists
+                 all three, and a button beside a menu entry is a second door onto the same
+                 room. What is left is about the LIBRARY itself. -->
+            <div class="ss-toolbar ss-toolbar-plain ss-toolbar-flush flex-shrink-0">
+                <h6 class="mb-0"><i class="bi bi-hdd-stack me-2"></i><span id="mibLibTitle"></span></h6>
+                <!-- One group and an explicit `ms-auto`. The toolbar pushes its SECOND child
+                     right, and the second child here is the pysmi badge — which is hidden
+                     whenever pysmi is installed, so the margin that does the pushing was on
+                     an element with no width and the whole right-hand end sat by the title. -->
+                <span class="ms-auto d-flex align-items-center gap-2 flex-wrap justify-content-end">
+                    <span class="text-muted" id="mibDirInfo"></span>
                     <span id="mibPysmiStatus" class="badge rounded-pill"></span>
-                    <span class="ms-auto text-muted" id="mibDirInfo"></span>
-                </div>
-                <!-- Toolbar row 2 — URL import -->
-                <div class="d-flex gap-2 mb-2">
-                    <input type="url" id="mibImportUrlInput" class="form-control form-control-sm"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromUrl();}">
-                    <button class="btn btn-sm btn-secondary flex-shrink-0" id="mibImportUrlBtn"
-                            onclick="_importMibFromUrl()">
-                        <i class="bi bi-cloud-download me-1"></i><span id="mibImportUrlBtnLabel"></span>
+                    <button class="btn btn-sm btn-secondary" id="mibRefreshBtn"
+                            onclick="_mibLoad()">
+                        <i class="bi bi-arrow-clockwise me-1"></i><span id="mibRefreshLabel"></span>
                     </button>
-                </div>
-                <!-- Toolbar row 3 — GitHub folder import (single line) -->
-                <div class="d-flex gap-2 mb-2 align-items-center">
-                    <select id="mibGithubRepoSel" class="form-select form-select-sm flex-shrink-0"
-                            style="width:150px" onchange="_mibGithubRepoPick()"></select>
-                    <input type="url" id="mibGithubUrlInput" class="form-control form-control-sm flex-grow-1"
-                           style="min-width:80px"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();_importMibFromGithub();}">
-                    <div class="form-check form-switch flex-shrink-0 m-0">
-                        <input class="form-check-input" type="checkbox" id="mibGithubRecursive" checked>
-                        <label class="form-check-label small text-nowrap" for="mibGithubRecursive"
-                               id="mibGithubRecursiveLabel"></label>
-                    </div>
-                    <button class="btn btn-sm btn-secondary flex-shrink-0 text-nowrap" id="mibGithubImportBtn"
-                            onclick="_importMibFromGithub()">
-                        <i class="bi bi-github me-1" id="mibGithubImportIcon"></i><span id="mibGithubImportBtnLabel"></span>
-                    </button>
-                </div>
-                <!-- Compile dependency sources (resolve IMPORTS during compilation) -->
-                <details class="mb-3">
-                    <summary class="small text-muted" id="mibDepSrcSummary"
-                             style="cursor:pointer"></summary>
-                    <div class="small text-muted mt-1" id="mibDepSrcHint"></div>
-                    <div id="mibDepSrcList" class="d-flex flex-column gap-1 mt-2 ps-1"></div>
-                </details>
-                <!-- Compilation progress (shown while a compile job is running) -->
-                <div id="mibProgressSection" class="mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <small class="text-muted" id="mibProgressLabel"></small>
-                        <small class="fw-semibold text-muted" id="mibProgressPct"></small>
-                    </div>
-                    <div class="progress">
-                        <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
-                             id="mibProgressBar" role="progressbar"
-                             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </span>
+            </div>
+            <!-- A job runs server-side and is watched from wherever you happen to be, so
+                 it reports in the SAME place in all three views: a strip under the head,
+                 which appears when something starts and is gone when it ends. Painted in
+                 three different corners, following somebody around the section, it read as
+                 three different things happening. Same ids on purpose — a `<template>` is
+                 inert and only the clone is ever in the document. -->
+            <div id="mibProgressSection" class="mib-progress flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+                    <small class="text-muted mib-progress-text" id="mibProgressLabel"></small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="fw-semibold text-muted mib-progress-text" id="mibProgressPct"></small>
+                        <button class="btn btn-sm btn-danger mib-stop" id="mibStopBtn"
+                                onclick="_mibStopCompile()">
+                            <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
+                        </button>
                     </div>
                 </div>
-                <!-- File lists -->
-                <div id="mibManagerBody">
+                <div class="progress">
+                    <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                         id="mibProgressBar" role="progressbar"
+                         aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+            </div>
+            <div class="ss-vfill p-3">
+                <!-- What is on screen and what has been ticked. Rendered rather than written:
+                     both are answers about the data, and neither exists before the library
+                     has been read. The states and the folders are not here — they are the
+                     rail, which the core builds beside this column. -->
+                <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0">
+                    <!-- Written here and not rendered: the bar is repainted on every
+                         keystroke, and an input rebuilt under the cursor is a cursor that
+                         leaves the box being typed in. -->
+                    <div class="input-group input-group-sm mib-search flex-shrink-0">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" id="mibSearch" class="form-control"
+                               autocomplete="off" oninput="_mibFilterLists()">
+                    </div>
+                    <span class="d-flex align-items-center gap-2 flex-wrap flex-grow-1"
+                          id="mibListBar"></span>
+                </div>
+                <div id="mibManagerBody" class="ss-vfill">
                     <div class="text-center py-4">
                         <div class="spinner-border spinner-border-sm"></div>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer py-1">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
-            </div>
-        </div>
-    </div>
 </div>
+</template>
+
+{# ── Compiling, as a view of its own ───────────────────────────────────────────
+   It was a button, a fold and a progress bar stacked over the list — two rows of the
+   screen spent on it whether anything was compiling or not, and the things that
+   actually matter when a compile goes wrong (which sources resolve an IMPORTS, and
+   what failed and why) either hidden in a `<details>` or scattered through four
+   thousand rows behind a chip.
+
+   Same ids for the progress and Stop as the other two views: a `<template>` is inert,
+   only the clone is ever in the document, and a job started here stays watchable from
+   the library. #}
+<template id="snmpCompilePageTpl">
+<div class="ss-vfill">
+            <div class="ss-toolbar ss-toolbar-plain ss-toolbar-flush flex-shrink-0">
+                <h6 class="mb-0"><i class="bi bi-gear me-2"></i><span id="mibCompileTitle"></span></h6>
+                <span class="ms-auto d-flex align-items-center gap-2">
+                    <span id="mibPysmiStatus" class="badge rounded-pill"></span>
+                    <button class="btn btn-sm btn-secondary" id="mibRefreshBtn"
+                            onclick="_mibLoad()">
+                        <i class="bi bi-arrow-clockwise me-1"></i><span id="mibRefreshLabel"></span>
+                    </button>
+                </span>
+            </div>
+            <!-- A job runs server-side and is watched from wherever you happen to be, so
+                 it reports in the SAME place in all three views: a strip under the head,
+                 which appears when something starts and is gone when it ends. Painted in
+                 three different corners, following somebody around the section, it read as
+                 three different things happening. Same ids on purpose — a `<template>` is
+                 inert and only the clone is ever in the document. -->
+            <div id="mibProgressSection" class="mib-progress flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+                    <small class="text-muted mib-progress-text" id="mibProgressLabel"></small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="fw-semibold text-muted mib-progress-text" id="mibProgressPct"></small>
+                        <button class="btn btn-sm btn-danger mib-stop" id="mibStopBtn"
+                                onclick="_mibStopCompile()">
+                            <i class="bi bi-stop-fill me-1"></i><span id="mibStopBtnLabel"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                         id="mibProgressBar" role="progressbar"
+                         aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+            </div>
+            <div class="ss-vfill p-3">
+            <!-- How much work there is, before the button that does it. -->
+            <div class="d-flex align-items-center gap-4 flex-wrap mb-3 flex-shrink-0"
+                 id="mibCompileStats"></div>
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2 flex-shrink-0">
+                <!-- Two actions, not one with a footnote. "Pending" walks what has no
+                     compiled module or one older than its source; "rebuild everything"
+                     walks the lot AND forces it, which is the case pysmi's timestamp
+                     check cannot see (pysmi upgraded, a dependency changed). -->
+                <button class="btn btn-sm btn-primary" id="mibCompileBtn"
+                        onclick="_compileMibs(null, 'pending')">
+                    <i class="bi bi-gear me-1"></i><span id="mibCompileBtnLabel"></span>
+                </button>
+                <button class="btn btn-sm btn-secondary" id="mibRebuildAllBtn"
+                        onclick="_mibRebuildAll()">
+                    <i class="bi bi-arrow-repeat me-1"></i><span id="mibCompileAllLabel"></span>
+                </button>
+                <!-- What a compile does to FINISH: the OID index every check resolves
+                     through, and the symbol catalogue the browser reads. Both are derived
+                     from `compiled/`, so they go stale on their own — a tidy-up discards the
+                     catalogue rather than paying to rebuild it, and a .py dropped in by hand
+                     is not a compile at all. Doing it by hand had no button. -->
+                <button class="btn btn-sm btn-secondary" id="mibReindexBtn"
+                        onclick="_mibReindex()">
+                    <i class="bi bi-list-ol me-1"></i><span id="mibReindexLabel"></span>
+                </button>
+                <!-- What is left over is compiled OUTPUT: a module whose source was deleted,
+                     and the folder its source lived in. It sat in the library's head, where
+                     it was an action on the library about something the library does not do.
+                     Hidden until there is something to sweep. -->
+                <button class="btn btn-sm btn-secondary ms-auto" id="mibCleanBtn"
+                        style="display:none" onclick="_mibCleanLibrary()">
+                    <i class="bi bi-eraser me-1"></i><span id="mibCleanLabel"></span><span
+                          class="badge text-bg-secondary ms-1" id="mibCleanCount"></span>
+                </button>
+            </div>
+            <!-- Where an IMPORTS is looked up when the library does not hold it. -->
+            <div class="mb-3 flex-shrink-0">
+                <div class="fw-semibold small mb-1" id="mibDepSrcTitle"></div>
+                <div class="small text-muted" id="mibDepSrcHint"></div>
+                <div id="mibDepSrcList" class="d-flex flex-column gap-1 mt-2 ps-1"></div>
+            </div>
+            <!-- What failed, with the reason beside it. A failure is not a flavour of
+                 pending: they need opposite things done to them, and one of them needs
+                 somebody to read a message. -->
+            <div class="ss-vfill">
+                <div class="fw-semibold small mb-1 flex-shrink-0" id="mibErrorsTitle"></div>
+                <div id="mibCompileErrors" class="ss-vscroll d-flex flex-column gap-1"></div>
+            </div>
+            </div>
+</div>
+</template>
