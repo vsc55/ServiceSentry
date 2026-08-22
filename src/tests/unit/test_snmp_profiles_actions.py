@@ -19,7 +19,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp.actions import SnmpActions
+from lib.core.snmp.actions import SnmpActions
 
 
 def _write(tmp_path, name, obj):
@@ -329,7 +329,7 @@ class TestAskingTheDeviceWhatItIs:
     def test_a_large_catalogue_cannot_turn_one_button_into_a_minute(self, acts):
         """One round trip per probing profile, against a device somebody is waiting on. Past
         the cap the rest are not probed — which costs suggestions, not the answer."""
-        from watchfuls.snmp import actions as _mod
+        from lib.core.snmp import actions as _mod
         acts._answers = {self.SYSOID: ('1.3.6.1.4.1.99999.1', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
         assert res['probed'] <= _mod._MAX_PROBES
@@ -748,7 +748,7 @@ class TestWhatTheAssignmentActuallyReads:
         """One implementation of "read this metric". Two of them agree until the day they do
         not, and that day the test says the profile works and the graph stays empty."""
         import inspect
-        from watchfuls.snmp import actions as _a
+        from lib.core.snmp import actions as _a
         from watchfuls.snmp import sampler as _s
         assert _a._read_metric is _s.read_metric
         assert 'read_metric(' in inspect.getsource(_s.SnmpSampler._sample_metric)

@@ -23,8 +23,8 @@ import zipfile
 
 import pytest
 
-from watchfuls.snmp import mib_admin
-from watchfuls.snmp.mib_admin import MibAdmin
+from lib.core.snmp.mibs import admin as mib_admin
+from lib.core.snmp.mibs.admin import MibAdmin
 
 
 def _mib(name, updated=None, body='body'):
@@ -516,7 +516,7 @@ class TestTheByteDosEndedAFileWith:
     def test_it_never_reaches_a_file_the_panel_writes(self):
         """Whatever the byte arrived in, it does not go out again: it cannot be part of a
         MIB, so there is no case in which keeping it is right."""
-        from watchfuls.snmp.mib_admin import _without_dos_eof
+        from lib.core.snmp.mibs.admin import _without_dos_eof
         assert _without_dos_eof('A-MIB DEFINITIONS ::= BEGIN\nEND\n\x1a\n') == (
             'A-MIB DEFINITIONS ::= BEGIN\nEND\n\n')
         assert _without_dos_eof('END\n') == 'END\n'

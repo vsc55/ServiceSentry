@@ -35,7 +35,7 @@ CSS = os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')
 # core now and the admin is still the watchful's — and a path spelled inline at ten call
 # sites is ten chances to leave one behind, reading a file that is not there.
 RESOLVER = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'resolver.py')
-MIB_ADMIN = os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py')
+MIB_ADMIN = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'admin.py')
 SNMP_INIT = os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py')
 LINT = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'lint.py')
 

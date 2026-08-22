@@ -19,7 +19,7 @@ import watchfuls.snmp as snmp
 from watchfuls.snmp import Watchful
 # El manejo del catalogo MIB (subir, compilar, importar) vive en su propio modulo desde que
 # dejo de ser la mitad del __init__: los tests lo nombran donde esta.
-from watchfuls.snmp import mib_admin
+from lib.core.snmp.mibs import admin as mib_admin
 from lib.core.snmp.mibs import resolver as mib_resolver
 from lib.core.snmp.mibs import catalog as mib_catalog
 
@@ -40,7 +40,7 @@ class _Base:
         # fail_streak debounce counters live).
         if monitor is None:
             monitor = create_mock_monitor({'watchfuls.snmp': module_config})
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None):
+        with patch('watchfuls.snmp._startup_compile_mibs'):
             return Watchful(monitor)
 
 

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.320 tests** (6290 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.330 tests** (6300 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -3658,7 +3658,7 @@ verdad.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_import_filter.py` — 41 tests
+**Archivo:** `tests/unit/test_snmp_mib_import_filter.py` — 41 tests
 
 **Qué entra en una importación, y dónde lo deja.** Tres cosas fallaban al entrar y las tres
 callaban. **Un nombre no es una prueba**: la carpeta `mibs/` de Net-SNMP trae `nodemap`,
@@ -3682,7 +3682,7 @@ rechazados en cada ejecución, un puñado distinto cada vez.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_dupes.py` — 32 tests
+**Archivo:** `tests/unit/test_snmp_mib_dupes.py` — 32 tests
 
 **Varios ficheros, un solo nombre de módulo.** pysmi resuelve un import **por nombre**: de tres
 ficheros llamados `SNMPv2-TC` lee uno, compila ése y no menciona los otros dos. Un archivo de
@@ -3708,7 +3708,7 @@ El listado decía `×3`, que es el hecho y no la pregunta. Las preguntas son si 
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_edit.py` — 52 tests
+**Archivo:** `tests/unit/test_snmp_mib_edit.py` — 52 tests
 
 **Editar un MIB, y poder deshacerlo.** Los fabricantes publican MIB rotos —SYNOLOGY-SMB-MIB no
 ha compilado nunca en ninguna parte— y desde aquí no hay nada que hacer salvo dejar que alguien
@@ -3737,7 +3737,7 @@ que no funcionó.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_errors.py` — 20 tests
+**Archivo:** `tests/unit/test_snmp_mib_errors.py` — 20 tests
 
 **Por qué un MIB no compiló, escrito donde están los MIB.** Compilar doscientos MIB no es algo
 que nadie mire hasta el final, y los fallos son justo a lo que se vuelve — con el modal ya
@@ -3784,7 +3784,7 @@ ahora llevan su carpeta) y lo que pysmi **compila** (nombres de módulo, que nun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_archive.py` — 76 tests
+**Archivo:** `tests/unit/test_snmp_mib_archive.py` — 76 tests
 
 **El archivo de MIBs de un fabricante, y distinguir una actualización de un retroceso.** Dos
 cosas que un catálogo de MIBs tiene que acertar en cuanto puede importar de más de un sitio, y
@@ -3821,7 +3821,7 @@ delante de lo instalado; la fecha del fichero dice cuándo se descargó).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_cleanup.py` — 15 tests
+**Archivo:** `tests/unit/test_snmp_mib_cleanup.py` — 15 tests
 
 **Lo que un borrado deja atrás.** `compiled/` es plano y cada fichero lleva el nombre del
 **módulo** —`IEEE8023-LAG-MIB.py`, se llamara como se llamara el fuente y estuviera en la
@@ -3844,7 +3844,7 @@ queda, y también la madre cuyo único contenido es esa carpeta.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 52 tests
+**Archivo:** `tests/unit/test_snmp_profiles_actions.py` — 52 tests
 
 **El catálogo, tal y como lo recibe el panel** — y preguntarle a un aparato qué es. Hasta que
 estas dos acciones existieron, la matriz de OIDs era real e invisible: tres ficheros JSON, un
@@ -3863,7 +3863,7 @@ parecen buenos, y ése es justo el fallo que tiene que confirmar una persona).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profile_catalog.py` — 66 tests
+**Archivo:** `tests/unit/test_snmp_profile_catalog.py` — 66 tests
 
 **Una palabra en lugar de quince perfiles.** Un Synology contesta quince perfiles —sistema,
 discos, SMART, volúmenes, SAI…— y cada uno es correctamente un perfil aparte, porque son
@@ -5256,6 +5256,30 @@ se incluye da un panel vacío sin error en ninguna parte.
 | `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
 | `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
 | `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 99a. Meta — Los dos valores por defecto que tienen que coincidir
+
+**Archivo:** `tests/meta/test_snmp_defaults_agree.py` — 4 tests
+
+Los valores por defecto de conexión SNMP están escritos **dos veces a propósito**, porque los
+dos lectores no pueden leer lo mismo: `lib/core/snmp/defaults.py` es lo que lee el **código**
+cuando un servidor deja un campo vacío (planificador, pantalla de prueba, descubrimiento), y
+`watchfuls/snmp/schema.json` es lo que lee el **navegador** para pintar el formulario — un
+esquema es dato, y un dato no puede llamar a una constante de Python.
+
+El fallo que se sigue de eso es del tipo silencioso. Cambia el default de `timeout` en el core
+y el formulario sigue ofreciendo el viejo como placeholder; cámbialo en el esquema y un check
+que deje el campo en blanco sigue usando el viejo. No salta nada, no se registra nada, y el
+número de la pantalla sencillamente no es el número que se usa.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTwoCopiesAgree::test_every_core_default_is_the_schema_s_default` | Campo a campo: si el core dice 161 y el formulario ofrece otro, lo dice con los dos valores |
+| `TestTheTwoCopiesAgree::test_the_core_covers_what_opening_a_connection_needs` | Puerto, versión y comunidad: sin ellos no hay conversación que empezar |
+| `TestTheTwoCopiesAgree::test_the_check_s_own_settings_are_not_in_it` | `timeout`/`retries` son política del check, no del protocolo — meterlos aquí haría del core el tercer sitio con una opinión |
+| `TestTheTwoCopiesAgree::test_the_schema_is_where_the_form_reads_it` | Control positivo: si el esquema dejara de declarar defaults, todo lo anterior pasaría comparando nada |
 
 ---
 

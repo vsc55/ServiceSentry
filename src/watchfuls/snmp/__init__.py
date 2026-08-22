@@ -16,14 +16,14 @@ import re
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
-from . import profile_store as _profile_store
+from lib.core.snmp import profile_store as _profile_store
 from lib.core.snmp import profiles as _profiles
-from .actions import SnmpActions
+from lib.core.snmp.actions import SnmpActions
 from .checks import SnmpChecks
 from lib.core.snmp.client import SnmpClient, _HAS_PYSNMP
 from .defaults import _SCHEMA, _CHECK_DEFAULTS, _SERVER_DEFAULTS
-from .mib_admin import MibAdmin, _HAS_PYSMI
-from . import mib_versions as _mib_versions
+from lib.core.snmp.mibs.admin import MibAdmin, startup_compile_mibs as _startup_compile_mibs, _HAS_PYSMI
+from lib.core.snmp.mibs import versions as _mib_versions
 from .sampler import SnmpSampler
 
 # What is left here is the module itself: the class, what it declares and what it offers the
@@ -127,7 +127,9 @@ class Watchful(MibAdmin, SnmpChecks, SnmpClient, SnmpActions, SnmpSampler,
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        self._startup_compile_mibs()
+        # Told where the library is and how to log, rather than reaching into this object for
+        # both: it was the one thing in the core's MIB administration that needed an instance.
+        _startup_compile_mibs(str(getattr(monitor, 'dir_var', '') or '').strip(), self._debug)
 
 def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
     """Every value a device profile can record, named — see lib.modules.history_fields.
@@ -155,12 +157,18 @@ def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
 
 
 def discover_db_tables():
-    """The tables this module keeps in the shared database.
+    """The tables SNMP keeps in the shared database, declared through this module.
 
     Edited MIB sources and their history, and the profile groupings written in the panel. On
     the general connector rather than files beside the MIBs because a deployment with a web
     container and a worker container shares the database and not the disk — and a MIB
     corrected in the panel has to be the MIB the worker compiles, exactly as a grouping made
     in the panel has to be the one the worker samples.
+
+    The stores themselves are core (``lib.core.snmp``) and each reconciles its own table when
+    it is constructed, so this is no longer the only thing standing between the schema and a
+    missing table. It stays because it is what runs at STARTUP: a table created on first use
+    is a table created inside whatever request or cycle happened to reach it first, and the
+    two ways of arriving there are not equally forgiving.
     """
     return [_mib_versions.SCHEMA, _profile_store.SCHEMA]

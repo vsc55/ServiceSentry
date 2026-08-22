@@ -86,7 +86,7 @@ class TestResolveHostGeneric:
 class TestPerModuleProfiles:
 
     def _snmp(self):
-        with patch.object(SnmpWatchful, '_startup_compile_mibs', return_value=None):
+        with patch('watchfuls.snmp._startup_compile_mibs'):
             s = SnmpWatchful(create_mock_monitor({'watchfuls.snmp': {}}))
         s._monitor._hosts_store = _FakeStore({'h1': _HOST})
         return s

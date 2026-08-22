@@ -8,6 +8,43 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.105] - 2026-08-22
+
+### Changed
+- **The SNMP engine is core; the watchful is a check again.** `mib_admin` (the operations the
+  panel invokes on the library), `actions` (the panel's profile and test operations), the two
+  stores, the MIB source list and the reading half of the sampler all move to
+  `lib/core/snmp/`. What is left in `watchfuls/snmp/` is **685 lines** of the 8,647 it held:
+  the check loop, the schema that describes a check, its UI and its translations.
+- Neither of the two big classes was a mixin, which is what made this a move rather than a
+  rewrite. `MibAdmin` has 72 methods and `SnmpActions` 34, and between them there was exactly
+  **one** instance method — `_startup_compile_mibs`, which reached into the object for two
+  facts every caller already has: where `var_dir` is, and where to log. It is a function
+  taking a directory now, and both classes are what they had quietly become: namespaces the
+  watchful inherits so the panel can dispatch to them by name.
+- The sampler is split along a real seam. Reading a metric off a device is core — the
+  scheduler, the test screen and (next) the host walk must get identical answers or the
+  screen becomes a second opinion. Turning a reading into a SERIES needs state that outlives
+  the process, and stays with the watchful that emits the verdict.
+- **The connection defaults are the protocol's**: port 161, community `public`, version 2c,
+  one retry. They are in `lib/core/snmp/defaults.py`, read by everything that opens a
+  conversation. The schema still declares the same values because a form is data the browser
+  reads and cannot call a Python constant — a duplication with a real reason, pinned by
+  `test_snmp_defaults_agree.py` rather than trusted.
+- The two tables keep their `mod_snmp_` names on purpose. A table name is a fact about DATA,
+  and every installation already has rows under those; renaming one because the code moved
+  would spend a migration on tidiness. If it is ever changed it should be for a reason of its
+  own, with the migration written and tested on all three engines.
+- Eight more test files follow their subject into `tests/unit/`.
+
+### Fixed
+- A fourth path anchored on where a test file happens to sit
+  (`split(os.sep + 'watchfuls' + os.sep)`), which silently resolved to the test's own path
+  once it moved — not an error until an `open()` fails, and not an error at all if a
+  same-named file had existed under it.
+- Two structural guards read sources by hand-spelled paths that no longer point anywhere.
+  Both now name each source once.
+
 ## [0.0.1+build.104] - 2026-08-22
 
 ### Changed

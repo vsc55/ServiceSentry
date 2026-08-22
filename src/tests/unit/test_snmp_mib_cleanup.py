@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp.mib_admin import MibAdmin as MA
+from lib.core.snmp.mibs.admin import MibAdmin as MA
 
 
 _MIB = 'A-MIB DEFINITIONS ::= BEGIN\nEND\n'

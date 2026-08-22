@@ -463,7 +463,7 @@ class TestNothingScansItFlatAnyMore:
         # this file: the two no longer live in the same tree — the resolver is core now and
         # the admin is still the watchful's — and a hand-written path would have to be
         # corrected on every move, silently reading nothing until somebody noticed.
-        from watchfuls.snmp import mib_admin          # noqa: PLC0415
+        from lib.core.snmp.mibs import admin as mib_admin          # noqa: PLC0415
         for mod in (mib_admin, mib_resolver):
             with open(os.path.abspath(mod.__file__), encoding='utf-8') as fh:
                 src = fh.read()

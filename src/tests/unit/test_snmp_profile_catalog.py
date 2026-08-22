@@ -28,9 +28,9 @@ it pointing at nothing. Both are refusals here and neither is a matter of taste.
 
 import pytest
 
-from watchfuls.snmp import profile_store as PS
+from lib.core.snmp import profile_store as PS
 from lib.core.snmp import profiles as P
-from watchfuls.snmp.actions import SnmpActions as A
+from lib.core.snmp.actions import SnmpActions as A
 
 
 def _prof(pid, *keys):

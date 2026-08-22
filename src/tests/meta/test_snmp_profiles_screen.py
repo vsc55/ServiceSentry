@@ -23,6 +23,12 @@ from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 SNMP = os.path.join(SRC, 'watchfuls', 'snmp')
+# The engine is core now; the module keeps the check and its schema. Each source is
+# named once, so the next move is a line rather than a hunt.
+CORE_SNMP = os.path.join(SRC, 'lib', 'core', 'snmp')
+ACTIONS = os.path.join(CORE_SNMP, 'actions.py')
+PROFILES = os.path.join(CORE_SNMP, 'profiles.py')
+SAMPLER = os.path.join(CORE_SNMP, 'sampler.py')
 WEB = os.path.join(SNMP, 'web')
 UI = os.path.join(WEB, 'profiles_ui.html')
 MODALS = os.path.join(WEB, 'profiles_modals.html')
@@ -165,7 +171,7 @@ class TestTheScreenIsWired:
         `profiles.normalise`, and the reason a metric was refused is asked for only AFTER
         `normalise_metric` has already said no — so the explanation cannot drift into
         disagreeing with the verdict."""
-        acts = _read(os.path.join(SNMP, 'actions.py'))
+        acts = _read(ACTIONS)
         # `_fn` reads JavaScript; this one is Python, so the method is sliced out by hand.
         start = acts.index('    def save_profile(cls')
         body = acts[start:acts.index('    # ── Taking one back', start)]
@@ -654,7 +660,7 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         js = _read(UI)
         drawn = re.search(r'const _SNMP_TEST_STEPS = \[(.*?)\]', js, re.S).group(1)
         drawn = re.findall(r"'(\w+)'", drawn)
-        acts = _read(os.path.join(SNMP, 'actions.py'))
+        acts = _read(ACTIONS)
         served = re.search(r"ORDER = \((.*?)\)", acts, re.S).group(1)
         assert drawn == re.findall(r"'(\w+)'", served), 'the two lists have drifted'
 
@@ -686,7 +692,7 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         metric for a number the profile is holding — and a metric declares a COLUMN while the
         device answers one OID per row under it, so the comparison is containment and never
         equality. As equality, every interface on the switch reads as uncaptured."""
-        py = _read(os.path.join(SNMP, 'actions.py'))
+        py = _read(ACTIONS)
         block = py.split('def _test_read(')[1].split('    @staticmethod')[0]
         assert "m.get('index_label')" in block and "m.get('scale_by')" in block
         assert 'def _covered_by(' in py and "'.'.join(parts[:i]) in roots" in py

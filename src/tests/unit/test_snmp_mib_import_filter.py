@@ -23,15 +23,20 @@ import shutil
 
 import pytest
 
-from watchfuls.snmp import mib_admin as MA
+from lib.core.snmp.mibs import admin as MA
 
 MIB = 'FOO-MIB DEFINITIONS ::= BEGIN\nfoo OBJECT IDENTIFIER ::= { iso 1 }\nEND\n'
 
 
 def _read_src(rel):
-    """A file of the source tree, from a test that lives beside its module."""
+    """A file of the source tree, located from the source ROOT.
+
+    Anchored on ``tests`` and not on ``watchfuls``: this test used to sit inside the module
+    it reads, and the old anchor quietly resolved to the test's own path once it moved —
+    which is not an error until the open() fails, and would not have failed at all if a
+    same-named file had happened to exist under it."""
     import io as _io
-    root = os.path.abspath(__file__).split(os.sep + 'watchfuls' + os.sep)[0]
+    root = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
     return _io.open(os.path.join(root, *rel.split('/')), encoding='utf-8').read()
 
 
@@ -45,7 +50,7 @@ def _fn_src(src, name):
 
 
 def _admin_src():
-    return _read_src('watchfuls/snmp/mib_admin.py')
+    return _read_src('lib/core/snmp/mibs/admin.py')
 
 
 class _FakeAdmin:
@@ -123,7 +128,7 @@ class TestASourceDeclaresItsOwnArchive:
 
     def test_librenms_declares_the_zip_and_the_folder(self):
         import json as _json
-        src = _json.loads(_read_src('watchfuls/snmp/mib_sources/librenms.json'))
+        src = _json.loads(_read_src('lib/core/snmp/mibs/mib_sources/librenms.json'))
         assert src['archive'].startswith('https://codeload.github.com/')
         assert src['archive_only'] == 'mibs'
         assert src['folder'], 'the API route is still the cheap one and stays'
@@ -193,7 +198,7 @@ class TestASourceDeclaresItsOwnArchive:
     def test_the_format_is_documented(self):
         """This directory is the place somebody adds a source without touching code, which
         only works while the fields are written down."""
-        doc = _read_src('watchfuls/snmp/mib_sources/README.md')
+        doc = _read_src('lib/core/snmp/mibs/mib_sources/README.md')
         assert 'archive_only' in doc
 
 

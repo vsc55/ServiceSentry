@@ -88,7 +88,7 @@ def env(tmp_path):
 
         def run(self, server, dev, monitor=None):
             mon = monitor or self.monitor(server)
-            with patch.object(Watchful, '_startup_compile_mibs', return_value=None), \
+            with patch('watchfuls.snmp._startup_compile_mibs'), \
                  patch.object(Watchful, '_snmp_get', dev.get), \
                  patch.object(Watchful, '_snmp_walk_oid', dev.walk):
                 wf = Watchful(mon)
@@ -173,7 +173,7 @@ class TestAGroupIsResolvedBeforeAnythingIsAsked:
         made in the panel that the sampler could not read would be a device assigned nothing
         at all."""
         from lib.db.sqlite import SQLiteConnector
-        from watchfuls.snmp.profile_store import CatalogStore
+        from lib.core.snmp.profile_store import CatalogStore
         env.profile('p1', [GAUGE])
         db = SQLiteConnector(str(tmp_path / 'test.db'))
         CatalogStore(db).save('mine', {'label': 'Mine', 'includes': ['p1']})
@@ -459,7 +459,7 @@ class TestAProbeProvesItAnswersAndStopsThere:
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
             'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None), \
+        with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', _walk), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: probe)):
@@ -492,7 +492,7 @@ class TestAProbeProvesItAnswersAndStopsThere:
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
             'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None), \
+        with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', lambda *_a, **_k: ({}, 'timeout')), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: True)):
@@ -532,7 +532,7 @@ class TestTheProbeThePanelRuns:
             'community': 'public', 'version': '2c'}}}}
         # The probe builds its own monitor with NO data directory, so only the shipped
         # catalogue is visible there — the profile has to come from a place it can reach.
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None),              patch.object(Watchful, '_snmp_get', dev.get),              patch.object(Watchful, '_snmp_walk_oid', dev.walk),              patch.object(Watchful, '_profile_catalog',
+        with patch('watchfuls.snmp._startup_compile_mibs'),              patch.object(Watchful, '_snmp_get', dev.get),              patch.object(Watchful, '_snmp_walk_oid', dev.walk),              patch.object(Watchful, '_profile_catalog',
                           lambda self: {'p1': _profile('p1', [GAUGE])}):
             res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
                                                 modules_dir='watchfuls')
