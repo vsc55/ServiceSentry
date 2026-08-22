@@ -8,6 +8,38 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.109] - 2026-08-22
+
+### Changed
+- **The SNMP section is claimed by the core**, not by a module. Its five views — the MIB
+  library, import, compile, the symbol browser and the profile catalogue — are declared as
+  `PAGE` in `lib/core/snmp/manifest.py`, and its UI moved with it to `lib/core/snmp/web/`.
+  A screen that vanished when somebody removed the SNMP watchful would be a library you can
+  still fill and no longer look at, and a catalogue the sampler still reads with nowhere to
+  edit it.
+- No new mechanism, twice over. The UI scanner already walked `<pkg>/web/*.html` for two
+  roots (watchfuls and providers) — core is a third, one line. And the page catalogue picks
+  the descriptor up through `lib/discovery.py`, the same scanner that finds permissions,
+  Overview widgets and host profiles.
+- A core section **names itself**: its title and its view labels come from core i18n
+  (`snmp_page`). A module's page is titled by its `pretty_name` because the core owns no
+  string that names a module; that reason does not apply to a section the core declares.
+- The sidebar needed nothing: it has always emitted `data-nav-module` conditionally, so a
+  page with no module behind it was already legal — nobody had ever declared one.
+
+### Added
+- A guard that a CORE section's renderer exists, mirroring the one that has always checked a
+  module's. It is what caught this change half-done: the UI had moved to the core while the
+  page was still declared by the watchful, so the module named a renderer it no longer
+  shipped — and nothing else noticed, because the module-side guard had stopped looking and
+  no core-side guard existed yet.
+
+### Notes
+- The screens' own vocabulary (347 strings) still lives in the module's lang file and is read
+  through `_modUiStr`. It works because the watchful is still installed; moving it is the
+  last of this, and it is a move of words, not of behaviour. The audit vocabulary is not
+  affected either way — `_auditWord` reads core i18n first and falls back to the module.
+
 ## [0.0.1+build.108] - 2026-08-22
 
 ### Changed

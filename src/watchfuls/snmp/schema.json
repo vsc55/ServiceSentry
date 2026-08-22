@@ -1,17 +1,5 @@
 {
     "__icon__": "bi-hdd-stack",
-    "__page__": {
-        "id": "snmp", "icon": "bi-hdd-stack", "order": 25,
-        "placement": "system", "perm": "snmp_view",
-        "render": "renderSnmpMibsPage",
-        "views": [
-            {"slug": "library", "icon": "bi-hdd-stack", "label": "view_mibs"},
-            {"slug": "import", "icon": "bi-cloud-download", "label": "view_import"},
-            {"slug": "compile", "icon": "bi-gear", "label": "view_compile"},
-            {"slug": "browser", "icon": "bi-diagram-3", "label": "view_browser"},
-            {"slug": "profiles", "icon": "bi-grid-3x3-gap", "label": "view_profiles"}
-        ]
-    },
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},

@@ -29,7 +29,7 @@ CORE_SNMP = os.path.join(SRC, 'lib', 'core', 'snmp')
 ACTIONS = os.path.join(CORE_SNMP, 'actions.py')
 PROFILES = os.path.join(CORE_SNMP, 'profiles.py')
 SAMPLER = os.path.join(CORE_SNMP, 'sampler.py')
-WEB = os.path.join(SNMP, 'web')
+WEB = os.path.join(CORE_SNMP, 'web')
 UI = os.path.join(WEB, 'profiles_ui.html')
 MODALS = os.path.join(WEB, 'profiles_modals.html')
 FIELD_RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
@@ -95,13 +95,11 @@ class TestTheScreenIsWired:
         was on screen. A card in a list of modules is where you configure a module, not where
         you read its reference — so the catalogue is a view of the SNMP section, declared the
         way the other four are, and the module ships no toolbar at all any more."""
-        import json
+        from lib.core.snmp.manifest import PAGE          # noqa: PLC0415
         init = _read(os.path.join(SNMP, '__init__.py'))
         assert 'WATCHFUL_TOOLBAR: tuple[dict, ...] = ()' in init, \
             'the module card launches screens again'
-        with open(os.path.join(SNMP, 'schema.json'), encoding='utf-8') as fh:
-            views = (json.load(fh)['__page__'].get('views') or [])
-        assert 'profiles' in [v['slug'] for v in views]
+        assert 'profiles' in [v['slug'] for v in PAGE['views']]
         assert 'function _snmpProfViewLoad(' in _read(UI)
 
     def test_the_picker_is_still_a_dialog(self):
@@ -567,7 +565,7 @@ class TestTheMibManagerScreen:
         """Synology publishes an archive of twenty MIBs; the mirror that hosts three of them
         is a dependency source for compiling, not the place to import from. Listed in the
         folder dropdown it looks like the main way in, and it is the small version."""
-        js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
+        js = _strip_comments(_read(os.path.join(WEB, '_ui.html')))
         block = js.split('function _mibPopulateRepoSelect')[1].split('function ')[0]
         assert 'if (!r.folder) continue' in block
 
@@ -579,7 +577,7 @@ class TestTheMibManagerScreen:
         section now, precisely because comparing against LibreNMS answers four thousand rows
         and no capped box is a way to read that. So the report fills instead: `.ss-vfill`
         down to one `.ss-vscroll`, header and count pinned, only the list scrolling."""
-        js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
+        js = _strip_comments(_read(os.path.join(WEB, '_ui.html')))
         fn = _fn(js, '_mibArchiveReport')
         assert 'ss-vfill' in fn and 'ss-vscroll' in fn
         assert 'ss-scroll-box' not in fn, 'still capped at the height of a dialog'

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.370 tests** (6340 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.380 tests** (6350 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -4879,7 +4879,7 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
 
-**Archivo:** `tests/unit/test_module_pages.py` — 20 tests
+**Archivo:** `tests/unit/test_module_pages.py` — 21 tests
 **Archivo:** `tests/integration/test_module_pages.py` — 12 tests
 
 Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo **`/module/<id>`**, en su propio espacio de nombres: así una sección futura del core no puede chocar con ella ni al revés. Las **vistas** de esa sección (varias disposiciones bajo un desplegable) están en [§131](#131-una-sección-de-módulo-puede-tener-más-de-una-vista).
@@ -6304,7 +6304,7 @@ la clase.
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
-**Archivo:** `tests/unit/test_wa_module_page_views.py` — 47 tests
+**Archivo:** `tests/unit/test_wa_module_page_views.py` — 48 tests
 
 Un módulo aporta una sección de primer nivel declarando `__page__` y contestando con una
 forma fija: secciones de filas, cada fila con estado, mensaje y lo que la comprobación haya

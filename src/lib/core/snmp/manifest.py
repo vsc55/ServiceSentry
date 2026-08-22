@@ -129,3 +129,31 @@ MODULE_PERMISSIONS = {
 AUDIT_EVENTS = [
     {'key': 'snmp_action', 'severity': 'muted'},
 ]
+
+
+# ── The section this package claims ──────────────────────────────────────────────────────
+#
+# A page of its own, declared here rather than in a module's schema.json. The MIB library,
+# the symbol browser and the profile catalogue are the core's: a screen that disappeared when
+# somebody removed the SNMP watchful would be a library you can still fill and no longer look
+# at, and a catalogue the sampler still reads with nowhere to edit it.
+#
+# `placement: system` because of what it IS: something an operator ADMINISTERS, filed beside
+# Services, Modules and Credentials, not beside the dashboards an operator watches.
+#
+# `i18n` names the section of the core lang files its words come from — the title and one per
+# view. A module's page is titled by its `pretty_name` because the core owns no string that
+# names a module; a core section names itself.
+PAGE: dict = {
+    'id': 'snmp', 'icon': 'bi-hdd-stack', 'order': 25,
+    'placement': 'system', 'perm': 'snmp_view',
+    'render': 'renderSnmpMibsPage',
+    'i18n': 'snmp_page',
+    'views': [
+        {'slug': 'library',  'icon': 'bi-hdd-stack',      'label': 'view_mibs'},
+        {'slug': 'import',   'icon': 'bi-cloud-download', 'label': 'view_import'},
+        {'slug': 'compile',  'icon': 'bi-gear',           'label': 'view_compile'},
+        {'slug': 'browser',  'icon': 'bi-diagram-3',      'label': 'view_browser'},
+        {'slug': 'profiles', 'icon': 'bi-grid-3x3-gap',   'label': 'view_profiles'},
+    ],
+}

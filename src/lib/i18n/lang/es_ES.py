@@ -3019,6 +3019,16 @@ LANG = {
     # Etiquetas de campos del perfil SSH core + opciones de método de autenticación
     # (el perfil SSH es del core, no un módulo, así que su i18n vive aquí; lo lee
     # lib/core/hosts/profiles.py para construir el meta de los campos del perfil).
+    # La sección SNMP se nombra a sí misma: la declara lib/core/snmp/manifest.py, no un
+    # módulo, así que sus palabras salen de aquí y no de un fichero que puede no existir.
+    'snmp_page': {
+        'title':         'SNMP',
+        'view_mibs':     'MIBs',
+        'view_import':   'Importar',
+        'view_compile':  'Compilar',
+        'view_browser':  'Navegador',
+        'view_profiles': 'Perfiles',
+    },
     'snmp_profile': {
         'labels': {
             'host':                 'Host / IP',

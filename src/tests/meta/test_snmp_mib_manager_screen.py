@@ -26,7 +26,7 @@ import re
 from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
-WEB = os.path.join(SRC, 'watchfuls', 'snmp', 'web')
+WEB = os.path.join(SRC, 'lib', 'core', 'snmp', 'web')
 UI = os.path.join(WEB, '_ui.html')
 MODALS = os.path.join(WEB, '_modals.html')
 STYLES = os.path.join(WEB, '_styles.html')
@@ -1440,19 +1440,19 @@ class TestImportingIsItsOwnView:
     (`/module/snmp/import`) that a person can send to somebody else."""
 
     def test_the_section_declares_its_views(self):
-        """The module says which it has and names them in its own lang file — the core ships
-        no string that names a module's view."""
-        import json
-        with open(os.path.join(SRC, 'watchfuls', 'snmp', 'schema.json'), encoding='utf-8') as fh:
-            views = (json.load(fh)['__page__'].get('views') or [])
+        """The section says which views it has and names them in CORE i18n — it is claimed by
+        a core package now, and a section whose words lived in a module would go quiet the
+        day somebody removed it."""
+        from lib.core.snmp.manifest import PAGE          # noqa: PLC0415
+        from lib.i18n import TRANSLATIONS                # noqa: PLC0415
+        views = PAGE['views']
         assert [v['slug'] for v in views] == ['library', 'import', 'compile',
                                               'browser', 'profiles']
         for lang in ('es_ES', 'en_EN'):
-            with open(os.path.join(SRC, 'watchfuls', 'snmp', 'lang', lang + '.json'),
-                      encoding='utf-8') as fh:
-                ui = json.load(fh).get('ui') or {}
+            words = (TRANSLATIONS.get(lang) or {}).get(PAGE['i18n']) or {}
+            assert words.get('title'), f'the section has no title in {lang}'
             for v in views:
-                assert ui.get(v['label']), f'{v["label"]} has no word in {lang}'
+                assert words.get(v['label']), f'{v["label"]} has no word in {lang}'
 
     def test_the_import_controls_live_in_the_import_view(self):
         """Each of them exactly once in the file: two live copies of an id is a control that

@@ -3018,6 +3018,16 @@ LANG = {
     # Core built-in SSH connection-profile field labels + auth-method options
     # (the SSH profile is core-owned, not a module, so its i18n lives here; see
     # lib/core/hosts/profiles.py, which reads these to build the profile field meta).
+    # The SNMP section names itself: it is declared by lib/core/snmp/manifest.py rather
+    # than by a module, so its words come from here and not from a file that may be absent.
+    'snmp_page': {
+        'title':         'SNMP',
+        'view_mibs':     'MIBs',
+        'view_import':   'Import',
+        'view_compile':  'Compile',
+        'view_browser':  'Browser',
+        'view_profiles': 'Profiles',
+    },
     'snmp_profile': {
         'labels': {
             'host':                 'Host / IP',
