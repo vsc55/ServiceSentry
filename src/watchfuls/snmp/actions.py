@@ -18,10 +18,10 @@ import threading
 import time
 import uuid
 
-from . import metrics as _metrics
+from lib.core.snmp import metrics as _metrics
 from . import mib_resolver as _mib_resolver
 from . import profile_store as _profile_store
-from . import profiles as _profiles
+from lib.core.snmp import profiles as _profiles
 from .client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
 from .sampler import read_metric as _read_metric

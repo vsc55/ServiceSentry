@@ -17,7 +17,7 @@ from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
 from . import profile_store as _profile_store
-from . import profiles as _profiles
+from lib.core.snmp import profiles as _profiles
 from .actions import SnmpActions
 from .checks import SnmpChecks
 from .client import SnmpClient, _HAS_PYSNMP

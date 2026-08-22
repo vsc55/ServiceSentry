@@ -3607,7 +3607,7 @@ nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 48 tests
+**Archivo:** `tests/unit/test_snmp_profiles.py` — 48 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -3898,7 +3898,7 @@ sería un aparato al que no se le asignó nada.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_metrics.py` — 28 tests
+**Archivo:** `tests/unit/test_snmp_metrics.py` — 28 tests
 
 **Los contadores, y las dos formas en que mienten.** Un contador de bytes es acumulativo:
 dibujado en crudo es una línea que sólo sube, en la que una caída de servicio es un tramo plano
@@ -5256,6 +5256,29 @@ se incluye da un panel vacío sin error en ninguna parte.
 | `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
 | `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
 | `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 99b. Meta — La dependencia apunta en un solo sentido
+
+**Archivo:** `tests/meta/test_core_does_not_import_modules.py` — 3 tests
+
+`lib/` es el cimiento y `watchfuls/` lo que se enchufa en él, y la relación solo funciona en
+una dirección: un watchful importa `lib.modules.ModuleBase` y lo que necesite, mientras que el
+core se entera de los módulos **descubriéndolos** —leyendo su `schema.json` del disco,
+escaneando declaraciones— y nunca importando uno. Eso es lo que hace que un módulo se pueda
+quitar, y lo que permite probar el core sin ninguno.
+
+La regla era cierta y no estaba escrita. Se escribió al empezar a mudar SNMP a
+`lib/core/snmp`: una mudanza a medias es justo cuando alguien pone
+`from watchfuls.snmp import …` para que resuelva un import, y no fallaría nada — `lib` pasaría
+a depender de un módulo que depende de `lib`, un ciclo en diferido.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheDependencyPointsOneWay::test_no_core_file_imports_a_watchful` | Ningún `.py` bajo `lib/` importa `watchfuls`, ni siquiera diferido dentro de una función: un ciclo roto moviendo el import al cuerpo sigue siendo el core dependiendo de un módulo |
+| `TestTheDependencyPointsOneWay::test_the_scan_reaches_the_files_it_claims_to` | Una guarda que recorre un árbol vacío pasa por el motivo equivocado |
+| `TestTheDependencyPointsOneWay::test_the_pattern_would_catch_one` | Control positivo: lo que se cree es la expresión, no la ausencia de infractores. Un comentario que mencione el import, o una ruta que contenga `watchfuls`, no cuentan |
 
 ---
 

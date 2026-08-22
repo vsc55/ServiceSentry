@@ -29,7 +29,7 @@ it pointing at nothing. Both are refusals here and neither is a matter of taste.
 import pytest
 
 from watchfuls.snmp import profile_store as PS
-from watchfuls.snmp import profiles as P
+from lib.core.snmp import profiles as P
 from watchfuls.snmp.actions import SnmpActions as A
 
 

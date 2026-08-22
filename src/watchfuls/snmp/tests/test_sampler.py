@@ -542,6 +542,6 @@ class TestTheProbeThePanelRuns:
     def test_the_shipped_catalogue_is_reachable_without_a_data_directory(self):
         """The probe monitor has none. A catalogue that needed one would make every profile
         invisible exactly where the admin is trying to check their work."""
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         assert _p.custom_dir('') == ''
         assert 'sys_generic' in _p.catalog()

@@ -8,6 +8,37 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.103] - 2026-08-22
+
+### Changed
+- **What a device IS moves to the core.** `profiles` (what a device profile declares — its
+  metrics, their kind, their scale, how a table's rows are named), the shipped catalogue of
+  41 profile files, and `metrics` (the counter maths that turns a running total into a rate)
+  now live in `lib/core/snmp/`. They answer a question no check owns: a host carries its SNMP
+  profiles the way it carries its address, and the code that says what one MEANS cannot sit
+  inside one of the things that reads it.
+- Neither file imported anything from the module — between them, zero references to
+  `ModuleBase` — so this is a move, not a rewrite. The watchful imports them from the core
+  now, which is the direction the dependency was always meant to point.
+- The catalogue travels with the code that reads it (`lib/core/snmp/profiles/`), and the
+  packaging needed no change: the staged tree is a copy of `src/`.
+- `test_metrics.py` and `test_profiles.py` follow the code they test into `tests/unit/`.
+  Their subject stopped being a module, so co-locating them with one would have been filing
+  by history rather than by what they touch.
+
+### Added
+- **A guard that the core never imports a watchful** (`test_core_does_not_import_modules.py`).
+  The rule was true and unwritten, and a half-finished move is exactly when somebody reaches
+  for `from watchfuls.snmp import …` to make an import resolve — after which `lib` depends on
+  a module that depends on `lib`, and nothing fails until something does. Reading a module's
+  `schema.json` off disk stays fine: that is what discovery is.
+
+### Fixed
+- A moved test derived the catalogue's path from its own location on disk
+  (`dirname(dirname(__file__))`), so it broke the moment either of them moved. It asks the
+  module where its catalogue is now — the anchor rule the repo already documents, applied to
+  data instead of to source roots.
+
 ## [0.0.1+build.102] - 2026-08-22
 
 ### Changed

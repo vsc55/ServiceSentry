@@ -907,7 +907,10 @@ que el siete sea un porcentaje, ni que el número de al lado sea un contador de 
 significa nada hasta derivarlo. Eso es un **perfil**: una lista de métricas que mapea cada OID a
 una clave, una etiqueta, una unidad, un tipo y cómo se dibuja.
 
-Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/profiles/`:
+Los perfiles son **datos, no código** — ficheros JSON en `lib/core/snmp/profiles/`.
+Están en el core y no en el módulo porque **qué es un dispositivo** no es asunto de un
+check: un host lleva sus perfiles igual que lleva su dirección, y quien los lee es la
+resolución host-céntrica, no el bucle de comprobaciones:
 
 ```json
 {

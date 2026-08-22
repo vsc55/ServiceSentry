@@ -171,7 +171,7 @@ class TestAskingTheDeviceWhatItIs:
         which is the thing that mattered. The reason travels on a device nothing claims,
         where the proposal is the profile itself.
         """
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
                          self.DESCR: ('Linux nas-01', None),
                          self.HOSTMIB: ('182', None)}
@@ -254,7 +254,7 @@ class TestAskingTheDeviceWhatItIs:
         """A Synology system, its disks and its volumes are three subjects and three profiles,
         and all three claim the vendor tree. Proposing only the most specific would leave the
         other two undetected on exactly the hardware they were written for."""
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         got = [x['id'] for x in _p.claims_sysobjectid(_p.catalog(), '1.3.6.1.4.1.6574.1')]
         assert {'synology_system', 'synology_disks', 'synology_raid'} <= set(got)
 
@@ -266,7 +266,7 @@ class TestAskingTheDeviceWhatItIs:
         The reason travels with it, because a proposal nobody can argue with is one they can
         only trust or ignore.
         """
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
                          self.DESCR: ('Linux nas-01 DSM', None),
                          '1.3.6.1.4.1.6574.1.5.1.0': ('DS920+', None)}
@@ -287,7 +287,7 @@ class TestAskingTheDeviceWhatItIs:
                          '1.3.6.1.4.1.6574.1.5.1.0': ('DS920+', None),
                          '1.3.6.1.4.1.6574.101.1.1.1.0': ('0', None),
                          '1.3.6.1.4.1.2021.13.15.1.1.1.1': ('1', None)}
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         items = acts.detect_profiles({'host': '10.0.0.1'})['items']
         # The vendor profile is reached through the group that now stands for it; the generic
         # one it replaces is gone from the proposal either way, which is the point.
@@ -345,7 +345,7 @@ class TestAskingTheDeviceWhatItIs:
         like anything else — `grp_synology` claims the vendor tree — and the guard below holds
         them to the same rule as their members.
         """
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         catalog = _p.catalog()
         for pid, prof in catalog.items():
             if _p.is_group(prof):
@@ -357,7 +357,7 @@ class TestAskingTheDeviceWhatItIs:
     def test_a_group_that_claims_a_device_stands_for_what_it_holds(self):
         """A claim without `supersedes` proposes the group AND its fifteen members, which is
         worse than either alone. Whatever a shipped group claims, it displaces."""
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         for pid, prof in _p.catalog().items():
             match = prof.get('match') or {}
             if not _p.is_group(prof) or not match.get('sysobjectid_prefix'):
@@ -739,7 +739,7 @@ class TestWhatTheAssignmentActuallyReads:
         """The screen says what the scheduler will collect. Two parsers of one field is a
         test that reports a profile the sampler never runs — separated by a newline instead
         of a comma, or by a capital letter, both of which somebody types."""
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         from watchfuls.snmp.sampler import SnmpSampler
         field = {'device_profiles': 'A b\nb'}
         assert SnmpSampler.profiles_of(field) == _p.assigned(field) == ['a', 'b']

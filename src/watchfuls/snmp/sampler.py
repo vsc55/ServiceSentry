@@ -32,9 +32,9 @@ import time
 
 from lib.debug import DebugLevel
 
-from . import metrics as _metrics
+from lib.core.snmp import metrics as _metrics
 from . import profile_store as _profile_store
-from . import profiles as _profiles
+from lib.core.snmp import profiles as _profiles
 from .defaults import _SERVER_DEFAULTS
 
 # A key segment lands in a result key, a history row and a chart legend. Anything that would
