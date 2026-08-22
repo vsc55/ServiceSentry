@@ -19,6 +19,104 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un MIB que la biblioteca tiene y el compilador se salta
+
+**Fecha:** 2026-08-22 · **Área:** `watchfuls/snmp/mib_resolver.py::compile_raw_mibs_progressive`
+
+**Síntoma.** `custom/Microsoft/SNMP-FRAMEWORK-MIB no compila`. Ni error, ni aviso: pedirle que
+lo compile responde `untouched`, no aparece ningún `.py`, y el fichero se queda pendiente para
+siempre — recompilándose en cada pasada y contestando lo mismo.
+
+**Diagnóstico.** pysnmp trae **27 módulos ya compilados**, y a pysmi se le pasan como *stubs*:
+«esto ya lo tienes, no lo compiles». La regla escrita es que **una copia que el usuario haya
+puesto en su biblioteca gana** —la puso para que se compile—, y la regla se preguntaba por el
+nombre equivocado:
+
+```python
+_raw_mibs_set = set(raw_mibs)          # nombres de FICHERO: 'rfc2571', 'mib_ii', …
+_stubs = [m for m in _builtin_mibs if m not in _raw_mibs_set]   # nombres de MÓDULO
+```
+
+Lo que el usuario coloca es un **fichero**. `rfc2571.mib` no se llama SNMP-FRAMEWORK-MIB, así
+que la copia importada se apuntalaba: nunca se compilaba, no se escribía ningún módulo, y
+`pending_raw_mibs` —que sí razona por nombre de módulo— la veía sin compilar eternamente.
+
+Medido sobre la biblioteca real: **dos ficheros**, los dos del juego que trae Windows —
+`rfc2571.mib` (SNMP-FRAMEWORK-MIB) y `mib_ii.mib` (RFC1213-MIB).
+
+**Causa raíz.** La misma escisión de identidad que atraviesa todo pysmi: **localiza por el
+nombre del fichero y escribe el del módulo**. Era el último sitio que seguía preguntándole al
+fichero una cosa que sólo el módulo contesta.
+
+**Solución.** El conjunto contra el que se decide se construye con los nombres **declarados**,
+no con los de los ficheros. Las dos identidades se calculan en la misma pasada y cada una se
+usa donde toca: el fichero es lo que se le entrega a pysmi, el módulo es lo que decide qué
+existe ya.
+
+**Lección.** Cuando un sistema tiene dos nombres para la misma cosa, cada comparación entre
+conjuntos hay que leerla dos veces: no basta con que los dos lados sean `str`. Aquí los dos
+lados eran conjuntos de cadenas, la operación era un `not in` perfectamente válido, y no había
+error en ninguna parte — sólo un fichero que no se compilaba nunca y no decía por qué.
+
+---
+
+## Los MIB de Windows no compilan: tres bugs de Microsoft, no del compilador
+
+**Fecha:** 2026-08-22 · **Área:** `watchfuls/snmp/mib_admin.py::_without_dos_eof`,
+`mib_admin.py::_strip_dos_eof`, `mib_lint.py::lint_mib`
+
+**Síntoma.** Importados los MIB que vienen con **Windows 10 Pro 22H2**, cuatro de los
+diecisiete fallan al compilar, con tres mensajes que no se parecen entre sí:
+
+```
+FTPSERVER-MIB        no symbol "software" in module "WINS-MIB"
+INTERNETSERVER-MIB   no symbol "software" in module "WINS-MIB"
+HOST-RESOURCES-MIB   Unknown parent symbol: mib_2 at MIB hostmib
+HTTPSERVER-MIB       Bad grammar near offset 21268 at MIB http
+```
+
+**Diagnóstico.** Tres causas distintas, y ninguna en el compilador.
+
+*El offset que no existe.* `http.mib` mide **20760 caracteres**: el offset 21268 está más allá
+del final. En bytes son 21271 (CRLF), y el 21268 es un **`0x1A`** — Ctrl-Z, la marca de fin de
+fichero de DOS — puesto tres bytes después de un `END` perfectamente válido. El único de los
+diecisiete que lo lleva.
+
+*El símbolo que WINS-MIB no tiene.* `inetsrv.mib` importaba `microsoft` y `software` **FROM
+WINS-MIB**, y WINS-MIB no los define: los *importa* de MSFT-MIB, y en SMI un símbolo importado
+no se re-exporta. El FTP era **daño colateral** — no importa `software` de nadie, importa
+`internetServer` de INTERNETSERVER-MIB, así que caía porque caía su dependencia.
+
+*El padre que nadie trajo.* `hostmib.mib` cuelga su árbol de `{ mib-2 25 }` con un `IMPORTS`
+que trae `DisplayString` de RFC1213-MIB y cuatro cosas de RFC1155-SMI, pero **nunca `mib-2`**.
+Quien lo define es RFC1213-MIB, el mismo módulo del que ya importaba otra cosa.
+
+**Causa raíz.** Las tres son erratas de los ficheros que publica Microsoft, vivas en la versión
+que se instala hoy. Lo que las hizo caras no fue encontrarlas, fue que **ninguno de los tres
+mensajes apunta a su causa**: un offset fuera del fichero, un símbolo buscado en el módulo
+equivocado, y un nombre (`mib_2`) que no aparece en ningún sitio del MIB porque el que falta es
+el `IMPORTS` que lo traería.
+
+**Solución.** Los ficheros, corregidos. Y el producto, para que no vuelva a costar lo mismo:
+
+- el `0x1A` **se quita al escribir cualquier MIB** (`_without_dos_eof`) y hay una pasada única
+  sobre lo que ya estaba en la biblioteca (`_strip_dos_eof`, con su propia marca). Aparte de la
+  reparación de finales de línea que tiene al lado, que **debe** correr una sola vez: repetida,
+  le quita un `\r` a cada fichero que legítimamente lleva CRLF. Quitar un byte que no puede
+  formar parte de un MIB es seguro de repetir;
+- el linter tiene una regla nueva, **`unknown-oid-parent`**: un padre de OID que ni se define
+  en el fichero ni se importa. Avisa antes de compilar, en la línea, y diciendo qué hacer.
+
+**Lección.** Un offset mayor que el fichero no es un error de sintaxis: es el parser saliéndose
+por el final. Y al escribir la regla del linter apareció un segundo hallazgo del mismo tipo: la
+expresión que reconocía `nombre OBJECT IDENTIFIER ::=` exigía las dos cosas **en la misma
+línea**, y media biblioteca escribe el nombre en una línea y la asignación en la siguiente
+—así lo hacen los RFC—. Leídas como una sola línea, esas definiciones eran invisibles y todo lo
+que colgaba de ellas parecía huérfano: **24 falsos positivos** en 162 ficheros reales, cada uno
+con su definición tres líneas más arriba. Con el salto de línea admitido, cero.
+
+---
+
 ## La sección de MIBs tardaba cuatro minutos en abrir
 
 **Fecha:** 2026-08-21 · **Área:** `watchfuls/snmp/mib_admin.py::_duplicate_sources`,

@@ -344,9 +344,30 @@ class TestOneProfileOneSubject:
 
     def test_the_storage_profile_only_measures_storage(self):
         """CPU and memory belong to a system profile, and a NAS running net-snmp gets that
-        one too. Reporting them here as well is where the double-counting starts."""
+        one too. Reporting them here as well is where the double-counting starts.
+
+        Asked of the OIDs and not of a frozen list of keys: what the rule forbids is reading
+        somewhere else, and a list of names has to be edited every time the profile learns to
+        say something more about the volumes it already measures."""
         prof = profiles.catalog()['hr_storage']
-        assert {m['key'] for m in prof['metrics']} == {'fs_used', 'fs_size'}
+        outside = [m['key'] for m in prof['metrics']
+                   if not str(m.get('oid') or m.get('walk')).startswith('1.3.6.1.2.1.25.2.3.')]
+        assert not outside, f'{outside} read from outside hrStorageTable'
+
+    def test_no_two_text_metrics_of_one_profile_claim_the_same_role(self):
+        """A text metric is filed under its `role`, and the row has ONE slot per role: two of
+        them claiming "model" is the second silently overwriting the first, with nothing to
+        say which won — the value simply changes depending on the order the metrics are read.
+
+        It stops being hypothetical the moment a profile records identity properly. The UPS
+        MIB names the model twice, in `upsDevice` and again in `upsInfo`, and both are worth
+        keeping: what the driver says and what the unit says can disagree, and that disagreeing
+        is itself the answer sometimes."""
+        for pid, prof in profiles.catalog().items():
+            roles = [m['role'] for m in prof.get('metrics') or ()
+                     if m.get('kind') == 'text' and m.get('role')]
+            dupes = {r for r in roles if roles.count(r) > 1}
+            assert not dupes, f'{pid}: two text metrics claim {sorted(dupes)}'
 
     def test_no_two_shipped_profiles_measure_the_same_thing(self):
         """A metric key IS the history field, so two profiles sharing one write to one

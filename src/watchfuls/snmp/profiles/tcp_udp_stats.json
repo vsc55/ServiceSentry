@@ -60,6 +60,14 @@
             "width": 32
         },
         {
+            "key": "tcp_estab_resets",
+            "label": {"en_EN": "Established connections reset", "es_ES": "Conexiones establecidas cortadas"},
+            "oid": "1.3.6.1.2.1.6.8.0",
+            "kind": "counter",
+            "unit": "conn/s",
+            "width": 32
+        },
+        {
             "key": "tcp_active_opens",
             "label": {"en_EN": "Outgoing connections opened", "es_ES": "Conexiones salientes abiertas"},
             "oid": "1.3.6.1.2.1.6.5.0",

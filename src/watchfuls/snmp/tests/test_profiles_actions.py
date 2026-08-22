@@ -41,11 +41,29 @@ class _Acts(SnmpActions):
     ``detect_profiles`` reaches the device through the client mixed in beside them."""
     _got: list = []
     _answers: dict = {}
+    _walks: dict = {}
 
     @classmethod
     def _snmp_get(cls, **kw):
         cls._got.append(kw['oid'])
         return cls._answers.get(kw['oid'], (None, 'no such name'))
+
+    @classmethod
+    def _snmp_walk_oid(cls, **kw):
+        """The device as a set of subtrees. Keys are the suffix under the walked root, which
+        is what the real primitive returns and what the row index is."""
+        cls._got.append(kw['oid'])
+        root = str(kw['oid']).strip('.')
+        cap = int(kw.get('max_rows') or 0) or 512
+        rows = {}
+        for oid, value in sorted(cls._walks.items()):
+            if oid == root:
+                rows['0'] = value
+            elif oid.startswith(root + '.'):
+                rows[oid[len(root) + 1:]] = value
+            if len(rows) >= cap:
+                break
+        return rows, None
 
 
 @pytest.fixture
@@ -53,6 +71,7 @@ def acts():
     class _A(_Acts):
         _got = []
         _answers = {}
+        _walks = {}
     return _A
 
 
@@ -145,9 +164,22 @@ class TestAskingTheDeviceWhatItIs:
     def test_a_nas_that_serves_the_host_mib_is_offered_storage(self, acts):
         """The case that exposed the hardcoded list: a Synology answers HOST-RESOURCES-MIB and
         its sysObjectID is its own, which no generic profile claims and none should. Whether a
-        device's volumes can be read is a question only the device can answer."""
+        device's volumes can be read is a question only the device can answer.
+
+        Answered through the GROUP now — a Synology comes back as one row and the storage
+        profile is inside it — so what is asserted is that the volumes are still measured,
+        which is the thing that mattered. The reason travels on a device nothing claims,
+        where the proposal is the profile itself.
+        """
+        from watchfuls.snmp import profiles as _p
         acts._answers = {self.SYSOID: ('1.3.6.1.4.1.6574.1', None),
                          self.DESCR: ('Linux nas-01', None),
+                         self.HOSTMIB: ('182', None)}
+        res = acts.detect_profiles({'host': '10.0.0.1'})
+        assert 'hr_storage' in _p.expand(_p.catalog(), res['items'])
+
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.99999.1', None),
+                         self.DESCR: ('Some appliance', None),
                          self.HOSTMIB: ('182', None)}
         res = acts.detect_profiles({'host': '10.0.0.1'})
         assert 'hr_storage' in res['items']
@@ -332,3 +364,391 @@ class TestAskingTheDeviceWhatItIs:
                 continue
             assert set(prof['includes']) <= set(match.get('supersedes') or ()), \
                 f'{pid} claims devices but leaves its members proposed beside it'
+
+
+class TestWhatTheAssignmentActuallyReads:
+    """`test_profiles` — the one screen that answers the question nobody could ask.
+
+    An assignment is wrong in two directions and the panel only ever showed one of them. A
+    profile naming an OID the device does not serve leaves an empty chart, and somebody
+    notices eventually. A device serving something no assigned profile names is INVISIBLE:
+    nothing is missing anywhere, because nothing ever said it could be there. The second gap
+    cannot be derived from the profiles — only from the device — which is why this walks it.
+    """
+
+    SYSOID = '1.3.6.1.2.1.1.2.0'
+    DESCR = '1.3.6.1.2.1.1.1.0'
+    NAME = '1.3.6.1.2.1.1.5.0'
+
+    def _prof(self, tmp_path, *profiles):
+        """A catalogue this installation wrote, so the assertions are about these OIDs."""
+        cdir = tmp_path / 'snmp_profiles'
+        cdir.mkdir(parents=True, exist_ok=True)
+        for prof in profiles:
+            (cdir / f"{prof['id']}.json").write_text(json.dumps(prof), encoding='utf-8')
+        return {'__var_dir__': str(tmp_path), 'host': '10.0.0.1'}
+
+    def _device(self, acts, walks, answers=None):
+        acts._walks = dict(walks)
+        acts._answers = {self.SYSOID: ('1.3.6.1.4.1.9999.1', None),
+                         self.DESCR: ('A box in the rack', None),
+                         self.NAME: ('rack-01', None),
+                         **{k: (v, None) for k, v in (answers or {}).items()},
+                         **{k: (v, None) for k, v in walks.items()}}
+
+    # ── The half that reads the profile ──────────────────────────────────────
+
+    def test_a_reading_comes_back_with_what_the_device_said_and_what_it_means(
+            self, acts, tmp_path):
+        """Both, and this is the whole reason the screen is worth opening: 405 is what the
+        agent answered, 40.5 is what the profile says it means. A profile whose scale is
+        wrong by ten shows a plausible temperature — and a raw value that gives it away."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_temp', 'label': 'Temp',
+            'metrics': [{'key': 'temp', 'label': 'Temperature', 'oid': '1.3.6.1.4.1.9999.2.1.0',
+                         'kind': 'gauge', 'unit': 'C', 'scale': 0.1}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.2.1.0': '405'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_temp'})
+        assert res['ok'] is True
+        row = res['metrics'][0]['rows'][0]
+        assert row['raw'] == '405' and row['value'] == 40.5
+
+    def test_a_counter_brings_its_total_and_no_value(self, acts, tmp_path):
+        """A counter MEANS the difference between two readings and there is one. Inventing a
+        rate from a single sample is the exact mistake the profile format exists to prevent —
+        so what comes back is the total the device is at, which is what says it is alive."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_ctr', 'label': 'Traffic',
+            'metrics': [{'key': 'octets', 'oid': '1.3.6.1.4.1.9999.3.0',
+                         'kind': 'counter', 'width': 32}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.3.0': '9912345'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_ctr'})
+        row = res['metrics'][0]['rows'][0]
+        assert row['raw'] == '9912345' and row['value'] is None
+
+    def test_a_table_comes_back_under_the_names_the_device_gives_its_rows(
+            self, acts, tmp_path):
+        """"3" is not the port on the front of the switch. The row name is what makes the
+        answer checkable against the machine somebody is standing in front of."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_if', 'label': 'Interfaces',
+            'metrics': [{'key': 'speed', 'walk': '1.3.6.1.4.1.9999.4.1.2',
+                         'index_label': '1.3.6.1.4.1.9999.4.1.1', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.4.1.1.1': 'eth0',
+                            '1.3.6.1.4.1.9999.4.1.1.2': 'eth1',
+                            '1.3.6.1.4.1.9999.4.1.2.1': '1000',
+                            '1.3.6.1.4.1.9999.4.1.2.2': '100'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_if'})
+        assert [r['name'] for r in res['metrics'][0]['rows']] == ['eth0', 'eth1']
+        assert [r['value'] for r in res['metrics'][0]['rows']] == [1000, 100]
+
+    def test_a_metric_the_device_does_not_answer_says_so(self, acts, tmp_path):
+        """The other gap, and the one that leaves an empty chart. It is per METRIC because
+        that is the granularity at which a profile is half-right on a model."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_two', 'label': 'Two',
+            'metrics': [{'key': 'a', 'oid': '1.3.6.1.4.1.9999.5.1.0', 'kind': 'gauge'},
+                        {'key': 'b', 'oid': '1.3.6.1.4.1.9999.5.2.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.5.1.0': '7'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_two'})
+        by_key = {m['key']: m for m in res['metrics']}
+        assert by_key['a']['rows'] and not by_key['a']['error']
+        assert by_key['b']['error'] and not by_key['b']['rows']
+        assert res['answered'] == 1
+
+    def test_a_group_is_expanded_before_anything_is_read(self, acts, tmp_path):
+        """The field says one word and the sampler reads twenty-two profiles. A test that
+        read what was typed would be testing something nobody is going to run."""
+        cfg = self._prof(
+            tmp_path,
+            {'id': 'p_one', 'label': 'One',
+             'metrics': [{'key': 'a', 'oid': '1.3.6.1.4.1.9999.6.1.0', 'kind': 'gauge'}]},
+            {'id': 'p_two', 'label': 'Two',
+             'metrics': [{'key': 'b', 'oid': '1.3.6.1.4.1.9999.6.2.0', 'kind': 'gauge'}]},
+            {'id': 'grp_both', 'label': 'Both', 'includes': ['p_one', 'p_two']})
+        self._device(acts, {'1.3.6.1.4.1.9999.6.1.0': '1', '1.3.6.1.4.1.9999.6.2.0': '2'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'grp_both'})
+        assert res['asked'] == ['grp_both']
+        assert [p['id'] for p in res['profiles']] == ['p_one', 'p_two']
+        assert res['answered'] == 2
+
+    def test_a_profile_that_no_longer_exists_is_named(self, acts, tmp_path):
+        """A field pointing at a deleted profile measures nothing, for ever, and no other
+        screen in the panel would ever say so — the id is a perfectly good string and every
+        list it is not in simply does not mention it.
+
+        Asked of what was TYPED and not of what came back: `expand` drops what it cannot
+        resolve, so asking it is asking the one list the answer has already been taken out
+        of, and the question can only ever answer "none".
+        """
+        cfg = self._prof(tmp_path, {'id': 'p_one', 'label': 'One', 'metrics': [
+            {'key': 'a', 'oid': '1.3.6.1.4.1.9999.13.1.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.13.1.0': '1'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_one, p_deleted'})
+        assert res['missing'] == ['p_deleted']
+        assert [p['id'] for p in res['profiles']] == ['p_one'], 'it was read anyway'
+
+    def test_the_column_that_names_the_rows_is_walked_once_for_the_whole_device(
+            self, acts, tmp_path):
+        """Seven metrics of an interface table name their rows with the same `ifDescr`, and
+        asking the device seven times is six round trips spent on an answer that cannot have
+        changed. It is also what makes the reads safe to run wide: with the naming and scaling
+        columns fetched first, nothing writes to the shared cache while the metrics run.
+        """
+        idx = '1.3.6.1.4.1.9999.14.1.1'
+        cfg = self._prof(tmp_path, {
+            'id': 'p_tbl', 'label': 'Table',
+            'metrics': [{'key': f'c{n}', 'walk': f'1.3.6.1.4.1.9999.14.1.{n}',
+                         'index_label': idx, 'kind': 'gauge'} for n in (2, 3, 4)]})
+        self._device(acts, {f'{idx}.1': 'eth0',
+                            **{f'1.3.6.1.4.1.9999.14.1.{n}.1': str(n) for n in (2, 3, 4)}})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_tbl'})
+        assert acts._got.count(idx) == 1, 'the naming column was walked once per metric'
+        assert res['answered'] == 3
+
+    def test_the_report_reads_in_catalogue_order_however_the_answers_arrive(
+            self, acts, tmp_path):
+        """The metrics are asked all at once, and a device answers them in whatever order it
+        likes. A report whose rows moved between two runs of the same button would be one
+        nobody could compare with the last one."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_many', 'label': 'Many',
+            'metrics': [{'key': f'k{n}', 'oid': f'1.3.6.1.4.1.9999.15.{n}.0', 'kind': 'gauge'}
+                        for n in range(1, 9)]})
+        self._device(acts, {f'1.3.6.1.4.1.9999.15.{n}.0': str(n) for n in range(1, 9)})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_many'})
+        assert [m['key'] for m in res['metrics']] == [f'k{n}' for n in range(1, 9)]
+
+    def test_a_profile_the_device_does_not_serve_is_not_read_at_all(self, acts, tmp_path):
+        """Measured on a real NAS: a group called "everything a Synology answers" assigned to
+        a model with no GPU, no expansion unit, no SSD cache and no iSCSI spent FORTY metrics
+        waiting out the timeout times the retries — fifty seconds of the wall clock, on
+        hardware that does not exist. Every one of those profiles already declares
+        `match.probe`, which is the device saying whether it applies.
+
+        And the screen reads better for it: "this device does not serve this profile" is an
+        answer, where forty separate "no answer"s look like something is broken.
+        """
+        cfg = self._prof(
+            tmp_path,
+            {'id': 'p_here', 'label': 'Here', 'match': {'probe': '1.3.6.1.4.1.9999.16.1.0'},
+             'metrics': [{'key': 'a', 'oid': '1.3.6.1.4.1.9999.16.2.0', 'kind': 'gauge'}]},
+            {'id': 'p_absent', 'label': 'Absent',
+             'match': {'probe': '1.3.6.1.4.1.9999.17.1.0'},
+             'metrics': [{'key': 'b', 'oid': '1.3.6.1.4.1.9999.17.2.0', 'kind': 'gauge'},
+                         {'key': 'c', 'walk': '1.3.6.1.4.1.9999.17.3',
+                          'index_label': '1.3.6.1.4.1.9999.17.4', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.16.1.0': '1', '1.3.6.1.4.1.9999.16.2.0': '7'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_here, p_absent'})
+        by = {m['key']: m for m in res['metrics']}
+        assert by['a']['rows'] and not by['a']['unserved']
+        assert by['b']['unserved'] and by['c']['unserved']
+        assert not by['b']['error'], 'an absent profile is not a device that refused'
+        assert res['unserved'] == 2
+        # …and not one round trip was spent on it, columns included.
+        assert '1.3.6.1.4.1.9999.17.2.0' not in acts._got
+        assert '1.3.6.1.4.1.9999.17.4' not in acts._got, 'it walked the absent naming column'
+        assert '1.3.6.1.4.1.9999.17.1.0' in acts._got, 'it never asked whether it was there'
+
+    def test_a_profile_that_claims_nothing_is_always_read(self, acts, tmp_path):
+        """A profile with no probe has made no statement that could be checked. Refusing to
+        read it would be inventing a condition it never declared."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_quiet', 'label': 'Quiet',
+            'metrics': [{'key': 'a', 'oid': '1.3.6.1.4.1.9999.18.1.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.18.1.0': '5'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_quiet'})
+        assert res['metrics'][0]['rows'] and not res['metrics'][0]['unserved']
+
+    # ── The half that reads the device ───────────────────────────────────────
+
+    def test_what_the_device_sends_that_nothing_reads_is_reported(self, acts, tmp_path):
+        """The gap that is invisible from the panel: the device has been answering this all
+        along and no screen could ever have shown that it was there."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_one', 'label': 'One',
+            'metrics': [{'key': 'a', 'oid': '1.3.6.1.2.1.1.3.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.2.1.1.3.0': '9', '1.3.6.1.4.1.9999.7.1.0': '42'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_one'})
+        found = {g['oid']: g for g in res['sweep']['objects']}
+        assert '1.3.6.1.4.1.9999.7.1' in found
+        assert found['1.3.6.1.4.1.9999.7.1']['samples'][0]['value'] == '42'
+        assert res['sweep']['uncaptured'] == 1
+
+    def test_a_whole_column_is_one_row_and_not_forty_eight(self, acts, tmp_path):
+        """Forty-eight lines saying `…2.2.1.16.<n>` is one sentence repeated: the device has
+        an ifOutOctets column and this assignment is not reading it. The count is the size."""
+        cfg = self._prof(tmp_path, {'id': 'p_none', 'label': 'None', 'metrics': [
+            {'key': 'a', 'oid': '1.3.6.1.2.1.1.3.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.2.1.1.3.0': '9',
+                            **{f'1.3.6.1.4.1.9999.8.1.{i}': str(i) for i in range(1, 41)}})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_none'})
+        cols = [g for g in res['sweep']['objects'] if g['oid'] == '1.3.6.1.4.1.9999.8.1']
+        assert len(cols) == 1 and cols[0]['count'] == 40
+        assert len(cols[0]['samples']) <= 3, 'the whole column travels as examples'
+
+    def test_the_column_that_names_the_rows_counts_as_captured(self, acts, tmp_path):
+        """It is not charted, and it is being read: it is what the rows are called. Listing
+        it as uncaptured sends somebody to write a metric for a value already in hand."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_if', 'label': 'Interfaces',
+            'metrics': [{'key': 'speed', 'walk': '1.3.6.1.4.1.9999.9.1.2',
+                         'index_label': '1.3.6.1.4.1.9999.9.1.1',
+                         'scale_by': '1.3.6.1.4.1.9999.9.1.3', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.9.1.1.1': 'eth0',
+                            '1.3.6.1.4.1.9999.9.1.2.1': '10',
+                            '1.3.6.1.4.1.9999.9.1.3.1': '2'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_if'})
+        assert res['sweep']['uncaptured'] == 0
+        assert res['metrics'][0]['rows'][0]['value'] == 20, 'the factor column was read'
+
+    def test_a_column_read_by_the_profile_is_not_reported_row_by_row(self, acts, tmp_path):
+        """A metric declares a COLUMN and the device answers one OID per row under it.
+        Comparing the two as strings reports every interface on the switch as uncaptured."""
+        cfg = self._prof(tmp_path, {
+            'id': 'p_tbl', 'label': 'Table',
+            'metrics': [{'key': 'x', 'walk': '1.3.6.1.4.1.9999.10.1.2', 'kind': 'gauge'}]})
+        self._device(acts, {f'1.3.6.1.4.1.9999.10.1.2.{i}': str(i) for i in range(1, 21)})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_tbl'})
+        assert res['sweep']['uncaptured'] == 0
+        assert res['metrics'][0]['rows_total'] == 20
+
+    def test_an_uncaptured_object_is_named_from_the_compiled_mibs(self, acts, tmp_path):
+        """`1.3.6.1.2.1.2.2.1.16` is not an answer anybody can act on. The library the panel
+        already keeps is what turns it into a name and the module it came from."""
+        idx = tmp_path / 'snmp_mibs'
+        idx.mkdir(parents=True, exist_ok=True)
+        (idx / 'oid_index.json').write_text(json.dumps({
+            '1.3.6.1.2.1.2.2.1.16': {'mib_module': 'IF-MIB', 'mib_name': 'ifOutOctets',
+                                     'mib_type': 'MibTableColumn'}}), encoding='utf-8')
+        from watchfuls.snmp import mib_resolver as _mr
+        _mr._idx_cache.pop(str(tmp_path), None)
+        cfg = self._prof(tmp_path, {'id': 'p_none', 'label': 'None', 'metrics': [
+            {'key': 'a', 'oid': '1.3.6.1.2.1.1.3.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.2.1.1.3.0': '9',
+                            '1.3.6.1.2.1.2.2.1.16.1': '100',
+                            '1.3.6.1.2.1.2.2.1.16.2': '200'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_none'})
+        _mr._idx_cache.pop(str(tmp_path), None)
+        named = [g for g in res['sweep']['objects'] if g['name'] == 'ifOutOctets']
+        assert len(named) == 1
+        assert named[0]['module'] == 'IF-MIB' and named[0]['count'] == 2
+
+    def test_an_object_nobody_has_a_mib_for_is_not_filed_under_enterprises(
+            self, acts, tmp_path):
+        """The library names nodes as well as objects, and `1.3.6.1.4.1` is one of them.
+
+        Walking up to the nearest name of ANY kind therefore finds `enterprises` for every
+        vendor OID nobody has a MIB for — and files the entire interesting half of the report
+        under one row called "enterprises", which is the half somebody opened this screen to
+        read. Only a thing the device ANSWERS can be the object of an instance: one value, or
+        one per row. Nothing else in the index is a reading.
+        """
+        cfg = self._prof(tmp_path, {'id': 'p_none', 'label': 'None', 'metrics': [
+            {'key': 'a', 'oid': '1.3.6.1.2.1.1.3.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.2.1.1.3.0': '9',
+                            '1.3.6.1.4.1.9999.20.1.1.1': 'a',
+                            '1.3.6.1.4.1.9999.20.1.1.2': 'b'})
+        res = acts.test_profiles({**cfg, 'device_profiles': 'p_none'})
+        found = {g['oid'] for g in res['sweep']['objects']}
+        assert '1.3.6.1.4.1.9999.20.1.1' in found
+        assert '1.3.6.1.4.1' not in found, 'the vendor tree collapsed into "enterprises"'
+
+    def test_with_nothing_assigned_everything_the_device_sends_is_uncaptured(
+            self, acts, tmp_path):
+        """A device somebody just added, which is where the screen earns its place: it is the
+        list of what could be measured, on the box, before any profile exists for it."""
+        cfg = self._prof(tmp_path)
+        self._device(acts, {'1.3.6.1.2.1.1.3.0': '9', '1.3.6.1.4.1.9999.11.1.0': '1'})
+        res = acts.test_profiles({**cfg, 'device_profiles': ''})
+        assert res['ok'] is True and res['metrics'] == []
+        assert res['sweep']['uncaptured'] == 2
+
+    def test_the_sweep_has_a_ceiling_and_says_when_it_hit_it(self, acts, tmp_path):
+        """A chassis switch answers tens of thousands of OIDs, and a test that never ends is
+        a button nobody presses twice. What it did read is true; that it stopped is said."""
+        cfg = self._prof(tmp_path)
+        self._device(acts, {f'1.3.6.1.2.1.99.1.{i}': str(i) for i in range(1, 300)})
+        res = acts.test_profiles({**cfg, 'device_profiles': '', 'sweep_max': 100})
+        assert res['sweep']['truncated'] is True
+        assert res['sweep']['walked'] == 50, 'mib-2 took more than its share of the budget'
+
+    def test_the_vendor_tree_is_still_asked_when_mib2_is_enormous(self, acts, tmp_path):
+        """Found on a real Synology, in the report itself: three thousand OIDs of budget, and
+        every one of them spent inside mib-2 — a routing table, an ARP table and one row per
+        open TCP connection — so `enterprises` was never walked at all. Which is where the
+        vendor's own subjects live, and where the answer somebody opened this screen for is.
+
+        A share each, as a floor: what the standard tree does not use is inherited by the
+        vendor tree, so a device with little in mib-2 does not waste half the sweep."""
+        cfg = self._prof(tmp_path)
+        self._device(acts, {**{f'1.3.6.1.2.1.99.1.{i}': str(i) for i in range(1, 300)},
+                            '1.3.6.1.4.1.6574.5.1.1.5.1': 'sda'})
+        res = acts.test_profiles({**cfg, 'device_profiles': '', 'sweep_max': 100})
+        found = {g['oid'] for g in res['sweep']['objects']}
+        assert '1.3.6.1.4.1.6574.5.1.1.5' in found, 'the vendor tree was never asked'
+
+    def test_a_root_that_finishes_early_gives_the_rest_away(self, acts, tmp_path):
+        """A quota would be as wrong as one pot: a switch whose mib-2 answers two hundred
+        OIDs would spend half the budget on nothing while its own tree came back cut."""
+        cfg = self._prof(tmp_path)
+        self._device(acts, {'1.3.6.1.2.1.99.1.1': 'x',
+                            **{f'1.3.6.1.4.1.6574.9.1.{i}': str(i) for i in range(1, 300)}})
+        res = acts.test_profiles({**cfg, 'device_profiles': '', 'sweep_max': 100})
+        assert res['sweep']['walked'] == 100, 'the unused share was not handed over'
+
+    def test_a_device_that_takes_too_long_stops_being_read_and_says_so(self, acts, tmp_path):
+        """A metric the device does NOT answer costs the full timeout times the retries, and
+        "Synology NAS (everything)" declares a hundred and thirty of them. Assigned to a model
+        that serves half, the arithmetic is ten minutes of a button that looks stuck.
+
+        What is past the clock is still LISTED, as not read: a metric that vanished from the
+        report would read as a profile with fewer metrics, and "nobody asked it" is a
+        different sentence from "it did not answer" — they call for opposite actions and they
+        look identical as an empty row. What it declares still counts as covered, because the
+        assignment does read it; it is this dialog that ran out of time, not the scheduler.
+        """
+        cfg = self._prof(tmp_path, {
+            'id': 'p_slow', 'label': 'Slow',
+            'metrics': [{'key': 'a', 'oid': '1.3.6.1.4.1.9999.12.1.0', 'kind': 'gauge'}]})
+        self._device(acts, {'1.3.6.1.4.1.9999.12.1.0': '1'})
+        catalog = acts._catalog(cfg)
+        metrics, roots = acts._test_read(catalog, ['p_slow'], acts._conn_of(cfg), deadline=1)
+        assert metrics[0]['skipped'] is True and not metrics[0]['rows']
+        assert not metrics[0]['error'], 'an unasked metric is not a device that refused'
+        assert '1.3.6.1.4.1.9999.12.1.0' in roots
+        assert acts._got == [], 'the device was asked anyway'
+
+    # ── When there is nothing on the other end ───────────────────────────────
+
+    def test_a_device_that_does_not_answer_is_an_error_and_not_an_empty_report(
+            self, acts, tmp_path):
+        """"Nothing is being captured" and "the device did not answer" call for opposite
+        actions from whoever is reading the screen."""
+        cfg = self._prof(tmp_path)
+        acts._answers, acts._walks = {}, {}
+        res = acts.test_profiles({**cfg, 'device_profiles': ''})
+        assert res['ok'] is False and res.get('message')
+
+    def test_without_a_host_nothing_is_asked(self, acts, tmp_path):
+        cfg = self._prof(tmp_path)
+        res = acts.test_profiles({**cfg, 'host': '  '})
+        assert res['ok'] is False and acts._got == []
+
+    def test_it_reads_the_field_the_way_the_sampler_reads_it(self):
+        """The screen says what the scheduler will collect. Two parsers of one field is a
+        test that reports a profile the sampler never runs — separated by a newline instead
+        of a comma, or by a capital letter, both of which somebody types."""
+        from watchfuls.snmp import profiles as _p
+        from watchfuls.snmp.sampler import SnmpSampler
+        field = {'device_profiles': 'A b\nb'}
+        assert SnmpSampler.profiles_of(field) == _p.assigned(field) == ['a', 'b']
+
+    def test_it_reads_a_metric_with_the_function_the_scheduler_reads_with(self):
+        """One implementation of "read this metric". Two of them agree until the day they do
+        not, and that day the test says the profile works and the graph stays empty."""
+        import inspect
+        from watchfuls.snmp import actions as _a
+        from watchfuls.snmp import sampler as _s
+        assert _a._read_metric is _s.read_metric
+        assert 'read_metric(' in inspect.getsource(_s.SnmpSampler._sample_metric)

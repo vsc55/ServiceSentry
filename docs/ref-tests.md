@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.250 tests** (6217 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-21). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.310 tests** (6280 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-21). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -3607,7 +3607,7 @@ nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 41 tests
+**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 48 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -3634,7 +3634,7 @@ perfiló, y cuando un firmware mueve un OID el arreglo no espera a la siguiente 
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_lint.py` — 27 tests
+**Archivo:** `watchfuls/snmp/tests/test_mib_lint.py` — 36 tests
 
 **Decir por qué un MIB no va a compilar, antes de que el compilador lo diga mal.** Dos MIB de
 fabricante se rompieron aquí con un día de diferencia y los dos se rompieron de las mismas dos
@@ -3784,7 +3784,7 @@ ahora llevan su carpeta) y lo que pysmi **compila** (nombres de módulo, que nun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_archive.py` — 71 tests
+**Archivo:** `watchfuls/snmp/tests/test_mib_archive.py` — 76 tests
 
 **El archivo de MIBs de un fabricante, y distinguir una actualización de un retroceso.** Dos
 cosas que un catálogo de MIBs tiene que acertar en cuanto puede importar de más de un sitio, y
@@ -3844,7 +3844,7 @@ queda, y también la madre cuyo único contenido es esa carpeta.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 27 tests
+**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 52 tests
 
 **El catálogo, tal y como lo recibe el panel** — y preguntarle a un aparato qué es. Hasta que
 estas dos acciones existieron, la matriz de OIDs era real e invisible: tres ficheros JSON, un
@@ -3859,6 +3859,7 @@ parecen buenos, y ése es justo el fallo que tiene que confirmar una persona).
 |---|---|
 | `TestTheCatalogueOnScreen::*` (8) | Lista lo que se envía; **cada fila dice su origen**; los perfiles propios de la instalación salen al lado de los enviados; reutilizar un `id` enviado se ve como **propio** y no duplica la fila; la pantalla dice **dónde van los perfiles propios** (si no, «¿y cómo añado uno?» es una consulta a la documentación desde una pantalla que ya sabe la respuesta); sin directorio de datos sale el catálogo enviado y no un error; la fila trae lo que la pantalla dibuja (tipo, unidad, ancho del contador y **qué nombra las filas** de una tabla); y los nombres viajan en todos los idiomas que tenga el perfil, porque un catálogo contesta a todas las sesiones |
 | `TestAskingTheDeviceWhatItIs::*` (14) | **Los candidatos los declaran los perfiles, no la acción.** Cada uno dice cómo se le reconoce —`match.sysobjectid_prefix` (quién lo fabricó) y `match.probe` (un OID que el aparato tiene que contestar)— y la detección pregunta exactamente eso. La acción llevó una lista de «los genéricos» escrita dentro durante exactamente un build, y el perfil añadido en ese build era **invisible para ella**: asignado a mano funcionaba, detectado no existía. Aquí: un aparato que sólo contesta MIB-II se lleva el genérico; **un NAS que sirve la HOST-RESOURCES-MIB se lleva almacenamiento** (el caso que destapó la lista: un Synology la contesta y su `sysObjectID` es suyo, que ningún perfil genérico reclama ni debe); uno que no la sirve no se lo lleva (un switch no tiene sistemas de ficheros, y ofrecérselo sería ofrecer una pantalla de gráficas vacías); quién lo fabricó sigue contando aunque no se sondee nada; un perfil reclamado **por las dos vías aparece una vez**; **contestar es la señal**, no lo que diga el valor (un umbral aquí sería la acción decidiendo algo sobre un perfil del que no debe saber nada, y «0 procesos» sigue siendo un aparato que implementa la MIB); una respuesta vacía no es una respuesta; dos detecciones del mismo aparato marcan lo mismo (si no, el admin decide a qué ejecución creer); un aparato que **no contesta es un error y no una respuesta vacía**; sin host no se pregunta nada; vuelve lo que el aparato **dice de sí mismo**; el sondeo está **acotado** (un viaje de ida y vuelta por perfil, contra un aparato con alguien esperando); y **todo perfil enviado dice cómo reconocerlo** — uno que el catálogo no puede detectar es uno que el admin tiene que saber que existe, que es el fallo que todo esto sustituyó |
+| `TestWhatTheAssignmentActuallyReads::*` (25) | **`test_profiles`: la pantalla que contesta lo que nadie podía preguntar.** Una asignación se equivoca en dos direcciones y el panel sólo enseñaba una: un perfil que nombra un OID que el aparato no sirve deja una gráfica vacía, y alguien acaba viéndolo; un aparato que sirve algo que ningún perfil asignado nombra es **invisible** —no falta nada en ninguna pantalla, porque nunca nadie dijo que pudiera estar—. Aquí: una lectura vuelve con **lo que dijo el aparato y lo que significa** (405 y 40,5 °C: una escala equivocada por diez enseña una temperatura plausible, y el crudo es lo que la delata); **un contador trae su total y ningún valor** (un contador *es* la diferencia entre dos lecturas, y sólo hay una); una tabla vuelve con **el nombre que el aparato da a cada fila** («3» no es el puerto de la parte de delante); una métrica que no se contesta **lo dice**, por métrica, que es la granularidad a la que un perfil acierta a medias en un modelo; **un grupo se expande antes de leer nada** (el campo dice una palabra y el planificador lee veinticuatro perfiles); **un perfil que el aparato no sirve no se lee siquiera** —medido en un NAS de verdad: un grupo «todo lo que contesta un Synology» sobre un modelo sin GPU, sin unidad de expansión, sin caché SSD y sin iSCSI se pasaba cuarenta métricas esperando el timeout por los reintentos, cincuenta segundos de reloj sobre hardware que no existe, y cada uno de esos perfiles ya declara su `match.probe`—, y uno que no reclama nada **se lee siempre**; **un perfil que ya no existe se nombra** —un campo que apunta a un perfil borrado no mide nada, jamás, y ninguna otra pantalla lo diría—; lo que el aparato manda y nadie lee **sale en la lista**; una columna entera es **una fila y no cuarenta y ocho** (la misma frase repetida); **la columna que nombra las filas y la que las escala cuentan como capturadas** (son valores que el perfil ya está usando); una columna que el perfil sí lee **no se informa fila a fila** (comparar por igualdad en vez de por prefijo delata como huérfana cada interfaz del switch); el objeto sin capturar **se nombra desde los MIB compilados**, y sólo puede serlo algo que el aparato *conteste* — la biblioteca nombra también los nodos del árbol, así que subir hasta el nombre más cercano de cualquier tipo archiva bajo **`enterprises`** todo OID de fabricante para el que nadie tiene un MIB, que es justo la mitad que se viene a leer; sin ningún perfil asignado **todo lo que manda está sin capturar** (que es la pantalla en el momento en que más vale: un aparato recién añadido); el barrido **tiene techo, avisa de que lo tocó y lo reparte por ramas** —encontrado en un Synology de verdad: los tres mil OIDs se fueron enteros en mib-2 (tabla de rutas, tabla ARP y una fila por conexión TCP abierta) y el árbol del fabricante no se llegó a preguntar, que es justo donde está lo que se viene a leer—, con la parte que una rama no gasta heredada por las siguientes; **la lectura tiene reloj** y lo que se queda fuera se lista como *sin leer* y no como sin respuesta (una métrica que el aparato no contesta cuesta el timeout por los reintentos, y un grupo declara ciento treinta: «nadie se lo preguntó» y «no contestó» piden acciones opuestas y son la misma fila vacía); un aparato que no contesta es **un error y no un informe vacío**; sin host no se pregunta nada; la columna que **nombra las filas se recorre una vez para todo el aparato** (siete métricas contra un mismo `ifDescr` son un recorrido y no siete, y precargarlas es lo que hace seguro leer en paralelo: ya nadie escribe en la caché compartida); el informe sale **en orden de catálogo venga como venga la respuesta**; y las dos garantías de que esto mide lo que se va a medir de verdad: **el campo se lee igual que lo lee el sampler** y **la métrica se lee con la función con la que lee el planificador** |
 
 ---
 
@@ -3915,7 +3916,7 @@ idénticas.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 157 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 117 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 
@@ -8469,7 +8470,7 @@ mira las pantallas sin darle el registro con ella.
 
 ---
 
-**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 43 tests
+**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 54 tests
 
 **La pantalla del catálogo de perfiles**: el cableado que hace visible un catálogo. Un watchful
 trae su propia interfaz en tres ficheros que una convención recoge, y una pantalla hecha así
@@ -8486,6 +8487,7 @@ como su propia clave.
 | `TestTheChipsReadAsNames::*` (5) | El campo guarda **ids**, que es lo correcto de guardar (sobreviven a un renombrado, son lo que habla la API y lo que se cita en un informe de fallo) y no es lo que lee una persona: una fila de `hr_storage`, `if_generic`, `ucd_linux` en el formulario de un host no dice nada de lo que se está midiendo, a quien está decidiendo si la asignación es correcta. El renderizador de chips **pide una etiqueta** al registro; la clave es `módulo|campo`, que es a lo que llegan **los dos paneles** (la ruta de Modules lleva el uid del item y la del modal del host su índice, y ninguno es parte de lo que el *campo* es); el módulo registra la suya; **el id no se pierde** — sigue en el tooltip, porque es la cadena que identifica el perfil en todos los demás sitios; y un catálogo que no se pueda leer deja los ids en pantalla, que es la conducta de antes y una pantalla que funciona |
 | `TestTheMibManagerScreen::*` (3) | Dos formas en que el gestor de MIBs engaña sin dar error: una fuente **sin carpeta no se ofrece como carpeta** (Synology publica un archivo de veinte MIB, y el espejo que aloja tres es fuente de dependencias para compilar, no el sitio del que importar — en el desplegable de carpetas parece la vía principal y es la versión pequeña); el informe de importación **no puede abrir el diálogo a empujones** (una primera importación son veinte filas «nuevo», y creciendo libre echa fuera de pantalla los botones que actúan sobre él, justo cuando hacen falta); y el cuadro acotado es una **clase reutilizable y no una regla por id**, que es la única norma que tiene el panel sobre CSS de maquetación |
 | `TestNothingReadsAsItsOwnKey::*` (2) | Cada cadena que pide la pantalla existe en **los dos idiomas** (la que falta se muestra como su clave literal); y el campo tiene etiqueta, texto de ayuda y nombre de grupo en ambos |
+| `TestTheDeviceGetsAskedWhetherItAgrees::*` (10) | El diálogo de la prueba, cableado: cada `id` que busca el script **existe en el marcado** (un `getElementById` fallido devuelve null y el fallo es un diálogo que se abre vacío sin error en ninguna parte); el botón **cuelga del campo del que habla** —qué perfiles lleva este aparato y qué hace el aparato con ellos son el mismo asunto— y va en el mismo registro que el selector, porque el renderizador no debe enterarse de que uno de sus doscientos campos es una lista de perfiles; **pregunta nada más abrirse** (no hay nada que configurar: la asignación es la pregunta y está en la pantalla de detrás); **una respuesta tardía de un diálogo cerrado se tira** (un barrido de un aparato lento sobrevive al diálogo que lo pidió); **las dos mitades son alcanzables** y ninguna es la respuesta por defecto; la acción está **registrada y no cambia nada** (ausente de `WATCHFUL_ACTIONS` es un 404 se llame como se llame en la interfaz); y **lo que el perfil lee no se informa como sin capturar**. Y la lista de pasos: el diálogo **vigila el trabajo en vez de esperarlo** (un NAS con un grupo de familia es un minuto de trabajo en un mal día, y un spinner de un minuto no se distingue de una pantalla colgada); **los seis pasos son los mismos a los dos lados** (uno añadido en un sitio y no en el otro es una línea que nunca se rellena, o una que se rellena y no se dibuja); y **cada paso tiene nombre en los dos idiomas** —la clave se construye a partir del identificador del paso, así que el guard que lee llamadas literales no puede verla— |
 
 ---
 

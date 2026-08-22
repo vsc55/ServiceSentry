@@ -1,0 +1,87 @@
+{
+  "id": "windows_workstation_lm",
+  "label": {
+    "en_EN": "Windows workstation service",
+    "es_ES": "Servicio de estacion de trabajo de Windows"
+  },
+  "description": {
+    "en_EN": "The other side of SMB: what this machine asks of other machines. Sessions it started and sessions that failed to start, resources it connected to and connections that were refused, and the reconnections the redirector had to make on its own — the number that says a share is dropping.",
+    "es_ES": "El otro lado de SMB: lo que esta maquina les pide a las demas. Sesiones que inicio y sesiones que no llegaron a iniciarse, recursos a los que se conecto y conexiones rechazadas, y las reconexiones que el redirector tuvo que hacer solo, que es el numero que dice que un recurso compartido se esta cayendo."
+  },
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.311.1.1.3.1.1",
+    "probe": "1.3.6.1.4.1.77.1.3.1.0"
+  },
+  "metrics": [
+    {
+      "key": "win_wks_connections",
+      "label": {
+        "en_EN": "Connections to other machines",
+        "es_ES": "Conexiones a otras maquinas"
+      },
+      "oid": "1.3.6.1.4.1.77.1.3.7.0",
+      "kind": "gauge",
+      "chart": "line"
+    },
+    {
+      "key": "win_wks_sess_starts",
+      "label": {
+        "en_EN": "Sessions started",
+        "es_ES": "Sesiones iniciadas"
+      },
+      "oid": "1.3.6.1.4.1.77.1.3.1.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_wks_sess_fails",
+      "label": {
+        "en_EN": "Sessions that failed to start",
+        "es_ES": "Sesiones que fallaron"
+      },
+      "oid": "1.3.6.1.4.1.77.1.3.2.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_wks_uses",
+      "label": {
+        "en_EN": "Resources connected",
+        "es_ES": "Recursos conectados"
+      },
+      "oid": "1.3.6.1.4.1.77.1.3.3.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_wks_use_fails",
+      "label": {
+        "en_EN": "Connections refused",
+        "es_ES": "Conexiones rechazadas"
+      },
+      "oid": "1.3.6.1.4.1.77.1.3.4.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_wks_auto_recs",
+      "label": {
+        "en_EN": "Automatic reconnections",
+        "es_ES": "Reconexiones automaticas"
+      },
+      "oid": "1.3.6.1.4.1.77.1.3.5.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    }
+  ]
+}

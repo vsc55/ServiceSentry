@@ -446,6 +446,29 @@ def collapse(profiles: dict, ids) -> list:
     return out
 
 
+def assigned(server: dict) -> list:
+    """The profile ids one server carries, in the order they were chosen.
+
+    Here and not in either of its callers, because there are two and they have to agree: the
+    scheduler reads this field to decide what to collect, and the panel reads it to show what
+    the collection is going to be. Two parsers of one field is a screen that reports a
+    profile the sampler never runs — separated by a newline instead of a comma, or by a
+    capital letter, both of which somebody types.
+
+    A list or a separated string, because the field is edited as chips and stored as text.
+    """
+    raw = (server or {}).get('device_profiles')
+    parts = ([str(x) for x in raw] if isinstance(raw, (list, tuple))
+             else re.split(r'[,\s]+', str(raw or '')))
+    seen, out = set(), []
+    for p in parts:
+        pid = p.strip().lower()
+        if pid and pid not in seen:
+            seen.add(pid)
+            out.append(pid)
+    return out
+
+
 def label_of(obj: dict, lang: str, default_lang: str = 'en_EN') -> str:
     """A profile's or metric's name in the reader's language, however it names itself."""
     labels = (obj or {}).get('label') or {}

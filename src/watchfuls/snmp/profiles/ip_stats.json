@@ -5,8 +5,8 @@
         "es_ES": "Estadísticas IP (IP-MIB)"
     },
     "description": {
-        "en_EN": "What the IP layer did with the packets: delivered, forwarded, discarded, fragmented. The interface counters say how much traffic there was; these say what happened to it.",
-        "es_ES": "Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados. Los contadores de interfaz dicen cuánto tráfico hubo; éstos dicen qué pasó con él."
+        "en_EN": "What the IP layer did with the packets: delivered, forwarded, discarded, fragmented. The interface counters say how much traffic there was; these say what happened to it. Read at both widths and for both address families, the way the interface profile reads octets: the RFC 1213 scalars are IPv4 only and 32 bits wide — on a machine that has moved 700 GB they have wrapped a hundred and sixty-seven times — while IP-MIB\u0027s own table reports per address family, and its 64-bit columns are the ones that still mean something a year in. A device that serves only the old scalars simply does not answer the new ones.",
+        "es_ES": "Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados. Los contadores de interfaz dicen cuánto tráfico hubo; éstos dicen qué pasó con él. Se leen en los dos anchos y para las dos familias de direcciones, igual que el perfil de interfaces lee los octetos: los escalares de RFC 1213 son sólo IPv4 y de 32 bits —en una máquina que ha movido 700 GB han dado la vuelta ciento sesenta y siete veces— mientras que la tabla propia de IP-MIB informa por familia, y sus columnas de 64 bits son las que siguen significando algo al año. Un dispositivo que sólo sirva los escalares viejos simplemente no contesta a las nuevas."
     },
     "match": {
         "probe": "1.3.6.1.2.1.4.3.0"
@@ -96,6 +96,102 @@
             "key": "ip_frag_fails",
             "label": {"en_EN": "Fragmentation failures", "es_ES": "Fallos de fragmentación"},
             "oid": "1.3.6.1.2.1.4.18.0",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip4_in_octets",
+            "label": {"en_EN": "IPv4 — Bytes in", "es_ES": "IPv4 — Bytes de entrada"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.6.1",
+            "kind": "counter",
+            "unit": "B/s",
+            "width": 64
+        },
+        {
+            "key": "ip4_out_octets",
+            "label": {"en_EN": "IPv4 — Bytes out", "es_ES": "IPv4 — Bytes de salida"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.33.1",
+            "kind": "counter",
+            "unit": "B/s",
+            "width": 64
+        },
+        {
+            "key": "ip4_in_pkts",
+            "label": {"en_EN": "IPv4 — Datagrams received", "es_ES": "IPv4 — Datagramas recibidos"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.4.1",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 64
+        },
+        {
+            "key": "ip4_out_pkts",
+            "label": {"en_EN": "IPv4 — Datagrams sent", "es_ES": "IPv4 — Datagramas enviados"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.21.1",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 64
+        },
+        {
+            "key": "ip4_in_discards",
+            "label": {"en_EN": "IPv4 — Inbound discards", "es_ES": "IPv4 — Descartes de entrada"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.17.1",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip4_out_discards",
+            "label": {"en_EN": "IPv4 — Outbound discards", "es_ES": "IPv4 — Descartes de salida"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.25.1",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip6_in_octets",
+            "label": {"en_EN": "IPv6 — Bytes in", "es_ES": "IPv6 — Bytes de entrada"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.6.2",
+            "kind": "counter",
+            "unit": "B/s",
+            "width": 64
+        },
+        {
+            "key": "ip6_out_octets",
+            "label": {"en_EN": "IPv6 — Bytes out", "es_ES": "IPv6 — Bytes de salida"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.33.2",
+            "kind": "counter",
+            "unit": "B/s",
+            "width": 64
+        },
+        {
+            "key": "ip6_in_pkts",
+            "label": {"en_EN": "IPv6 — Datagrams received", "es_ES": "IPv6 — Datagramas recibidos"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.4.2",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 64
+        },
+        {
+            "key": "ip6_out_pkts",
+            "label": {"en_EN": "IPv6 — Datagrams sent", "es_ES": "IPv6 — Datagramas enviados"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.21.2",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 64
+        },
+        {
+            "key": "ip6_in_discards",
+            "label": {"en_EN": "IPv6 — Inbound discards", "es_ES": "IPv6 — Descartes de entrada"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.17.2",
+            "kind": "counter",
+            "unit": "pkt/s",
+            "width": 32
+        },
+        {
+            "key": "ip6_out_discards",
+            "label": {"en_EN": "IPv6 — Outbound discards", "es_ES": "IPv6 — Descartes de salida"},
+            "oid": "1.3.6.1.2.1.4.31.1.1.25.2",
             "kind": "counter",
             "unit": "pkt/s",
             "width": 32

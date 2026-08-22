@@ -498,6 +498,67 @@ class TestTheSameFileIsNotAnUpdate:
         assert res['items'][0]['state'] == 'older' and res['written'] == 0
 
 
+class TestTheByteDosEndedAFileWith:
+    """`0x1A` — Ctrl-Z — meant "the file stops here" on CP/M and MS-DOS, and editors of that
+    era wrote one after the last line. It is not whitespace and it is not a comment: an ASN.1
+    parser that reaches it has run out of grammar, and what it reports is a syntax error at
+    an offset **past the end of the file** — the least useful thing it could say.
+
+    This is not archaeology. The MIB set that ships with Windows 10 Pro 22H2 has one in
+    HTTPSERVER-MIB, at byte 21268 of 21271: three bytes after a perfectly good `END`."""
+
+    def _lib(self, tmp_path, blob, name='A-MIB'):
+        raw = tmp_path / 'snmp_mibs' / 'raw'
+        raw.mkdir(parents=True)
+        (raw / name).write_bytes(blob)
+        return raw
+
+    def test_it_never_reaches_a_file_the_panel_writes(self):
+        """Whatever the byte arrived in, it does not go out again: it cannot be part of a
+        MIB, so there is no case in which keeping it is right."""
+        from watchfuls.snmp.mib_admin import _without_dos_eof
+        assert _without_dos_eof('A-MIB DEFINITIONS ::= BEGIN\nEND\n\x1a\n') == (
+            'A-MIB DEFINITIONS ::= BEGIN\nEND\n\n')
+        assert _without_dos_eof('END\n') == 'END\n'
+        assert _without_dos_eof(None) == ''
+
+    def test_what_is_already_in_the_library_is_swept(self, tmp_path):
+        raw = self._lib(tmp_path, b'A-MIB DEFINITIONS ::= BEGIN\r\nEND\r\n\x1a')
+        assert MibAdmin._strip_dos_eof(str(raw)) == 1
+        assert (raw / 'A-MIB').read_bytes() == b'A-MIB DEFINITIONS ::= BEGIN\r\nEND\r\n'
+
+    def test_a_file_without_one_is_not_touched(self, tmp_path):
+        raw = self._lib(tmp_path, b'A-MIB DEFINITIONS ::= BEGIN\r\nEND\r\n')
+        assert MibAdmin._strip_dos_eof(str(raw)) == 0
+
+    def test_it_does_not_order_a_rebuild_of_the_library(self, tmp_path):
+        """The byte is past the last `END`, so no compiler that got there ever saw it and
+        nothing needs compiling again. Touching two thousand mtimes would say otherwise."""
+        import os
+        raw = self._lib(tmp_path, b'A-MIB DEFINITIONS ::= BEGIN\nEND\n\x1a')
+        os.utime(raw / 'A-MIB', (1_000_000, 1_000_000))
+        MibAdmin._strip_dos_eof(str(raw))
+        assert int(os.stat(raw / 'A-MIB').st_mtime) == 1_000_000
+
+    def test_sweeping_twice_changes_nothing(self, tmp_path):
+        """Unlike the line-ending repair beside it, which MUST run once — run twice, it takes
+        a second `\r` off every file that legitimately has CRLF. Removing a byte that can
+        never belong is safe to repeat, and the two are kept apart for exactly that reason:
+        one marker each, one meaning each."""
+        import os
+        raw = self._lib(tmp_path, b'END\r\n\x1a')
+        MibAdmin._strip_dos_eof(str(raw))
+        os.remove(os.path.join(os.path.dirname(str(raw)), '.dos-eof-stripped'))
+        assert MibAdmin._strip_dos_eof(str(raw)) == 0
+        assert (raw / 'A-MIB').read_bytes() == b'END\r\n'
+
+    def test_the_sweep_runs_once(self, tmp_path):
+        raw = self._lib(tmp_path, b'END\r\n\x1a')
+        assert MibAdmin._strip_dos_eof(str(raw)) == 1
+        (raw / 'B-MIB').write_bytes(b'END\r\n\x1a')
+        assert MibAdmin._strip_dos_eof(str(raw)) == 0, 'the marker did not hold'
+
+
 class TestTheLibraryIsRepairedOnce:
     """Every file imported before the writer was fixed carries one extra `\r` per line, and
     no amount of re-importing could settle it: the comparison failed, the import rewrote it,

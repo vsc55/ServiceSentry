@@ -925,7 +925,7 @@ Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/prof
 |---|---|
 | `key` | Identificador de la métrica: acaba siendo el nombre del campo en el historial |
 | `oid` / `walk` | Un valor suelto **o** una columna de una tabla indexada. Uno de los dos, nunca ambos |
-| `kind` | `gauge` (el valor **es** la medida), `counter` (sólo significa algo como **diferencia**), `text` (no es una medida: nombre, modelo, número de serie) |
+| `kind` | `gauge` (el valor **es** la medida), `counter` (sólo significa algo como **diferencia**), `text` (no es una medida: nombre, modelo, número de serie). Un `text` viaja como **atributo** al lado de los números de su fila, nunca como serie — así que la regla de no medir un mismo valor dos veces no le aplica, y merece la pena capturar la identidad: no gasta ninguna gráfica y es lo que da contexto a lo que sí se mide |
 | `unit` | La unidad en la que queda tras `scale` |
 | `scale` | Multiplicador: centisegundos→segundos, KB→bytes, décimas de grado→grados |
 | `width` | 32 o 64 bits del contador — **es lo que distingue una vuelta de un reinicio** |
@@ -934,7 +934,7 @@ Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/prof
 | `scale_by` | La columna que da el factor, **por fila**, cuando lo decide el aparato y no el perfil (el tamaño de bloque de un sistema de ficheros) |
 | `group` | A qué **tabla** pertenece la métrica, para las tablas cuyas filas no tienen nombre: la identidad de una fila es su nombre, y sin él dos tablas caen a su índice SNMP — donde almacenamiento fila 3 y procesador fila 3 no son la misma fila |
 | `chart` | `line`, `area`, `value` o `none` |
-| `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina |
+| `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina. **Un papel por perfil**: la fila tiene una casilla por papel, así que dos textos que pidan `model` son el segundo pisando al primero sin decirlo |
 | `match.sysobjectid_prefix` | **Quién fabricó** el aparato: qué aparatos reclama el perfil; gana el prefijo **más específico** |
 | `match.probe` | **Qué sirve** el aparato: un OID que, si contesta, hace que el perfil aplique. Es el que importa para los genéricos — «¿implementa la HOST-RESOURCES-MIB?» no lo puede contestar un `sysObjectID`: un Synology, un Linux y un Windows la implementan y sus `sysObjectID` no tienen nada que ver |
 | `match.supersedes` | Qué perfiles genéricos **desplaza** éste en los aparatos que reclama: un Synology contesta el sondeo de E/S de UCD y el suyo, y los dos miden los mismos discos |
@@ -951,14 +951,16 @@ casos se guarda la nueva referencia: perder un punto cuesta un punto; inventarlo
 gráfica.
 
 Se envían **nueve** perfiles genéricos, todos de MIBs estándar para que funcionen sin saber
-quién fabricó el aparato, y **disjuntos** entre sí (más los quince de Synology, y los grupos de
-más abajo):
+quién fabricó el aparato, y **disjuntos** entre sí (más `hr_system` —carga por procesador,
+procesos y usuarios, el complemento de `hr_storage`—, los quince de Synology, el de los SAI de
+APC, el de los switches de Linksys, el de RouterOS de MikroTik, los tres de Windows, y los
+grupos de más abajo):
 
 | Perfil | MIB | Qué mide |
 |---|---|---|
 | `sys_generic` | MIB-II | Nombre, descripción, ubicación, contacto, uptime |
-| `if_generic` | IF-MIB | Tráfico y errores por interfaz (columnas de 32 y 64 bits) |
-| `ip_stats` | IP-MIB | Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados |
+| `if_generic` | IF-MIB | Tráfico, paquetes, errores y descartes por interfaz **en las dos direcciones** (columnas de 32 y 64 bits), más velocidad y estado administrativo |
+| `ip_stats` | IP-MIB | Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados. **En los dos anchos y para las dos familias** — los escalares de RFC 1213 son sólo IPv4 y de 32 bits (en una máquina con 700 GB movidos ya han dado la vuelta 167 veces, y el grupo viejo no tiene contador de octetos siquiera); la tabla propia de IP-MIB informa por familia y a 64 bits |
 | `icmp_stats` | ICMP-MIB | Ecos, inalcanzables y TTL agotado, de entrada y de salida |
 | `tcp_udp_stats` | TCP-MIB, UDP-MIB | Conexiones establecidas, retransmisiones, resets, datagramas a puertos cerrados |
 | `ucd_linux` | UCD-SNMP-MIB | CPU, carga y memoria |
@@ -994,9 +996,62 @@ buenos, y ése es justo el fallo que tiene que pasar por una persona. Un aparato
 se informa como inalcanzable y no como un aparato que ningún perfil reclama: en pantalla se leen
 igual y piden acciones opuestas.
 
+**Probar** (el botón de al lado) contesta la otra mitad, y es una pregunta que el panel no sabía
+hacer. Una asignación se equivoca en **dos direcciones** y sólo una se veía: un perfil que nombra
+un OID que el aparato no sirve deja una gráfica vacía, y alguien acaba viéndolo; un aparato que
+sirve algo que ningún perfil asignado nombra es **invisible** — no falta nada en ninguna
+pantalla, porque nunca nadie dijo que pudiera estar. Así que la prueba lee las dos:
+
+- **lo que la asignación recoge**, métrica a métrica, con **lo que dijo el aparato al lado de lo
+  que significa**: `405` y `40,5 °C`. Una escala equivocada por diez enseña una temperatura
+  plausible, y el crudo es lo único que la delata. Un contador trae su total y ningún valor,
+  porque un contador *es* la diferencia entre dos lecturas y aquí sólo hay una. Se lee con
+  `sampler.read_metric`, la misma función con la que muestrea el planificador: lo que enseña la
+  pantalla es lo que se va a registrar, y no puede derivar en otra lectura distinta;
+- **lo que el aparato manda y nadie lee**. Eso no se deduce del catálogo — es un hecho sobre la
+  caja —, así que se recorre el aparato y se le resta todo lo que la asignación ya lee. Sale
+  agrupado **por el objeto**, con el nombre que le den los MIB compilados: cuarenta y ocho líneas
+  diciendo `…2.2.1.16.<n>` son una frase repetida cuarenta y ocho veces, y una sola que diga
+  `ifOutOctets (IF-MIB) × 48` con un valor de ejemplo es la que se puede leer.
+
+La prueba **cuenta lo que va haciendo**: corre en segundo plano y el diálogo la sondea,
+dibujando seis pasos con su contador — conectar, resolver los perfiles asignados, **preguntar
+cuáles sirve** el dispositivo (su `match.probe`), leer sus métricas, **recorrer el árbol SNMP
+entero** y restar lo que ya se captura. Cada transición va también al log del servidor, y la
+consola del navegador recibe lo mismo más la respuesta completa en dos tablas ordenables. Es
+una pantalla de diagnóstico: poder leerla por los dos extremos es justo de lo que va.
+
+El recorrido va **por ramas y con reparto**: el árbol estándar (`1.3.6.1.2.1`) y el del
+fabricante (`1.3.6.1.4.1`) tienen cada uno su parte, como suelo y no como cupo — lo que una no
+gasta lo heredan las siguientes. Un bote único se lo come mib-2: en un Synology de verdad los
+tres mil OIDs se fueron enteros en la tabla de rutas, la tabla ARP y una fila por conexión TCP
+abierta, y el árbol del fabricante no se llegó a preguntar. Que es justo donde está lo que se
+viene a leer.
+
+La lectura va **en paralelo y en dos pasadas**: primero las columnas que nombran y escalan
+las filas, una vez cada una (siete métricas contra un mismo `ifDescr` son un recorrido y no
+siete), y precargarlas es también lo que hace seguro leer las métricas a la vez — ya nadie
+escribe en la caché compartida. De una en una, un NAS con «NAS Synology (todo)» no cabía en su
+propio reloj: ciento cincuenta y siete métricas, y cada una que el modelo no sirva cuesta el
+timeout por los reintentos.
+
+Una fila **sin nombre no es un misterio, es un MIB que falta**: sin TCP-MIB compilado, cada
+conexión abierta vuelve como una fila propia —no hay ninguna columna de la que ser instancia— y
+cuarenta filas iguales se leen como cuarenta problemas. La pantalla dice cuántas hay, y lo que
+hay que hacer es importar ese MIB.
+
+Lo que un perfil lee como **columna** se compara por prefijo y nunca por igualdad (comparando
+cadenas, cada interfaz del switch saldría como no capturada), y las columnas que **nombran** y
+**escalan** las filas cuentan como capturadas: son valores que la asignación ya está usando, y
+listarlas mandaría a alguien a escribir una métrica para un número que ya tiene. El recorrido
+tiene tope y **avisa cuando lo toca**, en vez de informar de un aparato más pequeño de lo que es.
+
+Sin ningún perfil asignado, la prueba es la lista de todo lo que ese aparato se puede medir —
+que es donde más vale: la caja del rack para la que nadie ha escrito un perfil todavía.
+
 Y los perfiles son **disjuntos a propósito**: se asignan varios a la vez, así que dos que den el
 mismo valor no es redundancia — es una medida graficada dos veces con dos nombres. Por eso
-`hr_storage` mide sólo volúmenes y deja la CPU y la memoria a `ucd_linux`.
+`hr_storage` mide sólo volúmenes y deja la CPU y la memoria a `ucd_linux`. Por eso mismo un Synology lleva `ucd_linux`: **es una máquina Linux con net-snmp**, sirve el árbol UCD entero (CPU repartida, medias de carga, memoria y swap) y ningún MIB de fabricante da eso — y por eso mismo el perfil del fabricante *no* mide la CPU, que sería el mismo dato peor contado.
 
 Los perfiles propios de la instalación van en `<var_dir>/snmp_profiles/`, junto a sus MIBs, para
 que una actualización del paquete no se los lleve. Cada fila del catálogo dice si viene enviada o
@@ -1036,9 +1091,35 @@ peor que cualquiera de las dos cosas por separado. Y aunque no reclame nada, la 
 cubre **entero** — una cobertura parcial asignaría perfiles que el aparato no contestó, que es
 justo el fallo que la detección existe para evitar.
 
-Se envían tres: `grp_synology`, `grp_linux` (lo que contesta una máquina con net-snmp) y
-`grp_network` (las preguntas estándar de cualquier equipo de red gestionable, el punto de
-partida para uno sin perfil de fabricante).
+Se envían nueve. Cinco son de fabricante o de familia —`grp_synology`, `grp_mikrotik`,
+`grp_linksys`, `grp_linux` y `grp_network`— y cuatro son de Windows, y éstos enseñan lo que un
+grupo puede hacer que un perfil no: **un grupo contiene otro grupo**.
+
+`grp_windows` es la base —lo que contesta cualquier Windows: MIB-II, HOST-RESOURCES y la MIB de
+LAN Manager— y los papeles la contienen entera y añaden lo suyo: `grp_windows_workstation` le
+suma el redirector, `grp_windows_server` el servicio de servidor, y `grp_windows_dc` contiene al
+de servidor y nada más, porque un controlador de dominio **es** un servidor y lo único distinto
+es el número con el que se presenta.
+
+Y ahí está la gracia: Windows dice qué papel tiene **en su propio `sysObjectID`**. Microsoft
+numera `workstation`, `server` y `dc` como 1, 2 y 3 bajo `{ windowsNT }`, así que cada grupo
+reclama su número, el más específico gana por prefijo más largo, y la base recoge lo que no sea
+ninguno de los tres.
+
+Todos reclaman su rama y **desplazan lo que contienen**, así que un aparato reconocido se
+propone como **una sola fila**. Comprobado sobre el catálogo real, nueve casos:
+
+| Aparato | Se propone |
+|---|---|
+| Windows estación de trabajo | `grp_windows_workstation` |
+| Windows servidor | `grp_windows_server` |
+| Windows controlador de dominio | `grp_windows_dc` |
+| Synology | `grp_synology` |
+| MikroTik | `grp_mikrotik` |
+| Linksys | `grp_linksys` |
+| Linux con net-snmp | `grp_linux` |
+| SAI de APC | `grp_network` + `apc_ups` |
+| Un switch de cualquier otro | `grp_network` |
 
 #### Lo que se escribe en el panel
 

@@ -10,14 +10,21 @@ instead of typing an OID from a vendor PDF. ``audit_detail`` is the other half o
 what the audit log should say once one has run.
 """
 
+import concurrent.futures
+import logging
 import os
 import re
+import threading
+import time
+import uuid
 
+from . import metrics as _metrics
 from . import mib_resolver as _mib_resolver
 from . import profile_store as _profile_store
 from . import profiles as _profiles
 from .client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
+from .sampler import read_metric as _read_metric
 
 # What every SNMP agent answers, and therefore what identifies a device before anybody has
 # decided anything about it. Everything ELSE a detection asks comes from the profiles
@@ -30,6 +37,154 @@ _OID_SYSNAME     = '1.3.6.1.2.1.1.5.0'
 # waiting on. Generous for a catalogue of a few dozen and finite for an installation that grew
 # hundreds; past it the rest are simply not probed, which costs suggestions and not the answer.
 _MAX_PROBES = 40
+
+# What a test says out loud while it runs. A diagnostic that only speaks at the end is one
+# nobody can tell apart from a hung one, and the interesting part of a slow test is exactly
+# WHICH step is slow — so every transition lands in the server log too, where somebody
+# watching a dev console can see the shape of it without opening the panel.
+_LOG = logging.getLogger(__name__)
+
+# Runs in flight, keyed by the id `test_profiles_start` hands out. Same shape and the same
+# GIL-safe write/poll as the MIB compiler's jobs beside it.
+_test_jobs: dict = {}
+
+# ── What a test of one device may read ───────────────────────────────────────
+#
+# The second half of the test is a sweep of the whole device, and a sweep has no natural
+# end: a chassis switch answers tens of thousands of OIDs and a NAS with twenty volumes is
+# not far behind. Every one of these is a ceiling on somebody's patience rather than on
+# correctness — a test that stops early SAYS it stopped early, and what it did read is true.
+
+# Where a device keeps what it has to say: the standard tree and the vendor's own. Between
+# them they are every OID any profile in the catalogue names. The rest of the space
+# (experimental, and SNMP's own administration) is protocol plumbing, and a list of it under
+# "what this device sends that nobody is capturing" would be forty rows of noise at the top
+# of the answer.
+_SWEEP_ROOTS = ('1.3.6.1.2.1', '1.3.6.1.4.1')
+
+_SWEEP_DEFAULT = 6000        # OIDs one test reads, unless the caller asks for more —
+                             # split evenly between the roots below, so three thousand
+                             # of mib-2 cannot leave the vendor tree unasked
+_SWEEP_MAX     = 20000       # …and the most it may ask for
+_TEST_ROWS     = 100         # rows of one table the answer carries
+_TEST_SAMPLES  = 3           # example instances shown per uncaptured object
+_TEST_CHARS    = 200         # how much of one value travels
+
+# How long the reading half may spend on the device. A metric the device does NOT answer
+# costs the full timeout times the retries — five seconds twice, by default — and a group
+# like "Synology NAS (everything)" declares a hundred and thirty of them. Assigned to a model
+# that serves half, the arithmetic is ten minutes of a button that looks stuck. The scheduler
+# can afford that in the background; a person waiting on a dialog cannot. What is past the
+# clock is reported as NOT READ rather than quietly missing, which is a different sentence
+# from "the device did not answer" and the screen says which one it is.
+_TEST_SECONDS = 60
+
+# How many questions one test asks at once. The metrics of one device are independent — each
+# is a GET or a walk of its own column — and asking them one after another is what put a
+# "Synology NAS (everything)" out of reach: a hundred and fifty-seven metrics, of which the
+# ones a given model does not serve cost the full timeout times the retries EACH. Eight is
+# the number the module already uses for a server's checks, and for the same reason: it is
+# generous against latency and modest against an agent that does not like being crowded.
+_TEST_THREADS = 8
+
+# What counts as the object an instance belongs to. Only these are things a device ANSWERS
+# — one value, or one per row; everything else in the index is structure (a table, a row, a
+# node in the tree). Walking up to the nearest name of ANY kind finds `enterprises` for every
+# vendor OID nobody has a MIB for, and collapses the whole interesting half of the report
+# into one row called "enterprises".
+#
+# By suffix, because the class is not always one of the two base ones: pysnmp derives columns
+# of its own (`_DHAuthKeyChangeColumn`), and a whitelist of exact names would quietly drop
+# them back into the tree above.
+_LEAF_TYPES = ('Scalar', 'Column')
+
+
+class _TestSteps:
+    """The checklist a test fills in as it goes.
+
+    Six steps, in the order they happen, each with a state, a counter and a note. It exists
+    because "reading" and "walking the device" are minutes apart on a big NAS and look
+    identical from outside: a spinner says something is happening, and this says what — which
+    is the difference between waiting and wondering whether to press it again.
+
+    Written from the worker threads and read from the polling request, so every mutation
+    takes the lock: a counter incremented from eight threads at once is a counter that
+    quietly loses ticks, and a progress bar that stops short is worse than none.
+    """
+
+    ORDER = ('connect', 'profiles', 'serves', 'read', 'sweep', 'analyse')
+
+    def __init__(self, label: str = ''):
+        self._lock = threading.Lock()
+        self._label = label
+        self._steps = {k: {'key': k, 'state': 'wait', 'n': 0, 'total': 0, 'note': ''}
+                       for k in self.ORDER}
+
+    def begin(self, key: str, total: int = 0, note: str = '') -> None:
+        with self._lock:
+            self._steps[key].update(state='run', total=int(total or 0), note=str(note or ''))
+        _LOG.info('SNMP test %s: %s started%s', self._label, key,
+                  f' ({total})' if total else '')
+
+    def tick(self, key: str, n: int = 1) -> None:
+        with self._lock:
+            self._steps[key]['n'] += int(n)
+
+    def end(self, key: str, note: str = '', state: str = 'done') -> None:
+        with self._lock:
+            step = self._steps[key]
+            step['state'] = state
+            if note:
+                step['note'] = str(note)
+            if not step['total']:
+                step['total'] = step['n']
+            seen = step['n']
+        _LOG.info('SNMP test %s: %s %s%s', self._label, key, state,
+                  f' — {note}' if note else (f' ({seen})' if seen else ''))
+
+    def snapshot(self) -> list:
+        with self._lock:
+            return [dict(self._steps[k]) for k in self.ORDER]
+
+
+class _NoSteps(_TestSteps):
+    """The same object for the synchronous action, which has nobody to report to."""
+
+    def begin(self, key: str, total: int = 0, note: str = '') -> None:
+        pass
+
+    def tick(self, key: str, n: int = 1) -> None:
+        pass
+
+    def end(self, key: str, note: str = '', state: str = 'done') -> None:
+        pass
+
+
+def _oid_key(oid: str) -> tuple:
+    """An OID sorted as a tree and not as a string, so `.10` comes after `.9`."""
+    out = []
+    for part in str(oid or '').split('.'):
+        try:
+            out.append(int(part))
+        except ValueError:
+            return tuple(out)
+    return tuple(out)
+
+
+def _covered_by(oid: str, roots: set) -> bool:
+    """Is *oid* inside anything the assigned profiles read?
+
+    Prefix containment and not equality: a metric declares a COLUMN
+    (`1.3.6.1.2.1.2.2.1.10`) and the device answers one OID per row under it. Comparing the
+    two directly would report every interface on the switch as uncaptured while the profile
+    charts all of them.
+    """
+    parts = str(oid or '').split('.')
+    for i in range(len(parts), 2, -1):
+        if '.'.join(parts[:i]) in roots:
+            return True
+    return False
+
 
 
 class SnmpActions:
@@ -541,6 +696,459 @@ class SnmpActions:
         can take away."""
         return cls._written_delete(config or {}, False)
 
+    @staticmethod
+    def _conn_of(cfg: dict) -> dict:
+        """The kwargs both primitives take, from a server's stored fields.
+
+        The same identity a check travels with, assembled in one place because it was
+        assembled in two: an action that reads the community while the server speaks v3 asks
+        a question the device does not answer, and reports the silence as a device with
+        nothing on it.
+        """
+        return dict(
+            host=str(cfg.get('host', '') or '').strip(),
+            port=int(cfg.get('port', _SERVER_DEFAULTS['port']) or _SERVER_DEFAULTS['port']),
+            version=str(cfg.get('version', _SERVER_DEFAULTS['version'])
+                        or _SERVER_DEFAULTS['version']).strip(),
+            community=str(cfg.get('community', _SERVER_DEFAULTS['community'])
+                          or _SERVER_DEFAULTS['community']).strip(),
+            timeout=max(1, int(cfg.get('timeout', _SERVER_DEFAULTS['timeout'])
+                               or _SERVER_DEFAULTS['timeout'])),
+            retries=max(0, int(cfg.get('retries', _SERVER_DEFAULTS['retries'])
+                               or _SERVER_DEFAULTS['retries'])),
+            v3_username=str(cfg.get('snmpv3_username', '') or ''),
+            v3_auth_key=str(cfg.get('snmpv3_auth_key', '') or ''),
+            v3_priv_key=str(cfg.get('snmpv3_priv_key', '') or ''),
+            v3_auth_proto=str(cfg.get('snmpv3_auth_protocol',
+                                      _SERVER_DEFAULTS['snmpv3_auth_protocol'])
+                              or _SERVER_DEFAULTS['snmpv3_auth_protocol']),
+            v3_priv_proto=str(cfg.get('snmpv3_priv_protocol',
+                                      _SERVER_DEFAULTS['snmpv3_priv_protocol'])
+                              or _SERVER_DEFAULTS['snmpv3_priv_protocol']),
+        )
+
+    # -- Web UI - what the assignment actually reads -------------------------
+
+    @classmethod
+    def _test_read(cls, catalog: dict, assigned: list, conn: dict, deadline: float = 0,
+                   steps=None) -> tuple:
+        """Every metric of every assigned profile, read off the device. ``(metrics, roots)``.
+
+        Through `sampler.read_metric`, which is the function the scheduler reads with. The
+        point of the whole screen is that what it shows is what will be recorded, and a
+        second implementation of "read this metric" would be right until the day it drifted —
+        the day the test says the profile works and the graph stays empty.
+
+        In two passes and in parallel, which is what makes a whole NAS answerable at all. The
+        naming and scaling columns go first, once each: an interface table with seven metrics
+        against one `ifDescr` is one walk and not seven, and pre-filling them is also what
+        makes the second pass safe to run wide — nothing writes to the shared cache any more.
+        Then every metric at once, up to `_TEST_THREADS`. Sequentially, a device carrying
+        "Synology NAS (everything)" could not finish inside its own clock, and most of the
+        report came back as *not read* — which is true, and useless.
+        """
+        todo, roots = [], set()
+        for pid in assigned:
+            prof = catalog.get(pid) or {}
+            for m in prof.get('metrics') or ():
+                todo.append((pid, prof, m))
+                # Everything the profile READS is covered, and not only what it charts: the
+                # column that names the rows and the one that scales them are answers this
+                # assignment is already using, and listing them as uncaptured would send
+                # somebody to write a metric for a value the profile is holding.
+                if m.get('oid'):
+                    roots.add(str(m['oid']).strip('.'))
+                if m.get('walk'):
+                    roots.add(str(m['walk']).strip('.'))
+                idx = m.get('index_label') or ''
+                for extra in (list(idx) if isinstance(idx, (list, tuple)) else [idx]) \
+                        + [m.get('scale_by') or '']:
+                    if extra:
+                        roots.add(str(extra).strip('.'))
+        if not todo:
+            return [], roots
+
+        steps = steps or _NoSteps()
+        columns: dict = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_TEST_THREADS) as pool:
+            served = cls._test_served(catalog, assigned, conn, pool, steps)
+            # The naming and scaling columns, once each — and only for the profiles this
+            # device actually has. Pre-filling them is also what makes the metric pass safe
+            # to run wide: nothing writes to the shared cache any more.
+            extras = []
+            for pid, _prof, m in todo:
+                if not served.get(pid, True):
+                    continue
+                idx = m.get('index_label') or ''
+                for extra in (list(idx) if isinstance(idx, (list, tuple)) else [idx]) \
+                        + [m.get('scale_by') or '']:
+                    if extra and extra not in extras:
+                        extras.append(extra)
+            wanted = sum(1 for t in todo if served.get(t[0], True))
+            steps.begin('read', wanted + len(extras))
+            for oid, (got, _e) in zip(extras, pool.map(
+                    lambda o: cls._snmp_walk_oid(oid=o, **conn), extras)):
+                columns[oid] = got or {}
+                steps.tick('read')
+            # `map` keeps the order it was given, so the report reads in catalogue order
+            # however the answers came back.
+            out = list(pool.map(
+                lambda t: cls._test_metric(t, conn, columns, deadline,
+                                           served.get(t[0], True), steps), todo))
+        answered = sum(1 for m in out if m['rows'] and not m['error'])
+        steps.end('read', f'{answered}/{wanted}')
+        return out, roots
+
+    @classmethod
+    def _test_served(cls, catalog: dict, assigned: list, conn: dict, pool, steps) -> dict:
+        """``{profile id: does this device serve it}``, asked once per profile that says how.
+
+        The cheapest question in the whole screen and the one that saves the most: a profile
+        declares `match.probe` precisely to say "this applies to a device that answers THIS",
+        and a group called "everything a Synology answers" is assigned whole to a model with
+        no GPU, no expansion unit, no SSD cache and no iSCSI. Reading their metrics costs the
+        full timeout times the retries FORTY times over; asking their probes costs seven GETs
+        at once — and what lands on the screen is better either way: "this device does not
+        serve this profile" instead of forty separate "no answer"s, which look like something
+        is broken.
+
+        A profile with no probe is always read: it has not claimed anything that could be
+        checked, and refusing to read it would be inventing a condition it never declared.
+        """
+        pairs = []
+        for pid in assigned:
+            probe = ((catalog.get(pid) or {}).get('match') or {}).get('probe')
+            if probe:
+                pairs.append((pid, probe))
+        steps.begin('serves', len(pairs))
+        if not pairs:
+            steps.end('serves', state='skip')
+            return {}
+        # Submitted rather than mapped, so the count moves as the answers arrive: these are
+        # the requests that WAIT — a probe for hardware the device has not got costs the whole
+        # timeout — and a counter that only jumps at the end is the one somebody is watching.
+        futures = {pool.submit(cls._snmp_get, oid=probe, **conn): pid for pid, probe in pairs}
+        out = {}
+        for fut in concurrent.futures.as_completed(futures):
+            value, err = fut.result()
+            out[futures[fut]] = not err and value not in (None, '')
+            steps.tick('serves')
+        absent = sorted(p for p, ok in out.items() if not ok)
+        steps.end('serves', f'{len(pairs) - len(absent)}/{len(pairs)}')
+        if absent:
+            _LOG.info('SNMP test: device does not serve %s', ', '.join(absent))
+        return out
+
+    @classmethod
+    def _test_metric(cls, task: tuple, conn: dict, columns: dict, deadline: float,
+                     served: bool = True, steps=None) -> dict:
+        """One metric of one profile, as the report carries it."""
+        pid, prof, m = task
+        # Past the clock the metric is still LISTED, and listed as unread: what it declares is
+        # still what the assignment covers, and a metric that silently vanished from the
+        # report would read as a profile with fewer metrics. Same for a profile the device
+        # does not serve — and that one is not a failure at all, which is why it says so with
+        # a word of its own instead of looking like an OID that went unanswered.
+        late = bool(deadline) and time.time() > deadline
+        rows, err = ([], '') if (late or not served) else _read_metric(
+            m, conn, cls._snmp_get, cls._snmp_walk_oid, columns)
+        if steps is not None and served:
+            steps.tick('read')
+        return {
+            'profile': pid,
+            'profile_label': prof.get('label') or {},
+            'key':   m.get('key', ''),
+            'label': m.get('label') or {},
+            'kind':  m.get('kind', 'gauge'),
+            'unit':  m.get('unit', ''),
+            'oid':   m.get('oid', '') or m.get('walk', ''),
+            'table': bool(m.get('walk')),
+            'rows':  [cls._test_row(m, r) for r in rows[:_TEST_ROWS]],
+            'rows_total': len(rows),
+            'error': str(err or ''),
+            'skipped': late,
+            'unserved': not served,
+        }
+
+    @staticmethod
+    def _test_row(metric: dict, row: dict) -> dict:
+        """One reading, as the profile means it — beside the digits the device sent.
+
+        Both, because they answer different questions and the screen exists for the second
+        one: 405 is what the agent said, 40.5 °C is what the profile says it means, and a
+        profile whose scale is wrong by ten shows a plausible temperature and a raw value
+        that gives it away.
+
+        A COUNTER has no value here and that is not a gap: a counter means the difference
+        between two readings, there is one, and inventing a rate from it would be the exact
+        mistake the profile format exists to prevent. What comes back is the total the
+        device is at, which is what says the counter is alive.
+        """
+        raw = row.get('raw')
+        kind = str(metric.get('kind') or 'gauge').lower()
+        if kind == 'text':
+            value = _metrics.attribute(metric, raw)
+        elif kind == 'counter':
+            value = None
+        else:
+            value = _metrics.scale_value(raw, metric.get('scale'))
+            if value is not None and row.get('factor', 1) != 1:
+                value = _metrics.scale_value(value, row['factor'])
+        return {'name': str(row.get('name') or ''), 'index': str(row.get('index') or ''),
+                'raw': str('' if raw is None else raw)[:_TEST_CHARS], 'value': value}
+
+    @classmethod
+    def _test_sweep(cls, conn: dict, budget: int, steps=None) -> tuple:
+        """Walk the device itself. ``(pairs, truncated, error)`` with pairs ``[(oid, value)]``.
+
+        The other half of the question, and the half nobody can answer from the profiles: an
+        assignment can only be judged against what the device actually has, and the only
+        thing that knows that is the device.
+        """
+        # A SHARE each, and not one pot the first root drains. Given the whole budget,
+        # mib-2 takes it: a NAS answers a routing table, an ARP table and one row per open
+        # TCP connection long before the walk reaches `enterprises` — where the vendor's own
+        # subjects live, and where the answer somebody opened this screen for actually is.
+        # Measured on a real Synology: every one of the three thousand OIDs went to mib-2 and
+        # the vendor tree was never asked at all.
+        #
+        # A floor and not a quota: a root that finishes under its share hands the rest to the
+        # ones after it, so a device with little in mib-2 does not waste half the sweep.
+        steps = steps or _NoSteps()
+        # Which trees, on the step itself: "walking the device" is not a thing anybody can
+        # picture, and the two roots are exactly what makes it one — the standard tree and
+        # the vendor's, asked whole, which is the only way to learn what a device has that
+        # nobody thought to ask it for.
+        steps.begin('sweep', budget, note=' + '.join(_SWEEP_ROOTS))
+        share = max(1, budget // len(_SWEEP_ROOTS))
+        spare = budget - share * len(_SWEEP_ROOTS)
+        pairs, truncated, err = [], False, ''
+        for root in _SWEEP_ROOTS:
+            allow = share + spare
+            got, werr = cls._snmp_walk_oid(oid=root, max_rows=allow, **conn)
+            if werr and not got:
+                err = err or str(werr)
+                continue
+            for index, value in (got or {}).items():
+                pairs.append((f'{root}.{index}', str(value)[:_TEST_CHARS]))
+            used = len(got or {})
+            steps.tick('sweep', used)
+            if used >= allow:
+                truncated = True
+            spare = max(0, allow - used)
+        steps.end('sweep', f'{len(pairs)}' + (' +' if truncated else ''))
+        return pairs, truncated, err
+
+    @classmethod
+    def _test_uncaptured(cls, pairs: list, roots: set, var_dir: str) -> tuple:
+        """What the device sends that nothing reads, gathered under the OBJECT it belongs to.
+
+        ``(groups, n)``. Four hundred rows saying `1.3.6.1.2.1.2.2.1.16.<n>` is the same
+        sentence four hundred times: the device has an ifOutOctets column and this assignment
+        is not reading it. So the instances collapse into the object they are instances of,
+        resolved through the compiled MIBs, and the count is what says how big it is.
+
+        The longest known prefix, not the parent: `.16.3` under a column that the library
+        knows resolves to the column; under one it does not, dropping the last component is
+        the best guess there is, and an unnamed row still carries its OID and its value —
+        which is exactly what somebody writing a profile for an unclaimed box has to work
+        from.
+        """
+        # The library is what turns `1.3.6.1.2.1.2.2.1.16` into a name somebody can act on,
+        # and a stale index is the difference between an answer and a column of digits. Built
+        # here on the same terms discovery builds it: only when it is missing or older than
+        # the compiled MIBs, which is a second the first time and nothing afterwards.
+        if var_dir and _mib_resolver.index_needs_rebuild(var_dir):
+            try:
+                _mib_resolver.build_oid_index(var_dir, [])
+            except Exception:  # pylint: disable=broad-except
+                pass           # an unnamed object still carries its OID and its value
+        index = _mib_resolver.get_oid_index(var_dir) if var_dir else {}
+        groups: dict = {}
+        total = 0
+        for oid, value in pairs:
+            if _covered_by(oid, roots):
+                continue
+            total += 1
+            parts = oid.split('.')
+            # The longest prefix the library knows as a READABLE object. Its own OID is what
+            # the instances under it are instances OF, and the remainder is the index — which
+            # is why this is a walk and not a subtraction: an SNMP index is one component on
+            # an interface table and four on one keyed by an IP address.
+            obj, entry = '.'.join(parts[:-1]), None
+            for i in range(len(parts), 2, -1):
+                probe = '.'.join(parts[:i])
+                found = index.get(probe)
+                if found and str(found.get('mib_type') or '').endswith(_LEAF_TYPES):
+                    obj, entry = probe, found
+                    break
+            grp = groups.get(obj)
+            if grp is None:
+                grp = groups[obj] = {
+                    'oid': obj,
+                    'name': (entry or {}).get('mib_name', ''),
+                    'module': (entry or {}).get('mib_module', ''),
+                    'type': (entry or {}).get('mib_type', ''),
+                    'count': 0, 'samples': [],
+                }
+            grp['count'] += 1
+            if len(grp['samples']) < _TEST_SAMPLES:
+                grp['samples'].append({'oid': oid, 'value': value})
+        return sorted(groups.values(), key=lambda g: _oid_key(g['oid'])), total
+
+    @classmethod
+    def test_profiles(cls, config: dict | None = None, steps=None) -> dict:
+        """Run one device's assignment against the device, and report BOTH gaps.
+
+        An assignment can be wrong in two directions and only one of them is visible from the
+        panel. A profile that names an OID the device does not serve leaves an empty chart,
+        which somebody eventually notices. A device that serves something no assigned profile
+        names is invisible — nothing is missing on any screen, because nothing ever said it
+        could be there. That second one is why this action walks the device instead of only
+        reading what it was told to read: what is NOT being captured cannot be derived from
+        the profiles, only from the box.
+
+        So: every metric of every assigned profile, read exactly as the scheduler reads it,
+        with the raw answer beside the value it turns into; and then a sweep of the standard
+        and vendor trees, minus everything the assignment already reads, gathered under the
+        objects the compiled MIBs name.
+        """
+        cfg = config or {}
+        steps = steps or _NoSteps()
+        if not _HAS_PYSNMP:
+            return {'ok': False, 'message': 'pysnmp is not installed'}
+        host = str(cfg.get('host', '') or '').strip()
+        if not host:
+            return {'ok': False, 'message': 'no host'}
+
+        conn = cls._conn_of(cfg)
+        started = time.time()
+
+        steps.begin('connect', note=f"{host}:{conn['port']} v{conn['version']}")
+        sysoid, err = cls._snmp_get(oid=_OID_SYSOBJECTID, **conn)
+        if err:
+            # The one OID every agent has went unanswered. Everything below would be an empty
+            # result about a device nobody is talking to, and "nothing is being captured" is
+            # a very different sentence from "the device did not answer".
+            steps.end('connect', str(err), state='fail')
+            return {'ok': False, 'message': str(err)}
+        sysdescr, _e1 = cls._snmp_get(oid=_OID_SYSDESCR, **conn)
+        sysname,  _e2 = cls._snmp_get(oid=_OID_SYSNAME,  **conn)
+        steps.end('connect', str(sysname or host))
+
+        steps.begin('profiles')
+        catalog = cls._catalog(cfg)
+        asked = _profiles.assigned(cfg)
+        # Through `expand`, which is where a group stops being one: a device carrying
+        # "Synology NAS (everything)" is carrying twenty-two profiles, and the test has to
+        # read what will be sampled and not what was typed in the field.
+        assigned = _profiles.expand(catalog, asked)
+        _total = sum(len((catalog.get(p) or {}).get('metrics') or ()) for p in assigned)
+        steps.end('profiles', f'{len(assigned)} / {_total}')
+
+        metrics, roots = cls._test_read(catalog, assigned, conn,
+                                        deadline=started + _TEST_SECONDS, steps=steps)
+        try:
+            budget = int(cfg.get('sweep_max') or _SWEEP_DEFAULT)
+        except (TypeError, ValueError):
+            budget = _SWEEP_DEFAULT
+        budget = max(100, min(_SWEEP_MAX, budget))
+        pairs, truncated, sweep_err = cls._test_sweep(conn, budget, steps=steps)
+        var_dir = str(cfg.get('__var_dir__') or '').strip()
+        steps.begin('analyse', len(pairs))
+        groups, uncaptured = cls._test_uncaptured(pairs, roots, var_dir)
+        steps.end('analyse', f'{uncaptured}')
+
+        return {
+            'ok': True,
+            'host': host,
+            'sysobjectid': str(sysoid or ''),
+            'sysdescr':    str(sysdescr or ''),
+            'sysname':     str(sysname or ''),
+            'asked':       asked,
+            'profiles': [{'id': pid,
+                          'label': (catalog.get(pid) or {}).get('label') or {},
+                          'metrics': len((catalog.get(pid) or {}).get('metrics') or ())}
+                         for pid in assigned],
+            # An id in the field that the catalogue no longer has. Asked of what was
+            # TYPED and not of what came back: `expand` drops what it cannot resolve, so
+            # asking it is asking the one list the answer has already been removed from.
+            # This is the field of a device pointing at a profile somebody deleted — it
+            # measures nothing, for ever, and no other screen would ever say so.
+            'missing':  [pid for pid in asked if pid not in catalog],
+            'metrics':  metrics,
+            'answered': sum(1 for m in metrics if m['rows'] and not m['error']),
+            'skipped':  sum(1 for m in metrics if m['skipped']),
+            'unserved': sum(1 for m in metrics if m['unserved']),
+            'values':   sum(m['rows_total'] for m in metrics),
+            'sweep': {
+                'walked':     len(pairs),
+                'truncated':  truncated,
+                'error':      sweep_err,
+                'uncaptured': uncaptured,
+                'objects':    groups,
+            },
+            'seconds': round(time.time() - started, 1),
+        }
+
+    @classmethod
+    def test_profiles_start(cls, config: dict | None = None) -> dict:
+        """Run the test in the background and hand back an id to watch it by.
+
+        A test of a NAS is a minute of work on a bad day, and a screen that shows a spinner
+        for a minute is one nobody can tell from a hung one — the interesting part of a slow
+        test is WHICH step is slow. So the work goes to a thread and the answer is polled: the
+        same shape the MIB compiler already has, for the same reason.
+
+        The synchronous action stays exactly as it was. It is the one the tests drive and the
+        one anything without a UI would call, and it is now the same code path with nobody
+        listening to the steps.
+        """
+        cfg = config or {}
+        if not _HAS_PYSNMP:
+            return {'ok': False, 'message': 'pysnmp is not installed'}
+        if not str(cfg.get('host', '') or '').strip():
+            return {'ok': False, 'message': 'no host'}
+
+        job_id = uuid.uuid4().hex[:12]
+        steps = _TestSteps(str(cfg.get('host') or ''))
+        _test_jobs[job_id] = {'done': False, 'steps': steps, 'result': None}
+
+        def _run():
+            try:
+                result = cls.test_profiles(cfg, steps=steps)
+            except Exception as exc:      # pylint: disable=broad-except
+                # A crash mid-test must end the job, or the screen polls a dead thread for
+                # ever. What went wrong travels as the message, which is the only place
+                # anybody would look for it.
+                _LOG.exception('SNMP test failed')
+                result = {'ok': False, 'message': str(exc)}
+            job = _test_jobs.get(job_id)
+            if job is not None:
+                job['result'] = result
+                job['done'] = True
+
+        threading.Thread(target=_run, name='snmp-test', daemon=True).start()
+        return {'ok': True, 'job_id': job_id, 'done': False,
+                'steps': steps.snapshot()}
+
+    @classmethod
+    def test_profiles_status(cls, config: dict | None = None) -> dict:
+        """Where a running test has got to — and, once, its whole answer.
+
+        Dropped on the first read that finds it finished, like the compile job: the result of
+        a test is a picture of one moment and there is nothing to come back to it for.
+        """
+        job_id = str((config or {}).get('job_id') or '').strip()
+        job = _test_jobs.get(job_id)
+        if job is None:
+            return {'ok': False, 'message': 'Job not found or already collected'}
+        snapshot = job['steps'].snapshot()
+        if not job['done']:
+            return {'ok': True, 'done': False, 'steps': snapshot}
+        del _test_jobs[job_id]
+        return {'ok': True, 'done': True, 'steps': snapshot, **(job['result'] or {})}
+
     @classmethod
     def detect_profiles(cls, config: dict | None = None) -> dict:
         """Ask ONE device what it is, and propose the profiles that fit it.
@@ -567,28 +1175,7 @@ class SnmpActions:
         host = str(cfg.get('host', '') or '').strip()
         if not host:
             return {'ok': False, 'message': 'no host', 'items': []}
-
-        conn = dict(
-            host=host,
-            port=int(cfg.get('port', _SERVER_DEFAULTS['port']) or _SERVER_DEFAULTS['port']),
-            version=str(cfg.get('version', _SERVER_DEFAULTS['version'])
-                        or _SERVER_DEFAULTS['version']).strip(),
-            community=str(cfg.get('community', _SERVER_DEFAULTS['community'])
-                          or _SERVER_DEFAULTS['community']).strip(),
-            timeout=max(1, int(cfg.get('timeout', _SERVER_DEFAULTS['timeout'])
-                               or _SERVER_DEFAULTS['timeout'])),
-            retries=max(0, int(cfg.get('retries', _SERVER_DEFAULTS['retries'])
-                               or _SERVER_DEFAULTS['retries'])),
-            v3_username=str(cfg.get('snmpv3_username', '') or ''),
-            v3_auth_key=str(cfg.get('snmpv3_auth_key', '') or ''),
-            v3_priv_key=str(cfg.get('snmpv3_priv_key', '') or ''),
-            v3_auth_proto=str(cfg.get('snmpv3_auth_protocol',
-                                      _SERVER_DEFAULTS['snmpv3_auth_protocol'])
-                              or _SERVER_DEFAULTS['snmpv3_auth_protocol']),
-            v3_priv_proto=str(cfg.get('snmpv3_priv_protocol',
-                                      _SERVER_DEFAULTS['snmpv3_priv_protocol'])
-                              or _SERVER_DEFAULTS['snmpv3_priv_protocol']),
-        )
+        conn = cls._conn_of(cfg)
 
         sysoid, err = cls._snmp_get(oid=_OID_SYSOBJECTID, **conn)
         if err:

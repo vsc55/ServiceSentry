@@ -5,8 +5,8 @@
         "es_ES": "Estadísticas ICMP (ICMP-MIB)"
     },
     "description": {
-        "en_EN": "Echoes, unreachables and time exceededs, in and out. It is where a network tells you it is complaining before anything reports as down.",
-        "es_ES": "Ecos, inalcanzables y TTL agotado, de entrada y de salida. Es donde una red avisa de que se está quejando antes de que nada aparezca como caído."
+        "en_EN": "Echoes, unreachables and time exceededs, in and out. It is where a network tells you it is complaining before anything reports as down. Echo is counted on both sides of the exchange: requests received and replies sent are this device ANSWERING pings; requests sent and replies received are this device making them — and a machine that has stopped getting answers is not the same thing as one nobody is asking.",
+        "es_ES": "Ecos, inalcanzables y TTL agotado, de entrada y de salida. Es donde una red avisa de que se está quejando antes de que nada aparezca como caído. El eco se cuenta por los dos lados del intercambio: peticiones recibidas y respuestas enviadas son este dispositivo CONTESTANDO pings; peticiones enviadas y respuestas recibidas son este dispositivo haciéndolos — y una máquina que ha dejado de recibir respuesta no es lo mismo que una a la que nadie pregunta."
     },
     "match": {
         "probe": "1.3.6.1.2.1.5.1.0"
@@ -88,6 +88,22 @@
             "key": "icmp_out_echo_rep",
             "label": {"en_EN": "Echo replies sent", "es_ES": "Respuestas de eco enviadas"},
             "oid": "1.3.6.1.2.1.5.22.0",
+            "kind": "counter",
+            "unit": "msg/s",
+            "width": 32
+        },
+        {
+            "key": "icmp_out_echo",
+            "label": {"en_EN": "Echo requests sent", "es_ES": "Peticiones de eco enviadas"},
+            "oid": "1.3.6.1.2.1.5.21.0",
+            "kind": "counter",
+            "unit": "msg/s",
+            "width": 32
+        },
+        {
+            "key": "icmp_in_echo_rep",
+            "label": {"en_EN": "Echo replies received", "es_ES": "Respuestas de eco recibidas"},
+            "oid": "1.3.6.1.2.1.5.9.0",
             "kind": "counter",
             "unit": "msg/s",
             "width": 32

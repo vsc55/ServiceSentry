@@ -1,0 +1,30 @@
+{
+  "id": "grp_windows_dc",
+  "label": {
+    "en_EN": "Windows domain controller (everything)",
+    "es_ES": "Controlador de dominio Windows (todo)"
+  },
+  "description": {
+    "en_EN": "A domain controller is a server, and says so with a different number: Microsoft numbers workstation, server and dc as 1, 2 and 3 under the same node. This exists so the third one is recognised as what it is.",
+    "es_ES": "Un controlador de dominio es un servidor, y lo dice con otro numero: Microsoft numera estacion de trabajo, servidor y dc como 1, 2 y 3 bajo el mismo nodo. Esto existe para que al tercero se le reconozca por lo que es."
+  },
+  "includes": [
+    "grp_windows_server"
+  ],
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.311.1.1.3.1.3",
+    "supersedes": [
+      "grp_windows_server",
+      "grp_windows",
+      "windows_server_lm",
+      "windows_lm",
+      "hr_system",
+      "hr_storage",
+      "sys_generic",
+      "if_generic",
+      "ip_stats",
+      "tcp_udp_stats",
+      "icmp_stats"
+    ]
+  }
+}

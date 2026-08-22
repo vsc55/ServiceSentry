@@ -61,6 +61,9 @@ function _fieldTermFor(key, meta, pathStr, target) {
  *  calls `updateField` when the user picks something. A caller that is not editing
  *  `modulesData` — the host modal edits an unsaved draft — passes `onPick(value)` instead and
  *  does the writing itself, which is what lets ONE picker serve both panes.
+ *
+ *  An optional `actions: [{icon, title, run}]` hangs further buttons off the same field, for
+ *  things done TO its value rather than to choose it — `run(pathStr, currentValue, buttonEl)`.
  */
 const FIELD_PICKERS = {};
 
@@ -95,12 +98,23 @@ function _fieldPickerTitle(fp) {
     return t(fp.title) || fp.title || '';
 }
 
-/** The button that opens a field's picker, or nothing when it has none. */
+/** The button that opens a field's picker — and whatever else it hangs off the same field.
+ *
+ *  A picker answers "which ones". Some fields have a second question that only makes sense
+ *  once they are answered: the SNMP device profiles are assigned on this field, and the only
+ *  place worth asking whether the device agrees with the assignment is beside it. Registered
+ *  the same way and for the same reason — the renderer draws two hundred fields and must not
+ *  learn that one of them is a list of profiles. */
 function _fieldPickerBtn(fp, pathStr, value, locked) {
     if (!fp || locked) return '';
-    return `<button class="btn btn-secondary" type="button"
-                onclick="_fieldPickerFor(${jsStr(pathStr)}).open(${jsStr(pathStr)},${jsStr(String(value == null ? '' : value))})"
+    const cur = jsStr(String(value == null ? '' : value));
+    const own = `<button class="btn btn-secondary" type="button"
+                onclick="_fieldPickerFor(${jsStr(pathStr)}).open(${jsStr(pathStr)},${cur})"
                 title="${escAttr(_fieldPickerTitle(fp))}"><i class="bi ${escAttr(fp.icon)}"></i></button>`;
+    const extra = (fp.actions || []).map((a, i) => `<button class="btn btn-secondary" type="button"
+                onclick="_fieldPickerFor(${jsStr(pathStr)}).actions[${i}].run(${jsStr(pathStr)},${cur},this)"
+                title="${escAttr(_fieldPickerTitle(a))}"><i class="bi ${escAttr(a.icon)}"></i></button>`).join('');
+    return own + extra;
 }
 
 function renderField(key, value, pathStr, target = 'modules') {

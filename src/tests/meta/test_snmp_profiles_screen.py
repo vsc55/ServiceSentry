@@ -198,6 +198,24 @@ class TestTheScreenIsWired:
         # rows meaning nothing, so those go with it.
         assert "['index_label', 'scale_by', 'group'].includes(f)" in body
 
+    def test_a_group_can_be_cloned_and_the_clone_is_a_new_one(self):
+        """The shipped groups cannot be edited — a release would take the change back — so
+        cloning is how an installation gets one of its own, and the case is the common one:
+        "everything a Synology answers, minus the two profiles this model has not got".
+        Twenty-three ticks against two clicks, and no way to notice a box left unticked.
+
+        The membership travels; the identity does not. A clone that kept the id would not be
+        a clone, it would be a failed save."""
+        js = _strip_comments(_read(UI))
+        body = _fn(js, '_snmpGrpOpen')
+        assert 'function _snmpGrpOpen(gid, copy)' in js, 'the group form cannot be opened as a copy'
+        assert "_snmpGrpEditing = (cur && !copy)" in body, 'a clone would overwrite the original'
+        assert "profile_copy" in body and '_snmpGrpNameInput()' in body
+        assert "cur.includes" in body, 'the clone starts empty'
+        # …and the button is on the row, for groups as well as profiles.
+        assert 'const dup = !pick;' in js, 'groups are not offered the duplicate button'
+        assert '_snmpGrpOpen(${jsStr(p.id)}, true)' in _read(UI)
+
     def test_a_copy_carries_the_matrix_and_not_the_identity(self):
         """An OID matrix from a blank form is an afternoon; the same matrix with three OIDs
         changed is five minutes. What must NOT come along is how the original is recognised —
@@ -413,7 +431,12 @@ class TestNothingReadsAsItsOwnKey:
         screen where a word belongs."""
         js = _read(UI)
         keys = set(re.findall(r"_snmpProfT\('(\w+)'", js))
+        keys |= set(re.findall(r"_snmpTestT\('(\w+)'", js))
         keys |= set(re.findall(r"_modUiStr\('snmp', '(\w+)'", js))
+        # A key BUILT from a value (`'test_step_' + s.key`) is captured here as its bare
+        # prefix, and the real key only exists at run time — the same exclusion the core
+        # i18n guard makes, and the checklist has a guard of its own for exactly those.
+        keys = {k for k in keys if not k.endswith('_')}
         assert keys, 'the screen asks for no translated string at all'
         for code in ('es_ES', 'en_EN'):
             ui = _lang(code).get('ui') or {}
@@ -462,3 +485,116 @@ class TestTheMibManagerScreen:
         """The panel has one rule about layout CSS: a generic class, never a per-id rule."""
         css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
         assert '#mibArchiveResult' not in css
+
+
+class TestTheDeviceGetsAskedWhetherItAgrees:
+    """The assignment is wrong in two directions and the panel could only show one of them.
+
+    A profile naming an OID the device does not serve leaves an empty chart, which somebody
+    eventually notices. A device serving something no assigned profile names is INVISIBLE —
+    nothing is missing on any screen, because nothing ever said it could be there. The second
+    one is why the test walks the device instead of only reading what it was told to read,
+    and it is the half these guards are about: it cannot be derived from the catalogue by
+    anybody, so if the sweep goes, the screen quietly becomes half a screen that still looks
+    complete.
+    """
+
+    def test_every_element_the_test_dialog_looks_up_exists_in_the_markup(self):
+        """`getElementById` on a missing id returns null and the failure is silent: a dialog
+        that opens with an empty body and no error anywhere."""
+        js, html = _read(UI), _read(MODALS)
+        wanted = set(re.findall(r"_snmpTestEl\('(snmpTest\w+)'\)", js))
+        wanted |= set(re.findall(r"getElementById\('(snmpTest\w+)'\)", js))
+        assert wanted, 'the dialog looks up no element of its own'
+        for eid in sorted(wanted):
+            assert f'id="{eid}"' in html, f'{eid} is looked up but never declared'
+
+    def test_the_button_hangs_off_the_field_it_is_about(self):
+        """Which profiles this device carries, and what the device makes of them, are the
+        same subject. Anywhere else on the form it is a button whose subject the reader has
+        to work out — and the renderer must not learn that one of its two hundred fields is
+        a list of profiles, which is why it goes in the same registry as the picker."""
+        js = _strip_comments(_read(UI))
+        block = js.split("FIELD_PICKERS['snmp|servers|device_profiles']")[1].split('};')[0]
+        assert 'actions:' in block and '_snmpTestOpen(' in block
+        render = _read(FIELD_RENDER)
+        assert 'fp.actions' in _fn(render, '_fieldPickerBtn'), \
+            'the renderer draws no action a picker registers'
+
+    def test_the_dialog_asks_the_moment_it_opens(self):
+        """There is nothing to configure in it: the assignment is the question and it is on
+        the screen behind. A dialog that opens empty with a button in the middle is one
+        extra click on every single use."""
+        assert '_snmpTestRun(' in _fn(_strip_comments(_read(UI)), '_snmpTestOpen')
+
+    def test_a_late_answer_for_a_closed_dialog_is_dropped(self):
+        """A sweep of a slow device outlives the dialog that asked for it, and two runs
+        overlap the moment somebody presses it twice. The later answer must not paint over
+        the newer one."""
+        body = _fn(_strip_comments(_read(UI)), '_snmpTestRun')
+        assert 'const gen = ++_snmpTestGen' in body
+        assert 'if (gen !== _snmpTestGen)' in body
+
+    def test_both_halves_are_reachable_and_neither_is_the_default_answer(self):
+        """One of them is the question nobody could ask before. Buried behind the other it
+        would go unread — so they are two switched views of one dialog, each saying how much
+        it holds."""
+        body = _fn(_strip_comments(_read(UI)), '_snmpTestRender')
+        assert "_snmpTestGapHtml(d, q)" in body and "_snmpTestReadHtml(d, q)" in body
+        assert "['gap'" in body or "'gap'," in body
+
+    def test_the_dialog_watches_the_work_instead_of_waiting_for_it(self):
+        """A NAS with a family group is a minute of work on a bad day, and a spinner held for
+        a minute is indistinguishable from a hung screen. What somebody watching wants to know
+        is WHICH step is slow — a fact the server had and was throwing away."""
+        init = _read(os.path.join(SNMP, '__init__.py'))
+        for action in ("'test_profiles_start'", "'test_profiles_status'"):
+            assert action in init.split('WATCHFUL_ACTIONS')[1].split('})')[0], action
+            assert action in init.split('READ_ONLY_ACTIONS')[1].split('})')[0], action
+        body = _fn(_strip_comments(_read(UI)), '_snmpTestRun')
+        assert "'test_profiles_start'" in body and "'test_profiles_status'" in body
+        assert 'st.done' in body, 'the poll never ends'
+
+    def test_the_checklist_names_the_same_steps_the_server_reports(self):
+        """The list is drawn whole before the first answer arrives, from a list of keys held
+        in the JS — so a step added on one side and not the other is a line that never fills
+        in, or one that fills in and is never drawn. Neither raises anything."""
+        js = _read(UI)
+        drawn = re.search(r'const _SNMP_TEST_STEPS = \[(.*?)\]', js, re.S).group(1)
+        drawn = re.findall(r"'(\w+)'", drawn)
+        acts = _read(os.path.join(SNMP, 'actions.py'))
+        served = re.search(r"ORDER = \((.*?)\)", acts, re.S).group(1)
+        assert drawn == re.findall(r"'(\w+)'", served), 'the two lists have drifted'
+
+    def test_every_step_has_a_name_in_both_languages(self):
+        """The labels are looked up by a key BUILT from the step id (`'test_step_' + key`), so
+        the guard that reads literal `_snmpTestT('…')` calls cannot see them: a missing one
+        would put `test_step_sweep` on screen where a sentence belongs."""
+        js = _read(UI)
+        drawn = re.findall(r"'(\w+)'",
+                           re.search(r'const _SNMP_TEST_STEPS = \[(.*?)\]', js, re.S).group(1))
+        assert drawn, 'the checklist draws no steps at all'
+        for code in ('es_ES', 'en_EN'):
+            ui = _lang(code).get('ui') or {}
+            missing = [k for k in drawn if not ui.get('test_step_' + k)]
+            assert not missing, f'{code} has no name for {missing}'
+
+    def test_the_action_is_registered_and_changes_nothing(self):
+        """An action absent from `WATCHFUL_ACTIONS` is a 404 whatever the UI calls it. And it
+        reads a device and writes nothing, which is what puts it among the read-only ones —
+        the same rights that already let somebody discover the device's OIDs."""
+        init = _read(os.path.join(SNMP, '__init__.py'))
+        acts = init.split('WATCHFUL_ACTIONS')[1].split('})')[0]
+        read_only = init.split('READ_ONLY_ACTIONS')[1].split('})')[0]
+        assert "'test_profiles'" in acts and "'test_profiles'" in read_only
+
+    def test_what_the_profile_reads_is_not_reported_as_uncaptured(self):
+        """The column that NAMES the rows and the one that scales them are values this
+        assignment is already using. Listed as uncaptured they send somebody to write a
+        metric for a number the profile is holding — and a metric declares a COLUMN while the
+        device answers one OID per row under it, so the comparison is containment and never
+        equality. As equality, every interface on the switch reads as uncaptured."""
+        py = _read(os.path.join(SNMP, 'actions.py'))
+        block = py.split('def _test_read(')[1].split('    @staticmethod')[0]
+        assert "m.get('index_label')" in block and "m.get('scale_by')" in block
+        assert 'def _covered_by(' in py and "'.'.join(parts[:i]) in roots" in py

@@ -129,6 +129,50 @@
                 "en_EN": "Swap available",
                 "es_ES": "Swap disponible"
             }
+        },
+        {
+            "key": "mem_cached",
+            "label": {"en_EN": "Memory cached", "es_ES": "Memoria en caché"},
+            "oid": "1.3.6.1.4.1.2021.4.15.0",
+            "kind": "gauge",
+            "unit": "B",
+            "scale": 1024,
+            "chart": "area"
+        },
+        {
+            "key": "mem_buffers",
+            "label": {"en_EN": "Memory buffers", "es_ES": "Memoria en buffers"},
+            "oid": "1.3.6.1.4.1.2021.4.14.0",
+            "kind": "gauge",
+            "unit": "B",
+            "scale": 1024,
+            "chart": "area"
+        },
+        {
+            "key": "cpu_count",
+            "label": {"en_EN": "Processors", "es_ES": "Procesadores"},
+            "oid": "1.3.6.1.4.1.2021.11.67.0",
+            "kind": "gauge",
+            "unit": "",
+            "chart": "value"
+        },
+        {
+            "key": "cpu_interrupts",
+            "label": {"en_EN": "Interrupts", "es_ES": "Interrupciones"},
+            "oid": "1.3.6.1.4.1.2021.11.59.0",
+            "kind": "counter",
+            "unit": "/s",
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "cpu_contexts",
+            "label": {"en_EN": "Context switches", "es_ES": "Cambios de contexto"},
+            "oid": "1.3.6.1.4.1.2021.11.60.0",
+            "kind": "counter",
+            "unit": "/s",
+            "width": 32,
+            "chart": "line"
         }
     ]
 }

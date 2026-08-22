@@ -13,6 +13,7 @@
     "if_generic",
     "ucd_linux",
     "hr_storage",
+    "hr_system",
     "disk_io",
     "lm_sensors",
     "ip_stats",

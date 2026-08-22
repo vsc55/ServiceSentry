@@ -272,7 +272,11 @@ function _snmpProfRender() {
         // written: an OID matrix from a blank form is an afternoon, and the same matrix with
         // three OIDs changed is five minutes. Offered on the shipped ones especially — they
         // are the ones worth starting from.
-        const dup = !grp && !pick;
+        //
+        // And on GROUPS for the same reason, which is stronger there: "everything a Synology
+        // answers, minus the two profiles this model does not have" is one clone and two
+        // clicks, against ticking twenty-three boxes and hoping none was missed.
+        const dup = !pick;
         const tick = pick
             ? `<i class="bi ${sel ? 'bi-check-square text-primary' : 'bi-square text-secondary'} flex-shrink-0 ss-fs-4"></i>`
             : `<i class="bi ${grp ? 'bi-collection' : 'bi-grid-3x3-gap'} text-secondary flex-shrink-0 ss-fs-4"></i>`;
@@ -302,7 +306,8 @@ function _snmpProfRender() {
                 </div>
                 ${dup ? `<button class="btn btn-sm btn-secondary flex-shrink-0" type="button"
                         title="${escAttr(_snmpProfT('profile_duplicate', 'Duplicate'))}"
-                        onclick="event.stopPropagation();_snmpPrfOpen(${jsStr(p.id)}, true)">
+                        onclick="event.stopPropagation();${grp
+                            ? `_snmpGrpOpen(${jsStr(p.id)}, true)` : `_snmpPrfOpen(${jsStr(p.id)}, true)`}">
                     <i class="bi bi-files"></i></button>` : ''}
                 ${mine ? `<button class="btn btn-sm btn-secondary flex-shrink-0" type="button"
                         title="${escAttr(t('edit') || 'Edit')}"
@@ -592,18 +597,27 @@ function _snmpGrpNameInput() {
     if (idEl) idEl.value = _snmpGrpSlug((_snmpGrpEl('snmpGrpName') || {}).value || '');
 }
 
-/** Open the form on an existing grouping, or on a new one when *gid* is empty. */
-function _snmpGrpOpen(gid) {
+/** Open the form on an existing grouping, on a COPY of one, or on a new one when *gid* is
+ *  empty.
+ *
+ *  A copy carries the membership and not the identity, which is the whole point: "everything
+ *  a Synology answers, minus the two profiles this model has not got" starts from the group
+ *  that already holds twenty-three, and the alternative is ticking them again one by one.
+ *  The id is left free and the name says it is a copy — the shipped ones cannot be edited
+ *  and should not be, so cloning is how an installation makes one of its own. */
+function _snmpGrpOpen(gid, copy) {
     const cur = (_snmpProfItems || []).find(p => String(p.id) === String(gid || ''));
-    _snmpGrpEditing = cur ? String(cur.id) : '';
+    _snmpGrpEditing = (cur && !copy) ? String(cur.id) : '';
     _snmpGrpIdTouched = !!_snmpGrpEditing;
     _snmpGrpSel = new Set((cur && cur.includes || []).map(x => String(x).toLowerCase()));
 
     const set = (id, val) => { const el = _snmpGrpEl(id); if (el) el.value = val; };
-    set('snmpGrpName', cur ? _snmpProfLabel(cur, cur.id) : '');
+    const name = cur ? _snmpProfLabel(cur, cur.id) : '';
+    set('snmpGrpName', copy ? `${name} (${_snmpProfT('profile_copy', 'copy')})` : name);
     set('snmpGrpId', _snmpGrpEditing);
     set('snmpGrpDesc', cur ? _snmpProfDesc(cur) : '');
     set('snmpGrpSearch', '');
+    if (copy) _snmpGrpNameInput();      // the id follows the name, as it does on a new one
 
     const idEl = _snmpGrpEl('snmpGrpId');
     // The id is what every device stores. Changing it would not rename a grouping, it would
@@ -1234,4 +1248,410 @@ FIELD_PICKERS['snmp|servers|device_profiles'] = {
     // A function because the module's i18n block is not loaded when this line runs.
     title: () => _modUiStr('snmp', 'device_profiles_pick', 'Device profiles'),
     open:  (pathStr, current, onPick) => _snmpProfOpenFor(pathStr, current, onPick),
+    // …and beside it, the question the assignment cannot answer about itself. It hangs off
+    // the FIELD because that is what it is about: which profiles this device carries, and
+    // what the device makes of them. Anywhere else on the form it would be a button whose
+    // subject the reader has to work out.
+    actions: [{
+        icon:  'bi-activity',
+        title: () => _modUiStr('snmp', 'test_profiles', 'Test against the device'),
+        run:   (pathStr, current, btn) => _snmpTestOpen(pathStr, current, btn),
+    }],
 };
+
+
+// ── Does the assignment match the device? ───────────────────────────────────
+//
+// The catalogue says what CAN be measured and the field says what was assigned; neither of
+// them has ever been asked whether the device agrees. This is that question, and it has two
+// halves that cannot be answered the same way:
+//
+//   * what the assignment reads, read for real — through `sampler.read_metric`, the same
+//     function the scheduler uses, with the device's raw answer beside the value the profile
+//     turns it into. A scale wrong by ten shows a plausible temperature; the raw digits are
+//     what give it away;
+//   * what the device sends that nothing reads. That one is not derivable from the
+//     catalogue by anybody: it is a fact about the box, so the box is walked and everything
+//     the assignment already reads is subtracted from what comes back.
+
+let _snmpTestPath = '';      // the field this was opened from
+let _snmpTestData = null;    // the last answer, as `test_profiles` returned it
+let _snmpTestView = 'read';  // 'read' — what the profiles get · 'gap' — what nobody reads
+let _snmpTestGen  = 0;       // bumped per run: a late answer for a closed dialog is dropped
+
+const _snmpTestEl = id => document.getElementById(id);
+
+function _snmpTestT(key, fallback) {
+    return _modUiStr(_snmpTestPath.split('|')[0] || 'snmp', key, fallback);
+}
+
+/** Open on one server's profile field and ask its device straight away.
+ *
+ *  Straight away because there is nothing to configure: the assignment is the question and
+ *  it is already on the screen behind this one. A dialog that opens empty with a button in
+ *  the middle is one extra click on every single use. */
+function _snmpTestOpen(pathStr, _value, _btn) {
+    _snmpTestPath = String(pathStr || '');
+    _snmpTestData = null;
+    _snmpTestView = 'read';
+    const set = (id, text) => { const e = _snmpTestEl(id); if (e) e.textContent = text; };
+    set('snmpTestTitle', _snmpTestT('test_title', 'Test against the device'));
+    set('snmpTestRunLabel', _snmpTestT('test_run', 'Test again'));
+    set('snmpTestDevice', '');
+    const srch = _snmpTestEl('snmpTestSearch');
+    if (srch) { srch.value = ''; srch.placeholder = _snmpTestT('test_search', 'OID, name or MIB…'); }
+    for (const id of ['snmpTestSummary', 'snmpTestTabs']) {
+        const e = _snmpTestEl(id);
+        if (e) e.innerHTML = '';
+    }
+    bootstrap.Modal.getOrCreateInstance(_snmpTestEl('snmpTestModal')).show();
+    _snmpTestRun(_snmpTestEl('snmpTestRunBtn'));
+}
+
+/** Ask the device, and say what is being asked while it happens.
+ *
+ *  The whole server travels, because the answer depends on all of it — the address, the
+ *  version and the identity — and the route resolves the bound host and the referenced
+ *  credential server-side, exactly as it does for a check.
+ *
+ *  In the background and polled, rather than one request that answers at the end: a NAS with
+ *  a family group is a minute of work on a bad day, and a spinner held for a minute is
+ *  indistinguishable from a hung screen. What somebody watching actually wants to know is
+ *  WHICH step is slow, and that is a fact the server has and was throwing away. */
+async function _snmpTestRun(btn) {
+    if (!_snmpTestPath) return;
+    const modName = _snmpTestPath.split('|')[0] || 'snmp';
+    const itemPath = _snmpTestPath.split('|').slice(0, -1).join('|');
+    const cfg = getPath(modulesData, itemPath.split('|')) || {};
+    const gen = ++_snmpTestGen;
+    _snmpTestSeen = {};
+    const body = _snmpTestEl('snmpTestBody');
+    if (body) body.innerHTML = _snmpTestStepsHtml([]);
+    const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
+    _snmpTestLog('run', {host: cfg.host || '', profiles: cfg.device_profiles || ''});
+
+    const fail = (msg) => {
+        _snmpTestData = null;
+        _snmpTestLog('failed', msg);
+        if (body) body.innerHTML = `<div class="alert alert-danger py-2 mb-0 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(msg || t('error') || 'Error')}</div>`;
+    };
+
+    const started = await apiPost(_snmpActionUrl(modName, 'test_profiles_start'), {...cfg});
+    const s0 = started && started.data;
+    if (gen !== _snmpTestGen) { done(); return; }
+    if (!s0 || !s0.ok || !s0.job_id) { done(); fail(s0 && s0.message); return; }
+
+    // Polled rather than streamed: it is the mechanism the MIB compiler already uses here,
+    // and half a second is far below the point where a step looks stuck.
+    let d = null;
+    for (;;) {
+        await new Promise(r => setTimeout(r, 500));
+        if (gen !== _snmpTestGen) { done(); return; }   // closed, or asked again
+        const res = await apiPost(_snmpActionUrl(modName, 'test_profiles_status'),
+                                  {job_id: s0.job_id});
+        if (gen !== _snmpTestGen) { done(); return; }
+        const st = res && res.data;
+        if (!st || !st.ok) { done(); fail(st && st.message); return; }
+        _snmpTestSteps(st.steps || []);
+        if (body) body.innerHTML = _snmpTestStepsHtml(st.steps || []);
+        if (st.done) { d = st; break; }
+    }
+    done();
+    if (!d.ok) { fail(d.message); return; }
+    _snmpTestData = d;
+    _snmpTestReport(d);
+    _snmpTestRender();
+}
+
+// ── Saying it out loud ──────────────────────────────────────────────────────
+//
+// This screen is a diagnostic, so it leaves a trail in the browser console as well as on
+// the page: what it asked, which step it reached, and the whole answer as tables somebody
+// can sort. The server writes the same story to its own log, so a slow device can be looked
+// at from either end.
+
+let _snmpTestSeen = {};      // last state seen per step — a transition is logged once
+
+function _snmpTestLog(...args) {
+    if (typeof console !== 'undefined' && console.log) console.log('[snmp-test]', ...args);
+}
+
+/** Log the steps that CHANGED, so a poll every half second is not a wall of repeats. */
+function _snmpTestSteps(steps) {
+    for (const s of steps || []) {
+        const mark = `${s.state}:${s.n}/${s.total}`;
+        if (s.state === 'wait' || _snmpTestSeen[s.key] === mark) continue;
+        const was = _snmpTestSeen[s.key];
+        _snmpTestSeen[s.key] = mark;
+        // Only the state changes are worth a line; a counter moving is the same step.
+        if (was && was.split(':')[0] === s.state && s.state === 'run') continue;
+        _snmpTestLog(s.key, s.state, s.note || (s.total ? `${s.n}/${s.total}` : ''));
+    }
+}
+
+/** The whole answer, once, as something that can be read and sorted in the console. */
+function _snmpTestReport(d) {
+    _snmpTestLog('done in', d.seconds + 's', {
+        device: d.sysname, sysObjectID: d.sysobjectid,
+        profiles: (d.profiles || []).length, metrics: (d.metrics || []).length,
+        answered: d.answered, notServed: d.unserved, notRead: d.skipped,
+        readings: d.values, walked: d.sweep.walked, uncaptured: d.sweep.uncaptured,
+    });
+    if (typeof console === 'undefined' || !console.table) return;
+    console.groupCollapsed('[snmp-test] ' + (d.sysname || d.host || ''));
+    console.table((d.metrics || []).map(m => ({
+        profile: m.profile, metric: m.key, oid: m.oid, rows: m.rows_total,
+        value: (m.rows[0] || {}).value, raw: (m.rows[0] || {}).raw,
+        state: m.unserved ? 'not served' : (m.skipped ? 'not read'
+             : (m.error ? 'no answer' : 'ok')), error: m.error,
+    })));
+    console.table((d.sweep.objects || []).slice(0, 200).map(o => ({
+        oid: o.oid, name: o.name, mib: o.module, rows: o.count,
+        sample: (o.samples[0] || {}).value,
+    })));
+    console.groupEnd();
+}
+
+/** The checklist, as it fills in. */
+function _snmpTestStepsHtml(steps) {
+    const ICON = {done: 'bi-check-circle-fill text-success', run: 'bi-arrow-repeat text-primary',
+                  fail: 'bi-x-circle-fill text-danger', skip: 'bi-dash-circle text-muted',
+                  wait: 'bi-circle text-muted'};
+    const rows = (steps.length ? steps : _SNMP_TEST_STEPS.map(k => ({key: k, state: 'wait', n: 0, total: 0})));
+    return `<div class="px-3 py-3">${rows.map(s => {
+        const count = s.total ? `${s.n}/${s.total}` : (s.n ? String(s.n) : '');
+        const pct = (s.state === 'run' && s.total)
+            ? Math.min(100, Math.round((s.n / s.total) * 100)) : 0;
+        return `<div class="d-flex align-items-center gap-2 py-1${s.state === 'wait' ? ' opacity-50' : ''}">
+            <i class="bi ${ICON[s.state] || ICON.wait}"></i>
+            <span class="${s.state === 'run' ? 'fw-semibold' : ''}">${esc(
+                _snmpTestT('test_step_' + s.key, s.key))}</span>
+            <span class="text-muted ss-fs-2 ms-auto font-monospace">${esc(count)}</span>
+            ${s.note ? `<span class="text-muted ss-fs-2">${esc(s.note)}</span>` : ''}
+        </div>
+        ${pct ? `<div class="progress mb-1" style="height:3px"><div class="progress-bar"
+                  style="width:${pct}%"></div></div>` : ''}`;
+    }).join('')}</div>`;
+}
+
+// The order the server reports them in, so the list is drawn whole before the first answer
+// comes back instead of growing a line at a time.
+const _SNMP_TEST_STEPS = ['connect', 'profiles', 'serves', 'read', 'sweep', 'analyse'];
+
+function _snmpTestSetView(view) {
+    _snmpTestView = view;
+    const srch = _snmpTestEl('snmpTestSearch');
+    if (srch) srch.value = '';        // the two halves are searched by different things
+    _snmpTestRender();
+}
+
+// ── What it looks like ──────────────────────────────────────────────────────
+
+/** One number with what it counts underneath. */
+function _snmpTestTile(value, label, tone) {
+    return `<div class="border rounded px-2 py-1 text-center flex-grow-1" style="min-width:5.5rem">
+        <div class="fw-semibold ${tone || ''}">${esc(String(value))}</div>
+        <div class="text-muted ss-fs-2">${esc(label)}</div></div>`;
+}
+
+function _snmpTestRender() {
+    const d = _snmpTestData;
+    const body = _snmpTestEl('snmpTestBody');
+    if (!d || !body) return;
+    const dev = _snmpTestEl('snmpTestDevice');
+    if (dev) dev.textContent = d.sysname || d.host || '';
+
+    // ── The summary: how much of the device this assignment is reading ──────
+    const sum = _snmpTestEl('snmpTestSummary');
+    if (sum) {
+        const half = d.answered < d.metrics.length - (d.unserved || 0);
+        const tiles = [
+            _snmpTestTile(`${d.answered}/${d.metrics.length - (d.unserved || 0)}`,
+                          _snmpTestT('test_answered', 'metrics answered'),
+                          d.metrics.length ? (half ? 'text-warning' : 'text-success') : ''),
+            _snmpTestTile(d.values, _snmpTestT('test_values', 'readings')),
+            _snmpTestTile(d.sweep.walked, _snmpTestT('test_walked', 'OIDs on the device')),
+            _snmpTestTile(d.sweep.uncaptured, _snmpTestT('test_uncaptured', 'not captured'),
+                          d.sweep.uncaptured ? 'text-warning' : 'text-success'),
+        ].join('');
+        // Counted apart from the answered ones, because it is not a shortfall: those metrics
+        // describe hardware this model has not got, and holding them against the total would
+        // make every device with a family group look half broken.
+        const aside = d.unserved
+            ? `<div class="text-muted ss-fs-2 mt-1">${esc(_snmpTestT('test_unserved',
+                '{n} metrics belong to profiles this device does not serve — not asked for.')
+                .replace('{n}', d.unserved))}</div>` : '';
+        // What the box says it is. The sysObjectID is the identity a profile claims and the
+        // description is what a person recognises — on an unclaimed device it is the only
+        // thing there is, and it is what somebody writes a profile from.
+        const ident = [];
+        if (d.sysobjectid) ident.push(`<code class="ss-fs-2">${esc(d.sysobjectid)}</code>`);
+        if (d.seconds != null) ident.push(`<span class="text-muted ss-fs-2">${esc(String(d.seconds))} s</span>`);
+        // Two different ways this answer can be short of the whole truth, and neither may
+        // be left to be inferred from a number that looks lower than expected.
+        const warn = [];
+        if (d.sweep.truncated) warn.push(_snmpTestT('test_truncated',
+            'The sweep stopped early — the device has more than this.'));
+        if (d.skipped) warn.push(_snmpTestT('test_skipped',
+            '{n} metrics were not read: the device took too long.').replace('{n}', d.skipped));
+        // The field points at something the catalogue no longer has. It measures nothing,
+        // for ever, and this is the only screen in the panel that would ever say so.
+        if ((d.missing || []).length) warn.push(_snmpTestT('test_missing',
+            'Assigned but no longer in the catalogue: {ids}').replace('{ids}', d.missing.join(', ')));
+        const trunc = warn.length
+            ? `<div class="alert alert-warning py-1 px-2 mb-0 mt-2 ss-fs-2">
+                 <i class="bi bi-exclamation-triangle me-1"></i>${warn.map(esc).join(' · ')}</div>` : '';
+        sum.innerHTML = `<div class="d-flex gap-2 flex-wrap">${tiles}</div>${aside}
+            ${d.sysdescr ? `<div class="text-muted ss-fs-2 mt-2">${esc(d.sysdescr)}</div>` : ''}
+            ${ident.length ? `<div class="d-flex gap-2 align-items-center mt-1">${ident.join('')}</div>` : ''}
+            ${trunc}`;
+    }
+
+    // ── The two halves ──────────────────────────────────────────────────────
+    const tabs = _snmpTestEl('snmpTestTabs');
+    if (tabs) {
+        const defs = [
+            ['read', 'bi-check2-square', _snmpTestT('test_tab_read', 'Captured'), d.metrics.length],
+            ['gap', 'bi-eye-slash', _snmpTestT('test_tab_gap', 'Not captured'), d.sweep.objects.length],
+        ];
+        tabs.innerHTML = defs.map(([k, icon, label, n]) => `
+            <button type="button" class="btn ${k === _snmpTestView ? 'btn-primary' : 'btn-secondary'}"
+                    onclick="_snmpTestSetView('${k}')" aria-pressed="${k === _snmpTestView}">
+                <i class="bi ${icon} me-1"></i>${esc(label)} (${n})</button>`).join('');
+    }
+
+    const q = ((_snmpTestEl('snmpTestSearch') || {}).value || '').trim().toLowerCase();
+    body.innerHTML = _snmpTestView === 'gap' ? _snmpTestGapHtml(d, q) : _snmpTestReadHtml(d, q);
+}
+
+/** What the assigned profiles get, profile by profile. */
+function _snmpTestReadHtml(d, q) {
+    if (!d.metrics.length) {
+        return `<div class="alert alert-info py-2 mb-0 small">
+            <i class="bi bi-info-circle me-1"></i>${esc(_snmpTestT('test_none_assigned',
+                'No profile is assigned to this server, so nothing is being captured. Everything the device sends is on the other tab.'))}</div>`;
+    }
+    const by = new Map();
+    for (const m of d.metrics) {
+        const hit = !q || [m.key, _snmpProfLabel(m, m.key), m.oid].join(' ').toLowerCase().includes(q)
+            || (m.rows || []).some(r => String(r.name || '').toLowerCase().includes(q));
+        if (!hit) continue;
+        if (!by.has(m.profile)) by.set(m.profile, []);
+        by.get(m.profile).push(m);
+    }
+    if (!by.size) return `<div class="text-muted text-center py-4 small">${esc(t('no_filter_matches') || '—')}</div>`;
+
+    const names = {};
+    for (const p of d.profiles || []) names[p.id] = _snmpProfLabel(p, p.id);
+    const out = [];
+    for (const [pid, metrics] of by) {
+        // A profile the device does not serve is ONE line and not a dozen red rows. It is
+        // not a failure: a NAS with no SSD cache has nothing to say about SSD cache, and
+        // twelve "no answer"s in a row read as something being broken.
+        const absent = metrics.every(m => m.unserved);
+        out.push(`<div class="px-2 pt-2 pb-1 d-flex align-items-center gap-2">
+            <i class="bi bi-grid-3x3-gap text-muted"></i>
+            <span class="fw-semibold${absent ? ' text-muted' : ''}">${esc(names[pid] || pid)}</span>
+            <span class="text-muted ss-fs-2 font-monospace">${esc(pid)}</span>
+            ${absent ? `<span class="badge bg-secondary ss-fs-1">${esc(
+                _snmpTestT('test_not_served', 'this device does not serve it'))}</span>
+                <span class="text-muted ss-fs-2">${metrics.length} ${esc(
+                _snmpTestT('profile_metrics', 'metrics'))}</span>` : ''}</div>`);
+        if (!absent) out.push(metrics.map(_snmpTestMetricHtml).join(''));
+    }
+    return out.join('');
+}
+
+/** One metric: what it is, where it comes from, and what came back. */
+function _snmpTestMetricHtml(m) {
+    const kindKey = {gauge: 'profile_kind_gauge', counter: 'profile_kind_counter',
+                     text: 'profile_kind_text'}[m.kind] || 'profile_kind_gauge';
+    const head = `<div class="d-flex gap-2 align-items-center flex-wrap">
+        <span class="fw-semibold">${esc(_snmpProfLabel(m, m.key))}</span>
+        <span class="text-muted ss-fs-2 font-monospace">${esc(m.key)}</span>
+        <span class="badge bg-secondary ss-fs-1">${esc(_snmpTestT(kindKey, m.kind))}</span>
+        ${m.unit ? `<span class="text-muted ss-fs-2">${esc(m.unit)}</span>` : ''}
+        <code class="ss-fs-2 text-muted">${esc(m.oid)}</code>
+        ${m.rows_total > 1 ? `<span class="badge bg-secondary ss-fs-1">${m.rows_total} ${esc(_snmpTestT('test_rows', 'rows'))}</span>` : ''}
+    </div>`;
+
+    // The device did not answer this one. Said per METRIC because that is the granularity at
+    // which a profile is half-right on a model — and an empty chart is what it costs.
+    if (m.error || !m.rows.length) {
+        // …unless nobody asked it. "Not read" and "did not answer" call for opposite actions
+        // from whoever is reading this, and they look identical as an empty row.
+        const [cls_, key, fb] = m.skipped
+            ? ['bg-secondary', 'test_not_read', 'not read']
+            : ['bg-danger', 'test_no_answer', 'no answer'];
+        return `<div class="border-bottom px-2 py-2">${head}
+            <div class="ss-fs-2 mt-1"><span class="badge ${cls_}">${esc(_snmpTestT(key, fb))}</span>
+            ${m.error ? `<span class="text-muted ms-1">${esc(m.error)}</span>` : ''}</div></div>`;
+    }
+    // A single value IS the device's own; a table has one per row and the row's name is the
+    // only thing that makes it checkable against the machine in front of you.
+    const rows = m.rows.map(r => `<tr>
+        <td class="text-muted ss-fs-2">${esc(r.name || '—')}</td>
+        <td class="text-end fw-semibold">${esc(_snmpTestValue(m, r))}</td>
+        <td class="text-end text-muted ss-fs-2 font-monospace">${esc(r.raw)}</td></tr>`).join('');
+    const more = m.rows_total > m.rows.length
+        ? `<div class="text-muted ss-fs-2 px-2 pb-1">${esc(
+              _snmpTestT('test_more', '{n} more').replace('{n}', m.rows_total - m.rows.length))}</div>` : '';
+    return `<div class="border-bottom px-2 py-2">${head}
+        <table class="table table-sm table-borderless mb-0 mt-1">
+            <tbody>${rows}</tbody></table>${more}</div>`;
+}
+
+/** The number as the profile means it — and a counter says why it has none.
+ *
+ *  A counter MEANS the difference between two readings, and one reading is not a rate. What
+ *  is shown is the total the device is at, which is what says the counter is alive. */
+function _snmpTestValue(m, r) {
+    if (r.value !== null && r.value !== undefined && r.value !== '') return String(r.value);
+    if (m.kind === 'counter') return _snmpTestT('test_counter', 'counter');
+    return '—';
+}
+
+/** What the device sends that no assigned profile reads. */
+function _snmpTestGapHtml(d, q) {
+    const objs = (d.sweep.objects || []).filter(o => !q
+        || [o.oid, o.name, o.module, o.type].join(' ').toLowerCase().includes(q));
+    if (!d.sweep.objects.length) {
+        return `<div class="alert alert-success py-2 mb-0 small">
+            <i class="bi bi-check2-circle me-1"></i>${esc(_snmpTestT('test_nothing_uncaptured',
+                'Everything this device answers is being read.'))}</div>`;
+    }
+    if (!objs.length) return `<div class="text-muted text-center py-4 small">${esc(t('no_filter_matches') || '—')}</div>`;
+
+    // Under the OBJECT and not one row per instance: forty-eight lines saying
+    // `…2.2.1.16.<n>` is one sentence repeated forty-eight times.
+    const rows = objs.slice(0, 500).map(o => `<tr>
+        <td class="font-monospace ss-fs-2">${esc(o.oid)}</td>
+        <td>${o.name ? esc(o.name) : `<span class="text-muted">—</span>`}</td>
+        <td class="text-muted ss-fs-2">${esc(o.module || '')}</td>
+        <td class="text-end">${o.count > 1 ? `<span class="badge bg-secondary">${o.count}</span>` : ''}</td>
+        <td class="text-muted ss-fs-2 text-truncate" style="max-width:16rem">${esc((o.samples[0] || {}).value || '')}</td>
+    </tr>`).join('');
+    const more = objs.length > 500
+        ? `<div class="text-muted ss-fs-2 px-2 py-1">${esc(
+              _snmpTestT('test_more', '{n} more').replace('{n}', objs.length - 500))}</div>` : '';
+    // Rows nothing in the library can name are not forty separate mysteries: they are one
+    // MIB that is not compiled. Without TCP-MIB, every open connection on the device becomes
+    // a row of its own, because there is no column for them to be instances of — and the fix
+    // is one import, which nothing on the screen would otherwise suggest.
+    const unnamed = (d.sweep.objects || []).filter(o => !o.name).length;
+    const hint = unnamed
+        ? ` ${_snmpTestT('test_gap_unnamed', '{n} of these are named by no compiled MIB — import it and they gather under their own column.').replace('{n}', unnamed)}` : '';
+    return `<div class="alert alert-info py-1 px-2 mb-2 ss-fs-2">
+            <i class="bi bi-info-circle me-1"></i>${esc(_snmpTestT('test_gap_intro',
+                'The device answers these and no assigned profile reads them.'))}${esc(hint)}</div>
+        <table class="table table-sm table-hover mb-0">
+            <thead><tr class="ss-fs-2 text-muted">
+                <th>${esc(_snmpTestT('test_oid', 'OID'))}</th>
+                <th>${esc(_snmpTestT('test_symbol', 'Name'))}</th>
+                <th>${esc(_snmpTestT('test_mib', 'MIB'))}</th>
+                <th class="text-end">${esc(_snmpTestT('test_instances', 'Rows'))}</th>
+                <th>${esc(_snmpTestT('test_sample', 'Sample'))}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody></table>${more}`;
+}

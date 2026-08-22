@@ -218,13 +218,18 @@ class TestCollapse:
         cat = {'a': _prof('a', 'x'), 'b': _prof('b', 'y'), 'g': _grp('g', 'a', 'b')}
         assert P.collapse(cat, ['a']) == ['a']
 
-    def test_a_real_synology_collapses_to_two_rows(self):
-        """The shipped catalogue, not a fixture: fifteen vendor profiles and the five generic
-        ones a NAS also answers become "Synology NAS" and "Switch / router"."""
+    def test_a_real_synology_collapses_to_one_row(self):
+        """The shipped catalogue, not a fixture: the vendor profiles and the standard ones a
+        NAS also answers become "Synology NAS", and nothing else.
+
+        A group that says "everything" has to hold everything the device serves — the
+        filesystems and the interface counters included. Holding only the vendor's fifteen
+        left a NAS reading as three chips under a label that promised one."""
         cat = P.catalog()
         found = [p for p in cat if p.startswith('synology_')] + [
-            'sys_generic', 'if_generic', 'ip_stats', 'tcp_udp_stats', 'icmp_stats']
-        assert set(P.collapse(cat, found)) == {'grp_synology', 'grp_network'}
+            'hr_storage', 'hr_system', 'ucd_linux', 'sys_generic', 'if_generic', 'ip_stats',
+            'tcp_udp_stats', 'icmp_stats']
+        assert P.collapse(cat, found) == ['grp_synology']
 
 
 # ── The store ───────────────────────────────────────────────────────────────

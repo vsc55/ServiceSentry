@@ -81,6 +81,41 @@
             "oid": "1.3.6.1.4.1.6574.4.1.2.0",
             "kind": "text",
             "role": "vendor"
+        },
+        {
+            "key": "syno_ups_serial",
+            "label": {"en_EN": "Serial number", "es_ES": "Número de serie"},
+            "oid": "1.3.6.1.4.1.6574.4.1.3.0",
+            "kind": "text",
+            "role": "serial"
+        },
+        {
+            "key": "syno_ups_firmware",
+            "label": {"en_EN": "Firmware", "es_ES": "Firmware"},
+            "oid": "1.3.6.1.4.1.6574.4.2.10.1.0",
+            "kind": "text",
+            "role": "version"
+        },
+        {
+            "key": "syno_ups_mfr_date",
+            "label": {"en_EN": "Manufactured", "es_ES": "Fecha de fabricación"},
+            "oid": "1.3.6.1.4.1.6574.4.2.6.2.0",
+            "kind": "text",
+            "role": "built"
+        },
+        {
+            "key": "syno_ups_info_model",
+            "label": {"en_EN": "Model (reported by the UPS)", "es_ES": "Modelo (según el SAI)"},
+            "oid": "1.3.6.1.4.1.6574.4.2.5.0",
+            "kind": "text",
+            "role": "model_reported"
+        },
+        {
+            "key": "syno_ups_info_vendor",
+            "label": {"en_EN": "Manufacturer (reported by the UPS)", "es_ES": "Fabricante (según el SAI)"},
+            "oid": "1.3.6.1.4.1.6574.4.2.6.1.0",
+            "kind": "text",
+            "role": "vendor_reported"
         }
     ]
 }

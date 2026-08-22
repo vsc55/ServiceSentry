@@ -983,6 +983,64 @@ def _wait_for_job(job_id, timeout=3.0):
             return
         _t.sleep(0.02)
 
+class TestWhatIsStubbedAwayIsDecidedByTheModule:
+    """A stub tells pysmi "you already have this one, do not compile it", and pysnmp ships
+    twenty-seven modules that qualify. The rule is that a copy the user placed in the library
+    WINS — they put it there to have it compiled — and the rule was asked of the wrong name.
+
+    What the user places is a FILE. `rfc2571.mib` is not called SNMP-FRAMEWORK-MIB, so the
+    copy they imported was stubbed away: never compiled, no module written, and reported
+    pending for ever while every run recompiled it and answered "untouched". The same identity
+    split pysmi has everywhere — it LOCATES by file name and WRITES the module's — and this is
+    the last place that was still asking the file.
+
+    Two files in one real library, both from the MIB set that ships with Windows:
+    SNMP-FRAMEWORK-MIB (`rfc2571.mib`) and RFC1213-MIB (`mib_ii.mib`).
+    """
+
+    def _builtin(self):
+        import os as _os
+        import pysnmp.smi.mibs as _pm
+        names = sorted(f[:-3] for f in _os.listdir(_os.path.dirname(_pm.__file__))
+                       if f.endswith('.py') and not f.startswith('__'))
+        assert names, 'pysnmp ships no built-in MIBs to reason about'
+        return names[0]
+
+    def _stubs_for(self, tmp_path, filename, module, monkeypatch):
+        """The stub list `compile_raw_mibs` builds for a library holding one file."""
+        raw = tmp_path / 'snmp_mibs' / 'raw'
+        raw.mkdir(parents=True)
+        (raw / filename).write_text(
+            f'{module} DEFINITIONS ::= BEGIN\nEND\n', encoding='utf-8')
+        seen: list = []
+
+        class _Fake:
+            def __init__(self, *names):
+                seen.extend(names)
+                raise RuntimeError('stop here')     # nothing needs to be compiled
+
+        import pysmi.searcher as _srch
+        monkeypatch.setattr(_srch, 'StubSearcher', _Fake)
+        from watchfuls.snmp import mib_resolver as _r
+        _r.compile_raw_mibs(str(raw), str(tmp_path / 'snmp_mibs' / 'compiled'))
+        return seen
+
+    def test_a_builtin_the_user_placed_under_another_name_is_not_stubbed(
+            self, tmp_path, monkeypatch):
+        mod = self._builtin()
+        seen = self._stubs_for(tmp_path, 'vendor-archive-name.mib', mod, monkeypatch)
+        assert seen, 'nothing was stubbed at all — the guard is not reaching the decision'
+        assert mod not in seen, (
+            f'{mod} was stubbed although this library holds a copy of it')
+
+    def test_a_builtin_nobody_placed_is_still_stubbed(self, tmp_path, monkeypatch):
+        """The other half of the rule, and the reason stubbing exists: without it pysmi goes
+        looking for every standard module a vendor MIB imports, over HTTP, one at a time."""
+        mod = self._builtin()
+        seen = self._stubs_for(tmp_path, 'A-MIB.mib', 'A-MIB', monkeypatch)
+        assert mod in seen
+
+
 class TestWhatCompileAllActuallyCompiled:
     """"Compile all" walked every MIB and let pysmi skip the up-to-date ones — so it did not
     recompile everything, and it did not compile only what needed it either. With twenty files

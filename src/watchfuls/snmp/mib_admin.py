@@ -106,6 +106,24 @@ def _normalized(text: str) -> str:
     return '\n'.join(str(text or '').splitlines())
 
 
+def _without_dos_eof(text: str) -> str:
+    """A MIB without the byte DOS used to end a text file with.
+
+    ``0x1A`` — Ctrl-Z — meant "the file stops here" on CP/M and MS-DOS, and editors of that
+    era wrote one after the last line. It is not whitespace and it is not a comment: an ASN.1
+    parser reaching it has run out of grammar, and what it reports is a syntax error at an
+    offset PAST THE END of the file, which is the least helpful thing it could say.
+
+    Microsoft still ships one. The MIB set that comes with Windows 10 Pro 22H2 has it in
+    HTTPSERVER-MIB, at byte 21268 of 21271 — three bytes after a perfectly good ``END``.
+
+    Removed wherever a MIB is written, because it can never be part of one, and because the
+    alternative is every reader of a thirty-year-old vendor archive diagnosing the same
+    non-error.
+    """
+    return str(text or '').replace('\x1a', '')
+
+
 def _text_of(path: str) -> str | None:
     """A MIB file as text with its line endings normalised, or ``None``."""
     if not path or not os.path.isfile(path):
@@ -120,6 +138,7 @@ def _text_of(path: str) -> str | None:
 # Beside the tree and not inside it: `raw/` is the library, and a bookkeeping file in it
 # would be one more thing every listing has to know to skip.
 _REPAIR_MARK = '.line-endings-repaired'
+_DOS_EOF_MARK = '.dos-eof-stripped'
 
 # Archive imports in flight, by job id. Beside `_github_jobs` and kept apart from it: they
 # report different things, and one dict answering two questions is how a poll for one job
@@ -923,7 +942,7 @@ def _run_github_import(var_dir: str, url: str, recursive: bool, progress_cb=None
         # newline='' or Windows translates every '\n' on the way out: a CRLF
         # file arrives as '\r\n' and would be stored as '\r\r\n'.
         with open(dest, 'w', encoding='utf-8', newline='') as fh:
-            fh.write(content)
+            fh.write(_without_dos_eof(content))
         return True
 
     _progress_lock = threading.Lock()
@@ -1319,7 +1338,7 @@ class MibAdmin:
         try:
             tmp = path + '.tmp'
             with io.open(tmp, 'w', encoding='utf-8', newline='') as fh:
-                fh.write(content)
+                fh.write(_without_dos_eof(content))
             os.replace(tmp, path)
         except OSError as exc:
             # The version is already in: an edit recorded but not written is recoverable,
@@ -1461,7 +1480,7 @@ class MibAdmin:
         try:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with io.open(dest, 'w', encoding='utf-8', newline='') as fh:
-                fh.write(content)
+                fh.write(_without_dos_eof(content))
         except OSError as exc:
             return {'ok': False, 'message': str(exc)}
         _mib_resolver.invalidate_cache()
@@ -1708,6 +1727,7 @@ class MibAdmin:
         raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')      if var_dir else ''
         compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled') if var_dir else ''
         cls._repair_line_endings(raw_dir)
+        cls._strip_dos_eof(raw_dir)
         # What was read out of every file last time, if it is still true. Five thousand
         # headers is most of what opening this section costs, and none of it changes while
         # the files do not.
@@ -1817,6 +1837,46 @@ class MibAdmin:
             'known_repos':     _KNOWN_MIB_REPOS,
             'mib_repos':       cls._repo_templates(cfg),
         }
+
+    @classmethod
+    def _strip_dos_eof(cls, raw_dir: str) -> int:
+        """Take the DOS end-of-file byte out of what is already in the library.
+
+        Everything imported from now on is written without it (:func:`_without_dos_eof`);
+        this is for what arrived before. Separate from the line-ending repair next to it, and
+        deliberately so: that one undoes a bug of ours and MUST run exactly once — run twice,
+        it takes a second ``\r`` off files that legitimately have CRLF. This one removes a
+        byte that can never belong in a MIB, so running it again changes nothing.
+
+        The modification time is kept. The byte is past the last ``END`` and no compiler that
+        got that far ever saw it, so nothing needs recompiling — and touching two thousand
+        mtimes would order a rebuild of the whole library.
+        """
+        if not raw_dir or not os.path.isdir(raw_dir):
+            return 0
+        mark = os.path.join(os.path.dirname(raw_dir), _DOS_EOF_MARK)
+        if os.path.exists(mark):
+            return 0
+        fixed = 0
+        for _rel, full in _mib_resolver.iter_raw_mibs(raw_dir):
+            try:
+                with open(full, 'rb') as fh:
+                    blob = fh.read()
+                if b'\x1a' not in blob:
+                    continue
+                st = os.stat(full)
+                with open(full, 'wb') as fh:
+                    fh.write(blob.replace(b'\x1a', b''))
+                os.utime(full, (st.st_atime, st.st_mtime))
+                fixed += 1
+            except OSError:
+                continue
+        try:
+            with open(mark, 'w', encoding='utf-8') as fh:
+                fh.write('')
+        except OSError:
+            pass
+        return fixed
 
     @classmethod
     def _repair_line_endings(cls, raw_dir: str) -> int:
@@ -2521,7 +2581,7 @@ class MibAdmin:
         if not dest:
             return {'ok': False, 'message': 'Invalid filename'}
         with open(dest, 'w', encoding='utf-8', newline='') as fh:
-            fh.write(content if isinstance(content, str) else '')
+            fh.write(_without_dos_eof(content) if isinstance(content, str) else '')
         return {'ok': True, 'filename': filename}
 
     @classmethod
@@ -2590,7 +2650,7 @@ class MibAdmin:
             return {'ok': False, 'message': 'Invalid filename'}
         try:
             with open(dest, 'w', encoding='utf-8', newline='') as fh:
-                fh.write(content)
+                fh.write(_without_dos_eof(content))
         except OSError as exc:
             return {'ok': False, 'message': f'Save failed: {exc}'}
 
@@ -2820,6 +2880,7 @@ class MibAdmin:
         # Before comparing anything against the library: a file this never touched would
         # come back as a difference that no import can settle.
         cls._repair_line_endings(os.path.join(var_dir, 'snmp_mibs', 'raw'))
+        cls._strip_dos_eof(os.path.join(var_dir, 'snmp_mibs', 'raw'))
         url = str(cfg.get('url') or '').strip()
         subdir = str(cfg.get('subdir') or '').strip()
         # A known source can be named instead of pasting its URL, so the panel offers the
@@ -3074,7 +3135,7 @@ class MibAdmin:
         try:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, 'w', encoding='utf-8', newline='') as fh:
-                fh.write(incoming)
+                fh.write(_without_dos_eof(incoming))
             row['written'] = True
         except OSError as exc:
             row['state'] = 'rejected'

@@ -270,3 +270,57 @@
             </div>
 </div>
 </template>
+
+
+{# ── Does the assignment match the device? ──────────────────────────────────
+   An assignment is wrong in two directions and the panel only ever showed one of them.
+   A profile naming an OID the device does not serve leaves an empty chart, and somebody
+   notices eventually. A device serving something no assigned profile names is INVISIBLE:
+   nothing is missing on any screen, because nothing ever said it could be there.
+
+   So this dialog has two halves and they are not the same question asked twice. The first
+   reads the assignment through the very function the scheduler reads with, and shows the
+   raw answer beside the value the profile turns it into. The second walks the device and
+   subtracts everything the assignment already reads — which is the only way that half can
+   be answered at all, because it is a fact about the box and not about the catalogue. #}
+<div class="modal fade" id="snmpTestModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-activity"></i>
+                    <span id="snmpTestTitle"></span>
+                    <span id="snmpTestDevice" class="badge bg-secondary"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+
+            {# What the device is, and how much of it is being read — above the fold, because
+               it is the answer and everything below it is the evidence. #}
+            <div class="px-3 py-2 border-bottom">
+                <div id="snmpTestSummary"></div>
+                <div class="d-flex gap-2 align-items-center flex-wrap mt-2">
+                    <div id="snmpTestTabs" class="btn-group btn-group-sm flex-shrink-0"></div>
+                    <div class="input-group input-group-sm flex-grow-1" style="min-width:12rem">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="snmpTestSearch"
+                               oninput="_snmpTestRender()">
+                    </div>
+                    <button class="btn btn-sm btn-primary flex-shrink-0" id="snmpTestRunBtn"
+                            onclick="_snmpTestRun(this)">
+                        <i class="bi bi-arrow-repeat me-1"></i><span id="snmpTestRunLabel"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-body p-2">
+                <div id="snmpTestBody"></div>
+            </div>
+
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>

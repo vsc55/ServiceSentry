@@ -261,3 +261,116 @@ class TestReadingAMibIsLexingIt:
         text = 'A\n-- c "\nB "s -- t"\nC\n'
         assert len(_blank(text)) == len(text)
         assert _blank(text).count('\n') == text.count('\n')
+
+
+class TestAnOidHungOffNothing:
+    """`host OBJECT IDENTIFIER ::= { mib-2 25 }` with no `mib-2` in the IMPORTS. pysmi answers
+    "Unknown parent symbol: mib_2" — under a name it mangled, about a module it names by the
+    FILE, and with nothing pointing at the import that is missing. Somebody then reads a MIB
+    of forty thousand lines looking for a symbol that is not in it, because what is missing
+    is the line that would have brought it IN.
+
+    Values are checked here and nowhere else in this linter, and the difference is what the
+    mistake costs: an unknown TYPE is resolved late and reported clearly by pysmi, while an
+    unknown PARENT stops the module dead — there is no tree left to hang anything on.
+
+    Not archaeology either: this is the HOST-RESOURCES-MIB that ships with Windows 10 Pro
+    22H2."""
+
+    BROKEN = """HOST-RESOURCES-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    DisplayString             FROM RFC1213-MIB
+    TimeTicks,
+    OBJECT-TYPE,
+    Counter, Gauge            FROM RFC1155-SMI;
+
+host     OBJECT IDENTIFIER ::= { mib-2 25 }
+hrSystem OBJECT IDENTIFIER ::= { host 1 }
+
+END
+"""
+
+    def _codes(self, text, name='X-MIB.mib'):
+        return [(f['code'], f['symbol']) for f in lint_mib(text, name)]
+
+    def test_the_parent_nobody_brought_in(self):
+        assert ('unknown-oid-parent', 'mib-2') in self._codes(
+            self.BROKEN, 'HOST-RESOURCES-MIB.mib')
+
+    def test_and_it_says_what_to_do_about_it(self):
+        f = [x for x in lint_mib(self.BROKEN, 'HOST-RESOURCES-MIB.mib')
+             if x['code'] == 'unknown-oid-parent'][0]
+        assert f['line'] == 9
+        assert 'IMPORTS' in f['message']
+
+    def test_importing_it_settles_it(self):
+        fixed = self.BROKEN.replace('    DisplayString  ', '    DisplayString, mib-2  ')
+        assert not [c for c in self._codes(fixed, 'HOST-RESOURCES-MIB.mib')
+                    if c[0] == 'unknown-oid-parent']
+
+    def test_a_parent_this_file_defines_further_down(self):
+        """Read top to bottom, `padre` is unknown on the line that uses it. The whole file is
+        one scope, and a MIB that defines things after using them is ordinary."""
+        text = """X-MIB DEFINITIONS ::= BEGIN
+IMPORTS enterprises FROM RFC1155-SMI;
+hijo  OBJECT IDENTIFIER ::= { padre 1 }
+padre OBJECT IDENTIFIER ::= { enterprises 99 }
+END
+"""
+        assert not self._codes(text)
+
+    def test_a_definition_written_across_two_lines_is_still_a_definition(self):
+        """A great many MIBs put the name on a line of its own:
+
+            radiusAccServMIBConformance
+                          OBJECT IDENTIFIER ::= { radiusAccServMIB 2 }
+
+        Read as one line only, every definition written that way is invisible and everything
+        hanging off it is reported as an orphan. Twenty-four of those in one real library."""
+        text = """X-MIB DEFINITIONS ::= BEGIN
+IMPORTS enterprises FROM RFC1155-SMI;
+padre
+        OBJECT IDENTIFIER ::= { enterprises 99 }
+hijo    OBJECT IDENTIFIER ::= { padre 1 }
+END
+"""
+        assert not self._codes(text)
+
+    def test_the_roots_of_the_tree_are_nobody_s_to_import(self):
+        text = """X-MIB DEFINITIONS ::= BEGIN
+org OBJECT IDENTIFIER ::= { iso 3 }
+END
+"""
+        assert not self._codes(text)
+
+    def test_an_oid_written_out_in_numbers_names_nothing(self):
+        text = """X-MIB DEFINITIONS ::= BEGIN
+raro OBJECT IDENTIFIER ::= { 1 3 6 1 4 1 311 }
+END
+"""
+        assert not self._codes(text)
+
+    def test_an_enumeration_is_not_an_assignment(self):
+        """`Estado ::= INTEGER { arriba(1) }` has braces and a name in front of them, and
+        neither of those is an object hanging off a parent."""
+        text = """X-MIB DEFINITIONS ::= BEGIN
+Estado ::= INTEGER { arriba(1), abajo(2) }
+END
+"""
+        assert not self._codes(text)
+
+    def test_an_object_type_hung_off_a_missing_parent_counts_too(self):
+        """It is the same failure: the parent is what places the object, whether the thing
+        being placed is a subtree or a single object."""
+        text = """X-MIB DEFINITIONS ::= BEGIN
+IMPORTS OBJECT-TYPE FROM RFC1155-SMI;
+cosa OBJECT-TYPE
+    SYNTAX  INTEGER
+    ACCESS  read-only
+    STATUS  mandatory
+    DESCRIPTION "x"
+    ::= { noSeSabe 1 }
+END
+"""
+        assert ('unknown-oid-parent', 'noSeSabe') in self._codes(text)

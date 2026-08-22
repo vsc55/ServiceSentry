@@ -8,6 +8,303 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.101] - 2026-08-22
+
+### Fixed
+- **A MIB set that does not compile, and three messages that each point away from the
+  cause.** The MIBs that ship with Windows 10 Pro 22H2 fail on four of their seventeen files,
+  and not one of the failures is in the compiler. `Bad grammar near offset 21268` in a file
+  of 20760 characters: the offset is past the end, because byte 21268 of 21271 is a `0x1A` —
+  the DOS end-of-file marker — sitting three bytes after a perfectly good `END`. `no symbol
+  "software" in module "WINS-MIB"`: INTERNETSERVER-MIB imports it from WINS-MIB, which does
+  not define it but imports it itself, and an imported symbol is not re-exported — with
+  FTPSERVER-MIB failing as collateral, since it only ever imported from INTERNETSERVER-MIB.
+  `Unknown parent symbol: mib_2`: HOST-RESOURCES-MIB hangs its tree off `{ mib-2 25 }` with
+  no `mib-2` in its IMPORTS, and the name pysmi reports appears nowhere in the file because
+  what is missing is the line that would bring it in.
+- **The DOS end-of-file byte is removed wherever a MIB is written**, and swept once from what
+  is already in the library. It can never be part of a MIB, and the alternative is every
+  reader of a thirty-year-old vendor archive diagnosing the same non-error. Kept separate
+  from the line-ending repair beside it, which MUST run exactly once — run twice, it takes a
+  second `` off every file that legitimately has CRLF; removing a byte that cannot belong
+  is safe to repeat, and the two now say so with a marker each.
+- **The linter names the parent nobody imported** (`unknown-oid-parent`), in the line, before
+  the compiler gets a chance to say it badly. Values are checked there and nowhere else in
+  the linter, and the difference is what the mistake costs: an unknown type is resolved late
+  and reported clearly, while an unknown parent stops the module dead.
+- Writing that rule turned up a second bug in the linter itself: the expression that
+  recognises `name OBJECT IDENTIFIER ::=` required both halves **on one line**, and a great
+  many MIBs — the RFCs among them — put the name on a line of its own and the assignment on
+  the next. Read as one line only, every definition written that way was invisible, and
+  everything hanging off it looked like an orphan: **24 false positives across 162 real
+  files**, each with its definition three lines above. With the line break allowed, zero.
+
+- **A MIB the library holds and the compiler skipped.** pysnmp ships twenty-seven modules
+  ready-made, and they are handed to pysmi as stubs — "you already have this, do not compile
+  it". The rule is that a copy the user placed in their library wins, and the rule was asked
+  of the wrong name: what somebody places is a FILE, and `rfc2571.mib` is not called
+  SNMP-FRAMEWORK-MIB. So the imported copy was stubbed away — never compiled, no module
+  written, and pending for ever while every run recompiled it and answered "untouched". Two
+  files in one real library, both from the MIB set that ships with Windows. The same identity
+  split pysmi has everywhere (it locates by file name and writes the module's), and the last
+  place that was still asking the file a question only the module can answer.
+
+- **A latency chart wrong by a factor of a thousand.** `synology_spaceio` declared its read
+  and write latency in milliseconds; SYNOLOGY-SPACEIO-MIB says microseconds, in the
+  DESCRIPTION of both columns. Two milliseconds of volume latency was drawn as two seconds.
+  The same columns arriving in `synology_storageio` ship scaled from the start.
+
+### Added
+- **Windows, as a base group and two roles that contain it.** A group can hold another
+  group, and this is what that is for: `grp_windows` is what any Windows answers — MIB-II,
+  HOST-RESOURCES and the LAN Manager MIB — and `grp_windows_workstation` and
+  `grp_windows_server` hold it whole and add what only they have. `grp_windows_dc` holds the
+  server group and nothing else, because a domain controller **is** a server and the only
+  thing different about it is the number it introduces itself with.
+- And it introduces itself: Windows says which role it has **in its own sysObjectID** —
+  Microsoft numbers workstation, server and dc as 1, 2 and 3 under `{ windowsNT }` — so each
+  group claims its number, the most specific wins on prefix length, and the base picks up
+  anything that is none of the three. Measured against the real catalogue across nine
+  devices: each of the three Windows roles, a Synology, a MikroTik, a Linksys, a Linux, an
+  APC UPS and a switch from nobody in particular, every one of them proposed as one row.
+- **What the two sides of SMB each say about themselves.** `windows_server_lm` is a Windows
+  serving files, printers or logons: sessions, users, shares, print queues, the bytes through
+  the stack, and the three kinds of refusal — bad password, no permission, system error.
+  `windows_workstation_lm` is the other side: what this machine asks of others, what was
+  refused, and the reconnections the redirector had to make on its own, which is the number
+  that says a share is dropping.
+- **`hr_system`, the generic profile that was missing**: load per processor, processes and
+  users logged in, from the MIB every general-purpose operating system serves. The companion
+  to `hr_storage`, which measures what a host holds rather than what it is doing — and the
+  reason a Windows, a Linux and a RouterOS can all be asked for their CPU without anybody
+  writing a vendor profile for it.
+- **A group that says "everything" now holds everything the device serves.** `grp_synology`
+  carried the vendor's fifteen and nothing else, so a NAS read as three chips under a label
+  that promised one; it holds the standard MIBs too. `grp_linux` and `grp_mikrotik` gained
+  `hr_system` for the same reason.
+- **A profile for an APC UPS**, read off PowerNet-MIB rather than off a memory of it: what it
+  is running on and how long it would last (charge, runtime remaining, time on battery,
+  internal temperature, battery bus voltage), the line on both sides of it (input and output
+  voltage, frequency, current, active power, load, and the highest and lowest input voltage
+  the unit has seen), and the five things that are a state rather than a measurement — output
+  state, battery state, "needs replacing", the last self-test and the alarm level. The two
+  values the MIB reports in TimeTicks carry the factor that turns them into seconds, which is
+  the difference between "60 minutes of runtime" and "an hour of hundredths".
+- It claims `1.3.6.1.4.1.318` — every APC device — and **probes the battery capacity**, so a
+  PDU or a rack monitor from the same vendor tree is not offered a profile about batteries it
+  does not have. Every one of its twenty-two OIDs was checked against the compiled MIB before
+  it shipped: an OID nothing declares is a metric that reads empty for ever and says nothing
+  about why.
+- **A profile for a Linksys managed switch**, holding what the switch knows about itself and
+  nothing else does: its CPU over the last minute and the last five, the temperature, uptime,
+  model, serial and versions of **each unit in the stack**, every fan and every power supply
+  under the name the switch gives it, and what the box is drawing. The ports are IF-MIB and
+  stay with the generic profile — a vendor profile that also charted the ports would chart
+  every one of them twice, under two sets of names that disagree.
+- Its rows are named by the switch and not by an SNMP index: the fan table is walked beside
+  the column that describes each fan, and the per-unit tables beside the stack unit they
+  belong to, so a stack of three reads as three units rather than as rows 1, 2 and 3 of
+  something. The two values the MIBs report in hundredths and in milliwatts carry the factor
+  that turns them into seconds and watts.
+- **A profile for MikroTik RouterOS**: the board, serial, RouterOS and RouterBOOT it runs and
+  the RouterBOOT waiting for it; four temperature sensors, because which one a model reports
+  varies and a profile that names only the other is one that shows no temperature at all;
+  input voltage, power, current and processor frequency; both power supplies and both fans;
+  every SFP module's received and transmitted power and temperature; and PoE power and state
+  per port. The scaling comes from the MIB's own DISPLAY-HINTs rather than from a memory of
+  them — `Voltage`, `Temperature` and `Power` are tenths, optical power is thousandths of a
+  dBm — which is the difference between 24.1 V and 241 V.
+- Interfaces, filesystems and **memory** stay with the generic profiles: RouterOS serves
+  HOST-RESOURCES-MIB, where main memory is a row of the storage table `hr_storage` already
+  walks. A vendor profile that measured it again would chart it twice under two names.
+- **A group for each of them** — `grp_mikrotik` and `grp_linksys` — holding the vendor profile
+  *and* the standard MIBs that device actually serves, which is what makes "everything" true:
+  a vendor profile alone leaves the ports, the counters and the filesystems unassigned. Both
+  claim their vendor tree and displace what they hold, so a recognised device is proposed as
+  one row. Measured against the real catalogue: a Linksys comes back as `grp_linksys`, a
+  MikroTik as `grp_mikrotik`, a Synology still as `grp_synology` + `grp_network`, and a switch
+  from anybody else still as `grp_network`.
+- `grp_linksys` leaves `hr_storage` out on purpose: that firmware does not serve
+  HOST-RESOURCES-MIB, and a group that named it would be claiming to cover something it does
+  not. A model that turns out to answer it is still offered the profile beside the group —
+  what a group covers is what is certain, not everything that might be there.
+
+- **A Test button on the device profiles, and it answers the question nobody could ask.** An
+  assignment is wrong in two directions and the panel only ever showed one of them. A profile
+  naming an OID the device does not serve leaves an empty chart, and somebody notices
+  eventually. A device serving something no assigned profile names is **invisible**: nothing
+  is missing on any screen, because nothing ever said it could be there. So the button reads
+  both — every metric of every assigned profile, against the device, and then a sweep of the
+  device with everything the assignment already reads subtracted from it.
+- The first half reads through `sampler.read_metric`, the very function the scheduler samples
+  with, extracted for this and shared. What the screen shows is therefore what will be
+  recorded, and it cannot drift into being a different reading — a second implementation of
+  "read this metric" is right until the day it is not, and that day the test says the profile
+  works and the graph stays empty.
+- Each reading carries **the raw answer beside the value the profile turns it into**: 405 is
+  what the agent said, 40.5 °C is what the profile says it means, and a scale wrong by ten
+  shows a plausible temperature that only the digits give away. A counter shows its total and
+  no rate, because a counter means the difference between two readings and there is one.
+- The second half lists what the device sends **under the object it belongs to**, named
+  through the compiled MIB library: forty-eight lines saying `…2.2.1.16.<n>` is one sentence
+  repeated forty-eight times, so the instances collapse into `ifOutOctets (IF-MIB) × 48` with
+  a sample value. Only something the device ANSWERS can be that object: the library names the
+  nodes of the tree as well, so walking up to the nearest name of any kind files every vendor
+  OID nobody has a MIB for under `enterprises` — collapsing the half of the report somebody
+  opened the screen to read into a single row. What a profile reads as a COLUMN is matched by
+  containment and never by equality — as equality, every interface on the switch would read as uncaptured — and the
+  columns that name and scale a table's rows count as captured, because they are values the
+  assignment is already using.
+- Assigned nothing, it is the list of everything the device could be measured on: the screen
+  earns its place hardest on the box in the rack nobody has written a profile for.
+- The sweep is bounded and **says when it stopped early** rather than reporting a shorter
+  device, and the reading half has a clock: a metric the device does not answer costs the
+  timeout times the retries, and "Synology NAS (everything)" declares a hundred and thirty of
+  them — assigned to a model that serves half, that is ten minutes of a button that looks
+  stuck. What is past the clock is listed as **not read**, which is a different sentence from
+  "did not answer" and looks identical as an empty row. The whole thing is one read-only action — the same rights that already let
+  somebody discover a device's OIDs.
+- **The first real report answered a question about the report itself**, run against a
+  Synology: the whole sweep was spent inside mib-2 — a routing table, an ARP table and one row
+  per open TCP connection — and `enterprises` was never walked at all. Which is where the
+  vendor's own subjects live, and where the answer somebody opens that screen for actually is.
+  The budget is a SHARE per root now, as a floor rather than a quota: what the standard tree
+  does not use is inherited by the vendor tree, so a switch with two hundred OIDs of mib-2
+  does not waste half the sweep either. The default went from three thousand OIDs to six.
+- **Rows nothing can name are one missing MIB, and the screen says so.** Without TCP-MIB
+  compiled, every open connection on the device comes back as a row of its own — there is no
+  column for them to be instances of — and forty identical-looking mysteries read as forty
+  problems. The count of unnamed objects is now stated with what to do about it, which is one
+  import that nothing else on the screen would have suggested.
+
+- **Eleven measurements the generic profiles were leaving on the device**, every one of them
+  read off a real NAS's own report and checked against the compiled MIBs before it shipped.
+  Three of them are asymmetries — the kind of gap that is invisible precisely because the
+  chart beside it looks complete:
+- `if_generic` charted **input** errors and not output ones. It now reads errors and discards
+  in BOTH directions (`ifOutErrors`, `ifInDiscards`, `ifOutDiscards`): a link drops packets on
+  one side at a time, and the half that is not charted is the half nobody sees. Packets in and
+  out join the octets — a flood of small packets fills a queue while the byte counters stay
+  flat — and `ifSpeed` and `ifAdminStatus` are what say whether a quiet interface is idle,
+  negotiated down, or switched off on purpose. Six metrics per interface became thirteen.
+- `icmp_stats` counted this device ANSWERING pings (echo requests received, replies sent) and
+  not making them. With `icmpOutEchos` and `icmpInEchoReps` both sides of the exchange are
+  there, and "we stopped getting answers" stops looking like "nobody is asking".
+- `tcp_udp_stats` gained `tcpEstabResets` — connections killed from ESTABLISHED, which is not
+  the same counter as the resets this machine sends and is the one that says a peer is
+  dropping sessions.
+- `sys_generic` records `sysObjectID`. It is the string the whole detection mechanism turns
+  on, and until now it was read on every detection and stored nowhere.
+
+- **The test reads a device in parallel**, in two passes. Sequentially a NAS carrying
+  "Synology NAS (everything)" could not finish inside its own clock: a hundred and fifty-seven
+  metrics, of which every one the model does not serve costs the full timeout times the
+  retries — so most of the report came back as *not read*, which is true and useless. The
+  naming and scaling columns are fetched first, once each (seven metrics against one `ifDescr`
+  is one walk, not seven), and pre-filling them is also what makes the metric pass safe to run
+  wide: nothing writes to the shared cache any more. Order is preserved, so two runs of the
+  same button can be compared.
+- **The test says what it is doing while it does it.** It runs in the background now and the
+  dialog polls it, drawing a six-line checklist: reaching the device, resolving the
+  assignment, asking which profiles it serves, reading their metrics, walking the whole SNMP
+  tree, subtracting what is already captured — each with its own counter and a note. A minute
+  of work behind a spinner is indistinguishable from a hung screen, and the thing worth
+  knowing about a slow test is WHICH step is slow, which the server knew and was throwing
+  away. Same job-and-poll shape the MIB compiler already uses.
+- The steps also name what they are asking. "Walking the device" is not something anybody can
+  picture; the step now carries the two roots it sweeps — the standard tree and the vendor's —
+  because asking those whole is the only way to learn what a device serves that nobody thought
+  to ask it for.
+- **And it leaves a trail in both consoles.** Every step transition is a line in the server
+  log, and the browser console gets the same story plus the finished answer as two sortable
+  tables: every metric with its value, its raw reading and its state, and every uncaptured
+  object with its MIB and a sample. It is a diagnostic screen; being able to read it from
+  either end is the point.
+- The synchronous action is unchanged underneath — the tests drive it, anything without a UI
+  would call it, and it is now the same code path with nobody listening to the steps.
+- **The check loop moved to `checks.py`**, joining the four files that were already split out
+  of the package's front door. A check is an OID, an operator and a value somebody expects —
+  a verdict, and a different job from the sampler's series; the file that declares the module
+  should say what the module IS, not carry a hundred and ninety lines of comparison logic.
+
+- **The test asks whether the device serves a profile before reading it.** Measured on a real
+  NAS: a group called "everything a Synology answers", assigned to a model with no GPU, no
+  expansion unit, no SSD cache and no iSCSI, spent FORTY metrics waiting out the timeout times
+  the retries — around fifty seconds of the wall clock on hardware that does not exist. Every
+  one of those profiles already declares `match.probe`, which is the device saying whether it
+  applies; seven GETs at once replace the forty waits.
+- And the screen reads better for it. A profile the device does not serve is now ONE line
+  saying so, not a dozen red "no answer" rows that look like something is broken, and its
+  metrics are counted apart from the answered ones — holding them against the total made every
+  device carrying a family group look half broken.
+
+- **A group can be cloned.** The shipped ones cannot be edited — a release would take the
+  change back — so cloning is how an installation gets one of its own, and the case is the
+  common one: "everything a Synology answers, minus the two profiles this model has not got"
+  is two clicks instead of twenty-three ticks with no way to notice one left unticked. The
+  membership travels and the identity does not, exactly as it already worked for profiles.
+
+- **Fourteen measurements a Synology declares and no profile was reading**, found by asking
+  the compiled MIBs rather than the device — the same subtraction the test screen does, run
+  against the library instead of the box:
+- **IP counted at 64 bits, and for both address families.** The RFC 1213 scalars `ip_stats`
+  was built on are IPv4 only and 32 bits wide, and the same NAS reported both in one sweep:
+  `ipSystemStatsOutOctets` 15 523 189 against `ipSystemStatsHCOutOctets` 721 570 028 917 —
+  the 32-bit one had wrapped a hundred and sixty-seven times, and there is no octet counter at
+  all in the old group, so the traffic an IP stack has actually moved was not on any chart.
+  IP-MIB's own table reports per address family, so twelve metrics join the eleven: bytes,
+  datagrams and discards, in and out, for IPv4 and IPv6.
+- Both widths in ONE profile rather than a second one that replaces it, which is exactly what
+  `if_generic` does with the interface octets and for the same reason: a device that serves
+  only the old scalars does not answer the new columns, and a profile that superseded
+  `ip_stats` would take the IP layer away from every switch that has not moved on. Every group
+  already carrying `ip_stats` gets this with nothing to reassign.
+
+- **A Synology is a Linux machine, and nothing was reading it as one.** It answers the whole
+  net-snmp UCD tree — CPU split into user, system and idle, the three load averages, memory
+  and swap — and `ucd_linux` has read exactly that for as long as it has existed. It simply
+  was not in the group, so on every NAS in every rack those numbers went past uncollected.
+  They are the ones that say a NAS is thrashing, and no vendor MIB has them. `grp_synology`
+  holds it now.
+- Which also settled where the CPU comes from: `synology_system` gains the thermal status and
+  NOT the two utilisation figures DSM reports. They are the same fact told with less in it —
+  one number against a user/system/idle split with load averages beside it — and two profiles
+  reporting one value chart it twice.
+- `synology_disks` gains the disk **type and serial number** — which drive to pull out of the
+  bay is not a question the model name answers when four of them are the same model.
+- `synology_raid` gains `raidSummary`, `synology_storageio` the per-device **read and write
+  latency**, and `synology_flashcache` the read and write totals the hit rates are a fraction
+  of.
+- **Identity is worth capturing, and it costs no chart.** A `text` metric is filed as an
+  ATTRIBUTE beside a row's numbers, never as a series — so the rule about not measuring one
+  value twice does not apply to it, and the thing being measured should say what it is. The
+  interfaces now record their **MAC address, type and MTU**; the filesystems record what kind
+  of storage each row is, which is what tells a volume from RAM from swap in a list where they
+  all look like bytes; a Synology disk records its **bay** ("Disk 1"), which is the one thing
+  the model name cannot tell you when four drives are the same model.
+- **"Aparato" became "dispositivo" throughout the Spanish UI.** The field has always been
+  called *Perfiles de dispositivo*, and a screen that says both makes them read as two things.
+- `synology_ups` gains the UPS's serial, firmware and **manufacturing date** — and both of the
+  model and manufacturer strings the MIB carries, the one the driver reports and the one the
+  unit itself does, because them disagreeing is occasionally the answer. The date is not
+  identity at all: the NAS this came from answers `2013/11/10`, and a battery that old is the
+  explanation for a runtime figure that has been quietly falling for years.
+- **The memory reading everybody gets wrong.** `ucd_linux` reported total and available and
+  stopped there — and on the NAS that means 131 MB "available" out of 8 GB, which reads as a
+  machine about to die. The 6.3 GB in `memCached` is what makes that number harmless, and it
+  was not on any chart. Cached and buffers now are, with the interrupt and context-switch
+  rates and the processor count beside them.
+
+- **`synology_smb` is new**: commands per second and latency per SMB command, read/write
+  packets and their latency, and what each smbd process costs in CPU. It is what a NAS is
+  FOR, and it had no profile at all — the interface counters can be flat and the volume idle
+  while every client waits on every open, and nothing on any screen would have said so.
+
+- **A picker can now hang further buttons off its field** (`FIELD_PICKERS[…].actions`), which
+  is where the Test button lives: which profiles this device carries and what the device makes
+  of them are one subject, and anywhere else on the form it would be a button whose subject
+  the reader has to work out. The renderer still knows nothing about profiles.
+
 ## [0.0.1+build.100] - 2026-08-21
 
 ### Added

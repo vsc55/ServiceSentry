@@ -64,8 +64,18 @@ _VALUE_DEF_RE = re.compile(
     r'^[ \t]*([A-Za-z][A-Za-z0-9_-]*)[ \t]+(?:' + '|'.join(_DEF_MACROS) + r')\b',
     re.MULTILINE)
 # `name OBJECT IDENTIFIER ::=` — also a value.
+#
+# The gap between the name and the keywords is `\s+` and not `[ \t]+`, because a great many
+# MIBs put the name on a line of its own and the assignment on the next:
+#
+#     radiusAccServMIBConformance
+#                   OBJECT IDENTIFIER ::= { radiusAccServMIB 2 }
+#
+# Read as one line only, every definition written that way is invisible — and then the thing
+# it defines looks, to anything hanging off it, like a parent nobody declares. Twenty-four of
+# those in one real library, every one of them a definition three lines up.
 _OID_DEF_RE = re.compile(
-    r'^[ \t]*([A-Za-z][A-Za-z0-9_-]*)[ \t]+OBJECT[ \t]+IDENTIFIER\s*::=', re.MULTILINE)
+    r'^[ \t]*([A-Za-z][A-Za-z0-9_-]*)\s+OBJECT[ \t]+IDENTIFIER\s*::=', re.MULTILINE)
 # `Name ::= …` — a TYPE definition (textual convention, SEQUENCE, subtype).
 _TYPE_DEF_RE = re.compile(r'^[ \t]*([A-Za-z][A-Za-z0-9_-]*)\s*::=', re.MULTILINE)
 # `Name ::= SEQUENCE {` — the row type a table's SEQUENCE OF must name. The brace lands on the
@@ -74,6 +84,12 @@ _SEQ_TYPE_RE = re.compile(
     r'^[ \t]*([A-Za-z][A-Za-z0-9_-]*)\s*::=\s*SEQUENCE\s*\{', re.MULTILINE)
 
 _IMPORTS_RE = re.compile(r'\bIMPORTS\b(.*?);', re.DOTALL)
+# `::= { parent 25 }` — where an object hangs. The parent is a NAME followed by a number, so
+# an absolute path (`{ iso org(3) dod(6) }`) and a numeric one (`{ 1 3 6 1 4 1 311 }`) do not
+# match: neither of them names anything that could be missing.
+_OID_PARENT_RE = re.compile(r'::=\s*\{\s*([a-zA-Z][A-Za-z0-9_-]*)\s+\d')
+# The three roots of the OID tree. Nothing declares them and nothing imports them.
+_OID_ROOTS = frozenset({'iso', 'ccitt', 'joint-iso-ccitt'})
 _SYNTAX_RE = re.compile(r'\bSYNTAX\s+([A-Za-z][A-Za-z0-9_-]*)')
 _SEQUENCE_OF_RE = re.compile(r'\bSEQUENCE\s+OF\s+([A-Za-z][A-Za-z0-9_-]*)')
 # The body of a row type: `Name ::= SEQUENCE { field Type, field Type }`. A type can go
@@ -367,6 +383,32 @@ def lint_mib(text: str, filename: str = '') -> list[dict]:
                             f'defined in this MIB. Add it to the IMPORTS of the module that '
                             f'defines it.'),
             })
+
+    # ── An OID hung off a parent that is nowhere ─────────────────────────────
+    # `host OBJECT IDENTIFIER ::= { mib-2 25 }` with no `mib-2` in the IMPORTS. pysmi answers
+    # "Unknown parent symbol: mib_2" — under the name it mangled, in a module it names by the
+    # FILE, and with nothing pointing at the import that is missing. The MIB set shipped with
+    # Windows 10 Pro 22H2 has exactly this in its HOST-RESOURCES-MIB.
+    #
+    # Values are checked here and nowhere else in this file, and for a reason: an unknown
+    # TYPE is somebody else's problem (pysmi resolves it late and says so clearly), while an
+    # unknown PARENT stops the module dead — there is no tree to hang anything on.
+    seen_parents = set()
+    for m in _OID_PARENT_RE.finditer(body):
+        sym = m.group(1)
+        if (sym in known or sym in _OID_ROOTS or sym in _ASN1_KEYWORDS
+                or sym in seen_parents):
+            continue
+        seen_parents.add(sym)
+        out.append({
+            'line': _line_of(body, m.start()),
+            'code': 'unknown-oid-parent',
+            'symbol': sym,
+            'message': (f'"{sym}" is where this object hangs, and it is neither defined in '
+                        f'this MIB nor imported. Nothing can be placed under a parent that '
+                        f'does not resolve. Add it to the IMPORTS of the module that '
+                        f'defines it.'),
+        })
 
     # ── SEQUENCE OF pointing at something that is not a row type ─────────────
     for m in _SEQUENCE_OF_RE.finditer(body):

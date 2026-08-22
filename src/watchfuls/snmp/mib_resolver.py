@@ -939,15 +939,24 @@ def compile_raw_mibs_progressive(
     # DEPENDENCIES, and that is all it can do: asked to compile one by name, pysmi parses the
     # source before it consults a searcher, so a local copy fails at the parse and no amount
     # of stubbing gets in front of it. The list of what to compile is where this belongs.
-    raw_mibs = sorted({
-        os.path.splitext(os.path.basename(rel))[0]
-        for rel, _full in iter_raw_mibs(raw_dir)
-        if (raw_module_name(_full) or os.path.splitext(os.path.basename(rel))[0])
-        not in MACRO_ONLY_MIBS
-    })
+    #
+    # Both names are kept, because both questions get asked about the same file: pysmi is
+    # HANDED a file name, and everything that reasons about what a MIB *is* — what it
+    # supersedes, what already exists — has to use the module the file declares.
+    _pairs = []
+    for rel, _full in iter_raw_mibs(raw_dir):
+        _stem = os.path.splitext(os.path.basename(rel))[0]
+        _mod = raw_module_name(_full) or _stem
+        if _mod in MACRO_ONLY_MIBS:
+            continue
+        _pairs.append((_stem, _mod))
     if mibs_filter:
         _keep = set(mibs_filter)
-        raw_mibs = [m for m in raw_mibs if m in _keep]
+        _pairs = [p for p in _pairs if p[0] in _keep]
+    raw_mibs = sorted({stem for stem, _mod in _pairs})
+    # What this library DECLARES, whatever its files are called. The stub decision below is
+    # the one thing that must be answered with these and not with the file names.
+    raw_modules = {mod for _stem, mod in _pairs}
     if not raw_mibs:
         return {'ok': True, 'compiled': False, 'partial': False, 'results': {}}
 
@@ -1027,8 +1036,15 @@ def compile_raw_mibs_progressive(
         # The macro-only pair is stubbed either way: see MACRO_ONLY_MIBS. There is no
         # copy of them anybody can compile, so "the user placed one here" cannot mean
         # "compile it" — it only means a permanent error nobody can clear.
-        _raw_mibs_set = set(raw_mibs)
-        _stubs = [m for m in _builtin_mibs if m not in _raw_mibs_set]
+        # By MODULE name, and this is not a detail: a stub says "you already have this,
+        # do not compile it", and what the user placed in the library is a FILE. Asked of the
+        # file name, `rfc2571.mib` is not called SNMP-FRAMEWORK-MIB, so the copy the user
+        # imported was stubbed away — never compiled, no module written, and reported pending
+        # for ever while every run recompiled it and answered "untouched". The same identity
+        # split that pysmi has everywhere: it LOCATES by file name and WRITES the module's.
+        # Two files in one real library: SNMP-FRAMEWORK-MIB and RFC1213-MIB, both from the
+        # MIB set that ships with Windows.
+        _stubs = [m for m in _builtin_mibs if m not in raw_modules]
         _stubs += list(MACRO_ONLY_MIBS)
         if _stubs:
             _add_srh(StubSearcher(*_stubs))
