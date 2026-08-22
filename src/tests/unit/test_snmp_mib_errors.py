@@ -21,7 +21,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp.mib_admin import MibAdmin as MA
+from lib.core.snmp.mibs.admin import MibAdmin as MA
 
 
 def _raw(name, size=10, mtime=1000):
@@ -79,7 +79,7 @@ class TestTheStoreItself:
         worrying about. The newest survive, because they are the ones still being acted on."""
         cap = 3
         old_cap = MA.__dict__.get('_MAX_ERROR_ENTRIES')
-        import watchfuls.snmp.mib_admin as ma
+        import lib.core.snmp.mibs.admin as ma
         ma._MAX_ERROR_ENTRIES = cap
         try:
             for i in range(cap + 4):

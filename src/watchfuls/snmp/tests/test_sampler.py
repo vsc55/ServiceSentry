@@ -88,7 +88,7 @@ def env(tmp_path):
 
         def run(self, server, dev, monitor=None):
             mon = monitor or self.monitor(server)
-            with patch.object(Watchful, '_startup_compile_mibs', return_value=None), \
+            with patch('watchfuls.snmp._startup_compile_mibs'), \
                  patch.object(Watchful, '_snmp_get', dev.get), \
                  patch.object(Watchful, '_snmp_walk_oid', dev.walk):
                 wf = Watchful(mon)
@@ -173,7 +173,7 @@ class TestAGroupIsResolvedBeforeAnythingIsAsked:
         made in the panel that the sampler could not read would be a device assigned nothing
         at all."""
         from lib.db.sqlite import SQLiteConnector
-        from watchfuls.snmp.profile_store import CatalogStore
+        from lib.core.snmp.profile_store import CatalogStore
         env.profile('p1', [GAUGE])
         db = SQLiteConnector(str(tmp_path / 'test.db'))
         CatalogStore(db).save('mine', {'label': 'Mine', 'includes': ['p1']})
@@ -459,7 +459,7 @@ class TestAProbeProvesItAnswersAndStopsThere:
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
             'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None), \
+        with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', _walk), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: probe)):
@@ -492,7 +492,7 @@ class TestAProbeProvesItAnswersAndStopsThere:
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
             'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None), \
+        with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', lambda *_a, **_k: ({}, 'timeout')), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: True)):
@@ -532,7 +532,7 @@ class TestTheProbeThePanelRuns:
             'community': 'public', 'version': '2c'}}}}
         # The probe builds its own monitor with NO data directory, so only the shipped
         # catalogue is visible there — the profile has to come from a place it can reach.
-        with patch.object(Watchful, '_startup_compile_mibs', return_value=None),              patch.object(Watchful, '_snmp_get', dev.get),              patch.object(Watchful, '_snmp_walk_oid', dev.walk),              patch.object(Watchful, '_profile_catalog',
+        with patch('watchfuls.snmp._startup_compile_mibs'),              patch.object(Watchful, '_snmp_get', dev.get),              patch.object(Watchful, '_snmp_walk_oid', dev.walk),              patch.object(Watchful, '_profile_catalog',
                           lambda self: {'p1': _profile('p1', [GAUGE])}):
             res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
                                                 modules_dir='watchfuls')
@@ -542,6 +542,91 @@ class TestTheProbeThePanelRuns:
     def test_the_shipped_catalogue_is_reachable_without_a_data_directory(self):
         """The probe monitor has none. A catalogue that needed one would make every profile
         invisible exactly where the admin is trying to check their work."""
-        from watchfuls.snmp import profiles as _p
+        from lib.core.snmp import profiles as _p
         assert _p.custom_dir('') == ''
         assert 'sys_generic' in _p.catalog()
+
+
+class TestAHostIsADeviceOnItsOwn:
+    """The point of the whole move: a host that carries an SNMP profile with device profiles
+    assigned is sampled, with no entry in the module pointing back at it.
+
+    Before this, that configuration bought nothing until a second thing existed. The device
+    held the community and the assignment; the module decided whether anybody read them.
+    """
+
+    class _Store:
+        def __init__(self, hosts):
+            self._hosts = hosts
+
+        def list(self, decrypt=True):        # noqa: A003
+            return self._hosts
+
+        def get(self, uid):
+            return next((h for h in self._hosts if h.get('uid') == uid), None)
+
+    @staticmethod
+    def _host(uid='h1', name='erebor', profiles=None, **kw):
+        h = {'uid': uid, 'name': name, 'address': '10.0.0.9', 'kind': 'local',
+             'os': 'auto', 'maintenance': False, 'modules': [],
+             'profiles': profiles if profiles is not None else {
+                 'snmp': {'community': 'public', 'version': '2c', 'device_profiles': 'p1'}}}
+        h.update(kw)
+        return h
+
+    def _run(self, env, hosts, servers=None, gets=None):
+        env.profile('p1', [GAUGE])
+        dev = _Dev(gets=gets if gets is not None else {GAUGE['oid']: ('41', None)})
+        mon = create_mock_monitor({'watchfuls.snmp': {'servers': servers or {}}})
+        mon.dir_var = env.monitor({}).dir_var
+        mon._hosts_store = self._Store(hosts)
+        with patch('watchfuls.snmp._startup_compile_mibs'), \
+             patch.object(Watchful, '_snmp_get', dev.get), \
+             patch.object(Watchful, '_snmp_walk_oid', dev.walk):
+            res = Watchful(mon).check()
+        return res, dev
+
+    def test_a_configured_host_is_sampled_with_no_module_entry(self, env):
+        res, dev = self._run(env, [self._host()])
+        assert 'host.h1/metrics' in res.list
+        assert res.get_other_data('host.h1/metrics')['cpu'] == 41
+        assert ('get', GAUGE['oid']) in dev.asked
+
+    def test_the_device_is_named_after_the_host(self, env):
+        """A chart legend and an alert both read this; `host.h1` is not a machine anybody
+        recognises."""
+        res, _dev = self._run(env, [self._host(name='erebor')])
+        assert res.get_name('host.h1/metrics') == 'erebor'
+
+    def test_the_connection_comes_from_the_host_profile(self, env):
+        """Nothing carries the community but the host, so a device that answers proves the
+        profile was resolved — address included, since the item has no address at all."""
+        res, dev = self._run(env, [self._host()])
+        assert dev.asked, 'the device was never asked anything'
+        assert res.get_status('host.h1/metrics') is True
+
+    def test_a_host_in_maintenance_is_not_read(self, env):
+        """Decided by resolve_host, the same gate a check goes through: a graph of a machine
+        somebody is working on is a graph of the work."""
+        _res, dev = self._run(env, [self._host(maintenance=True)])
+        assert dev.asked == []
+
+    def test_a_host_an_item_already_covers_is_not_sampled_twice(self, env):
+        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'device_profiles': 'p1',
+                           'label': 'nas-01'}}
+        res, _dev = self._run(env, [self._host()], servers)
+        assert 'srv/metrics' in res.list
+        assert 'host.h1/metrics' not in res.list
+
+    def test_a_device_switched_off_stays_off(self, env):
+        """A disabled item is somebody saying "not this one". Resuming it from the other end
+        because the configuration also lives on the host would be an upgrade undoing a
+        decision nobody was asked about."""
+        servers = {'srv': {'enabled': False, 'host_uid': 'h1', 'device_profiles': 'p1'}}
+        _res, dev = self._run(env, [self._host()], servers)
+        assert dev.asked == []
+
+    def test_a_host_with_no_assignment_is_left_alone(self, env):
+        hosts = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
+        _res, dev = self._run(env, hosts)
+        assert dev.asked == []

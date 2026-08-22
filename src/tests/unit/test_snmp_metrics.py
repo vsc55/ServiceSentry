@@ -23,7 +23,7 @@ years at a terabit), so a backwards step is a reboot and the sample is dropped.
 
 import pytest
 
-from watchfuls.snmp import metrics
+from lib.core.snmp import metrics
 
 
 class TestScaling:

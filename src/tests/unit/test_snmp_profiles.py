@@ -21,7 +21,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp import profiles
+from lib.core.snmp import profiles
 
 
 def _metric(**over):
@@ -45,8 +45,10 @@ class TestWhatShips:
     def test_every_shipped_profile_survives_its_own_validation(self):
         """They are files in the repository, so nothing else would notice a typo in one until
         a device somewhere stopped being measured."""
-        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            'profiles')
+        # Asked of the module, not derived from where this file happens to sit: the
+        # catalogue travels with the code that reads it, and a path spelled relative to the
+        # test was silently wrong the moment either of them moved.
+        root = os.path.join(os.path.dirname(os.path.abspath(profiles.__file__)), 'profiles')
         for name in os.listdir(root):
             if not name.endswith('.json'):
                 continue

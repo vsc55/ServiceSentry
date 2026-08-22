@@ -700,8 +700,15 @@ puede declararse **host-capaz**: sus campos de conexión pasan a un **Host**
 "__host_profile__": {"key": "snmp", "address_field": "host",
     "fields": ["host", "port", "version", "community",
                "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key",
-               "snmpv3_auth_protocol", "snmpv3_priv_protocol", "timeout", "retries"]},
+               "snmpv3_auth_protocol", "snmpv3_priv_protocol",
+               "device_profiles"]},
 ```
+
+La lista marca **qué es el dispositivo**, no qué hacemos con él: su dirección, su puerto,
+la identidad con la que hay que hablarle y lo que declara ser. `timeout` y `retries` se
+quedan fuera a propósito —son cuánto esperamos antes de rendirnos, no quién es la máquina—
+y meterlos tiene un coste concreto: dos entradas de la misma IP que solo difieran en el
+timeout dejan de ser el mismo host para el migrador, y se convierten en dos.
 
 Puede ser una **lista** de specs para módulos con varios protocolos (p. ej.
 `datastore` declara `db` + `ssh`). Solo los specs con `address_field` reciben la

@@ -105,4 +105,48 @@ def backup_parts_catalog(watchfuls_dir: str | None = None, reserved=()) -> list:
                 'default': bool(spec.get('default')),
                 'label_i18n': label or pretty or {'en_EN': pid},
             })
+    out.extend(_core_parts(taken))
+    return out
+
+
+def _core_parts(taken: set) -> list:
+    """Parts a CORE package declares (``BACKUP_PART`` in its manifest).
+
+    Same descriptor, same rules, one difference: the label comes from core i18n, because a
+    core package names itself.
+
+    It exists for a failure that says nothing. A backup part lives as long as the
+    ``schema.json`` declaring it does, so the SNMP MIB library — which is the core's, and
+    which somebody may have spent an afternoon importing and correcting — silently dropped
+    out of every backup the moment the watchful was removed. Nothing warns you; the archive
+    is simply smaller.
+    """
+    from lib.discovery import scan                     # noqa: PLC0415
+    from lib.i18n import TRANSLATIONS                   # noqa: PLC0415
+
+    out = []
+    for pkg, decl in scan('BACKUP_PART'):
+        specs = [decl] if isinstance(decl, dict) else (
+            [d for d in decl if isinstance(d, dict)] if isinstance(decl, list) else [])
+        for spec in specs:
+            pid = str(spec.get('id') or pkg).strip()
+            rel = _safe_rel(spec.get('dir'))
+            if not pid or not rel or pid in taken:
+                continue
+            taken.add(pid)
+            section = str(spec.get('i18n') or '').strip()
+            key = str(spec.get('label_key') or '').strip()
+            label = {}
+            if section and key:
+                for lang, data in TRANSLATIONS.items():
+                    val = ((data.get(section) or {}) if isinstance(data, dict) else {}).get(key)
+                    if isinstance(val, str) and val:
+                        label[lang] = val
+            out.append({
+                'id': pid,
+                'module': '',          # nobody's module — the core declares it
+                'dir': rel,
+                'default': bool(spec.get('default')),
+                'label_i18n': label or {'en_EN': pid},
+            })
     return out

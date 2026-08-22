@@ -876,7 +876,10 @@ sub-colección de **checks** (OIDs a comprobar):
 |---------|-------|------|-------------|
 | `__module__` | `enabled` | bool | Activar el módulo |
 | | `threads` | int | Hilos para checks en paralelo |
-| | `mib_dirs` | str | Directorios adicionales de MIBs |
+
+> Los ajustes de la **biblioteca MIB** (`mib_dirs`, `mib_repos`, `github_token`) ya no están
+> aquí: son de la biblioteca, que es del core, y viven en la sección `snmp` de la
+> configuración — ver [ref-configuracion.md](ref-configuracion.md).
 | `servers.*` | `enabled` | bool | Activar el servidor |
 | | `host` | str | Host/IP del agente SNMP |
 | | `port` | int | Puerto (161 por defecto) |
@@ -907,7 +910,10 @@ que el siete sea un porcentaje, ni que el número de al lado sea un contador de 
 significa nada hasta derivarlo. Eso es un **perfil**: una lista de métricas que mapea cada OID a
 una clave, una etiqueta, una unidad, un tipo y cómo se dibuja.
 
-Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/profiles/`:
+Los perfiles son **datos, no código** — ficheros JSON en `lib/core/snmp/profiles/`.
+Están en el core y no en el módulo porque **qué es un dispositivo** no es asunto de un
+check: un host lleva sus perfiles igual que lleva su dirección, y quien los lee es la
+resolución host-céntrica, no el bucle de comprobaciones:
 
 ```json
 {

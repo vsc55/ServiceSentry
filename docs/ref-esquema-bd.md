@@ -898,7 +898,7 @@ aborta el arranque**.
 > **Estado actual:** ningún watchful del árbol declara tablas de módulo (0 coincidencias de
 > `discover_db_tables` en `src/watchfuls`). Es un mecanismo disponible sin tablas en uso.
 
-**Fuera del conector:** `watchfuls/snmp/mib_catalog.py` abre su propio archivo SQLite de
+**Fuera del conector:** `lib/core/snmp/mibs/catalog.py` abre su propio archivo SQLite de
 catálogo MIB con `sqlite3.connect` directo — **no** pasa por la capa de conectores ni se
 reconcilia.
 

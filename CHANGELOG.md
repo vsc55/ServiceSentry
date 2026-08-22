@@ -8,6 +8,345 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.112] - 2026-08-22
+
+### Fixed
+- **The SNMP section disappeared from the System panel.** Reported from the browser, and
+  invisible to every test: nothing failed, the entry simply never appeared. Two places
+  decided "is this a section somebody declared?" by asking whether a MODULE was behind it,
+  which stopped being the same question when a core package claimed one.
+  - the sidebar emitted `data-nav-perm` only alongside `data-nav-module`, so a core section
+    carried neither — and the entry ships hidden, revealed by `applyRoleRestrictions` for
+    anything with a permission and by `syncModuleSections` for anything with a module. With
+    neither attribute, nobody revealed it, ever;
+  - `dashboard.html` generated a pane for `standalone_specs if p.module`, so the section had
+    no pane to open either. The filter is `generated` now — a flag the spec carries — because
+    the core sections that predate this (Overview, Infra, History, Syslog) also have no
+    module and DO have bespoke markup, so dropping the filter would have emitted their panes
+    twice.
+- The guard that should have caught it asserted `data-nav-module="snmp"` and
+  `data-nav-perm="modules_view"` with `in html` — against the whole page, where both strings
+  appear in somebody else's markup. It reads the entry's own tag now: an attribute asserted
+  against a whole document is an attribute that can belong to anything on it.
+
+## [0.0.1+build.111] - 2026-08-22
+
+### Changed
+- **The MIB library's settings are configuration, not module config.** `mib_dirs`,
+  `mib_repos` and `github_token` describe the LIBRARY — where it looks and who it asks — and
+  the library is the core's. They are `snmp|*` in `lib/config/spec.py` now, on their own card
+  under Monitoring, with `SS_SNMP_MIB_DIRS` and `SS_SNMP_GITHUB_TOKEN` documented in
+  `docker/env.example`. Behind a module card, "where do I keep my vendor MIBs" was a question
+  filed under something that could be uninstalled.
+- **The route reads them server-side.** They used to arrive in the module config the browser
+  posted, which meant a client could name the directories the server scans off its own disk,
+  and meant the token had to travel to the browser at all — if only as a mask.
+- `github_token` is a CORE secret now (`secret_manager.ENCRYPT_KEYS`). It was encrypted
+  because the SNMP module declared it `secret` in its schema, and a module's declaration
+  stops applying the moment the setting leaves the module — without naming it in the core key
+  set, the move would have quietly written a token in plaintext.
+- The GitHub source list writes to the config surface instead of the module's, so the
+  checkbox that adds a repository still saves where its value now lives.
+- No migration: an installation that set one of these re-enters it in Configuration → SNMP
+  library. They are three strings, and inventing a migration for them would be more code
+  than the setting.
+
+### Fixed
+- The route called the config reader with the wrong argument count, and the `except` around
+  it swallowed the `TypeError` — so the library settings silently never applied. Found by a
+  test that asserted the values ARRIVE rather than only that the wrong ones do not.
+
+## [0.0.1+build.110] - 2026-08-22
+
+### Changed
+- **The screens' words moved with the screens.** The 347 strings of the MIB library, the
+  symbol browser and the profile catalogue are core i18n now (`snmp_ui`), read through one
+  helper. A section whose vocabulary lived in a watchful would go mute the day somebody
+  removed it — every label reading as its own key, which is a failure that only shows up on
+  the page.
+- The 34 audit words went to core i18n as plain `audit_v_*` / `audit_f_*` keys, which is
+  where `_auditWord` looks FIRST — so the audit renderer needed no change at all.
+- What stays in the module's lang file is what belongs to a check: the labels and hints of
+  its fields, its messages, its pretty name.
+- **A backup part the core declares.** The SNMP MIB library is offered to a backup by
+  `lib/core/snmp/manifest.py` rather than by the watchful's schema. A backup part lives
+  exactly as long as the file declaring it, so removing the watchful used to take the library
+  out of every backup **and say nothing** — the archive is simply smaller, and you find out
+  when you need it.
+
+### Fixed
+- Three headings would have fallen back to English in Spanish. The view names are declared
+  once in `snmp_page` for the sidebar, and the screens ask for the same keys to title
+  themselves; the helper read only `snmp_ui`, so "Import" appeared over a pane the rail
+  beside it calls "Importar". Found by checking every key the JS asks for against what the
+  lang files hold — a guard does that now.
+
+### Notes
+- `mib_dirs`, `mib_repos` and `github_token` stay in the module's `__module__` config. They
+  reach the core actions correctly (the browser posts them; the route restores the masked
+  token from storage), and moving them to `lib/config/spec.py` is a relocation of settings
+  with a migration for anyone who set one — worth doing on its own terms, not as the tail of
+  this. `threads` belongs to the check loop and stays regardless.
+
+## [0.0.1+build.109] - 2026-08-22
+
+### Changed
+- **The SNMP section is claimed by the core**, not by a module. Its five views — the MIB
+  library, import, compile, the symbol browser and the profile catalogue — are declared as
+  `PAGE` in `lib/core/snmp/manifest.py`, and its UI moved with it to `lib/core/snmp/web/`.
+  A screen that vanished when somebody removed the SNMP watchful would be a library you can
+  still fill and no longer look at, and a catalogue the sampler still reads with nowhere to
+  edit it.
+- No new mechanism, twice over. The UI scanner already walked `<pkg>/web/*.html` for two
+  roots (watchfuls and providers) — core is a third, one line. And the page catalogue picks
+  the descriptor up through `lib/discovery.py`, the same scanner that finds permissions,
+  Overview widgets and host profiles.
+- A core section **names itself**: its title and its view labels come from core i18n
+  (`snmp_page`). A module's page is titled by its `pretty_name` because the core owns no
+  string that names a module; that reason does not apply to a section the core declares.
+- The sidebar needed nothing: it has always emitted `data-nav-module` conditionally, so a
+  page with no module behind it was already legal — nobody had ever declared one.
+
+### Added
+- A guard that a CORE section's renderer exists, mirroring the one that has always checked a
+  module's. It is what caught this change half-done: the UI had moved to the core while the
+  page was still declared by the watchful, so the module named a renderer it no longer
+  shipped — and nothing else noticed, because the module-side guard had stopped looking and
+  no core-side guard existed yet.
+
+### Notes
+- The screens' own vocabulary (347 strings) still lives in the module's lang file and is read
+  through `_modUiStr`. It works because the watchful is still installed; moving it is the
+  last of this, and it is a move of words, not of behaviour. The audit vocabulary is not
+  affected either way — `_auditWord` reads core i18n first and falls back to the module.
+
+## [0.0.1+build.108] - 2026-08-22
+
+### Changed
+- **SNMP answers for itself: `/api/v1/snmp/<action>`.** The MIB library, the device-profile
+  catalogue and asking a device what it serves were reachable only at
+  `/api/v1/modules/watchfuls/snmp/<action>` — a path describing where the code lived rather
+  than what the endpoint is about. 42 operations moved; `discover` did not, because it finds
+  OIDs for the field of a check and that is a check's business. The split is by what an
+  operation is ABOUT, not by where the code ended up.
+- **Its own permissions, `snmp_view` and `snmp_manage`.** Everything SNMP offered was gated by
+  "can this person see modules", which was never a decision — a watchful owns no permission
+  flags. That meant the MIB library could not be granted to somebody without granting them
+  every module in the panel, and could not be withheld from somebody who needed the rest.
+- **BREAKING, deliberately: `modules_view` no longer opens any of it.** A CUSTOM role that
+  relied on it needs `snmp_view` (and `snmp_manage` to change anything) — the built-in roles
+  get both from the manifest. No compatibility bridge: a flag that never bites is a flag that
+  cannot restrict, which is half of what it is for.
+- The section's page follows the same gate. `__page__` already accepted a `perm` of its own
+  and defaulted to `modules_view` only because watchful modules had no flags to name.
+- The route's pipeline is deliberately the one a watchful action already went through —
+  masked secrets restored, bound host resolved server-side, named credential over inline
+  values. The operations are the same functions, and an operation that behaved differently
+  depending on which URL reached it would be worse than either behaviour.
+
+### Fixed
+- The audit row for an SNMP operation reads its verb from a module's vocabulary, and the new
+  route was not saying whose. It would have printed the raw identifier (`clean_library`)
+  where a sentence belongs. The words have not moved yet, so neither has the attribution.
+- The guard that every state-changing action has a word in both languages only scanned
+  watchful modules, so 42 actions would have left its sight in silence. It reads core
+  package manifests too now.
+
+## [0.0.1+build.107] - 2026-08-22
+
+### Changed
+- **A device is a host that carries an SNMP profile, not a module entry about one.** Giving a
+  host a community and a set of device profiles used to buy nothing until a SECOND thing
+  existed: an entry in the SNMP module pointing back at that host. The device held the
+  configuration and the module decided whether anybody read it. The host registry answers it
+  now — a host with an `snmp` profile and at least one device profile assigned is sampled,
+  with nothing else present.
+- Three things it deliberately does not do. It does not resume a device somebody switched
+  off: a module item bound to a host covers that host **even when disabled**, because
+  disabling it is somebody saying "not this one" and quietly resuming because the
+  configuration now lives elsewhere would be an upgrade undoing a decision. It does not take
+  the maintenance decision — the synthetic item goes through the same `resolve_host` a check
+  does, so there is one place that gate lives. And it returns an ITEM, not a connection:
+  building one here would be a second implementation of a merge that already exists.
+- **A result whose key begins `host.` belongs to a host rather than to a check**, and the
+  Servers tab reads it. Without that a device could be sampled, found down, and still show a
+  neutral dash — the column would be answering "how many checks did you configure" while
+  looking like it answers "is this machine all right". The convention lives with the host
+  registry and names no module: any module may file a result that way.
+
+## [0.0.1+build.106] - 2026-08-22
+
+### Changed
+- **The SNMP host profile is declared by the core**, the way SSH already was and for the same
+  reason: it describes the DEVICE — its address, its port, the identity it answers to, what it
+  declares itself to be — none of which stops being true when no check exists. Until now the
+  watchful declared it, which had a consequence past tidiness: the host form could only offer
+  a protocol whose module happened to be installed, and core code that needed to know what an
+  SNMP connection looks like had to go and read a module's `schema.json`.
+- No new mechanism for it. `lib/discovery.py` already scans each core package's `manifest.py`
+  for a named constant — the same scanner that finds permissions and Overview widgets — so
+  the profile is a `HOST_PROFILE` declaration in `lib/core/snmp/manifest.py` and the catalogue
+  picks it up without naming anybody. The next core protocol needs no edit in `hosts`.
+- Its labels come from core i18n (`snmp_profile.labels`), like the SSH profile's.
+- The module keeps its own `__host_profile__` and its inline fields: the first is how a CHECK
+  bound to a host inherits these, the second is what keeps a check against a bare IP possible
+  without registering the device first.
+
+### Added
+- A guard that the two descriptions of an SNMP connection do not drift
+  (`test_snmp_host_profile_agrees.py`). Neither can be derived from the other — one is Python
+  read before any module loads, the other is data the browser renders — and every way they can
+  disagree is silent: a `show_when` that drifts hides a field on one screen only, an `options`
+  list offers an auth protocol the check cannot use, and a `secret` flag that drifts stops
+  encrypting a password.
+
+## [0.0.1+build.105] - 2026-08-22
+
+### Changed
+- **The SNMP engine is core; the watchful is a check again.** `mib_admin` (the operations the
+  panel invokes on the library), `actions` (the panel's profile and test operations), the two
+  stores, the MIB source list and the reading half of the sampler all move to
+  `lib/core/snmp/`. What is left in `watchfuls/snmp/` is **685 lines** of the 8,647 it held:
+  the check loop, the schema that describes a check, its UI and its translations.
+- Neither of the two big classes was a mixin, which is what made this a move rather than a
+  rewrite. `MibAdmin` has 72 methods and `SnmpActions` 34, and between them there was exactly
+  **one** instance method — `_startup_compile_mibs`, which reached into the object for two
+  facts every caller already has: where `var_dir` is, and where to log. It is a function
+  taking a directory now, and both classes are what they had quietly become: namespaces the
+  watchful inherits so the panel can dispatch to them by name.
+- The sampler is split along a real seam. Reading a metric off a device is core — the
+  scheduler, the test screen and (next) the host walk must get identical answers or the
+  screen becomes a second opinion. Turning a reading into a SERIES needs state that outlives
+  the process, and stays with the watchful that emits the verdict.
+- **The connection defaults are the protocol's**: port 161, community `public`, version 2c,
+  one retry. They are in `lib/core/snmp/defaults.py`, read by everything that opens a
+  conversation. The schema still declares the same values because a form is data the browser
+  reads and cannot call a Python constant — a duplication with a real reason, pinned by
+  `test_snmp_defaults_agree.py` rather than trusted.
+- The two tables keep their `mod_snmp_` names on purpose. A table name is a fact about DATA,
+  and every installation already has rows under those; renaming one because the code moved
+  would spend a migration on tidiness. If it is ever changed it should be for a reason of its
+  own, with the migration written and tested on all three engines.
+- Eight more test files follow their subject into `tests/unit/`.
+
+### Fixed
+- A fourth path anchored on where a test file happens to sit
+  (`split(os.sep + 'watchfuls' + os.sep)`), which silently resolved to the test's own path
+  once it moved — not an error until an `open()` fails, and not an error at all if a
+  same-named file had existed under it.
+- Two structural guards read sources by hand-spelled paths that no longer point anywhere.
+  Both now name each source once.
+
+## [0.0.1+build.104] - 2026-08-22
+
+### Changed
+- **Speaking SNMP, and understanding a MIB, move to the core.** `client` (the protocol
+  conversation: get, walk, the three versions and their credentials) is now
+  `lib/core/snmp/client.py`, and the MIB layer is `lib/core/snmp/mibs/` — `lint` (reading a
+  source without compiling it), `resolver` (compiling, and name↔OID) and `catalog` (the
+  persisted symbol index). A MIB is not a check's private business: it is how an
+  installation understands its devices at all, and the same library answers the browser, the
+  profile catalogue, discovery, and whatever asks next.
+- They lose the `mib_` prefix on the way in — `mibs.resolver`, not `mibs.mib_resolver` —
+  while the import ALIASES stay (`_mib_resolver`), so not one call site changed. The diff is
+  import lines and nothing else.
+- What stays a watchful: `mib_admin` (the operations the panel invokes on the library) and
+  `mib_versions` (a store on a module-namespaced table). Both are surfaces, and surfaces move
+  in the step that deals with routes, permissions and the tables — not smuggled in with a
+  file move.
+- Three test files follow their subject into `tests/unit/`: the MIB linter, the MIB tree and
+  the walk. What they test stopped being a module.
+
+### Fixed
+- A structural guard read two sources by a path spelled relative to the test file. The two
+  no longer live in the same tree, so it read a file that was not there — and would have gone
+  on doing that after every future move. It asks each module where it is now.
+- The MIB-manager screen guard spelled `watchfuls/snmp/mib_resolver.py` out at nine call
+  sites, the admin at fourteen and the module at six. One constant each: the next move is one
+  line, not twenty-nine, and a path left behind does not fail loudly — it reads nothing, or
+  worse, something else.
+
+## [0.0.1+build.103] - 2026-08-22
+
+### Changed
+- **What a device IS moves to the core.** `profiles` (what a device profile declares — its
+  metrics, their kind, their scale, how a table's rows are named), the shipped catalogue of
+  41 profile files, and `metrics` (the counter maths that turns a running total into a rate)
+  now live in `lib/core/snmp/`. They answer a question no check owns: a host carries its SNMP
+  profiles the way it carries its address, and the code that says what one MEANS cannot sit
+  inside one of the things that reads it.
+- Neither file imported anything from the module — between them, zero references to
+  `ModuleBase` — so this is a move, not a rewrite. The watchful imports them from the core
+  now, which is the direction the dependency was always meant to point.
+- The catalogue travels with the code that reads it (`lib/core/snmp/profiles/`), and the
+  packaging needed no change: the staged tree is a copy of `src/`.
+- `test_metrics.py` and `test_profiles.py` follow the code they test into `tests/unit/`.
+  Their subject stopped being a module, so co-locating them with one would have been filing
+  by history rather than by what they touch.
+
+### Added
+- **A guard that the core never imports a watchful** (`test_core_does_not_import_modules.py`).
+  The rule was true and unwritten, and a half-finished move is exactly when somebody reaches
+  for `from watchfuls.snmp import …` to make an import resolve — after which `lib` depends on
+  a module that depends on `lib`, and nothing fails until something does. Reading a module's
+  `schema.json` off disk stays fine: that is what discovery is.
+
+### Fixed
+- A moved test derived the catalogue's path from its own location on disk
+  (`dirname(dirname(__file__))`), so it broke the moment either of them moved. It asks the
+  module where its catalogue is now — the anchor rule the repo already documents, applied to
+  data instead of to source roots.
+
+## [0.0.1+build.102] - 2026-08-22
+
+### Changed
+- **An SNMP device is configured where the device is, not once per check.** The host's SNMP
+  profile carried its address and nothing else, so the community, the version and the v3 keys
+  were re-entered on every server entry that pointed at the same box — and the field that says
+  what the device IS (`device_profiles`) lived there too, which made a property of the machine
+  a property of one entry about it. The profile now carries all of it, and a check bound to a
+  host inherits the lot: `resolve_host` already merged whatever the module declared as
+  host-owned, so widening the declaration was the change.
+- Deliberately NOT host-owned: `timeout` and `retries`. They are how long we wait before
+  giving up, not who the machine is — and moving them has a concrete cost, since two entries
+  for one address differing only in their timeout would stop being one host to the migration
+  planner and become two.
+- **A reusable credential can supply any protocol's identity, not just SSH's.** SSH had a
+  credential picker on the host form and no other protocol did; that read as a rule and was
+  only ever the consequence of being the only profile with an identity to store. Any protocol
+  whose module declares a `__credential__` now offers the same choice, and picking one clears
+  the inline copy from the host — two places holding one secret means the stale one wins the
+  day somebody rotates the other.
+- The SNMP profile picker and its "test against the device" button work from the host form as
+  well as from the Modules tab. Both reach the device through one resolver, which is set by
+  both entry points: the Modules tab has the server's saved config at a path, the host form
+  has a draft that may never have been saved, and a stale provider between them would have
+  quietly asked the last host somebody looked at.
+
+### Fixed
+- **A form that rendered perfectly into a page that never asked for it.** The per-protocol
+  profile section had been removed from the host modal when the profiles were narrowed to an
+  address — there was nothing left to put in it — and `_renderProfileFields` stayed behind,
+  correct and uncalled: the element it repaints was looked up in one place and created in
+  none. Widening the profile would have been a form nobody draws. It is back, inside the
+  module's own card and above the checks that use it, which is where its meaning is: SSH is
+  the machine's own connection and belongs in General; SNMP is a conversation one module
+  holds with it. A guard now requires the block to be drawn by both card shapes and by the
+  repaint — dead code that reads as live code puts nothing red.
+- **A web action bound to a host was handed the address and nothing else.** `resolve_host_ctx`
+  carried only the host's `ssh` profile, and `merge_host_conn` filled every protocol's fields
+  from it — survivable only while ssh was the one profile with fields to give. The moment
+  another protocol carries credentials, Discover and Test reach the device with no community
+  at all, and fail as "the device did not answer" rather than "nobody told me who to be",
+  which is the harder of the two to read. Every profile travels now, and each spec draws from
+  its own — which is what `resolve_host` does for a scheduled check.
+- A masked secret in a host draft is restored from the stored host **for every protocol**, by
+  the same field-name rule the host store itself uses — so a module's own secret field is
+  restored without core naming it. Only `ssh_password` and `ssh_key_string` were, by name.
+- The host-profile catalogue dropped a field's `multi` flag, so a list of values rendered on
+  the host form as a text box holding a comma-separated string: editable-looking, and the one
+  thing nobody should type by hand when the values are ids.
+
 ## [0.0.1+build.101] - 2026-08-22
 
 ### Fixed

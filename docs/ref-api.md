@@ -389,6 +389,7 @@ Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo qu
 
 | Método | Ruta | Permiso (inline) | Propósito |
 |---|---|---|---|
+| GET/POST | `/api/v1/snmp/<acción>` | `snmp_view` (lectura) · `snmp_manage` (el resto) | La biblioteca de MIB, el catálogo de perfiles de dispositivo y preguntarle a un dispositivo qué sirve. 42 acciones; las declara `lib/core/snmp/manifest.py`. `discover` **no** está aquí: busca OIDs para el campo de un check, así que sigue en `/api/v1/modules/watchfuls/snmp/discover` |
 | GET | `/api/v1/hosts` | `servers_view` (global) o view por host | Listar hosts, secretos enmascarados |
 | GET | `/api/v1/hosts/<uid>/status` | `view` por host | Últimos resultados de checks |
 | POST | `/api/v1/hosts` | `servers_edit` | Crear host |

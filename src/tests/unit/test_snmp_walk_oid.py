@@ -17,8 +17,8 @@ walked from another column — and the traffic of port 3 quietly becomes the tra
 
 import pytest
 
-from watchfuls.snmp import client as snmp_client
-from watchfuls.snmp.client import SnmpClient
+from lib.core.snmp import client as snmp_client
+from lib.core.snmp.client import SnmpClient
 
 pytestmark = pytest.mark.skipif(not snmp_client._HAS_PYSNMP, reason='pysnmp is not installed')
 

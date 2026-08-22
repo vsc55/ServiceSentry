@@ -33,11 +33,11 @@ import importlib.util as _importlib_util
 
 from lib import APP_NAME
 from lib.debug import DebugLevel
-from . import mib_resolver as _mib_resolver
-from . import mib_catalog as _mib_catalog
-from . import mib_versions as _mib_versions
-from . import mib_lint as _mib_lint
-from .client import _HAS_PYSNMP
+from lib.core.snmp.mibs import resolver as _mib_resolver
+from lib.core.snmp.mibs import catalog as _mib_catalog
+from lib.core.snmp.mibs import versions as _mib_versions
+from lib.core.snmp.mibs import lint as _mib_lint
+from lib.core.snmp.client import _HAS_PYSNMP
 
 # Optional dependency: pysmi is needed to COMPILE raw ASN.1, not to read an already
 # compiled MIB - which is why it is a partial dependency and not a missing one.
@@ -1076,84 +1076,6 @@ _github_jobs: dict = {}
 
 class MibAdmin:
     """Upload, compile, import, list and inspect MIBs. Mixed into ``Watchful``."""
-
-    # ── Startup MIB compilation ────────────────────────────────────────────────
-
-    def _startup_compile_mibs(self) -> None:
-        """Compile raw ASN.1 MIBs at module startup.
-
-        Reads ``var_dir`` from the monitor, ensures the ``snmp_mibs/raw/``
-        directory exists (so users know where to drop ``.mib`` files) and
-        tries to compile any new or updated files into ``snmp_mibs/compiled/``
-        using pysmi (if installed).  All outcomes are logged for auditability.
-        """
-        var_dir = str(getattr(self._monitor, 'dir_var', '') or '').strip()
-        if not var_dir:
-            return
-
-        raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')
-        compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled')
-        os.makedirs(raw_dir, exist_ok=True)
-
-        # Count raw MIB files so we can warn if pysmi is missing. Recursive: an imported
-        # archive or repository keeps its folders, and counting only the top level reports
-        # zero for an installation whose MIBs all came from one.
-        raw_files = [rel for rel, _full in _mib_resolver.iter_raw_mibs(raw_dir)]
-
-        # Only invoke pysmi when new/updated raw MIBs exist.  compile_raw_mibs()
-        # initialises an HttpReader (→ DNS lookup for mibs.pysnmp.com) even for
-        # already-compiled MIBs, which can block for 45+ seconds on slow networks.
-        #
-        # And only for the FEW that are waiting.  This runs at module startup, so
-        # compiling everything new meant that importing a vendor folder — hundreds of
-        # files, ~2.7 s of ASN.1 parsing each — bought a panel that does not come up for
-        # the best part of an hour, with nothing on screen to say what it is doing. Past
-        # the limit they stay raw until the MIB manager is told to compile them.
-        _pending = _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir)
-        if not _pending:
-            compile_result = {'ok': True, 'compiled': False}
-        elif len(_pending) > _mib_resolver.AUTO_COMPILE_LIMIT:
-            compile_result = {'ok': True, 'compiled': False}
-            self._debug(
-                f'SNMP: {len(_pending)} raw MIB file(s) are not compiled — too many to do '
-                f'at startup, compile them from the MIB manager (raw={raw_dir})',
-                DebugLevel.info,
-            )
-        else:
-            compile_result = _mib_resolver.compile_raw_mibs(
-                raw_dir, compiled_dir, mibs_filter=_pending)
-
-        if not compile_result.get('ok'):
-            self._debug(
-                f'SNMP: MIB compilation error — {compile_result.get("message", "unknown error")}',
-                DebugLevel.warning,
-            )
-        elif compile_result.get('compiled'):
-            self._debug(
-                f'SNMP: MIB compilation complete — '
-                f'raw={raw_dir}  compiled={compiled_dir}',
-                DebugLevel.info,
-            )
-        elif raw_files:
-            # Files present but nothing compiled: either up-to-date or pysmi missing
-            if _HAS_PYSMI:
-                self._debug(
-                    f'SNMP: MIB files already up-to-date in {compiled_dir}',
-                    DebugLevel.debug,
-                )
-            else:
-                self._debug(
-                    f'SNMP: {len(raw_files)} raw MIB file(s) found in {raw_dir} '
-                    f'but pysmi is not installed — install it to enable auto-compilation '
-                    f'(pip install pysmi)',
-                    DebugLevel.warning,
-                )
-        else:
-            self._debug(
-                f'SNMP: MIB directory ready — drop .mib files in {raw_dir} '
-                f'to add custom MIBs',
-                DebugLevel.debug,
-            )
 
     # ── MIB manager ────────────────────────────────────────────────────────────
 
@@ -3141,3 +3063,86 @@ class MibAdmin:
             row['state'] = 'rejected'
             row['error'] = str(exc)
         return row
+
+
+def startup_compile_mibs(var_dir: str, debug=None) -> None:
+    """Compile raw ASN.1 MIBs at startup.
+
+    Ensures ``snmp_mibs/raw/`` exists — so people know where to drop ``.mib`` files — and
+    compiles anything new or updated into ``snmp_mibs/compiled/`` with pysmi, when it is
+    installed. Every outcome is logged, because the failure mode here is silence: MIBs that
+    did not compile look exactly like MIBs nobody added.
+
+    A function taking a directory, not a method reading one off a monitor. It was the only
+    thing in this file that needed an instance, and it needed it for two facts — where
+    ``var_dir`` is and where to log — which every caller already has. Without it the class
+    below is what it had quietly become: a namespace of classmethods, inherited by the
+    watchful so the panel can dispatch to them by name.
+    """
+    if not var_dir:
+        return
+    _log = debug if callable(debug) else (lambda msg, level=None: None)
+
+    raw_dir      = os.path.join(var_dir, 'snmp_mibs', 'raw')
+    compiled_dir = os.path.join(var_dir, 'snmp_mibs', 'compiled')
+    os.makedirs(raw_dir, exist_ok=True)
+
+    # Count raw MIB files so we can warn if pysmi is missing. Recursive: an imported
+    # archive or repository keeps its folders, and counting only the top level reports
+    # zero for an installation whose MIBs all came from one.
+    raw_files = [rel for rel, _full in _mib_resolver.iter_raw_mibs(raw_dir)]
+
+    # Only invoke pysmi when new/updated raw MIBs exist.  compile_raw_mibs()
+    # initialises an HttpReader (→ DNS lookup for mibs.pysnmp.com) even for
+    # already-compiled MIBs, which can block for 45+ seconds on slow networks.
+    #
+    # And only for the FEW that are waiting.  This runs at module startup, so
+    # compiling everything new meant that importing a vendor folder — hundreds of
+    # files, ~2.7 s of ASN.1 parsing each — bought a panel that does not come up for
+    # the best part of an hour, with nothing on screen to say what it is doing. Past
+    # the limit they stay raw until the MIB manager is told to compile them.
+    _pending = _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir)
+    if not _pending:
+        compile_result = {'ok': True, 'compiled': False}
+    elif len(_pending) > _mib_resolver.AUTO_COMPILE_LIMIT:
+        compile_result = {'ok': True, 'compiled': False}
+        _log(
+            f'SNMP: {len(_pending)} raw MIB file(s) are not compiled — too many to do '
+            f'at startup, compile them from the MIB manager (raw={raw_dir})',
+            DebugLevel.info,
+        )
+    else:
+        compile_result = _mib_resolver.compile_raw_mibs(
+            raw_dir, compiled_dir, mibs_filter=_pending)
+
+    if not compile_result.get('ok'):
+        _log(
+            f'SNMP: MIB compilation error — {compile_result.get("message", "unknown error")}',
+            DebugLevel.warning,
+        )
+    elif compile_result.get('compiled'):
+        _log(
+            f'SNMP: MIB compilation complete — '
+            f'raw={raw_dir}  compiled={compiled_dir}',
+            DebugLevel.info,
+        )
+    elif raw_files:
+        # Files present but nothing compiled: either up-to-date or pysmi missing
+        if _HAS_PYSMI:
+            _log(
+                f'SNMP: MIB files already up-to-date in {compiled_dir}',
+                DebugLevel.debug,
+            )
+        else:
+            _log(
+                f'SNMP: {len(raw_files)} raw MIB file(s) found in {raw_dir} '
+                f'but pysmi is not installed — install it to enable auto-compilation '
+                f'(pip install pysmi)',
+                DebugLevel.warning,
+            )
+    else:
+        _log(
+            f'SNMP: MIB directory ready — drop .mib files in {raw_dir} '
+            f'to add custom MIBs',
+            DebugLevel.debug,
+        )

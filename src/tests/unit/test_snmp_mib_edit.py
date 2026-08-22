@@ -20,8 +20,8 @@ import os
 
 import pytest
 
-from watchfuls.snmp import mib_versions
-from watchfuls.snmp.mib_admin import MibAdmin as MA
+from lib.core.snmp.mibs import versions as mib_versions
+from lib.core.snmp.mibs.admin import MibAdmin as MA
 
 pytestmark = pytest.mark.usefixtures()
 
@@ -139,7 +139,7 @@ class TestSeeingWhatChanged:
     def test_a_diff_is_bounded(self, tree, monkeypatch):
         """It is read on screen, so it is capped like something read on screen — and it says
         when it was cut, because a diff silently missing its tail is worse than no diff."""
-        monkeypatch.setattr('watchfuls.snmp.mib_admin._DIFF_MAX_LINES', 10)
+        monkeypatch.setattr('lib.core.snmp.mibs.admin._DIFF_MAX_LINES', 10)
         MA.save_mib_source({**tree,
                             'content': '\n'.join(f'line {i}' for i in range(500))})
         v1 = [v for v in MA.list_mib_versions(tree)['versions'] if v['version'] == 1][0]

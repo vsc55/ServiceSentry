@@ -23,6 +23,7 @@ import os
 import re
 import uuid
 
+from lib.core.hosts.resolve import host_uid_from_key
 from lib.security import secret_manager
 
 
@@ -447,6 +448,30 @@ def _host_statuses(wa):
                         a['has_warn'] = True
                     else:
                         a['has_error'] = True
+
+    # …and the results that belong to a host with no check behind them: a device the panel
+    # reads because the HOST says it is one (an SNMP profile with device profiles assigned).
+    # Without this a device can be sampled, found down, and still show a neutral dash — the
+    # column would be answering "how many checks did you configure" while looking like it
+    # answers "is this machine all right".
+    for mod_status in status_raw.values():
+        if not isinstance(mod_status, dict):
+            continue
+        for res_key, info in mod_status.items():
+            uid = host_uid_from_key(res_key)
+            if not uid:
+                continue
+            a = agg.setdefault(uid, {'has_error': False, 'has_warn': False,
+                                     'known': 0, 'total': 0})
+            a['total'] += 1
+            a['known'] += 1
+            st = info.get('status') if isinstance(info, dict) else None
+            sev = (info.get('severity') or '') if isinstance(info, dict) else ''
+            if st is not True:
+                if sev == 'warning':
+                    a['has_warn'] = True
+                else:
+                    a['has_error'] = True
 
     out = {}
     for uid, a in agg.items():

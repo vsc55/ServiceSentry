@@ -18,13 +18,13 @@ import threading
 import time
 import uuid
 
-from . import metrics as _metrics
-from . import mib_resolver as _mib_resolver
-from . import profile_store as _profile_store
-from . import profiles as _profiles
-from .client import _HAS_PYSNMP, run_coroutine
-from .defaults import _SERVER_DEFAULTS
-from .sampler import read_metric as _read_metric
+from lib.core.snmp import metrics as _metrics
+from lib.core.snmp.mibs import resolver as _mib_resolver
+from lib.core.snmp import profile_store as _profile_store
+from lib.core.snmp import profiles as _profiles
+from lib.core.snmp.client import _HAS_PYSNMP, run_coroutine
+from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
+from lib.core.snmp.sampler import read_metric as _read_metric
 
 # What every SNMP agent answers, and therefore what identifies a device before anybody has
 # decided anything about it. Everything ELSE a detection asks comes from the profiles

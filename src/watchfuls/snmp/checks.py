@@ -20,7 +20,8 @@ import re
 
 from lib.debug import DebugLevel
 
-from .client import _HAS_PYSNMP
+from lib.core.snmp import devices as _devices
+from lib.core.snmp.client import _HAS_PYSNMP
 from .defaults import _CHECK_DEFAULTS, _SERVER_DEFAULTS
 
 
@@ -47,9 +48,17 @@ class SnmpChecks:
         # and a device may well be worth one and not the other.
         items: list[tuple[str, dict, dict]] = []
         sampled: list[tuple[str, dict]] = []
+        bound: set[str] = set()      # hosts an item speaks for, enabled or not
         for srv_key, srv in self.get_conf('servers', {}).items():
             if not isinstance(srv, dict):
                 continue
+            # Collected BEFORE the enabled gate on purpose: a disabled item still speaks for
+            # its host. Somebody switched that device off, and resuming it from the other end
+            # because the configuration also lives on the host would be an upgrade quietly
+            # undoing a decision.
+            _uid = str(srv.get('host_uid') or '').strip()
+            if _uid:
+                bound.add(_uid)
             if not srv.get('enabled', _SERVER_DEFAULTS['enabled']):
                 continue
             if self.profiles_of(srv):
@@ -59,6 +68,13 @@ class SnmpChecks:
                     continue
                 if chk_cfg.get('enabled', _CHECK_DEFAULTS['enabled']):
                     items.append((f'{srv_key}.{chk_key}', chk_cfg, srv))
+
+        # …and every host that IS an SNMP device without anybody having said so twice. A host
+        # with a community and device profiles assigned is a device; that used to be worth
+        # nothing until a module entry pointed back at it, which made the module — not the
+        # device — the thing that decided it was worth looking at.
+        sampled.extend(_devices.devices_to_sample(
+            getattr(self._monitor, '_hosts_store', None), bound))
 
         # Friendly label per result key (keys are opaque "<srv_uid>.<chk_uid>").
         labels = {k: (str(c.get('label') or '').strip() or k) for k, c, _ in items}

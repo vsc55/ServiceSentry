@@ -87,14 +87,46 @@ function _renderProfileFields(proto, spec) {
         eff[f.name] = (prof[f.name] !== undefined && prof[f.name] !== null)
             ? prof[f.name] : f.default;
     }
-    const ctx = { mod: spec.module, fields: eff };
+    // `proto` and not just the module: a profile field is written back into the host draft
+    // under its protocol, and the module is only where its metadata was declared.
+    const ctx = { mod: spec.module, proto, fields: eff };
+    // A device's identity may be a REUSABLE credential instead of inline values — the same
+    // choice a check has always offered, offered where the device is now configured. SSH had
+    // this and no other protocol did, which was not a decision: it was the only profile that
+    // carried an identity at all.
+    const cspec = (typeof _credTypeForModule === 'function') ? _credTypeForModule(spec.module) : null;
+    const credFields = new Set(cspec ? cspec.fields : []);
+    const usingCred = !!prof.cred_uid;
+    const picker = cspec ? `<div class="col-12">
+        <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}</label>
+        <select class="form-select form-select-sm ss-cred-picker" data-cred-ctype="${escAttr(cspec.type)}"
+            onchange="_setProfileField(${jsStr(proto)},'cred_uid',this.value)">${credentialOptions(prof.cred_uid, cspec.type)}</select>
+        <div class="form-text small">${esc(t('cred_use_hint'))}</div>
+    </div>` : '';
     let h = '';
+    let placed = !picker;
     for (const f of (spec.fields || [])) {
         if (f.name === spec.address_field) continue;   // comes from host.address
+        if (credFields.has(f.name)) {
+            // Before the first credential field that is actually VISIBLE — the v3 keys only
+            // show at version 3 — so the picker never ends up stranded under a heading whose
+            // fields are all hidden.
+            if (!placed && _hostFieldVisible(f, ctx)) { h += picker; placed = true; }
+            if (usingCred) continue;      // the credential supplies these
+        }
         h += _hostFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
                            `_setProfileField(${jsStr(proto)},${jsStr(f.name)},`, ctx);
     }
+    if (!placed) h = picker + h;
     return h || `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
+}
+
+/** The identity fields a protocol's credential supplies, so picking one can clear them. */
+function _profileCredFields(proto) {
+    if (proto === 'ssh') return [..._SSH_IDENTITY_FIELDS];
+    const mod = (HOST_PROFILES[proto] || {}).module;
+    const cs = (mod && typeof _credTypeForModule === 'function') ? _credTypeForModule(mod) : null;
+    return cs ? cs.fields : [];
 }
 
 // Module-level default for a field referenced by placeholder_module (e.g. the
@@ -219,7 +251,89 @@ function _hostFieldControl(f, val, onch, ctx) {
             placeholder: (f.placeholder != null ? String(f.placeholder) : ''),
             trailing: _hostFieldPickerBtn(ctx.mod, ctx.idx, f.name)});
     }
+    // …and the same field on a PROTOCOL PROFILE, which has no check index. What a device
+    // IS — the SNMP profiles it carries — belongs to the device, so this is where it is
+    // now edited; without this branch it renders as a text box holding a comma-separated
+    // list, which looks editable and is the one thing nobody should type by hand.
+    if (f.multi && ctx && ctx.idx == null && ctx.proto) {
+        const _pKey = 'host|' + ctx.proto + '|' + f.name;
+        registerFieldAdapter(_pKey,
+            () => (((_hostDraft.profiles || {})[ctx.proto] || {})[f.name]) || '',
+            v => _setProfileField(ctx.proto, f.name, v));
+        return fieldCtl({kind: 'multi', key: _pKey, value: val,
+            placeholder: (f.placeholder != null ? String(f.placeholder) : ''),
+            trailing: _hostProfilePickerBtn(ctx.proto, ctx.mod, f.name)});
+    }
     return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`});
+}
+
+/** `<module>|<collection>|<field>` for a field on a protocol PROFILE.
+ *
+ *  A picker is registered against the kind of field, and that identity is spelled with the
+ *  module's host-capable collection in the middle — the same string the Modules tab uses,
+ *  so one registration serves both screens and neither knows about the other. */
+function _hostProfileSchemaKey(mod, name) {
+    const colls = (typeof MODULE_HOST_COLLECTIONS !== 'undefined')
+        ? (MODULE_HOST_COLLECTIONS[mod] || []) : [];
+    const coll = Array.isArray(colls) ? colls[0] : colls;
+    return coll ? `${mod}|${coll}|${name}` : '';
+}
+
+/** The picker button (and any actions beside it) for a profile field. */
+function _hostProfilePickerBtn(proto, mod, name) {
+    const key = _hostProfileSchemaKey(mod, name);
+    const fp = (key && typeof _fieldPickerFor === 'function') ? _fieldPickerFor(key) : null;
+    if (!fp) return '';
+    let h = `<button class="btn btn-secondary" type="button"
+            title="${escAttr(_fieldPickerTitle(fp))}"
+            onclick="_hostProfilePickerOpen(${jsStr(proto)},${jsStr(mod)},${jsStr(name)})">
+            <i class="bi ${escAttr(fp.icon)}"></i></button>`;
+    (fp.actions || []).forEach((a, i) => {
+        h += `<button class="btn btn-secondary" type="button"
+            title="${escAttr(_fieldPickerTitle(a))}"
+            onclick="_hostProfileActionRun(${jsStr(proto)},${jsStr(mod)},${jsStr(name)},${i},this)">
+            <i class="bi ${escAttr(a.icon)}"></i></button>`;
+    });
+    return h;
+}
+
+function _hostProfilePickerOpen(proto, mod, name) {
+    const key = _hostProfileSchemaKey(mod, name);
+    const fp = key && _fieldPickerFor(key);
+    if (!fp) return;
+    const cur = ((_hostDraft.profiles || {})[proto] || {})[name] || '';
+    fp.open(key, cur, (v) => {
+        _setProfileField(proto, name, v);
+        if (typeof renderChips === 'function') renderChips('host|' + proto + '|' + name);
+    }, () => _hostProfileActionCfg(proto));
+}
+
+/** Run one of the picker's neighbouring actions (e.g. SNMP's "test against the device").
+ *
+ *  The action is handed the host draft rather than a config path: on this screen the value
+ *  it is about may never have been saved, and the device it would be tested against is the
+ *  one in the form. */
+function _hostProfileActionRun(proto, mod, name, idx, btn) {
+    const key = _hostProfileSchemaKey(mod, name);
+    const fp = key && _fieldPickerFor(key);
+    const act = fp && (fp.actions || [])[idx];
+    if (!act) return;
+    const cur = ((_hostDraft.profiles || {})[proto] || {})[name] || '';
+    act.run(key, cur, btn, () => _hostProfileActionCfg(proto));
+}
+
+/** What an action posted from the host modal runs against.
+ *
+ *  The identity is NOT sent: the draft travels as `_host` and the server resolves the
+ *  bound host and its credential exactly as it does for a scheduled check — which is also
+ *  the only way it can work, since the browser holds a mask where each secret used to be. */
+function _hostProfileActionCfg(proto) {
+    const d = _hostDraft || {};
+    const cfg = { ...(d.profiles || {})[proto] };
+    if (_editingHostUid) cfg.host_uid = _editingHostUid;
+    cfg._host = { address: d.address || '', kind: d.kind || 'local', os: d.os || 'auto',
+                  profiles: d.profiles || {} };
+    return cfg;
 }
 
 /** The picker button for a check field, when the module registered one for that KIND of
@@ -311,18 +425,18 @@ function _setProfileField(proto, field, value) {
     if (!_hostDraft.profiles) _hostDraft.profiles = {};
     if (!_hostDraft.profiles[proto]) _hostDraft.profiles[proto] = {};
     _hostDraft.profiles[proto][field] = value;
-    // Picking a credential clears the inline SSH identity so stale values don't
+    // Picking a credential clears that protocol's inline identity so stale values don't
     // linger in the draft and reappear if the credential is later cleared.
-    if (proto === 'ssh' && field === 'cred_uid' && value) {
-        _SSH_IDENTITY_FIELDS.forEach(f => delete _hostDraft.profiles.ssh[f]);
+    if (field === 'cred_uid' && value) {
+        _profileCredFields(proto).forEach(f => delete _hostDraft.profiles[proto][f]);
     }
     // Re-render the profile's fields when a controller changed (e.g. SNMP
     // version=3 reveals the v3 credential fields; SSH key-source toggles the
     // file/text field).
     const spec = HOST_PROFILES[proto];
-    // cred_uid isn't a schema controller, but toggling it shows/hides the SSH
-    // identity fields, so re-render the SSH section too.
-    const credToggle = (proto === 'ssh' && field === 'cred_uid');
+    // cred_uid isn't a schema controller, but toggling it shows/hides that protocol's
+    // identity fields, so its section has to be redrawn.
+    const credToggle = (field === 'cred_uid');
     if (spec && (credToggle || _hostFieldControls(spec.fields, field))) {
         if (proto === 'ssh') {
             const el = document.getElementById('hmSshFields');
@@ -354,6 +468,12 @@ async function saveHostModal(closeAfter = true) {
     }
     // A local host keeps no SSH connection (it is reached directly).
     if (d.kind !== 'remote') delete profiles.ssh;
+    // A protocol whose identity comes from a credential stores no copy of it: two places
+    // holding one secret means the stale one wins the day somebody rotates the other.
+    for (const [proto, fields] of Object.entries(profiles)) {
+        if (proto === 'ssh' || !fields.cred_uid) continue;
+        _profileCredFields(proto).forEach(f => delete fields[f]);
+    }
     // Honour the auth-method selector: drop the credentials of the other two
     // methods so a stale value (incl. a masked-secret marker that would be
     // restored server-side) can't win over the chosen one.

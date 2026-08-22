@@ -135,6 +135,19 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # opposite until somebody zeroed all four caps in this panel meaning "keep
         # everything" and silently lost two logs and these names.
         min=0, max=10000, env='SS_AUDIT_DETAIL_MAX_ITEMS'),
+    # ══ snmp: the MIB library ════════════════════════════════════════════════
+    # Where the library looks and who it asks — settings of the LIBRARY, which is the core's.
+    # They lived in the SNMP module's own `__module__` block, which put "where do I keep my
+    # vendor MIBs" behind a module card, and made them vanish with the module.
+    Cfg('snmp|mib_dirs', str, '', card='snmp_library', env='SS_SNMP_MIB_DIRS'),
+    # The GitHub repositories an import may pull dependencies from, one template per line.
+    # No card: it is edited by the source list on the Import view, which knows which
+    # templates belong together — a textarea of URL templates is not a thing to hand-write.
+    Cfg('snmp|mib_repos', str, '', card=None),
+    # Anonymous GitHub allows 60 requests an hour, and importing one vendor folder can spend
+    # that on dependency lookups alone. A token raises it to 5000; a secret, so it is
+    # encrypted at rest and masked on the way out (see secret_manager.ENCRYPT_KEYS).
+    Cfg('snmp|github_token', str, '', card='snmp_library', env='SS_SNMP_GITHUB_TOKEN'),
     Cfg('web_admin|backup_dir', str, '', attr='_BACKUP_DIR',
         # Where copies are written. Empty means `<var_dir>/backups`, which is the sane
         # default and the wrong place to leave it: a copy on the same disk as the data it

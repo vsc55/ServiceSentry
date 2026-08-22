@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp import mib_resolver
+from lib.core.snmp.mibs import resolver as mib_resolver
 
 
 def _tree(tmp_path):
@@ -459,10 +459,15 @@ class TestNothingScansItFlatAnyMore:
     def test_no_module_lists_the_raw_directory_directly(self):
         """Three separate places had to be found by hand after the first was fixed, and each
         one failed the same silent way. The shared walker is the only way in."""
-        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for name in ('mib_admin.py', 'mib_resolver.py'):
-            with open(os.path.join(here, name), encoding='utf-8') as fh:
+        # Each module is asked where it is, rather than the path being spelled relative to
+        # this file: the two no longer live in the same tree — the resolver is core now and
+        # the admin is still the watchful's — and a hand-written path would have to be
+        # corrected on every move, silently reading nothing until somebody noticed.
+        from lib.core.snmp.mibs import admin as mib_admin          # noqa: PLC0415
+        for mod in (mib_admin, mib_resolver):
+            with open(os.path.abspath(mod.__file__), encoding='utf-8') as fh:
                 src = fh.read()
+            name = os.path.basename(mod.__file__)
             # `iter_raw_mibs` itself walks; everything else has to go through it.
             body = src.split('def iter_raw_mibs')[0] + \
                 src.split('def iter_raw_mibs')[-1].split('def raw_mib_dirs')[-1]

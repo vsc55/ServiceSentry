@@ -118,6 +118,27 @@ class TestTheLayoutsBelongToTheCore:
             assert os.path.isfile(ui), f'{module} declares {fn} and ships no web/_ui.html'
             assert f'function {fn}(' in _read(ui), f'{module} declares {fn}, which is not defined'
 
+    def test_a_core_section_s_renderer_exists_too(self):
+        """The same rule, on the other side of the fence. A CORE package may claim a section
+        (``PAGE`` in its manifest) and ship its screen in its own ``web/_ui.html``, picked up
+        by the same scanner that finds a module's — and a renderer named in one place and
+        defined in neither is a section that opens on nothing.
+
+        This is the guard that caught the half-way state: SNMP's UI had moved to the core
+        while its page was still declared by the watchful, so the module named a renderer it
+        no longer shipped. Nothing else noticed."""
+        from lib.discovery import scan          # noqa: PLC0415
+        checked = 0
+        for pkg, decl in scan('PAGE'):
+            fn = str((decl or {}).get('render') or '').strip()
+            if not fn:
+                continue          # the core's generic renderer paints it
+            ui = os.path.join(SRC, 'lib', 'core', pkg, 'web', '_ui.html')
+            assert os.path.isfile(ui), f'{pkg} declares {fn} and ships no web/_ui.html'
+            assert f'function {fn}(' in _read(ui), f'{pkg} declares {fn}, not defined'
+            checked += 1
+        assert checked, 'no core section declares a renderer — the scan found nothing to check'
+
     def test_the_retired_renderer_is_really_gone(self):
         """Deleted, not merely unreferenced: a dead copy left in the tree is the one the
         next person edits."""

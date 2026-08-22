@@ -24,7 +24,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp.mib_admin import MibAdmin as MA
+from lib.core.snmp.mibs.admin import MibAdmin as MA
 
 
 @pytest.fixture()
@@ -190,12 +190,12 @@ class TestWhichCopyIsUsed:
 
     def test_a_name_nothing_answers_for_is_simply_absent(self, tree):
         """The listing and the question are two moments, and a file can go between."""
-        from watchfuls.snmp import mib_resolver
+        from lib.core.snmp.mibs import resolver as mib_resolver
         raw = os.path.join(tree['__var_dir__'], 'snmp_mibs', 'raw')
         assert mib_resolver.resolve_raw_sources(raw, ['NOPE-MIB']) == {}
 
     def test_nothing_is_asked_when_there_is_nothing_to_ask(self, tree):
-        from watchfuls.snmp import mib_resolver
+        from lib.core.snmp.mibs import resolver as mib_resolver
         raw = os.path.join(tree['__var_dir__'], 'snmp_mibs', 'raw')
         assert mib_resolver.resolve_raw_sources(raw, []) == {}
         assert mib_resolver.resolve_raw_sources('', ['X-MIB']) == {}
@@ -271,7 +271,7 @@ class TestTheDateEachCopyDeclares:
 
     def test_it_comes_from_the_same_read_as_the_module_name(self, tree):
         """Both facts are in the same header and the listing wants both of every file."""
-        from watchfuls.snmp import mib_resolver
+        from lib.core.snmp.mibs import resolver as mib_resolver
         path = _put(tree, 'net/X-MIB.txt',
                     'X-MIB DEFINITIONS ::= BEGIN\nLAST-UPDATED "200210160000Z"\nEND\n')
         assert mib_resolver.raw_facts(path) == {'module': 'X-MIB', 'updated': '2002-10-16'}

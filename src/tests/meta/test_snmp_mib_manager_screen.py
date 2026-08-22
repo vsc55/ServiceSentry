@@ -26,11 +26,27 @@ import re
 from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
-WEB = os.path.join(SRC, 'watchfuls', 'snmp', 'web')
+WEB = os.path.join(SRC, 'lib', 'core', 'snmp', 'web')
 UI = os.path.join(WEB, '_ui.html')
 MODALS = os.path.join(WEB, '_modals.html')
 STYLES = os.path.join(WEB, '_styles.html')
 CSS = os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')
+# The sources these guards read, named once. They have moved trees before — the resolver is
+# core now and the admin is still the watchful's — and a path spelled inline at ten call
+# sites is ten chances to leave one behind, reading a file that is not there.
+RESOLVER = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'resolver.py')
+MIB_ADMIN = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'admin.py')
+SNMP_INIT = os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py')
+LINT = os.path.join(SRC, 'lib', 'core', 'snmp', 'mibs', 'lint.py')
+
+def _snmp_actions():
+    """``(ACTIONS, READ_ONLY)`` — the operations the panel may invoke, and which change
+    nothing.  Declared in ``lib/core/snmp/manifest.py`` since the library stopped being a
+    check's business; asked of it rather than sliced out of source text."""
+    from lib.core.snmp.manifest import ACTIONS, READ_ONLY      # noqa: PLC0415
+    return ACTIONS, READ_ONLY
+
+
 
 TPL_ID = 'snmpMibsPageTpl'
 
@@ -330,8 +346,8 @@ class TestAFailureIsItsOwnState:
     def test_the_reason_reaches_the_browser_at_all(self):
         """Four hops, and it is dropped at any one of them: pysmi's status carries it, the
         resolver classifies, the job records, the list answers."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
-        adm = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        res = _read(RESOLVER)
+        adm = _read(MIB_ADMIN)
         assert "'errors':  _compile_errors(failed, _status)" in res, \
             'the reason is looked up under the same name the failure was filed under'
         assert "'errors':    result.get('errors', {})" in adm
@@ -360,7 +376,7 @@ class TestTheCompilerIsNotTheOnlyThingThatReadsTheFile:
     def test_the_hints_are_read_now_and_not_stored_with_the_error(self):
         """An error kept from last week beside hints from last week is two stale things
         agreeing with each other. The file is what it is right now."""
-        adm = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        adm = _read(MIB_ADMIN)
         assert '\'hints\'' not in adm, 'findings are being frozen into the failure store'
         assert 'lint_mib' in adm, 'nothing reads them at all'
 
@@ -379,10 +395,8 @@ class TestTheCompilerIsNotTheOnlyThingThatReadsTheFile:
     def test_it_reads_and_does_not_write(self):
         """Checking a file must never be a thing that changes it — and it audits a row per
         look unless it is declared read-only."""
-        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
-        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
-        ro = acts[acts.index('READ_ONLY_ACTIONS'):]
-        assert "'lint_mib_source'" in acts and "'lint_mib_source'" in ro
+        acts, ro = _snmp_actions()
+        assert 'lint_mib_source' in acts and 'lint_mib_source' in ro
 
 
 class TestTheSourceIsReadableAgainstTheError:
@@ -632,13 +646,13 @@ class TestARowIsAModuleAndNotAFileName:
         assert '_mibData.pending' in _fn(_read(UI), '_mibUpdateCompileBtn')
 
     def test_the_listing_ships_that_list_from_the_function_that_decides_it(self):
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         assert "'pending':         _mib_resolver.pending_raw_mibs" in admin
 
     def test_pending_answers_the_name_the_compiler_needs(self):
         """Asked about the MODULE, answered with the FILE: handed a module name pysmi would
         look for a file of that name, find none, and go to the internet for it."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        res = _read(RESOLVER)
         i = res.index('def pending_raw_mibs')
         body = res[i:res.index('\ndef ', i)]
         assert 'raw_module_name(path)' in body and 'compiled_mtime.get(mib)' in body
@@ -652,7 +666,7 @@ class TestACompileThatDidNothingSaysSo:
     def test_an_import_is_resolved_by_the_name_it_asks_for(self):
         """pysmi tries the module name as a FILE name, which in a vendor archive finds
         nothing: DIFFSERV-DSCP-TC lives in `diffserv-dscp-tc-rfc3289.mib`."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        res = _read(RESOLVER)
         assert 'def module_index' in res and 'def _module_reader' in res
         i = res.index('for _dir in raw_mib_dirs(raw_dir):')
         assert '_module_reader' in res[:i], 'the index has to be asked FIRST'
@@ -660,20 +674,20 @@ class TestACompileThatDidNothingSaysSo:
     def test_the_verdict_is_looked_up_under_both_names(self):
         """A module pysmi compiled comes back under the MODULE's name; one it could not parse
         under the name it was HANDED, because it never read the module out of the file."""
-        body = _pyfn(_read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py')),
+        body = _pyfn(_read(RESOLVER),
                      '_classify_compile_results')
         assert 'all_results.get(_mod(m))' in body and 'all_results.get(m)' in body
 
     def test_a_failure_is_reported_under_the_module_name(self):
         """Which is what the panel keys its rows and its stored reasons by."""
-        body = _pyfn(_read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py')),
+        body = _pyfn(_read(RESOLVER),
                      '_classify_compile_results')
         assert '_status[_mod(m)] = st' in body
 
     def test_the_store_is_cleared_by_what_the_job_reached(self):
         """`attempted` listed file names against a result keyed by module: always empty, so
         nothing was ever cleared and a MIB that had since compiled kept its old red row."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         assert "result.get('attempted')" in admin
         assert 'raw_facts(_full)' in admin, 'the error index is keyed by module too'
 
@@ -701,7 +715,7 @@ class TestSomeMibsAreNeverCompiled:
 
     def test_the_listing_ships_the_names_from_the_resolver(self):
         """One list of the two names. Two would be one of them updated on its own."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         assert '_mib_resolver.MACRO_ONLY_MIBS' in admin
         assert "'RFC-1212'" not in admin, 'the admin surface knows the names on its own'
 
@@ -724,7 +738,7 @@ class TestACompiledModuleCanOutliveItsSource:
     def test_the_server_agrees_that_it_is_pending(self):
         """The chips and the compile button read two different answers — that is how the
         panel once showed "Pending 0, Errors 1" over a button compiling three."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        res = _read(RESOLVER)
         i = res.index('def pending_raw_mibs')
         body = res[i:res.index('\ndef ', i)]
         assert 'compiled_source' in body and 'orphaned' in body
@@ -732,7 +746,7 @@ class TestACompiledModuleCanOutliveItsSource:
     def test_provenance_is_read_where_it_is_written(self):
         """pysmi writes the header; the resolver owns everything about compiled modules. The
         admin surface asks it rather than parsing a .py of its own."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         assert 'ASN.1 source' not in admin
         assert '_mib_resolver.compiled_source' in admin
 
@@ -793,7 +807,7 @@ class TestWhatDeletingLeavesBehind:
     def test_a_dependency_is_never_swept_up_with_them(self):
         """A compiled module pysmi did not read out of `raw/` cannot be rebuilt from
         anything here, and the modules that import it stop loading the day it goes."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         i = admin.index('def _stray_compiled')
         body = admin[i:admin.index('\n    @', i)]
         assert 'if not src:' in body and 'continue' in body
@@ -802,7 +816,7 @@ class TestWhatDeletingLeavesBehind:
     def test_the_names_it_compares_come_from_inside_the_files(self):
         """`trunk.mib` declares IEEE8023-LAG-MIB and the .py is named after the module. A
         comparison by file name deletes what is still there and keeps what is not."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         i = admin.index('def _declared_modules')
         body = admin[i:admin.index('\n    @', i)]
         assert 'raw_facts' in body and "['module']" in body
@@ -810,7 +824,7 @@ class TestWhatDeletingLeavesBehind:
     def test_an_emptied_folder_is_swept_too(self):
         """`os.remove` removes files; the folder stays. A parent whose only content is empty
         folders is empty as well, which a walk that stops at the first branch never sees."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         i = admin.index('def _empty_raw_dirs')
         body = admin[i:admin.index('\n    @', i)]
         assert 'os.walk' in body and 'dirname' in body
@@ -821,20 +835,16 @@ class TestWhatDeletingLeavesBehind:
     def test_the_symbol_catalogue_is_dropped_when_something_went(self):
         """It names modules that are no longer there. Discarded and not rebuilt: the next
         MIB Browser open pays for one rebuild, this click does not."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         clean = admin[admin.index('def clean_library'):]
         clean = clean[:clean.index('\n    @')]
         assert '_mib_catalog.discard' in clean
 
     def test_the_report_is_read_only_and_the_sweep_is_not(self):
         """One of them deletes files. The audit log is the difference."""
-        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
-        i = init.index('WATCHFUL_ACTIONS')
-        actions = init[i:init.index('READ_ONLY_ACTIONS')]
-        assert "'clean_library'" in actions and "'library_leftovers'" in actions
-        ro = init[init.index('READ_ONLY_ACTIONS'):]
-        ro = ro[:ro.index('})')]
-        assert "'library_leftovers'" in ro and "'clean_library'" not in ro
+        actions, ro = _snmp_actions()
+        assert 'clean_library' in actions and 'library_leftovers' in actions
+        assert 'library_leftovers' in ro and 'clean_library' not in ro
 
 
 class TestCompilingIsAPlaceAndNotAButton:
@@ -904,19 +914,27 @@ class TestEachWayInSaysWhatItIs:
         for title in ('mibUploadTitle', 'mibImportUrlTitle', 'mibGithubTitle', 'mibArchiveTitle'):
             assert 'id="%s"' % title in markup, f'{title} has no heading'
 
-    def test_the_names_come_from_the_module_and_not_the_core(self):
+    def test_the_names_are_the_section_s_own(self):
+        """This used to read "from the module and not the core", and the rule behind it was
+        real: the core owns no string that names a MODULE's screen. It stopped applying when
+        the screen stopped being a module's — the section is claimed by lib/core/snmp, so its
+        words are core i18n (`snmp_ui`) and its view labels are in `snmp_page`.
+
+        What the guard is for has not changed: each of these names a way in, and a missing
+        one puts an identifier on screen where a heading belongs."""
+        from lib.i18n import TRANSLATIONS          # noqa: PLC0415
         body = _fn(_read(UI), '_snmpImportPageLabels')
         for key in ('mib_upload_title', 'mib_import_url_title', 'mib_github_title',
                     'mib_archive_title'):
             assert key in body
-        import json
         for lang in ('es_ES', 'en_EN'):
-            with open(os.path.join(SRC, 'watchfuls', 'snmp', 'lang', lang + '.json'),
-                      encoding='utf-8') as fh:
-                ui = json.load(fh).get('ui') or {}
+            texts = TRANSLATIONS.get(lang) or {}
+            ui = texts.get('snmp_ui') or {}
             for key in ('mib_upload_title', 'mib_import_url_title', 'mib_github_title',
-                        'mib_archive_title', 'view_compile'):
+                        'mib_archive_title'):
                 assert ui.get(key), f'{key} has no word in {lang}'
+            assert (texts.get('snmp_page') or {}).get('view_compile'), \
+                f'the compile view has no name in {lang}'
 
     def test_the_report_still_gets_the_rest_of_the_page(self):
         """The cards are the top of the page and refuse to grow; what "Compare" answers is
@@ -1037,7 +1055,7 @@ class TestSeveralFilesOneModule:
     def test_the_comparison_is_server_side(self):
         """The listing ships a hash per copy, never the content: comparing in the page would
         mean fetching every duplicate in full to throw most of it away."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         dupes = admin[admin.index('def _duplicate_sources'):admin.index('def diff_mib_files')]
         assert "'sha'" in dupes and "'content'" not in dupes
         assert 'def diff_mib_files' in admin
@@ -1045,13 +1063,13 @@ class TestSeveralFilesOneModule:
     def test_one_derivation_of_what_the_difference_is(self):
         """Versions and files ask the same question. Two implementations of it stay in step
         until the day the context lines or the cap change in one of them."""
-        admin = _strip_comments(_read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py')))
+        admin = _strip_comments(_read(MIB_ADMIN))
         assert admin.count('difflib.unified_diff(') == 1
 
     def test_which_copy_wins_is_asked_of_pysmi(self):
         """It follows pysmi's own directory walk and extension order. Re-derived here, it
         would be right until the release that changed it and silent about having stopped."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        res = _read(RESOLVER)
         i = res.index('def resolve_raw_sources')
         body = res[i:res.index('\ndef ', i)]
         assert 'FileReader' in body
@@ -1059,7 +1077,7 @@ class TestSeveralFilesOneModule:
     def test_the_tree_is_walked_once_for_the_whole_batch(self):
         """The reader re-walks the entire tree on every single lookup, and the listing asks
         it once per duplicate — on a library of a thousand files that is the refresh."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        res = _read(RESOLVER)
         assert 'def resolve_raw_sources' in res, 'one name at a time is one walk at a time'
 
     def test_the_filter_is_not_a_state(self):
@@ -1082,11 +1100,9 @@ class TestSeveralFilesOneModule:
         assert 'mib_dupe_deleted_used' in body
 
     def test_it_is_a_declared_action(self):
-        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
-        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
-        assert "'diff_mib_files'" in acts
-        assert "'diff_mib_files'" in acts[acts.index('READ_ONLY_ACTIONS'):], \
-            'reading a diff writes nothing'
+        acts, ro = _snmp_actions()
+        assert 'diff_mib_files' in acts
+        assert 'diff_mib_files' in ro, 'reading a diff writes nothing'
 
 
 class TestTwoProblemsAreNotOneProblem:
@@ -1106,7 +1122,7 @@ class TestTwoProblemsAreNotOneProblem:
     def test_kinship_is_measured_where_the_files_are_read(self):
         """…which is the action that opens a group, and no longer the listing: reading 529
         files to answer about panels nobody had opened was four minutes of every load."""
-        admin = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_admin.py'))
+        admin = _read(MIB_ADMIN)
         assert 'def _kinship' in admin
         assert "'kinship': _kinship(paths)" in admin
         # Sliced to the next method: `_pyfn` cuts at the next TOP-LEVEL def, and these are
@@ -1119,7 +1135,7 @@ class TestTwoProblemsAreNotOneProblem:
     def test_it_is_the_descriptors_that_are_compared(self):
         """Not the size, not the text: what a MIB declares is what survives being copied,
         renamed and re-indented."""
-        lint = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_lint.py'))
+        lint = _read(LINT)
         assert 'def declared_names' in lint
 
 
@@ -1147,7 +1163,7 @@ class TestTheDateDecidesAndIsShown:
     def test_it_is_read_beside_the_module_name(self):
         """Both facts live in the same header, and the listing wants both of every file: two
         reads and two caches for one header would be one of them going stale on its own."""
-        res = _read(os.path.join(SRC, 'watchfuls', 'snmp', 'mib_resolver.py'))
+        res = _read(RESOLVER)
         i = res.index('def raw_facts')
         body = res[i:res.index('\ndef ', i)]
         assert 'module' in body and 'updated' in body
@@ -1210,23 +1226,21 @@ class TestTheHistoryIsServerSide:
         """The mechanism for a module keeping data in the shared database, used as intended:
         a file beside the MIBs would be per-container, and a deployment with a web container
         and a worker container shares the database and not the disk."""
-        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
+        init = _read(SNMP_INIT)
         assert 'def discover_db_tables' in init
         assert 'mib_versions.SCHEMA' in init
 
     def test_editing_needs_edit_rights_and_reading_does_not(self):
-        """`READ_ONLY_ACTIONS` is what the route checks to decide whether `modules_view` is
-        enough. A write action listed there is a write anybody who can look can do."""
-        init = _read(os.path.join(SRC, 'watchfuls', 'snmp', '__init__.py'))
-        acts = init[init.index('WATCHFUL_ACTIONS'):init.index('WATCHFUL_TOOLBAR')]
-        ro = acts[acts.index('READ_ONLY_ACTIONS'):]
+        """`READ_ONLY` is what the route checks to decide whether `snmp_view` is enough.
+        A write action listed there is a write anybody who can look can do."""
+        acts, ro = _snmp_actions()
         for a in ('save_mib_source', 'restore_mib_version', 'list_mib_versions',
                   'get_mib_version'):
-            assert f"'{a}'" in acts, f'{a} is not a declared action — the route 404s'
+            assert a in acts, f'{a} is not a declared action — the route 404s'
         for a in ('save_mib_source', 'restore_mib_version'):
-            assert f"'{a}'" not in ro, f'{a} is marked read-only — anyone who can look can write'
+            assert a not in ro, f'{a} is marked read-only — anyone who can look can write'
         for a in ('list_mib_versions', 'get_mib_version'):
-            assert f"'{a}'" in ro, f'{a} audits a row for every look'
+            assert a in ro, f'{a} audits a row for every look'
 
     def test_the_actor_reaches_the_module(self):
         """A history that says only WHAT changed answers half the question on a panel with
@@ -1434,19 +1448,19 @@ class TestImportingIsItsOwnView:
     (`/module/snmp/import`) that a person can send to somebody else."""
 
     def test_the_section_declares_its_views(self):
-        """The module says which it has and names them in its own lang file — the core ships
-        no string that names a module's view."""
-        import json
-        with open(os.path.join(SRC, 'watchfuls', 'snmp', 'schema.json'), encoding='utf-8') as fh:
-            views = (json.load(fh)['__page__'].get('views') or [])
+        """The section says which views it has and names them in CORE i18n — it is claimed by
+        a core package now, and a section whose words lived in a module would go quiet the
+        day somebody removed it."""
+        from lib.core.snmp.manifest import PAGE          # noqa: PLC0415
+        from lib.i18n import TRANSLATIONS                # noqa: PLC0415
+        views = PAGE['views']
         assert [v['slug'] for v in views] == ['library', 'import', 'compile',
                                               'browser', 'profiles']
         for lang in ('es_ES', 'en_EN'):
-            with open(os.path.join(SRC, 'watchfuls', 'snmp', 'lang', lang + '.json'),
-                      encoding='utf-8') as fh:
-                ui = json.load(fh).get('ui') or {}
+            words = (TRANSLATIONS.get(lang) or {}).get(PAGE['i18n']) or {}
+            assert words.get('title'), f'the section has no title in {lang}'
             for v in views:
-                assert ui.get(v['label']), f'{v["label"]} has no word in {lang}'
+                assert words.get(v['label']), f'{v["label"]} has no word in {lang}'
 
     def test_the_import_controls_live_in_the_import_view(self):
         """Each of them exactly once in the file: two live copies of an id is a control that

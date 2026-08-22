@@ -43,25 +43,60 @@ def _frozenset_names(src: str, name: str) -> set:
 
 
 def _modules() -> list:
+    """``[(vocabulary, [state-changing actions])]`` for every surface the audit log names.
+
+    Two sources now, one rule. A watchful declares its actions in its ``__init__``; a CORE
+    package that owns a surface declares them in its manifest — SNMP's library and catalogue
+    operations moved there when they stopped being a check's business. Both end up in the
+    same audit row, read through the same module vocabulary, so both are checked here.
+    """
     out = []
     for mod in sorted(os.listdir(MODULES)):
         init = os.path.join(MODULES, mod, '__init__.py')
         if not os.path.isfile(init):
             continue
         src = _read(init)
-        changing = _frozenset_names(src, 'WATCHFUL_ACTIONS') \
-            - _frozenset_names(src, 'READ_ONLY_ACTIONS')
+        changing = _frozenset_names(src, 'WATCHFUL_ACTIONS')             - _frozenset_names(src, 'READ_ONLY_ACTIONS')
         if changing:
             out.append((mod, sorted(changing)))
+    out.extend(_core_surfaces())
+    return out
+
+
+def _core_surfaces() -> list:
+    """The same, for core packages whose manifest declares ``ACTIONS``.
+
+    The vocabulary is still the module's lang file — that is where these words live and where
+    the audit renderer reads them — so the pair is ``(module_name, actions)`` exactly as
+    above. This is about which words must exist, not about who runs the operation.
+    """
+    from lib.discovery import scan          # noqa: PLC0415
+    ro = dict(scan('READ_ONLY'))
+    out = []
+    for pkg, actions in scan('ACTIONS'):
+        changing = sorted(set(actions) - set(ro.get(pkg) or ()))
+        if changing:
+            out.append((pkg, changing))
     return out
 
 
 def _ui(mod: str, lang: str) -> dict:
+    """Where *mod*'s action words live.
+
+    A watchful keeps them in its own lang file. A CORE surface keeps them in core i18n, as
+    plain ``audit_v_*`` keys — which is where ``_auditWord`` looks FIRST, so the renderer
+    needed no change when they moved. Both are checked, because both end up in the same row.
+    """
     path = os.path.join(MODULES, mod, 'lang', lang + '.json')
-    if not os.path.isfile(path):
-        return {}
-    with io.open(path, encoding='utf-8') as fh:
-        return json.load(fh).get('ui') or {}
+    if os.path.isfile(path):
+        with io.open(path, encoding='utf-8') as fh:
+            own = json.load(fh).get('ui') or {}
+        if own:
+            return own
+    from lib.i18n import TRANSLATIONS              # noqa: PLC0415
+    texts = TRANSLATIONS.get(lang) or {}
+    return {k: v for k, v in texts.items()
+            if isinstance(k, str) and k.startswith(('audit_v_', 'audit_f_'))}
 
 
 class TestTheScanItself:

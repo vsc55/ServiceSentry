@@ -684,7 +684,9 @@ For host-aware / history / credential-backed modules, declare these in `__module
 ```json
 "__module__": {
     "api_ver": "v1",
-    "__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]},
+    "__host_profile__": {"key": "snmp", "address_field": "host",
+                     "fields": ["host", "port", "version", "community",
+                                "device_profiles"]},
     "__host_multiple__": true,
     "__history__": {"field": "percent", "unit": "%", "label": "Usage"},
     "enabled": {"type": "bool", "default": true}

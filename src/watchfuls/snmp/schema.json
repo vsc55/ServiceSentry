@@ -1,29 +1,17 @@
 {
     "__icon__": "bi-hdd-stack",
-    "__page__": {
-        "id": "snmp", "icon": "bi-hdd-stack", "order": 25,
-        "placement": "system", "perm": "modules_view",
-        "render": "renderSnmpMibsPage",
-        "views": [
-            {"slug": "library", "icon": "bi-hdd-stack", "label": "view_mibs"},
-            {"slug": "import", "icon": "bi-cloud-download", "label": "view_import"},
-            {"slug": "compile", "icon": "bi-gear", "label": "view_compile"},
-            {"slug": "browser", "icon": "bi-diagram-3", "label": "view_browser"},
-            {"slug": "profiles", "icon": "bi-grid-3x3-gap", "label": "view_profiles"}
-        ]
-    },
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},
-        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50},
-        "mib_dirs": {"type": "str",  "default": ""},
-        "mib_repos": {"type": "str", "default": "", "hidden": true},
-        "github_token": {"type": "str", "default": "", "secret": true}
+        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
-    "__backup_part__": {"id": "mibs", "dir": "snmp_mibs/raw",
-                        "label_key": "backup_part_mibs", "default": false},
-    "__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]},
+    "__host_profile__": {"key": "snmp", "address_field": "host",
+                         "fields": ["host", "port",
+                                    "version", "community",
+                                    "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key",
+                                    "snmpv3_auth_protocol", "snmpv3_priv_protocol",
+                                    "device_profiles"]},
     "__credential__": {
         "type": "snmp_auth",
         "fields": [

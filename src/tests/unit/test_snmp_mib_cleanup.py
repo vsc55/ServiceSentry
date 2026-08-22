@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from watchfuls.snmp.mib_admin import MibAdmin as MA
+from lib.core.snmp.mibs.admin import MibAdmin as MA
 
 
 _MIB = 'A-MIB DEFINITIONS ::= BEGIN\nEND\n'
@@ -141,7 +141,7 @@ class TestSweepingThemUp:
 
     def test_the_symbol_catalogue_goes_when_something_did(self, tree, monkeypatch):
         """It names modules that are no longer there, and no timestamp can notice that."""
-        from watchfuls.snmp import mib_catalog
+        from lib.core.snmp.mibs import catalog as mib_catalog
         seen = []
         monkeypatch.setattr(mib_catalog, 'discard', lambda v: seen.append(v))
         MA.clean_library(tree)

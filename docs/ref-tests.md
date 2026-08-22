@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.310 tests** (6280 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-21). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.400 tests** (6370 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2738,7 +2738,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 26 tests
+**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 27 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2776,7 +2776,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 46. Hosts — Asistente de migración
 
-**Archivo:** `tests/unit/test_hosts_migrate.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_migrate.py` — 8 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3562,7 +3562,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 35 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 42 tests
 
 **Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
 veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
@@ -3588,7 +3588,7 @@ cuando el aparato renumera).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_walk_oid.py` — 11 tests
+**Archivo:** `tests/unit/test_snmp_walk_oid.py` — 11 tests
 
 **Recorrer UNA columna**, que es lo que pide una métrica de perfil. El walk de descubrimiento
 barre dos subárboles fijos, trunca los valores a 120 caracteres y se traga los errores, porque
@@ -3607,7 +3607,7 @@ nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 48 tests
+**Archivo:** `tests/unit/test_snmp_profiles.py` — 48 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -3634,7 +3634,7 @@ perfiló, y cuando un firmware mueve un OID el arreglo no espera a la siguiente 
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_lint.py` — 36 tests
+**Archivo:** `tests/unit/test_snmp_mib_lint.py` — 36 tests
 
 **Decir por qué un MIB no va a compilar, antes de que el compilador lo diga mal.** Dos MIB de
 fabricante se rompieron aquí con un día de diferencia y los dos se rompieron de las mismas dos
@@ -3658,7 +3658,7 @@ verdad.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_import_filter.py` — 41 tests
+**Archivo:** `tests/unit/test_snmp_mib_import_filter.py` — 41 tests
 
 **Qué entra en una importación, y dónde lo deja.** Tres cosas fallaban al entrar y las tres
 callaban. **Un nombre no es una prueba**: la carpeta `mibs/` de Net-SNMP trae `nodemap`,
@@ -3682,7 +3682,7 @@ rechazados en cada ejecución, un puñado distinto cada vez.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_dupes.py` — 32 tests
+**Archivo:** `tests/unit/test_snmp_mib_dupes.py` — 32 tests
 
 **Varios ficheros, un solo nombre de módulo.** pysmi resuelve un import **por nombre**: de tres
 ficheros llamados `SNMPv2-TC` lee uno, compila ése y no menciona los otros dos. Un archivo de
@@ -3708,7 +3708,7 @@ El listado decía `×3`, que es el hecho y no la pregunta. Las preguntas son si 
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_edit.py` — 52 tests
+**Archivo:** `tests/unit/test_snmp_mib_edit.py` — 52 tests
 
 **Editar un MIB, y poder deshacerlo.** Los fabricantes publican MIB rotos —SYNOLOGY-SMB-MIB no
 ha compilado nunca en ninguna parte— y desde aquí no hay nada que hacer salvo dejar que alguien
@@ -3737,7 +3737,7 @@ que no funcionó.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_errors.py` — 20 tests
+**Archivo:** `tests/unit/test_snmp_mib_errors.py` — 20 tests
 
 **Por qué un MIB no compiló, escrito donde están los MIB.** Compilar doscientos MIB no es algo
 que nadie mire hasta el final, y los fallos son justo a lo que se vuelve — con el modal ya
@@ -3756,7 +3756,7 @@ porque una fila roja que nadie puede quitar haciendo lo obvio es peor que ningun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_tree.py` — 48 tests
+**Archivo:** `tests/unit/test_snmp_mib_tree.py` — 48 tests
 
 **Los MIB en bruto viven en un árbol, y todo lo que los lee tiene que saberlo.** En cuanto una
 importación conserva la carpeta de la que viene un fichero, un MIB que estaba en `raw/` pasa a
@@ -3784,7 +3784,7 @@ ahora llevan su carpeta) y lo que pysmi **compila** (nombres de módulo, que nun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_archive.py` — 76 tests
+**Archivo:** `tests/unit/test_snmp_mib_archive.py` — 76 tests
 
 **El archivo de MIBs de un fabricante, y distinguir una actualización de un retroceso.** Dos
 cosas que un catálogo de MIBs tiene que acertar en cuanto puede importar de más de un sitio, y
@@ -3821,7 +3821,7 @@ delante de lo instalado; la fecha del fichero dice cuándo se descargó).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_cleanup.py` — 15 tests
+**Archivo:** `tests/unit/test_snmp_mib_cleanup.py` — 15 tests
 
 **Lo que un borrado deja atrás.** `compiled/` es plano y cada fichero lleva el nombre del
 **módulo** —`IEEE8023-LAG-MIB.py`, se llamara como se llamara el fuente y estuviera en la
@@ -3844,7 +3844,7 @@ queda, y también la madre cuyo único contenido es esa carpeta.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 52 tests
+**Archivo:** `tests/unit/test_snmp_profiles_actions.py` — 52 tests
 
 **El catálogo, tal y como lo recibe el panel** — y preguntarle a un aparato qué es. Hasta que
 estas dos acciones existieron, la matriz de OIDs era real e invisible: tres ficheros JSON, un
@@ -3863,7 +3863,7 @@ parecen buenos, y ése es justo el fallo que tiene que confirmar una persona).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profile_catalog.py` — 66 tests
+**Archivo:** `tests/unit/test_snmp_profile_catalog.py` — 66 tests
 
 **Una palabra en lugar de quince perfiles.** Un Synology contesta quince perfiles —sistema,
 discos, SMART, volúmenes, SAI…— y cada uno es correctamente un perfil aparte, porque son
@@ -3898,7 +3898,7 @@ sería un aparato al que no se le asignó nada.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_metrics.py` — 28 tests
+**Archivo:** `tests/unit/test_snmp_metrics.py` — 28 tests
 
 **Los contadores, y las dos formas en que mienten.** Un contador de bytes es acumulativo:
 dibujado en crudo es una línea que sólo sube, en la que una caída de servicio es un tramo plano
@@ -4187,7 +4187,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ## 76. Hosts — Primitivas de resolución (lib/hosts/resolve.py)
 
-**Archivo:** `tests/unit/test_hosts_resolve.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_resolve.py` — 11 tests
 
 ### `TestHostProfileSpecs` — Normalización de specs de perfil
 
@@ -4879,7 +4879,7 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
 
-**Archivo:** `tests/unit/test_module_pages.py` — 20 tests
+**Archivo:** `tests/unit/test_module_pages.py` — 21 tests
 **Archivo:** `tests/integration/test_module_pages.py` — 12 tests
 
 Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo **`/module/<id>`**, en su propio espacio de nombres: así una sección futura del core no puede chocar con ella ni al revés. Las **vistas** de esa sección (varias disposiciones bajo un desplegable) están en [§131](#131-una-sección-de-módulo-puede-tener-más-de-una-vista).
@@ -5256,6 +5256,140 @@ se incluye da un panel vacío sin error en ninguna parte.
 | `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
 | `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
 | `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 97. SNMP contesta por sí mismo
+
+**Archivo:** `tests/integration/test_wa_snmp_routes.py` — 12 tests
+
+La biblioteca, el catálogo y preguntarle a un dispositivo sólo eran alcanzables en
+`/api/v1/modules/watchfuls/snmp/<acción>`: una ruta que describía dónde vivía el código en vez
+de de qué va el endpoint, y una puerta (`modules_view`) que no sabía distinguir «deja a esta
+persona compilar MIB» de «deja a esta persona ver todos los módulos del panel».
+
+Lo que fijan estos tests es **la puerta**, porque es la parte que cuesta cuando está mal: una
+operación alcanzable por quien no debería, o una lectura que exige permisos de escritura y
+escribe una fila de auditoría por cada vistazo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSurfaceExists::test_a_read_only_action_answers` | La ruta existe y contesta |
+| `TestTheSurfaceExists::test_it_also_answers_a_get` | La ruta de módulo lo hacía y no valía la pena estrechar la capacidad de paso: listar una biblioteca es una lectura |
+| `TestTheSurfaceExists::test_an_unknown_action_is_a_404_and_not_a_500` | Una acción que no existe se contesta, no se revienta |
+| `TestTheSurfaceExists::test_an_action_of_the_module_is_not_reachable_here` | `discover` busca OIDs para el campo de un check, así que sigue siendo del check. Una superficie que aceptara las dos cosas dejaría esa línea sin significado |
+| `TestTheGate::test_anonymous_is_refused` | Sin sesión no se entra |
+| `TestTheGate::test_a_viewer_may_read_the_library` | Leer una biblioteca de MIB dice qué sabe medir el panel: el mismo tipo de hecho que el resto de lo que ve un viewer |
+| `TestTheGate::test_a_viewer_may_not_change_it` | **El que importa.** Compilar, importar, borrar y escribir perfiles son `snmp_manage`; un flag de solo-lectura que dejara pasar cualquiera de ellos sería una escritura que puede hacer cualquiera que pueda mirar |
+| `TestTheGate::test_an_editor_may_change_it` | Y que la puerta no se pase de celosa |
+| `TestTheGate::test_the_modules_permission_no_longer_opens_it` | **El corte limpio.** Un rol con `modules_view` y nada más alcanzaba toda la superficie SNMP, porque un watchful no tiene flags propios — que es justo lo que hacía imposible decir «dale la biblioteca de MIB» |
+| `TestTheLibrarySettingsComeFromTheConfig::test_the_route_ignores_what_the_client_sends` | **El que tiene coste.** Una lista de carpetas enviada por el cliente es un cliente eligiendo qué lee el servidor de su propio disco |
+| `TestTheLibrarySettingsComeFromTheConfig::test_what_the_config_holds_is_what_arrives` | Y que sí llegan: cazó que la ruta llamaba al lector de config con los argumentos mal y el `except` se lo tragaba — los ajustes no se aplicaban nunca, en silencio |
+| `TestTheLibrarySettingsComeFromTheConfig::test_the_token_is_a_core_secret` | Se cifraba porque el módulo lo declaraba `secret`, y esa declaración deja de aplicar cuando el ajuste sale del módulo. Sin nombrarlo en el core, la mudanza lo habría escrito en claro |
+
+---
+
+## 98. Un dispositivo es un host, no una entrada de módulo sobre uno
+
+**Archivo:** `tests/unit/test_snmp_devices.py` — 16 tests
+
+Es la conducta que hace verdad la frase «SNMP es configuración del dispositivo». Antes de
+esto, darle a un host una comunidad y un juego de perfiles no compraba nada hasta que
+existía una **segunda** cosa: una entrada en el módulo SNMP apuntando de vuelta a ese host.
+El dispositivo guardaba la configuración y el módulo decidía si alguien la leía.
+
+Ahora contesta el registro de hosts: un host con perfil `snmp` y al menos un perfil de
+dispositivo asignado **es** un dispositivo, y se muestrea. No hace falta nada más.
+
+Las tres cosas que esto deliberadamente **no** hace pesan tanto como la que hace:
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatCountsAsADevice::test_a_host_with_profiles_assigned_is_sampled` | Un host configurado se muestrea sin ninguna entrada de módulo |
+| `TestWhatCountsAsADevice::test_a_host_with_a_community_but_nothing_assigned_is_not` | Alcanzable no es lo mismo que digno de graficar: sin perfiles no hay nada que medir, y muestrearlo registraría nada con pinta de haber funcionado |
+| `TestWhatItRefusesToDecide::test_a_host_an_item_already_speaks_for_is_left_alone` | Muestrearlo dos veces serían dos respuestas a «qué está haciendo este dispositivo», con dos líneas base de contador independientes |
+| `TestWhatItRefusesToDecide::test_maintenance_is_not_decided_here` | Lo decide `resolve_host`, por donde pasa todo ítem muestreado: un sitio donde un host en mantenimiento deja de leerse, no dos que tengan que coincidir |
+| `TestWhatItRefusesToDecide::test_it_returns_an_item_and_not_a_connection` | Construir aquí la conexión sería una segunda implementación de la mezcla que ya hace `resolve_host`, y las dos discreparían en cuanto cambiara una |
+| `TestItCannotTakeACycleDown::*` (×4) | Un registro ilegible significa cero dispositivos extra este ciclo — el mismo resultado que no tener ninguno, y no vale un ciclo de monitorización caído |
+| `TestTheKeyIsStable::*` (×3) | El estado de contadores y las filas de historial se archivan bajo esa clave: si cambiara entre ciclos reiniciaría cada tasa y partiría cada gráfica |
+
+Y en `tests/unit/test_hosts_resolve.py`, la convención que lo sostiene: un resultado cuya
+clave empieza por `host.` pertenece a un **host** y no a un check, que es lo que permite a la
+pestaña de Servidores atribuirlo. Sin eso un dispositivo puede muestrearse, darse por caído, y
+seguir enseñando un guion neutro.
+
+---
+
+## 99. Meta — Una conexión SNMP descrita dos veces
+
+**Archivo:** `tests/meta/test_snmp_host_profile_agrees.py` — 5 tests
+
+`lib/core/snmp/manifest.py` declara el perfil que lleva un **host**: lo que dibuja el
+formulario de Servidores y lo que hereda cualquier check atado a ese host.
+`watchfuls/snmp/schema.json` declara los mismos campos en un ítem *server*, porque un check
+contra una IP suelta tiene que seguir siendo posible sin dar de alta el dispositivo.
+
+Ninguna se puede derivar de la otra: la del core es Python que se lee antes de cargar ningún
+módulo, la del módulo es dato que renderiza el navegador. Así que están escritas dos veces, y
+esto es lo que impide que eso sea un bug esperando: un `show_when` que se separa esconde un
+campo en una pantalla y no en la otra, un `options` que se separa ofrece un protocolo de
+autenticación que el check no sabe usar, y un `secret` que se separa **deja de cifrar una
+contraseña** — y nada de eso levanta un error en ninguna parte.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTwoDescriptionsAgree::test_every_core_field_exists_on_the_check` | Un check inline puede decir todo lo que puede decir un host, o el caso «IP suelta» es de segunda y no sabe hacer SNMPv3 |
+| `TestTheTwoDescriptionsAgree::test_the_metadata_matches_field_by_field` | Tipo, default, opciones, `show_when`, `secret`, `multi`, mín/máx. El `placeholder` queda fuera a propósito: es una pista de una caja vacía y cada formulario puede redactarla a su manera |
+| `TestTheTwoDescriptionsAgree::test_the_module_still_inherits_them_when_bound` | El módulo conserva su `__host_profile__`: es la declaración que hace que un check atado a un host herede estos campos en vez de repetirlos |
+| `TestTheTwoDescriptionsAgree::test_the_core_declaration_is_the_one_the_form_draws` | La recoge el escáner compartido de `manifest.py`, así que el catálogo la ofrece esté o no instalado el watchful — que es justo el objetivo |
+| `TestTheTwoDescriptionsAgree::test_every_field_is_named_in_both_languages` | Una etiqueta que falta pone el nombre crudo del campo en pantalla, y eso solo se ve mirando la página |
+
+---
+
+## 99a. Meta — Los dos valores por defecto que tienen que coincidir
+
+**Archivo:** `tests/meta/test_snmp_defaults_agree.py` — 4 tests
+
+Los valores por defecto de conexión SNMP están escritos **dos veces a propósito**, porque los
+dos lectores no pueden leer lo mismo: `lib/core/snmp/defaults.py` es lo que lee el **código**
+cuando un servidor deja un campo vacío (planificador, pantalla de prueba, descubrimiento), y
+`watchfuls/snmp/schema.json` es lo que lee el **navegador** para pintar el formulario — un
+esquema es dato, y un dato no puede llamar a una constante de Python.
+
+El fallo que se sigue de eso es del tipo silencioso. Cambia el default de `timeout` en el core
+y el formulario sigue ofreciendo el viejo como placeholder; cámbialo en el esquema y un check
+que deje el campo en blanco sigue usando el viejo. No salta nada, no se registra nada, y el
+número de la pantalla sencillamente no es el número que se usa.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTwoCopiesAgree::test_every_core_default_is_the_schema_s_default` | Campo a campo: si el core dice 161 y el formulario ofrece otro, lo dice con los dos valores |
+| `TestTheTwoCopiesAgree::test_the_core_covers_what_opening_a_connection_needs` | Puerto, versión y comunidad: sin ellos no hay conversación que empezar |
+| `TestTheTwoCopiesAgree::test_the_check_s_own_settings_are_not_in_it` | `timeout`/`retries` son política del check, no del protocolo — meterlos aquí haría del core el tercer sitio con una opinión |
+| `TestTheTwoCopiesAgree::test_the_schema_is_where_the_form_reads_it` | Control positivo: si el esquema dejara de declarar defaults, todo lo anterior pasaría comparando nada |
+
+---
+
+## 99b. Meta — La dependencia apunta en un solo sentido
+
+**Archivo:** `tests/meta/test_core_does_not_import_modules.py` — 3 tests
+
+`lib/` es el cimiento y `watchfuls/` lo que se enchufa en él, y la relación solo funciona en
+una dirección: un watchful importa `lib.modules.ModuleBase` y lo que necesite, mientras que el
+core se entera de los módulos **descubriéndolos** —leyendo su `schema.json` del disco,
+escaneando declaraciones— y nunca importando uno. Eso es lo que hace que un módulo se pueda
+quitar, y lo que permite probar el core sin ninguno.
+
+La regla era cierta y no estaba escrita. Se escribió al empezar a mudar SNMP a
+`lib/core/snmp`: una mudanza a medias es justo cuando alguien pone
+`from watchfuls.snmp import …` para que resuelva un import, y no fallaría nada — `lib` pasaría
+a depender de un módulo que depende de `lib`, un ciclo en diferido.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheDependencyPointsOneWay::test_no_core_file_imports_a_watchful` | Ningún `.py` bajo `lib/` importa `watchfuls`, ni siquiera diferido dentro de una función: un ciclo roto moviendo el import al cuerpo sigue siendo el core dependiendo de un módulo |
+| `TestTheDependencyPointsOneWay::test_the_scan_reaches_the_files_it_claims_to` | Una guarda que recorre un árbol vacío pasa por el motivo equivocado |
+| `TestTheDependencyPointsOneWay::test_the_pattern_would_catch_one` | Control positivo: lo que se cree es la expresión, no la ausencia de infractores. Un comentario que mencione el import, o una ruta que contenga `watchfuls`, no cuentan |
 
 ---
 
@@ -6173,7 +6307,7 @@ la clase.
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
-**Archivo:** `tests/unit/test_wa_module_page_views.py` — 47 tests
+**Archivo:** `tests/unit/test_wa_module_page_views.py` — 48 tests
 
 Un módulo aporta una sección de primer nivel declarando `__page__` y contestando con una
 forma fija: secciones de filas, cada fila con estado, mensaje y lo que la comprobación haya
@@ -8470,7 +8604,7 @@ mira las pantallas sin darle el registro con ella.
 
 ---
 
-**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 54 tests
+**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 63 tests
 
 **La pantalla del catálogo de perfiles**: el cableado que hace visible un catálogo. Un watchful
 trae su propia interfaz en tres ficheros que una convención recoge, y una pantalla hecha así

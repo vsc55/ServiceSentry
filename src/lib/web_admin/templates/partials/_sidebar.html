@@ -163,11 +163,18 @@
                     {% for t in panel_tabs %}
                     {# data-nav-module on a module's tab: it is offered only while its module
                        is configured and on, and that changes while the panel is open, so
-                       syncModuleSections() decides. Core tabs carry no module and are
-                       governed by applyRoleRestrictions() alone. #}
+                       syncModuleSections() decides.
+
+                       data-nav-perm on EVERY page-derived tab (`t.url`), with or without a
+                       module: applyRoleRestrictions() reveals by permission and already
+                       treats "no module" as active. Emitting it only alongside a module left
+                       a CORE-declared section — SNMP's, the first of them — carrying neither
+                       attribute, so nothing ever revealed it and it shipped hidden. The
+                       panel's own tabs (no `url`) stay governed by id, as before. #}
                     <li class="nav-item{% if not standalone and (t.id in subtabs or t.views) %} ss-sb-has-sub{% endif %}"
                         id="tab-{{ t.id }}-li" style="display:none" role="presentation"
-                        {% if t.module %}data-nav-module="{{ t.module }}" data-nav-perm="{{ t.perm }}"{% endif %}>
+                        {% if t.module %}data-nav-module="{{ t.module }}"{% endif %}
+                        {% if t.url %}data-nav-perm="{{ t.perm }}"{% endif %}>
                         {% if standalone %}
                         {# On a standalone page the panes don't exist → deep-link into /admin #}
                         <a class="ss-sb-item ss-sb-subitem" href="/admin?tab={{ t.id }}"

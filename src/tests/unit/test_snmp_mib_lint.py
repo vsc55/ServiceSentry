@@ -13,7 +13,7 @@ finding only means "go and look at that line" while findings are rare. Both clas
 it produced are pinned below, because both were invisible until it was run over real files.
 """
 
-from watchfuls.snmp.mib_lint import (_blank, declared_names, last_updated,
+from lib.core.snmp.mibs.lint import (_blank, declared_names, last_updated,
                                     lint_mib, module_name)
 
 

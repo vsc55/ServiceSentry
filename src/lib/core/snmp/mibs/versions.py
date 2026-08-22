@@ -36,6 +36,16 @@ MODULE = 'snmp'
 # One row per saved version. `content` is the whole file: MIBs are tens of kilobytes and a
 # diff-based store would buy space at the price of being able to read a version on its own,
 # which is the only thing anybody wants from it.
+# ── Why the table is still called ``mod_snmp_mib_versions`` ───────────────────────────────────
+# The code moved to the core; the table did not, and that is deliberate. A table name is a
+# fact about DATA — every installation already has rows under this one — while where the code
+# lives is a fact about the source tree, and renaming one because the other moved would spend
+# a migration on tidiness. It buys nothing a reader of this file cannot get from this comment,
+# and it can go wrong on a database this project does not own.
+#
+# ``module_table`` is kept for the same reason: it is what produces that exact name. If the
+# name is ever changed it should be for a reason of its own, with the migration written and
+# tested on all three engines.
 SCHEMA = module_table(MODULE, 'mib_versions', (
     Column('uid',        'TEXT',    primary_key=True),
     # The MIB module name — what pysmi compiles by, and what survives the file being moved

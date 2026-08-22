@@ -10,6 +10,35 @@ duplicated between the two, so the shared behaviour lives in one place.
 
 from __future__ import annotations
 
+# ── Results that belong to a host rather than to a check ─────────────────────────────────
+#
+# A check is an item somebody configured, and its result is filed under that item's key. Some
+# results have no item behind them: a device the panel monitors because the HOST says it is
+# one — an SNMP profile with device profiles assigned — is read without anybody creating a
+# check about it. Those results still belong to a host, and the Servers tab has to be able to
+# say so, or a device can be sampled, reported down, and still show a neutral dash.
+#
+# The convention rather than a module name: any module may file a result this way, and core
+# code that reads it stays ignorant of which one did.
+HOST_RESULT_PREFIX = 'host.'
+
+
+def host_result_key(host_uid: str) -> str:
+    """The result key a host-owned (item-less) result is recorded under."""
+    return f'{HOST_RESULT_PREFIX}{host_uid}'
+
+
+def host_uid_from_key(key: str) -> str:
+    """The host uid a result key names, or ``''`` when it names a check instead.
+
+    Tolerates the ``<key>/<metric>`` composite the recorders already use, so
+    ``host.abc123/metrics`` answers ``abc123``.
+    """
+    text = str(key or '')
+    if not text.startswith(HOST_RESULT_PREFIX):
+        return ''
+    return text[len(HOST_RESULT_PREFIX):].split('/', 1)[0].strip()
+
 
 def host_profile_specs(host_profile) -> list[dict]:
     """Normalise a module's ``__host_profile__`` to a list of spec dicts.
