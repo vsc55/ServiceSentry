@@ -81,11 +81,22 @@ def _core_surfaces() -> list:
 
 
 def _ui(mod: str, lang: str) -> dict:
+    """Where *mod*'s action words live.
+
+    A watchful keeps them in its own lang file. A CORE surface keeps them in core i18n, as
+    plain ``audit_v_*`` keys — which is where ``_auditWord`` looks FIRST, so the renderer
+    needed no change when they moved. Both are checked, because both end up in the same row.
+    """
     path = os.path.join(MODULES, mod, 'lang', lang + '.json')
-    if not os.path.isfile(path):
-        return {}
-    with io.open(path, encoding='utf-8') as fh:
-        return json.load(fh).get('ui') or {}
+    if os.path.isfile(path):
+        with io.open(path, encoding='utf-8') as fh:
+            own = json.load(fh).get('ui') or {}
+        if own:
+            return own
+    from lib.i18n import TRANSLATIONS              # noqa: PLC0415
+    texts = TRANSLATIONS.get(lang) or {}
+    return {k: v for k, v in texts.items()
+            if isinstance(k, str) and k.startswith(('audit_v_', 'audit_f_'))}
 
 
 class TestTheScanItself:

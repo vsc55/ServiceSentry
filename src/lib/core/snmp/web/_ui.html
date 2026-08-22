@@ -3,7 +3,7 @@
    Injected into the dashboard's <script> block by the generic
    module-web-UI include mechanism in _js_modules.html.
    All user-visible strings are read from this module's own ui
-   i18n block via _modUiStr() — no SNMP strings in web_admin.
+   core i18n (`snmp_ui`) via _snmpT() — the screens are the core's, and so are their words.
    ================================================================ #}
 
 // ──────────────────────────── MIB Manager ─────────────────────────
@@ -154,8 +154,29 @@ function _mibRenderDetailsTbody() {
 }
 
 // Shorthand: read a ui string from the active module's own lang file.
+/** A word of these screens, in the reader's language.
+ *
+ *  Core i18n (`snmp_ui`), not a module's: the screens are the core's, and a section whose
+ *  vocabulary lived in a watchful would go mute the day somebody removed it — labels reading
+ *  as their own keys, which is the failure that only shows up on the page.
+ *
+ *  The fallback is the English the caller passes, so a key added to the JS before it is added
+ *  to the lang files reads as a sentence rather than as an identifier. */
+function _snmpT(key, fallback) {
+    const i = (typeof I18N === 'object' && I18N) || {};
+    const ui = i.snmp_ui || {};
+    if (key in ui) return ui[key];
+    // …and the section's OWN words (`snmp_page`): the view names are declared there for the
+    // sidebar, and the screens ask for the same ones to title themselves. Looked up in one
+    // place only, the headings quietly fell back to the English the caller passes — which in
+    // Spanish reads "Import" over a pane called "Importar" in the rail beside it.
+    const page = i.snmp_page || {};
+    return (key in page) ? page[key] : fallback;
+}
+
+// Shorthand kept for the 252 call sites that read the same way whichever screen they are on.
 function _ms(key, fallback) {
-    return _modUiStr(_mibManagerModuleName, key, fallback);
+    return _snmpT(key, fallback);
 }
 
 // Build a watchful action URL using the API version declared in the

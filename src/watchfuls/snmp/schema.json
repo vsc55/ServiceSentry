@@ -9,8 +9,6 @@
         "github_token": {"type": "str", "default": "", "secret": true}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
-    "__backup_part__": {"id": "mibs", "dir": "snmp_mibs/raw",
-                        "label_key": "backup_part_mibs", "default": false},
     "__host_profile__": {"key": "snmp", "address_field": "host",
                          "fields": ["host", "port",
                                     "version", "community",

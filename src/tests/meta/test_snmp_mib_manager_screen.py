@@ -914,19 +914,27 @@ class TestEachWayInSaysWhatItIs:
         for title in ('mibUploadTitle', 'mibImportUrlTitle', 'mibGithubTitle', 'mibArchiveTitle'):
             assert 'id="%s"' % title in markup, f'{title} has no heading'
 
-    def test_the_names_come_from_the_module_and_not_the_core(self):
+    def test_the_names_are_the_section_s_own(self):
+        """This used to read "from the module and not the core", and the rule behind it was
+        real: the core owns no string that names a MODULE's screen. It stopped applying when
+        the screen stopped being a module's — the section is claimed by lib/core/snmp, so its
+        words are core i18n (`snmp_ui`) and its view labels are in `snmp_page`.
+
+        What the guard is for has not changed: each of these names a way in, and a missing
+        one puts an identifier on screen where a heading belongs."""
+        from lib.i18n import TRANSLATIONS          # noqa: PLC0415
         body = _fn(_read(UI), '_snmpImportPageLabels')
         for key in ('mib_upload_title', 'mib_import_url_title', 'mib_github_title',
                     'mib_archive_title'):
             assert key in body
-        import json
         for lang in ('es_ES', 'en_EN'):
-            with open(os.path.join(SRC, 'watchfuls', 'snmp', 'lang', lang + '.json'),
-                      encoding='utf-8') as fh:
-                ui = json.load(fh).get('ui') or {}
+            texts = TRANSLATIONS.get(lang) or {}
+            ui = texts.get('snmp_ui') or {}
             for key in ('mib_upload_title', 'mib_import_url_title', 'mib_github_title',
-                        'mib_archive_title', 'view_compile'):
+                        'mib_archive_title'):
                 assert ui.get(key), f'{key} has no word in {lang}'
+            assert (texts.get('snmp_page') or {}).get('view_compile'), \
+                f'the compile view has no name in {lang}'
 
     def test_the_report_still_gets_the_rest_of_the_page(self):
         """The cards are the top of the page and refuse to grow; what "Compare" answers is

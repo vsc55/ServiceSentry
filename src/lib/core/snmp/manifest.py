@@ -157,3 +157,23 @@ PAGE: dict = {
         {'slug': 'profiles', 'icon': 'bi-grid-3x3-gap',   'label': 'view_profiles'},
     ],
 }
+
+
+# ── What a backup must hold of this package ──────────────────────────────────────────────
+#
+# The raw MIB files. Not derived data — they are what somebody imported, corrected and, in
+# more than one case, spent an afternoon on; the compiled tree and the symbol index are both
+# rebuilt from them.
+#
+# Declared here rather than in a module's schema.json because of how the old arrangement
+# failed: a backup part lives exactly as long as the file declaring it, so removing the SNMP
+# watchful took the library out of every backup **and said nothing**. The archive is simply
+# smaller, and you find out when you need it.
+#
+# `default: False` deliberately: a library of vendor archives is large and re-importable, so
+# it is offered rather than assumed. What matters is that it can be chosen at all.
+BACKUP_PART: dict = {
+    'id': 'mibs', 'dir': 'snmp_mibs/raw',
+    'i18n': 'snmp_ui', 'label_key': 'backup_part_mibs',
+    'default': False,
+}

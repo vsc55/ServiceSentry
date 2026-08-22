@@ -8,6 +8,38 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.110] - 2026-08-22
+
+### Changed
+- **The screens' words moved with the screens.** The 347 strings of the MIB library, the
+  symbol browser and the profile catalogue are core i18n now (`snmp_ui`), read through one
+  helper. A section whose vocabulary lived in a watchful would go mute the day somebody
+  removed it — every label reading as its own key, which is a failure that only shows up on
+  the page.
+- The 34 audit words went to core i18n as plain `audit_v_*` / `audit_f_*` keys, which is
+  where `_auditWord` looks FIRST — so the audit renderer needed no change at all.
+- What stays in the module's lang file is what belongs to a check: the labels and hints of
+  its fields, its messages, its pretty name.
+- **A backup part the core declares.** The SNMP MIB library is offered to a backup by
+  `lib/core/snmp/manifest.py` rather than by the watchful's schema. A backup part lives
+  exactly as long as the file declaring it, so removing the watchful used to take the library
+  out of every backup **and say nothing** — the archive is simply smaller, and you find out
+  when you need it.
+
+### Fixed
+- Three headings would have fallen back to English in Spanish. The view names are declared
+  once in `snmp_page` for the sidebar, and the screens ask for the same keys to title
+  themselves; the helper read only `snmp_ui`, so "Import" appeared over a pane the rail
+  beside it calls "Importar". Found by checking every key the JS asks for against what the
+  lang files hold — a guard does that now.
+
+### Notes
+- `mib_dirs`, `mib_repos` and `github_token` stay in the module's `__module__` config. They
+  reach the core actions correctly (the browser posts them; the route restores the masked
+  token from storage), and moving them to `lib/config/spec.py` is a relocation of settings
+  with a migration for anyone who set one — worth doing on its own terms, not as the tail of
+  this. `threads` belongs to the check loop and stays regardless.
+
 ## [0.0.1+build.109] - 2026-08-22
 
 ### Changed

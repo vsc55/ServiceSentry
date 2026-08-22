@@ -43,7 +43,9 @@ let _snmpProfRail     = 'all';    // the rail's one selected line — the view o
 let _snmpProfNames    = null;     // {id: name} for the chips, fetched once and cached
 let _snmpProfNamesBusy = false;
 
-function _snmpProfT(key, fallback) { return _modUiStr(_snmpProfMod, key, fallback); }
+// The catalogue's and the test dialog's words. Both read the core's `snmp_ui` — the same
+// place the MIB manager's do, since the three are views of one section.
+function _snmpProfT(key, fallback) { return _snmpT(key, fallback); }
 
 function _snmpActionUrl(modName, action) {
     const ver = (ITEM_SCHEMAS[`${modName}|__module__`] || {})['api_ver'] || 'v1';
@@ -1269,7 +1271,7 @@ CHIP_LABELS['snmp|device_profiles'] = _snmpProfChipLabel;
 FIELD_PICKERS['snmp|servers|device_profiles'] = {
     icon:  'bi-grid-3x3-gap',
     // A function because the module's i18n block is not loaded when this line runs.
-    title: () => _modUiStr('snmp', 'device_profiles_pick', 'Device profiles'),
+    title: () => _snmpT('device_profiles_pick', 'Device profiles'),
     open:  (pathStr, current, onPick) => _snmpProfOpenFor(pathStr, current, onPick),
     // …and beside it, the question the assignment cannot answer about itself. It hangs off
     // the FIELD because that is what it is about: which profiles this device carries, and
@@ -1277,7 +1279,7 @@ FIELD_PICKERS['snmp|servers|device_profiles'] = {
     // subject the reader has to work out.
     actions: [{
         icon:  'bi-activity',
-        title: () => _modUiStr('snmp', 'test_profiles', 'Test against the device'),
+        title: () => _snmpT('test_profiles', 'Test against the device'),
         run:   (pathStr, current, btn) => _snmpTestOpen(pathStr, current, btn),
     }],
 };
@@ -1305,7 +1307,7 @@ let _snmpTestGen  = 0;       // bumped per run: a late answer for a closed dialo
 const _snmpTestEl = id => document.getElementById(id);
 
 function _snmpTestT(key, fallback) {
-    return _modUiStr(_snmpTestPath.split('|')[0] || 'snmp', key, fallback);
+    return _snmpT(key, fallback);
 }
 
 /** Open on one server's profile field and ask its device straight away.

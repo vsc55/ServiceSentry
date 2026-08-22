@@ -59,8 +59,26 @@ def _schema():
 
 
 def _lang(code):
+    """The MODULE's lang file — what is left of it: the labels and hints of a check's
+    fields, which belong to the check."""
     with io.open(os.path.join(SNMP, 'lang', f'{code}.json'), encoding='utf-8') as fh:
         return json.load(fh)
+
+
+def _ui(code):
+    """Every word these screens can reach, as the JS reaches them.
+
+    `snmp_ui` and `snmp_page` together, because `_snmpT` reads both: the view names are
+    declared once for the sidebar and the screens ask for the same ones to title themselves.
+    Checking only the first block passed while three headings fell back to the English the
+    caller passes — "Import" over a pane the rail beside it calls "Importar".
+
+    They moved with the screens: a section whose words lived in a watchful would go mute the
+    day somebody removed it, and a label that reads as its own key is a failure that only
+    shows up on the page."""
+    from lib.i18n import TRANSLATIONS          # noqa: PLC0415
+    texts = TRANSLATIONS.get(code) or {}
+    return {**(texts.get('snmp_page') or {}), **(texts.get('snmp_ui') or {})}
 
 
 class TestTheScreenIsWired:
@@ -313,6 +331,26 @@ class TestTheScreenIsWired:
             assert name in read_only, f'{name} demands edit rights to read'
 
 
+class TestTheSectionSpeaksForItself:
+    """Its words are the core's now — the screens are, so a vocabulary living in a watchful
+    would go mute the day somebody removed it."""
+
+    def test_the_helper_reads_both_blocks(self):
+        """`snmp_page` holds the view names for the sidebar and the screens ask for the same
+        ones. Reading one block only is not an error: it silently falls back to the English
+        the caller passed, which is the failure that only appears on the page."""
+        js = _strip_comments(_read(os.path.join(WEB, '_ui.html')))
+        fn = _fn(js, '_snmpT')
+        assert 'snmp_ui' in fn and 'snmp_page' in fn
+
+    def test_nothing_asks_a_module_for_these_words_any_more(self):
+        """`_modUiStr` reads a MODULE's lang file. Left behind on one call site, that string
+        reads as its own key the day the watchful is not installed."""
+        for name in ('_ui.html', 'profiles_ui.html'):
+            js = _strip_comments(_read(os.path.join(WEB, name)))
+            assert '_modUiStr(' not in js, f'{name} still asks a module for a word'
+
+
 class TestTheFieldThatAssignsThem:
 
     def test_the_device_carries_its_profiles(self):
@@ -543,7 +581,7 @@ class TestNothingReadsAsItsOwnKey:
         keys = {k for k in keys if not k.endswith('_')}
         assert keys, 'the screen asks for no translated string at all'
         for code in ('es_ES', 'en_EN'):
-            ui = _lang(code).get('ui') or {}
+            ui = _ui(code)
             missing = sorted(k for k in keys if not ui.get(k))
             assert not missing, f'{code} is missing {missing}'
 
@@ -679,7 +717,7 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
                            re.search(r'const _SNMP_TEST_STEPS = \[(.*?)\]', js, re.S).group(1))
         assert drawn, 'the checklist draws no steps at all'
         for code in ('es_ES', 'en_EN'):
-            ui = _lang(code).get('ui') or {}
+            ui = _ui(code)
             missing = [k for k in drawn if not ui.get('test_step_' + k)]
             assert not missing, f'{code} has no name for {missing}'
 
