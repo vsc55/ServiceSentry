@@ -20,7 +20,7 @@ from . import profile_store as _profile_store
 from lib.core.snmp import profiles as _profiles
 from .actions import SnmpActions
 from .checks import SnmpChecks
-from .client import SnmpClient, _HAS_PYSNMP
+from lib.core.snmp.client import SnmpClient, _HAS_PYSNMP
 from .defaults import _SCHEMA, _CHECK_DEFAULTS, _SERVER_DEFAULTS
 from .mib_admin import MibAdmin, _HAS_PYSMI
 from . import mib_versions as _mib_versions

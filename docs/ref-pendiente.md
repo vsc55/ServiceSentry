@@ -171,7 +171,7 @@ local** (`{var_dir}/snmp_mibs/mib_catalog.db`). Se aplazó en su día por decisi
 pidió *«solo el mecanismo general»*.
 
 **Antes de migrarlo hay que resolver una contradicción**, porque el código dice lo contrario que
-esta entrada: el docstring de `watchfuls/snmp/mib_catalog.py` sostiene que ese fichero es *a
+esta entrada: el docstring de `lib/core/snmp/mibs/catalog.py` sostiene que ese fichero es *a
 propósito* un caché derivado local —se reconstruye desde los MIB compilados, la BD de la
 aplicación puede ser remota y no tiene por qué cargar con un caché por instalación—. O esa
 razón sigue valiendo y esta entrada sobra, o ya no vale y el docstring miente. Decidirlo es el

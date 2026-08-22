@@ -22,7 +22,7 @@ import os
 import re
 import threading
 
-from . import mib_lint as _mib_lint
+from . import lint as _mib_lint
 
 # ── Type category tables ─────────────────────────────────────────────────────
 

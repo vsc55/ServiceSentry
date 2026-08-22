@@ -3588,7 +3588,7 @@ cuando el aparato renumera).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_walk_oid.py` — 11 tests
+**Archivo:** `tests/unit/test_snmp_walk_oid.py` — 11 tests
 
 **Recorrer UNA columna**, que es lo que pide una métrica de perfil. El walk de descubrimiento
 barre dos subárboles fijos, trunca los valores a 120 caracteres y se traga los errores, porque
@@ -3634,7 +3634,7 @@ perfiló, y cuando un firmware mueve un OID el arreglo no espera a la siguiente 
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_lint.py` — 36 tests
+**Archivo:** `tests/unit/test_snmp_mib_lint.py` — 36 tests
 
 **Decir por qué un MIB no va a compilar, antes de que el compilador lo diga mal.** Dos MIB de
 fabricante se rompieron aquí con un día de diferencia y los dos se rompieron de las mismas dos
@@ -3756,7 +3756,7 @@ porque una fila roja que nadie puede quitar haciendo lo obvio es peor que ningun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_tree.py` — 48 tests
+**Archivo:** `tests/unit/test_snmp_mib_tree.py` — 48 tests
 
 **Los MIB en bruto viven en un árbol, y todo lo que los lee tiene que saberlo.** En cuanto una
 importación conserva la carpeta de la que viene un fichero, un MIB que estaba en `raw/` pasa a

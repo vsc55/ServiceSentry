@@ -621,7 +621,7 @@ class TestWhatTheAssignmentActuallyReads:
         (idx / 'oid_index.json').write_text(json.dumps({
             '1.3.6.1.2.1.2.2.1.16': {'mib_module': 'IF-MIB', 'mib_name': 'ifOutOctets',
                                      'mib_type': 'MibTableColumn'}}), encoding='utf-8')
-        from watchfuls.snmp import mib_resolver as _mr
+        from lib.core.snmp.mibs import resolver as _mr
         _mr._idx_cache.pop(str(tmp_path), None)
         cfg = self._prof(tmp_path, {'id': 'p_none', 'label': 'None', 'metrics': [
             {'key': 'a', 'oid': '1.3.6.1.2.1.1.3.0', 'kind': 'gauge'}]})

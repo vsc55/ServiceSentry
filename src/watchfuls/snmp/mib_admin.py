@@ -33,11 +33,11 @@ import importlib.util as _importlib_util
 
 from lib import APP_NAME
 from lib.debug import DebugLevel
-from . import mib_resolver as _mib_resolver
-from . import mib_catalog as _mib_catalog
+from lib.core.snmp.mibs import resolver as _mib_resolver
+from lib.core.snmp.mibs import catalog as _mib_catalog
 from . import mib_versions as _mib_versions
-from . import mib_lint as _mib_lint
-from .client import _HAS_PYSNMP
+from lib.core.snmp.mibs import lint as _mib_lint
+from lib.core.snmp.client import _HAS_PYSNMP
 
 # Optional dependency: pysmi is needed to COMPILE raw ASN.1, not to read an already
 # compiled MIB - which is why it is a partial dependency and not a missing one.

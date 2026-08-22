@@ -8,6 +8,35 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.104] - 2026-08-22
+
+### Changed
+- **Speaking SNMP, and understanding a MIB, move to the core.** `client` (the protocol
+  conversation: get, walk, the three versions and their credentials) is now
+  `lib/core/snmp/client.py`, and the MIB layer is `lib/core/snmp/mibs/` — `lint` (reading a
+  source without compiling it), `resolver` (compiling, and name↔OID) and `catalog` (the
+  persisted symbol index). A MIB is not a check's private business: it is how an
+  installation understands its devices at all, and the same library answers the browser, the
+  profile catalogue, discovery, and whatever asks next.
+- They lose the `mib_` prefix on the way in — `mibs.resolver`, not `mibs.mib_resolver` —
+  while the import ALIASES stay (`_mib_resolver`), so not one call site changed. The diff is
+  import lines and nothing else.
+- What stays a watchful: `mib_admin` (the operations the panel invokes on the library) and
+  `mib_versions` (a store on a module-namespaced table). Both are surfaces, and surfaces move
+  in the step that deals with routes, permissions and the tables — not smuggled in with a
+  file move.
+- Three test files follow their subject into `tests/unit/`: the MIB linter, the MIB tree and
+  the walk. What they test stopped being a module.
+
+### Fixed
+- A structural guard read two sources by a path spelled relative to the test file. The two
+  no longer live in the same tree, so it read a file that was not there — and would have gone
+  on doing that after every future move. It asks each module where it is now.
+- The MIB-manager screen guard spelled `watchfuls/snmp/mib_resolver.py` out at nine call
+  sites, the admin at fourteen and the module at six. One constant each: the next move is one
+  line, not twenty-nine, and a path left behind does not fail loudly — it reads nothing, or
+  worse, something else.
+
 ## [0.0.1+build.103] - 2026-08-22
 
 ### Changed

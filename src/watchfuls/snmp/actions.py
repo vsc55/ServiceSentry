@@ -19,10 +19,10 @@ import time
 import uuid
 
 from lib.core.snmp import metrics as _metrics
-from . import mib_resolver as _mib_resolver
+from lib.core.snmp.mibs import resolver as _mib_resolver
 from . import profile_store as _profile_store
 from lib.core.snmp import profiles as _profiles
-from .client import _HAS_PYSNMP, run_coroutine
+from lib.core.snmp.client import _HAS_PYSNMP, run_coroutine
 from .defaults import _SERVER_DEFAULTS
 from .sampler import read_metric as _read_metric
 

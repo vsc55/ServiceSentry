@@ -13,7 +13,7 @@ what the answer means; this decides how to ask it.
 import asyncio
 import threading
 
-from . import mib_resolver as _mib_resolver
+from .mibs import resolver as _mib_resolver
 
 
 def run_coroutine(coro):

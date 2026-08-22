@@ -20,7 +20,7 @@ import re
 
 from lib.debug import DebugLevel
 
-from .client import _HAS_PYSNMP
+from lib.core.snmp.client import _HAS_PYSNMP
 from .defaults import _CHECK_DEFAULTS, _SERVER_DEFAULTS
 
 

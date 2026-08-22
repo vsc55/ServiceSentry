@@ -20,8 +20,8 @@ from watchfuls.snmp import Watchful
 # El manejo del catalogo MIB (subir, compilar, importar) vive en su propio modulo desde que
 # dejo de ser la mitad del __init__: los tests lo nombran donde esta.
 from watchfuls.snmp import mib_admin
-from watchfuls.snmp import mib_resolver
-from watchfuls.snmp import mib_catalog
+from lib.core.snmp.mibs import resolver as mib_resolver
+from lib.core.snmp.mibs import catalog as mib_catalog
 
 
 def _cfg(checks, server_extra=None, **server):
@@ -596,7 +596,7 @@ class TestTheRepositoryTreeSurvivesTheImport:
         assert (raw / 'librenms' / 'cisco' / 'nested' / 'N-MIB').is_file()
         # …and the walker can SEE it there. A MIB the reader does not reach does not exist as
         # far as the panel is concerned: it is not listed, not counted and never compiled.
-        from watchfuls.snmp import mib_resolver
+        from lib.core.snmp.mibs import resolver as mib_resolver
         found = {rel for rel, _f in mib_resolver.iter_raw_mibs(str(raw))}
         assert 'librenms/cisco/nested/N-MIB' in found
 
@@ -618,7 +618,7 @@ class TestTheRepositoryTreeSurvivesTheImport:
         """`iter_raw_mibs` stops at RAW_MAX_DEPTH, and a MIB it cannot see is a MIB that does
         not exist as far as the panel is concerned — so an import must not bury one deeper
         than that."""
-        from watchfuls.snmp import mib_resolver
+        from lib.core.snmp.mibs import resolver as mib_resolver
         # source folder + the deepest nesting an import can produce, against the reader's cap.
         assert mib_resolver.RAW_MAX_DEPTH >= 4
 
@@ -1021,7 +1021,7 @@ class TestWhatIsStubbedAwayIsDecidedByTheModule:
 
         import pysmi.searcher as _srch
         monkeypatch.setattr(_srch, 'StubSearcher', _Fake)
-        from watchfuls.snmp import mib_resolver as _r
+        from lib.core.snmp.mibs import resolver as _r
         _r.compile_raw_mibs(str(raw), str(tmp_path / 'snmp_mibs' / 'compiled'))
         return seen
 
@@ -1517,7 +1517,7 @@ class TestItDoesNotAssumeItOwnsTheThread:
         return cls._on_thread(fn, with_loop=False)
 
     def test_a_coroutine_still_runs_with_a_loop_already_going(self):
-        from watchfuls.snmp.client import run_coroutine
+        from lib.core.snmp.client import run_coroutine
 
         async def _answer():
             return 42
@@ -1526,7 +1526,7 @@ class TestItDoesNotAssumeItOwnsTheThread:
 
     def test_it_still_runs_with_no_loop_at_all(self):
         """The ordinary path, and the one the fix must not slow down or change."""
-        from watchfuls.snmp.client import run_coroutine
+        from lib.core.snmp.client import run_coroutine
 
         async def _answer():
             return 42
@@ -1536,7 +1536,7 @@ class TestItDoesNotAssumeItOwnsTheThread:
     def test_what_the_coroutine_raises_reaches_the_caller(self):
         """The point of the helper is to move the loop, not to become a second place that
         swallows failures — the swallowing is what made this invisible for as long as it was."""
-        from watchfuls.snmp.client import run_coroutine
+        from lib.core.snmp.client import run_coroutine
 
         async def _boom():
             raise ValueError('from inside')
@@ -1582,7 +1582,7 @@ class TestDiscoveryUsesTheServersIdentity:
 
     def test_one_builder_answers_for_every_version(self):
         """Two copies is how one of them came to not know about v3."""
-        from watchfuls.snmp.client import SnmpClient
+        from lib.core.snmp.client import SnmpClient
         assert type(SnmpClient._auth_data('1', 'public')).__name__ == 'CommunityData'
         assert type(SnmpClient._auth_data('2c', 'public')).__name__ == 'CommunityData'
         assert type(SnmpClient._auth_data(
