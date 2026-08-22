@@ -8,6 +8,56 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.102] - 2026-08-22
+
+### Changed
+- **An SNMP device is configured where the device is, not once per check.** The host's SNMP
+  profile carried its address and nothing else, so the community, the version and the v3 keys
+  were re-entered on every server entry that pointed at the same box — and the field that says
+  what the device IS (`device_profiles`) lived there too, which made a property of the machine
+  a property of one entry about it. The profile now carries all of it, and a check bound to a
+  host inherits the lot: `resolve_host` already merged whatever the module declared as
+  host-owned, so widening the declaration was the change.
+- Deliberately NOT host-owned: `timeout` and `retries`. They are how long we wait before
+  giving up, not who the machine is — and moving them has a concrete cost, since two entries
+  for one address differing only in their timeout would stop being one host to the migration
+  planner and become two.
+- **A reusable credential can supply any protocol's identity, not just SSH's.** SSH had a
+  credential picker on the host form and no other protocol did; that read as a rule and was
+  only ever the consequence of being the only profile with an identity to store. Any protocol
+  whose module declares a `__credential__` now offers the same choice, and picking one clears
+  the inline copy from the host — two places holding one secret means the stale one wins the
+  day somebody rotates the other.
+- The SNMP profile picker and its "test against the device" button work from the host form as
+  well as from the Modules tab. Both reach the device through one resolver, which is set by
+  both entry points: the Modules tab has the server's saved config at a path, the host form
+  has a draft that may never have been saved, and a stale provider between them would have
+  quietly asked the last host somebody looked at.
+
+### Fixed
+- **A form that rendered perfectly into a page that never asked for it.** The per-protocol
+  profile section had been removed from the host modal when the profiles were narrowed to an
+  address — there was nothing left to put in it — and `_renderProfileFields` stayed behind,
+  correct and uncalled: the element it repaints was looked up in one place and created in
+  none. Widening the profile would have been a form nobody draws. It is back, inside the
+  module's own card and above the checks that use it, which is where its meaning is: SSH is
+  the machine's own connection and belongs in General; SNMP is a conversation one module
+  holds with it. A guard now requires the block to be drawn by both card shapes and by the
+  repaint — dead code that reads as live code puts nothing red.
+- **A web action bound to a host was handed the address and nothing else.** `resolve_host_ctx`
+  carried only the host's `ssh` profile, and `merge_host_conn` filled every protocol's fields
+  from it — survivable only while ssh was the one profile with fields to give. The moment
+  another protocol carries credentials, Discover and Test reach the device with no community
+  at all, and fail as "the device did not answer" rather than "nobody told me who to be",
+  which is the harder of the two to read. Every profile travels now, and each spec draws from
+  its own — which is what `resolve_host` does for a scheduled check.
+- A masked secret in a host draft is restored from the stored host **for every protocol**, by
+  the same field-name rule the host store itself uses — so a module's own secret field is
+  restored without core naming it. Only `ssh_password` and `ssh_key_string` were, by name.
+- The host-profile catalogue dropped a field's `multi` flag, so a list of values rendered on
+  the host form as a text box holding a comma-separated string: editable-looking, and the one
+  thing nobody should type by hand when the values are ids.
+
 ## [0.0.1+build.101] - 2026-08-22
 
 ### Fixed

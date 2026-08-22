@@ -1837,6 +1837,9 @@ LANG = {
     'host_virtual_hint':    'Host virtual (VIP de keepalived, cluster de proxmox…): una entidad a monitorizar, no una máquina física.',
     'host_physical':        'Físico',
     'host_ssh_conn':        'Conexión SSH',
+    # La conexión que un módulo mantiene con el dispositivo (SNMP, BD…), dentro de
+    # su tarjeta: es del dispositivo, no de cada check que la usa.
+    'host_conn_profile':    'Conexión con el dispositivo',
     'host_ssh_test':        'Probar conexión',
     'host_test':            'Probar servidor',
     'host_test_all':        'Probar todos',

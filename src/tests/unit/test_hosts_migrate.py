@@ -27,21 +27,38 @@ class TestPlan:
         c = _by_addr(plan)['10.0.0.1']
         assert c['is_duplicate'] is True
         assert {m['key'] for m in c['members']} == {'r1', 'r1b', 'p1'}
-        # Host profiles are address-only now (snmp community/version are
-        # per-check), so the candidate carries no protocol creds.
-        assert c['profiles'] == {}
+        # The SNMP identity is the DEVICE's, so the candidate host carries it: the
+        # migration moves whatever the module declares as host-owned, and nothing
+        # here had to learn the word "community" to do it.
+        assert c['profiles'] == {'snmp': {'community': 'public', 'version': '2c'}}
         assert set(c['modules']) == {'snmp', 'ping'}
 
-    def test_same_address_merges_regardless_of_settings(self):
-        # community is per-check now, so two SNMP servers at the same address
-        # merge into one host (each check keeps its own community).
+    def test_same_address_and_same_identity_merge(self):
+        # One address, one credential, one device — the ordinary case, and the whole
+        # point of the migration: two module entries collapse into one host.
+        mods = {'watchfuls.snmp': {'servers': {
+            'a': {'host': '1.1.1.1', 'community': 'public', 'uid': 'a'},
+            'b': {'host': '1.1.1.1', 'community': 'public', 'timeout': 30, 'uid': 'b'},
+        }}}
+        plan = build_migration_plan(mods)
+        cands = [c for c in plan['candidates'] if c['address'] == '1.1.1.1']
+        assert len(cands) == 1 and len(cands[0]['members']) == 2
+        # `timeout` differs and does NOT split them: it is how OFTEN we give up on the
+        # device, not who we are to it, so it stays on the check where it was.
+        assert cands[0]['profiles'] == {'snmp': {'community': 'public'}}
+
+    def test_same_address_with_a_different_identity_does_not_merge(self):
+        # Same box, two communities. Merging would hand both entries ONE of them and
+        # silently break the other, because applying the plan strips the field from the
+        # item — so they stay apart and the admin decides.
         mods = {'watchfuls.snmp': {'servers': {
             'a': {'host': '1.1.1.1', 'community': 'public', 'uid': 'a'},
             'b': {'host': '1.1.1.1', 'community': 'private', 'uid': 'b'},
         }}}
         plan = build_migration_plan(mods)
         cands = [c for c in plan['candidates'] if c['address'] == '1.1.1.1']
-        assert len(cands) == 1 and len(cands[0]['members']) == 2
+        assert len(cands) == 2
+        assert {tuple(c['profiles']['snmp'].values()) for c in cands} == {('public',), ('private',)}
 
     def test_different_address_separate(self):
         mods = {'watchfuls.ping': {'list': {
@@ -96,9 +113,11 @@ class TestApply:
 
         r1 = mods['watchfuls.snmp']['servers']['r1']
         assert r1['host_uid'] == 'HOST-A'
-        # Only the host-owned address is stripped; per-check settings stay.
-        assert 'host' not in r1
-        assert r1['community'] == 'public' and r1['version'] == '2c'
+        # Everything the host now owns is stripped — the address AND the identity — so
+        # there is exactly one place the community can be edited. Leaving a copy behind
+        # is worse than either: the check would keep answering with a stale secret long
+        # after the host's was changed.
+        assert 'host' not in r1 and 'community' not in r1 and 'version' not in r1
         assert r1['checks'] == {'c': {'oid': 'x'}}
         assert r1['enabled'] is True and r1['uid'] == 's1'
 

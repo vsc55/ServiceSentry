@@ -25,6 +25,8 @@ from __future__ import annotations
 import json
 import os
 
+from lib.security import secret_manager
+
 from .items import is_item_collection
 
 
@@ -59,12 +61,20 @@ def resolve_host_ctx(wa, config):
         from lib.core.credentials.store import apply_credential  # noqa: PLC0415
         return apply_credential(ssh, cred)
 
-    def _ctx(address, kind, os_, ssh):
+    def _ctx(address, kind, os_, profiles):
         is_remote = str(kind or 'local').strip().lower() == 'remote'
         # Web discovery can't probe a remote OS here → assume 'linux' for 'auto'.
         os_ = resolve_os(os_, is_remote, remote_auto='linux')
+        # EVERY protocol profile travels, not only ssh. A host carries one profile per
+        # protocol it speaks, and an action's connection fields may come from any of them —
+        # an SNMP action needs the device's community exactly as an SSH one needs its key.
+        # While only ssh was carried, a widened profile handed the action the address and
+        # nothing else, which fails as "no answer from the device" rather than as "nobody
+        # told me the community".
+        profiles = {k: dict(v) for k, v in (profiles or {}).items() if isinstance(v, dict)}
+        profiles['ssh'] = _apply_ssh_cred(profiles.get('ssh') or {})
         return {'address': address or '', 'kind': kind or 'local', 'os': os_,
-                'ssh': _apply_ssh_cred(ssh)}
+                'ssh': profiles['ssh'], 'profiles': profiles}
 
     store = getattr(wa, '_hosts_store', None)
     uid = str(config.get('host_uid') or '').strip()
@@ -77,18 +87,24 @@ def resolve_host_ctx(wa, config):
     draft = config.get('_host') if isinstance(config.get('_host'), dict) else None
 
     if draft:
-        ssh = dict((draft.get('profiles') or {}).get('ssh') or draft.get('ssh') or {})
-        if stored:  # restore secrets the client masked out
-            stored_ssh = (stored.get('profiles') or {}).get('ssh') or {}
-            for k in ('ssh_password', 'ssh_key_string'):
-                if ssh.get(k) in (None, '') and stored_ssh.get(k):
-                    ssh[k] = stored_ssh[k]
+        profiles = {k: dict(v) for k, v in (draft.get('profiles') or {}).items()
+                    if isinstance(v, dict)}
+        # A draft may carry the ssh profile flat (older callers) instead of under `profiles`.
+        if not profiles.get('ssh') and isinstance(draft.get('ssh'), dict):
+            profiles['ssh'] = dict(draft['ssh'])
+        if stored:
+            # Restore every secret the client masked out, in every protocol — by the same
+            # field-name rule the host store itself uses, so a module's own secret field
+            # (an SNMP community, a token) is restored without core naming it.
+            secret_manager.restore_sensitive(
+                profiles, stored.get('profiles') or {},
+                keys=getattr(wa, '_secret_keys', None) or secret_manager.ENCRYPT_KEYS)
         return _ctx(draft.get('address') or (stored or {}).get('address'),
                     draft.get('kind') or (stored or {}).get('kind'),
-                    draft.get('os') or (stored or {}).get('os'), ssh)
+                    draft.get('os') or (stored or {}).get('os'), profiles)
     if stored:
         return _ctx(stored.get('address'), stored.get('kind'), stored.get('os'),
-                    (stored.get('profiles') or {}).get('ssh') or {})
+                    stored.get('profiles') or {})
     return None
 
 
@@ -190,10 +206,16 @@ def apply_cred_to_config(wa, config):
 
 
 def merge_host_conn(wa, module, config, host_ctx):
-    """Populate *config*'s connection fields from the bound host (its address and SSH profile),
-    mirroring ModuleBase.resolve_host — so a web action runs on a host-bound check whose own
-    connection fields are empty.  An explicit value on the check always wins; only blank/0/
-    missing fields are filled.
+    """Populate *config*'s connection fields from the bound host (its address and the profile
+    of EACH protocol the module declares), mirroring ModuleBase.resolve_host — so a web action
+    runs on a host-bound check whose own connection fields are empty.  An explicit value on the
+    check always wins; only blank/0/missing fields are filled.
+
+    Each spec draws from its own protocol (``profiles[spec['key']]``), which is what
+    ``resolve_host`` does for a scheduled check.  Filling every spec from the SSH profile was
+    survivable only while ssh was the one profile with fields to give: the moment another
+    protocol carries credentials — an SNMP community, a device's port — the action got the
+    address and nothing else, and failed as if the device had not answered.
 
     Reads ``__host_profile__`` straight from the module schema (not module_host_specs, which
     drops address-only profiles like datastore's 'db') so the address_field is filled even when
@@ -208,7 +230,9 @@ def merge_host_conn(wa, module, config, host_ctx):
         return
     specs = host_profile_specs(hp)
     address = host_ctx.get('address') or ''
-    ssh = host_ctx.get('ssh') or {}
+    profiles = host_ctx.get('profiles')
+    if not isinstance(profiles, dict):      # a caller that built the ctx by hand
+        profiles = {'ssh': host_ctx.get('ssh') or {}}
     for spec in specs:
         if not isinstance(spec, dict):
             continue
@@ -218,11 +242,18 @@ def merge_host_conn(wa, module, config, host_ctx):
         # blank, so a per-check override wins.
         if address_field and address and config.get(address_field) in (None, '', 0):
             config[address_field] = address
+        prof = profiles.get(spec.get('key'))
+        prof = prof if isinstance(prof, dict) else {}
+        # The host's identity for this protocol, when the action names none — the credential
+        # itself is overlaid afterwards by apply_cred_to_config, so it still wins over the
+        # inline values filled here, exactly as it does on the scheduler's side.
+        if not str(config.get('cred_uid') or '').strip() and prof.get('cred_uid'):
+            config['cred_uid'] = prof['cred_uid']
         for f in (spec.get('fields') or []):
             if config.get(f) not in (None, '', 0):
                 continue              # the check's own value wins
-            if f in ssh:
-                config[f] = ssh[f]    # ssh_* ← host SSH profile
+            if f in prof and prof[f] not in (None, ''):
+                config[f] = prof[f]   # ← this protocol's profile on the host
 
 
 def apply_item_identities(wa, module, config):

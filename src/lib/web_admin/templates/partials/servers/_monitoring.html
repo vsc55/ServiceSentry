@@ -475,7 +475,11 @@ function _renderMonitoringSection() {
                 <button class="btn btn-sm btn-success flex-shrink-0 text-nowrap" onclick="_addHostCheck(${jsStr(mod)})"
                     title="${escAttr(t('host_add_check'))}"><i class="bi bi-plus-lg me-1"></i>${esc(t('host_add_check'))}</button>
             </div>`;
-            const body = `${toolbar}<div id="hmChkList_${slug}">${_renderHostCheckList(mod)}</div>`;
+            // The device's connection first, then the checks that use it — one profile for
+            // the module, not one per check (see _hostProfileBlock).
+            const _prof = _hostProfileBlock(mod);
+            const body = `${_prof ? `<div class="row g-2 mb-3">${_prof}</div>` : ''}`
+                + `${toolbar}<div id="hmChkList_${slug}">${_renderHostCheckList(mod)}</div>`;
             // Collapsed when editing an existing host; expanded for a new one.
             h += _collapsibleCard('hmCard_' + slug, title, actions, body, !_editingHostUid);
         } else {

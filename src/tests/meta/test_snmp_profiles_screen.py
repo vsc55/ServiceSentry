@@ -384,6 +384,98 @@ class TestTheHostModalIsWhereItIsActuallyBound:
             'the callback must win over the modulesData path, not the other way round')
 
 
+class TestTheDeviceIsWhereTheDeviceIsConfigured:
+    """What a device IS — the profiles it carries and who you have to be to ask it — is a
+    property of the device, so it is edited on the host, not on each check bound to it.
+
+    That moves the same field onto a third renderer: the per-protocol PROFILE form, which
+    has no check index to hang a value on and, until now, no identity of its own to speak of
+    — SSH was the only profile that carried a credential, which read like a rule and was
+    only ever a consequence of being the only one with anything to carry.
+    """
+
+    def test_the_snmp_profile_carries_the_identity_not_just_the_address(self):
+        hp = _schema().get('__host_profile__') or {}
+        fields = set(hp.get('fields') or [])
+        assert hp.get('key') == 'snmp' and hp.get('address_field') == 'host'
+        assert {'community', 'version', 'device_profiles'} <= fields
+        # …and NOT how long we wait for it: two entries for one box would then migrate
+        # into two hosts because one of them had a longer timeout.
+        assert not ({'timeout', 'retries'} & fields)
+
+    def test_a_multi_value_field_works_on_a_profile_too(self):
+        """The check branch keys its adapter on `mod|idx|field`; a profile has no idx, so
+        without a branch of its own the field falls through to a text box holding a
+        comma-separated list — which looks editable and is the one thing nobody should
+        type by hand."""
+        js = _strip_comments(_read(HOST_MODAL))
+        assert 'ctx.idx == null && ctx.proto' in js, 'no profile branch for multi fields'
+        branch = js.split('ctx.idx == null && ctx.proto')[1].split('return fieldCtl')[1]
+        assert "kind: 'multi'" in branch.split(');')[0]
+        assert '_setProfileField(' in _fn(js, '_hostProfilePickerOpen')
+
+    def test_the_actions_beside_the_picker_come_with_it(self):
+        """The picker and "test against the device" are registered together against the same
+        field; a pane that drew one and not the other would answer "which profiles" and not
+        "and does the device agree", which is the half that is not guessable."""
+        js = _strip_comments(_read(HOST_MODAL))
+        fn = _fn(js, '_hostProfilePickerBtn')
+        assert 'fp.actions' in fn and '_hostProfileActionRun' in fn
+
+    def test_an_action_run_from_a_host_says_which_device(self):
+        """A form the user is in the middle of filling in IS the device under test — and its
+        secrets are masks, so the draft travels and the server resolves it exactly as it
+        resolves a scheduled check."""
+        js = _strip_comments(_read(HOST_MODAL))
+        fn = _fn(js, '_hostProfileActionCfg')
+        assert '_host' in fn and 'host_uid' in fn and 'profiles' in fn
+
+    def test_both_panes_reach_the_device_through_one_place(self):
+        """`_snmpDeviceCfg` is state, and stale state here means asking the last host
+        somebody looked at. Both entry points must set it — to a provider or to null."""
+        js = _strip_comments(_read(UI))
+        for fname in ('_snmpProfOpenFor', '_snmpTestOpen'):
+            assert '_snmpDeviceCfg =' in _fn(js, fname), f'{fname} leaves it stale'
+        # And everything that talks to the device reads it through the one resolver.
+        for fname in ('_snmpProfDetect', '_snmpTestRun'):
+            assert '_snmpCfgFor(' in _fn(js, fname), f'{fname} bypasses the resolver'
+        assert 'getPath(modulesData' not in _fn(js, '_snmpTestRun')
+
+    def test_the_profile_form_is_actually_drawn_somewhere(self):
+        """`_renderProfileFields` existed, was correct, and **nobody called it**: the element
+        it repaints (`hmProfFields_<proto>`) was only ever looked up, never created. The
+        per-protocol section had been removed from the modal when the profiles were narrowed
+        to an address, and the renderer stayed behind — so a widened profile would have been
+        a form that renders perfectly into a page that never asks for it.
+
+        Dead code that reads as live code is exactly what a guard is for: nothing failed, no
+        test went red, and the screen simply had no connection form."""
+        checks = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_checks.html')))
+        monitoring = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_monitoring.html')))
+        block = _fn(checks, '_hostProfileBlock')
+        assert '_renderProfileFields(' in block, 'the block does not draw the fields'
+        assert 'hmProfFields_' in block, 'nothing creates the element the repaint looks up'
+        # Called from both card shapes — one check per host, and several.
+        assert '_hostProfileBlock(' in _fn(checks, '_renderSingleCheck')
+        assert '_hostProfileBlock(' in monitoring, 'multi-check cards draw no profile'
+        # …and kept on the repaint, or editing a check silently drops the connection form.
+        assert '_hostProfileBlock(' in _fn(checks, '_refreshSingleCheck')
+
+    def test_a_credential_is_offered_for_any_protocol_that_declares_one(self):
+        """SSH had a credential picker and nothing else did. The device's identity is the
+        same kind of thing whatever the protocol, and an SNMP community reused across forty
+        switches is exactly what the credential manager is for."""
+        js = _strip_comments(_read(HOST_MODAL))
+        fn = _fn(js, '_renderProfileFields')
+        assert '_credTypeForModule(' in fn, 'the profile form knows only about ssh'
+        assert "'cred_uid'" in fn and 'credentialOptions(' in fn
+        # Picking one must clear the inline copy, or two places hold one secret and the
+        # stale one wins the day somebody rotates the other.
+        assert '_profileCredFields(' in _fn(js, '_setProfileField')
+
+
 class TestTheChipsReadAsNames:
     """The field stores profile ids, which is the right thing to store — they survive a
     rename, they are what the API speaks and what a bug report quotes. They are not what a

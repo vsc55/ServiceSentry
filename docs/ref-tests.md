@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.310 tests** (6280 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-21). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.320 tests** (6290 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2738,7 +2738,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 26 tests
+**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 27 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2776,7 +2776,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 46. Hosts — Asistente de migración
 
-**Archivo:** `tests/unit/test_hosts_migrate.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_migrate.py` — 8 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -8470,7 +8470,7 @@ mira las pantallas sin darle el registro con ella.
 
 ---
 
-**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 54 tests
+**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 61 tests
 
 **La pantalla del catálogo de perfiles**: el cableado que hace visible un catálogo. Un watchful
 trae su propia interfaz en tres ficheros que una convención recoge, y una pantalla hecha así

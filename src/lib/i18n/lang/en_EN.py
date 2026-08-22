@@ -1832,6 +1832,9 @@ LANG = {
     'host_virtual_hint':    'Virtual host (a keepalived VIP, a proxmox cluster…): an entity to monitor, not a physical machine.',
     'host_physical':        'Physical',
     'host_ssh_conn':        'SSH connection',
+    # The connection one module holds with the device (SNMP, a database…), inside its
+    # own card: it belongs to the device, not to each check that uses it.
+    'host_conn_profile':    'Device connection',
     'host_ssh_test':        'Test connection',
     'host_test':            'Test server',
     'host_test_all':        'Test all',

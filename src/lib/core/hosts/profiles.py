@@ -61,6 +61,10 @@ def _profile_options(keys: tuple[str, ...]) -> dict:
 _META_KEYS = ('type', 'options', 'options_int', 'options_deps', 'options_disabled',
               'options_i18n', 'secret', 'sensitive', 'placeholder', 'placeholder_map',
               'placeholder_map_field', 'show_when', 'rows',
+              # A multi-value field is a LIST with a picker, not a text box. Dropping the
+              # flag here does not fail: it renders a comma-separated string that happens
+              # to look editable, which is the worst of the three possible outcomes.
+              'multi',
               'min', 'max', 'label_i18n', 'default')
 
 # ── Built-in SSH connection profile (core, not a module) ──────────────────────

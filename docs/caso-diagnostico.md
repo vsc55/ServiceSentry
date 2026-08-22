@@ -19,6 +19,48 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un formulario que se dibujaba perfecto en una página que no lo pedía
+
+**Fecha:** 2026-08-22 · **Área:** `lib/web_admin/templates/partials/servers/_save.html::_renderProfileFields`
+
+**Síntoma.** Al ensanchar el perfil SNMP del host —que pasaba de llevar solo la dirección a
+llevar puerto, versión, comunidad, claves v3 y perfiles de dispositivo— los campos nuevos no
+aparecían por ninguna parte del modal de servidor. Ningún error en consola, ninguna traza en
+el servidor: sencillamente no había formulario.
+
+**Diagnóstico.** `_renderProfileFields(proto, spec)` existía, estaba bien escrito y hacía
+exactamente lo que hacía falta. El único sitio del repositorio que nombraba el elemento que
+rellena era su propio repintado:
+
+```bash
+$ grep -rn "hmProfFields" lib/web_admin/templates/
+_save.html:445:  const el = document.getElementById('hmProfFields_' + proto.replace(/\W/g, '_'));
+```
+
+Una búsqueda: **se lee, nunca se crea**. El `git log -S` lo explicó — la pestaña «Credenciales»
+que dibujaba un acordeón por protocolo se retiró del modal cuando los perfiles se redujeron a
+la dirección (no quedaba nada que poner dentro), y el renderizador se quedó atrás. Los tests
+que había lo confirmaban por escrito: *«Host-owned = the address only — there is no Credentials
+section anymore»*.
+
+**Causa raíz.** Código muerto que se lee como código vivo. La función era correcta, su
+repintado era correcto, y entre las dos no había página: la llamada que las unía se había ido
+en un commit anterior sin que nada lo notara, porque **nada falla cuando no se llama a nadie**.
+
+**Solución.** Devolver la sección donde ahora tiene sentido —dentro de la tarjeta del módulo,
+encima de sus checks, que es donde está su significado: SSH es la conexión de la máquina y va
+en General; SNMP es una conversación que un módulo mantiene con ella— y una guarda de estructura
+que exige que el bloque se dibuje: que lo llamen las dos formas de tarjeta (un check por host y
+varios) y también el repintado, o editar un check dejaría caer el formulario de conexión.
+
+**Lección.** Una función sin llamantes no da error, no pone un test en rojo y no se distingue
+de una viva leyéndola. Cuando un cambio «solo tiene que aparecer en pantalla» y no aparece, la
+primera pregunta no es si el renderizador está bien: es **quién lo llama** —`grep` del id que
+genera, no del nombre de la función—. Y si la respuesta es «nadie», la guarda que hay que
+escribir no es sobre lo que dibuja, sino sobre que alguien lo pida.
+
+---
+
 ## Un MIB que la biblioteca tiene y el compilador se salta
 
 **Fecha:** 2026-08-22 · **Área:** `watchfuls/snmp/mib_resolver.py::compile_raw_mibs_progressive`

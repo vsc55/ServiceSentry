@@ -33,6 +33,25 @@ clave / clave en línea) para que los módulos que necesitan **ejecutar comandos
 servidor (p.ej. `raid`) o **abrir un túnel** a través de él (p.ej. `datastore`) reutilicen las
 mismas credenciales definidas una vez en el host.
 
+### La identidad va con el protocolo, no solo con SSH
+
+Un perfil no lleva solo *por dónde* se llega a la máquina: lleva **quién hay que ser** para
+que conteste. SSH fue el primero en tenerlo y durante un tiempo fue el único, lo que se leía
+como una regla y solo era la consecuencia de ser el único perfil con algo que guardar.
+
+Cualquier protocolo cuyo módulo declare `__credential__` ofrece lo mismo en el formulario del
+host: o los valores en línea, o una **credencial reutilizable** (`cred_uid`) del gestor. Al
+elegir una, los campos que esa credencial aporta desaparecen del formulario **y del host** —
+dos sitios guardando un secreto significa que el día que se rota uno, gana el otro.
+
+En SNMP eso son la versión, la comunidad y las claves v3, más lo que el dispositivo **declara
+ser** (`device_profiles`). Una comunidad compartida por cuarenta switches se define una vez y
+se referencia cuarenta, que es exactamente para lo que está el gestor de credenciales.
+
+Lo que **no** sube al host es cuánto esperamos por él (`timeout`, `retries`): eso es política
+de sondeo del check, y además dos entradas de la misma IP que solo difieran ahí dejarían de
+ser el mismo host para el asistente de migración.
+
 ---
 
 ## Cómo un check se liga a un host

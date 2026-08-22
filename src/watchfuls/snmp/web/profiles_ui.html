@@ -19,6 +19,25 @@ let _snmpProfSel      = new Set();
 let _snmpProfExpanded = new Set();
 let _snmpProfGen      = 0;        // bumped per open — a late fetch for a closed modal is dropped
 let _snmpProfOnPick   = null;     // where the selection goes, when it is not a modulesData path
+
+// ── The device an action on this field runs against ─────────────────────────
+//
+// Two panes ask the same question and reach the device two different ways. The Modules tab
+// has the server's saved config at a path in `modulesData`; the Servers tab is editing a
+// host draft that may never have been saved, and hands over a provider when it opens the
+// field. Everything that talks to the device — Detect, Test — goes through here, so neither
+// of them has to know which pane it was opened from.
+//
+// Set by BOTH entry points, to a function or to null: leaving a stale provider behind would
+// point the next run at the last host somebody looked at.
+let _snmpDeviceCfg = null;
+
+function _snmpCfgFor(pathStr) {
+    if (_snmpDeviceCfg) return _snmpDeviceCfg() || {};
+    const itemPath = String(pathStr || '').split('|').slice(0, -1).join('|');
+    return (typeof getPath === 'function' && itemPath)
+        ? (getPath(modulesData, itemPath.split('|')) || {}) : {};
+}
 let _snmpProfReasons  = {};       // why a detection proposed each profile, once one has run
 let _snmpProfRail     = 'all';    // the rail's one selected line — the view only
 let _snmpProfNames    = null;     // {id: name} for the chips, fetched once and cached
@@ -66,8 +85,10 @@ function _snmpProfViewLoad(modName) {
  *
  *  `onPick` is how one picker serves two panes. The Modules tab has a path into
  *  `modulesData` and needs nothing else; the host modal is editing a draft that has not been
- *  saved, so it hands over a callback and keeps the writing to itself. */
-function _snmpProfOpenFor(pathStr, current, onPick) {
+ *  saved, so it hands over a callback and keeps the writing to itself — and a `cfgProvider`
+ *  for Detect, which is the one button in here that speaks to the device. */
+function _snmpProfOpenFor(pathStr, current, onPick, cfgProvider) {
+    _snmpDeviceCfg = (typeof cfgProvider === 'function') ? cfgProvider : null;
     _snmpProfOpen(String(pathStr || '').split('|')[0] || 'snmp', pathStr, current, onPick);
 }
 
@@ -528,8 +549,7 @@ function _snmpProfCommit() {
  *  numbers that look fine, and that is the failure worth making somebody confirm. */
 async function _snmpProfDetect(btn) {
     if (!_snmpProfPath) return;
-    const itemPath = _snmpProfPath.split('|').slice(0, -1).join('|');
-    const cfg = getPath(modulesData, itemPath.split('|')) || {};
+    const cfg = _snmpCfgFor(_snmpProfPath);
     const box = _profEl('snmpProfilesDetected');
     const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
     const res = await apiPost(_snmpActionUrl(_snmpProfMod, 'detect_profiles'), {...cfg});
@@ -1290,8 +1310,9 @@ function _snmpTestT(key, fallback) {
  *  Straight away because there is nothing to configure: the assignment is the question and
  *  it is already on the screen behind this one. A dialog that opens empty with a button in
  *  the middle is one extra click on every single use. */
-function _snmpTestOpen(pathStr, _value, _btn) {
+function _snmpTestOpen(pathStr, _value, _btn, cfgProvider) {
     _snmpTestPath = String(pathStr || '');
+    _snmpDeviceCfg = (typeof cfgProvider === 'function') ? cfgProvider : null;
     _snmpTestData = null;
     _snmpTestView = 'read';
     const set = (id, text) => { const e = _snmpTestEl(id); if (e) e.textContent = text; };
@@ -1321,14 +1342,16 @@ function _snmpTestOpen(pathStr, _value, _btn) {
 async function _snmpTestRun(btn) {
     if (!_snmpTestPath) return;
     const modName = _snmpTestPath.split('|')[0] || 'snmp';
-    const itemPath = _snmpTestPath.split('|').slice(0, -1).join('|');
-    const cfg = getPath(modulesData, itemPath.split('|')) || {};
+    // One server's saved config, or — opened from a host — the draft on screen. Both end up
+    // as the same thing to the route: an item, resolved server-side against its bound host.
+    const cfg = _snmpCfgFor(_snmpTestPath);
     const gen = ++_snmpTestGen;
     _snmpTestSeen = {};
     const body = _snmpTestEl('snmpTestBody');
     if (body) body.innerHTML = _snmpTestStepsHtml([]);
     const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
-    _snmpTestLog('run', {host: cfg.host || '', profiles: cfg.device_profiles || ''});
+    _snmpTestLog('run', {host: cfg.host || (cfg._host && cfg._host.address) || '',
+                         profiles: cfg.device_profiles || ''});
 
     const fail = (msg) => {
         _snmpTestData = null;
