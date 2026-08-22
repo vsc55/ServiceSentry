@@ -8,6 +8,27 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.112] - 2026-08-22
+
+### Fixed
+- **The SNMP section disappeared from the System panel.** Reported from the browser, and
+  invisible to every test: nothing failed, the entry simply never appeared. Two places
+  decided "is this a section somebody declared?" by asking whether a MODULE was behind it,
+  which stopped being the same question when a core package claimed one.
+  - the sidebar emitted `data-nav-perm` only alongside `data-nav-module`, so a core section
+    carried neither — and the entry ships hidden, revealed by `applyRoleRestrictions` for
+    anything with a permission and by `syncModuleSections` for anything with a module. With
+    neither attribute, nobody revealed it, ever;
+  - `dashboard.html` generated a pane for `standalone_specs if p.module`, so the section had
+    no pane to open either. The filter is `generated` now — a flag the spec carries — because
+    the core sections that predate this (Overview, Infra, History, Syslog) also have no
+    module and DO have bespoke markup, so dropping the filter would have emitted their panes
+    twice.
+- The guard that should have caught it asserted `data-nav-module="snmp"` and
+  `data-nav-perm="modules_view"` with `in html` — against the whole page, where both strings
+  appear in somebody else's markup. It reads the entry's own tag now: an attribute asserted
+  against a whole document is an attribute that can belong to anything on it.
+
 ## [0.0.1+build.111] - 2026-08-22
 
 ### Changed

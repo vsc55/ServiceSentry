@@ -192,11 +192,13 @@
         {% include "partials/account/_pane.html" %}
         {% endif %}
 
-        <!-- ======= Module-contributed sections (schema.json → __page__) ====== -->
-        {# Generated, never hand-written: a watchful claiming a page gets its pane here,
-           and its own web/_ui.html renders into #<id>-container. The core panes above
-           predate this and keep their bespoke markup. #}
-        {% for p in standalone_specs if p.module %}
+        <!-- ======= Declared sections (__page__ / a core package's PAGE) ====== -->
+        {# Generated, never hand-written: whatever claims a page gets its pane here, and its
+           own web/_ui.html renders into #<id>-container. The core panes above predate this
+           and keep their bespoke markup, which is why the filter is `generated` and not
+           `module`: a CORE package can claim a section too, and asking whether a module was
+           behind it left that section with an entry in the sidebar and no pane to open. #}
+        {% for p in standalone_specs if p.generated %}
         <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="{{ p.pane }}">
             <div id="{{ p.id }}-container" class="ss-vfill">
                 <div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>
