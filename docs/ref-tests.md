@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.390 tests** (6360 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.400 tests** (6370 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -5261,7 +5261,7 @@ se incluye da un panel vacío sin error en ninguna parte.
 
 ## 97. SNMP contesta por sí mismo
 
-**Archivo:** `tests/integration/test_wa_snmp_routes.py` — 9 tests
+**Archivo:** `tests/integration/test_wa_snmp_routes.py` — 12 tests
 
 La biblioteca, el catálogo y preguntarle a un dispositivo sólo eran alcanzables en
 `/api/v1/modules/watchfuls/snmp/<acción>`: una ruta que describía dónde vivía el código en vez
@@ -5283,6 +5283,9 @@ escribe una fila de auditoría por cada vistazo.
 | `TestTheGate::test_a_viewer_may_not_change_it` | **El que importa.** Compilar, importar, borrar y escribir perfiles son `snmp_manage`; un flag de solo-lectura que dejara pasar cualquiera de ellos sería una escritura que puede hacer cualquiera que pueda mirar |
 | `TestTheGate::test_an_editor_may_change_it` | Y que la puerta no se pase de celosa |
 | `TestTheGate::test_the_modules_permission_no_longer_opens_it` | **El corte limpio.** Un rol con `modules_view` y nada más alcanzaba toda la superficie SNMP, porque un watchful no tiene flags propios — que es justo lo que hacía imposible decir «dale la biblioteca de MIB» |
+| `TestTheLibrarySettingsComeFromTheConfig::test_the_route_ignores_what_the_client_sends` | **El que tiene coste.** Una lista de carpetas enviada por el cliente es un cliente eligiendo qué lee el servidor de su propio disco |
+| `TestTheLibrarySettingsComeFromTheConfig::test_what_the_config_holds_is_what_arrives` | Y que sí llegan: cazó que la ruta llamaba al lector de config con los argumentos mal y el `except` se lo tragaba — los ajustes no se aplicaban nunca, en silencio |
+| `TestTheLibrarySettingsComeFromTheConfig::test_the_token_is_a_core_secret` | Se cifraba porque el módulo lo declaraba `secret`, y esa declaración deja de aplicar cuando el ajuste sale del módulo. Sin nombrarlo en el core, la mudanza lo habría escrito en claro |
 
 ---
 

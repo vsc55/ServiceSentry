@@ -289,11 +289,17 @@ class TestATokenChangesTheBudget:
         assert body.count("_h['Authorization'] = f'Bearer {token}'") == 2
 
     def test_it_is_a_declared_secret(self):
-        """Encrypted at rest and masked in the API, like every other secret a module
-        declares — a token in the clear in a config table is a token in a backup."""
-        import json as _json
-        schema = _json.loads(_read_src('watchfuls/snmp/schema.json'))
-        assert schema['__module__']['github_token']['secret'] is True
+        """Encrypted at rest and masked in the API — a token in the clear in a config table
+        is a token in a backup.
+
+        It used to be encrypted because the SNMP module declared it `secret` in its schema,
+        and that declaration stopped applying the moment the setting became the library's
+        rather than the module's. A CORE secret now, by name, or the move would have quietly
+        written it in plaintext."""
+        from lib.security.secret_manager import ENCRYPT_KEYS      # noqa: PLC0415
+        from lib.config.spec import CFG_BY_PATH                   # noqa: PLC0415
+        assert 'snmp|github_token' in CFG_BY_PATH
+        assert 'github_token' in ENCRYPT_KEYS
 
     def test_a_module_secret_reaches_its_own_action(self, tmp_path):
         """…which is what makes it usable at all: the browser holds `null` for every secret

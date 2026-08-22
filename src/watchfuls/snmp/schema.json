@@ -3,10 +3,7 @@
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},
-        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50},
-        "mib_dirs": {"type": "str",  "default": ""},
-        "mib_repos": {"type": "str", "default": "", "hidden": true},
-        "github_token": {"type": "str", "default": "", "secret": true}
+        "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
     "__host_profile__": {"key": "snmp", "address_field": "host",

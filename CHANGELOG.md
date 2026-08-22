@@ -8,6 +8,33 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.111] - 2026-08-22
+
+### Changed
+- **The MIB library's settings are configuration, not module config.** `mib_dirs`,
+  `mib_repos` and `github_token` describe the LIBRARY — where it looks and who it asks — and
+  the library is the core's. They are `snmp|*` in `lib/config/spec.py` now, on their own card
+  under Monitoring, with `SS_SNMP_MIB_DIRS` and `SS_SNMP_GITHUB_TOKEN` documented in
+  `docker/env.example`. Behind a module card, "where do I keep my vendor MIBs" was a question
+  filed under something that could be uninstalled.
+- **The route reads them server-side.** They used to arrive in the module config the browser
+  posted, which meant a client could name the directories the server scans off its own disk,
+  and meant the token had to travel to the browser at all — if only as a mask.
+- `github_token` is a CORE secret now (`secret_manager.ENCRYPT_KEYS`). It was encrypted
+  because the SNMP module declared it `secret` in its schema, and a module's declaration
+  stops applying the moment the setting leaves the module — without naming it in the core key
+  set, the move would have quietly written a token in plaintext.
+- The GitHub source list writes to the config surface instead of the module's, so the
+  checkbox that adds a repository still saves where its value now lives.
+- No migration: an installation that set one of these re-enters it in Configuration → SNMP
+  library. They are three strings, and inventing a migration for them would be more code
+  than the setting.
+
+### Fixed
+- The route called the config reader with the wrong argument count, and the `except` around
+  it swallowed the `TypeError` — so the library settings silently never applied. Found by a
+  test that asserted the values ARRIVE rather than only that the wrong ones do not.
+
 ## [0.0.1+build.110] - 2026-08-22
 
 ### Changed

@@ -15,6 +15,8 @@ write rights and audits a row for every look.
 import os
 import pathlib
 
+from unittest.mock import patch
+
 import pytest
 
 from lib.web_admin import WebAdmin
@@ -116,3 +118,51 @@ class TestTheGate:
                                 'role': '_snmp_none', 'display_name': 'Mod'}
         _login(client, 'modonly')
         assert client.post('/api/v1/snmp/list_mibs', json={}).status_code == 403
+
+
+class TestTheLibrarySettingsComeFromTheConfig:
+    """`mib_dirs`, `mib_repos` and `github_token` describe the LIBRARY, which is the core's.
+
+    They used to travel in the module config the browser posted, which meant a client could
+    name the directories the server scans and hand over a token — and meant the token had to
+    reach the browser at all, if only as a mask. The route reads them server-side now.
+    """
+
+    def test_the_route_ignores_what_the_client_sends(self, wa, client):
+        """The one with a cost. A directory list from the client is a client choosing what
+        the server reads off its own disk."""
+        seen = {}
+
+        def _fake(cfg=None):
+            seen.update(cfg or {})
+            return {'ok': True, 'mibs': []}
+
+        _as(wa, client, 'admin')
+        with patch('lib.core.snmp.mibs.admin.MibAdmin.list_mibs', staticmethod(_fake)):
+            res = client.post('/api/v1/snmp/list_mibs',
+                              json={'mib_dirs': '/etc/shadow', 'github_token': 'stolen'})
+        assert res.status_code == 200
+        assert seen.get('mib_dirs') == ''        # the config's value, which is unset here
+        assert seen.get('github_token') == ''
+
+    def test_what_the_config_holds_is_what_arrives(self, wa, client):
+        seen = {}
+
+        def _fake(cfg=None):
+            seen.update(cfg or {})
+            return {'ok': True, 'mibs': []}
+
+        _as(wa, client, 'admin')
+        wa._write_config({**(wa._read_config_file(wa._CONFIG_FILE) or {}),
+                          'snmp': {'mib_dirs': '/opt/mibs', 'github_token': 'ghp_x'}})
+        with patch('lib.core.snmp.mibs.admin.MibAdmin.list_mibs', staticmethod(_fake)):
+            client.post('/api/v1/snmp/list_mibs', json={})
+        assert seen.get('mib_dirs') == '/opt/mibs'
+        assert seen.get('github_token') == 'ghp_x'
+
+    def test_the_token_is_a_core_secret(self):
+        """It was encrypted because the module declared it `secret`, and a module's
+        declaration stops applying the moment the setting leaves the module. Named in the
+        core key set now — without that, moving it would have written it in plaintext."""
+        from lib.security.secret_manager import ENCRYPT_KEYS
+        assert 'github_token' in ENCRYPT_KEYS

@@ -2469,6 +2469,9 @@ LANG = {
         'landing_page': 'Landing page',
         'remember_me_days': '“Remember me” lifetime (days)',
         'audit_detail_max_items': 'Items per audit detail (0 = no limit)',
+    'mib_repos': 'GitHub MIB repositories',
+    'mib_dirs': 'Extra MIB directories',
+    'github_token': 'GitHub token for MIB imports',
     'backup_dir': 'Backup folder',
     'update_check_url': 'Update check URL',
     'backup_every_hours': 'Automatic backup every (hours)',
@@ -2642,6 +2645,9 @@ LANG = {
     },
     # Field hints — shown as ⓘ tooltip next to each config option
     'hints': {
+        "mib_dirs": "Extra directories to look for compiled MIBs in, comma-separated. They are added to the panel's library, not a replacement for it. Use it for a directory something else already maintains — a system net-snmp, a share — without copying anything into it.",
+        'github_token': 'Anonymous GitHub allows 60 requests an hour, and one vendor folder can spend them looking up dependencies. With a token it is 5000. Stored encrypted and never sent back to the browser.',
+        'mib_repos': 'URL templates, one per line, an import may pull dependencies from. Edited by the source list on the Import view, which knows which templates belong together: one repository mixes .txt, .my and extensionless files, and each spelling needs its own.',
         'backup_every_hours': '0 = no automatic backups. 24 = daily, 168 = weekly. An interval and not a time of day on purpose: a panel that was off at 03:00 must still take its copy when it comes back at 09:00, and "how long since the last one" stays true until one is taken. The cost is that copies land a few minutes later each time.',
         'backup_keep': 'How many AUTOMATIC copies are kept; making a new one deletes the oldest. 0 keeps them all. Copies made by hand are never touched. Without retention the folder grows until the disk is full, and a full disk stops the whole panel.',
         'backup_auto_secrets': 'Automatic copies carry the encrypted credentials. On by default, unlike a hand-made copy where somebody is there to decide: an unattended copy with no credentials is discovered at restore time, the worst moment to discover anything.',
@@ -3475,6 +3481,7 @@ LANG = {
     # Registered by CONVENTION (`cfg_desc_<card id>`, resolved in lib/config/layout.py):
     # writing the string is what registers it, so thirty-four sections cannot become
     # thirty-four chances to add a card and forget its line.
+    'cfg_desc_snmp_library': 'Where the panel looks for MIBs, and which repositories it asks.',
     'cfg_desc_global':                    'Language, theme, and where you land after signing in.',
     'cfg_desc_proxy':                     'How ServiceSentry is reached from outside: public URL, HTTPS and trusted proxies.',
     'cfg_desc_database':                  'Engine and connection for the main database. Applied on restart.',
@@ -3708,6 +3715,7 @@ LANG = {
     'page_reload_countdown': 'The service was restarted — reloading in {} s…',
     'reload':                'Reload',
     'proxy_section': 'External Access',
+    'cfg_card_snmp_library': 'SNMP library (MIBs)',
     'cfg_card_platform_health': 'Platform health',
     'cfg_card_maintenance': 'Maintenance',
     'cfg_card_diagnostics': 'Diagnostics',

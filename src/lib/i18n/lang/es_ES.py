@@ -2470,6 +2470,9 @@ LANG = {
         'landing_page': 'Página de inicio',
         'remember_me_days': 'Duración de «Recordarme» (días)',
         'audit_detail_max_items': 'Elementos por detalle de auditoría (0 = sin límite)',
+    'mib_repos': 'Repositorios de MIB en GitHub',
+    'mib_dirs': 'Carpetas de MIB adicionales',
+    'github_token': 'Token de GitHub para importar MIB',
     'backup_dir': 'Carpeta de copias de seguridad',
     'update_check_url': 'URL de comprobación de versión',
     'backup_every_hours': 'Copia automática cada (horas)',
@@ -2643,6 +2646,9 @@ LANG = {
     },
     # Hints de campo — se muestran como tooltip ⓘ junto a cada opción de configuración
     'hints': {
+        'mib_dirs': 'Carpetas adicionales donde buscar MIB compilados, separadas por comas. Se suman a la biblioteca del panel; no la sustituyen. Sirve para una carpeta que ya mantiene otra cosa —un net-snmp del sistema, un recurso compartido— sin copiar nada dentro.',
+        'github_token': 'GitHub anónimo permite 60 peticiones por hora, y una sola carpeta de un fabricante puede gastarlas buscando dependencias. Con token son 5000. Se guarda cifrado y no vuelve al navegador.',
+        'mib_repos': 'Plantillas de URL, una por línea, de donde una importación puede sacar dependencias. Se editan con la lista de fuentes de la vista Importar, que sabe qué plantillas van juntas: un repositorio mezcla ficheros .txt, .my y sin extensión, y hace falta una por cada forma.',
         'backup_every_hours': '0 = sin copias automáticas. 24 = diaria, 168 = semanal. Es un intervalo y no una hora del día a propósito: un panel apagado a las 03:00 tiene que hacer su copia al volver a las 09:00, y «cuánto hace de la última» sigue siendo cierto hasta que se hace una. El precio es que caen unos minutos más tarde cada vez.',
         'backup_keep': 'Cuántas copias AUTOMÁTICAS se guardan; al hacer una nueva se borran las más viejas. 0 = conservarlas todas. Las copias hechas a mano no se tocan nunca. Sin retención la carpeta crece hasta llenar el disco, y un disco lleno para el panel entero.',
         'backup_auto_secrets': 'Las copias automáticas llevan las credenciales cifradas. Activado por defecto, al revés que una copia hecha a mano donde alguien está delante para decidir: una copia desatendida que no lleva credenciales se descubre al restaurar, que es el peor momento para descubrir nada.',
@@ -3476,6 +3482,7 @@ LANG = {
     # Registered by CONVENTION (`cfg_desc_<card id>`, resolved in lib/config/layout.py):
     # writing the string is what registers it, so thirty-four sections cannot become
     # thirty-four chances to add a card and forget its line.
+    'cfg_desc_snmp_library': 'Dónde busca MIB el panel y a qué repositorios los pide.',
     'cfg_desc_global':                    'Idioma, tema y a qué página llegas al iniciar sesión.',
     'cfg_desc_proxy':                     'Cómo se llega a ServiceSentry desde fuera: URL pública, HTTPS y proxies de confianza.',
     'cfg_desc_database':                  'Motor y conexión de la base de datos principal. Se aplica al reiniciar.',
@@ -3709,6 +3716,7 @@ LANG = {
     'page_reload_countdown': 'El servicio se ha reiniciado — recargando en {} s…',
     'reload':                'Recargar',
     'proxy_section': 'Acceso Externo',
+    'cfg_card_snmp_library': 'Biblioteca SNMP (MIB)',
     'cfg_card_platform_health': 'Salud de la plataforma',
     'cfg_card_maintenance': 'Mantenimiento',
     'cfg_card_diagnostics': 'Diagnóstico',

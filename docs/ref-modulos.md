@@ -876,7 +876,10 @@ sub-colección de **checks** (OIDs a comprobar):
 |---------|-------|------|-------------|
 | `__module__` | `enabled` | bool | Activar el módulo |
 | | `threads` | int | Hilos para checks en paralelo |
-| | `mib_dirs` | str | Directorios adicionales de MIBs |
+
+> Los ajustes de la **biblioteca MIB** (`mib_dirs`, `mib_repos`, `github_token`) ya no están
+> aquí: son de la biblioteca, que es del core, y viven en la sección `snmp` de la
+> configuración — ver [ref-configuracion.md](ref-configuracion.md).
 | `servers.*` | `enabled` | bool | Activar el servidor |
 | | `host` | str | Host/IP del agente SNMP |
 | | `port` | int | Puerto (161 por defecto) |

@@ -70,6 +70,16 @@ def register(app, wa):
             del config[_k]
         modules_actions.fill_from_stored_item(wa, 'snmp', config)
         modules_actions.restore_action_secrets(wa, 'snmp', config)
+        # The library's own settings, from the configuration and not from the client. They
+        # used to arrive in the posted module config, which meant a browser could name the
+        # directories to scan and hand over a token — and meant the token had to travel to
+        # the browser at all, if only as a mask.
+        # `_config_section` and not a bare read: it is the one place that knows which file
+        # and how, and calling the reader by hand is how this arrived with the wrong argument
+        # count — swallowed by the except below, so the settings silently never applied.
+        _snmp_cfg = wa._config_section('snmp')
+        for _k in ('mib_dirs', 'mib_repos', 'github_token'):
+            config[_k] = _snmp_cfg.get(_k, '') or ''
         config['__var_dir__'] = wa._var_dir or ''
         config['__connector__'] = getattr(wa, '_db_connector', None)
         config['__user__'] = session.get('username', '')
