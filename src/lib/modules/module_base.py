@@ -75,6 +75,26 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         """ Check the module and return the result. """
         self.debug.debug_obj(self.name_module, self.dict_return.list, "Data Return")
 
+    def report_progress(self, detail: str) -> None:
+        """Say what this module is doing right now — free text, shown to whoever is watching.
+
+        Only somebody who pressed a button is ever listening (the infrastructure section's
+        "collect now" installs the sink; a scheduler cycle does not), so this costs an
+        attribute lookup the rest of the time and is safe to call from anywhere in a check.
+
+        Free text because the MODULE is the only thing that knows what it is doing. A core
+        vocabulary of steps would fit whichever module was in front of whoever wrote it and
+        be a lie for the other twenty.
+        """
+        mon = getattr(self, '_monitor', None)
+        report = getattr(mon, 'report_progress', None)
+        if report is None:
+            return
+        try:
+            report(self.name_module, str(detail or ''))
+        except Exception:  # pylint: disable=broad-except
+            pass
+
     def run_parallel(self, items, check_fn, error_prefix: str) -> None:
         """Run ``check_fn(key, value)`` over ``items`` in a thread pool.
 
@@ -87,8 +107,14 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         workers = max(1, self.module_default('threads', self.module_field_default('threads')))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(check_fn, k, v): k for k, v in items}
+            # What every module can say without being asked: how many of its things are done.
+            # A module with forty checks is forty minutes of silence otherwise, and the one
+            # place that knows the count is the loop that owns it.
+            total, done = len(futures), 0
             for future in concurrent.futures.as_completed(futures):
                 key = futures[future]
+                done += 1
+                self.report_progress(f'{done}/{total} — {self.item_label(key) or key}')
                 try:
                     future.result()
                 except Exception as exc:  # pylint: disable=broad-except

@@ -89,7 +89,7 @@ sus mensajes `info(...)` se **descartan silenciosamente**:
   añadir columna NOT NULL sin default).
 - [lib/db/module_tables.py:53](../src/lib/db/module_tables.py#L53) — avisos del descubrimiento
   de tablas de módulo.
-- [watchfuls/snmp/mib_admin.py:110](../src/watchfuls/snmp/mib_admin.py#L110) — avisos de fuentes
+- [watchfuls/snmp/mib_admin.py:110](../src/lib/core/snmp/mibs/admin.py#L110) — avisos de fuentes
   MIB.
 
 > **Implicación práctica:** para ver los `info`/`debug` de la capa de BD (evolución de esquema)

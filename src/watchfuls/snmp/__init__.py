@@ -16,14 +16,12 @@ import re
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
-from . import profile_store as _profile_store
-from . import profiles as _profiles
-from .actions import SnmpActions
+from lib.core.snmp import profiles as _profiles
+from lib.core.snmp.actions import SnmpActions
 from .checks import SnmpChecks
-from .client import SnmpClient, _HAS_PYSNMP
+from lib.core.snmp.client import SnmpClient, _HAS_PYSNMP
 from .defaults import _SCHEMA, _CHECK_DEFAULTS, _SERVER_DEFAULTS
-from .mib_admin import MibAdmin, _HAS_PYSMI
-from . import mib_versions as _mib_versions
+from lib.core.snmp.mibs.admin import MibAdmin, startup_compile_mibs as _startup_compile_mibs, _HAS_PYSMI
 from .sampler import SnmpSampler
 
 # What is left here is the module itself: the class, what it declares and what it offers the
@@ -42,74 +40,15 @@ class Watchful(MibAdmin, SnmpChecks, SnmpClient, SnmpActions, SnmpSampler,
     MISSING_DEPS: list[str]  = [] if _HAS_PYSNMP else ['pysnmp']
     PARTIAL_DEPS: list[str]  = [] if _HAS_PYSMI  else ['pysmi']
 
-    WATCHFUL_ACTIONS: frozenset[str] = frozenset({
-        'discover',
-        'list_profiles',
-        'detect_profiles',
-        'test_profiles',
-        'test_profiles_start',
-        'test_profiles_status',
-        'save_profile_group',
-        'delete_profile_group',
-        'save_profile',
-        'delete_profile',
-        'list_mibs',
-        'list_mib_sources',
-        'compile_mibs',
-        'compile_mibs_start',
-        'compile_mibs_status',
-        'compile_mibs_cancel',
-        'delete_mib',
-        'upload_mib',
-        'import_mib_from_url',
-        'import_mib_from_github',
-        'import_mib_from_github_start',
-        'import_mib_from_github_status',
-        'import_mib_archive',
-        'import_mib_archive_start',
-        'import_mib_archive_status',
-        'get_mib_details',
-        'get_raw_mib_details',
-        'get_all_symbols',
-        'build_oid_index',
-        'save_mib_source',
-        'diff_mib_versions',
-        'restore_mib_version',
-        'list_mib_versions',
-        'get_mib_version',
-        'lint_mib_source',
-        'delete_mib_version',
-        'orphan_versions',
-        'diff_mib_files',
-        'mib_dupe_details',
-        'restore_orphan',
-        'forget_mib_versions',
-        'library_leftovers',
-        'clean_library',
-    })
+    # One action, and it is the only one that was ever about a check: `discover` finds the
+    # OIDs to build a check's field from. Everything else this module used to answer for —
+    # the MIB library, the profile catalogue, asking a device what it serves — is the core's
+    # and answers at /api/v1/snmp/<action>. They were listed here because that was the only
+    # place a panel operation could be listed, not because a check owned them.
+    WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
 
     # Actions that produce no side effects — audit logging is suppressed for them.
-    READ_ONLY_ACTIONS: frozenset[str] = frozenset({
-        'discover',
-        'list_profiles',
-        'detect_profiles',
-        'test_profiles',
-        'test_profiles_start',
-        'test_profiles_status',
-        'list_mibs',
-        'list_mib_sources',
-        'get_mib_details',
-        'get_raw_mib_details',
-        'get_all_symbols',
-        'list_mib_versions',
-        'get_mib_version',
-        'diff_mib_versions',
-        'lint_mib_source',
-        'orphan_versions',
-        'diff_mib_files',
-        'mib_dupe_details',
-        'library_leftovers',
-    })
+    READ_ONLY_ACTIONS: frozenset[str] = frozenset({'discover'})
 
 
     # No toolbar. All three of these used to be buttons on the module's card in Modules,
@@ -127,7 +66,9 @@ class Watchful(MibAdmin, SnmpChecks, SnmpClient, SnmpActions, SnmpSampler,
 
     def __init__(self, monitor):
         super().__init__(monitor, __package__)
-        self._startup_compile_mibs()
+        # Told where the library is and how to log, rather than reaching into this object for
+        # both: it was the one thing in the core's MIB administration that needed an instance.
+        _startup_compile_mibs(str(getattr(monitor, 'dir_var', '') or '').strip(), self._debug)
 
 def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
     """Every value a device profile can record, named — see lib.modules.history_fields.
@@ -152,15 +93,3 @@ def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
         for field, meta in _profiles.history_fields(prof, lang).items():
             out.setdefault(field, meta)
     return out
-
-
-def discover_db_tables():
-    """The tables this module keeps in the shared database.
-
-    Edited MIB sources and their history, and the profile groupings written in the panel. On
-    the general connector rather than files beside the MIBs because a deployment with a web
-    container and a worker container shares the database and not the disk — and a MIB
-    corrected in the panel has to be the MIB the worker compiles, exactly as a grouping made
-    in the panel has to be the one the worker samples.
-    """
-    return [_mib_versions.SCHEMA, _profile_store.SCHEMA]

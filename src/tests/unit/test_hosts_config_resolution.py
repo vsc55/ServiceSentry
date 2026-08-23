@@ -85,17 +85,34 @@ class TestResolveHostGeneric:
 
 class TestPerModuleProfiles:
 
-    def test_snmp_inherits_only_address(self):
-        # The host now provides only the address; SNMP settings (community,
-        # version, v3 keys) are per-check, so the check's own values are kept.
-        with patch.object(SnmpWatchful, '_startup_compile_mibs', return_value=None):
+    def _snmp(self):
+        with patch('watchfuls.snmp._startup_compile_mibs'):
             s = SnmpWatchful(create_mock_monitor({'watchfuls.snmp': {}}))
         s._monitor._hosts_store = _FakeStore({'h1': _HOST})
-        srv = s.resolve_host({'host_uid': 'h1', 'community': 'mine',
-                              'version': '3', 'checks': {}})
-        assert srv['host'] == '10.0.0.9'           # address inherited from host
-        assert srv['community'] == 'mine'          # NOT overridden by the host
-        assert srv['version'] == '3'
+        return s
+
+    def test_snmp_inherits_the_device_identity_from_the_host(self):
+        """Bound to a host, the device's own settings come from the device — address,
+        port, community and the v3 keys alike.  The values left on the item are stale by
+        construction: the form that would have edited them is hidden once a host is
+        bound, so preferring them means authenticating with what somebody typed before
+        the host existed."""
+        srv = self._snmp().resolve_host({'host_uid': 'h1', 'community': 'mine',
+                                         'version': '3', 'checks': {}})
+        assert srv['host'] == '10.0.0.9'
+        assert srv['community'] == 'sec'
+        assert srv['version'] == '2c'
+        assert srv['port'] == 161
+        assert srv['snmpv3_auth_key'] == 'authk'
+
+    def test_snmp_without_a_host_keeps_its_own_connection(self):
+        """A one-off check against a bare address stays legal: no host_uid, nothing
+        resolved, the item answers for itself.  Binding to a host is how a device you
+        monitor is configured, not a requirement for asking one question of an IP."""
+        srv = self._snmp().resolve_host({'host': '192.0.2.7', 'community': 'mine',
+                                         'version': '3', 'checks': {}})
+        assert srv['host'] == '192.0.2.7'
+        assert srv['community'] == 'mine' and srv['version'] == '3'
 
     def test_ssl_cert_host_address_port_stays_on_check(self):
         # The host owns only the address; each check has its own port (a server

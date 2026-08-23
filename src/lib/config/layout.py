@@ -73,6 +73,11 @@ CARDS: tuple[dict, ...] = (
     # not something to keep one stray click away. The card has no fields of its own: each
     # domain contributes its button as a CONFIG_ACTION on section 'maintenance', so
     # nothing here knows about history or syslog specifically.
+    # The MIB library's own settings. Under Monitoring because that is what the library
+    # is FOR — the panel understanding what a device is saying — and not under General,
+    # where it would read as a platform setting nobody connects to a graph.
+    {'tab': 'monitoring', 'id': 'snmp_library', 'title_key': 'cfg_card_snmp_library',
+     'icon': 'bi-hdd-stack'},
     {'tab': 'general', 'id': 'maintenance', 'title_key': 'cfg_card_maintenance',
      'icon': 'bi-trash3'},
     # Where copies are written. A card of its own rather than a line in General: the section

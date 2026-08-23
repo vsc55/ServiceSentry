@@ -32,6 +32,7 @@ from lib.core.hosts.profiles import (
     module_host_multi_bind,
     module_status_render,
 )
+from lib.core.hosts.manifest import HOST_TYPES
 from lib.modules.discovery.credential_schemas import credential_schemas
 from lib.modules.discovery.overview_widgets import overview_widgets_catalog
 from lib.core.overview.discovery import discover_overview_widgets_public as _discover_overview_widgets
@@ -134,6 +135,8 @@ def register(app, wa):
             role=session.get('role', 'viewer'),
             item_schemas=ModuleBase.discover_schemas(wa._modules_dir),
             host_profiles=host_profiles_catalog(wa._modules_dir),
+            # What a device may declare itself to be, and the icon each wears.
+            host_types=[dict(t) for t in HOST_TYPES],
             credential_types=credential_schemas(wa._modules_dir),
             module_host_fields=module_host_fields(wa._modules_dir),
             module_host_collections=module_host_collections(wa._modules_dir),

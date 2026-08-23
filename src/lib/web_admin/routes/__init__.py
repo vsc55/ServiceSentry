@@ -25,8 +25,10 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     credentials      /api/v1/credentials*
     history          /api/v1/history*
     hosts            /api/v1/hosts*             (perm group 'servers')
-    infra            /api/v1/infra*             (read-only: the fleet as it IS right
-                                                now — hosts owns the registry)
+    infra            /api/v1/infra*             (the fleet as it IS right now — hosts owns
+                                                the registry; + /infra/hosts/<uid>/collect,
+                                                the one non-GET, and /infra/collect[/<job_id>]
+                                                to watch it — perm 'infra_collect')
     modules          /api/v1/modules*           (+ /modules/checks/run, /modules/watchfuls/<mod>/<action>)
     overview         /api/v1/overview*
     notify/email     /api/v1/notify/email/test  (+ template_routes: /notify/templates*, /notify/html-templates*)
@@ -94,6 +96,7 @@ from lib.core.backup.routes import register as _backup
 from lib.core.diagnostics.routes import register as _diagnostics
 from lib.core.config.routes import register as _config
 from lib.core.hosts.routes import register as _hosts
+from lib.core.snmp.routes import register as _snmp
 from lib.core.infra.routes import register as _infra
 from lib.core.credentials.routes import register as _credentials
 from lib.core.history.routes import register as _history
@@ -122,6 +125,7 @@ def register_all(app, wa):
     _overview(app, wa)
     _config(app, wa)
     _hosts(app, wa)
+    _snmp(app, wa)
     _infra(app, wa)
     _credentials(app, wa)
     _telegram(app, wa)

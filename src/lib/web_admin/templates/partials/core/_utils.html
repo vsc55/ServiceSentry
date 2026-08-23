@@ -476,6 +476,35 @@ function _loadViewMode(key, def = 'table') { try { return localStorage.getItem(k
  *  showing four groups can never suggest the whole set is four things. Every section that
  *  grew a summary wrote this same strip; seven copies of one line of markup is seven places
  *  for the padding to end up different. */
+/** Give an element the height that is actually left below it, and keep it there.
+ *
+ *  For a panel inside a page that SCROLLS. The fill chain (`.ss-vfill`) is the mechanism when
+ *  there is a height to hand down; a tab inside a scrolling document has none, so a panel that
+ *  asked to fill drew at the height of its own header. A fixed `min-height` in the stylesheet
+ *  is the other half of the same problem from the other side: 60vh is right for one screen and
+ *  a hole for the next, because the stylesheet cannot know where on the page the panel starts.
+ *
+ *  Measured, not guessed: where the element IS, minus where the viewport ends. Re-measured on
+ *  resize, and the listener removes itself once the element is gone — a section is re-rendered
+ *  on a timer, and a listener per render is a page that gets slower the longer it stays open.
+ *
+ *  A floor and never a cap: content past it grows the page, which is what a page that scrolls
+ *  is for.
+ */
+function fitToViewportBottom(el, gap = 16) {
+    if (!el) return;
+    const apply = () => {
+        if (!el.isConnected) { window.removeEventListener('resize', apply); return; }
+        const top = el.getBoundingClientRect().top;
+        const left = Math.round(window.innerHeight - top - gap);
+        // Below a floor there is nothing worth fitting to — on a short window the answer is
+        // to scroll, not to draw a panel two rows tall.
+        el.style.minHeight = Math.max(240, left) + 'px';
+    };
+    apply();
+    window.addEventListener('resize', apply);
+}
+
 function _summaryHeader(chips) {
     return `<div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2 border-bottom">${chips}</div>`;
 }

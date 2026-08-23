@@ -1,0 +1,431 @@
+{# ================================================================
+   Infrastructure — "how is this machine", before the other thousand values.
+
+   A device with a full set of SNMP profiles answers around a thousand measurements. The
+   Measures tab is right for that — a rail of families, a table per family — and it is the
+   wrong screen for the question somebody actually opens a device with: is this box all right,
+   how hard is it working, is it running out of room.
+
+   WHICH VALUES THOSE ARE IS NOT DECIDED HERE. The profile declares them (`"headline": true`),
+   because it is a fact about the equipment and not about the panel: a NAS answers with its
+   system status and its temperature, a switch's headline is throughput, a UPS's is its
+   battery and its runtime. A core that picked them by field name would be a core that knows
+   what a NAS is — and would have nothing to say about the next kind of device somebody adds.
+
+   So this file draws whatever was flagged, in whatever units it came in, and a device whose
+   profiles flag nothing gets told that plainly rather than being given an empty box.
+   ================================================================ #}
+
+/** The headline figures, as tiles — the device's own first, then per row.
+ *
+ *  Two shapes because there are two kinds of answer. "CPU idle 87 %" is about the box; "used
+ *  412 GB of 3.6 TB" is about one filesystem, and there are usually several. Drawing the
+ *  second kind as loose tiles would be twelve numbers with no way to tell which volume each
+ *  belongs to. */
+function _infraDetailsPane(metrics) {
+    const flagged = (metrics || []).filter(m => m.headline);
+    if (!flagged.length)
+        return `<div class="text-muted small">${esc(t('infra_no_headline'))}</div>`;
+    const own = flagged.filter(m => !m.row);
+    const rows = new Map();
+    for (const m of flagged.filter(m => m.row)) {
+        const k = `${m.row_group || ''}\u0000${m.row}`;
+        if (!rows.has(k)) rows.set(k, {row: m.row, group: m.row_group || '', items: []});
+        rows.get(k).items.push(m);
+    }
+    // Rows in a stable order. The device's own index is gone by the time this is drawn (the
+    // payload is sorted by module and label), and a list that reshuffles between refreshes is
+    // one nobody can read twice.
+    const list = [...rows.values()].sort((a, b) =>
+        String(a.group).localeCompare(String(b.group)) || String(a.row).localeCompare(String(b.row)));
+    // …under a heading each, by what answered them. Reported from the screen: memory stores
+    // and volumes came out as one run of cards with nothing between them, and "31 TiB" beside
+    // "8 GiB" reads as one list of the same kind of thing. The heading is the source's own
+    // name, so a device that adds a fourth kind of store gets a fourth section for free.
+    const sections = new Map();
+    for (const r of list) {
+        const k = r.items[0].source || '';
+        if (!sections.has(k)) sections.set(k, {
+            key: k, rank: r.items[0].source_rank || 0,
+            label: r.items[0].source_short || _infraShortLabel(r.items[0].source_label || k),
+            rows: []});
+        sections.get(k).rows.push(r);
+    }
+    const ordered = [...sections.values()].sort((a, b) =>
+        a.rank - b.rank || String(a.label).localeCompare(String(b.label)));
+    return `${own.length ? `<div class="d-flex flex-wrap gap-2 mb-3">
+            ${own.map(_infraDetailTile).join('')}</div>` : ''}
+        ${ordered.map(sec => `
+            ${ordered.length > 1 || own.length
+                ? `<div class="text-muted ss-fs-1 text-uppercase mb-1 mt-2">${esc(sec.label)}</div>`
+                : ''}
+            <div class="d-flex flex-wrap gap-2">${sec.rows.map(_infraDetailRow).join('')}</div>
+        `).join('')}`;
+}
+
+/** One figure, big enough to read from across the room.
+ *
+ *  The value is drawn by the SAME code the Measures tab uses (`_infraValueHtml`): a state is a
+ *  badge with the word the MIB gives it, a byte count is scaled to something a person reads,
+ *  a percentage gets its bar. Two renderers for one value is two answers to "what does 2
+ *  mean", and the one on the summary screen would be the one that stayed wrong. */
+function _infraDetailTile(m) {
+    return `<div class="rounded-3 border px-3 py-2" style="min-width:11rem;flex:1 1 11rem">
+        <div class="text-muted ss-fs-1 text-truncate" title="${escAttr(_infraTileTitle(m))}">
+            ${esc(m.label || m.field)}</div>
+        <div class="d-flex align-items-baseline gap-1 ss-fs-5">${_infraValueHtml(m)}</div>
+        <div class="text-muted ss-fs-1 text-truncate">${esc(
+            m.source_short || _infraShortLabel(m.source_label || ''))}</div>
+    </div>`;
+}
+
+/** Where a figure came from, for the hover: the part of the device, then the check. */
+function _infraTileTitle(m) {
+    return [m.source_label || '', m.item || '', m.module || ''].filter(Boolean).join(' · ');
+}
+
+/** One row of the device — a store, a filesystem — with its figures beside its name.
+ *
+ *  A row whose profile declared BOTH halves of a proportion is drawn as one: HOST-RESOURCES-
+ *  MIB reports every store the same way, memory and mounted volume alike, as a size and an
+ *  amount used — and two byte counts side by side is arithmetic left to the reader when the
+ *  answer they want is "83 %". Which figure is which is the profile's word (`"headline":
+ *  "used"` / `"total"`), because a label saying "Usado" in one profile and "In use" in the
+ *  next is not something to pattern-match on.
+ *
+ *  The group heading comes with it when the row has one: a Synology names a disk in an
+ *  expansion bay "Drive 1 (DX517-1)", and "Drive 1" on its own is two different disks. */
+function _infraDetailRow(g) {
+    // Openable when the device says more about this row than fits on the card. For a disk
+    // that is its SMART attributes — eighty-odd of them, filed as rows of their own whose
+    // group is the disk — and no summary can hold those, but "click the disk" is where a
+    // person looks for them.
+    const key = g.items[0].row_key || g.row;
+    const more = _infraRowDetailCount(key);
+    const used  = g.items.find(m => m.headline === 'used');
+    const free  = g.items.find(m => m.headline === 'free');
+    const total = g.items.find(m => m.headline === 'total');
+    const rest  = g.items.filter(m => m !== used && m !== total && m !== free);
+    return `<div class="rounded-3 border px-3 py-2 mb-2${more ? ' ss-pointer' : ''}"
+                style="min-width:14rem;flex:1 1 14rem"
+                ${more ? `onclick="_infraOpenRow(${jsStr(key)})"
+                         title="${escAttr(tf('infra_row_more', more))}"` : ''}>
+        <div class="d-flex align-items-baseline gap-2 mb-2">
+            <span class="fw-semibold text-truncate" title="${escAttr(g.row)}">${esc(g.row)}</span>
+            ${g.group ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal">${esc(g.group)}</span>` : ''}
+            ${more ? `<i class="bi bi-chevron-right text-muted ms-auto ss-fs-1"></i>` : ''}
+        </div>
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            ${_infraDonut(used, total, free)}
+            ${rest.map(m => `<div style="min-width:7rem">
+                <div class="text-muted ss-fs-1 text-truncate">${esc(m.label || m.field)}</div>
+                <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(m)}</div>
+            </div>`).join('')}
+        </div>
+    </div>`;
+}
+
+/** How full something is, as a ring — or the two figures when it cannot be a proportion.
+ *
+ *  A capacity of zero is not 0 %: an unmounted store and a full one are different things, and
+ *  dividing by it would say the second. So the numbers are shown as they are and nothing is
+ *  claimed. Same for a row that declared only one half.
+ *
+ *  No colour by threshold. What counts as "too full" is a decision about the installation and
+ *  the panel has not been given one — the same reason the percentage bar beside it is grey.
+ *  Inventing 80 % here would be the screen turning something amber on its own authority. */
+function _infraDonut(used, total, free) {
+    // A table reports whichever half it has: HOST-RESOURCES gives an amount USED, and
+    // SYNOLOGY-RAID-MIB gives the space FREE. Both answer "how full is it" and neither is
+    // worth a second renderer, so the one that is missing is worked out from the other —
+    // arithmetic on two numbers of the same table, not a guess about what a value means.
+    if (!used && free && total) {
+        const cap = Number(total.value), fr = Number(free.value);
+        if (Number.isFinite(cap) && Number.isFinite(fr))
+            used = {...free, headline: 'used', value: Math.max(0, cap - fr),
+                    label: free.label, unit: free.unit};
+    }
+    if (!used || !total) {
+        return [used, total, free].filter(Boolean).map(m => `<div style="min-width:7rem">
+            <div class="text-muted ss-fs-1 text-truncate">${esc(m.label || m.field)}</div>
+            <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(m)}</div>
+        </div>`).join('');
+    }
+    // `cap` and not `t`: `t` is the panel's translator, and shadowing it inside a function
+    // that also needs a word is a TypeError on the one branch that has a word in it.
+    const u = Number(used.value), cap = Number(total.value);
+    if (!Number.isFinite(u) || !Number.isFinite(cap) || cap <= 0) {
+        return `<div class="d-flex flex-wrap gap-3">
+            <div style="min-width:7rem">
+                <div class="text-muted ss-fs-1">${esc(used.label || used.field)}</div>
+                <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(used)}</div>
+            </div>
+            <div style="min-width:7rem">
+                <div class="text-muted ss-fs-1">${esc(total.label || total.field)}</div>
+                <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(total)}</div>
+            </div></div>`;
+    }
+    // Whole percent in the ring: "10.42 %" inside a 52px circle is a number nobody reads, and
+    // the exact figures are right underneath it. Rounded for the LABEL only — the arc itself
+    // uses the real value, so 0.4 % is a sliver and not nothing.
+    const pct = Math.max(0, Math.min(100, (u / cap) * 100));
+    // A stroke-dasharray on a circle: the arc is `pct` of the circumference and the rest is
+    // gap. `r=16` puts the circumference at ~100.53, so the numbers below read as percentages.
+    const C = 2 * Math.PI * 16;
+    const fu = _fmtMeasure(u, used.unit), ft = _fmtMeasure(cap, total.unit);
+    return `<div class="d-flex align-items-center gap-2">
+        <svg width="52" height="52" viewBox="0 0 40 40" role="img"
+             aria-label="${escAttr(Math.round(pct) + '%')}">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--bs-secondary-bg)"
+                    stroke-width="5"></circle>
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--bs-secondary)"
+                    stroke-width="5" stroke-linecap="round"
+                    stroke-dasharray="${(C * pct / 100).toFixed(2)} ${C.toFixed(2)}"
+                    transform="rotate(-90 20 20)"></circle>
+            <text x="20" y="20" text-anchor="middle" dominant-baseline="central"
+                  fill="currentColor" font-size="10">${esc(Math.round(pct))}%</text>
+        </svg>
+        <div class="ss-fs-2">
+            <div>${esc(fu.value)} <span class="text-muted">${esc(fu.unit)}</span></div>
+            <div class="text-muted">${esc('/ ' + ft.value + ' ' + ft.unit)}</div>
+            ${free ? `<div class="text-muted">${esc(_fmtMeasure(Number(free.value), free.unit).value)}
+                ${esc(_fmtMeasure(Number(free.value), free.unit).unit)} ${esc(t('infra_free'))}</div>` : ''}
+        </div>
+    </div>`;
+}
+
+/** Everything the device says about ONE row, wherever it said it.
+ *
+ *  A row is a name the equipment chose, and several profiles can be about the same one: a disk
+ *  is a row of SYNOLOGY-DISK-MIB (its model, its temperature, its health) AND the group that
+ *  eighty rows of SYNOLOGY-SMART-MIB belong to (`row_group`, split from "Drive 1 / Reallocated
+ *  Sector Count" by the pattern that table declares). So the match is on either, and what
+ *  comes back is the disk's whole story rather than the profile that happened to be open.
+ */
+//: The identity facts that are a NAME for a row rather than a description of it. A model or a
+//: kind is shared by every disk in the box; a bay, a serial or a name is one row's alone.
+const _INFRA_ID_ROLES = new Set(['bay', 'serial', 'name', 'id', 'wwn']);
+
+//: alias → row_key, for the aliases that belong to exactly one row. Rebuilt with the facts.
+let _infraRowAlias = new Map();
+
+/** Work out every name this device uses for each of its rows.
+ *
+ *  Two tables of one device index it by different columns, and there is no rule that says they
+ *  agree: SYNOLOGY-DISK-MIB names a disk by `diskName` ("Drive 1") and files its `diskID`
+ *  ("Disk 1") beside it, while SYNOLOGY-SMART-MIB names its rows by a column of its own. So
+ *  the SMART rows of a disk grouped under a name the disk's own row never had, and clicking
+ *  the disk showed its six readings and none of its eighty attributes.
+ *
+ *  Built from what the device SAID — the identity facts it reported for each row — and never
+ *  from a rule about how the names look. An alias claimed by two rows is dropped: a Synology
+ *  with an expansion unit has a "Drive 3" in the box and a "Drive 3" in the shelf, and
+ *  attaching one disk's SMART to both is the failure this is trying to avoid, not a
+ *  near-miss of it.
+ */
+function _infraIndexRowAliases() {
+    const claims = new Map();          // alias → Set(row_key)
+    const claim = (alias, key) => {
+        const a = String(alias || '').trim();
+        if (!a || a === key) return;
+        if (!claims.has(a)) claims.set(a, new Set());
+        claims.get(a).add(key);
+    };
+    const rowKeys = new Set(), nestedOf = new Map();     // row_key → its group, when nested
+    for (const m of (_infraDetail && _infraDetail.metrics) || []) {
+        if (!m.row_key) continue;
+        rowKeys.add(m.row_key);
+        claim(m.row, m.row_key);
+        if (m.row_group) nestedOf.set(m.row_key, m.row_group);
+    }
+    for (const list of _infraRowFacts.values())
+        for (const a of list)
+            if (_INFRA_ID_ROLES.has(a.key)) claim(a.value, a.row);
+
+    // The exact join, when the device offers one. Two tables of one machine can name a disk
+    // differently — "Drive 1" and "sda" — and pairing them by position or by the letter after
+    // "sd" is a guess that points at the WRONG disk the day a bay is empty, which is exactly
+    // the day somebody is reading SMART. But SYNOLOGY-SMART-MIB also reports the serial of the
+    // disk each of its rows belongs to, and so does the disk table: same physical object, same
+    // number, no convention. Any identifying fact does — the rule is "these two rows are about
+    // the same thing because the device gave them the same name for it".
+    const owner = new Map();                            // `role\u0000value` → row_key
+    for (const list of _infraRowFacts.values())
+        for (const a of list)
+            if (_INFRA_ID_ROLES.has(a.key) && !nestedOf.has(a.row)) {
+                const k = `${a.key}\u0000${a.value}`;
+                if (!owner.has(k)) owner.set(k, new Set());
+                owner.get(k).add(a.row);
+            }
+    for (const list of _infraRowFacts.values())
+        for (const a of list) {
+            const group = nestedOf.get(a.row);
+            if (!group || !_INFRA_ID_ROLES.has(a.key)) continue;
+            const owners = owner.get(`${a.key}\u0000${a.value}`);
+            if (owners && owners.size === 1) claim(group, [...owners][0]);
+        }
+    _infraRowAlias = new Map();
+    for (const [alias, keys] of claims)
+        // Claimed by exactly one row, AND not already the name of a row itself. The second
+        // half is the one that bites: with an expansion unit the shelf disk's split name is
+        // "Drive 3", which is the internal disk's whole name — one claimant, and completely
+        // the wrong disk. A name that already belongs to a row is never a nickname for
+        // another.
+        if (keys.size === 1 && !rowKeys.has(alias)) _infraRowAlias.set(alias, [...keys][0]);
+}
+
+/** Everything the device says about ONE row, wherever it said it. */
+function _infraRowDetail(key) {
+    const name = String(key || '');
+    if (!name) return [];
+    const all = (_infraDetail && _infraDetail.metrics) || [];
+    // Matched on `row_key` — the name the DEVICE composed, before the profile's split — and
+    // never on the split half. Reported from the screen as a disk's dialog showing every
+    // reading twice, at two different temperatures: a Synology with an expansion unit has a
+    // "Drive 3" in the box and a "Drive 3 (DX517-1)" in the shelf, and the split exists
+    // precisely so those two are not one row. Looking them up by the split name puts them
+    // back together, which is the bug that split was written to fix.
+    //
+    // A nested row's group is matched through the alias table, because the table it came from
+    // may index the device by a different column than the row's own table does.
+    return all.filter(m => m.row_key === name
+                        || m.row_group === name
+                        || (m.row_group && _infraRowAlias.get(m.row_group) === name));
+}
+
+/** How much of it is NOT already on the card. A chevron on a row that opens onto the two
+ *  numbers already in front of you is a promise the dialog does not keep. */
+function _infraRowDetailCount(row) {
+    return _infraRowDetail(row).filter(m => !m.headline).length;
+}
+
+/** That story, as a dialog: what the row is, what it says now, and everything behind it.
+ *
+ *  Two panes, because a disk answers two different kinds of thing and one list of ninety rows
+ *  buries the six that matter. The first is the disk itself — health, temperature, life — and
+ *  the second is its SMART table, which is eighty attributes each with four numbers and is a
+ *  TABLE, not a list: "Reallocated Sector Count 100 100 5 0" is one line, and four lines
+ *  saying "Reallocated Sector Count — Valor actual" is the same data made unreadable.
+ *
+ *  Bootstrap's own tabs inside the body, so nothing here needs a handler: the dialog is
+ *  disposable markup and a tab that needed wiring would need unwiring too. */
+function _infraOpenRow(key) {
+    const items = _infraRowDetail(key);
+    if (!items.length) return;
+    // The dialog is titled with what the device calls it, split included: "Drive 3" in the
+    // shelf and "Drive 3" in the box are two dialogs and have to look like it.
+    const own = items.find(m => m.row_key === key) || items[0];
+    const row = own.row_group ? `${own.row} (${own.row_group})` : (own.row || key);
+    const mine   = items.filter(m => m.row_key === key);
+    const nested = items.filter(m => m.row_key !== key);
+    const facts  = _infraRowFactsHtml(key);
+    const body = nested.length
+        ? `${facts}
+            <ul class="nav nav-tabs mt-3" role="tablist">
+                <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
+                    data-bs-target="#infraRowNow" type="button">${esc(t('infra_row_now'))}
+                    <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1">${mine.length}</span>
+                </button></li>
+                <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+                    data-bs-target="#infraRowAll" type="button">${esc(_infraNestedLabel(nested))}
+                    <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1">${_infraNestedRows(nested).size}</span>
+                </button></li>
+            </ul>
+            <div class="tab-content pt-2">
+                <div class="tab-pane fade show active" id="infraRowNow">${_infraRowList(mine, key)}</div>
+                <div class="tab-pane fade" id="infraRowAll">${_infraNestedTable(nested)}</div>
+            </div>`
+        : facts + _infraRowList(mine, key);
+    showHtmlModal(String(row), body, 'primary');
+}
+
+/** What the nested rows are called — the profile's own name for them ("SMART"), not ours. */
+function _infraNestedLabel(nested) {
+    const m = nested[0] || {};
+    return m.source_short || _infraShortLabel(m.source_label || m.source || '');
+}
+
+/** The nested rows, keyed by the name the device gave each one. */
+function _infraNestedRows(nested) {
+    const rows = new Map();
+    for (const m of nested) {
+        const k = m.row || m.row_key;
+        if (!rows.has(k)) rows.set(k, []);
+        rows.get(k).push(m);
+    }
+    return rows;
+}
+
+/** One line per attribute, one column per reading.
+ *
+ *  A SMART attribute is a name and four numbers — current, worst, threshold, raw — and it is
+ *  read ACROSS: "is the current value near the threshold" is the whole question, and it cannot
+ *  be asked of four separate lines. The columns are whatever fields came back, in the order
+ *  the profile declared them, so a table with three of them or six works the same. */
+function _infraNestedTable(nested) {
+    const rows = _infraNestedRows(nested);
+    const cols = [];
+    for (const m of nested)
+        if (!cols.some(c => c.field === m.field)) cols.push({field: m.field, label: m.label});
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead class="ss-thead"><tr>
+            <th>${esc(t('col_name'))}</th>
+            ${cols.map(c => `<th class="text-end text-nowrap">${esc(c.label || c.field)}</th>`).join('')}
+        </tr></thead>
+        <tbody>${[...rows.entries()]
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+            .map(([name, list]) => `<tr>
+                <td class="text-truncate" style="max-width:18rem">${esc(name)}</td>
+                ${cols.map(c => {
+                    const m = list.find(x => x.field === c.field);
+                    return `<td class="text-end text-nowrap">${m
+                        ? `<span class="d-inline-flex align-items-baseline gap-1">${_infraValueHtml(m)}</span>`
+                        : '<span class="text-muted">—</span>'}</td>`;
+                }).join('')}
+            </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+/** The row's own readings, one per line. Few enough that a table of columns would be one
+ *  column wide. */
+function _infraRowList(items, key) {
+    if (!items.length) return '';
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <tbody>${items
+            .slice()
+            .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+            .map(m => `<tr>
+                <td class="text-truncate" style="max-width:20rem">${esc(_infraRowWhich(m, key))}</td>
+                <td class="text-end text-nowrap">
+                    <span class="d-inline-flex align-items-baseline gap-1">${_infraValueHtml(m)}</span>
+                </td>
+            </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+/** What to call a measurement inside a dialog that is already about one row.
+ *
+ *  A SMART attribute's own row name IS the label somebody wants ("Reallocated Sector Count");
+ *  a figure of the disk itself has none and its field label is the answer. Repeating the disk
+ *  in every line of a dialog titled with it is the one word on the screen that carries no
+ *  information. */
+function _infraRowWhich(m, key) {
+    const own = m.row_key && m.row_key !== key ? (m.row || m.row_key) : '';
+    return own ? `${own} — ${m.label || m.field}` : (m.label || m.field);
+}
+
+/** The row's identifying facts — a disk's model, serial and bay — above its numbers. */
+function _infraRowFactsHtml(key) {
+    const facts = [];
+    // The attributes were recorded against the unsplit name too, so this is an equality and
+    // not a prefix test — `startsWith` matched "Drive 3" against "Drive 30".
+    for (const list of _infraRowFacts.values())
+        for (const a of list)
+            if (a.row === key) facts.push(a);
+    if (!facts.length) return '';
+    const seen = new Set();
+    const uniq = facts.filter(a => !seen.has(a.key) && seen.add(a.key));
+    return `<div class="d-flex flex-wrap gap-3 pb-2 border-bottom">${uniq.map(a => `
+        <div><div class="text-muted ss-fs-1">${esc(_attrLabel(a.key))}</div>
+             <div>${esc(a.value)}</div></div>`).join('')}</div>`;
+}

@@ -172,3 +172,91 @@ class TestTheTwoShapesOfTheApiHelpersAreNotMixed:
         assert 'return await r.json();' in get_body, 'apiGet no longer answers the body'
         post_body = src.split('async function apiPost(', 1)[1].split('async function', 1)[0]
         assert 'status: r.status' in post_body, 'apiPost no longer answers {status, data}'
+
+
+class TestAnEventHandlerIsEscapedOnce:
+    """`jsStr` IS `escAttr(JSON.stringify(s))` — it says so where it is defined.
+
+    Wrapping it again turns the `&quot;` it produced into `&amp;quot;`, the attribute decodes
+    that back to a literal `&quot;`, and the browser hands the JS engine an ampersand where it
+    expected a string. Reported from the console as::
+
+        Uncaught SyntaxError: expected expression, got '&'
+
+    which says nothing about escaping and points at a generated line nobody wrote. The value
+    still LOOKS right in the markup, so it survives reading; it only fails when clicked.
+    """
+
+    def _templates(self):
+        for root, dirs, files in os.walk(TPL):
+            dirs[:] = [d for d in dirs if d != '__pycache__']
+            for f in files:
+                if f.endswith('.html'):
+                    yield os.path.join(root, f)
+
+    def test_nothing_escapes_a_handler_argument_twice(self):
+        bad = []
+        for path in self._templates():
+            src = io.open(path, encoding='utf-8-sig', errors='replace').read()
+            if 'escAttr(jsStr(' in src:
+                bad.append(os.path.relpath(path, TPL))
+        assert not bad, (
+            'escAttr(jsStr(…)) double-escapes — jsStr already calls escAttr: ' + ', '.join(bad))
+
+    def test_the_helper_still_does_its_own_escaping(self):
+        """If `jsStr` ever stops escaping, the rule above becomes wrong rather than merely
+        redundant — and every handler in the panel becomes an attribute injection."""
+        src = io.open(os.path.join(TPL, 'partials', 'core', '_utils.html'),
+                      encoding='utf-8-sig', errors='replace').read()
+        assert 'function jsStr(s) { return escAttr(JSON.stringify(s)); }' in src
+
+
+class TestAPickerForwardsWhatItWasGiven:
+    """A field picker is called with a different number of arguments by each pane.
+
+    The Modules tab draws a check that HAS a path into `modulesData`, so three arguments say
+    everything. The host modal is editing a draft that may never have been saved — the device
+    the button would speak to lives in the form, not in the store — so it passes a fourth: a
+    function that reads that draft.
+
+    An arrow that names three parameters drops it without a word. Reported from the panel as
+    "Test against the device → no host": the button was there, the request went out, and the
+    address it was about had been discarded in a wrapper. Nothing logs that, and the same
+    wrapper had been correct for as long as only one pane existed.
+    """
+
+    def _sources(self):
+        """The templates AND the core packages' own screens — a picker registered from
+        `lib/core/<domain>/web/` is the same registry entry."""
+        roots = [TPL, os.path.join(os.path.dirname(TPL.split(os.sep + 'lib' + os.sep)[0]),
+                                   'src', 'lib', 'core')]
+        seen = set()
+        for root in roots:
+            for base, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if d != '__pycache__']
+                for f in files:
+                    if f.endswith('.html') and os.path.join(base, f) not in seen:
+                        seen.add(os.path.join(base, f))
+                        yield os.path.join(base, f)
+
+    def test_every_registered_hook_is_variadic(self):
+        bad = []
+        hook = re.compile(r'[\s,{](open|run)\s*:\s*(\([^)]*\))\s*=>')
+        for path in self._sources():
+            src = io.open(path, encoding='utf-8-sig', errors='replace').read()
+            if 'FIELD_PICKERS[' not in src:
+                continue
+            for m in hook.finditer(src):
+                params = m.group(2)
+                if '...' in params:
+                    continue
+                bad.append((os.path.basename(path), m.group(0)))
+        assert not bad, (
+            'a field-picker hook names its parameters instead of forwarding them — a pane that '
+            'passes one more is silently ignored: ' + str(bad))
+
+    def test_the_scan_finds_the_registry_at_all(self):
+        """The rule above is vacuous if the walk misses the files that register pickers."""
+        found = [p for p in self._sources()
+                 if 'FIELD_PICKERS[' in io.open(p, encoding='utf-8-sig', errors='replace').read()]
+        assert len(found) >= 2, f'the picker registrations are not being scanned: {found}'

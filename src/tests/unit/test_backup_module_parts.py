@@ -24,6 +24,15 @@ from lib.modules.discovery.backup_parts import _safe_rel, backup_parts_catalog
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 
 
+def _module_parts(root, **kw):
+    """Only the parts a MODULE under *root* contributes.
+
+    The catalogue also carries what CORE packages declare (SNMP's MIB library), which is
+    there whatever the watchfuls directory holds — these tests are about module
+    contribution, so they filter to it rather than pretending the rest is absent."""
+    return [p for p in backup_parts_catalog(root, **kw) if p.get('module')]
+
+
 def _write_module(root, name, schema, lang=None):
     mdir = os.path.join(root, name)
     os.makedirs(os.path.join(mdir, 'lang'), exist_ok=True)
@@ -42,7 +51,7 @@ class TestTheCatalogueIsBuiltFromTheDeclaration:
         _write_module(root, 'thing', {'__backup_part__': {
             'id': 'stuff', 'dir': 'thing_files/raw', 'label_key': 'backup_part_stuff'}},
             {'pretty_name': 'Thing', 'ui': {'backup_part_stuff': 'Ficheros de Thing'}})
-        got = backup_parts_catalog(root)
+        got = _module_parts(root)
         assert got == [{'id': 'stuff', 'module': 'thing', 'dir': 'thing_files/raw',
                         'default': False,
                         'label_i18n': {'es_ES': 'Ficheros de Thing'}}]
@@ -50,7 +59,7 @@ class TestTheCatalogueIsBuiltFromTheDeclaration:
     def test_the_id_defaults_to_the_module(self, tmp_path):
         root = str(tmp_path)
         _write_module(root, 'thing', {'__backup_part__': {'dir': 'x'}})
-        assert backup_parts_catalog(root)[0]['id'] == 'thing'
+        assert _module_parts(root)[0]['id'] == 'thing'
 
     def test_the_label_falls_back_to_the_module_name(self, tmp_path):
         """Right when a module contributes ONE part: its own name is the answer, and it is
@@ -58,19 +67,19 @@ class TestTheCatalogueIsBuiltFromTheDeclaration:
         root = str(tmp_path)
         _write_module(root, 'thing', {'__backup_part__': {'dir': 'x'}},
                       {'pretty_name': 'Cosa'})
-        assert backup_parts_catalog(root)[0]['label_i18n'] == {'es_ES': 'Cosa'}
+        assert _module_parts(root)[0]['label_i18n'] == {'es_ES': 'Cosa'}
 
     def test_a_module_may_contribute_several(self, tmp_path):
         root = str(tmp_path)
         _write_module(root, 'thing', {'__backup_part__': [
             {'id': 'a', 'dir': 'one'}, {'id': 'b', 'dir': 'two', 'default': True}]})
-        got = {p['id']: p for p in backup_parts_catalog(root)}
+        got = {p['id']: p for p in _module_parts(root)}
         assert set(got) == {'a', 'b'} and got['b']['default'] is True
 
     def test_a_module_without_the_declaration_contributes_nothing(self, tmp_path):
         root = str(tmp_path)
         _write_module(root, 'thing', {'__icon__': 'bi-x'})
-        assert backup_parts_catalog(root) == []
+        assert _module_parts(root) == []
 
     def test_a_broken_schema_does_not_cost_the_others_theirs(self, tmp_path):
         """Discovery is per file precisely so a bad module stays contained."""
@@ -79,7 +88,7 @@ class TestTheCatalogueIsBuiltFromTheDeclaration:
         with io.open(os.path.join(root, 'bad', 'schema.json'), 'w', encoding='utf-8') as fh:
             fh.write('{ not json')
         _write_module(root, 'good', {'__backup_part__': {'dir': 'x'}})
-        assert [p['module'] for p in backup_parts_catalog(root)] == ['good']
+        assert [p['module'] for p in _module_parts(root)] == ['good']
 
 
 class TestADeclarationCannotEscapeVarDir:
@@ -102,20 +111,20 @@ class TestADeclarationCannotEscapeVarDir:
     def test_an_empty_declaration_contributes_nothing(self, tmp_path):
         root = str(tmp_path)
         _write_module(root, 'thing', {'__backup_part__': {'id': 'x'}})
-        assert backup_parts_catalog(root) == []
+        assert _module_parts(root) == []
 
     def test_a_module_cannot_take_a_core_part_id(self, tmp_path):
         """`core` is every table nothing else claimed; a module shadowing it would replace the
         copy's tables with a directory."""
         root = str(tmp_path)
         _write_module(root, 'thing', {'__backup_part__': {'id': 'core', 'dir': 'x'}})
-        assert backup_parts_catalog(root, reserved=bk_parts.PART_IDS) == []
+        assert _module_parts(root, reserved=bk_parts.PART_IDS) == []
 
     def test_two_modules_cannot_claim_the_same_id(self, tmp_path):
         root = str(tmp_path)
         _write_module(root, 'aaa', {'__backup_part__': {'id': 'same', 'dir': 'x'}})
         _write_module(root, 'bbb', {'__backup_part__': {'id': 'same', 'dir': 'y'}})
-        assert [p['module'] for p in backup_parts_catalog(root)] == ['aaa']
+        assert [p['module'] for p in _module_parts(root)] == ['aaa']
 
 
 class TestTheCoreNamesNoModule:
@@ -141,11 +150,14 @@ class TestTheCoreNamesNoModule:
     def test_the_core_catalogue_holds_no_module_part(self):
         assert 'mibs' not in bk_parts.PART_IDS
 
-    def test_the_module_still_gets_its_part(self):
-        """The point is not that the core forgot it — it is that the module supplies it."""
+    def test_the_snmp_library_is_still_offered(self):
+        """It used to be the MODULE that supplied it, and that was the failure: a backup part
+        lives as long as the file declaring it, so removing the watchful took the MIB library
+        out of every backup and said nothing — the archive is simply smaller, and you find
+        out when you need it. The core declares it now, so `module` is empty on purpose."""
         got = {p['id']: p for p in bk_parts.parts_catalogue('es_ES')}
-        assert 'mibs' in got, 'the SNMP module no longer contributes its MIBs'
-        assert got['mibs']['module'] == 'snmp'
+        assert 'mibs' in got, 'the SNMP MIB library is no longer offered to a backup'
+        assert got['mibs']['module'] == '' 
         assert got['mibs'].get('label') and 'backup_part' not in got['mibs']['label']
 
     def test_a_module_part_is_labelled_not_keyed(self):

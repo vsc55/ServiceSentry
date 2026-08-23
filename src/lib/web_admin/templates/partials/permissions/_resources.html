@@ -34,9 +34,9 @@ const _PERM_RES_SPECS = [
         },
     },
     {
-        prefix: 'server', group: 'perm_group_servers',
+        prefix: 'server', group: 'perm_group_devices',
         info: () => t('server_perms_info'), colLabel: () => t('col_server') || 'Server',
-        globalFor: { view: 'servers_view', add: 'servers_add', edit: 'servers_edit', delete: 'servers_delete' },
+        globalFor: { view: 'devices_view', add: 'devices_add', edit: 'devices_edit', delete: 'devices_delete' },
         // 'add' on a server = "add checks to THIS host" (not creating a host).
         actionLabel: a => a === 'add' ? (t('server_perm_add') || t('module_perm_add')) : (t('module_perm_' + a) || a),
         actionTip: a => a === 'add' ? t('server_perm_add_tt') : '',

@@ -150,6 +150,19 @@ independiente ignora `autostart`). Si el panel hospeda el monitor lo decide el e
 | `monitoring.autostart` | bool | `true` | Arrancar el monitor embebido al iniciar el panel web (env `SS_MONITORING_AUTOSTART`). Off = arranca **parado** pero iniciable a mano desde Servicios. Solo aplica al modo embebido |
 | `monitoring.timer_check` | int | 300 | Segundos entre ciclos de comprobación (rango 10–86400; env `SS_CHECK_INTERVAL`) |
 
+### Sección `snmp`
+
+Ajustes de la **biblioteca MIB**, que es del core: dónde busca y a quién le pide
+dependencias. Vivían en el bloque `__module__` del watchful SNMP, lo que dejaba «dónde
+guardo mis MIB de fabricante» detrás de la tarjeta de un módulo — y hacía que
+desaparecieran con él.
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `snmp.mib_dirs` | string | `""` | Carpetas adicionales donde buscar MIB compilados, separadas por comas (env `SS_SNMP_MIB_DIRS`). Se **suman** a la biblioteca del panel; no la sustituyen |
+| `snmp.mib_repos` | string | `""` | Plantillas de URL de repositorios GitHub, una por línea. No se edita a mano: la lista de fuentes de la vista **Importar** sabe qué plantillas van juntas (un repo mezcla `.txt`, `.my` y ficheros sin extensión) |
+| `snmp.github_token` | string | `""` | Token personal de GitHub para importar MIB (env `SS_SNMP_GITHUB_TOKEN`). Anónimo son 60 peticiones/hora y una sola carpeta de fabricante puede gastarlas buscando dependencias; con token son 5000. **Secreto**: cifrado en reposo y enmascarado en la API |
+
 ### Sección `global`
 
 | Clave | Tipo | Por defecto | Descripción |

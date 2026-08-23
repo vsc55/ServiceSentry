@@ -453,11 +453,11 @@ class TestBugAudit202607:
         assert r.status_code == 403, r.status_code
         assert admin._users["victim"]["role"] != powerful_uid
 
-    def test_servers_edit_cannot_test_a_stored_credential(self, client):
-        """E: a plain servers_edit holder (no credentials perm) cannot use the credential-test
+    def test_devices_edit_cannot_test_a_stored_credential(self, client):
+        """E: a plain devices_edit holder (no credentials perm) cannot use the credential-test
         endpoint — it would decrypt a stored secret and could exfiltrate it to any address."""
         _login(client)
-        _mk_role_user(client, "srv_only", ["servers_view", "servers_edit"], "srvuser")
+        _mk_role_user(client, "srv_only", ["devices_view", "devices_edit"], "srvuser")
         client.post("/logout")
         _login(client, "srvuser", "testpass1")
         r = client.post("/api/v1/credentials/test", json={"cred_uid": "whatever", "address": "10.0.0.5"})

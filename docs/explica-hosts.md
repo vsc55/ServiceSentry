@@ -12,7 +12,7 @@ conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 > Los **campos** de cada protocolo se descubren de los módulos (`__host_profile__`) — ver
 > [explica-descubrimiento.md → Perfiles de host](explica-descubrimiento.md#5-perfiles-de-host-__host_profile__). La
 > **referencia de esa meta-clave** está en [ref-schema-json.md](ref-schema-json.md) / [ref-modulos.md](ref-modulos.md).
-> La **UI y los endpoints** (sección Servers) en [explica-web-admin.md → Servidores](explica-web-admin.md).
+> La **UI y los endpoints** (sección Dispositivos) en [explica-web-admin.md → Dispositivos](explica-web-admin.md).
 
 ---
 
@@ -21,8 +21,8 @@ conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 | Pieza | Fichero | Rol |
 |---|---|---|
 | `HostsStore` | `lib/core/hosts/store.py` | Store relacional (tabla `hosts`): dirección + `profiles` por protocolo; secretos (contraseñas SSH/DB, claves SNMPv3, tokens) **cifrados en reposo** (`secret_manager`) |
-| Catálogo de perfiles | `lib/core/hosts/profiles.py` | Construye, de cada `__host_profile__` de módulo, el mapa **protocolo → campos** que la UI usa para pintar los formularios por-protocolo |
-| Resolución | `lib/core/hosts/resolve.py` | Primitivas sin store: `host_profile_specs()` (normaliza `__host_profile__`), `resolve_os()` |
+| Catálogo de perfiles | `lib/core/hosts/profiles.py` | El mapa **protocolo → campos** que la UI usa para pintar los formularios por-protocolo. `core_profiles()` es el registro de los que declara el **core** (SSH y los `HOST_PROFILE` de manifiesto), que sobrescriben a los de módulo del mismo nombre |
+| Resolución | `lib/core/hosts/resolve.py` | Primitivas sin store: `host_profile_specs()` (normaliza `__host_profile__` **y le completa los campos del core**, incluido su `address_field`), `resolve_os()` |
 | SSH | `lib/core/hosts/ssh_client.py` | Helpers SSH (paramiko, opcional): `connect_host`, `run_command`, `test_connection` |
 | Ejecución | `lib/core/hosts/runner.py` | Ejecuta un comando en el host, **local o remoto por SSH** |
 | Sonda | `lib/core/hosts/probe.py` | Resuelve un host **sin guardar** (el borrador del modal) para que el asistente pruebe lo que el admin acaba de teclear. Ejecutar el check en sí **no** es asunto de hosts: eso es `lib/modules/check_runner.py` |
@@ -32,6 +32,43 @@ Un host declarado como **`remote`** lleva una conexión SSH (usuario + contrase�
 clave / clave en línea) para que los módulos que necesitan **ejecutar comandos** en el
 servidor (p.ej. `raid`) o **abrir un túnel** a través de él (p.ej. `datastore`) reutilicen las
 mismas credenciales definidas una vez en el host.
+
+### Qué es el aparato (`device_type`)
+
+El registro guarda servidores, pero también un NAS, un switch y un SAI — la sección se llamó
+«Servidores» mientras el catálogo SNMP de al lado traía perfiles de Mikrotik, Linksys y dos
+marcas de SAI. Así que un dispositivo declara **qué es**, y el panel deja de adivinarlo.
+
+El catálogo lo declara `lib/core/hosts/manifest.py` (`HOST_TYPES`): once tipos, cada uno con
+su icono, más «sin clasificar» (`''`), que es lo que tiene todo dispositivo anterior al campo
+y el que se dio de alta con prisa. Un tipo no declarado se **descarta** al guardar: llega del
+cuerpo de una petición, y conservarlo pondría en pantalla una palabra que ningún idioma sabe
+traducir.
+
+> **Es una propiedad, y a propósito no una sección.** Todo lo que el panel hace con una
+> entrada —dirección, credencial, perfiles, mantenimiento, etiquetas, los checks atados— es
+> igual sea lo que sea, así que repartir el registro por tipo obligaría a acertar al crearla y
+> a menudo no se acierta: un NAS **es** un servidor, un hipervisor es las dos cosas. Gobierna
+> el icono, la columna y el filtro; nunca la navegación.
+
+### La identidad va con el protocolo, no solo con SSH
+
+Un perfil no lleva solo *por dónde* se llega a la máquina: lleva **quién hay que ser** para
+que conteste. SSH fue el primero en tenerlo y durante un tiempo fue el único, lo que se leía
+como una regla y solo era la consecuencia de ser el único perfil con algo que guardar.
+
+Cualquier protocolo cuyo módulo declare `__credential__` ofrece lo mismo en el formulario del
+host: o los valores en línea, o una **credencial reutilizable** (`cred_uid`) del gestor. Al
+elegir una, los campos que esa credencial aporta desaparecen del formulario **y del host** —
+dos sitios guardando un secreto significa que el día que se rota uno, gana el otro.
+
+En SNMP eso son la versión, la comunidad y las claves v3, más lo que el dispositivo **declara
+ser** (`device_profiles`). Una comunidad compartida por cuarenta switches se define una vez y
+se referencia cuarenta, que es exactamente para lo que está el gestor de credenciales.
+
+Lo que **no** sube al host es cuánto esperamos por él (`timeout`, `retries`): eso es política
+de sondeo del check, y además dos entradas de la misma IP que solo difieran ahí dejarían de
+ser el mismo host para el asistente de migración.
 
 ---
 
@@ -43,7 +80,7 @@ la conexión del host sobre la config del ítem**; qué campos vienen del host l
 módulo con `__host_profile__` en su `schema.json`:
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host", "community"]}
+"__host_profile__": {"key": "snmp", "address_field": "host"}
 ```
 
 ```mermaid
@@ -125,7 +162,7 @@ comportamiento (normalizar `__host_profile__`, resolver el SO) viva en un solo s
 ## Dónde se gestiona
 
 - **UI + endpoints** (crear/editar hosts, perfiles por protocolo, probar conexión, migración):
-  [explica-web-admin.md → Servidores](explica-web-admin.md).
+  [explica-web-admin.md → Dispositivos](explica-web-admin.md).
 - **Meta-clave `__host_profile__`** (referencia de campos): [ref-schema-json.md](ref-schema-json.md) y
   [ref-modulos.md](ref-modulos.md).
 - **Descubrimiento** del catálogo protocolo→campos: [explica-descubrimiento.md](explica-descubrimiento.md#5-perfiles-de-host-__host_profile__).

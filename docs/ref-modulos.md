@@ -425,7 +425,7 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. A
 
 > La **dirección del host** no es un campo de `list`: el ítem se **vincula a un host**
 > del registro y hereda la dirección vía `__host_profile__` (la `key` del item se usa
-> como fallback). Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
+> como fallback). Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
 
 **Flujo:** `socket.create_connection(host, port)` → lee datos → parsea formato `|dev|model|temp|unit|` → compara con el umbral.
 
@@ -728,7 +728,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 > **no** son campos del ítem, sino que se heredan al **vincular el ítem a un host**
 > del registro (`__host_profile__` + credenciales reutilizables). El ejemplo de
 > arriba con `host`/`user`/`key_file` inline es el **formato legacy** (clave `remote`),
-> que sigue leyéndose por compatibilidad. Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
+> que sigue leyéndose por compatibilidad. Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
@@ -876,18 +876,13 @@ sub-colección de **checks** (OIDs a comprobar):
 |---------|-------|------|-------------|
 | `__module__` | `enabled` | bool | Activar el módulo |
 | | `threads` | int | Hilos para checks en paralelo |
-| | `mib_dirs` | str | Directorios adicionales de MIBs |
+
+> Los ajustes de la **biblioteca MIB** (`mib_dirs`, `mib_repos`, `github_token`) ya no están
+> aquí: son de la biblioteca, que es del core, y viven en la sección `snmp` de la
+> configuración — ver [ref-configuracion.md](ref-configuracion.md).
 | `servers.*` | `enabled` | bool | Activar el servidor |
-| | `host` | str | Host/IP del agente SNMP |
-| | `port` | int | Puerto (161 por defecto) |
-| | `version` | str | `v1`, `v2c` o `v3` |
-| | `community` | str | Community string (v1/v2c) |
 | | `timeout` / `retries` | int | Timeout y reintentos |
-| | `snmpv3_username` | str | Usuario SNMPv3 |
-| | `snmpv3_auth_key` | str | Clave de autenticación SNMPv3 *(secreto, cifrado)* |
-| | `snmpv3_priv_key` | str | Clave de privacidad SNMPv3 *(secreto, cifrado)* |
-| | `snmpv3_auth_protocol` | str | Protocolo auth (MD5/SHA…) |
-| | `snmpv3_priv_protocol` | str | Protocolo priv (DES/AES…) |
+| | *(conexión)* | | `host`, `port`, `version`, `community`, los cinco `snmpv3_*` y `device_profiles` — ver abajo |
 | `servers.*.checks.*` | `enabled` | bool | Activar el check |
 | | `oid` | str | OID a consultar (numérico o nombre MIB) |
 | | `snmp_type` | str | Tipo del valor |
@@ -895,10 +890,26 @@ sub-colección de **checks** (OIDs a comprobar):
 | | `value` | str | Valor esperado para la comparación |
 | | `alert` | bool | Si el check dispara alerta |
 
-> Los campos `snmpv3_auth_key` y `snmpv3_priv_key` se declaran como secretos en
-> el `schema.json` del módulo y el core los cifra automáticamente (descubrimiento
-> schema-driven, ver [explica-seguridad.md](explica-seguridad.md)). El módulo es 100 % independiente
-> del core.
+> **Los campos de conexión tampoco los escribe el módulo.** La colección nombra el protocolo
+> (`"__profile_fields__": "snmp"`) y el panel expande dentro de ella la declaración del core
+> (`HOST_PROFILE`), con sus etiquetas y sus ayudas. `__host_profile__` sólo dice qué hereda un
+> check **atado** a un host; no pinta nada en el formulario de uno sin atar, y un check contra
+> una IP suelta tiene que poder decir su comunidad y sus claves v3 — eso era lo que obligaba a
+> escribirlos dos veces. Ver [ref-schema-json.md](ref-schema-json.md).
+>
+> `timeout` y `retries` se quedan en el check: cuánto esperamos antes de rendirnos no es lo
+> que el dispositivo **es**.
+
+> **La credencial SNMP ya no la declara el módulo.** Qué es una credencial SNMP —una
+> versión, una comunidad y los siete campos de v3— es un hecho del *protocolo*, así que la
+> declara `lib/core/snmp/manifest.py` (`CREDENTIAL`). El motivo no es pulcritud: un tipo de
+> credencial que desaparece al desinstalar el watchful se lleva las credenciales guardadas
+> fuera del editor, mientras siguen en la base de datos referenciadas por los hosts que las
+> usan.
+>
+> `snmpv3_auth_key`, `snmpv3_priv_key` y `community` siguen cifrándose igual: el descubrimiento
+> de campos secretos recorre los tipos de credencial, vengan de donde vengan (ver
+> [explica-seguridad.md](explica-seguridad.md)).
 
 ### Perfiles de dispositivo (la matriz de OIDs)
 
@@ -907,7 +918,10 @@ que el siete sea un porcentaje, ni que el número de al lado sea un contador de 
 significa nada hasta derivarlo. Eso es un **perfil**: una lista de métricas que mapea cada OID a
 una clave, una etiqueta, una unidad, un tipo y cómo se dibuja.
 
-Los perfiles son **datos, no código** — ficheros JSON en `watchfuls/snmp/profiles/`:
+Los perfiles son **datos, no código** — ficheros JSON en `lib/core/snmp/profiles/sources/`.
+Están en el core y no en el módulo porque **qué es un dispositivo** no es asunto de un
+check: un host lleva sus perfiles igual que lleva su dirección, y quien los lee es la
+resolución host-céntrica, no el bucle de comprobaciones:
 
 ```json
 {

@@ -305,21 +305,21 @@ class TestApiWatchfulActionAuthorization:
         """A modules_view-only user must NOT be able to delete a MIB (write action)."""
         self._login_viewer(client_with_modules)
         resp = client_with_modules.post(
-            "/api/v1/modules/watchfuls/snmp/delete_mib", json={"name": "x.mib", "kind": "raw"}
+            "/api/v1/snmp/delete_mib", json={"name": "x.mib", "kind": "raw"}
         )
         assert resp.status_code == 403
 
     def test_viewer_can_run_read_only_action(self, client_with_modules):
         """A modules_view-only user CAN run a read-only action (list_mibs)."""
         self._login_viewer(client_with_modules)
-        resp = client_with_modules.get("/api/v1/modules/watchfuls/snmp/list_mibs")
+        resp = client_with_modules.get("/api/v1/snmp/list_mibs")
         assert resp.status_code == 200
 
     def test_admin_can_run_write_action(self, client_with_modules):
         """Admin (has modules_edit) is not blocked by the authorization gate."""
         _login(client_with_modules)
         resp = client_with_modules.post(
-            "/api/v1/modules/watchfuls/snmp/delete_mib", json={"name": "nonexistent.mib", "kind": "raw"}
+            "/api/v1/snmp/delete_mib", json={"name": "nonexistent.mib", "kind": "raw"}
         )
         assert resp.status_code != 403
 

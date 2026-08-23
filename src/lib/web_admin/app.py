@@ -455,6 +455,11 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
 
         _collect_web(_watchfuls_root, '', _watchfuls_root)
         _collect_web(_providers_root, 'providers/', _lib_root)
+        # …and core packages that own a screen. SNMP's is the first: the MIB library and the
+        # profile catalogue are the core's, so their UI cannot live in a module that may not
+        # be installed. Addressed through the parent dir ("core/…") for the same reason
+        # providers are — a prefix that can never collide with a watchful of the same name.
+        _collect_web(os.path.join(_lib_root, 'core'), 'core/', _lib_root)
         if _loader_roots:
             app.jinja_loader = ChoiceLoader(
                 [app.jinja_loader] + [FileSystemLoader(r) for r in _loader_roots])

@@ -285,7 +285,7 @@ try {
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
     if ((currentUser.permissions || []).some(p =>
-        p === 'servers_view' || p === 'servers_edit' || p === 'servers_delete' || p.startsWith('server.'))) {
+        p === 'devices_view' || p === 'devices_edit' || p === 'devices_delete' || p.startsWith('server.'))) {
         await loadHosts();
     }
     // Org-wide default dashboard layout (for users who haven't customised theirs).
@@ -295,8 +295,8 @@ try {
     // Credentials are needed both for their own tab and for the host SSH picker,
     // so load them for credential managers AND server editors.
     if ((currentUser.permissions || []).some(p =>
-        p.startsWith('credentials_') || p === 'servers_view' || p === 'servers_edit'
-        || p === 'servers_delete' || p.startsWith('server.')
+        p.startsWith('credentials_') || p === 'devices_view' || p === 'devices_edit'
+        || p === 'devices_delete' || p.startsWith('server.')
         || p === 'modules_view' || p === 'modules_edit' || p.startsWith('module.'))) {
         await loadCredentials();
     }

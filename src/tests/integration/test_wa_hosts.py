@@ -407,17 +407,19 @@ class TestApiMigrate:
 
         host = admin._hosts_store.get_by_name('host-a')
         assert host and host['address'] == '10.0.0.1'
-        # Host profiles are address-only now; SNMP settings stay on the check.
-        assert 'snmp' not in (host.get('profiles') or {})
+        # The device's identity moves WITH it: the host is what the community is about.
+        assert (host.get('profiles') or {})['snmp'] == {'community': 'public', 'version': '2c'}
 
         newmods = client.get('/api/v1/modules').get_json()
         # Items are now keyed by their uid, so look them up by value.
         r1 = next(iter(newmods['snmp']['servers'].values()))
         assert r1.get('host_uid') and 'host' not in r1
-        # community is a secret (secret: true) → masked in the API response, so verify
-        # it survived the migration by reading the DECRYPTED stored config instead.
+        # …and does not stay behind on the check. Read the DECRYPTED stored config, not the
+        # API response, where a secret is masked either way: masking would hide the
+        # difference between "moved" and "copied", and a copy is the failure worth catching —
+        # the check would keep authenticating with a stale secret after the host's is rotated.
         r1_stored = next(iter(admin._load_modules()['snmp']['servers'].values()))
-        assert r1_stored['community'] == 'public'  # per-check setting preserved
+        assert 'community' not in r1_stored and 'version' not in r1_stored
         p1 = next(iter(newmods['ping']['list'].values()))
         assert p1.get('host_uid') == r1['host_uid'] and 'host' not in p1
 
@@ -436,7 +438,7 @@ class TestApiMigrate:
         assert c['profiles']['ssh']['ssh_password'] is None   # secret masked
 
     def test_apply_requires_edit_permission(self, client, admin):
-        # A viewer (no servers_edit) cannot preview/apply.
+        # A viewer (no devices_edit) cannot preview/apply.
         admin._users['viewer'] = {'password_hash': admin._users['admin']['password_hash'],
                                   'role': 'viewer', 'display_name': 'V'}
         _login(client, 'viewer')

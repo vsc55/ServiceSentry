@@ -220,6 +220,32 @@ function _hostCheckFieldsHtml(mod, idx, it, metas) {
     return html;
 }
 
+// ── The connection this module makes to the device ──────────────────────────
+//
+// A protocol profile is a property of the DEVICE — its port, the identity it answers to,
+// what it declares itself to be — so it is edited once, here, above the checks that use it.
+// It sat in a "Credentials" tab of its own until the profiles were narrowed to an address
+// and there was nothing left to put in it; what brought it back is that the address was
+// never the whole story, and re-entering a community on every check that points at one box
+// is how a device ends up authenticating two different ways.
+//
+// Placed with the module rather than with the host's own fields because that is where its
+// meaning is: SSH is the box's own connection and lives in General; SNMP is a conversation
+// one module holds with it.
+function _hostProfileBlock(mod) {
+    if (typeof HOST_PROFILES === 'undefined') return '';
+    const entry = Object.entries(HOST_PROFILES).find(([proto, spec]) =>
+        proto !== 'ssh' && spec && spec.module === mod &&
+        (spec.fields || []).some(f => f.name !== spec.address_field));
+    if (!entry) return '';
+    const [proto, spec] = entry;
+    const pid = 'hmProfFields_' + proto.replace(/\W/g, '_');
+    return `<div class="col-12 ss-section-hdr">
+            <small class="text-muted ss-section-title">${esc(t('host_conn_profile') || proto.toUpperCase())}</small>
+        </div>
+        <div class="col-12"><div class="row g-2" id="${pid}">${_renderProfileFields(proto, spec)}</div></div>`;
+}
+
 // Single-check module: a master toggle (header) + the (one) check's fields in
 // the collapsible body.
 function _renderSingleCheck(mod) {
@@ -227,9 +253,10 @@ function _renderSingleCheck(mod) {
     const it = st.items[0];
     const slug = mod.replace(/\W/g, '_');
     const bodyId = 'hmChk1_' + slug;
-    const fieldsHtml = st.fieldsMeta.length
-        ? _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
-        : `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
+    const _prof = _hostProfileBlock(mod);
+    const _checkFields = st.fieldsMeta.length ? _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta) : '';
+    const fieldsHtml = (_prof + _checkFields)
+        || `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
     const title = `<span class="fw-semibold">${esc(modulePrettyName(mod))}</span>`;
     // Just an enable switch (no redundant "Monitor with X" text) + run-test.
     const actions = `<div class="d-flex align-items-center gap-2">
@@ -557,7 +584,9 @@ function _refreshSingleCheck(mod) {
     if (!body) return;
     const st = _hostChecks[mod];
     const it = st.items[0];
-    body.innerHTML = _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta)
+    // The profile is redrawn with the check fields: it lives in the same body, and a repaint
+    // that forgot it would silently drop the connection form off the card.
+    body.innerHTML = (_hostProfileBlock(mod) + _hostCheckFieldsHtml(mod, 0, it, st.fieldsMeta))
         || `<div class="col-12 text-muted small">${esc(t('host_profile_no_fields'))}</div>`;
     initTooltips(body);
 }

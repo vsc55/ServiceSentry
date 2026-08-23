@@ -151,9 +151,23 @@ class HostBinding:
         # host kind; the host's ssh-profile cred_uid is the SSH identity, so it
         # only applies to a remote host.
         cred_uid = str(item.get('cred_uid') or '').strip()
-        if not cred_uid and is_remote:
-            ssh_prof = profiles.get('ssh') if isinstance(profiles.get('ssh'), dict) else {}
-            cred_uid = str(ssh_prof.get('cred_uid') or '').strip()
+        if not cred_uid:
+            # The host's own identity for the protocol, when the check names none. A device
+            # carries its credential the way it carries its address — one place, reused by
+            # every check bound to it — so this is not an SSH privilege: SSH is merely the
+            # protocol that is skipped on a LOCAL host, because a local host is not reached
+            # over it. Any other protocol (an SNMP community, an API token) applies whatever
+            # the host's kind.
+            for spec in specs:
+                key = spec.get('key') if isinstance(spec, dict) else None
+                if not key or (key == 'ssh' and not is_remote):
+                    continue
+                prof = profiles.get(key)
+                if not isinstance(prof, dict):
+                    continue
+                cred_uid = str(prof.get('cred_uid') or '').strip()
+                if cred_uid:
+                    break
         if cred_uid:
             resolved = self._apply_cred(resolved, cred_uid)
         # Expose the host's OS so modules that run OS-specific commands can

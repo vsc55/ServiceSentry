@@ -138,6 +138,13 @@ createListTable({
             default:        return '<td></td>';
         }
     },
+    // The whole row opens the device, like a card does — the button stayed the discoverable
+    // way in, but a table where only the last 2rem of a row is clickable teaches you to aim.
+    // Guarded on the target so the actions column keeps working: a click that lands on a
+    // control means that control, not the row under it.
+    rowAttrs: uid => ` style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"`
+        + ` onclick="if(!event.target.closest('button,a,input,select,label'))`
+        + ` infraOpen(${jsStr(uid)})"`,
     actions: uid => `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="infraOpen(${jsStr(uid)})"
         title="${escAttr(t('infra_open_host'))}"><i class="bi bi-box-arrow-in-right"></i></button>`,
     headerLead: () => _infraView.switcher('setInfraView'),

@@ -10,9 +10,7 @@
     },
     "__history__": {"field": "used", "unit": "%", "label": "CPU Usage"},
     "__status_render__": [{"type": "bar", "value": "used", "threshold": "alert", "default_threshold": 80, "unit": "%"}],
-    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
-        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
-                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host"},
     "list": {
         "__check_title_field__": "label",
         "__title_editable__": true,

@@ -20,14 +20,30 @@ class TestCatalog:
         for proto in ('snmp', 'ssh', 'icmp', 'tls', 'ntp'):
             assert proto in cat, proto
 
-    def test_snmp_profile_is_address_only(self):
-        # SNMP settings (community/version/v3) are per-check now; the host
-        # profile only carries the address.
+    def test_snmp_profile_carries_the_device_identity(self):
+        """SNMP is a property of the DEVICE, like SSH: its address, its port, and who you
+        have to be to ask it anything.  Carrying only the address made every check re-enter
+        the same community, and made the panel's own screens ask for it again.
+
+        The field METADATA comes from the module's own schema — options, show_when, the
+        secret flag — so the host form renders v3 exactly as the module tab does, without
+        core holding a second copy of what an SNMP credential looks like."""
         cat = host_profiles_catalog()
         snmp = cat['snmp']
         assert snmp['module'] == 'snmp'
         assert snmp['address_field'] == 'host'
-        assert [f['name'] for f in snmp['fields']] == ['host']
+        names = [f['name'] for f in snmp['fields']]
+        assert names[0] == 'host'
+        assert {'port', 'version', 'community', 'device_profiles'} <= set(names)
+        assert {'snmpv3_username', 'snmpv3_auth_key', 'snmpv3_priv_key'} <= set(names)
+        # How long we wait and how often we retry is not WHO the device is: it stays on
+        # the check, or two entries for one box would migrate into two hosts.
+        assert 'timeout' not in names and 'retries' not in names
+        by_name = {f['name']: f for f in snmp['fields']}
+        assert by_name['community'].get('secret') is True
+        assert by_name['version'].get('options') == ['1', '2c', '3']
+        assert by_name['snmpv3_auth_key'].get('show_when') == {'version': ['3']}
+        assert by_name['device_profiles'].get('multi') is True
 
     def test_ssh_is_core_builtin(self):
         # SSH is a property of the server itself, so the core owns it: the
@@ -72,7 +88,9 @@ class TestCatalog:
         # Host-owned = the address only (per-protocol settings live on the
         # check now — there is no Credentials section anymore).
         assert m['ssl_cert'] == ['host']
-        assert m['snmp'] == ['host']           # community/version are per-check
+        # SNMP host-owns its identity as well as its address (see the catalog test):
+        # the device is who you authenticate to, not a setting of each check.
+        assert {'host', 'community', 'version', 'device_profiles'} <= set(m['snmp'])
         # web hides nothing: 'url' stays visible so one host (a reverse proxy)
         # can carry several FQDNs — blank url falls back to the host address.
         assert 'web' not in m or 'url' not in m['web']

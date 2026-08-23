@@ -150,7 +150,7 @@ def credentials_stat(wa) -> dict:                 # proveedor de datos (server-s
 OVERVIEW_WIDGETS = [
     {'id': 'credentials', 'icon': 'bi-key', 'label_key': 'overview_credentials',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 90,   # layout por defecto (span/alto)
-     'perms': {'any': ['credentials_view', 'servers_view', 'modules_view']},  # expresión declarativa
+     'perms': {'any': ['credentials_view', 'devices_view', 'modules_view']},  # expresión declarativa
      'nav':   {'tab': '#tab-access', 'sub': '#subtab-credentials'},           # click-through
      'stat':  credentials_stat,                                              # ← callable de datos
      'view':  {'kind': 'stat', 'icon': 'bi-key-fill', 'accent': 'teal',
@@ -443,12 +443,22 @@ flowchart TB
 
 ## 5. Perfiles de host (`__host_profile__`)
 
-Un módulo declara qué **protocolo de conexión** aporta a un Host y qué campos lleva (SNMP,
-SSH, un perfil de BD…). El panel usa el catálogo para pintar los formularios por-protocolo de
-la sección Servers y para saber qué campos ocultar en un check una vez ligado a un host.
+Un módulo declara a qué **protocolo de conexión** se ata un check (SNMP, SSH, un perfil de
+BD…). El panel usa el catálogo para pintar los formularios por-protocolo de la sección Servers
+y para saber qué campos ocultar en un check una vez ligado a un host.
 
 **Descriptor** (en `watchfuls/<m>/schema.json`): `__host_profile__` = un spec o una lista
 (datastore aporta varios: túnel `ssh` + perfil `db`).
+
+**Dos dueños.** Un protocolo que declara el **core** —`ssh`, y cualquier `HOST_PROFILE` de un
+`manifest.py`— dice él mismo qué campos tiene, y sobrescribe a un perfil de módulo del mismo
+nombre. El módulo entonces sólo lo *nombra*: `{"key": "ssh", "address_field": "ssh_host"}`, sin
+`fields`. Un protocolo propio del módulo sigue escribiendo los suyos.
+
+Y como `__host_profile__` sólo dice qué hereda un check **atado** —no pinta nada en el
+formulario de uno sin atar—, una colección que necesite la conexión inline (el caso «IP
+suelta») la pide con `"__profile_fields__": "<protocolo>"` y `discover_schemas()` la expande
+desde la misma declaración del core. Ver [ref-schema-json.md](ref-schema-json.md).
 
 **Flujo y datos:**
 

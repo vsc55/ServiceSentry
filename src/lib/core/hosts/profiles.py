@@ -27,21 +27,29 @@ from __future__ import annotations
 
 import json
 import os
+from functools import lru_cache
 
+from lib.core.hosts.resolve import host_profile_specs
+from lib.discovery import scan
 from lib.i18n import TRANSLATIONS
 from lib.modules import ModuleBase
 
 
-def _profile_label(key: str) -> dict:
-    """Build ``{lang: text}`` for a core SSH-profile field *key* from the lang
-    files (``ssh_profile.labels``) — the profile is core-owned, so its i18n lives
-    in lib/i18n like every other translation, not inline here."""
+def _section_label(section: str, key: str, block: str = 'labels') -> dict:
+    """Build ``{lang: text}`` for a core profile field from the lang files
+    (``<section>.labels``, or another block of it) — a core-owned profile takes its
+    words from core i18n like every other translation, not inline here."""
     out = {}
     for lang, data in TRANSLATIONS.items():
-        txt = ((data.get('ssh_profile') or {}).get('labels') or {}).get(key)
+        txt = ((data.get(section) or {}).get(block) or {}).get(key)
         if isinstance(txt, str) and txt:
             out[lang] = txt
     return out
+
+
+def _profile_label(key: str) -> dict:
+    """The SSH profile's own labels (``ssh_profile.labels``)."""
+    return _section_label('ssh_profile', key)
 
 
 def _profile_options(keys: tuple[str, ...]) -> dict:
@@ -61,6 +69,10 @@ def _profile_options(keys: tuple[str, ...]) -> dict:
 _META_KEYS = ('type', 'options', 'options_int', 'options_deps', 'options_disabled',
               'options_i18n', 'secret', 'sensitive', 'placeholder', 'placeholder_map',
               'placeholder_map_field', 'show_when', 'rows',
+              # A multi-value field is a LIST with a picker, not a text box. Dropping the
+              # flag here does not fail: it renders a comma-separated string that happens
+              # to look editable, which is the worst of the three possible outcomes.
+              'multi',
               'min', 'max', 'label_i18n', 'default')
 
 # ── Built-in SSH connection profile (core, not a module) ──────────────────────
@@ -131,10 +143,9 @@ def host_profiles_catalog(watchfuls_dir: str | None = None) -> dict:
                 schema = json.load(fh)
         except (OSError, ValueError):
             continue
-        hp = schema.get('__host_profile__')
-        if not hp:
+        specs = host_profile_specs(schema.get('__host_profile__'))
+        if not specs:
             continue
-        specs = [hp] if isinstance(hp, dict) else hp
 
         # This module's top-level collections (exclude sub-collections "mod|c|sub").
         mod_colls = {
@@ -173,16 +184,80 @@ def host_profiles_catalog(watchfuls_dir: str | None = None) -> dict:
                 'address_field': spec.get('address_field'),
                 'fields':        field_entries,
             }
-    # The SSH connection is core-owned: always present and authoritative, so it
-    # overrides any module-declared 'ssh' profile (a module may still declare it
-    # to receive the host's SSH fields via resolve_host, but the UI is core's).
-    catalog['ssh'] = {
-        'module':        _BUILTIN_SSH['module'],
-        'builtin':       True,
-        'address_field': _BUILTIN_SSH['address_field'],
-        'fields':        [dict(f) for f in _BUILTIN_SSH['fields']],
-    }
+    # A protocol the CORE declares overrides any module-declared profile of the same key.
+    # A profile that only exists while some module happens to be installed is a property of
+    # that module; these are properties of the DEVICE.
+    catalog.update(core_profiles())
     return catalog
+
+
+@lru_cache(maxsize=None)
+def _core_profiles() -> dict:
+    """``{protocol: entry}`` for every connection profile the CORE declares.
+
+    The one place that answers "what is an SSH / an SNMP connection". Four other things
+    needed that answer and each read it from somewhere else: the catalogue built it here,
+    while ``resolve_host``, the hide-when-bound list and the assisted migration read a COPY
+    of the field names out of every module's ``__host_profile__``. Eleven modules carried
+    such a copy — ten of them the same seven SSH names — for a list they do not own and
+    that this function overrides anyway.
+
+    Cached because it is asked per item per cycle by the monitor and the declarations cannot
+    change while the process lives.
+    """
+    out: dict = {
+        # SSH is core-owned without a manifest: it predates the mechanism and its fields
+        # carry their translations inline.
+        'ssh': {
+            'module':        _BUILTIN_SSH['module'],
+            'builtin':       True,
+            'address_field': _BUILTIN_SSH['address_field'],
+            'fields':        list(_BUILTIN_SSH['fields']),
+        },
+    }
+    for pkg, decl in scan('HOST_PROFILE'):
+        if not isinstance(decl, dict) or not decl.get('key'):
+            continue
+        section = decl.get('i18n') or ''
+        fields = []
+        for f in (decl.get('fields') or []):
+            if not isinstance(f, dict) or not f.get('name'):
+                continue
+            f = dict(f)
+            if section:
+                label = _section_label(section, f['name'])
+                if label:
+                    f['label_i18n'] = label
+                hint = _section_label(section, f['name'], 'hints')
+                if hint:
+                    f['hint_i18n'] = hint
+            fields.append(f)
+        out[decl['key']] = {
+            'module':        decl.get('module') or pkg,
+            'builtin':       True,
+            'address_field': decl.get('address_field'),
+            'fields':        fields,
+        }
+    return out
+
+
+def core_profiles() -> dict:
+    """A caller-owned copy of :func:`_core_profiles` — the cache is shared and long-lived,
+    and the catalogue it feeds is handed to code that edits its entries."""
+    return {k: {**v, 'fields': [dict(f) for f in v['fields']]}
+            for k, v in _core_profiles().items()}
+
+
+def core_profile_fields(key: str) -> list[dict]:
+    """The fields the core declares for one protocol, or ``[]`` if it declares none."""
+    entry = _core_profiles().get(str(key or ''))
+    return [dict(f) for f in entry['fields']] if entry else []
+
+
+def core_profile_field_names(key: str) -> tuple:
+    """Just their names — what a module's ``__host_profile__`` used to restate."""
+    entry = _core_profiles().get(str(key or ''))
+    return tuple(f['name'] for f in entry['fields']) if entry else ()
 
 
 def module_host_multiple(watchfuls_dir: str | None = None) -> dict:
@@ -324,10 +399,9 @@ def module_host_specs(watchfuls_dir: str | None = None) -> dict:
                 schema = json.load(fh)
         except (OSError, ValueError):
             continue
-        hp = schema.get('__host_profile__')
-        if not hp:
+        specs = host_profile_specs(schema.get('__host_profile__'))
+        if not specs:
             continue
-        specs = [hp] if isinstance(hp, dict) else hp
         entries = []
         for spec in specs:
             if isinstance(spec, dict) and spec.get('key') and spec.get('fields'):
@@ -369,10 +443,9 @@ def module_host_collections(watchfuls_dir: str | None = None) -> dict:
                 schema = json.load(fh)
         except (OSError, ValueError):
             continue
-        hp = schema.get('__host_profile__')
-        if not hp:
+        specs = host_profile_specs(schema.get('__host_profile__'))
+        if not specs:
             continue
-        specs = [hp] if isinstance(hp, dict) else hp
         all_fields: list = []
         for spec in specs:
             if isinstance(spec, dict):
@@ -414,10 +487,9 @@ def module_host_fields(watchfuls_dir: str | None = None) -> dict:
                 schema = json.load(fh)
         except (OSError, ValueError):
             continue
-        hp = schema.get('__host_profile__')
-        if not hp:
+        specs = host_profile_specs(schema.get('__host_profile__'))
+        if not specs:
             continue
-        specs = [hp] if isinstance(hp, dict) else hp
         fields: list = []
         for spec in specs:
             if isinstance(spec, dict):

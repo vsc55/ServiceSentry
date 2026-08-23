@@ -1,0 +1,62 @@
+{
+    "id": "hr_storage",
+    "label": {
+        "en_EN": "Storage (HOST-RESOURCES-MIB)",
+        "es_ES": "Almacenamiento (HOST-RESOURCES-MIB)"
+    },
+    "short_label": {"en_EN": "Memory", "es_ES": "Memoria"},
+    "description": {
+        "en_EN": "Usage and capacity per volume, from the standard host MIB — what makes a NAS measurable without knowing who made it. Storage only: CPU and memory belong to a system profile, and two profiles reporting the same value would chart it twice.",
+        "es_ES": "Uso y capacidad por volumen, desde la MIB estándar de host — lo que hace medible un NAS sin saber quién lo fabricó. Sólo almacenamiento: la CPU y la memoria son de un perfil de sistema, y dos perfiles dando el mismo valor lo graficarían dos veces."
+    },
+    "_comment_headline_rows": "hrStorageType (…25.2.3.1.2) says what each row IS. A NAS running containers reports physical memory, swap and the buffers — and then forty bind mounts of the same volume, every one of them hrStorageFixedDisk. The summary is the screen that exists so nobody has to read that, so it takes the memory stores and leaves the filesystems to the Measures tab. The real volumes come from the vendor's own profile, which knows which ones are volumes.",
+    "headline_rows": {
+        "role": "kind",
+        "any": [
+            "1.3.6.1.2.1.25.2.1.1",
+            "1.3.6.1.2.1.25.2.1.2",
+            "1.3.6.1.2.1.25.2.1.3"
+        ]
+    },
+    "match": {
+        "probe": "1.3.6.1.2.1.25.2.2.0"
+    },
+    "metrics": [
+        {
+            "key": "fs_used",
+            "headline": "used",
+            "label": {
+                "en_EN": "Used",
+                "es_ES": "Usado"
+            },
+            "walk": "1.3.6.1.2.1.25.2.3.1.6",
+            "kind": "gauge",
+            "unit": "B",
+            "chart": "area",
+            "index_label": "1.3.6.1.2.1.25.2.3.1.3",
+            "scale_by": "1.3.6.1.2.1.25.2.3.1.4"
+        },
+        {
+            "key": "fs_size",
+            "headline": "total",
+            "label": {
+                "en_EN": "Capacity",
+                "es_ES": "Capacidad"
+            },
+            "walk": "1.3.6.1.2.1.25.2.3.1.5",
+            "kind": "gauge",
+            "unit": "B",
+            "chart": "line",
+            "index_label": "1.3.6.1.2.1.25.2.3.1.3",
+            "scale_by": "1.3.6.1.2.1.25.2.3.1.4"
+        },
+        {
+            "key": "fs_kind",
+            "label": {"en_EN": "Storage type", "es_ES": "Tipo de almacenamiento"},
+            "walk": "1.3.6.1.2.1.25.2.3.1.2",
+            "kind": "text",
+            "index_label": "1.3.6.1.2.1.25.2.3.1.3",
+            "role": "kind"
+        }
+    ]
+}

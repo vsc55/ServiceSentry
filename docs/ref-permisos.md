@@ -19,8 +19,8 @@ código) tiene exactamente esos 76 flags.
 | Rol | Permisos |
 |-----|----------|
 | `admin` | Todos los permisos (76 flags) |
-| `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `servers_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `servers_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
-| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `servers_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`, `credentials_view` (sin `config_view`, que expone secretos sin enmascarar) |
+| `editor` | Vista de todo + edición (sin borrar ni crear): `modules_edit`, `config_edit`, `checks_run`, `roles_edit`, `groups_edit`, `users_edit`, `devices_edit`, `clusters_edit`, `events_edit`, `overview_edit`, `services_control`, más los `*_view` correspondientes (`modules_view`, `devices_view`, `clusters_view`, `config_view`, `overview_view`, `checks_view`, `audit_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`) **más** `credentials_view` y `credentials_edit` |
+| `viewer` | Solo lectura: `users_view`, `roles_view`, `groups_view`, `audit_view`, `modules_view`, `devices_view`, `clusters_view`, `overview_view`, `sessions_view`, `checks_view`, `history_view`, `syslog_view`, `services_view`, `events_view`, `events_notify_view`, `credentials_view` (sin `config_view`, que expone secretos sin enmascarar) |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos vía API. Sí permiten
 > actualizar la **etiqueta** (`label`) y gestionar qué usuarios/grupos lo tienen asignado. El
@@ -74,7 +74,9 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `modules_add` | Crear nuevas entradas de módulo |
 | | `modules_edit` | Guardar cambios en módulos |
 | | `modules_delete` | Eliminar entradas de módulo |
-| **Servers** | `servers_view` `servers_add` `servers_edit` `servers_delete` | CRUD del registro de hosts |
+| **Servers** | `devices_view` `devices_add` `devices_edit` `devices_delete` | CRUD del registro de hosts |
+| **SNMP** | `snmp_view` | Acceder a la sección SNMP: biblioteca de MIB, navegador de símbolos y catálogo de perfiles de dispositivo. Incluye preguntarle a un dispositivo qué sirve — habla con la red, no cambia nada |
+| | `snmp_manage` | Compilar, importar, editar y borrar MIB; escribir perfiles en el catálogo. **Corte limpio:** `modules_view` ya no abre nada de esto, así que un rol personalizado que dependiera de él necesita el flag nuevo |
 | **Clusters** | `clusters_view` `clusters_add` `clusters_edit` `clusters_delete` | CRUD de clusters (checks multi-bind) |
 | **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de credenciales reutilizables: identidades SSH y registros de aplicación de Entra ID (`azure_app`, `m365_app`), tokens de API (Proxmox, NUT, HTTP, datastore). Sección propia dentro de System |
 | **Config** | `config_view` | Leer configuración sin poder editarla |
@@ -84,7 +86,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `overview_edit` | Editar el layout propio |
 | | `overview_set_default` | Fijar el layout como default global |
 | | `overview_reset_factory` | Restaurar el layout de fábrica |
-| **Infraestructura** | `infra_view` | Ver el estado en vivo de las máquinas (sección `/infra`). No concede nada del registro: eso es `servers_view` / `servers_edit` |
+| **Infraestructura** | `infra_view` | Ver el estado en vivo de las máquinas (sección `/infra`). No concede nada del registro: eso es `devices_view` / `devices_edit` |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
 | **Segundo factor** | `mfa_reset_others` | Quitar el segundo factor de **otra** cuenta, con sus códigos de recuperación. **De nadie por defecto**, ni siquiera de `admin`: es el camino de vuelta de quien perdió el móvil *y* los códigos, y es también lo que haría alguien con `users_edit` para desarmar la protección antes de ir a por la contraseña. No existe el contrario —nadie puede **activar** el MFA de otro—, porque solo el dueño puede dar de alta un autenticador que tiene en la mano. Ver [explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta) |

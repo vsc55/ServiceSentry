@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.310 tests** (6280 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-21). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~6.660 tests** (6653 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-22). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2608,9 +2608,91 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_secrets_encrypted_at_rest_decrypted_on_read` | Secrets encrypted at rest decrypted on read |
 | `test_reload_if_changed` | Reload if changed |
 
+## 38b. Monitor — el módulo que llega tarde
+
+**Archivo:** `tests/unit/test_monitor_executor.py` — 14 tests
+
+La ronda le da un plazo a cada módulo y sigue. Lo que **no** hace es matar el hilo —no puede—,
+así que el módulo vuelve, y al volver guarda su estado en vivo como siempre. Sus filas de
+historial iban a otro sitio: a un búfer cuyo escritor había pasado minutos antes, y se
+perdían sin decir nada.
+
+Queda un módulo con estado al día en pantalla y **ninguna serie detrás**, que es una forma que
+no hace saltar nada: el panel en verde, la gráfica vacía, y las dos cosas parecen problemas de
+subsistemas distintos.
+
+Encontrado en una flota real: muestrear un NAS con un perfil SNMP completo son cientos de idas
+y vueltas y tardaba unos cinco minutos contra un plazo de 120 s, así que cada ronda escribía
+295 resultados en vivo y, desde el día que se instaló el módulo, ni una fila de historial.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheOnesThatArriveOnTime::test_their_history_is_written` | El camino normal sigue siendo el normal |
+| `TestTheOnesThatArriveOnTime::test_no_history_store_is_not_an_error` | Un *probe* corre el mismo ejecutor sin store: no puede ser un caso especial que aparezca la primera vez que alguien pulsa «probar» |
+| `TestTheOneThatArrivesLate::test_it_is_reported_as_a_timeout` | La ronda deja de esperarlo y lo dice |
+| `TestTheOneThatArrivesLate::test_its_history_is_written_anyway` | **La regresión**: lo que midió vale exactamente lo mismo que valía antes de que se acabara el reloj |
+| `TestTheOneThatArrivesLate::test_it_is_recorded_once_and_not_twice` | Los dos caminos bajo el mismo lock: el que termina justo en la frontera lo escribe el volcado o él, nunca los dos |
+| `TestSayingWhereItIs::*` (7) | El ejecutor avisa al empezar y al terminar cada módulo, dice **cuántos valores** volvieron («ok» dice que corrió, «295 valores» dice que encontró el aparato), un módulo que se pasa del plazo es `timeout` **y no `error`** —sigue trabajando y escribirá su estado e historial al aterrizar, y una pantalla a la que le dicen «error» tiene que desdecirse—, un callback que **revienta no se lleva la ejecución por delante**, y no pasar callback sigue siendo el caso normal. Además el **propio módulo puede hablar desde dentro**: el borde del módulo no basta para el que importa —muestrear un NAS por sus perfiles son minutos dentro de UN módulo, así que una pantalla que solo ve empezar/terminar se queda al 0 % cinco minutos y es idéntica a una colgada—, así que el ejecutor instala un *sink* por el que el módulo informa. Y el **sink no sobrevive a la tanda**: el planificador comparte ese monitor, y uno olvidado tendría sus ciclos informando a un job que terminó hace horas | Una obtención pedida a mano tarda minutos, y una barra que solo se mueve al final no se distingue de una colgada. El ejecutor es lo único que sabe cuándo un módulo empieza y cuándo aterriza, así que es lo único que lo puede decir: avisa al empezar y al terminar, dice **cuántos valores** volvieron (que es lo que hace legible una fila terminada: «ok» dice que corrió, «295 valores» dice que encontró el aparato), un módulo que se pasa del plazo es `timeout` **y no `error`** —no ha fallado, sigue trabajando y escribirá su propio estado e historial al aterrizar, y una pantalla a la que le dicen «error» es una que tiene que desdecirse—, un callback que **revienta no se lleva la ejecución por delante** (la pantalla de progreso jamás puede matar el trabajo que describe) y no pasar callback sigue siendo el caso normal |
+| `TestTheAccessorsAreProperties::*` (2) | Un `@property` decora **la función siguiente**, así que un método insertado entre los dos se lo roba en silencio y el que lo pierde pasa a ser un método ligado que todo el mundo usa como número. Pasó: `interval * _WORKER_FRESH_INTERVALS` se volvió «método por int» y la pestaña de Servicios contestaba 500 en cada sondeo |
+
+## 38b-bis. Lo que un módulo dice de una medida tiene que llegar entero
+
+**Archivo:** `tests/unit/test_history_field_meta_survives.py` — 3 tests
+
+Un módulo declara más que una etiqueta y una unidad: de qué parte del aparato es el valor, si
+es una línea o una insignia, qué significan sus números, cómo nombra sus filas la tabla, si el
+perfil es un estándar o el MIB de un fabricante. Entre el módulo y el navegador esa declaración
+pasa por **dos listas blancas** —la proyección del módulo y la superficie de metadatos del
+historial—, y una lista blanca es la forma correcta aquí: un módulo no puede meter claves
+arbitrarias en una estructura del core.
+
+El modo de fallo es la razón de este fichero. Una lista blanca que **no crece** tira la clave
+nueva **en silencio**: sin error, sin aviso, sin línea de log. El valor llega sin lo que decía
+cómo dibujarlo y la pantalla lo dibuja como antes — un estado como entero, una medida sin
+encabezado, una tabla sin grupos, una tarjeta en el orden equivocado. Ha pasado **tres veces**
+en esta sección, y las tres las encontró alguien mirando una pantalla y diciendo «ese número
+no significa nada».
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheModuleProjection::*` (2) | Toda clave que un perfil real **puede** declarar está en la lista blanca (no una lista escrita en el test, que sería un cuarto sitio donde olvidarse: la unión de lo que la maquinaria de perfiles emite de verdad); y **al revés**, una clave en la lista que nadie produce es una errata o un resto, y las dos se leen como «esto está resuelto» |
+| `TestTheHistoryMetadataSurface::test_it_carries_the_same_keys` | La segunda lista blanca, que es la que el navegador lee de verdad. Que crezca la primera sin ésta es el mismo tirón silencioso, una capa más allá |
+
+---
+
+## 38c. Infraestructura — la obtención que alguien está mirando
+
+**Archivo:** `tests/unit/test_infra_collect_job.py` — 16 tests
+
+Pedirle datos frescos a un aparato tarda lo que tarde el aparato. Las sondas normales contestan
+en segundos; un NAS con un perfil SNMP completo contesta unos mil valores y tarda minutos. Así
+que el trabajo va a un hilo y el navegador **sondea un job** — y todo lo que puede salir mal con
+esa forma es invisible hasta que hay alguien delante:
+
+* un job que nunca pone `done` es un diálogo girando para siempre;
+* un job que no suelta el *check lock* es un panel donde ya no se puede ejecutar nada —
+  **incluido el ciclo del planificador**, que toma ese mismo lock y se salta la ronda cuando no
+  puede: una obtención atascada apaga la vigilancia en silencio;
+* un job que audita como `system` ha perdido el único dato por el que existe la entrada;
+* y un job que le pasa su contabilidad interna al navegador es una API con un campo que nadie
+  quiso publicar.
+
+Sin Flask, sin base de datos y sin aparato: al job se le da un `wa` y llama a dos métodos, así
+que la forma entera se comprueba con un doble que apunta lo que le pidieron.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestItReportsWhileItRuns::*` (4) | Los módulos salen **en cola y la barra a cero** antes de que conteste el primero (un diálogo que abre vacío hace que los primeros segundos de una ejecución de cinco minutos parezcan que no ha pasado nada); cada módulo mueve la cuenta, leída **desde fuera** de uno en uno como hace el navegador; un módulo que este job no conoce se ignora en vez de reventar un hilo; y un `timeout` **suma a la barra** aunque el módulo siga trabajando, o la barra se queda al 90 % para siempre — que es exactamente lo que haría en la flota para la que se escribió |
+| `TestItAlwaysEnds::*` (4) | Termina y dice qué contestó; **una ejecución que revienta también termina** (`done` es lo que para el sondeo del navegador, así que un job que revienta antes de ponerlo es un diálogo girando hasta que alguien recarga); **el lock se suelta igual**, porque quedárselo es un panel que deja de vigilar; y una auditoría que falla no se lleva el resultado |
+| `TestWhatItRecords::*` (3) | La entrada de auditoría **nombra a quién lo pidió** —se escribe desde un hilo donde no hay petición que leer, así que el actor viaja dentro; grabarlo como `system` sería perder el único dato por el que existe—, sin actor sí es `system`, y la entrada nombra el aparato y los módulos |
+| `TestWhatLeavesTheProcess::*` (3) | La contabilidad interna **se queda dentro** (una respuesta de sondeo es una API, y un campo publicado por accidente es uno del que alguien empieza a depender); un job que este proceso nunca tuvo es `None` y no un job vacío —viven en memoria, así que «no conozco ese id» es la verdad tras un reinicio—; y la respuesta es una **copia**, o quien la guardara estaría leyendo una estructura que los hilos siguen escribiendo |
+| `TestHowLongAModuleIsGiven::*` (2) | Le pregunta al **planificador y no al navegador**: 45 s es lo que se le pide esperar a un navegador en la pantalla de Estado, aquí no hay petición esperando, y cuánto tiempo se le da a un módulo es el ajuste del operador (`monitoring|module_timeout`, que una flota con un NAS de cinco minutos tiene que poder subir). Sin planificador embebido sigue ejecutando: un plazo corto es el número equivocado, no obtener nada es peor |
+
+---
+
 ## 39. BD — HostsStore
 
-**Archivo:** `tests/unit/test_hosts_store.py` — 20 tests
+**Archivo:** `tests/unit/test_hosts_store.py` — 26 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2634,6 +2716,21 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_secrets_encrypted_at_rest` | Secrets encrypted at rest |
 | `test_no_fernet_stores_plaintext` | No fernet stores plaintext |
 | `test_persists_across_store_instances` | Persists across store instances |
+
+### `TestWhatTheDeviceIs` — `device_type`, una propiedad y no una sección
+
+Todo lo que el panel hace con una entrada es igual sea lo que sea, así que repartir el
+registro por tipo obligaría a acertar al crearla, y a menudo no se acierta: un NAS **es** un
+servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nunca se navega.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatTheDeviceIs::test_it_round_trips` | Se guarda y se lee |
+| `TestWhatTheDeviceIs::test_unclassified_is_the_default_and_a_real_value` | Vacío es lo que tiene todo dispositivo anterior al campo, y el que se dio de alta con prisa: exigirlo sería peor formulario que ninguno |
+| `TestWhatTheDeviceIs::test_an_undeclared_type_is_dropped_not_stored` | Llega del cuerpo de una petición; guardarlo pondría en pantalla una palabra que ningún idioma sabe traducir |
+| `TestWhatTheDeviceIs::test_it_is_case_insensitive_on_the_way_in` | `SWITCH` entra como `switch` |
+| `TestWhatTheDeviceIs::test_an_update_can_set_and_clear_it` | Una reclasificación se puede deshacer |
+| `TestWhatTheDeviceIs::test_every_declared_type_is_storable` | El catálogo y el validador leen la misma lista: un tipo que el selector ofrece y el store rechaza sería un desplegable que no hace nada |
 
 ## 40. BD — CredentialsStore
 
@@ -2738,7 +2835,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 26 tests
+**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 27 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2776,7 +2873,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 46. Hosts — Asistente de migración
 
-**Archivo:** `tests/unit/test_hosts_migrate.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_migrate.py` — 8 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3562,7 +3659,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 35 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 57 tests
 
 **Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
 veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
@@ -3576,6 +3673,8 @@ cuando el aparato renumera).
 | Test | Qué comprueba |
 |---|---|
 | `TestWhichDevicesAreSampled::*` (5) | Los perfiles se leen escritos como se escriban (cadena en pantalla, lista por la API — la misma asignación, y un aparato que no mide porque el valor llegó en la otra forma es un fallo sin síntoma); **un servidor con perfiles y sin checks ya es trabajo** (la razón de esta fase); uno sin perfiles no recibe ni una pregunta; un perfil que ya no está en el catálogo cuesta las métricas de ese aparato y no el ciclo; y un host en mantenimiento no se grafica (alguien está trabajando en él, y la gráfica sería del trabajo) |
+| `TestTheProfileIsTheVerdict::*` (9) | Un perfil que se ha molestado en decir **cuáles de los significados de un valor son malos** ya ha dicho todo lo necesario para comprobar el aparato — y se estaba tirando: un NAS contesta «estado del sistema: Fallo», «ventilador: Fallo», «actualización disponible» en cada ciclo, cada uno con su nivel ya escrito en el perfil, y la fila se grababa como correcta, porque un muestreo se trataba como algo que llega o no llega. El mapa que pinta la insignia ámbar es el mismo que dice que la máquina necesita atención. Un nivel `bad` **tumba la fila** y el mensaje **nombra la medida y lo que dijo** («SNMP: erebor» no es accionable; «Estado del sistema: Fallo» sí); un `warn` es **aviso y no caída** (una actualización de DSM pendiente no puede pintar un NAS de rojo); `ok` e `info` no son hallazgos —«Conectando» es el aparato diciendo que no sabe—; un valor **que el mapa no cubre** tampoco (los perfiles se rellenan un MIB cada vez, y no saber es una respuesta legítima); una métrica **sin estados** nunca produce uno (una temperatura no es una enumeración); `bad` gana a `warn` y **sólo se reporta uno** (una fila con cuatro estados infelices es una fila en problemas, no cuatro notificaciones); y los números siguen viajando con el veredicto |
+| `TestSayingWhereItIs::*` (5) | Un NAS con veinticuatro perfiles son minutos dentro de **un** módulo. Reportado desde el panel: pulsas «obtener datos» y el diálogo dice «snmp — ejecutando, 0 %» durante cinco minutos, que es lo mismo que se ve cuando algo se ha colgado. El borde del módulo es lo único que el core puede ver, así que habla el módulo: nombra **el perfil y por cuál va** (`(3/24)`) y **de qué aparato** (un módulo muestrea toda la flota: «Discos (3/24)» sin máquina delante es una frase sobre nada). Un aparato sin perfiles no dice nada, y **que no haya nadie escuchando es el caso normal** — el muestreo no depende de ello en absoluto. Y un perfil que **se nombra por idioma** (`{'en_EN': …, 'es_ES': …}`) se lee, no se imprime: reportado desde el panel como una línea de progreso con un diccionario de Python dentro |
 | `TestCountersAcrossCycles::*` (3) | El primer ciclo guarda **referencia y ningún valor** (no hay de qué restar: un valor ahí pondría el uptime entero como el tráfico de un intervalo); el segundo ya es tasa **y sobrevive a una instancia nueva**; y la referencia se guarda donde aguanta un proceso nuevo — el `check_state`, al lado de `fail_streak` y por el mismo motivo |
 | `TestATableKeepsItsNames::*` (5) | Cada fila se archiva bajo **el nombre que le da el aparato** (bajo el índice, una gráfica de «3» es una que nadie puede accionar, y pasa a ser otro puerto el día que el aparato renumere); una fila sin nombre cae a su índice en vez de desaparecer; un nombre que partiría la clave (`eth0/1`) se sanea pero **se conserva entero** en la fila, que es lo que lee una persona; la columna de nombres se recorre **una vez** aunque la compartan cinco métricas; y las métricas de una fila llegan juntas (dos resultados serían dos gráficas de medio puerto sin nada que dijera que son el mismo) |
 | `TestWhenTheDeviceDecidesTheUnit::*` (4) | El factor viene de **otra columna y por fila** (dos volúmenes de un mismo NAS pueden tener bloques distintos); esa columna se recorre una vez; un factor que falta **deja la lectura en paz** (el factor es un detalle *sobre* el valor: un aparato que contestó el valor pero no la unidad ha contestado el valor); y un factor cero se rechaza — multiplicar por él graficaría todos los volúmenes vacíos, que parece un dato y no una lectura mala |
@@ -3583,12 +3682,12 @@ cuando el aparato renumera).
 | `TestAProbeProvesItAnswersAndStopsThere::*` (4) | **Reportado**: «probar servidor» contra un NAS con sólo SNMP y perfiles se queda en «probando…» y no vuelve. No estaba colgado: el muestreo lee **todas** las métricas de **todos** los perfiles —quince perfiles de ocho métricas son 135 walks, cada uno cientos de round-trips contra el aparato— y **una prueba no guarda nada de eso**: su respuesta es una gráfica que nadie está dibujando. Lo que la prueba tiene que demostrar es que los perfiles llegan al aparato, y un valor que vuelve lo demuestra. Se comprueba que una prueba **para en la primera métrica que contesta** (135 walks → 2 en el caso real), que **un ciclo de verdad las sigue leyendo todas** (recortarlo ahí sería recortar las gráficas), que una prueba **sin respuesta lo sigue diciendo**, y que un ciclo **sólo se cree una prueba si se lo dicen** (`is True` y no verdad-aproximada: un doble de test contesta que sí a todo, y un ciclo que se crea un ensayo deja de rellenar el historial) |
 | `TestTheProbeThePanelRuns::*` (2) | El botón **Probar** del modal de host no pasa por el monitor: monta un `Watchful` de usar y tirar con un item y enseña lo que vuelva. Un servidor con perfiles y sin checks OID no devolvía nada, y «nada» se dibuja como «nada que probar» — que se lee como una configuración mal puesta y no como una función sin cablear. Además, el catálogo enviado tiene que ser alcanzable **sin directorio de datos** (el probe no tiene), o los perfiles serían invisibles justo donde el admin comprueba su trabajo |
 | `TestAGroupIsResolvedBeforeAnythingIsAsked::*` (4) | El muestreador es donde un **grupo** deja de serlo: a un aparato al que se le asignó uno se le pregunta lo que el grupo contiene; un grupo escrito en el panel —que vive en la BD— **llega al worker**, que es justo la razón de que no sea un fichero (web y worker comparten la base de datos, no el disco); un perfil que comparten dos grupos **se pregunta una vez** (dos veces graficaría cada serie contra sí misma); y un grupo cuyos miembros ya no existen es un aparato sin nada que preguntar, no un ciclo que se rompe |
-| `TestWhatIsNotASeries::*` (1) | Lo que la máquina **es** (nombre, modelo) viaja al lado de los números y no como serie propia: identifica lo que se está graficando, y una gráfica de eso sería una gráfica de nada |
+| `TestWhatIsNotASeries::*` (2) | Lo que la máquina **es** (nombre, modelo) viaja al lado de los números y no como serie propia: identifica lo que se está graficando, y una gráfica de eso sería una gráfica de nada. Y va archivado **bajo el perfil que lo contestó** — reportado desde la pantalla: la identidad del NAS y la de su SAI salían mezcladas, porque varios perfiles contestan a lo mismo (fabricante, modelo, versión) y en plano el segundo pisaba al primero. Cuál sobrevivía dependía del orden, y no se reportaba nada mal: un dato desaparecía |
 | `TestWhenTheDeviceGoesQuiet::*` (5) | Un ciclo callado no es una caída (un datagrama UDP perdido no lo es); dos sí; se informa **una vez por aparato y no una por métrica** (cuarenta avisos de un cable desenchufado es como se aprende a ignorar los avisos); una respuesta parcial cuesta sólo las métricas que fallaron (un switch sin agente UCD sigue teniendo interfaces); y un aparato que vuelve a contestar deja de estar caído |
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_walk_oid.py` — 11 tests
+**Archivo:** `tests/unit/test_snmp_walk_oid.py` — 11 tests
 
 **Recorrer UNA columna**, que es lo que pide una métrica de perfil. El walk de descubrimiento
 barre dos subárboles fijos, trunca los valores a 120 caracteres y se traga los errores, porque
@@ -3607,7 +3706,7 @@ nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles.py` — 48 tests
+**Archivo:** `tests/unit/test_snmp_profiles.py` — 81 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -3628,13 +3727,15 @@ perfiló, y cuando un firmware mueve un OID el arreglo no espera a la siguiente 
 | `TestAProbeHasToBeAnswerable::*` (2) | Un `probe` es un GET, y un GET contra una **columna** de tabla no contesta nada (la columna no tiene instancia, sólo sus filas). Un perfil cuyo probe fuera una de sus propias columnas validaría, cargaría, se quedaría en el catálogo y **no se detectaría jamás** — asignado a mano mide perfecto, que es justo el fallo más difícil de notar. Ningún probe enviado es una columna pelada, y un perfil que sólo tiene tablas sondea **una de sus filas** (que además es la condición que interesa: a una máquina sin discos no hay que ofrecerle un perfil de discos) |
 | `TestAVendorProfileDisplacesAGenericOne::*` (4) | Un Synology corre net-snmp por debajo, así que contesta el sondeo de E/S de UCD **y el suyo**, y los dos miden los mismos discos: sin esto la detección propone la pareja y quien acepte ambos grafica cada disco **dos veces**, con dos juegos de nombres que discrepan en lo que cada MIB cuenta distinto. Un perfil puede declarar **a quién sustituye**; una lista que no sean ids se descarta; el perfil de E/S del fabricante enviado sustituye al genérico; y **todo lo sustituido existe** — sustituir a uno que se renombró dejaría de sustituirlo en silencio y el doble conteo volvería sin nada que dijera por qué |
 | `TestOneProfileOneSubject::*` (2) | Los perfiles se asignan **varios a la vez**, así que tienen que ser disjuntos: dos que den el mismo valor no es redundancia, es **una medida graficada dos veces con dos nombres**, y el día que discrepen no hay nada que diga cuál vale. El de almacenamiento mide sólo almacenamiento (la CPU y la memoria son del perfil de sistema, y un NAS con net-snmp se lleva ése también); y **ningún par de perfiles enviados comparte una clave de métrica** — la clave *es* el campo del historial, así que compartirla sería escribir en una serie y quedarse con lo que el bucle alcanzara último |
-| `TestNames::*` (3) | Una cadena suelta vale como nombre en todos los idiomas (un perfil para un rack de una empresa no tiene por qué ser bilingüe); gana el idioma del lector con respaldo; y una métrica sin etiqueta se sigue leyendo |
+| `TestHowADevicesIdentityReads::*` (8) | Además del orden, **cómo se llama lo que describe un perfil**: la entrada del catálogo tiene que decir «Synology — sistema (SYNOLOGY-SYSTEM-MIB)» para que quien elige entre cuarenta perfiles sepa qué MIB coge, mientras que la tarjeta de un dispositivo está nombrando **una caja en un rack** — «Synology», y el SAI de al lado es «SAI». Recortar el título largo acierta con la primera y falla con la segunda, así que lo dice el perfil (`short_label`), **no decir nada es el caso normal** (cuarenta perfiles no necesitan un segundo nombre) y viaja por el mismo canal que el nombre largo |
+| `TestTheHandfulSomebodyWantsFirst::*` (11) | Qué medidas contestan «¿está bien esta caja?» lo declara **el perfil** (`headline`), y puede ser una cifra suelta o **la mitad de una proporción** (`used`/`total`). El vocabulario es corto a propósito —una palabra que el core tiene que entender es una que tiene que saber dibujar— y **un rol que nadie conoce sigue siendo una cabecera**, no un error: la alternativa es un valor que desaparece de la pantalla. Los tres perfiles sobre los que está montada la página de dispositivo no pueden perder sus marcas en silencio, y **la memoria se contesta una sola vez**: `hr_storage` la da como almacenes con capacidad y usado, `ucd_linux` como total y disponible, y las dos en el mismo resumen son dos respuestas a «cuánta memoria hay» que pueden discrepar |
+| `TestNames::*` (4) | Una cadena suelta vale como nombre en todos los idiomas (un perfil para un rack de una empresa no tiene por qué ser bilingüe); gana el idioma del lector con respaldo; una métrica sin etiqueta se sigue leyendo; y **un perfil que nunca pasó por `normalise` sigue teniendo nombre** — `label_of` se llama también sobre perfiles crudos (un *probe* arma su catálogo desde los ficheros), donde una etiqueta de texto plano hacía saltar un `AttributeError` que el sampler se tragaba: la pantalla decía que el aparato no contestaba. Un fallo que se lee como una caída es peor que un fallo |
 | `TestClaimingADevice::*` (3) | Gana el prefijo **más específico** (el árbol del fabricante y el nodo del modelo son reclamaciones legítimas, y la concreta sabe más); casa por **nodos y no por dígitos** (`…657` no puede reclamar `…6574`: son fabricantes distintos); y un aparato desconocido no reclama nada |
 | `TestWhatTheChartsGet::*` (2) | Los campos salen con la **forma que habla el historial** —la misma que produce el `__history__` estático de un módulo, porque es lo que hace un valor graficable y nombrable, y un perfil es exactamente esa declaración para un valor que llega sin ninguna— y lo que la máquina **es** (nombre, modelo) no es una serie |
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_lint.py` — 36 tests
+**Archivo:** `tests/unit/test_snmp_mib_lint.py` — 36 tests
 
 **Decir por qué un MIB no va a compilar, antes de que el compilador lo diga mal.** Dos MIB de
 fabricante se rompieron aquí con un día de diferencia y los dos se rompieron de las mismas dos
@@ -3658,7 +3759,7 @@ verdad.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_import_filter.py` — 41 tests
+**Archivo:** `tests/unit/test_snmp_mib_import_filter.py` — 41 tests
 
 **Qué entra en una importación, y dónde lo deja.** Tres cosas fallaban al entrar y las tres
 callaban. **Un nombre no es una prueba**: la carpeta `mibs/` de Net-SNMP trae `nodemap`,
@@ -3682,7 +3783,7 @@ rechazados en cada ejecución, un puñado distinto cada vez.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_dupes.py` — 32 tests
+**Archivo:** `tests/unit/test_snmp_mib_dupes.py` — 32 tests
 
 **Varios ficheros, un solo nombre de módulo.** pysmi resuelve un import **por nombre**: de tres
 ficheros llamados `SNMPv2-TC` lee uno, compila ése y no menciona los otros dos. Un archivo de
@@ -3708,7 +3809,7 @@ El listado decía `×3`, que es el hecho y no la pregunta. Las preguntas son si 
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_edit.py` — 52 tests
+**Archivo:** `tests/unit/test_snmp_mib_edit.py` — 52 tests
 
 **Editar un MIB, y poder deshacerlo.** Los fabricantes publican MIB rotos —SYNOLOGY-SMB-MIB no
 ha compilado nunca en ninguna parte— y desde aquí no hay nada que hacer salvo dejar que alguien
@@ -3737,7 +3838,7 @@ que no funcionó.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_errors.py` — 20 tests
+**Archivo:** `tests/unit/test_snmp_mib_errors.py` — 20 tests
 
 **Por qué un MIB no compiló, escrito donde están los MIB.** Compilar doscientos MIB no es algo
 que nadie mire hasta el final, y los fallos son justo a lo que se vuelve — con el modal ya
@@ -3756,7 +3857,7 @@ porque una fila roja que nadie puede quitar haciendo lo obvio es peor que ningun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_tree.py` — 48 tests
+**Archivo:** `tests/unit/test_snmp_mib_tree.py` — 48 tests
 
 **Los MIB en bruto viven en un árbol, y todo lo que los lee tiene que saberlo.** En cuanto una
 importación conserva la carpeta de la que viene un fichero, un MIB que estaba en `raw/` pasa a
@@ -3784,7 +3885,7 @@ ahora llevan su carpeta) y lo que pysmi **compila** (nombres de módulo, que nun
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_archive.py` — 76 tests
+**Archivo:** `tests/unit/test_snmp_mib_archive.py` — 76 tests
 
 **El archivo de MIBs de un fabricante, y distinguir una actualización de un retroceso.** Dos
 cosas que un catálogo de MIBs tiene que acertar en cuanto puede importar de más de un sitio, y
@@ -3821,7 +3922,7 @@ delante de lo instalado; la fecha del fichero dice cuándo se descargó).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_mib_cleanup.py` — 15 tests
+**Archivo:** `tests/unit/test_snmp_mib_cleanup.py` — 15 tests
 
 **Lo que un borrado deja atrás.** `compiled/` es plano y cada fichero lleva el nombre del
 **módulo** —`IEEE8023-LAG-MIB.py`, se llamara como se llamara el fuente y estuviera en la
@@ -3844,7 +3945,7 @@ queda, y también la madre cuyo único contenido es esa carpeta.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profiles_actions.py` — 52 tests
+**Archivo:** `tests/unit/test_snmp_profiles_actions.py` — 52 tests
 
 **El catálogo, tal y como lo recibe el panel** — y preguntarle a un aparato qué es. Hasta que
 estas dos acciones existieron, la matriz de OIDs era real e invisible: tres ficheros JSON, un
@@ -3863,7 +3964,7 @@ parecen buenos, y ése es justo el fallo que tiene que confirmar una persona).
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_profile_catalog.py` — 66 tests
+**Archivo:** `tests/unit/test_snmp_profile_catalog.py` — 66 tests
 
 **Una palabra en lugar de quince perfiles.** Un Synology contesta quince perfiles —sistema,
 discos, SMART, volúmenes, SAI…— y cada uno es correctamente un perfil aparte, porque son
@@ -3898,7 +3999,7 @@ sería un aparato al que no se le asignó nada.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_metrics.py` — 28 tests
+**Archivo:** `tests/unit/test_snmp_metrics.py` — 28 tests
 
 **Los contadores, y las dos formas en que mienten.** Un contador de bytes es acumulativo:
 dibujado en crudo es una línea que sólo sube, en la que una caída de servicio es un tramo plano
@@ -3916,7 +4017,7 @@ idénticas.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 117 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp.py` — 113 tests
 
 ### `TestEvaluate`, `TestActions`, `TestCheckFlow`, `TestAlertDebounce`, `TestCompileResultClassification`, `TestGetCategory`, `TestHttpFetchTimeout`, `TestGithubFolderParse`, `TestLooksLikeMib`, `TestLoadMibSources`, `TestKnownRepos`, `TestRepoTemplates`, `TestImportFromGithub`, `TestImportFromGithubAsync`, `TestMibCatalog`, `TestCompilePhase`, `TestCompileCancel`
 
@@ -4187,7 +4288,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ## 76. Hosts — Primitivas de resolución (lib/hosts/resolve.py)
 
-**Archivo:** `tests/unit/test_hosts_resolve.py` — 7 tests
+**Archivo:** `tests/unit/test_hosts_resolve.py` — 14 tests
 
 ### `TestHostProfileSpecs` — Normalización de specs de perfil
 
@@ -4196,6 +4297,9 @@ los contenedores en los que el panel **no** se está ejecutando.
 | `test_dict_becomes_single_element_list` | Un dict se envuelve en lista de un elemento | Devuelve `[spec]` | Si no lo envuelve |
 | `test_list_is_kept_dropping_non_dicts` | Una lista se conserva descartando los no-dict | Solo quedan los dicts (`a`, `b`) | Si mantiene `'nope'`/`None` o descarta dicts |
 | `test_none_and_other_types_give_empty` | `None` y tipos no soportados | Devuelven `[]` | Si devuelven algo distinto de lista vacía |
+| `test_a_core_owned_protocol_brings_its_own_fields` | Normalizar es también completar: el módulo nombra el protocolo, el core dice qué campos tiene | El spec sale con la lista del core | Si respeta una copia del módulo, que es lo que se separaba en silencio |
+| `test_the_address_field_is_part_of_it` | El campo que RECIBE la dirección es del host: entra en la lista | Va el primero | Si falta — `datastore` volvería a dibujar su caja `ssh_host` en un check atado |
+| `test_a_protocol_the_core_does_not_own_is_left_alone` | `web` declara `http`, que el core no posee, y su `server` se ve a propósito | El spec sale intacto | Si se rellena, escondiendo el campo de un host tras un proxy inverso |
 
 ### `TestResolveOs` — Resolución del SO
 
@@ -4879,7 +4983,7 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ## 92. Panel Web — páginas de sección, cuenta y convenciones de partials
 
-**Archivo:** `tests/unit/test_module_pages.py` — 20 tests
+**Archivo:** `tests/unit/test_module_pages.py` — 21 tests
 **Archivo:** `tests/integration/test_module_pages.py` — 12 tests
 
 Un watchful puede reclamar una sección propia declarando `__page__`. Vive bajo **`/module/<id>`**, en su propio espacio de nombres: así una sección futura del core no puede chocar con ella ni al revés. Las **vistas** de esa sección (varias disposiciones bajo un desplegable) están en [§131](#131-una-sección-de-módulo-puede-tener-más-de-una-vista).
@@ -5000,7 +5104,7 @@ al principio y solo uno sigue siendo cierto tras guardar.
 | `TestTheToolbarSaysWhatItCanDo::test_reloading_empties_what_the_password_half_DREW_too` | Los tres campos se vaciaban y el medidor de fuerza no: una barra roja diciendo «Débil» bajo un campo vacío es un veredicto sobre una contraseña que ya no está |
 | `TestTheToolbarSaysWhatItCanDo::test_reloading_over_unsaved_work_asks_first` | Es el único control de la página que puede perder lo tecleado, y pregunta con el diálogo propio, nunca con el del navegador |
 
-**Archivo:** `tests/meta/test_wa_partials_convention.py` — 19 tests
+**Archivo:** `tests/meta/test_wa_partials_convention.py` — 24 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -5256,6 +5360,238 @@ se incluye da un panel vacío sin error en ninguna parte.
 | `TestTheWiringItself::test_the_modal_still_carries_permissions_when_cloning` | El único caso en que sí debe mandarlos: un clon es un rol NUEVO y el POST decide su conjunto entero. Sin esto, «clonar» pasaría a ser «crear vacío» |
 | `TestItSpeaksBothLanguages::test_every_new_key_is_translated` (×2) | Una etiqueta que resuelve a su propia clave solo se ve en la página |
 | `TestItSpeaksBothLanguages::test_the_placeholders_match_across_languages` | `tf()` sustituye un `{}` por argumento: un recuento distinto deja un `{}` literal en pantalla |
+
+---
+
+## 97. SNMP contesta por sí mismo
+
+**Archivo:** `tests/integration/test_wa_snmp_routes.py` — 12 tests
+
+La biblioteca, el catálogo y preguntarle a un dispositivo sólo eran alcanzables en
+`/api/v1/modules/watchfuls/snmp/<acción>`: una ruta que describía dónde vivía el código en vez
+de de qué va el endpoint, y una puerta (`modules_view`) que no sabía distinguir «deja a esta
+persona compilar MIB» de «deja a esta persona ver todos los módulos del panel».
+
+Lo que fijan estos tests es **la puerta**, porque es la parte que cuesta cuando está mal: una
+operación alcanzable por quien no debería, o una lectura que exige permisos de escritura y
+escribe una fila de auditoría por cada vistazo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheSurfaceExists::test_a_read_only_action_answers` | La ruta existe y contesta |
+| `TestTheSurfaceExists::test_it_also_answers_a_get` | La ruta de módulo lo hacía y no valía la pena estrechar la capacidad de paso: listar una biblioteca es una lectura |
+| `TestTheSurfaceExists::test_an_unknown_action_is_a_404_and_not_a_500` | Una acción que no existe se contesta, no se revienta |
+| `TestTheSurfaceExists::test_an_action_of_the_module_is_not_reachable_here` | `discover` busca OIDs para el campo de un check, así que sigue siendo del check. Una superficie que aceptara las dos cosas dejaría esa línea sin significado |
+| `TestTheGate::test_anonymous_is_refused` | Sin sesión no se entra |
+| `TestTheGate::test_a_viewer_may_read_the_library` | Leer una biblioteca de MIB dice qué sabe medir el panel: el mismo tipo de hecho que el resto de lo que ve un viewer |
+| `TestTheGate::test_a_viewer_may_not_change_it` | **El que importa.** Compilar, importar, borrar y escribir perfiles son `snmp_manage`; un flag de solo-lectura que dejara pasar cualquiera de ellos sería una escritura que puede hacer cualquiera que pueda mirar |
+| `TestTheGate::test_an_editor_may_change_it` | Y que la puerta no se pase de celosa |
+| `TestTheGate::test_the_modules_permission_no_longer_opens_it` | **El corte limpio.** Un rol con `modules_view` y nada más alcanzaba toda la superficie SNMP, porque un watchful no tiene flags propios — que es justo lo que hacía imposible decir «dale la biblioteca de MIB» |
+| `TestTheLibrarySettingsComeFromTheConfig::test_the_route_ignores_what_the_client_sends` | **El que tiene coste.** Una lista de carpetas enviada por el cliente es un cliente eligiendo qué lee el servidor de su propio disco |
+| `TestTheLibrarySettingsComeFromTheConfig::test_what_the_config_holds_is_what_arrives` | Y que sí llegan: cazó que la ruta llamaba al lector de config con los argumentos mal y el `except` se lo tragaba — los ajustes no se aplicaban nunca, en silencio |
+| `TestTheLibrarySettingsComeFromTheConfig::test_the_token_is_a_core_secret` | Se cifraba porque el módulo lo declaraba `secret`, y esa declaración deja de aplicar cuando el ajuste sale del módulo. Sin nombrarlo en el core, la mudanza lo habría escrito en claro |
+
+---
+
+## 98. Un dispositivo es un host, no una entrada de módulo sobre uno
+
+**Archivo:** `tests/unit/test_snmp_devices.py` — 16 tests
+
+Es la conducta que hace verdad la frase «SNMP es configuración del dispositivo». Antes de
+esto, darle a un host una comunidad y un juego de perfiles no compraba nada hasta que
+existía una **segunda** cosa: una entrada en el módulo SNMP apuntando de vuelta a ese host.
+El dispositivo guardaba la configuración y el módulo decidía si alguien la leía.
+
+Ahora contesta el registro de hosts: un host con perfil `snmp` y al menos un perfil de
+dispositivo asignado **es** un dispositivo, y se muestrea. No hace falta nada más.
+
+Las tres cosas que esto deliberadamente **no** hace pesan tanto como la que hace:
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatCountsAsADevice::test_a_host_with_profiles_assigned_is_sampled` | Un host configurado se muestrea sin ninguna entrada de módulo |
+| `TestWhatCountsAsADevice::test_a_host_with_a_community_but_nothing_assigned_is_not` | Alcanzable no es lo mismo que digno de graficar: sin perfiles no hay nada que medir, y muestrearlo registraría nada con pinta de haber funcionado |
+| `TestWhatItRefusesToDecide::test_a_host_an_item_already_speaks_for_is_left_alone` | Muestrearlo dos veces serían dos respuestas a «qué está haciendo este dispositivo», con dos líneas base de contador independientes |
+| `TestWhatItRefusesToDecide::test_maintenance_is_not_decided_here` | Lo decide `resolve_host`, por donde pasa todo ítem muestreado: un sitio donde un host en mantenimiento deja de leerse, no dos que tengan que coincidir |
+| `TestWhatItRefusesToDecide::test_it_returns_an_item_and_not_a_connection` | Construir aquí la conexión sería una segunda implementación de la mezcla que ya hace `resolve_host`, y las dos discreparían en cuanto cambiara una |
+| `TestItCannotTakeACycleDown::*` (×4) | Un registro ilegible significa cero dispositivos extra este ciclo — el mismo resultado que no tener ninguno, y no vale un ciclo de monitorización caído |
+| `TestTheKeyIsStable::*` (×3) | El estado de contadores y las filas de historial se archivan bajo esa clave: si cambiara entre ciclos reiniciaría cada tasa y partiría cada gráfica |
+
+Y en `tests/unit/test_hosts_resolve.py`, la convención que lo sostiene: un resultado cuya
+clave empieza por `host.` pertenece a un **host** y no a un check, que es lo que permite a la
+pestaña de Servidores atribuirlo. Sin eso un dispositivo puede muestrearse, darse por caído, y
+seguir enseñando un guion neutro.
+
+---
+
+## 99. Meta — Una conexión SNMP descrita dos veces
+
+**Archivo:** `tests/meta/test_snmp_host_profile_agrees.py` — 14 tests
+
+`lib/core/snmp/manifest.py` declara el perfil que lleva un **host**: lo que dibuja el
+formulario de Servidores y lo que hereda cualquier check atado a ese host.
+`watchfuls/snmp/schema.json` declara los mismos campos en un ítem *server*, porque un check
+contra una IP suelta tiene que seguir siendo posible sin dar de alta el dispositivo.
+
+Ninguna se puede derivar de la otra: la del core es Python que se lee antes de cargar ningún
+módulo, la del módulo es dato que renderiza el navegador. Así que están escritas dos veces, y
+esto es lo que impide que eso sea un bug esperando: un `show_when` que se separa esconde un
+campo en una pantalla y no en la otra, un `options` que se separa ofrece un protocolo de
+autenticación que el check no sabe usar, y un `secret` que se separa **deja de cifrar una
+contraseña** — y nada de eso levanta un error en ninguna parte.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheTwoDescriptionsAgree::test_every_core_field_exists_on_the_check` | Un check inline puede decir todo lo que puede decir un host, o el caso «IP suelta» es de segunda y no sabe hacer SNMPv3 |
+| `TestTheTwoDescriptionsAgree::test_the_check_does_not_restate_them` | Control positivo: la colección nombra el protocolo y no repite los diez campos — si no, la expansión podría dejar de funcionar y bastaría con pegarlos de vuelta para volver a verde |
+| `TestTheTwoDescriptionsAgree::test_the_metadata_matches_field_by_field` | Tipo, default, opciones, `show_when`, `secret`, `multi`, mín/máx. El `placeholder` queda fuera a propósito: es una pista de una caja vacía y cada formulario puede redactarla a su manera |
+| `TestTheTwoDescriptionsAgree::test_the_module_names_the_protocol_and_the_core_says_what_it_holds` | El módulo conserva su `__host_profile__` —es lo que hace heredar— pero ya no repite la lista; sí sigue diciendo dónde aterriza la dirección |
+| `TestTheTwoDescriptionsAgree::test_the_core_declaration_is_the_one_the_form_draws` | La recoge el escáner compartido de `manifest.py`, así que el catálogo la ofrece esté o no instalado el watchful — que es justo el objetivo |
+| `TestTheTwoDescriptionsAgree::test_every_field_is_named_in_both_languages` | Una etiqueta que falta pone el nombre crudo del campo en pantalla, y eso solo se ve mirando la página |
+| `TestTheCredentialSaysTheSameThing::*` (3) | La tercera descripción de la misma conexión, y la que lleva candado: llega al catálogo, sus campos de identidad coinciden con el perfil de host, y está redactada en los dos idiomas |
+| `TestTheCredentialTheEditorActuallyGETS::*` (5) | Lo que `credential_schemas()` entrega al editor: qué se pregunta según versión y nivel, cada secreto marcado como tal, las listas de protocolo sin `none`, y el nivel v3 ofrecido en palabras y no en identificadores ASN.1 |
+
+---
+
+## 99e. Meta — Mil medidas no son mil tarjetas
+
+**Archivo:** `tests/meta/test_wa_infra_metrics.py` — 119 tests
+
+La tira de tarjetas se escribió para una máquina vigilada por las sondas normales: una docena
+de valores, cada uno de una **clase** distinta —CPU, latencia, RAM, días hasta caducar—, donde
+una tarjeta por valor se lee de un vistazo. Reportado desde la pantalla al encender SNMP: un
+NAS con perfil completo archiva **1.014 medidas**, y no son mil clases. Son 64 clases medidas
+sobre muchas filas — cuatro atributos SMART sobre 176 de ellas son 704 tarjetas que dicen casi
+lo mismo. La página se volvió un muro que hay que pasar para llegar a la tabla de debajo, que
+son otras 295 filas.
+
+Las dos mitades fallan igual y ninguna levanta nada: todo se pinta, no falta nada, y la página
+no se puede usar. Así que lo que se vigila es la **forma**.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestAThousandMeasurementsAreNotAThousandCards::*` (4) | Agrupado por `módulo\|campo` y no por etiqueta (dos módulos pueden llamar igual a cosas distintas), un puñado de filas sigue siendo tarjetas —NS1 resuelve tres registros DNS y esas tres tarjetas están bien—, los grandes se pliegan diciendo cuántos son, y los bloques mayores van al final |
+| `TestTheChartIsDrawnWhereTheNumberIs::*` (5) | Ninguna medida navega fuera; pide la serie a la API y la dibuja **en su sitio** con el mismo `_historyDraw` de Historial; una serie que aún no existe lo dice en vez de dejar un hueco; cerrar mientras carga no la repinta; y **un solo rango para la página**, porque comparar dos números de un equipo sobre ventanas distintas es la comparación que esto invitaría a hacer y no podría sostener |
+| `TestTheResultsTableIsNotEndless::*` (2) | Tope con cuenta de lo que esconde, y lo peor primero: un tope sobre un orden cualquiera esconde noticias, y sobre uno ordenado esconde solo la cola que nadie iba a leer |
+| `TestRowsThatBelongToDifferentPartsAreSeparated::*` (4) | Ocho discos en dos bandejas se intercalan y se leen como un estante de ocho: el equipo los llama «Drive 1» y «Drive 1 (DX517-1)». A qué parte pertenece una fila lo resuelve el **servidor** con un patrón que declara el **perfil** — la MIB no tiene columna de recinto, y suponer algo sobre paréntesis es una afirmación sobre un fabricante. Una vez por medida en vez de en cada repintado, y a la pantalla llega **dato**, no una regla. Sin partir, sin encabezados |
+| `TestAPanelFillsWhatIsActuallyLeft::*` (5) | Reportado **dos veces**: primero la tabla de logs dibujaba a la altura de su propia cabecera, y con un `min-height` en la hoja de estilos se quedaba corta. Son la misma cosa por los dos lados — la cadena de relleno sirve cuando **hay** altura que repartir, y una pestaña dentro de un documento que scrollea no la tiene; una fracción del viewport es correcta en una pantalla y un hueco en la siguiente, porque la hoja de estilos no puede saber **dónde empieza** el panel. Se mide: dónde está el elemento contra dónde acaba la ventana. Suelo y nunca techo, con mínimo para que una ventana corta no dé un panel de dos filas, se remide al cambiar de tamaño y **el listener se quita solo** — la sección se repinta con un temporizador, y un listener por repintado es una página que va peor cuanto más rato la dejas abierta |
+| `TestNothingIsPushedOutOfItsColumn::*` (3) | Tres desajustes de una misma captura y la misma regla de flexbox: **el mínimo automático de un hijo flex es su contenido**. Una fila de tarjetas empujaba al rail de familias a la línea de arriba; un nombre de perfil largo empujaba al propio rail, y el elemento seleccionado dibujaba entonces hasta un borde distinto del resto. Y el bloque de la ficha se titulaba con el tooltip del engranaje — «Abrir en el registro» sobre una lista de datos se lee como una instrucción, y no lo es |
+| `TestTheOpenDeviceSurvivesAReload::*` (5) | **Reportado**: F5 dentro de un dispositivo contestaba volviendo a la lista de cuarenta. Una sección que contesta «qué máquina está en problemas» es una que se deja abierta, se recarga y se manda a un compañero, y el dispositivo abierto vivía sólo en una variable. Va en la URL (`?host=`), **reemplazando y no apilando** —una entrada por dispositivo haría que Atrás recorriera las máquinas que miraste en vez de salir de la sección—, se lee **una sola vez** por carga (el auto-refresco repinta, y releerla reabriría lo que alguien acaba de cerrar), y un uid que ya no existe cae a la flota en vez de a un spinner eterno |
+| `TestTheIdentityColumnIsAnIdentityAndNotAnInventory::*` (2) | **Reportado**: la columna se iba páginas abajo. Un ítem SNMP archiva un resultado por disco, por volumen, por recurso, y cada uno lleva modelo, serie y bahía — doscientos bloques no son una identidad, son un inventario, y van al lado de las filas que describen. La columna contesta «qué es esta caja», agrupado por quién lo contestó |
+| `TestTheFamilyRailDoesNotFightThePage::*` (2) | **Reportado**: abrir ciertas familias mandaba la tira de pestañas al final del documento. `.ss-railbox` es un rail con su propio scroll y la hoja de estilos convierte el cuerpo que lo contiene en columna flex con `overflow: hidden` — correcto cuando el rail **es** la página, y falso desde que la página del dispositivo scrollea detrás de una columna fija. Ahora es la misma columna fija, y el botón suelta la MIB del nombre (el hover la conserva) |
+| `TestAPanelThatNeedsRoomAsksForIt::*` (2) | **Reportado**: la tabla de logs enseñaba sus títulos y nada más. `.ss-vfill` sirve cuando **hay** una altura que repartir; una pestaña dentro de un documento que scrollea no la tiene. `.ss-pane-tall` es un suelo y no un techo: un dispositivo con cuatrocientas líneas de syslog no scrollea dentro de una caja dentro de una página que también scrollea |
+| `TestIdentityIsContextAndNotASection::*` (6) | Era una pestaña, y una pestaña se lee una vez y ya no se vuelve — que es lo contrario de para qué sirven un número de serie y una versión de firmware: son el **contexto** de todo lo demás, se leen *mientras* miras las medidas. Ahora es una columna fija (`.ss-sticky-aside`, clase genérica: la siguiente columna de contexto es marcado y ninguna regla nueva). **No** es una segunda zona de scroll —un scroll dentro de una página que ya scrollea es cómo una columna acaba con la cabeza fuera de pantalla— y deja de pegarse por debajo del breakpoint, porque una columna fija de 17rem en un móvil es la página |
+| `TestHowAValueIsDrawnIsOneDecision::*` (5) | Un porcentaje, un estado y un montón de bytes no son la misma clase de respuesta, y pintar los tres como «un número con una palabra detrás» es parte de lo que hacía muro la página. Ahora **una sola función decide**, por orden de cuánto se sabe del valor: enumeración que el perfil explicó → porcentaje (cuya escala no hay que explicar) → número con su unidad. La barra **no juzga**: la mitad de estos son «CPU inactiva» y «capacidad de batería», donde lleno es la buena noticia — lo que un número significa es un umbral, y un umbral es trabajo de un check. Y el sparkline **falta a propósito, con el motivo escrito**: dibujar ochenta son ochenta peticiones, porque la API de historial contesta una serie por llamada |
+| `TestWhatTheMachineHasBeenSaying::*` (5) | Los logs sólo se alcanzaban desde el modal donde se **configura** un dispositivo, que es el sitio equivocado: esta página es a la que se viene cuando una máquina se porta mal, y la otra es donde se le cambia la comunidad. Es **el mismo panel** que pinta el modal, al que ahora se le dice dónde ponerse — dos tablas de syslog con dos barras de filtros y dos paginadores serían dos sitios donde dejar de estar de acuerdo. Con permiso (`syslog_view`): una pestaña cuyos datos no puedes pedir es una pestaña que se abre con un error. Y sin contador, porque los logs se piden por páginas y un cero ahí diría que la máquina no ha dicho nada |
+| `TestAStateIsAWordAndNotAnInteger::*` (5) | **Reportado y confirmado contra un panel maduro**: la página leía «Estado del sistema 1 · Estado de alimentación 1 · Actualización disponible 2». El agente contesta 1 y sólo la MIB de la que sale dice que 1 es Normal; el panel no puede saberlo, así que imprimía el entero — en la pantalla cuyo trabajo entero es decir si la máquina está bien. Ahora el perfil declara `states`, el valor se pinta como **insignia con su nivel**, y un valor que el mapa no cubre **conserva su número**: los perfiles se rellenan MIB a MIB y no saber es una respuesta digna |
+| `TestWhichPartOfTheDeviceAMeasurementIsOf::*` (6) | Sesenta y cuatro clases de medida no es una lista que se lea, es una lista que se abandona — pero tampoco son sesenta y cuatro cosas sueltas: el módulo ya las agrupa por **perfil** (el sistema, los discos, el RAID, los recursos, el SAI enchufado). Esa agrupación existía en el único punto donde se podía saber y la unión que aplana los campos de todos los perfiles la tiraba. Ahora viaja por campo (`source`/`source_label`), junto con `chart` —línea o estado, que es la diferencia entre dibujar una gráfica y dibujar una insignia—, y la pantalla pinta un rail de familias. Alfabético y no por tamaño: un índice que se pueda usar es uno cuyo orden no cambia porque al equipo le añadan un disco. Y no abre por la familia más ruidosa (los 704 atributos SMART), que es la que menos probable era que vinieras a ver |
+| `TestTheRowOpensTheDevice::*` (2) | La fila entera abre el dispositivo, como una tarjeta — con guarda en el destino para que la columna de acciones siga significando el control que pulsaste |
+| `TestWhatEachMeasurementIsCalled::*` (4) | **Reportado**: todas las tarjetas ponían «erebor» en la página de erebor. Es la etiqueta del ÍTEM, y un ítem SNMP archiva un resultado por disco, por volumen, por recurso — el nombre del equipo mil veces en el único sitio donde no dice nada. Manda la **fila**; sin fila no se pone nada (poner el módulo sería la misma repetición con otra palabra), y el nombre completo queda en el hover. El backend la saca de lo que el módulo grabó (`_row`) o de la clave `<ítem>/<detalle>`: no adivina |
+| `TestAValueIsShownAtTheSizeItIs::*` (3) | El módulo graba en su unidad base —lo único sensato para un almacén—, pero `34528771842048 B` no lo lee nadie. Escalado **sólo al pintar**: pasos binarios para bytes, porque es lo que un agente quiere decir con B, y segundos a la unidad que deja un número legible. A la gráfica va el valor crudo, o el eje y el número de encima no dirían lo mismo |
+| `TestARowsOwnFacts::*` (5) | El modelo y la serie de un disco, el estado de un atributo SMART. **Se estaban grabando y no se dibujaban en ningún sitio**: la columna de identidad muestra los datos DEL APARATO —tiene que hacerlo, o un NAS y el SAI enchufado a él se leen como una máquina con dos series contradictorias— y los de fila se fueron con el cambio que arregló aquello. Una serie que no se puede leer desde el panel es una serie que alguien lee de la máquina con una linterna. Se casan por el nombre **anterior al corte** (`row_key`): los atributos se grabaron contra el nombre que compuso el aparato, y el corte lo hace la pantalla — casar por la mitad cortada no encuentra nada, en silencio. Los del aparato **no se repiten en cada fila** (176 filas SMART rotuladas «modelo: DS916+» no son información, son papel pintado), se indexan **una vez** por repintado, y una fila sin datos no dibuja nada |
+| `TestHowIsThisMachine::*` (17) + `TestOneRowsWholeStory::*` (13) + `TestEverythingTheDeviceAnswered::*` (5) + `TestHowIsThisMachineStill::*` (2) | La pestaña **Detalles**: la pregunta con la que se abre un dispositivo, y la de Medidas es la pantalla equivocada para ella —un aparato con perfiles completos contesta unas mil medidas y «¿está bien esta caja?» son cuatro o cinco—. Va **primera** y es la pestaña por defecto (quien no ha elegido quiere la respuesta, no el archivo); **qué cuatro o cinco lo decide el perfil** (`headline`) y el panel no nombra ni un campo de módulo, porque uno que los eligiera por nombre sabría qué es un NAS y no tendría nada que decir del siguiente aparato que alguien enchufe; un aparato que no marca ninguna **lo dice** (una caja vacía se lee como una pantalla rota); el valor lo dibuja **el único renderizador** (dos serían dos respuestas a «qué significa 2», y la de la pantalla resumen sería la que se quedara mal); y las medidas **de una fila se quedan con su fila** — «Usado 412 GiB» es de UN sistema de ficheros y suele haber varios. Y **un almacén se dibuja como una proporción**: HOST-RESOURCES-MIB da todos igual —memoria física, caché, swap y cada volumen montado— como capacidad y usado, y dos cifras en bytes una al lado de otra es aritmética que se le deja al lector cuando lo que quiere es «83 %». **Cuál de las dos mitades es cuál lo dice el perfil**, porque una etiqueta que pone «Usado» en un perfil y «In use» en el siguiente no es algo sobre lo que casar patrones — y equivocarse pinta un disco lleno como vacío. Una **capacidad de cero no es 0 %** (un almacén sin montar y uno lleno son cosas distintas, y dividir por cero dice la segunda); **nada se colorea por un umbral que nadie ha dado** (qué es «demasiado lleno» es una decisión de la instalación, la misma razón por la que la barra de al lado es gris); las filas **no se rebarajan** entre refrescos; y el anillo compone sus dos cifras con **el formateador compartido**, no con una segunda respuesta a cuánto es un gibibyte. **Una tabla dice de qué filas suyas va el resumen**: reportado desde la pantalla — HOST-RESOURCES informa de todos los almacenes de un host, y en un NAS con contenedores eso son la memoria física, el swap y los búferes, y luego **cuarenta bind mounts del mismo volumen**, así que Detalles salían cinco anillos útiles y treinta y nueve diciendo todos 67 % de los mismos 31 TiB. La regla se casa contra lo que **dijo el aparato** (`hrStorageType`) y no contra una ruta, porque un volumen es `/volume1` en una máquina y `C:` en la siguiente; los volúmenes de verdad los da el perfil del fabricante, que sabe cuáles lo son, y su tabla **nombra por patrón** cuáles de sus filas son volúmenes y cuáles el pool (SYNOLOGY-RAID-MIB lista los dos y no contesta nada que los distinga). Una tabla que informa del espacio **libre** en vez del usado sigue siendo una proporción; **memoria, volúmenes y discos no son una sola lista** (el encabezado es el nombre del propio origen, así que un aparato con una cuarta clase de almacén gana una cuarta sección sin que el panel se entere); los discos traen **su salud**; y `t` —el traductor del panel— **no se pisa** con una variable local, que es un TypeError en la única rama que tiene una palabra dentro. Al hacer **clic en una fila** sale todo lo que el aparato dice de ella, y se identifica por **el nombre que él compuso** (`row_key`) y nunca por su mitad partida: reportado como el diálogo de un disco enseñando cada lectura **dos veces y a dos temperaturas** —un Synology con expansión tiene un «Drive 3» en la caja y otro «Drive 3 (DX517-1)» en la bandeja, y el corte existe justo para que no sean la misma fila—. El diálogo trae **dos paneles** (lo que dice ahora y lo que cuelga de ella), la tabla SMART **se lee a lo ancho** —un atributo es un nombre y cuatro números, y «¿está el valor actual cerca del umbral?» no se le puede preguntar a cuatro líneas sueltas—, las **columnas son las que hayan venido** (una lista fija de nombres SMART aquí sería el panel sabiendo qué es SMART), una fila sin nada colgando **no gana pestañas**, y abre con lo que la fila ES. Y **dos tablas del mismo aparato pueden nombrarlo distinto**: reportado como un disco que al abrirlo enseñaba sus seis lecturas y ninguno de sus ochenta atributos SMART — SYNOLOGY-DISK-MIB lo llama `diskName` («Drive 1») y guarda su `diskID` («Disk 1») al lado, y SYNOLOGY-SMART-MIB nombra sus filas con una columna propia, sin que nada diga que coinciden. Los alias son **lo que dijo el aparato** (sus datos de identidad, y sólo los que NOMBRAN una fila: un modelo o un tipo lo comparten todos los discos de la caja) y nunca una regla sobre cómo se ven los nombres; y **un alias ambiguo no se usa** — con una unidad de expansión el nombre partido del disco de la bandeja es «Drive 3», que es el nombre **entero** del disco de la caja: un solo reclamante, y el disco equivocado. Y **el enlace es el número del propio aparato, no una convención**: las letras parecen una regla —sda el primero, sdb el segundo— pero son **orden de detección**, así que una bahía vacía las corre todas y la pantalla enseñaría el SMART del disco equivocado justo el día que alguien lee SMART. SYNOLOGY-SMART-MIB informa del **número de serie** del disco al que pertenece cada fila (`diskSMARTSerialNumber`, …5.1.1.11), y la tabla de discos también: el mismo objeto físico, el mismo número, nada supuesto — y el test prohíbe que se cuele aritmética de letras. Y la pestaña **Datos brutos**, que es la única sin opinión: va la última y nunca por defecto, enseña **el número y no su dibujo** (en las demás un estado es la palabra del MIB y los bytes van escalados, que es lo correcto y es justo lo que no se puede contrastar con el aparato), nombra **las coordenadas** de cada lectura (perfil, fila, campo, check) y filtra **sin repintar** la tabla, porque un repintado por tecla sobre mil filas es el panel congelándose mientras alguien escribe |
+| `TestAPileIsNotAnIdentity::*` (5) | El encabezado de los datos **cuyo origen no se guardó**. Un muestreo escrito antes de que se guardara el origen tiene los del NAS y los del SAI en un mismo dict, sin forma ya de saber cuál dijo qué — que es exactamente cómo el modelo del SAI acabó leyéndose como el del NAS. La forma anidada arregló **la grabación**; lo que no puede arreglar es un muestreo que ya está en disco. Presentarlo bajo «Identidad» es el panel afirmando justo lo que demostrablemente no sabe, así que se llama por lo que es. Un origen conocido **sí** sigue siendo el encabezado —y con **su nombre traducido**, no su id: se estaban imprimiendo en crudo (`synology_ups`) al lado de valores que sí estaban traducidos, que es el panel enseñándole su archivador a quien preguntó qué es la máquina—, el navegador **no los reordena** (el servidor ya los ordenó con la declaración del perfil en la mano; un segundo orden aquí sería una opinión con menos información detrás), y aquí sólo entran los datos del aparato. Y **al lado de tarjetas con origen, el montón se va**: reportado desde la pantalla, estaba encima de las tres correctas y cada dato suyo ya estaba en una de ellas, atribuido — un aparato que ha contestado una vez con orígenes los ha contestado todos, así que ahí no es un respaldo sino un duplicado rancio que las contradice («Modelo: Linux erebor…» encima de «Modelo: DS916+»). **Sobrevive cuando es lo único que hay**: un módulo que graba atributos sin nombrar quién contestó no está rancio, es un módulo con un solo contestador, y tirarlo escondería los únicos datos que tiene |
+| `TestTheSmartTableSaysWhichHalfIsTheDisk` | `index_label` nombra dos columnas y el sampler las une con ` / `, así que cada fila SMART es `<disco> / <atributo>`. Sin el corte se ordenan por nombre de atributo a través de todas las bahías: ochenta filas en las que la historia de un disco nunca está junta |
+
+---
+
+## 99d. Meta — Qué dice ser un dispositivo
+
+**Archivo:** `tests/meta/test_host_types.py` — 12 tests
+
+El registro guarda servidores, pero también un NAS, un switch y un SAI: la sección se llamaba
+«Servidores» mientras el catálogo SNMP de al lado traía perfiles de Mikrotik, Linksys y dos
+marcas de SAI. Ahora un dispositivo declara qué es, el panel pinta su icono y una flota se
+puede filtrar por ello.
+
+Todas las piezas de eso fallan **sin levantar nada**. El catálogo se declara en Python y lo
+consume JavaScript por el contexto de la página: quita la entrada del contexto y el selector
+ofrece una sola opción; falta una traducción y ofrece un id crudo; escribe mal un icono y la
+insignia simplemente no tiene glifo, porque una clase `bi-*` desconocida es una clase que no
+aplica nada.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheCatalogueIsUsable::*` (5) | Cada tipo tiene id e icono, ninguno repetido, **cada icono existe en la fuente empaquetada** (y el de reserva, que es el que más se pinta), y un tipo desconocido cae al genérico |
+| `TestItIsNamedEverywhereItIsShown::*` (2) | Los once tipos traducidos en los dos idiomas, y también el campo, su ayuda y «Sin clasificar» — que es una opción que alguien elige, no una ausencia |
+| `TestTheAnswerReachesTheBrowser::*` (5) | El contexto lo entrega, la plantilla lo publica con sus dos helpers, el modal lo ofrece **y el guardado lo lleva** (selector sin payload = eliges «Switch», guardas, y vuelve sin clasificar), y la lista lo dibuja y lo filtra — incluida la opción «sin clasificar» sola. Y que **el id que repinta el icono sea un elemento que existe**: ya pasó aquí (`_renderProfileFields`, ver [caso-diagnostico.md](caso-diagnostico.md)) — un repintado que busca un id que nadie crea no encuentra nada, no hace nada, y deja una página con aspecto de terminada |
+
+---
+
+## 99c. Meta — Un protocolo del core dice sus campos en un sitio
+
+**Archivo:** `tests/meta/test_host_profiles_single_source.py` — 4 tests
+
+Once módulos repetían esa lista en su `__host_profile__`: diez con los mismos siete nombres de
+SSH y SNMP con los diez suyos, ochenta nombres en total. El catálogo ya ignoraba todas las
+copias —un perfil declarado por el core sobrescribe al del módulo— así que una copia que se
+separara **no cambiaba el formulario**. Cambiaba algo más callado: `resolve_host` lee esa lista
+para decidir **qué valores puede empujar un host atado sobre el check**, y la lista de
+«ocultar al atar» la lee para decidir qué deja de dibujar un check ya atado.
+
+Y se habían separado: los diez listaban `ssh_host` y ninguno listaba `ssh_auth_method`, así que
+un host que guardaba su método de autenticación sin credencial nombrada nunca lo entregaba. No
+fallaba nada; el check autenticaba de la manera por defecto.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestNobodyRestatesWhatTheCoreOwns::test_no_module_lists_the_fields_of_a_core_owned_protocol` | Que las copias no vuelvan: ningún módulo escribe la lista de un protocolo que posee el core |
+| `TestNobodyRestatesWhatTheCoreOwns::test_a_module_that_binds_to_one_still_resolves_to_its_fields` | Borrarlas solo es seguro porque normalizar un spec las rellena; si dejara de hacerlo, estos módulos heredarían **nada** al atarse a un host |
+| `TestTheAddressFieldIsHostOwned::test_it_is_in_the_list_a_bound_check_stops_drawing` | Es el campo que **recibe** la dirección: `datastore` tiene una caja `ssh_host` de verdad y dejarla fuera la devuelve a un check ya atado |
+| `TestTheAddressFieldIsHostOwned::test_a_visible_address_on_a_module_owned_protocol_stays_visible` | `web` ata a `http`, que el core no posee, y su `server` se edita a propósito: un host tras un proxy inverso sirve varios FQDN |
+
+---
+
+## 99a. Meta — Los dos valores por defecto que tienen que coincidir
+
+**Archivo:** `tests/meta/test_snmp_defaults_agree.py` — 6 tests
+
+Los valores por defecto de conexión SNMP estaban escritos **dos veces a propósito**, porque los
+dos lectores no podían leer lo mismo: `lib/core/snmp/defaults.py` es lo que lee el **código**
+cuando un servidor deja un campo vacío (planificador, pantalla de prueba, descubrimiento), y
+`watchfuls/snmp/schema.json` era lo que leía el **navegador** para pintar el formulario — un
+esquema es dato, y un dato no puede llamar a una constante de Python.
+
+Ya no hace falta: la colección nombra el protocolo (`"__profile_fields__": "snmp"`) y el panel
+expande la declaración del core dentro de ella antes de que el navegador la vea, así que el
+formulario pinta la misma constante que obedece el planificador.
+
+Eso **mueve** el fallo, no lo quita. El de antes era deriva; el de ahora es **ausencia**: si la
+expansión deja de entregar, no llega ningún default al formulario y no salta nada. Donde más
+muerde es en el propio `watchfuls/snmp/defaults.py`, que lee `schema.json` directo del disco,
+sin expansión, y por eso toma explícitamente del core la mitad de conexión.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheFormOffersTheDefaultTheSchedulerObeys::test_every_core_default_reaches_the_form` | Campo a campo sobre el esquema **expandido**: si el core dice 161 y el formulario ofrece otro, lo dice con los dos valores |
+| `TestTheFormOffersTheDefaultTheSchedulerObeys::test_the_expansion_is_what_puts_them_there` | Control positivo: seis de los siete ya no están en `schema.json`, así que sin esto lo anterior podría estar leyendo una copia pegada de vuelta |
+| `TestTheFormOffersTheDefaultTheSchedulerObeys::test_the_core_covers_what_opening_a_connection_needs` | Puerto, versión y comunidad: sin ellos no hay conversación que empezar |
+| `TestTheFormOffersTheDefaultTheSchedulerObeys::test_what_the_check_decides_for_itself_is_not_in_it` | Si una entrada está activa, y qué dice ser el dispositivo, no son respuestas que tenga el protocolo |
+| `TestTheOnePairStillWrittenTwice::test_they_agree` | `timeout`/`retries` siguen en los dos sitios porque el perfil de host no tiene sitio para ellos — el único par que queda por atar a mano |
+| `TestTheOnePairStillWrittenTwice::test_the_modules_own_defaults_carry_the_connection_too` | `watchfuls/snmp/defaults.py` parsea el esquema él mismo: sin tomar del core habría perdido puerto, versión y comunidad en silencio |
+
+---
+
+## 99b. Meta — La dependencia apunta en un solo sentido
+
+**Archivo:** `tests/meta/test_core_does_not_import_modules.py` — 3 tests
+
+`lib/` es el cimiento y `watchfuls/` lo que se enchufa en él, y la relación solo funciona en
+una dirección: un watchful importa `lib.modules.ModuleBase` y lo que necesite, mientras que el
+core se entera de los módulos **descubriéndolos** —leyendo su `schema.json` del disco,
+escaneando declaraciones— y nunca importando uno. Eso es lo que hace que un módulo se pueda
+quitar, y lo que permite probar el core sin ninguno.
+
+La regla era cierta y no estaba escrita. Se escribió al empezar a mudar SNMP a
+`lib/core/snmp`: una mudanza a medias es justo cuando alguien pone
+`from watchfuls.snmp import …` para que resuelva un import, y no fallaría nada — `lib` pasaría
+a depender de un módulo que depende de `lib`, un ciclo en diferido.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheDependencyPointsOneWay::test_no_core_file_imports_a_watchful` | Ningún `.py` bajo `lib/` importa `watchfuls`, ni siquiera diferido dentro de una función: un ciclo roto moviendo el import al cuerpo sigue siendo el core dependiendo de un módulo |
+| `TestTheDependencyPointsOneWay::test_the_scan_reaches_the_files_it_claims_to` | Una guarda que recorre un árbol vacío pasa por el motivo equivocado |
+| `TestTheDependencyPointsOneWay::test_the_pattern_would_catch_one` | Control positivo: lo que se cree es la expresión, no la ausencia de infractores. Un comentario que mencione el import, o una ruta que contenga `watchfuls`, no cuentan |
 
 ---
 
@@ -6061,7 +6397,7 @@ servidor algo que el servidor va a rechazar.
 
 ---
 
-**Archivo:** `tests/meta/test_wa_css_traps.py` — 22 tests
+**Archivo:** `tests/meta/test_wa_css_traps.py` — 25 tests
 
 Cuatro trampas: dos encontradas la misma tarde mirando la tabla de Status y la tercera reportada desde una captura, las tres invisibles en revisión y evidentes en pantalla.
 
@@ -6120,6 +6456,9 @@ plantillas que están bien y habría enseñado al siguiente a desactivar el test
 | `TestASettingsPageThatFillsItsPane::test_a_list_section_can_ask_out_of_the_reading_width` | Reportado desde la pantalla, con una flecha dibujada en la banda vacía: la tabla de tokens estaba topada a los mismos 76rem que los formularios, así que estrujaba sus columnas mientras sobraba página a la derecha. El escape es **genérico y lo decide el panel activo** —el cuerpo lo comparten todas las secciones y solo una está a la vista—, así que la siguiente sección ancha se apunta con la misma clase y sin regla nueva. Un selector `#acctab-tokens` sería CSS por id para maquetar, justo lo que este fichero impide |
 | `TestASettingsPageThatFillsItsPane::test_a_list_section_drops_the_card_frame_as_well` | La otra mitad del mismo reporte: «el resto de tablas no están en un card». Una lista metida en un card dentro de una página de ajustes es un marco dentro de otro, mientras que las demás listas del panel **son** la sección y llegan a los cuatro bordes. `.ss-fullbleed` ya es esa clase en todas partes y aplana sola los cards de dentro; lo propio del shell es el canalón, que aquí es padding de la caja de scroll y no de `.container-fluid`, así que se quita **en su origen** en vez de cancelarlo dos veces |
 | `TestASettingsPageThatFillsItsPane::test_a_full_bleed_list_reaches_the_bottom_of_the_pane` | Reportado desde la pantalla: «en las demás tablas la parte de abajo se expande hasta el pie de la página». `.ss-vfill` solo crece si su padre es una columna flex, y entre el shell y el panel hay dos cajas planas —el cuerpo de anchura de lectura y el `.tab-content`—, así que el card se quedaba a la altura de sus filas y dejaba vacío el resto del panel, que es justo lo que la sangre venía a arreglar. La cadena se rehace **solo mientras el panel abierto va a sangre**: esas cajas las comparten las secciones de formulario, que tienen que seguir fluyendo y desplazándose |
+| `TestARailReachesTheBottomOfItsCard::test_the_scroll_box_around_a_rail_becomes_a_column` | Reportado desde la pantalla: el rail se paraba tras sus dos elementos y el resto del card quedaba vacío. `.ss-railbox` es `flex: 1 1 auto`, que no significa nada si su padre no es una **columna** flex — y la fábrica entrega el cuerpo de una vista a un `.ss-vscroll` pelado, que es un ítem flex sin ser contenedor |
+| `TestARailReachesTheBottomOfItsCard::test_it_matches_a_rail_anywhere_below_it_and_not_only_a_child` | La regresión misma: la regla existía con selector de **hijo**, y bastó que una vista pusiera una cabecera de resumen encima de su rail para que dejara de casar. Ni el marcado ni la hoja de estilos se leían mal; cambió la forma del árbol |
+| `TestARailReachesTheBottomOfItsCard::test_nothing_between_the_body_and_the_rail_breaks_the_chain` | La otra mitad: la regla pasa la altura hacia abajo y un envoltorio que no es eslabón de la cadena se la queda. Mira el **tag entero** y no solo un atributo `class`, porque un `<div>` sin clase es justo la forma que esto vigila |
 | `TestACardCannotAskForAnAccentThatDoesNotExist::test_every_accent_a_template_asks_for_is_defined` | Reportado desde la pantalla como «estás añadiendo un espacio entre el filtro y el título». No había espacio: la franja de acento del card mide 3px y `ss-accent-violet` no tenía regla de color, así que pintaba 3px de fondo de card entre el pelo del filtro y la banda de la cabecera — una costura que se lee como hueco muerto, al lado de secciones donde esos mismos 3px son una línea de color que une las dos. La hoja de estilos ya tiene un respaldo para un acento **sin variante**, escrito justo para esto, y no puede cazar este caso: el elemento **sí** lleva una clase `ss-accent-*`, solo que nombra un color que nadie definió |
 
 ---
@@ -6173,7 +6512,7 @@ la clase.
 
 ## 118. Páginas de módulo — cuatro layouts que son del núcleo, no de un módulo
 
-**Archivo:** `tests/unit/test_wa_module_page_views.py` — 47 tests
+**Archivo:** `tests/unit/test_wa_module_page_views.py` — 48 tests
 
 Un módulo aporta una sección de primer nivel declarando `__page__` y contestando con una
 forma fija: secciones de filas, cada fila con estado, mensaje y lo que la comprobación haya
@@ -6543,9 +6882,9 @@ entrega y los botones — `events_*` se vuelve control en un solo sitio.
 | `TestTheSwitcherItselfIsShared::*` (×2) | **Seis secciones** pintaban el mismo grupo de botones con seis copias del marcado; ahora `_viewSwitcher(registro, actual, setter)` y cada una pasa lo que de verdad difiere |
 | `TestTheLabelsExist::*` (×2) | Las ocho vistas y el vocabulario, en los dos idiomas |
 
-## 126. Servers — cuatro vistas, y dos que hablan de la flota
+## 126. Dispositivos — cinco vistas, y tres que hablan de la flota
 
-**Archivo:** `tests/unit/test_wa_servers_views.py` — 24 tests
+**Archivo:** `tests/unit/test_wa_servers_views.py` — 30 tests
 
 Servers es la única lista donde las filas no son el asunto: lo que quieres de ella es un
 estado de la flota, y una tabla te lo da de host en host. Tres cosas que deja fuera:
@@ -6558,8 +6897,11 @@ estado de la flota, y una tabla te lo da de host en host. Tres cosas que deja fu
   panel se queda verde mientras una máquina está caída.
 - **qué es un host** como objeto y no como ocho columnas que enciendes y lees de izquierda a
   derecha.
+- **de qué está HECHA la flota.** Una tabla ordenada por tipo se puede paginar hasta tener la
+  respuesta; un rail de los tipos la dice antes de leer una fila, y elegir uno es como se pide
+  «enséñame los switches».
 
-Las dos vistas agrupadas son **resúmenes**: reciben todas las filas que dejaron los filtros,
+Las tres vistas agrupadas son **resúmenes**: reciben todas las filas que dejaron los filtros,
 no la página, y no pintan paginación. La fábrica aprendió ese modo para esta sección
 (`bodyMode: 'summary'`), y Credentials se alineó con él.
 
@@ -6574,7 +6916,7 @@ sería una vista que olvidó que el caso granular existe.
 | `TestASummaryIsNotAPage::test_the_factory_knows_what_a_summary_is` | `'cards'` es otro cuerpo sobre la misma página; `'summary'` describe el conjunto: recibe todas las filas y quita las bandas |
 | `TestASummaryIsNotAPage::test_the_grouped_views_declare_it` | |
 | `TestASummaryIsNotAPage::test_a_summary_is_handed_every_filtered_row` | |
-| `TestASummaryIsNotAPage::test_both_summaries_state_the_whole_fleet` | Tres grupos no pueden sugerir que la flota son tres hosts |
+| `TestASummaryIsNotAPage::test_every_summary_states_the_whole_fleet` | Tres grupos no pueden sugerir que la flota son tres hosts |
 | `TestASummaryIsNotAPage::test_the_column_chooser_belongs_to_the_table` | |
 | `TestOneStatusVocabulary::test_no_view_paints_its_own_status` | Mantenimiento es naranja en todas partes: el mismo host no puede parecer dos estados en dos vistas de la misma página |
 | `TestOneStatusVocabulary::test_no_checks_is_not_a_fifth_state` | «No sabemos cómo está» no es un matiz de «bien» |
@@ -6585,7 +6927,13 @@ sería una vista que olvidó que el caso granular existe.
 | `TestCoverageHasThreeAnswers::test_the_pill_always_shows_both_numbers` | «3» a secas no dice si las otras dos faltan o están apagadas |
 | `TestCoverageHasThreeAnswers::test_the_ratio_names_both_numbers` | |
 | `TestSwitchingViewIsPresentationOnly::*` (×3) | Redibuja sin pedir datos, no arrastra una selección a un resumen sin casillas, y recuerda la elección en las dos capas |
-| `TestTheLabelsExist::*` (×2) | Las cuatro vistas y el vocabulario de cobertura, en los dos idiomas |
+| `TestTheLabelsExist::*` (×2) | Las cinco vistas y el vocabulario de cobertura, en los dos idiomas |
+| `TestTheTypeRailShowsWhatIsThere::test_only_the_types_present_are_grouped` | Un índice de cosas que no están es ruido: ocho filas vacías por las clases de aparato que este sitio no tiene |
+| `TestTheTypeRailShowsWhatIsThere::test_the_catalogue_order_wins_over_the_count` | Un rail que se reordenara según llegan y se van dispositivos movería lo que ibas a pulsar; para cuál es el más grande están los números |
+| `TestTheTypeRailShowsWhatIsThere::test_the_unclassified_ones_are_last_and_flagged` | Y sólo se pintan en ámbar si los hay: «0 sin clasificar» en ámbar sería un aviso de nada |
+| `TestTheTypeRailShowsWhatIsThere::test_it_is_the_shared_railbox_and_not_a_second_one` | `.ss-railbox` existe para que la siguiente vista agrupada sea marcado y ninguna regla nueva |
+| `TestTheTypeRailShowsWhatIsThere::test_the_selection_lives_outside_the_body` | El cuerpo se rehace en cada render, y la elección se valida contra los grupos que existen AHORA: filtra a dos switches y un «NAS» rancio deja el detalle vacío sin nada seleccionado |
+| `TestTheTypeRailShowsWhatIsThere::test_unclassified_is_not_stored_as_an_empty_string` | Pasando por localStorage, «vacío» es indistinguible de «nada elegido» |
 
 ## 127. Syslog — tres vistas sobre la misma página del servidor
 
@@ -6941,7 +7289,7 @@ cambio de atadura exige permiso sobre **las dos**: de dónde sale y a dónde va.
 reintroduciendo la regla vieja, que deja el test en rojo nombrando el caso.
 
 Se cubre además lo que **sí** debe seguir permitido —editar y añadir en el host propio, y que un
-`servers_edit` global sí pueda mover un check entre dos hosts, porque ese permiso no está
+`devices_edit` global sí pueda mover un check entre dos hosts, porque ese permiso no está
 confinado— y que un check **sin host** no lo puede tocar ningún permiso por servidor: sin
 atadura no hay quien hable por él.
 
@@ -8003,9 +8351,37 @@ una de esas cosas es la función entera cuando falta.
 
 ---
 
+## 157c. Nada invisible en el fuente
+
+**Archivo:** `tests/meta/test_no_control_characters.py` — 3 tests
+
+Esto ha costado **dos tardes**, las dos igual y las dos en un **test**. Un regex escrito
+`r'loquesea'` llega al fichero como un **retroceso literal** (U+0008) cuando el escape se
+come un nivel de más por el camino. Lo que queda es un patrón que empieza por un carácter que
+no contiene ningún fuente: no casa con nada, y la guarda construida encima **pasa en verde para
+siempre sin mirar nada**.
+
+Es el peor fallo que puede tener un test: no es uno rojo que alguien investiga, es uno verde que
+certifica una regla que nadie está aplicando. Las dos veces se encontró **por accidente**, y
+entre medias la regla que debía proteger ya se había roto.
+
+Todo editor los dibuja como nada, `grep` los imprime como nada y un diff enseña una línea
+idéntica a la de arriba. Un escaneo de bytes es lo único que los ve. De paso salieron los **NUL
+literales** que la casa usaba como separador dentro de cadenas JS: son invisibles igual, y hacen
+que `grep` trate el fichero como **binario** — que es por lo que media sección contestaba
+«Binary file matches» a cada búsqueda. Sustituidos por su escape, el mismo byte en ejecución.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestNothingInvisibleIsInTheSource::test_no_file_carries_a_control_character` | Ni un carácter de control C0 en `lib/`, `tests/` ni `watchfuls/` —salvo tabulador, salto y retorno—, incluidos los **JSON de perfiles**, donde un `row_split` es un regex escrito a mano |
+| `::test_the_scan_reaches_the_files_it_is_about` | La regla de arriba es vacía si el recorrido no encuentra nada: tiene que ver las propias guardas (un fichero de test es donde esto pasa) y los JSON de perfiles |
+| `::test_it_would_notice_one` | La comprobación en sí, sobre una cadena y no sobre el árbol — para que un recorrido que dejara de casar en silencio tampoco pueda hacer que este fichero parezca que funciona |
+
+---
+
 ## 158. Un solo elemento activo en una barra lateral que Bootstrap ve como varias
 
-**Archivo:** `tests/meta/test_wa_spa_nav.py` — 5 tests
+**Archivo:** `tests/meta/test_wa_spa_nav.py` — 8 tests
 
 El panel es un único shell SPA cuyas secciones son pestañas de Bootstrap, y **no** están todas
 en un mismo `.nav`: las de primer nivel cuelgan de la lista exterior, las de Sistema de un
@@ -8036,6 +8412,7 @@ un disparador **es** —`[data-bs-toggle="tab"]`— no puede.
 | `TestEveryTriggerLosesItsActiveMark::test_the_sweep_matches_triggers_by_what_they_are` | **La regresión**: volver a seleccionar por clase deja `.active` puesto en cualquier disparador que no vista `.ss-sb-item` |
 | `TestEveryTriggerLosesItsActiveMark::test_the_account_trigger_is_the_one_that_proves_it` | El disparador de cuenta, nombrado: oculto, sin la clase de la barra, y en el grupo exterior mientras las secciones que roban el resaltado están en el anidado |
 | `TestEveryTriggerLosesItsActiveMark::test_the_sweep_leaves_the_sub_item_highlight_alone` | Los sub-ítems los repunta `_sbSyncSub`: limpiarlos aquí dejaría el resaltado en blanco un fotograma en cada navegación |
+| `TestASectionKeepsItsOwnQuery::*` (3) | Reportado desde el panel: abres un dispositivo en Infraestructura, pulsas F5 y **vuelves a la lista de cuarenta**. La sección sí pone el dispositivo abierto en la barra de direcciones y sí lo lee de vuelta; lo que no podía sobrevivir era este fichero, que reconstruye la URL a partir de la sección y su vista en **cada** activación —la inicial incluida—, así que `/infra?host=<uid>` quedaba reemplazado por `/infra/table` antes de que la sección llegara a mirarlo. No lo perdía la sección: se lo llevaba por delante la navegación que solo intentaba decir qué sección está abierta. Ahora el query se conserva, y **solo** mientras la ruta ya es la de esa sección (`/history?module=cpu` no te sigue a Infraestructura), y la rama de `/admin?tab=` sale antes de tocar nada |
 | `TestTheOtherHalfOfTheSameProblem::test_panes_from_the_other_group_are_hidden` | La otra mitad del mismo problema, que ya estaba resuelta y no puede perderse |
 
 ---
@@ -8451,26 +8828,30 @@ existe para encontrar. Cuatro copias de esa regla se desvían, y la que dejara d
 
 ---
 
-**Archivo:** `tests/integration/test_wa_infra.py` — 16 tests
+**Archivo:** `tests/integration/test_wa_infra.py` — 22 tests
 
 **Infraestructura (vivo)** — la flota tal como ESTÁ, al lado del registro que dice cómo
 debería estar. Sistema › Infraestructura contesta «qué he declarado»: máquinas, clústeres, qué
 módulo vigila qué y con qué credencial. Lo que no podía contestar es la otra mitad —**qué están
 haciendo esas máquinas**— porque el panel ordenaba eso por CHECK (Estado) y por SERIE
 (Historial), nunca por máquina. La sección es esa ordenación, y es de **sólo lectura por
-construcción**: el dominio no tiene una sola ruta que escriba, así que se le puede dar a quien
-mira las pantallas sin darle el registro con ella.
+construcción**: el dominio no edita nada, así que se le puede dar a quien mira las pantallas
+sin darle el registro con ella. La única ruta que no es un GET —«obtener datos ahora»— tampoco
+edita: pide a los módulos que vuelvan a producir sus números, por el mismo ejecutor que usa el
+ciclo del planificador, y lleva **permiso propio** porque arrancar minutos de sondeo no es el
+mismo acto que mirar la respuesta de ayer.
 
 | Test | Qué comprueba |
 |---|---|
 | `TestTheFleet::*` (5) | Pide sesión; lista las máquinas con su estado; **no lleva nunca las credenciales** —el registro enmascara los secretos dentro de `profiles`, aquí `profiles` no viaja en absoluto: una pantalla que sólo enseña estado no tiene por qué cargar con la credencial de cada protocolo que llega a la máquina, y una proyección en **lista blanca** no puede empezar a llevarla porque alguien añada un campo—; una máquina **que nadie vigila es un estado propio** y no un «ok» (pintarla verde sería la sección mintiendo sobre lo único que existe para enseñar), con su propio número en la cabecera donde «31 OK» la habría escondido; y los recuentos cuadran con la lista |
 | `TestOneMachine::*` (3) | Contesta qué es y qué dijo cada check; una máquina desconocida es 404; y tampoco por ahí salen las credenciales |
-| `TestWhoMaySeeIt::*` (3) | `infra_view` y no `servers_view`: leer el estado en vivo y editar el registro que lo define son actos distintos que quiere gente distinta. Un rol sin la bandera recibe 403, un *viewer* lo lee, y **no existe `infra_edit`** —lo que hay que cambiar vive en el registro, tras los permisos que el registro ya tiene— |
+| `TestWhoMaySeeIt::*` (3) | `infra_view` y no `devices_view`: leer el estado en vivo y editar el registro que lo define son actos distintos que quiere gente distinta. Un rol sin la bandera recibe 403, un *viewer* lo lee, y **no existe `infra_edit`** —lo que hay que cambiar vive en el registro, tras los permisos que el registro ya tiene—; las banderas del dominio son exactamente dos, `infra_view` e `infra_collect` |
+| `TestCollectingNow::*` (6) | La única ruta que actúa. Pide sesión; **un *viewer* puede mirar la pantalla del botón y no puede pulsarlo** (si el endpoint colgara de `infra_view`, un rol de sólo lectura podría poner a sondear cuarenta aparatos apoyándose en él); un *editor* sí la tiene —y recibe 409, no 403: pasó la puerta y no encontró nada que ejecutar—; un aparato **sin ningún check activo no tiene nada que obtener** y decirle «hecho» sería pintar una hora fresca sobre una pantalla donde no se miró nada; una máquina desconocida es 404; y tener la bandera dice qué ACTO puedes hacer, no **sobre qué máquinas** — se aplica encima el mismo estrechamiento (`devices_view` / `server.<uid>.view`) que los dos GET, así que refrescar tu propio rack no es una forma de sondear el de otro |
 | `TestTheViewModel::*` (5) | Las reglas donde están escritas: **la peor máquina va primero** (esta lista se abre cuando algo va mal; el orden alfabético contesta «cuál está en problemas» obligándote a leer las cuarenta filas); y un valor es una **medida sólo si su módulo lo dijo** —`other_data` es una bolsa de lo que al módulo le apeteció guardar, así que la sección no adivina cuál de esas claves es una medida ni le inventa un nombre: lee la declaración `__history__` del propio módulo, la misma que hace el valor graficable en Historial—. Un texto bajo una clave declarada no llega a un eje, un booleano tampoco (en Python `True` es un entero, así que una bandera de estado se pintaría como una línea en 1 y se leería como dato), y cada medida viaja con las **coordenadas de su serie** para que la pantalla pueda graficarla sin saber nada del módulo |
 
 ---
 
-**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 54 tests
+**Archivo:** `tests/meta/test_snmp_profiles_screen.py` — 63 tests
 
 **La pantalla del catálogo de perfiles**: el cableado que hace visible un catálogo. Un watchful
 trae su propia interfaz en tres ficheros que una convención recoge, y una pantalla hecha así
@@ -8525,7 +8906,7 @@ compilado?» se respondía leyendo las dos y comparando a ojo.
 
 ---
 
-**Archivo:** `tests/meta/test_wa_infra_section.py` — 17 tests
+**Archivo:** `tests/meta/test_wa_infra_section.py` — 36 tests
 
 El cableado que una **sección raíz** necesita para existir. No es un fichero: es una entrada en
 el registro de páginas (que es lo que le da URL, ruta, filtro por permiso y entrada en la barra
@@ -8539,7 +8920,10 @@ renderizador no está definido. Todos fallan **en silencio**.
 | `TestTheSectionIsWiredEndToEnd::*` (5) | La entrada del registro (URL, permiso, render, panel), el panel en el armazón y su activación en `/infra`, los tres `include`, que `renderInfra` exista y que las rutas estén registradas e indexadas |
 | `TestItIsTheSharedMachinery::*` (3) | Sale de `createListTable` con persistencia y franja de filtro, toda columna ordenable tiene valor de orden, y las vistas vienen del registro compartido |
 | `TestItDoesNotGoStale::*` (5) | Reportado desde el panel: una máquina dada de alta en Sistema no aparecía aquí. La primera versión pedía la flota **sólo si no tenía ninguna**, que es la caché que una sección se puede permitir mientras es lo único que escribe sus propios datos — y ésta no escribe ninguno: todo lo que hay en pantalla se edita en otro sitio, así que «ya tengo una flota» nunca es motivo para creer que es la de ahora. Se guarda que el punto de entrada pregunta siempre, que los redibujados baratos (filtro, orden, página) **no** tocan la red, que lleva el control de auto-refresco compartido en vez de un intervalo escrito a mano, que el tick para cuando la sección no está en pantalla y que el intervalo elegido sobrevive a una recarga |
-| `TestItShowsWithoutHandingOver::*` (4) | La proyección es **lista blanca**; el dominio **no escribe** (ni un POST/PUT/DELETE/PATCH: `infra_view` no puede ser un rodeo a los permisos del registro); **no tiene almacén propio** —cada dato es de alguien: hosts, estado de checks, historial, y una cuarta copia sería una cuarta cosa que mantener en hora, y la primera en desviarse sería la que la gente está mirando—; y el **vocabulario de estado es el del registro**, porque un segundo juego de nombres sería una segunda definición de «máquina rota» |
+| `TestItShowsWithoutHandingOver::*` (9) | La proyección es **lista blanca**; el dominio **no edita** —ni un PUT/DELETE/PATCH, y el único POST está nombrado en vez de tolerado: `infra_view` no puede ser un rodeo a los permisos del registro—; **no tiene almacén propio** —cada dato es de alguien: hosts, estado de checks, historial, y una cuarta copia sería una cuarta cosa que mantener en hora, y la primera en desviarse sería la que la gente está mirando—; y el **vocabulario de estado es el del registro**, porque un segundo juego de nombres sería una segunda definición de «máquina rota» |
+| `TestItRefreshesWithoutBlinking::*` (5) | Reportado desde el panel: el botón de recargar **hacía parpadear toda la web**. Pasaba por el punto de entrada de la sección, que vuelve a pedir la flota, luego vacía el panel para poner un *spinner* y luego pide el dispositivo: dos viajes y una pantalla en blanco para redibujar una máquina — y con el auto-refresco puesto, eso es cada intervalo. Ahora refresca **en sitio**: pide lo que se está mirando y cambia el marcado cuando la respuesta ya está en la mano, un refresco fallido **conserva** la pantalla que había, el *spinner* es sólo para un panel vacío, y el tick usa el mismo camino. Y el botón deja de llamar «servidor» a un aparato: `refresh_tt` («Recargar datos del servidor») es correcto en todo el panel y equívoco al lado de una máquina, donde además la distinción que importa es la otra — **este botón no consulta al equipo y el de al lado sí** |
+| `TestWatchingItHappen::*` (9) | El trabajo va a un hilo y el navegador **sondea un job**: la petición devuelve un id y no resultados (una petición abierta los minutos que tarda un NAS es una que el navegador o un proxy abandonan); la ruta de progreso se estrecha **al host del job** (un id corto y aleatorio no es un permiso: sin eso, quien pueda sondear aprende el nombre de una máquina que no puede ver); **cerrar el diálogo no para nada** —toca sólo la pantalla—; **sigue habiendo barra** cuando está cerrado, con porcentaje y con vuelta al diálogo; la barra es **de su propia máquina**; el porcentaje **nunca va solo** —el progreso es por módulo, así que nueve rápidos y un perfil SNMP llegan al 90 % en dos segundos, y lo que hace legible la pausa es el nombre de lo que está trabajando—; un módulo en curso **dice qué está haciendo** (diálogo y barra); un `timeout` **no se pinta como fallo**; y el sondeo **se rinde** con un job que ya no existe, porque tras un reinicio esperar más no lo devuelve |
+| `TestItShowsWithoutHandingOver` (obtener datos) | Las cinco guardas del botón: la ruta va tras **`infra_collect` y nunca tras `infra_view`** (el error que este test existe para cazar); la bandera está declarada y es **sólo de `editor`**, espejo de `checks_run`; el botón **también** está filtrado, porque un botón que devuelve 403 es el panel diciéndote que lo intentes otra vez; se ejecutan **módulos enteros** y el motivo está escrito donde alguien iría a estrecharlo a un host —el monitor poda de lo que acaba de escribir toda clave que la ejecución no reportó (`_prune_orphan_status`), así que una ejecución de una máquina refresca una y **borra treinta y nueve**—; y la pantalla **dice qué no ha vuelto todavía**, porque el ejecutor contesta a los 45 s haya terminado o no el módulo lento y afirmar que los números son los de ahora es la misma mentira que hacía parecer un muestreo de cinco minutos un módulo sin historial |
 
 ---
 

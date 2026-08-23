@@ -119,6 +119,14 @@ const ITEM_SCHEMAS = Object.fromEntries([
 // Host registry: per-protocol connection-profile catalog + the connection
 // fields each module contributes (hidden on a check once it is bound to a host).
 const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
+// What a device may declare itself to be (lib/core/hosts/manifest.py::HOST_TYPES):
+// [{id, icon}] in the order the picker offers them. The label is t('host_type_<id>').
+const HOST_TYPES = {{ host_types | default([]) | tojson }};
+const HOST_TYPE_ICONS = Object.fromEntries(HOST_TYPES.map(x => [x.id, x.icon]));
+/** The icon a device wears: its type's, or the generic one when it has none. */
+function hostTypeIcon(type) { return HOST_TYPE_ICONS[type] || 'bi-hdd-network'; }
+/** Its translated name, or a dash when unclassified. */
+function hostTypeLabel(type) { return type ? (t('host_type_' + type) || type) : ''; }
 const CREDENTIAL_TYPES = {{ credential_types | default({}) | tojson }};
 const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
 // Which collection(s) of each host-centric module may bind to a host (show the

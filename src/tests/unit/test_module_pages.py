@@ -79,10 +79,30 @@ class TestDiscovery:
         assert m365['refresh'] == 'page_refresh',             'without a refresh action the page can only ever show the cached result'
 
     def test_every_page_carries_what_the_core_needs(self):
+        """`module` is the exception and says something: a section a CORE package claims has
+        no module behind it, and the sidebar has always allowed that (`{% if p.module %}`).
+        SNMP's is the first — the MIB library outlives the watchful that used to declare
+        it — so the key must be PRESENT and may be empty, which is not the same as absent."""
         for p in module_pages_catalog():
-            for key in ('id', 'module', 'icon', 'order', 'perm', 'label_i18n'):
-                assert p.get(key) not in (None, ''), f"{p.get('module')} page missing {key}"
+            assert 'module' in p, f"{p.get('id')} page has no module key at all"
+            for key in ('id', 'icon', 'order', 'perm', 'label_i18n'):
+                assert p.get(key) not in (None, ''), f"{p.get('id')} page missing {key}"
             assert isinstance(p['label_i18n'], dict) and p['label_i18n']
+
+    def test_a_core_section_names_itself(self):
+        """A module's page is titled by its `pretty_name` because the core owns no string
+        that names a module. A core section is the other way round: it says which lang
+        section its words come from, and a missing one would put the package name on screen
+        where a title belongs."""
+        snmp = next(p for p in module_pages_catalog() if p['id'] == 'snmp')
+        assert snmp['module'] == '', 'the SNMP section is claimed by a module again'
+        assert snmp['perm'] == 'snmp_view'
+        for lang in ('es_ES', 'en_EN'):
+            assert snmp['label_i18n'].get(lang) == 'SNMP'
+        labels = {v['slug']: v['label_i18n'] for v in snmp['views']}
+        assert set(labels) == {'library', 'import', 'compile', 'browser', 'profiles'}
+        for slug, texts in labels.items():
+            assert texts.get('en_EN') and texts['en_EN'] != slug, slug
 
     def test_a_declared_refresh_reaches_the_client_spec(self):
         """`refresh` is what tells the core's generic renderer the module can fetch live

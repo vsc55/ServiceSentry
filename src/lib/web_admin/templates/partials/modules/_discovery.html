@@ -249,7 +249,7 @@ function _renderDiscoverList() {
     const _typeStoreField = (_colSch && _colSch['__discovery_type_store_field__']) || '';
     const _dedupWithType  = !!(_colSch && _colSch['__discovery_dedup_with_type__']);
     const _dedupKey = (base, typeVal) =>
-        _dedupWithType ? `${base} ${typeVal || ''}`.toLowerCase()
+        _dedupWithType ? `${base}\u0000${typeVal || ''}`.toLowerCase()
                        : String(base).toLowerCase();
 
     // Build set of identifiers already configured (case-insensitive).

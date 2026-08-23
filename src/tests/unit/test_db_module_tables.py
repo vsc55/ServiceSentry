@@ -103,16 +103,22 @@ class TestReconcile:
         assert all(n.startswith('mod_') for n in done),             'a module table that is not namespaced can collide with a core one'
 
     def test_a_declared_table_really_gets_created(self):
-        """The mechanism end to end on the real package: SNMP keeps its edited MIB sources
-        and their history here, and a table that reconciles into nothing is a feature that
-        fails on the first save."""
+        """The mechanism end to end on a real package: SNMP keeps its edited MIB sources and
+        their history here, and a table that reconciles into nothing is a feature that fails
+        on the first save.
+
+        Through the CORE reconciler: the library stopped being a module\'s, so its tables
+        lost the `mod_` namespace with it. A module\'s prefix exists so two modules cannot
+        collide; the core is one namespace already, and `snmp_mib_versions` sits beside
+        `hosts` and `history` because that is what it is."""
+        from lib.db import reconcile_core_tables          # noqa: PLC0415
         con = get_connector(None, default_sqlite_path=':memory:')
-        assert 'mod_snmp_mib_versions' in reconcile_module_tables(con)
-        con.execute("INSERT INTO mod_snmp_mib_versions (uid, mib, version, content) "
+        assert 'snmp_mib_versions' in reconcile_core_tables(con)
+        con.execute("INSERT INTO snmp_mib_versions (uid, mib, version, content) "
                     "VALUES (?, ?, ?, ?)", ('u1', 'A-MIB', 1, 'x'))
         con.commit()
         assert con.fetchall(
-            "SELECT mib, version FROM mod_snmp_mib_versions") == [('A-MIB', 1)]
+            "SELECT mib, version FROM snmp_mib_versions") == [('A-MIB', 1)]
 
     def test_collect_module_tables_real_dir(self):
         # The walk over the real watchfuls package must return a list (no crash).

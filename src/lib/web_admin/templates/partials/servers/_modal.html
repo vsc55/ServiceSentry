@@ -2,8 +2,9 @@ function openNewHostModal() {
     _editingHostUid = null;
     _hostModalReadonly = false;   // reachable only with edit rights (toolbar-gated)
     _hostDraft = { name: '', address: '', kind: 'local', os: 'auto', maintenance: false,
-                   virtual: false, tags: [], description: '', profiles: {} };
+                   virtual: false, device_type: '', tags: [], description: '', profiles: {} };
     document.getElementById('hostModalTitle').textContent = t('host_new');
+    _refreshHostTypeIcon();
     _hostChecks = _buildHostChecks(null);
     _hostCheckFilters = {};
     _hostShownMods = new Set();   // new host: start empty, add modules as needed
@@ -129,7 +130,7 @@ function openEditHostModal(uid) {
     _hostDraft = JSON.parse(JSON.stringify({
         name: host.name || '', address: host.address || '',
         kind: host.kind || 'local', os: host.os || 'auto', maintenance: !!host.maintenance,
-        virtual: !!host.virtual,
+        virtual: !!host.virtual, device_type: host.device_type || '',
         tags: host.tags || [], description: host.description || '',
         profiles: host.profiles || {},
     }));
@@ -154,6 +155,7 @@ function openEditHostModal(uid) {
     const _hName = (_hostDraft.name || host.name || '').trim();
     document.getElementById('hostModalTitle').textContent =
         t(_hostModalReadonly ? 'host_view' : 'host_edit') + (_hName ? ': ' + _hName : '');
+    _refreshHostTypeIcon();
     _renderHostModalBody();
     const err = document.getElementById('hostModalError'); if (err) err.textContent = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
@@ -180,6 +182,15 @@ function _renderHostModalBody() {
                    value="${escAttr((d.tags || []).join(', '))}"
                    oninput="_hostDraft.tags=this.value.split(',').map(s=>s.trim()).filter(Boolean)"
                    placeholder="prod, db">
+        </div>
+        <div class="col-sm-6">
+            <label class="form-label small fw-semibold">${esc(t('host_type'))}</label>
+            <select class="form-select form-select-sm" id="hmType"
+                    onchange="_hostDraft.device_type=this.value;_refreshHostTypeIcon()">
+                <option value="" ${!d.device_type ? 'selected' : ''}>${esc(t('host_type_unset'))}</option>
+                ${HOST_TYPES.map(x => `<option value="${escAttr(x.id)}" ${d.device_type === x.id ? 'selected' : ''}>${esc(hostTypeLabel(x.id))}</option>`).join('')}
+            </select>
+            <div class="form-text small">${esc(t('host_type_hint'))}</div>
         </div>
         <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('host_kind'))}</label>
@@ -233,7 +244,7 @@ function _renderHostModalBody() {
             data-bs-target="#hmTabLatest" type="button" onclick="_loadHostLatestData()">
             <i class="bi bi-clock-history me-1"></i>${esc(t('host_tab_latest'))}</button></li>
         ${_canSyslog ? `<li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
-            data-bs-target="#hmTabLogs" type="button" onclick="_loadHostLogs()">
+            data-bs-target="#hmTabLogs" type="button" onclick="_loadHostLogs('hmLogsBody')">
             <i class="bi bi-card-list me-1"></i>${esc(t('host_tab_logs'))}</button></li>` : ''}
     </ul>
     <div class="tab-content gm-tab-content">
@@ -367,6 +378,14 @@ function _renderSshFields() {
 
 // ── Operating-system selector (auto / fixed) ────────────────────────
 function _osLabel(o) { return t('host_os_' + o) || o; }
+
+/** Repaint the icon beside the modal title when the type changes — the picker is the only
+ *  place the choice is visible otherwise, and a device is recognised by its icon in every
+ *  list that shows it. */
+function _refreshHostTypeIcon() {
+    const el = document.getElementById('hmTypeIcon');
+    if (el) el.className = 'bi ' + hostTypeIcon((_hostDraft || {}).device_type) + ' me-2';
+}
 
 function _renderOsField() {
     const d = _hostDraft;

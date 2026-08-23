@@ -19,18 +19,36 @@ import pytest
 from tests.conftest import _login
 
 
+def _entry(html, li_id):
+    """The opening ``<li …>`` tag of one sidebar entry.
+
+    Scoped on purpose: an attribute asserted against the whole page is an attribute that can
+    belong to anything on it, and this file exists to check THIS entry."""
+    i = html.index(f'id="{li_id}"')
+    start = html.rindex('<li', 0, i)
+    return html[start:html.index('>', i) + 1]
+
+
 def test_a_module_page_can_live_in_the_system_panel(client):
     """The SNMP MIB manager, end to end: the entry inside the accordion, the pane it opens
     and the markup it clones — with the modal it replaced gone."""
     _login(client)
     html = client.get('/admin').data.decode('utf-8', 'replace')
 
-    # The entry, and the two attributes that decide whether it is ever shown: the permission
-    # it declared, and the module it came from — a section for a module that is off is a
-    # section that opens on nothing.
+    # The entry, and the attribute that decides whether it is ever shown — read off the
+    # ELEMENT and not off the page. Asserted as `in html` these passed while the entry
+    # carried neither: `data-nav-module="snmp"` and `data-nav-perm="modules_view"` both
+    # appear elsewhere on the page, so the guard was satisfied by somebody else's markup
+    # while the section itself shipped hidden and nothing ever revealed it.
     assert 'id="tab-snmp-li"' in html, 'no entry for the SNMP section in the panel'
     assert 'data-bs-target="#tab-snmp"' in html
-    assert 'data-nav-module="snmp"' in html and 'data-nav-perm="modules_view"' in html
+    entry = _entry(html, 'tab-snmp-li')
+    # SNMP is declared by a CORE package now, so there is no module behind it and the
+    # permission is the whole rule. `applyRoleRestrictions` reveals by permission and treats
+    # "no module" as active; `syncModuleSections` only handles the ones that HAVE a module.
+    # An entry with neither attribute is an entry nobody shows.
+    assert 'data-nav-perm="snmp_view"' in entry, entry
+    assert 'data-nav-module=' not in entry, 'the section belongs to a module again'
 
     # The pane it opens, and the container the module renders into.
     assert 'id="tab-snmp"' in html and 'id="snmp-container"' in html

@@ -164,7 +164,7 @@ class TestTheImportCycleStaysOpen:
             PERMISSIONS, PERMISSION_GROUPS, BUILTIN_ROLE_PERMISSIONS,
             discover_permissions, is_module_perm,
         )
-        assert len(PERMISSIONS) == 76 and len(PERMISSION_GROUPS) == 21
+        assert len(PERMISSIONS) == 79 and len(PERMISSION_GROUPS) == 22
         assert BUILTIN_ROLE_PERMISSIONS['admin'] == frozenset(PERMISSIONS)
         assert discover_permissions() and is_module_perm('module.ping.view')
 

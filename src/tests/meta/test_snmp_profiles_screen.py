@@ -23,7 +23,13 @@ from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 SNMP = os.path.join(SRC, 'watchfuls', 'snmp')
-WEB = os.path.join(SNMP, 'web')
+# The engine is core now; the module keeps the check and its schema. Each source is
+# named once, so the next move is a line rather than a hunt.
+CORE_SNMP = os.path.join(SRC, 'lib', 'core', 'snmp')
+ACTIONS = os.path.join(CORE_SNMP, 'actions.py')
+PROFILES = os.path.join(CORE_SNMP, 'profiles.py')
+SAMPLER = os.path.join(CORE_SNMP, 'sampler.py')
+WEB = os.path.join(CORE_SNMP, 'web')
 UI = os.path.join(WEB, 'profiles_ui.html')
 MODALS = os.path.join(WEB, 'profiles_modals.html')
 FIELD_RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
@@ -36,15 +42,51 @@ HOST_MODAL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
 FIELD = 'device_profiles'
 PICKER_KEY = 'snmp|servers|device_profiles'
 
+def _snmp_actions():
+    """``(ACTIONS, READ_ONLY)`` — the operations the panel may invoke, and which change
+    nothing.  Declared in ``lib/core/snmp/manifest.py`` since the library and the catalogue
+    stopped being a check's business; asked of it rather than sliced out of source text,
+    which is what these guards used to do when the only place to declare them was a module."""
+    from lib.core.snmp.manifest import ACTIONS, READ_ONLY      # noqa: PLC0415
+    return ACTIONS, READ_ONLY
+
+
+
 
 def _schema():
     with io.open(os.path.join(SNMP, 'schema.json'), encoding='utf-8') as fh:
         return json.load(fh)
 
 
+def _servers():
+    """The ``servers`` collection as the BROWSER gets it: the connection fields are not in
+    schema.json any more — the collection names the protocol and the panel expands the core
+    declaration into it, so this is where the answer is."""
+    from lib.modules import ModuleBase                        # noqa: PLC0415
+    return ModuleBase.discover_schemas()['snmp|servers']
+
+
 def _lang(code):
+    """The MODULE's lang file — what is left of it: the labels and hints of a check's
+    fields, which belong to the check."""
     with io.open(os.path.join(SNMP, 'lang', f'{code}.json'), encoding='utf-8') as fh:
         return json.load(fh)
+
+
+def _ui(code):
+    """Every word these screens can reach, as the JS reaches them.
+
+    `snmp_ui` and `snmp_page` together, because `_snmpT` reads both: the view names are
+    declared once for the sidebar and the screens ask for the same ones to title themselves.
+    Checking only the first block passed while three headings fell back to the English the
+    caller passes — "Import" over a pane the rail beside it calls "Importar".
+
+    They moved with the screens: a section whose words lived in a watchful would go mute the
+    day somebody removed it, and a label that reads as its own key is a failure that only
+    shows up on the page."""
+    from lib.i18n import TRANSLATIONS          # noqa: PLC0415
+    texts = TRANSLATIONS.get(code) or {}
+    return {**(texts.get('snmp_page') or {}), **(texts.get('snmp_ui') or {})}
 
 
 class TestTheScreenIsWired:
@@ -79,13 +121,11 @@ class TestTheScreenIsWired:
         was on screen. A card in a list of modules is where you configure a module, not where
         you read its reference — so the catalogue is a view of the SNMP section, declared the
         way the other four are, and the module ships no toolbar at all any more."""
-        import json
+        from lib.core.snmp.manifest import PAGE          # noqa: PLC0415
         init = _read(os.path.join(SNMP, '__init__.py'))
         assert 'WATCHFUL_TOOLBAR: tuple[dict, ...] = ()' in init, \
             'the module card launches screens again'
-        with open(os.path.join(SNMP, 'schema.json'), encoding='utf-8') as fh:
-            views = (json.load(fh)['__page__'].get('views') or [])
-        assert 'profiles' in [v['slug'] for v in views]
+        assert 'profiles' in [v['slug'] for v in PAGE['views']]
         assert 'function _snmpProfViewLoad(' in _read(UI)
 
     def test_the_picker_is_still_a_dialog(self):
@@ -165,7 +205,7 @@ class TestTheScreenIsWired:
         `profiles.normalise`, and the reason a metric was refused is asked for only AFTER
         `normalise_metric` has already said no — so the explanation cannot drift into
         disagreeing with the verdict."""
-        acts = _read(os.path.join(SNMP, 'actions.py'))
+        acts = _read(ACTIONS)
         # `_fn` reads JavaScript; this one is Python, so the method is sliced out by hand.
         start = acts.index('    def save_profile(cls')
         body = acts[start:acts.index('    # ── Taking one back', start)]
@@ -293,12 +333,30 @@ class TestTheScreenIsWired:
         """An action absent from WATCHFUL_ACTIONS is a 404, and one absent from
         READ_ONLY_ACTIONS demands edit rights to LOOK at the catalogue — and writes an audit
         entry for every look."""
-        init = _read(os.path.join(SNMP, '__init__.py'))
-        actions = init.split('WATCHFUL_ACTIONS')[1].split('})')[0]
-        read_only = init.split('READ_ONLY_ACTIONS')[1].split('})')[0]
+        actions, read_only = _snmp_actions()
         for name in ('list_profiles', 'detect_profiles'):
-            assert f"'{name}'" in actions, f'{name} is not callable'
-            assert f"'{name}'" in read_only, f'{name} demands edit rights to read'
+            assert name in actions, f'{name} is not callable'
+            assert name in read_only, f'{name} demands edit rights to read'
+
+
+class TestTheSectionSpeaksForItself:
+    """Its words are the core's now — the screens are, so a vocabulary living in a watchful
+    would go mute the day somebody removed it."""
+
+    def test_the_helper_reads_both_blocks(self):
+        """`snmp_page` holds the view names for the sidebar and the screens ask for the same
+        ones. Reading one block only is not an error: it silently falls back to the English
+        the caller passed, which is the failure that only appears on the page."""
+        js = _strip_comments(_read(os.path.join(WEB, '_ui.html')))
+        fn = _fn(js, '_snmpT')
+        assert 'snmp_ui' in fn and 'snmp_page' in fn
+
+    def test_nothing_asks_a_module_for_these_words_any_more(self):
+        """`_modUiStr` reads a MODULE's lang file. Left behind on one call site, that string
+        reads as its own key the day the watchful is not installed."""
+        for name in ('_ui.html', 'profiles_ui.html'):
+            js = _strip_comments(_read(os.path.join(WEB, name)))
+            assert '_modUiStr(' not in js, f'{name} still asks a module for a word'
 
 
 class TestTheFieldThatAssignsThem:
@@ -306,15 +364,15 @@ class TestTheFieldThatAssignsThem:
     def test_the_device_carries_its_profiles(self):
         """On the SERVER and not on a check: what a machine IS does not change because
         somebody added a fourth OID check to it."""
-        servers = _schema()['servers']
+        servers = _servers()
         assert FIELD in servers
-        assert FIELD in servers['__field_order__'], 'declared but never drawn'
+        assert FIELD in _schema()['servers']['__field_order__'], 'declared but never drawn'
 
     def test_it_is_a_list_and_not_a_choice(self):
         """A NAS is the generic profile plus the interfaces plus its own disks. One profile
         per device would mean one monolithic profile per model, which is how a catalogue
         becomes unmaintainable."""
-        meta = _schema()['servers'][FIELD]
+        meta = _servers()[FIELD]
         assert meta.get('multi') is True
         assert meta.get('default') == ''
 
@@ -384,6 +442,101 @@ class TestTheHostModalIsWhereItIsActuallyBound:
             'the callback must win over the modulesData path, not the other way round')
 
 
+class TestTheDeviceIsWhereTheDeviceIsConfigured:
+    """What a device IS — the profiles it carries and who you have to be to ask it — is a
+    property of the device, so it is edited on the host, not on each check bound to it.
+
+    That moves the same field onto a third renderer: the per-protocol PROFILE form, which
+    has no check index to hang a value on and, until now, no identity of its own to speak of
+    — SSH was the only profile that carried a credential, which read like a rule and was
+    only ever a consequence of being the only one with anything to carry.
+    """
+
+    def test_the_snmp_profile_carries_the_identity_not_just_the_address(self):
+        from lib.core.hosts.resolve import host_profile_specs   # noqa: PLC0415
+        hp = _schema().get('__host_profile__') or {}
+        # Resolved, not as written: the module names the protocol and the core says what it
+        # holds, so the answer is what the panel acts on rather than what the file repeats.
+        fields = set(host_profile_specs(hp)[0].get('fields') or [])
+        assert hp.get('key') == 'snmp' and hp.get('address_field') == 'host'
+        assert {'community', 'version', 'device_profiles'} <= fields
+        # …and NOT how long we wait for it: two entries for one box would then migrate
+        # into two hosts because one of them had a longer timeout.
+        assert not ({'timeout', 'retries'} & fields)
+
+    def test_a_multi_value_field_works_on_a_profile_too(self):
+        """The check branch keys its adapter on `mod|idx|field`; a profile has no idx, so
+        without a branch of its own the field falls through to a text box holding a
+        comma-separated list — which looks editable and is the one thing nobody should
+        type by hand."""
+        js = _strip_comments(_read(HOST_MODAL))
+        assert 'ctx.idx == null && ctx.proto' in js, 'no profile branch for multi fields'
+        branch = js.split('ctx.idx == null && ctx.proto')[1].split('return fieldCtl')[1]
+        assert "kind: 'multi'" in branch.split(');')[0]
+        assert '_setProfileField(' in _fn(js, '_hostProfilePickerOpen')
+
+    def test_the_actions_beside_the_picker_come_with_it(self):
+        """The picker and "test against the device" are registered together against the same
+        field; a pane that drew one and not the other would answer "which profiles" and not
+        "and does the device agree", which is the half that is not guessable."""
+        js = _strip_comments(_read(HOST_MODAL))
+        fn = _fn(js, '_hostProfilePickerBtn')
+        assert 'fp.actions' in fn and '_hostProfileActionRun' in fn
+
+    def test_an_action_run_from_a_host_says_which_device(self):
+        """A form the user is in the middle of filling in IS the device under test — and its
+        secrets are masks, so the draft travels and the server resolves it exactly as it
+        resolves a scheduled check."""
+        js = _strip_comments(_read(HOST_MODAL))
+        fn = _fn(js, '_hostProfileActionCfg')
+        assert '_host' in fn and 'host_uid' in fn and 'profiles' in fn
+
+    def test_both_panes_reach_the_device_through_one_place(self):
+        """`_snmpDeviceCfg` is state, and stale state here means asking the last host
+        somebody looked at. Both entry points must set it — to a provider or to null."""
+        js = _strip_comments(_read(UI))
+        for fname in ('_snmpProfOpenFor', '_snmpTestOpen'):
+            assert '_snmpDeviceCfg =' in _fn(js, fname), f'{fname} leaves it stale'
+        # And everything that talks to the device reads it through the one resolver.
+        for fname in ('_snmpProfDetect', '_snmpTestRun'):
+            assert '_snmpCfgFor(' in _fn(js, fname), f'{fname} bypasses the resolver'
+        assert 'getPath(modulesData' not in _fn(js, '_snmpTestRun')
+
+    def test_the_profile_form_is_actually_drawn_somewhere(self):
+        """`_renderProfileFields` existed, was correct, and **nobody called it**: the element
+        it repaints (`hmProfFields_<proto>`) was only ever looked up, never created. The
+        per-protocol section had been removed from the modal when the profiles were narrowed
+        to an address, and the renderer stayed behind — so a widened profile would have been
+        a form that renders perfectly into a page that never asks for it.
+
+        Dead code that reads as live code is exactly what a guard is for: nothing failed, no
+        test went red, and the screen simply had no connection form."""
+        checks = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_checks.html')))
+        monitoring = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_monitoring.html')))
+        block = _fn(checks, '_hostProfileBlock')
+        assert '_renderProfileFields(' in block, 'the block does not draw the fields'
+        assert 'hmProfFields_' in block, 'nothing creates the element the repaint looks up'
+        # Called from both card shapes — one check per host, and several.
+        assert '_hostProfileBlock(' in _fn(checks, '_renderSingleCheck')
+        assert '_hostProfileBlock(' in monitoring, 'multi-check cards draw no profile'
+        # …and kept on the repaint, or editing a check silently drops the connection form.
+        assert '_hostProfileBlock(' in _fn(checks, '_refreshSingleCheck')
+
+    def test_a_credential_is_offered_for_any_protocol_that_declares_one(self):
+        """SSH had a credential picker and nothing else did. The device's identity is the
+        same kind of thing whatever the protocol, and an SNMP community reused across forty
+        switches is exactly what the credential manager is for."""
+        js = _strip_comments(_read(HOST_MODAL))
+        fn = _fn(js, '_renderProfileFields')
+        assert '_credTypeForModule(' in fn, 'the profile form knows only about ssh'
+        assert "'cred_uid'" in fn and 'credentialOptions(' in fn
+        # Picking one must clear the inline copy, or two places hold one secret and the
+        # stale one wins the day somebody rotates the other.
+        assert '_profileCredFields(' in _fn(js, '_setProfileField')
+
+
 class TestTheChipsReadAsNames:
     """The field stores profile ids, which is the right thing to store — they survive a
     rename, they are what the API speaks and what a bug report quotes. They are not what a
@@ -439,19 +592,29 @@ class TestNothingReadsAsItsOwnKey:
         keys = {k for k in keys if not k.endswith('_')}
         assert keys, 'the screen asks for no translated string at all'
         for code in ('es_ES', 'en_EN'):
-            ui = _lang(code).get('ui') or {}
+            ui = _ui(code)
             missing = sorted(k for k in keys if not ui.get(k))
             assert not missing, f'{code} is missing {missing}'
 
     def test_the_field_is_named_and_explained_in_both_languages(self):
         """An option whose label is missing shows its storage path, and one with no hint
-        leaves "what do I put here" to be answered from the source."""
+        leaves "what do I put here" to be answered from the source.
+
+        Asked of what the panel HANDS the browser rather than of the module's lang file: the
+        field is expanded from the core profile now, and so are its words. They travel by two
+        different roads — the label rides on the field, the hint goes through the module's
+        ``__i18n__`` — and one of the two breaking on its own is the failure worth catching.
+        """
+        from lib.modules import ModuleBase                    # noqa: PLC0415
+        schemas = ModuleBase.discover_schemas()
+        meta = schemas['snmp|servers'][FIELD]
         for code in ('es_ES', 'en_EN'):
-            data = _lang(code)
-            assert (data.get('labels') or {}).get(FIELD), f'{code}: no label'
-            assert (data.get('hints') or {}).get(FIELD), f'{code}: no hint'
-            assert (data.get('group_labels') or {}).get(
-                _schema()['servers'][FIELD]['group']), f'{code}: the group has no name'
+            assert (meta.get('label_i18n') or {}).get(code), f'{code}: no label'
+            words = (schemas['snmp|__i18n__'] or {}).get(code) or {}
+            assert (words.get('hints') or {}).get(FIELD), f'{code}: no hint'
+            # The group headings stay the module's: they are how ITS form is laid out.
+            assert (_lang(code).get('group_labels') or {}).get(
+                meta['group']), f'{code}: the group has no name'
 
 
 class TestTheMibManagerScreen:
@@ -461,7 +624,7 @@ class TestTheMibManagerScreen:
         """Synology publishes an archive of twenty MIBs; the mirror that hosts three of them
         is a dependency source for compiling, not the place to import from. Listed in the
         folder dropdown it looks like the main way in, and it is the small version."""
-        js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
+        js = _strip_comments(_read(os.path.join(WEB, '_ui.html')))
         block = js.split('function _mibPopulateRepoSelect')[1].split('function ')[0]
         assert 'if (!r.folder) continue' in block
 
@@ -473,7 +636,7 @@ class TestTheMibManagerScreen:
         section now, precisely because comparing against LibreNMS answers four thousand rows
         and no capped box is a way to read that. So the report fills instead: `.ss-vfill`
         down to one `.ss-vscroll`, header and count pinned, only the list scrolling."""
-        js = _strip_comments(_read(os.path.join(SNMP, 'web', '_ui.html')))
+        js = _strip_comments(_read(os.path.join(WEB, '_ui.html')))
         fn = _fn(js, '_mibArchiveReport')
         assert 'ss-vfill' in fn and 'ss-vscroll' in fn
         assert 'ss-scroll-box' not in fn, 'still capped at the height of a dialog'
@@ -547,10 +710,10 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         """A NAS with a family group is a minute of work on a bad day, and a spinner held for
         a minute is indistinguishable from a hung screen. What somebody watching wants to know
         is WHICH step is slow — a fact the server had and was throwing away."""
-        init = _read(os.path.join(SNMP, '__init__.py'))
-        for action in ("'test_profiles_start'", "'test_profiles_status'"):
-            assert action in init.split('WATCHFUL_ACTIONS')[1].split('})')[0], action
-            assert action in init.split('READ_ONLY_ACTIONS')[1].split('})')[0], action
+        actions, read_only = _snmp_actions()
+        for action in ('test_profiles_start', 'test_profiles_status'):
+            assert action in actions, action
+            assert action in read_only, action
         body = _fn(_strip_comments(_read(UI)), '_snmpTestRun')
         assert "'test_profiles_start'" in body and "'test_profiles_status'" in body
         assert 'st.done' in body, 'the poll never ends'
@@ -562,7 +725,7 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         js = _read(UI)
         drawn = re.search(r'const _SNMP_TEST_STEPS = \[(.*?)\]', js, re.S).group(1)
         drawn = re.findall(r"'(\w+)'", drawn)
-        acts = _read(os.path.join(SNMP, 'actions.py'))
+        acts = _read(ACTIONS)
         served = re.search(r"ORDER = \((.*?)\)", acts, re.S).group(1)
         assert drawn == re.findall(r"'(\w+)'", served), 'the two lists have drifted'
 
@@ -575,7 +738,7 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
                            re.search(r'const _SNMP_TEST_STEPS = \[(.*?)\]', js, re.S).group(1))
         assert drawn, 'the checklist draws no steps at all'
         for code in ('es_ES', 'en_EN'):
-            ui = _lang(code).get('ui') or {}
+            ui = _ui(code)
             missing = [k for k in drawn if not ui.get('test_step_' + k)]
             assert not missing, f'{code} has no name for {missing}'
 
@@ -583,10 +746,8 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         """An action absent from `WATCHFUL_ACTIONS` is a 404 whatever the UI calls it. And it
         reads a device and writes nothing, which is what puts it among the read-only ones —
         the same rights that already let somebody discover the device's OIDs."""
-        init = _read(os.path.join(SNMP, '__init__.py'))
-        acts = init.split('WATCHFUL_ACTIONS')[1].split('})')[0]
-        read_only = init.split('READ_ONLY_ACTIONS')[1].split('})')[0]
-        assert "'test_profiles'" in acts and "'test_profiles'" in read_only
+        actions, read_only = _snmp_actions()
+        assert 'test_profiles' in actions and 'test_profiles' in read_only
 
     def test_what_the_profile_reads_is_not_reported_as_uncaptured(self):
         """The column that NAMES the rows and the one that scales them are values this
@@ -594,7 +755,7 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         metric for a number the profile is holding — and a metric declares a COLUMN while the
         device answers one OID per row under it, so the comparison is containment and never
         equality. As equality, every interface on the switch reads as uncaptured."""
-        py = _read(os.path.join(SNMP, 'actions.py'))
+        py = _read(ACTIONS)
         block = py.split('def _test_read(')[1].split('    @staticmethod')[0]
         assert "m.get('index_label')" in block and "m.get('scale_by')" in block
         assert 'def _covered_by(' in py and "'.'.join(parts[:i]) in roots" in py

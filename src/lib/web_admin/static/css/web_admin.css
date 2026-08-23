@@ -2285,9 +2285,16 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
                  padding: .25rem .5rem; display: flex; align-items: center; gap: .25rem; }
 .ss-rail-head .badge { margin-left: auto; }
 .ss-rail-item { display: flex; align-items: center; gap: .35rem; width: 100%;
+                 min-width: 0;
                  border: 0; background: transparent; text-align: left;
                  font-size: .82rem; color: var(--bs-body-color);
                  padding: .3rem .5rem; border-radius: .375rem; }
+/* …and its label has to be allowed to shrink for `.text-truncate` to mean anything: a flex
+   child's automatic minimum size is its CONTENT, so a long name does not ellipsise — it
+   pushes the column wider than the width the column was given, and the selected item then
+   draws to a different edge than the rest. Reported from the screen as one row of a rail
+   sticking out past its neighbours. */
+.ss-rail-item > .text-truncate { min-width: 0; }
 .ss-rail-item:hover { background: var(--bs-secondary-bg); }
 .ss-rail-item.active { background: var(--bs-primary); color: #fff; }
 .ss-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
@@ -2303,6 +2310,27 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     .ss-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
                 border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
 }
+/* .ss-pane-tall : a body that needs room to be useful, inside a page that already scrolls.
+   The fill chain (.ss-vfill) is the right mechanism when there IS a height to hand down; a
+   tab inside a scrolling document has none, so a panel that asked to fill drew at the height
+   of its own header — reported from the screen as a log table showing its column titles and
+   nothing else. A viewport fraction is a floor and not a cap: the content still grows past
+   it, and a short answer no longer collapses to a caption. */
+.ss-pane-tall { min-height: 60vh; }
+/* .ss-sticky-aside : a column that stays put while its sibling scrolls past it.
+   For the panel beside a long body whose content is the CONTEXT of that body rather than one
+   more section of it — a device's serial, firmware and location while you scroll its
+   measurements. As a tab it was read once and then unreachable, which is the opposite of
+   context.
+   Deliberately NOT its own scroll region: a second scrollbar inside a page that already
+   scrolls is how a rail ends up with its head off the screen, and this column is short by
+   construction. Below the breakpoint it stops sticking and stacks above, because a sticky
+   column 17rem wide on a phone is the page. */
+.ss-sticky-aside { flex: 0 0 17rem; max-width: 17rem; min-width: 0;
+                    position: sticky; top: 0; align-self: flex-start; }
+@media (max-width: 991.98px) {
+    .ss-sticky-aside { flex: 0 0 auto; max-width: none; position: static; }
+}
 /* .ss-railbox : the same rail + detail, INSIDE a body rather than as a pane's own frame.
    `.ss-shell` is the page-level version and carries the negative margins that make a section
    bleed to the pane's edges — inside a card those pull it out of its own box. Everything else
@@ -2314,8 +2342,14 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    being a flex CONTAINER — so the rail grew to the height of its own items and left the rest of
    the card empty, exactly as the account pane did before it. Same trap, same fix, and the
    overflow moves too: the rail and its detail scroll on their own, so a scrollbar out here
-   would be a second one around them. */
-.ss-vscroll:has(> .ss-railbox) {
+   would be a second one around them.
+
+   A DESCENDANT and not a child: a view that puts a summary header above its rail wraps both,
+   and `> .ss-railbox` stopped matching the moment there was anything between them — the rail
+   went back to the height of its own items with the rest of the card empty, and no rule said
+   why. What matters is that this box holds a rail at all; the wrapper between them carries
+   .ss-vfill to pass the height down. */
+.ss-vscroll:has(.ss-railbox) {
     display: flex;
     flex-direction: column;
     overflow: hidden;

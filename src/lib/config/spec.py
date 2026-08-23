@@ -135,6 +135,19 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         # opposite until somebody zeroed all four caps in this panel meaning "keep
         # everything" and silently lost two logs and these names.
         min=0, max=10000, env='SS_AUDIT_DETAIL_MAX_ITEMS'),
+    # ══ snmp: the MIB library ════════════════════════════════════════════════
+    # Where the library looks and who it asks — settings of the LIBRARY, which is the core's.
+    # They lived in the SNMP module's own `__module__` block, which put "where do I keep my
+    # vendor MIBs" behind a module card, and made them vanish with the module.
+    Cfg('snmp|mib_dirs', str, '', card='snmp_library', env='SS_SNMP_MIB_DIRS'),
+    # The GitHub repositories an import may pull dependencies from, one template per line.
+    # No card: it is edited by the source list on the Import view, which knows which
+    # templates belong together — a textarea of URL templates is not a thing to hand-write.
+    Cfg('snmp|mib_repos', str, '', card=None),
+    # Anonymous GitHub allows 60 requests an hour, and importing one vendor folder can spend
+    # that on dependency lookups alone. A token raises it to 5000; a secret, so it is
+    # encrypted at rest and masked on the way out (see secret_manager.ENCRYPT_KEYS).
+    Cfg('snmp|github_token', str, '', card='snmp_library', env='SS_SNMP_GITHUB_TOKEN'),
     Cfg('web_admin|backup_dir', str, '', attr='_BACKUP_DIR',
         # Where copies are written. Empty means `<var_dir>/backups`, which is the sane
         # default and the wrong place to leave it: a copy on the same disk as the data it
@@ -373,6 +386,15 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('monitoring|enabled', bool, True, env='SS_MONITORING_ENABLED', card='monitoring'),
     Cfg('monitoring|autostart', bool, True, env='SS_MONITORING_AUTOSTART', card='monitoring'),
     Cfg('monitoring|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL',
+        card='monitoring'),
+    # How long a cycle waits for one module before moving on. It was a 120 hard-coded in the
+    # scheduler, which is the wrong place for a number that depends on the fleet: an SNMP
+    # device with a full profile is hundreds of round trips, and the box that answers them
+    # in eight seconds today answers them in four minutes when it is busy.
+    #
+    # Passing it no longer costs the module its history (see monitoring/executor.py), so this
+    # is about how long the CYCLE is willing to wait, not about who gets recorded.
+    Cfg('monitoring|module_timeout', int, 120, min=10, max=3600, env='SS_MODULE_TIMEOUT',
         card='monitoring'),
     # ── Platform self-monitoring (lib/core/health) — NOT the monitoring service ──
     # Service-health notifications: alert when a background service (monitor/syslog/events

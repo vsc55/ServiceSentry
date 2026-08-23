@@ -168,7 +168,7 @@ class TestTheAccountPageRemembersItsSection:
 class TestTheTokenDialogSpeaksTheSameLanguageAsAccessPermissions:
     """Reported from the panel: "the permissions are not being translated".
 
-    The create dialog was listing raw flags — `users_view`, `servers_edit` — because it built
+    The create dialog was listing raw flags — `users_view`, `devices_edit` — because it built
     its own list out of `currentUser.permissions`. The panel already has one catalog with one
     set of names (`PERM_GROUPS` + `permission_labels`), used by Access › Permissions, and a
     second list of the same thing is a second list to translate, group and keep in step.

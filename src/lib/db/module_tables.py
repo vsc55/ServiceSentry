@@ -150,6 +150,40 @@ def collect_module_tables(watchfuls_dir: str | None = None) -> list[TableSpec]:
     return specs
 
 
+def collect_core_tables() -> list:
+    """Tables a CORE package declares (``DB_TABLES`` in its manifest).
+
+    The same idea as a module's, minus the namespace: a module's tables are prefixed so two
+    modules can never collide, and a core package's are named outright because the core is
+    one namespace already — ``snmp_catalog``, beside ``hosts`` and ``history``.
+
+    Declared rather than constructed at boot: these stores are built on demand (a request
+    that edits a MIB, a cycle that reads the catalogue), so without this the table would be
+    created inside whatever request or cycle happened to reach it first. The two ways of
+    arriving there are not equally forgiving.
+    """
+    from lib.discovery import scan          # noqa: PLC0415
+    out: list = []
+    for _pkg, decl in scan('DB_TABLES'):
+        for spec in (decl if isinstance(decl, (list, tuple)) else [decl]):
+            if isinstance(spec, TableSpec):
+                out.append(spec)
+    return out
+
+
+def reconcile_core_tables(connector) -> list[str]:
+    """Reconcile every core-package-declared table. Same contract as the module one:
+    each independently, a failure logged and never fatal."""
+    done: list[str] = []
+    for spec in collect_core_tables():
+        try:
+            connector.reconcile_table(spec)
+            done.append(spec.name)
+        except Exception as exc:  # pylint: disable=broad-except
+            _log.warning('Failed to reconcile core table %s: %s', spec.name, exc)
+    return done
+
+
 def reconcile_module_tables(connector, watchfuls_dir: str | None = None) -> list[str]:
     """Discover and reconcile every module-declared table on *connector*.
 
