@@ -106,8 +106,13 @@ function _infraDetailRow(g) {
     const free  = g.items.find(m => m.headline === 'free');
     const total = g.items.find(m => m.headline === 'total');
     const rest  = g.items.filter(m => m !== used && m !== total && m !== free);
+    // The card is as wide as what it has to say, and grows SIDEWAYS. It used to be pinned at a
+    // 14rem basis, so a disk with two readings stacked them and the card grew downwards — a
+    // shelf of eight disks became a column of tall boxes with an empty right half each.
+    // `flex: 0 1 auto` lets the readings sit side by side and lets the whole card wrap when the
+    // pane genuinely runs out of room, which is the thing that should wrap.
     return `<div class="rounded-3 border px-3 py-2 mb-2${more ? ' ss-pointer' : ''}"
-                style="min-width:14rem;flex:1 1 14rem"
+                style="min-width:14rem;max-width:100%;flex:0 1 auto"
                 ${more ? `onclick="_infraOpenRow(${jsStr(key)})"
                          title="${escAttr(tf('infra_row_more', more))}"` : ''}>
         <div class="d-flex align-items-baseline gap-2 mb-2">
@@ -115,14 +120,40 @@ function _infraDetailRow(g) {
             ${g.group ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal">${esc(g.group)}</span>` : ''}
             ${more ? `<i class="bi bi-chevron-right text-muted ms-auto ss-fs-1"></i>` : ''}
         </div>
-        <div class="d-flex align-items-center gap-3 flex-wrap">
+        <div class="d-flex align-items-center gap-4 flex-wrap">
             ${_infraDonut(used, total, free)}
-            ${rest.map(m => `<div style="min-width:7rem">
-                <div class="text-muted ss-fs-1 text-truncate">${esc(m.label || m.field)}</div>
-                <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(m)}</div>
+            ${rest.map(m => `<div class="text-nowrap">
+                <div class="text-muted ss-fs-1">${esc(m.label || m.field)}</div>
+                <div class="d-flex align-items-baseline gap-1">${_infraCardValueHtml(m)}</div>
             </div>`).join('')}
         </div>
     </div>`;
+}
+
+/** A reading on a summary card: the same value, with a state drawn as a MARK.
+ *
+ *  Everywhere else a state is the word the MIB gives it, which is right — "Initialized" and
+ *  "Not initialized" are two different pieces of news and only the word separates them. On a
+ *  card the word is the widest thing in the box and the one that changes with the language, so
+ *  eight disks came out as eight boxes sized by the length of "Normal" in Spanish.
+ *
+ *  The mark is picked by the LEVEL, which the profile already declares — the same value the
+ *  badge is coloured by, so a symbol and a colour can never disagree. Shape and colour both
+ *  carry it (a tick, a triangle, an octagon), because colour alone is not a distinction for
+ *  everybody, and the word itself is on the hover and on the row's own dialog. */
+const _INFRA_LEVEL_MARKS = {
+    ok:   {icon: 'bi-check-circle-fill',        cls: 'text-success'},
+    warn: {icon: 'bi-exclamation-triangle-fill', cls: 'text-warning'},
+    bad:  {icon: 'bi-x-octagon-fill',            cls: 'text-danger'},
+    info: {icon: 'bi-info-circle-fill',          cls: 'text-body-secondary'},
+};
+
+function _infraCardValueHtml(m) {
+    const st = m.states && m.states[String(m.value)];
+    if (!st) return _infraValueHtml(m);
+    const mark = _INFRA_LEVEL_MARKS[st.level] || _INFRA_LEVEL_MARKS.info;
+    return `<i class="bi ${mark.icon} ${mark.cls} ss-fs-5" role="img"
+               title="${escAttr(st.label)}" aria-label="${escAttr(st.label)}"></i>`;
 }
 
 /** How full something is, as a ring — or the two figures when it cannot be a proportion.
@@ -390,17 +421,18 @@ function _infraNestedTable(nested) {
  *  column wide. */
 function _infraRowList(items, key) {
     if (!items.length) return '';
-    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
-        <tbody>${items
-            .slice()
-            .sort((a, b) => String(a.label).localeCompare(String(b.label)))
-            .map(m => `<tr>
-                <td class="text-truncate" style="max-width:20rem">${esc(_infraRowWhich(m, key))}</td>
-                <td class="text-end text-nowrap">
-                    <span class="d-inline-flex align-items-baseline gap-1">${_infraValueHtml(m)}</span>
-                </td>
-            </tr>`).join('')}</tbody>
-    </table></div>`;
+    // Two columns on a wide dialog rather than one table across the whole width: a full-width
+    // row made the eye travel the entire modal to join "Temperatura" to "40 °C", with nothing
+    // in between. The grid keeps each pair together and uses the space instead of spanning it.
+    return `<div class="ss-factgrid ss-factgrid-lg">${items
+        .slice()
+        .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+        .map(m => `<div>
+            ${m.icon ? `<i class="bi ${escAttr(m.icon)} text-muted ss-fs-3"></i>` : ''}
+            <span class="text-truncate">${esc(_infraRowWhich(m, key))}</span>
+            <span class="ms-auto text-nowrap d-inline-flex align-items-baseline gap-1"
+                  >${_infraValueHtml(m)}</span>
+        </div>`).join('')}</div>`;
 }
 
 /** What to call a measurement inside a dialog that is already about one row.
@@ -414,6 +446,21 @@ function _infraRowWhich(m, key) {
     return own ? `${own} — ${m.label || m.field}` : (m.label || m.field);
 }
 
+//: The order these read in. Alphabetical by key is what it was, which put "Bahía" first and
+//: "Modelo" third for no reason anybody could see — the keys are internal and their alphabet is
+//: not a fact about equipment. This is: WHAT it is, WHICH one it is, WHERE it sits, and then
+//: what it is running. The core may decide this because the core is what names these roles.
+const _INFRA_FACT_ORDER = ['model', 'model_reported', 'vendor', 'vendor_reported', 'serial',
+                           'kind', 'bay', 'node', 'cluster', 'role', 'status', 'standby',
+                           'firmware', 'version', 'built', 'mac', 'name', 'description',
+                           'location', 'contact', 'sysobjectid'];
+
+/** Where a fact sits in that order — anything unlisted goes after, alphabetically. */
+function _infraFactRank(key) {
+    const i = _INFRA_FACT_ORDER.indexOf(String(key || ''));
+    return i < 0 ? _INFRA_FACT_ORDER.length : i;
+}
+
 /** The row's identifying facts — a disk's model, serial and bay — above its numbers. */
 function _infraRowFactsHtml(key) {
     const facts = [];
@@ -425,7 +472,13 @@ function _infraRowFactsHtml(key) {
     if (!facts.length) return '';
     const seen = new Set();
     const uniq = facts.filter(a => !seen.has(a.key) && seen.add(a.key));
-    return `<div class="d-flex flex-wrap gap-3 pb-2 border-bottom">${uniq.map(a => `
-        <div><div class="text-muted ss-fs-1">${esc(_attrLabel(a.key))}</div>
-             <div>${esc(a.value)}</div></div>`).join('')}</div>`;
+    uniq.sort((a, b) => _infraFactRank(a.key) - _infraFactRank(b.key)
+                     || String(a.key).localeCompare(String(b.key)));
+    return `<div class="ss-factgrid rounded-3 border bg-body-tertiary px-3 py-3 mb-3">
+        ${uniq.map(a => `<div>
+            <div class="text-muted ss-fs-1 text-uppercase">${esc(_attrLabel(a.key))}</div>
+            <div class="ss-fact-v fw-semibold text-truncate"
+                 title="${escAttr(a.value)}">${esc(a.value)}</div>
+        </div>`).join('')}
+    </div>`;
 }

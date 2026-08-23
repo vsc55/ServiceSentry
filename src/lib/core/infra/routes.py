@@ -9,6 +9,7 @@ Routes registered by this file:
     POST   /api/v1/infra/hosts/<uid>/collect   run this machine's checks now, and record them
     GET    /api/v1/infra/collect              the collection in flight, if any
     GET    /api/v1/infra/collect/<job_id>      how that collection is going
+    GET    /api/v1/infra/map              how the fleet is wired, out of what it answered
 
 **Nothing here edits.** The section shows what the fleet is doing; what the fleet IS lives in
 the registry, behind the permissions the registry already has. An edit route here would make
@@ -37,6 +38,7 @@ from lib.core.hosts import service as hosts_svc
 from lib.core.hosts.service import _checks_for_host
 from lib.core.infra import jobs as infra_jobs
 from lib.core.infra import service as infra_svc
+from lib.core.infra import topology as infra_topology
 
 
 def register(app, wa):
@@ -125,6 +127,58 @@ def register(app, wa):
                         'attributes': infra_svc.attributes(
                             results, infra_svc.sources_of(fields))})
 
+    @app.route('/api/v1/infra/map', methods=['GET'])
+    @infra_view_req
+    def api_infra_map():
+        """How the fleet is wired together, as far as what it has already answered can say.
+
+        Nothing here asks a device anything: the networks come from the addresses each machine
+        reported and the prefix beside each one, and the edges from the next hop each machine
+        uses for what it cannot deliver itself. A map that cost a fresh conversation with forty
+        machines would be a map somebody turns off.
+
+        What it is NOT is a cable diagram. "These two have an address on one network" is a
+        statement about reachability, not about a port on a switch — that is LLDP, and nothing
+        in this fleet serves it yet. Every edge says how it was arrived at so the screen can
+        draw the difference instead of flattening it.
+        """
+        store = getattr(wa, '_hosts_store', None)
+        if store is None:
+            return jsonify({'networks': [], 'nodes': [], 'edges': [], 'unplaced': []})
+        hosts = store.list(decrypt=False)
+        hosts_svc.enrich_hosts(hosts, hosts_svc._host_statuses(wa),
+                               hosts_svc._host_bound_modules(wa))
+        hosts = _visible(hosts, set(wa._get_session_permissions() or []))
+        # Read ONCE for the whole fleet and not once per machine: the state table and the
+        # history index are the two expensive reads on this path, and a map of forty machines
+        # would be forty of each.
+        status_raw = wa._read_check_status()
+        hist_by_mod: dict = {}
+        hist_store = getattr(wa, '_history', None)
+        if hist_store is not None:
+            try:
+                for series in hist_store.get_index():
+                    hist_by_mod.setdefault(series.get('module'), []).append(series)
+            except Exception:                       # pylint: disable=broad-except
+                pass                                # a map is not worth failing the page for
+        lang = session.get('lang') or wa._DEFAULT_LANG
+        fields_cache: dict = {}
+        attrs_by_host: dict = {}
+        for host in hosts:
+            uid = str(host.get('uid') or '')
+            bound: dict = {}
+            for (bare, _coll), items in _checks_for_host(wa, uid).items():
+                for key, item in items.items():
+                    bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
+            for mod in bound:
+                if mod not in fields_cache:
+                    fields_cache[mod] = (history_svc.history_meta(
+                        wa._modules_dir, mod, lang, wa._var_dir or '').get('fields') or {})
+            results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
+            fields = {mod: fields_cache.get(mod) or {} for mod in bound}
+            attrs_by_host[uid] = infra_svc.attributes(results, infra_svc.sources_of(fields))
+        return jsonify(infra_topology.build(hosts, attrs_by_host))
+
     def _modules_to_collect(uid):
         """The enabled modules with at least one enabled check bound to this machine.
 
@@ -199,7 +253,11 @@ def register(app, wa):
         try:
             job_id = infra_jobs.start_collect(
                 wa, uid, str(record.get('name') or ''), modules,
-                actor=session.get('username', ''), ip=request.remote_addr or '')
+                actor=session.get('username', ''), ip=request.remote_addr or '',
+                # The language of whoever pressed the button, read while there is still a
+                # request to read it from: the checklist is written on a worker thread, and
+                # its words are for this person and not for whoever the alerts are sent to.
+                lang=session.get('lang', '') or wa._DEFAULT_LANG)
         except Exception:                           # pylint: disable=broad-except
             wa._check_lock.release()                # nothing started, so nothing will release
             raise

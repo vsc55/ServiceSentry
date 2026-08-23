@@ -9,13 +9,21 @@ operator is left unable to tell whether it worked — which is the same reason t
 copies and the MIB compile are shaped this way. So the work goes on a thread and the answer
 is a job id the browser polls.
 
-**What the job knows is what the executor tells it.** The progress is per MODULE, because the
-executor runs modules and that is the only boundary it can honestly report — a module is not
-subdivided into steps and inventing some would be a bar that moves smoothly and means nothing.
-It also means the bar is not linear in TIME: nine fast modules and one SNMP profile go to 90 %
-in two seconds and stay there for four minutes. That is why the job carries which module is
-running and not only a number: "snmp — running" is the sentence that makes the pause legible,
-and a bar on its own would look like a hang.
+**What the job knows is what the executor tells it.** The bar is per MODULE, because that is
+the only boundary the executor can honestly measure, and it is therefore not linear in TIME:
+nine fast modules and one SNMP profile go to 90 % in two seconds and stay there for four
+minutes. A bar on its own would look like a hang, so the job also carries a CHECKLIST — the
+phases a module names for itself while it works, each with its counter. The core names none of
+them (see ``ModuleBase.report_progress``): a vocabulary of steps written here would fit
+whichever module was in front of whoever wrote it and be a lie for the other twenty. What
+arrives is drawn, in the order it arrives.
+
+**A run is over when it is over.** A module that outlives the batch deadline is not finished:
+it is still walking the device, and it writes its own state and history when it lands. The job
+used to declare itself done at that moment anyway and warn that "some modules are still
+working" — a screen announcing an ending it then has to take back, reported exactly that way.
+It now stays open until the straggler reports (the executor tells it), or until ``_LATE_GRACE``
+passes and it says plainly that it stopped watching.
 
 **In memory on purpose.** A job is about THIS process: it dies with it, and a browser polling
 a job whose process is gone gets a 404, which is the truth. Nothing about a collection is
@@ -36,6 +44,20 @@ _JOBS: dict = {}
 #: was closed over lunch still gets its answer instead of a 404 that reads like a failure,
 #: short enough that a panel left running for a month is not holding a hundred of them.
 _KEEP_FINISHED = 30 * 60
+
+#: How long a job keeps waiting for a module that overran the batch deadline, before it stops
+#: watching and says so. The module is not cancelled by this — nothing can cancel it — and it
+#: still writes its own state and history whenever it lands. This is only how long the SCREEN
+#: is prepared to keep the run open, and it is generous because the case it exists for is a
+#: NAS that answers a thousand values in five minutes.
+_LATE_GRACE = 20 * 60
+
+#: A phase reports at whatever rate the module chooses. This is the ceiling on how many lines
+#: one module may fill, so a module working on forty machines cannot grow the polled answer
+#: without bound. Over the cap, a line that has FINISHED is dropped to make room — the list is
+#: a window on what is happening now, and the module's own row carries the summary. With
+#: nothing finished to drop, the last line keeps updating rather than the list growing.
+_MAX_STEPS = 10
 
 
 def job_status(job_id: str) -> dict | None:
@@ -76,7 +98,7 @@ def _prune(now: float) -> None:
 
 
 def start_collect(wa, uid: str, host_name: str, modules: list,
-                  actor: str = '', ip: str = '') -> str:
+                  actor: str = '', ip: str = '', lang: str = '') -> str:
     """Run *modules* in the background and hand back a job id to ask about.
 
     The caller has already taken ``wa._check_lock`` — taking it here would be a window in
@@ -88,6 +110,10 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
     ``actor`` and ``ip`` are read from the request and carried in, because the audit entry is
     written from a thread where there is no request to read them from. Recording it as
     ``system`` would lose the one fact the entry exists to keep — who asked.
+
+    ``lang`` travels for the same reason and is the same kind of fact: the words a module
+    writes into the checklist are read by the person who pressed the button, and a worker
+    thread has no session to ask which language that is.
     """
     now = time.time()
     _prune(now)
@@ -99,12 +125,17 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
         # A list and not a dict: the screen draws it as a list, and the order a dict of
         # module names iterates in is not one anybody chose.
         'modules': [{'module': m, 'state': 'pending', 'detail': ''} for m in modules],
-        'done': False, 'error': '', 'answered': [], 'errors': [],
+        # `awaiting`: the batch is over and a module is still out. `gave_up`: it was still
+        # out when the panel stopped waiting — the one case where "it carries on in the
+        # background" is a true thing to say rather than an excuse for ending early.
+        'done': False, 'awaiting': False, 'gave_up': False,
+        'error': '', 'answered': [], 'errors': [],
         '_started': now, '_ended': 0.0,
     }
     index = {m: i for i, m in enumerate(modules)}
 
-    def _progress(state: str, module: str, detail: str = '') -> None:
+    def _progress(state: str, module: str, detail: str = '',
+                  extra: dict | None = None) -> None:
         """One module moved. Called from the executor's worker threads.
 
         No lock. Every write here is a single assignment to a dict entry or a list slot,
@@ -118,16 +149,25 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
         row = job['modules'][i]
         row['state'] = state
         row['detail'] = detail
-        # `completed` counts modules that will not move again. A timeout is not one of them
-        # in spirit — the module is still running — but it IS one for the bar, or the bar
-        # stops at 90 % forever on the fleet this was written for.
+        _step(row, state, detail, extra)
+        # `completed` counts modules that have SAID how they ended. A timeout has not: the
+        # module is still walking the device. It used to be counted anyway, so the bar would
+        # not stop short — and the result was "100 %" over the words "one module is still
+        # working", which is the screen contradicting itself in one glance. The bar stopping
+        # short is not a problem now that the run waits for the straggler and the line turns
+        # into a tick on its own; and if the panel does give up, a bar that never reached the
+        # end is the honest picture of what happened.
         job['completed'] = sum(1 for r in job['modules']
-                               if r['state'] in ('ok', 'error', 'timeout'))
+                               if r['state'] in ('ok', 'error'))
+        # A straggler landing is what ends a run that overran: the batch returned minutes
+        # ago and this is the only place that hears about it.
+        if job.get('_awaiting') and not _still_out(job):
+            _finish(job)
 
     def _work():
         try:
             results, errors = wa._run_checks(
-                modules, timeout=_timeout_of(wa), progress_cb=_progress)
+                modules, timeout=_timeout_of(wa), progress_cb=_progress, lang=lang)
             job['answered'] = sorted(results.keys())
             job['errors'] = list(errors or [])
         except Exception as exc:      # pylint: disable=broad-except
@@ -145,13 +185,104 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
                 wa._check_lock.release()
             except RuntimeError:      # pylint: disable=broad-except
                 pass                  # already released — the run is over either way
-            job['_ended'] = time.time()
-            # Last, and always: `done` is what stops the browser polling, so a job that
-            # raised before setting it is one the screen waits on forever.
-            job['done'] = True
+            # A module that overran is still working, and saying "finished" over the top
+            # of it is the screen announcing something it has to take back — reported
+            # exactly that way: a run that ends with a warning while the device is still
+            # being walked. So the job stays open until the straggler lands (the executor
+            # calls `_progress` again when it does) or until the panel gives up waiting.
+            if job['error'] or not _still_out(job):
+                _finish(job)
+            else:
+                job['awaiting'] = True
+                job['_awaiting'] = True
+                timer = threading.Timer(_LATE_GRACE, lambda: _finish(job, gave_up=True))
+                timer.daemon = True
+                timer.start()
 
     threading.Thread(target=_work, daemon=True, name='ss-infra-collect').start()
     return job_id
+
+
+def _still_out(job: dict) -> bool:
+    """Whether any module of *job* is known to be still working.
+
+    `timeout` and only `timeout`. That state is the executor saying "this one overran its
+    deadline and is still going", which is a specific claim about a live thread. A row left
+    `pending` or `running` when the batch returns is not a straggler — the executor reports
+    every module it starts, one way or the other — so treating those as "still out" would
+    hang the job for the whole grace period on a run where something else went wrong.
+    """
+    return any(r.get('state') == 'timeout' for r in job.get('modules') or ())
+
+
+def _finish(job: dict, gave_up: bool = False) -> None:
+    """Close the job. Idempotent on purpose: the straggler and the watchdog race."""
+    if job.get('done'):
+        return
+    job['awaiting'] = False
+    job['_awaiting'] = False
+    job['gave_up'] = bool(gave_up)
+    job['_ended'] = time.time()
+    # Last, and always: `done` is what stops the browser polling, so a job that raised
+    # before setting it is one the screen waits on forever.
+    job['done'] = True
+
+
+def _step(row: dict, state: str, detail: str, extra: dict | None) -> None:
+    """Fold one report into the module's checklist.
+
+    A line is identified by the THING it is about and the WORDS the module used for the phase,
+    because those two are all there is: the core names no steps (see
+    ``ModuleBase.report_progress``). Repeating a phase for the same thing keeps its line and
+    moves its counter — twenty-four profiles are one line reading "3/24", not twenty-four
+    lines — while a second machine gets a line of its own, which is the whole point: this
+    module samples its devices in a pool, and one shared line was four threads overwriting
+    each other's counter.
+    """
+    if state in ('ok', 'error', 'timeout'):
+        for st in row.get('steps') or ():
+            if st['state'] != 'run':
+                continue
+            if state == 'timeout':
+                continue                     # still working: leave the line as it is
+            st['state'] = 'done' if state == 'ok' else 'fail'
+            # …and the counter goes. It measured progress and progress is over; a module that
+            # stopped reporting where it did would otherwise leave "3/24" beside a green tick,
+            # which is a number that means nothing and reads as a run that lost its place.
+            st['n'] = st['total'] = 0
+        return
+    name = str((extra or {}).get('step') or '').strip()[:80]
+    if not name:
+        return
+    scope = str((extra or {}).get('scope') or '').strip()[:80]
+    steps = row.setdefault('steps', [])
+    cur = next((s for s in steps if s['key'] == name and s.get('scope', '') == scope), None)
+    if cur is None:
+        if len(steps) >= _MAX_STEPS:
+            # Room is made by forgetting something that has ENDED, oldest first. Only if
+            # nothing has: a list of forty machines all mid-walk keeps its last line moving
+            # rather than growing, and the module's own row still says how the run is going.
+            spare = next((s for s in steps if s['state'] != 'run'), None)
+            if spare is not None:
+                steps.remove(spare)
+                cur = None
+            else:
+                cur = steps[-1]
+        if cur is None and len(steps) < _MAX_STEPS:
+            # The previous phase OF THE SAME THING ended when this one began. Another
+            # machine's line is none of this one's business.
+            for st in steps:
+                if st['state'] == 'run' and st.get('scope', '') == scope:
+                    st['state'] = 'done'
+                    st['n'] = st['total'] = 0
+            cur = {'key': name, 'scope': scope, 'state': 'run', 'n': 0, 'total': 0, 'note': ''}
+            steps.append(cur)
+    cur['key'] = name
+    cur['scope'] = scope
+    cur['state'] = 'run'
+    cur['n'] = int((extra or {}).get('n') or 0)
+    cur['total'] = int((extra or {}).get('total') or 0)
+    cur['note'] = str(detail or '')[:200]
 
 
 def _timeout_of(wa) -> int:

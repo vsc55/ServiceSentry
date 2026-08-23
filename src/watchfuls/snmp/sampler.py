@@ -40,7 +40,37 @@ from lib.core.snmp import profiles as _profiles
 from lib.core.snmp.sampler import _row_factor, _safe_key, read_metric
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
 
+def _skipped(metric: dict, text: str) -> bool:
+    """Whether the profile said this reading is not an answer (`skip`).
+
+    Compiled per call and cached by `re`: these run once per row of one walk, and a cache of
+    our own would be a second place for a pattern to go stale. A pattern that fails here is
+    treated as no filter — normalise already rejected the ones that do not compile, and a
+    fact that vanishes for a reason nobody can see is worse than one with noise in it.
+    """
+    pat = metric.get('skip')
+    if not pat or not text:
+        return False
+    try:
+        return re.search(pat, text) is not None
+    except re.error:
+        return False
+
+
 # Where a device's previous counter readings are kept between cycles.
+#
+# Under `module_state`, and that word is the whole point. The monitor's status dict LOOKS
+# free-form — `set_conf` takes any path and returns True — but what survives a cycle is what
+# the `check_state` table has a column for, and `status.read()` at the top of every cycle
+# rebuilds each entry from those columns. A field written anywhere else is in memory until
+# the next read and gone after it, with no error at either end.
+#
+# That is exactly what happened here: every counter in every profile — interface traffic,
+# packets, errors and discards, the TCP/UDP/ICMP/IP counters, disk and volume I/O — was
+# writing its baseline into a dict that was thrown away seconds later, so every sample was
+# the FIRST sample and no rate was ever computed. The panel showed the gauges and simply had
+# no line where a counter should be, which reads as a device that does not serve them.
+_STATE_ROOT = 'module_state'
 _STATE_FIELD = 'snmp_prev'
 
 # How many cycles of silence before a sampled device is called down. Fixed rather than
@@ -99,10 +129,30 @@ class SnmpSampler:
 
     def _sample_server(self, srv_key: str, server: dict, label: str) -> None:
         """Read every metric of every profile assigned to *server* and record the values."""
+        # Nothing assigned, nothing to say: a device this module is not sampling must not
+        # appear in a checklist of what the module is doing.
+        wanted = self.profiles_of(server)
+        if not wanted:
+            return
+        # The phases, in the module's own words. The core has no vocabulary for "which
+        # profile of a Synology am I on" and would be inventing one for the other twenty
+        # modules if it did — so the words are here, translated like every other sentence
+        # this module produces, and the panel draws whatever arrives.
+        # `watcher_lang()` and not the notification language: this line is read by the
+        # person standing in front of the screen, who chose a language in the panel. Reported
+        # as a Spanish dialog with "Reading the metrics" in it.
+        # `scope=label`: this module samples its devices in a THREAD POOL, so several of
+        # these are in flight at once. Without saying which machine each line is about they
+        # all write into one, and the counter jumps between machines and freezes wherever the
+        # last thread left it — reported from the screen as a finished run showing "3/24" of
+        # a device nobody had asked about.
+        watching = self.watcher_lang()
+        self.report_progress(label, scope=label,
+                             step=self._msg('snmp_step_resolve', lang=watching))
         catalog = self._profile_catalog()
         # `expand` is where a group stops being one: what comes back is profiles with metrics
         # in them, deduplicated, so two groups that share a profile do not sample it twice.
-        assigned = [catalog[p] for p in _profiles.expand(catalog, self.profiles_of(server))]
+        assigned = [catalog[p] for p in _profiles.expand(catalog, wanted)]
         if not assigned:
             return
 
@@ -140,8 +190,17 @@ class SnmpSampler:
             # forget — reported from the panel as a progress line with a Python dict in it.
             # The configured NOTIFY language, because that is the one a module already uses
             # for every sentence it produces; a worker thread has no session to ask.
-            self.report_progress(
-                f'{label} — {_profiles.label_of(prof, lang)} ({_i}/{len(assigned)})')
+            # One PHASE, whose counter moves — not one line per profile. Twenty-four
+            # lines scrolling past is a list nobody reads; "Leyendo las métricas 7/24,
+            # Synology — discos" is the sentence somebody watching actually wants.
+            # The profile's SHORT name where it has one: "Synology — SMART attributes
+            # (SYNOLOGY-SMART-MIB)" is a MIB filename in a line that has room for a few words,
+            # and the same shortening is what the family rail and the summary already use.
+            _lg = watching or lang
+            _name = _profiles.short_label_of(prof, _lg) or _profiles.label_of(prof, _lg)
+            self.report_progress(_name, scope=label,
+                                 step=self._msg('snmp_step_read', lang=watching),
+                                 n=_i, total=len(assigned))
             for metric in prof.get('metrics') or ():
                 ok, err = self._sample_metric(metric, conn, now, state, rows, columns,
                                               source=str(prof.get('id') or ''), lang=lang)
@@ -195,12 +254,25 @@ class SnmpSampler:
         another machine's firmware, and WHICH survived depended on the order the profiles
         happened to be sampled in. Nothing was reported wrong; a fact was simply gone.
         """
+        # A table the profile declared as being ABOUT the box (`of_device`) does not get a
+        # row each: its readings fold into one fact on the device itself, in the order the
+        # agent walked them. `ipAddrTable` is the case — its rows are one machine's addresses,
+        # and one address per row is an answer to "what is this box on the network" filed in
+        # five places nothing opens.
+        if metric.get('kind') == 'text':
+            text = _metrics.attribute(metric, raw)
+            if _skipped(metric, text):
+                return          # the profile said this reading is not an answer
+            if metric.get('of_device'):
+                self._store_device_fact(rows, metric, text, source)
+                return
+            row = rows.setdefault(row_key, {'name': row_name, 'values': {}, 'attrs': {},
+                                            'states': []})
+            bucket = row['attrs'].setdefault(source or '_', {})
+            bucket[metric.get('role') or metric['key']] = text
+            return
         row = rows.setdefault(row_key, {'name': row_name, 'values': {}, 'attrs': {},
                                         'states': []})
-        if metric.get('kind') == 'text':
-            bucket = row['attrs'].setdefault(source or '_', {})
-            bucket[metric.get('role') or metric['key']] = _metrics.attribute(metric, raw)
-            return
         prev = (state.get(row_key) or {}).get(metric['key'])
         value, new_state = _metrics.sample(metric, raw, prev, now)
         if new_state is not None:
@@ -216,6 +288,27 @@ class SnmpSampler:
             spec = (states or {}).get(str(value))
             if spec:
                 row['states'].append(spec)
+
+    #: What separates the readings of an `of_device` table when they are read as one fact.
+    _FACT_JOIN = ', '
+
+    def _store_device_fact(self, rows: dict, metric: dict, text: str, source: str) -> None:
+        """Append one reading to the device's own fact for *metric*.
+
+        Called once per row of the walk, so it accumulates. Empty readings are dropped (a
+        column the agent left blank is not an address) and repeats are dropped with them —
+        two interfaces answering the same address is one address, and "192.168.1.1,
+        192.168.1.1" reads as a machine with a problem it does not have.
+        """
+        if not text:
+            return
+        row = rows.setdefault('', {'name': '', 'values': {}, 'attrs': {}, 'states': []})
+        bucket = row['attrs'].setdefault(source or '_', {})
+        key = metric.get('role') or metric['key']
+        seen = [p for p in str(bucket.get(key) or '').split(self._FACT_JOIN) if p]
+        if text in seen:
+            return
+        bucket[key] = self._FACT_JOIN.join(seen + [text])
 
     # ── What comes out ────────────────────────────────────────────────────────
 
@@ -287,7 +380,7 @@ class SnmpSampler:
             return {}
         try:
             got = self._monitor.status.get_conf(
-                [self.name_module, f'{srv_key}/metrics', _STATE_FIELD], {})
+                [self.name_module, f'{srv_key}/metrics', _STATE_ROOT, _STATE_FIELD], {})
             return dict(got) if isinstance(got, dict) else {}
         except Exception:  # pylint: disable=broad-except
             return {}
@@ -297,7 +390,7 @@ class SnmpSampler:
             return
         try:
             self._monitor.status.set_conf(
-                [self.name_module, f'{srv_key}/metrics', _STATE_FIELD], state)
+                [self.name_module, f'{srv_key}/metrics', _STATE_ROOT, _STATE_FIELD], state)
             self._monitor._status_counts_dirty = True  # noqa: SLF001 — monitor-owned flag
         except Exception:  # pylint: disable=broad-except
             pass

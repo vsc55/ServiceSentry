@@ -17,6 +17,8 @@
     "metrics": [
         {
             "key": "syno_disk_temp",
+            "icon": "bi-thermometer-half",
+            "headline": true,
             "label": {
                 "en_EN": "Temperature",
                 "es_ES": "Temperatura"
@@ -29,6 +31,7 @@
         },
         {
             "key": "syno_disk_status",
+            "icon": "bi-hdd",
             "label": {
                 "en_EN": "Status",
                 "es_ES": "Estado"
@@ -77,6 +80,7 @@
         },
         {
             "key": "syno_disk_health",
+            "icon": "bi-heart-pulse",
             "headline": true,
             "label": {
                 "en_EN": "Health",
@@ -119,6 +123,7 @@
         },
         {
             "key": "syno_disk_life",
+            "icon": "bi-hourglass-split",
             "label": {
                 "en_EN": "Remaining life",
                 "es_ES": "Vida restante"
@@ -140,6 +145,7 @@
         },
         {
             "key": "syno_disk_badsectors",
+            "icon": "bi-exclamation-octagon",
             "label": {
                 "en_EN": "Bad sectors",
                 "es_ES": "Sectores defectuosos"
@@ -151,6 +157,7 @@
         },
         {
             "key": "syno_disk_retries",
+            "icon": "bi-arrow-repeat",
             "label": {
                 "en_EN": "Connection retries",
                 "es_ES": "Reintentos de conexión"

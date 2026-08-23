@@ -24,7 +24,7 @@ from lib.debug import DebugLevel
 
 
 def run_checks(monitor, module_names, *, timeout: int, history=None,
-               progress_cb=None) -> tuple[dict, list]:
+               progress_cb=None, lang: str = '') -> tuple[dict, list]:
     """Run *module_names* on *monitor* concurrently and return ``(results, errors)``.
 
     ``results`` = ``{module: {item: {'status', 'message'}}}`` for modules that ran;
@@ -62,6 +62,18 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     # writes its own rows instead of adding them to a list nobody reads again.
     _flushed = threading.Event()
     _enabled_set = set(monitor._get_enabled_modules())
+    # Start from what is actually stored, the way the scheduler's own cycle does.
+    #
+    # Saving is `persist_status(status.data)`, which REPLACES the table — so a run launched
+    # from the panel writes back this process's whole snapshot, and a web process that read
+    # the state once at startup would put an hour-old copy of every other check on top of
+    # what the worker has written since. It also decides whether a counter has a baseline:
+    # a rate is the difference against the previous reading, and the previous reading is in
+    # the table, not in this process's memory.
+    try:
+        monitor.status.read()
+    except Exception:  # pylint: disable=broad-except
+        pass          # a state that cannot be read is not a reason not to run the checks
 
     def _has_items(mod_name: str) -> bool:
         """True if the module has at least one item configured in any collection."""
@@ -73,12 +85,16 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
                 return True
         return False
 
-    def _tell(state: str, mod_name: str, detail: str = '') -> None:
-        """Say where a module is, if anyone is listening. Never at the cost of the run."""
+    def _tell(state: str, mod_name: str, detail: str = '', extra: dict | None = None) -> None:
+        """Say where a module is, if anyone is listening. Never at the cost of the run.
+
+        *extra* is whatever the module said about its own phase (`report_progress`), passed
+        through untouched: the core names no steps.
+        """
         if progress_cb is None:
             return
         try:
-            progress_cb(state, mod_name, detail)
+            progress_cb(state, mod_name, detail, extra)
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -154,7 +170,13 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     # the duration of this batch and taken off afterwards: the scheduler shares this monitor,
     # and a sink left behind would have its cycles reporting into a job that ended hours ago.
     _prev_sink = getattr(monitor, '_progress_sink', None)
+    _prev_lang = getattr(monitor, '_progress_lang', '')
     monitor._progress_sink = _tell if progress_cb is not None else None
+    # …and the language the WATCHER reads in. A module's sentences are otherwise resolved in
+    # the installation's notification language, which is the right answer for a message sent
+    # to a channel and the wrong one for a line on the screen of the person who just pressed
+    # the button: reported as a Spanish dialog with "Reading the metrics" inside it.
+    monitor._progress_lang = str(lang or '') if progress_cb is not None else ''
 
     workers = min(len(module_names), 16)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
@@ -169,6 +191,7 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
         # nobody is watching any more — and, more importantly, so the next batch does not
         # inherit a sink pointing at a run that finished hours ago.
         monitor._progress_sink = _prev_sink
+        monitor._progress_lang = _prev_lang
 
     for future in done:
         mod = future_to_mod[future]
@@ -181,12 +204,35 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
         except Exception as exc:  # pylint: disable=broad-except
             errors.append(f'{mod}: {exc}')
 
+    def _late(future) -> None:
+        """A module that overran, landing after the batch had already returned.
+
+        It writes its own state and history — that part always worked. What nobody told was
+        the SCREEN, which had been shown "still working" and then never heard another word,
+        so a collection somebody was watching ended at 90 % and stayed there. The run is over
+        when the run is over, and this is the only moment that knows.
+        """
+        mod_name = future_to_mod.get(future, '')
+        try:
+            name, items, err = future.result()
+        except Exception as exc:  # pylint: disable=broad-except
+            _tell('error', mod_name, f'{type(exc).__name__}: {exc}')
+            return
+        if items is None:
+            _tell('error', mod_name, err or name)
+        else:
+            _tell('ok', mod_name, f'{len(items)}')
+
     for future in not_done:
         errors.append(f'{future_to_mod[future]}: timeout after {timeout}s')
         # Not 'error': the module has NOT failed, it is still working and will write its own
         # state and history when it lands (see the docstring). A screen told "error" would be
-        # a screen that has to un-say it, and nothing here is watching long enough to.
+        # a screen that has to un-say it.
         _tell('timeout', future_to_mod[future], str(timeout))
+        # …and it is told when it does land. The callback fires on the worker thread that
+        # finishes it, which outlives this function: the pool is shut down without waiting,
+        # and a future already running is not cancelled by that.
+        future.add_done_callback(_late)
 
     # Write history sequentially (one writer at a time — no concurrent SQLite contention),
     # and from here on a straggler writes its own; see the note in the docstring.

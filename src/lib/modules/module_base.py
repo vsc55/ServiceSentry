@@ -75,23 +75,44 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         """ Check the module and return the result. """
         self.debug.debug_obj(self.name_module, self.dict_return.list, "Data Return")
 
-    def report_progress(self, detail: str) -> None:
-        """Say what this module is doing right now — free text, shown to whoever is watching.
+    def report_progress(self, detail: str = '', *, step: str = '', scope: str = '',
+                        n: int = 0, total: int = 0) -> None:
+        """Say what this module is doing right now, to whoever is watching.
 
         Only somebody who pressed a button is ever listening (the infrastructure section's
         "collect now" installs the sink; a scheduler cycle does not), so this costs an
         attribute lookup the rest of the time and is safe to call from anywhere in a check.
 
-        Free text because the MODULE is the only thing that knows what it is doing. A core
-        vocabulary of steps would fit whichever module was in front of whoever wrote it and
-        be a lie for the other twenty.
+        *detail* is the sentence — what is happening at this instant. *step* is the PHASE it
+        belongs to, and repeating the same *step* keeps the same line: a run that reports
+        "reading" forty times draws one line whose counter moves, not forty lines. *n* and
+        *total* are that phase's progress when the module knows them.
+
+        *scope* is WHICH THING the phase is about, and it is what makes the line safe under a
+        module that works on several at once. This module samples its devices in a thread
+        pool, so without it four machines wrote "reading 7/24, reading 3/24, reading 19/24"
+        into the same line: a counter that jumps backwards, and that freezes at whatever the
+        last thread happened to write. Reported exactly that way — a finished run showing a
+        green tick beside "3/24" of a machine nobody had asked about.
+
+        All of it is the module's own words. A core vocabulary of steps would fit whichever
+        module was in front of whoever wrote it and be a lie for the other twenty — so the
+        core draws the phases it is given, in the order they arrive, and names none of them.
         """
         mon = getattr(self, '_monitor', None)
         report = getattr(mon, 'report_progress', None)
         if report is None:
             return
         try:
-            report(self.name_module, str(detail or ''))
+            report(self.name_module, str(detail or ''), step=str(step or ''),
+                   scope=str(scope or ''), n=int(n or 0), total=int(total or 0))
+        except TypeError:
+            # An older monitor that only knows the sentence. The phase is a nicety; losing
+            # the progress line entirely because of it would not be.
+            try:
+                report(self.name_module, str(detail or ''))
+            except Exception:  # pylint: disable=broad-except
+                pass
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -253,13 +274,14 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         cfg = getattr(getattr(self._monitor, 'config', None), 'data', None)
         return notify_lang(cfg if isinstance(cfg, dict) else {})
 
-    def _module_lang_section(self, section: str) -> dict:
-        """This module's *section* dict for the current notification language, from its
-        own ``lang/<lang>.json`` (requested language wins, ``en_EN`` fills gaps). Used
-        for ``messages`` and any module-specific map (e.g. m365 ``health_states``).
-        Cached per (module, language, section)."""
+    def _module_lang_section(self, section: str, lang: str = '') -> dict:
+        """This module's *section* dict, from its own ``lang/<lang>.json`` (requested
+        language wins, ``en_EN`` fills gaps). Used for ``messages`` and any module-specific
+        map (e.g. m365 ``health_states``). Cached per (module, language, section).
+
+        The notification language unless *lang* says otherwise — see :meth:`_msg`."""
         from lib.i18n import DEFAULT_LANG  # noqa: PLC0415
-        lang = self._notify_lang()
+        lang = lang or self._notify_lang()
         base = getattr(self._monitor, 'dir_modules', None) if self.is_monitor_exist else None
         if not isinstance(base, str):
             base = None
@@ -284,22 +306,43 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         _MODULE_MSG_CACHE[ck] = out
         return out
 
-    def _module_messages(self) -> dict:
-        """This module's ``messages`` dict for the current notification language."""
-        return self._module_lang_section('messages')
+    def _module_messages(self, lang: str = '') -> dict:
+        """This module's ``messages`` dict, in the notification language or in *lang*."""
+        return self._module_lang_section('messages', lang)
 
-    def _msg(self, key: str, *args) -> str:
-        """Translate a check message in the system notification language: an admin text override
+    def _msg(self, key: str, *args, lang: str = '') -> str:
+        """Translate a check message: an admin text override
         (``notif_text_overrides[lang]['mod:<module>:<key>']``) wins, else this module's
         ``lang/*.json`` ``messages`` section.  ``{}`` placeholders are filled positionally by
-        *args*; an unknown key falls back to the key itself."""
+        *args*; an unknown key falls back to the key itself.
+
+        The system NOTIFICATION language by default, which is right for what this mostly
+        produces: a message sent to a channel, read by whoever the installation sends things
+        to. *lang* overrides it for the sentences that are not that — a progress line is read
+        by the person watching the screen right now, in the language they chose
+        (:meth:`watcher_lang`).
+        """
         from lib.core.notify.formatting import text_override, _fill  # noqa: PLC0415
         cfg = getattr(getattr(self._monitor, 'config', None), 'data', None)
         cfg = cfg if isinstance(cfg, dict) else {}
         name = (self.name_module or '').split('.')[-1]
-        text = (text_override(cfg, self._notify_lang(), f'mod:{name}:{key}')
-                or self._module_messages().get(key, key))
+        lang = lang or self._notify_lang()
+        text = (text_override(cfg, lang, f'mod:{name}:{key}')
+                or self._module_messages(lang).get(key, key))
         return _fill(text, args)   # {} sequential + {0}/{1}… indexed (reorderable in overrides)
+
+    def watcher_lang(self) -> str:
+        """The language of whoever is watching this run, or ``''`` when nobody is.
+
+        A progress line is the one thing a module produces for a PERSON standing in front of
+        the screen, and that person picked a language in the panel. The notification language
+        is a property of the installation and is the wrong answer here — reported from the
+        screen as a Spanish dialog with "Reading the metrics" inside it.
+
+        Installed by the executor for the duration of a watched batch, exactly like the
+        progress sink, so a scheduler cycle has none and nothing changes for it.
+        """
+        return str(getattr(getattr(self, '_monitor', None), '_progress_lang', '') or '')
 
     def get_conf(
             self,

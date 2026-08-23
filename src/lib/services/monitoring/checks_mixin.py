@@ -24,7 +24,7 @@ class _ChecksMixin:
     """Run module checks via Monitor and return serialisable results."""
 
     def _run_checks(self, requested, *, timeout: int | None = None,
-                    progress_cb=None) -> tuple[dict, list[str]]:
+                    progress_cb=None, lang: str = '') -> tuple[dict, list[str]]:
         """Execute the requested module checks in parallel and return their
         serialisable results.
 
@@ -39,8 +39,13 @@ class _ChecksMixin:
         (``monitoring|module_timeout``) — a fleet whose NAS answers in five minutes needs a
         different answer from one whose devices answer in two seconds.
 
-        ``progress_cb(state, module, detail)`` is handed straight to the executor: it is
-        called as each module starts and lands, so a background run can be watched.
+        ``progress_cb(state, module, detail, extra)`` is handed straight to the executor: it
+        is called as each module starts and lands, so a background run can be watched.
+
+        ``lang`` is the language of whoever is WATCHING, carried through so a module's progress
+        lines come out in it. Without it they are resolved in the installation's notification
+        language — right for a message sent to a channel, wrong for a line on the screen of the
+        person who just pressed the button.
         """
         import sys
         from lib import Monitor
@@ -74,7 +79,7 @@ class _ChecksMixin:
         else:
             module_names = [m for m in requested if isinstance(m, str)]
 
-        return run_checks(monitor, module_names,
+        return run_checks(monitor, module_names, lang=lang,
                           timeout=int(timeout or _MODULE_CHECK_TIMEOUT),
                           history=getattr(self, '_history', None),
                           progress_cb=progress_cb)

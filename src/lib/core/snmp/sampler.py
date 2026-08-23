@@ -31,6 +31,14 @@ def _safe_key(text: str, fallback: str) -> str:
     return out or fallback
 
 
+def _text(raw) -> str:
+    """A reading as the string it will be recorded as. SNMP answers bytes as readily as text,
+    and joining a column onto a bytes object is a `TypeError` in the middle of a cycle."""
+    if isinstance(raw, bytes):
+        return raw.decode('utf-8', 'replace').strip()
+    return str(raw if raw is not None else '').strip()
+
+
 def _row_factor(column, index):
     """The multiplier this row's ``scale_by`` column gave, or 1 when it gave nothing usable.
 
@@ -44,6 +52,28 @@ def _row_factor(column, index):
     except (TypeError, ValueError):
         return 1
     return got if got > 0 else 1
+
+
+def prefix_of(mask: str) -> str:
+    """A dotted netmask as the number of bits, or ``''`` when it is not one.
+
+    IP arithmetic and not knowledge about any device, which is why it can live in the core:
+    255.255.255.0 is /24 on every machine ever made. Empty for anything that is not a
+    contiguous mask — a made-up number would be worse than the text somebody can read.
+    """
+    parts = str(mask or '').strip().split('.')
+    if len(parts) != 4:
+        return ''
+    try:
+        octets = [int(p) for p in parts]
+    except ValueError:
+        return ''
+    if any(o < 0 or o > 255 for o in octets):
+        return ''
+    bits = ''.join(f'{o:08b}' for o in octets)
+    if '01' in bits:
+        return ''                       # 255.0.255.0 is not a prefix, whatever it is
+    return str(bits.count('1'))
 
 
 def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
@@ -77,13 +107,26 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
     idx = metric.get('index_label') or ''
     idx_oids = list(idx) if isinstance(idx, (list, tuple)) else ([idx] if idx else [])
     by_oid = metric.get('scale_by') or ''
-    for extra in idx_oids + ([by_oid] if by_oid else []):
+    # The column that says which rows this metric is about, when the profile named one.
+    where = metric.get('where') or {}
+    w_oid = str(where.get('oid') or '')
+    # …and the column that travels WITH this one on the same row (an address and its mask).
+    pair = metric.get('with') or {}
+    p_oid = str(pair.get('oid') or '')
+    for extra in (idx_oids + ([by_oid] if by_oid else []) + ([w_oid] if w_oid else [])
+                  + ([p_oid] if p_oid else [])):
         if extra not in columns:
             found, _e = walk(oid=extra, **conn)
             columns[extra] = found or {}
     grp = metric.get('group') or ''
     out = []
     for index, raw in walked.items():
+        # Filtered on the OTHER column's value, per row. A row the filter column says nothing
+        # about is dropped rather than kept: "the rows where the destination is 0.0.0.0" does
+        # not include the ones with no destination, and keeping them would put every route's
+        # next hop under the word "gateway".
+        if w_oid and str((columns.get(w_oid) or {}).get(index, '')).strip() != where['equals']:
+            continue
         # The device's own name for the row, and the index only when it has none: an SNMP
         # index is not the port on the front of the switch, and a chart legend that says
         # "3" is one nobody can act on. Where there is no name, the table's own id goes in
@@ -96,6 +139,14 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
         else:
             row_key = f'{grp}.{index}' if grp else index
             row_name = row_key
+        # Composed only for TEXT: a number with something appended to it is a string that
+        # used to be a measurement, and the arithmetic downstream would fail on it.
+        if p_oid and str(metric.get('kind') or '') == 'text':
+            mate = str((columns.get(p_oid) or {}).get(index, '') or '').strip()
+            if pair.get('as') == 'prefix':
+                mate = prefix_of(mate) or mate
+            if mate:
+                raw = f'{_text(raw)}{pair.get("sep", " ")}{mate}'
         out.append({'index': index, 'key': row_key, 'name': row_name, 'raw': raw,
                     'factor': _row_factor(columns.get(by_oid), index) if by_oid else 1})
     return out, (err or None)

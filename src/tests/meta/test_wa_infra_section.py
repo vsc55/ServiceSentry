@@ -17,7 +17,7 @@ import io
 import os
 import re
 
-from tests.helpers import _read
+from tests.helpers import _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
@@ -209,29 +209,73 @@ class TestWatchingItHappen:
 
     def test_the_percentage_is_never_alone(self):
         """Progress is per MODULE, so nine fast ones and an SNMP profile reach 90 % in two
-        seconds and stay there for four minutes. The name of what is working is what makes
-        that pause legible; a bar on its own reads as a hang."""
+        seconds and stay there for four minutes. What is being done is what makes that pause
+        legible; a bar on its own reads as a hang."""
         src = self._collect()
-        assert 'running.detail || running.module' in src, (
+        bar = src.split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
+        assert 'step.key' in bar and 'running.detail' in bar, (
             'the bar does not name what is working')
-        assert '_infraCollectRow' in src, 'the dialog does not list the modules'
+        assert '_infraCollectRow' in src, 'the dialog does not list what is being done'
 
     def test_a_timeout_is_not_drawn_as_a_failure(self):
         """The module has not failed — it is still working and writes its own state and
         history when it lands. A red cross is a thing the screen has to take back."""
-        row = self._collect().split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
-        assert "timeout: ['bi-hourglass-split',    'text-warning'" in row
+        marks = self._collect().split('_INFRA_MARKS = {')[1].split('};')[0]
+        assert "timeout: ['bi-hourglass-split',   'text-warning']" in marks, marks
+        assert 'text-danger' not in marks.split('timeout:')[1]
 
-    def test_a_running_module_says_what_it_is_doing(self):
-        """0 % for five minutes is the same picture as a hang. The module boundary is all the
-        core can see, so the module speaks for itself — and the screen has to draw what it
-        said, in the dialog and on the bar."""
-        src = self._collect()
-        row = src.split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
-        assert "m.state === 'running' ? (m.detail" in row, (
-            'a running module shows no detail — the dialog is a spinner with a name on it')
-        bar = src.split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
-        assert 'running.detail' in bar, 'the bar does not say what is happening'
+    def test_one_map_decides_what_a_mark_means(self):
+        """A module line and one of its own phases disagreeing about what a tick looks like
+        is two vocabularies for one idea. Both states live in the same map — the executor's
+        (pending/running/ok/error/timeout) and a phase's (run/done/fail) — because
+        translating one into the other would be a third name for each."""
+        marks = self._collect().split('_INFRA_MARKS = {')[1].split('};')[0]
+        for key in ('pending', 'running', 'run', 'ok', 'done', 'error', 'fail', 'timeout'):
+            assert f'{key}:' in marks, f'{key} has no mark and would draw as "waiting"'
+
+    def test_it_is_a_checklist_and_not_a_list_of_module_ids(self):
+        """Reported from the panel: a five-minute run showed `snmp · Ejecutando…` and nothing
+        else, which is the same information as a spinner. Each line is a thing being done,
+        with how far along it is where the module counts them."""
+        row = self._collect().split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
+        assert 'm.steps' in row and '_infraChecklistLine' in row, (
+            'the phases a module names for itself are not drawn')
+        assert '<code' not in _strip_comments(row), (
+            'a module still reads as an id in a code span')
+        assert '_infraModuleLabel' in row, 'a module is named by its id and not by its name'
+        line = self._collect().split('function _infraChecklistLine')[1].split(chr(10) + 'function ')[0]
+        assert 'o.total' in line and 'progress-bar' in line, 'a phase cannot show its counter'
+
+    def test_the_core_names_none_of_the_phases(self):
+        """The words are the module's own — it is the only thing that knows what it is doing,
+        and a vocabulary written here would fit whichever module was in front of whoever wrote
+        it and be a lie for the other twenty."""
+        row = self._collect().split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
+        for word in ('connect', 'Conect', 'read', 'Leyendo', 'sweep', 'analyse'):
+            assert f"'{word}" not in row, f'the panel has invented a step name ({word})'
+
+    def test_a_module_that_names_no_phase_still_says_something(self):
+        """Most modules take a second and report no phases at all. Their line is the module,
+        and the sentence they do send belongs on it — or it is a spinner with a name."""
+        row = self._collect().split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
+        assert "!steps.length) ? (m.detail" in row
+
+    def test_it_does_not_announce_an_ending_it_has_to_take_back(self):
+        """Reported from the panel: a collection ended with a warning saying some modules were
+        still working — a screen declaring itself finished over the top of a device still
+        being walked. A module that overran keeps the run open (see `lib/core/infra/jobs.py`),
+        so the dialog has a word for "waiting on it" that is not "finished"."""
+        body = self._collect().split('function _infraCollectBody')[1].split(chr(10) + 'function ')[0]
+        assert 'job.awaiting' in body and 'infra_collect_still_out' in body
+        assert 'job.gave_up' in body and 'infra_collect_left_running' in body, (
+            'no way to say the panel stopped waiting, which is the one case where '
+            '"it carries on in the background" is true')
+
+    def test_the_still_working_warning_only_fires_when_it_gave_up(self):
+        """It used to fire on every collection of a NAS. It is a true sentence in exactly one
+        case: the run was left going and nobody is watching it any more."""
+        fin = self._collect().split('function _infraCollectFinish')[1].split(chr(10) + 'function ')[0]
+        assert 'job.gave_up' in fin, 'the warning fires on a run that is still being waited for'
 
     def test_the_poll_gives_up_on_a_job_that_is_gone(self):
         """The jobs live in the panel's memory. After a restart, waiting longer does not

@@ -762,6 +762,40 @@ class TestAPileIsNotAnIdentity:
         src = _read(TABS)
         return src[src.index('function _infraIdentityHtml'):]
 
+    def test_a_property_of_the_box_sits_beside_what_the_box_IS(self):
+        """"Is there an update" is not a measurement anybody charts — it is a property of the
+        machine, and it belongs next to the DSM version it is about rather than among the
+        temperatures on the summary. Which values those are is the profile's word, so the panel
+        never learns what an update is."""
+        body = self._fn()
+        assert 'm.identity && !m.row' in body
+        assert '_infraValueHtml(m)' in body, (
+            'the badge is drawn a second way, so a warning level could be amber in one place '
+            'and not the other')
+        # …and beside the FACT it is about, not as a second entry: "Actualización disponible:
+        # Disponible" is the same word twice and pushes the version a line away from the thing
+        # that qualifies it.
+        assert 'm.identity === a.key' in body
+        assert 'const loose' in body, (
+            'a state whose fact the device did not answer would vanish — a value nobody shows '
+            'is a value that might as well not be sampled')
+        import json                                            # noqa: PLC0415
+        prof = json.loads(_read(os.path.join(
+            SRC, 'lib', 'core', 'snmp', 'profiles', 'sources', 'synology_system.json')))
+        up = [m for m in prof['metrics'] if m['key'] == 'syno_upgrade'][0]
+        assert up.get('identity') == 'firmware', 'it no longer says which fact it is about'
+        assert not up.get('headline'), 'it is on the summary as well as beside the firmware'
+
+    def test_it_is_the_profile_that_says_so_and_not_the_panel(self):
+        """A core that put "update available" beside the model by name would be a core that
+        knows what DSM is, and would have nothing to say about the next kind of device."""
+        # The code, not the prose: the comment says "update" because that is the example the
+        # screen showed. What must not exist is a field name being tested for.
+        body = _strip_comments(self._fn())
+        assert 'syno_' not in body, 'the identity card names a module field'
+        for tell in ('m.field ===', 'm.field ==', 'm.label ===', ".includes('"):
+            assert tell not in body, f'the card picks its values by name ({tell})'
+
     def test_the_unsourced_pile_is_not_called_the_identity(self):
         body = self._fn()
         assert "t('infra_identity_unsourced')" in body
@@ -970,6 +1004,62 @@ class TestHowIsThisMachine:
             SRC, 'lib', 'core', 'snmp', 'profiles', 'sources', 'synology_disks.json')))
         assert any(m.get('headline') for m in prof['metrics'] if m['key'] == 'syno_disk_health')
 
+    def test_and_how_hot_they_are(self):
+        """`diskHealthStatus` says "Normal" until the day it does not. Heat is the half of a
+        drive's condition that moves, and the summary card is where somebody looks weeks before
+        there is anything to look for."""
+        import json                                            # noqa: PLC0415
+        prof = json.loads(_read(os.path.join(
+            SRC, 'lib', 'core', 'snmp', 'profiles', 'sources', 'synology_disks.json')))
+        temp = [m for m in prof['metrics'] if m['key'] == 'syno_disk_temp'][0]
+        assert temp.get('headline'), 'a disk says how it is and not how hot it is'
+        assert temp.get('unit') == '°C', 'degrees, not a bare number'
+
+    def test_a_card_grows_sideways(self):
+        """Reported from the screen: a disk with two readings stacked them, so a shelf of eight
+        came out as eight tall boxes each with an empty right half. The card was pinned at a
+        14rem basis, which is a width chosen before anyone knew what was going in it — so the
+        CONTENT wrapped instead. Sized by what it holds, and the whole card wraps when the pane
+        runs out of room, which is the thing that should wrap."""
+        body = _fn(_read(DETAILS), '_infraDetailRow')
+        assert 'flex:0 1 auto' in body, 'the card does not follow its content'
+        assert 'flex:1 1 14rem' not in body, 'the card is still pinned at a fixed basis'
+        assert 'min-width:7rem' not in body, 'a reading still claims a column of its own'
+
+    def test_a_condition_on_a_card_is_a_mark(self):
+        """The word is the widest thing in the box and the one that changes with the language:
+        eight disks came out as eight cards sized by the length of "Normal" in Spanish. A tick,
+        a triangle or an octagon says the same thing in every language and in no room at all —
+        with the word itself on the hover and in the row's own dialog, since "Initialized" and
+        "Not initialized" are two pieces of news that no symbol separates."""
+        body = _fn(_read(DETAILS), '_infraCardValueHtml')
+        assert 'm.states' in body and '_INFRA_LEVEL_MARKS' in body
+        assert 'title=' in body and 'aria-label=' in body, (
+            'the word is gone rather than moved — unreachable by hover or by screen reader')
+        assert '_infraValueHtml(m)' in body, 'a reading that is not a state must be untouched'
+
+    def test_the_mark_is_picked_by_the_level_the_profile_declared(self):
+        """The same value the badge is coloured by, so a symbol and a colour cannot disagree.
+        Reading the WORD would be the panel deciding that "Degraded" is bad and "Repairing" is
+        not — which is true, and is not something the text can tell you."""
+        body = _fn(_read(DETAILS), '_infraCardValueHtml')
+        assert 'st.level' in body
+        assert 'st.label.' not in body and 'toLowerCase' not in body
+
+    def test_every_level_has_a_shape_of_its_own(self):
+        """The silent one. A level added to the palette without a mark falls back to the info
+        `i`, so the worst news on the device draws as the mildest — no error anywhere, and the
+        card looks exactly as it should. Shape AND colour, because colour alone is not a
+        distinction for everybody."""
+        marks = _read(DETAILS).split('_INFRA_LEVEL_MARKS = {')[1].split(NL + '};')[0]
+        levels = _read(METRICS).split('_INFRA_LEVELS = {')[1].split('};')[0]
+        have = set(re.findall(r'(\w+):\s*\{', marks))
+        want = set(re.findall(r'(\w+):\s*[\'"]', levels))
+        assert want and have == want, f'levels {sorted(want)} but marks {sorted(have)}'
+        icons = re.findall(r"icon: '([^']+)'", marks)
+        assert len(set(icons)) == len(icons), f'two levels share a shape: {icons}'
+        assert all(i.startswith('bi-') for i in icons), icons
+
 class TestOneRowsWholeStory:
     """Clicking a disk shows its SMART.
 
@@ -1087,6 +1177,123 @@ class TestOneRowsWholeStory:
         """A tab strip over a single pane is furniture."""
         body = _fn(self._src(), '_infraOpenRow')
         assert 'nested.length' in body and ': facts + _infraRowList' in body
+
+    def test_the_facts_are_a_grid_and_not_a_ragged_row(self):
+        """Reported from the screen. With a flex row each pair takes the width of its own
+        text, so "Tipo SATA" sits inches from "Modelo ST14000NM000J-2TX103" and there is no
+        column for the eye to run down. Columns of a minimum width line up and wrap whole."""
+        body = _fn(self._src(), '_infraRowFactsHtml')
+        assert 'ss-factgrid' in body
+        assert 'd-flex flex-wrap gap-3' not in body, 'the bare flex with no gap of its own'
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        base = css.split('.ss-factgrid {')[1].split('}')[0]
+        # Columns of EQUAL width was the version after that, and it wrapped for a reason that
+        # has nothing to do with the content: four tracks of 13rem need 56rem and the dialog
+        # offers 46, so the fourth fact dropped to a line of its own while three quarters of
+        # the row sat empty. A fact is as wide as the fact.
+        assert 'grid-template-columns' not in base
+        assert 'display: flex' in base and 'gap:' in base
+        item = css.split('.ss-factgrid > div {')[1].split('}')[0]
+        assert 'min-width' in item and 'max-width' in item, (
+            'a fact is unbounded — one long value pushes the rest off the row')
+
+    def test_the_two_shapes_each_declare_their_own(self):
+        """The facts are a flex row and the readings are a grid. A modifier that only changed
+        `grid-template-columns` while the base said `display: flex` would be a layout that
+        depends on which rule loaded last."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert 'display: grid' in css.split('.ss-factgrid-lg {')[1].split('}')[0]
+        assert css.index('.ss-factgrid-lg {') > css.index('.ss-factgrid {')
+
+    def test_the_dialog_grows_to_what_it_needs(self):
+        """Already true and worth pinning: a dialog of this size is `fit-content` capped at
+        the work area, so widening it is a matter of the content asking for the room."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.modal-lg, .modal-xl { max-width: 96vw; width: fit-content; }' in css
+
+    def test_the_facts_read_in_an_order_somebody_chose(self):
+        """Alphabetical by KEY is what it was, which put "Bahía" first and "Modelo" third for
+        no reason a reader could see. The keys are internal and their alphabet is not a fact
+        about equipment."""
+        src = self._src()
+        assert '_INFRA_FACT_ORDER' in src
+        order = src.split('_INFRA_FACT_ORDER = [')[1].split('];')[0]
+        assert order.index("'model'") < order.index("'bay'"), 'what it is, before where it sits'
+        assert order.index("'serial'") < order.index("'role'")
+        body = _fn(src, '_infraRowFactsHtml')
+        assert '_infraFactRank' in body, 'the order is declared and not applied'
+
+    def test_a_role_the_core_does_not_name_still_appears(self):
+        """Last, and not dropped: a module can record an attribute the core has no word for,
+        and a fact nobody shows is a fact somebody reads off the machine with a torch."""
+        body = _fn(self._src(), '_infraFactRank')
+        assert '_INFRA_FACT_ORDER.length' in body
+
+    def test_a_part_number_is_not_broken_in_half(self):
+        """Reported from the screen: "ST12000NM000J-2TY103" came out as "…-2TY10" and "3" on
+        the next line, which reads as two things. Truncated with the whole of it on the hover,
+        which is what the rest of the panel does with a value that will not fit."""
+        body = _fn(self._src(), '_infraRowFactsHtml')
+        assert 'text-truncate' in body and 'title="${escAttr(a.value)}"' in body
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        grid = css.split('.ss-factgrid {')[1].split('}')[0]
+        assert 'word-break' not in grid, 'the browser is still told to split a part number'
+
+    def test_an_icon_is_the_profiles_word(self):
+        """A number has no picture. Only whatever produced it knows that this one is a
+        temperature and that one a count of bad sectors, so the profile says — and a metric
+        that says nothing gets none rather than a placeholder."""
+        body = _fn(self._src(), '_infraRowList')
+        assert 'm.icon ?' in body, 'every reading gets an icon whether it has one or not'
+        assert 'escAttr(m.icon)' in body, 'the icon reaches a class attribute unescaped'
+        prof = _read(os.path.join(SRC, 'lib', 'core', 'snmp', 'profiles', '__init__.py'))
+        assert "_ICON_RE = re.compile(r'^bi-[a-z0-9-]{1,40}$')" in prof, (
+            'a profile is data an administrator writes, and this one ends up in a class')
+
+    def test_the_dialog_does_not_offer_to_be_resized(self):
+        """A resize handle and a maximise button on a box that is already exactly as tall as
+        its six lines is offering to make the empty part bigger. Both halves — the CSS and the
+        header controls — read one function, so they cannot disagree about which dialogs are
+        resizable."""
+        beh = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'init',
+                                 '_behaviors.html'))
+        assert 'function _modalResizable' in beh
+        assert beh.count('_modalResizable(dlg)') == 3, 'a caller still decides for itself'
+        assert "contains('ss-modal-fit')" in beh
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        content = css.split('.ss-modal-fit > .modal-content {')[1].split('}')[0]
+        assert 'resize: none' in content
+
+    def test_the_dialog_is_only_as_tall_as_it_needs(self):
+        """`.modal-dialog-scrollable` sets a full height unconditionally — which is what makes
+        a long body scroll inside instead of pushing the page, and also what left six readings
+        sitting in four hundred pixels of empty box."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-modal-fit.modal-dialog-scrollable' in css
+        # split on the RULE and not the name: the comment above it says the name too
+        rule = css.split('.ss-modal-fit.modal-dialog-scrollable,')[1].split('}')[0]
+        assert 'height: auto' in rule
+        assert '.ss-modal-fit.modal-dialog-centered.modal-dialog-scrollable' in rule
+        # It still SPANS, and that span is what centring measures against — taking it away
+        # (the second attempt) gave a compact box glued to the top of the screen.
+        assert 'min-height: calc' in rule and 'justify-content: center' in rule
+        content = css.split('.ss-modal-fit > .modal-content {')[1].split('}')[0]
+        # …and the content is the half that must not stretch into that span. This is the line
+        # that empties the four hundred pixels.
+        assert 'flex: 0 1 auto' in content
+        assert 'max-height' in content, (
+            'a long body would now push the page instead of scrolling inside')
+        dialogs = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                     'modals', '_dialogs.html'))
+        info = dialogs.split('id="infoModal"')[1].split('</div>')[0]
+        assert 'ss-modal-fit' in info
+
+    def test_the_readings_do_not_span_the_whole_dialog(self):
+        """A full-width row made the eye travel the entire modal to join "Temperatura" to
+        "40 °C", with nothing in between."""
+        body = _fn(self._src(), '_infraRowList')
+        assert 'ss-factgrid-lg' in body
+        assert '<table' not in body, 'one column across the whole width again'
 
     def test_it_leads_with_what_the_row_IS(self):
         """A disk's model and serial before its numbers — that is the half of the dialog

@@ -20,6 +20,7 @@
     "metrics": [
         {
             "key": "syno_raid_status",
+            "icon": "bi-hdd-stack",
             "label": {
                 "en_EN": "Array status",
                 "es_ES": "Estado del array"
@@ -124,6 +125,7 @@
         },
         {
             "key": "syno_raid_free",
+            "icon": "bi-hdd",
             "headline": "free",
             "label": {
                 "en_EN": "Free space",
@@ -137,6 +139,7 @@
         },
         {
             "key": "syno_raid_total",
+            "icon": "bi-hdd",
             "headline": "total",
             "label": {
                 "en_EN": "Total space",

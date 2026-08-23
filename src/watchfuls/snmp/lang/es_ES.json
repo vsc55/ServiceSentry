@@ -42,7 +42,9 @@
         "snmp_sampled": "SNMP: {} 📊 {} valores",
         "snmp_sample_down": "SNMP: {} 💥 sin datos ({})",
         "snmp_state_bad": "SNMP: {} 💥 {}: {}",
-        "snmp_state_warn": "SNMP: {} ⚠ {}: {}"
+        "snmp_state_warn": "SNMP: {} ⚠ {}: {}",
+        "snmp_step_resolve": "Resolviendo los perfiles del dispositivo",
+        "snmp_step_read": "Leyendo las métricas"
     },
     "messages_vars": {
         "snmp_error": [

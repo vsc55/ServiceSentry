@@ -8,6 +8,225 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.114] - 2026-08-23
+
+### Changed
+- **The disk dialog's identity strip is one line of content-sized facts.** It was a bare flex
+  row with no gap of its own, so the spacing was whatever the text left over — "Tipo SATA" sat
+  inches from "Modelo ST14000NM000J-2TX103" and it read as ragged. Equal-width columns fixed
+  that and broke something else: four tracks of 13rem need 56rem and the dialog offers 46, so
+  the fourth fact dropped to a line of its own while three quarters of the row sat empty. A
+  fact is as wide as the fact, with an even gap, bounded at both ends.
+- **…and the facts read in an order somebody chose.** Alphabetical by KEY put "Bahía" first and
+  "Modelo" third for no reason a reader could see — the keys are internal and their alphabet is
+  not a fact about equipment. It is what it is, which one it is, where it sits, what it does;
+  a role the core has no word for goes last rather than disappearing.
+- **A part number is not broken in half.** "ST12000NM000J-2TY103" came out as "…-2TY10" and "3"
+  on the next line, which reads as two things. Truncated with the whole of it on the hover,
+  which is what the rest of the panel does with a value that will not fit.
+- **A measurement can carry an icon, declared by the profile** (`"icon": "bi-…"`). A number has
+  no picture: only whatever produced it knows that this one is a temperature and that one a
+  count of bad sectors. Validated against `^bi-[a-z0-9-]+$`, because a profile is data an
+  administrator writes and this value ends up in a `class` attribute. Declared so far on the
+  Synology disk, system and volume profiles, on HOST-RESOURCES storage and on net-snmp CPU.
+- **The readings no longer span the whole dialog.** A single full-width row made the eye travel
+  the entire modal to join "Temperatura" to "40 °C"; two columns keep each pair together.
+- **The information dialog is only as tall as it needs to be** (`.ss-modal-fit`).
+  `.modal-dialog-scrollable` sets a full height unconditionally — which is what makes a long
+  body scroll inside instead of pushing the page, and also what left six readings sitting in
+  four hundred pixels of empty box — and `.modal-dialog-centered` sets a `min-height` to the
+  same value, which beats a `height: auto` and is why the first attempt changed nothing at all.
+  The dialog still spans (that span is what centring measures against; removing it gave a
+  compact box glued to the top of the screen) and the CONTENT is the half told not to stretch
+  into it. Not applied to the pickers, which ask for a fixed height on purpose.
+- **…and it no longer offers to be resized.** A resize handle and a maximise button on a box
+  that is already exactly as tall as its six lines is offering to make the empty part bigger.
+  One function decides, so the stylesheet and the header controls cannot disagree about which
+  dialogs are resizable.
+
+- **"Is there an update" moved out of the summary and beside the firmware version it is
+  about.** It is not a measurement anybody charts — it is a property of the box, and on the
+  Details tab it sat among the temperatures answering a question nobody was asking there. A
+  metric can now say it belongs in the identity card (`"identity": true`) or, with a role name
+  (`"identity": "firmware"`), beside that particular fact — a second entry reading
+  "Actualización disponible: Disponible" is the same word twice and pushes the version a line
+  away from the thing that qualifies it. Which fact it annotates is the profile's to know; the
+  core names roles and has never heard of DSM.
+- **…and its words read on their own now.** "Firmware / DSM 7.3-86009 · No disponible" was
+  right for a field called "Update available" — unavailable meaning no update — and beside a
+  version number it says the firmware is unavailable. The states are sentences about the
+  version ("Actualizado", "Hay actualización"), and a guard fails on a bare yes/no in any state
+  that annotates a fact: the question it would be answering is not on screen.
+- **A disk's card carries its temperature beside its health.** `diskHealthStatus` says "Normal"
+  until the day it does not; heat is the half of a drive's condition that moves, and a disk
+  climbing through the fifties is the one that will read "Warning" in a month. Flagged in the
+  profile like every other summary value — the core still names no field of any device.
+- **A summary card is as wide as what it holds, and grows sideways.** It was pinned at a 14rem
+  basis — a width chosen before anyone knew what was going in it — so a disk with two readings
+  stacked them and a shelf of eight came out as eight tall boxes with an empty right half each.
+  The card follows its content and the whole card wraps when the pane runs out of room, which
+  is the thing that should wrap.
+- **A condition on a card is a mark, not a word.** "Normal" was the widest thing in the box and
+  the one that changes with the language, so the cards were sized by a translation. A tick, a
+  triangle or an octagon says it in every language and in no room at all; the word stays on the
+  hover, on the screen reader and in the row's own dialog, where "Initialized" and "Not
+  initialized" are two pieces of news no symbol separates. The shape is picked by the LEVEL the
+  profile declared — the same value the colour comes from, so the two cannot disagree — and a
+  guard fails if a level ever has a colour without a shape of its own: the worst news on the
+  device would draw as the mildest, with no error anywhere.
+
+### Added
+- **A map of how the fleet is wired together** (Infraestructura → Mapa, `GET /api/v1/infra/map`).
+  Built entirely out of what the ordinary cycle already recorded — the addresses each machine
+  claims, the network each one sits on, and the next hop it uses for what it cannot deliver
+  itself. Nothing asks a device anything: a map that cost a fresh conversation with forty
+  machines is a map somebody turns off.
+  It is careful about what it claims, because a picture of a network is read as a picture of
+  cables and this one is about addresses. A machine sitting in a network's lane is an
+  arrangement of addresses; an arrow to a gateway is a statement the device itself made; and
+  "which port is plugged into which port" is not on it at all — that is LLDP, which nothing in
+  this fleet serves yet. Two kinds of line, drawn differently, with the legend saying which is
+  which. Hand-written SVG: the page is self-contained, so there is no layout library — and a
+  lane per network cannot produce the hairball a force layout produces on a flat /24.
+- **A column can carry another one with it** (`"with": {"oid": …, "sep": "/", "as": "prefix"}`).
+  An address and its netmask are two columns of one table and one fact: as separate lines they
+  are arithmetic left to the reader, and as separate LISTS the pairing is gone altogether. So
+  `ipAdEntAddr` now reads "192.168.250.21/24", which is also what makes the map's arithmetic
+  possible. `as: "prefix"` is the only rendering the core knows, and it is IP arithmetic rather
+  than knowledge about any device — a mask that is not contiguous keeps its own text, because
+  a wrong number is worse than an ugly one.
+- **A profile can say WHICH ROWS of a table it means** (`"where": {"oid": …, "equals": …}`).
+  A routing table has one row per destination and the default gateway is the next hop OF ONE
+  of them — every other row's next hop answers a different question — so "the column" was the
+  wrong unit and there was no way to write "the column, filtered". An exact match and not a
+  pattern: what this selects on are protocol constants, and a regular expression would be a
+  way to write a filter that half-matches by accident.
+- **…and with it, the default gateway** (`sys_generic`): which way a machine gets off its own
+  network. A fact worth having on its own, and the first edge of the network map.
+- **A profile group for a Proxmox VE node** (`grp_proxmox`). A PVE node answers no MIB of its
+  own — Proxmox serves nothing over SNMP and its sysObjectID is net-snmp's, the same as every
+  other Debian — so this is `grp_linux` plus the three things a HYPERVISOR needs and a plain
+  server does not, and it is assigned BY HAND: a group claiming that prefix would claim most of
+  a fleet. Nothing about the detection changed; there is nothing to detect.
+- **The CPU counters that only mean something on a hypervisor** (in `ucd_linux`, so every Linux
+  gets them): time spent inside guests, time stolen from the host, time waiting on I/O and time
+  in soft interrupts, plus swap in/out and MemAvailable. None of them exists as one of the
+  percentage scalars net-snmp serves, so they come off the raw jiffy counters — as a rate in
+  cores, not as a percentage, because "250 %" of a twelve-core box is a bar the panel would
+  clamp to full and a number nobody can read.
+- **`ucd_disk`: how full each filesystem is, by the agent's own reckoning** — percentage, inode
+  percentage, and net-snmp's own "past the limit you set" flag. Percentages and not byte
+  counts on purpose: `dskTotal` is a 32-bit count of kibibytes and wraps in silence at 2 TiB,
+  which on a hypervisor is the storage pool. The bytes stay with HOST-RESOURCES, where every
+  row declares its own allocation unit.
+- **`ucd_extend`: what machine is underneath.** A plain Linux answers no vendor MIB at all —
+  sysDescr gives the kernel and nothing else — so the model, the manufacturer and the serial
+  come from the `extend` directives in snmpd.conf, the convention Observium and LibreNMS ask
+  for. Each subtree is read as a COLUMN rather than as one known row, because the row is
+  indexed by the name somebody chose, and a permission error is skipped rather than recorded
+  as the answer.
+- **"Obtener datos ahora" is a checklist, not a spinner with a name on it.** A five-minute run
+  showed one line reading `snmp · Ejecutando…` and nothing else, which is exactly as much as a
+  spinner says. Each line is now a thing being done, with its mark and its state, and under a
+  module that counts its own work the phases IT named, each with how far along it is
+  ("Leyendo las métricas 7/24, erebor — Synology discos"). Same visual language as the device
+  test's checklist: it is the same question asked of the same machine, and answering it two
+  ways is two things to learn instead of one. Modules read by their name now, not their id in
+  a `<code>` — a list of "ssl_cert, ram_swap, snmp" reads as a log line.
+- **A module's progress line is written in the language of whoever is WATCHING.** Its
+  sentences are resolved in the installation's notification language, which is right for a
+  message sent to a channel and wrong for a line on the screen of the person who just pressed
+  the button — reported as a Spanish dialog with "Reading the metrics" in it. The executor
+  installs the watcher's language beside the progress sink, for exactly as long as somebody is
+  watching, and the route reads it while there is still a request to read it from.
+- **A module can name its own phases** (`report_progress(detail, step=…, n=…, total=…)`).
+  Repeating a phase keeps its line and moves its counter, so twenty-four profiles are one line
+  reading 7/24 rather than twenty-four lines scrolling past. The words stay the module's: a
+  vocabulary of steps written in the core would fit whichever module was in front of whoever
+  wrote it and be a lie for the other twenty, so the panel draws what arrives and names none
+  of it. The SNMP module declares two — resolving the device's profiles, then reading them.
+- **A device records its own IP addresses.** `ipAddrTable` is RFC 1213 — every agent answers
+  it — and nothing asked for it, so the panel showed the address somebody typed into the
+  registry and never what the machine says it is reachable on. Declared in `sys_generic`,
+  beside the name and the location, which is where "what is this box" already lives.
+- **A profile can say that a table describes the BOX, not the things inside it**
+  (`"of_device": true`). Almost every walk is a list of parts — disks, interfaces, volumes —
+  and a fact belongs to its row. The address table is not that shape: its rows are the
+  addresses of ONE machine, and one row each files the answer to "what is this box on the
+  network" in five rows that nothing opens, collected every cycle and visible nowhere. Such a
+  table folds into one fact about the device, in the order the agent walked it, without
+  repeats.
+- **…and which readings are not answers** (`"skip": "<regex>"`). A column answers for every
+  row it has, including the ones that tell nobody anything: `ipAddrTable` lists the loopback
+  beside the address the machine is actually reachable on, and "127.0.0.1, 192.168.1.10"
+  leads with the one nobody asked about. The pattern is the profile's — the core has no
+  opinion about what 127 means, and the next profile will want to drop "N/A" instead. One
+  that does not compile is NO filter rather than a filter that drops everything.
+
+### Fixed
+- **Four machines were writing their progress into one line.** This module samples its devices
+  in a thread pool — they have always run in parallel — and a phase was identified by its words
+  alone, so every device in flight overwrote the same counter: it jumped backwards while the
+  run went on and froze at whatever the last thread left, so a finished collection showed a
+  green tick beside "3/24" of a device nobody had asked about. A report now says WHICH THING it
+  is about (`report_progress(..., scope=…)`) and each gets a line of its own. The list is
+  bounded the way it has to be for a fleet of forty: over the cap, a line that has ENDED makes
+  way, oldest first.
+- **…and a finished phase drops its counter.** It measured progress and progress is over; a
+  number left behind beside a tick means nothing and reads as a run that lost its place.
+- **The bar no longer says 100 % over the words "one module is still working".** A module that
+  overran had not said how it ended, and was counted as finished anyway so the bar would not
+  stop short. It stopping short is not a problem now that the run waits for the straggler and
+  the line turns into a tick by itself — and when the panel does give up, a bar that never
+  reached the end is the honest picture.
+- **The dialog says what a collection actually runs.** A module runs with its whole
+  configuration, so pressing "collect now" on one NAS walks every device that module watches.
+  The title named the machine that was asked for while the checklist named a different one,
+  which reads as the panel having lost track of which device it is on. It now says so in a
+  line, and the profile name in the phase note is the short one — "Synology — SMART attributes
+  (SYNOLOGY-SMART-MIB)" is a MIB filename in a space that has room for a few words.
+- **A collection no longer announces an ending it has to take back.** A module that overran
+  the batch deadline has NOT finished — it is still walking the device and writes its own
+  state and history when it lands — and the run declared itself done at that moment anyway,
+  with a warning saying some modules were still working. On the fleet this was written for
+  that was every collection of a NAS. The job now stays open until the straggler reports (the
+  executor tells it, which nothing did before: it landed, wrote its data and said nothing to
+  the screen), and only if it is still out after the grace period does the panel stop waiting
+  — which is the one case where "it carries on in the background" is a true thing to say.
+  The check lock is released the moment the batch returns, so the wait is the screen's and
+  never the panel's.
+- **No SNMP counter had ever produced a value.** A NAS with twenty-four profiles answered a
+  thousand readings and not one figure of traffic: no interface octets, packets, errors or
+  discards, no IP/TCP/UDP/ICMP counters, no disk or volume I/O. It reads as an incomplete
+  profile, and the profiles declared every one of them. The tell was the cut — across five
+  unrelated MIBs every `gauge` arrived and every `counter` was missing.
+  A rate is the difference between two readings, so the sampler kept the previous reading
+  under the check's key, in `self.status` — which LOOKS free-form (`set_conf` takes any path
+  and returns True) and is not: what survives a cycle is what the `check_state` table has a
+  column for, because `status.read()` rebuilds every entry from those columns at the top of
+  each cycle. `snmp_prev` was not one of them, so every sample was the first sample. No error
+  at either end.
+  The table gains a `module_state` column (JSON) — a module's own working state, not a result
+  and never shown — declared LAST so an existing install gains it with `ADD COLUMN` rather
+  than a rebuild, and `set()` carries it forward so a seed cannot erase a baseline. The test
+  that would have caught this is not the one proving the column works: it is the one that runs
+  two cycles and demands a rate from the second.
+- **...and a run launched from the panel starts from what is stored.** Saving is
+  `persist_status(status.data)`, which REPLACES the table — so a forced collection wrote back
+  whatever snapshot that process happened to hold, which in a split deployment is the web
+  process and not the one that has been writing. It is also where a counter's baseline is: a
+  run that never read it starts from nothing every time.
+- **Documented, not fixed in code: Nginx Proxy Manager's *Cache Assets* must be off.** With it
+  on, every static request carrying the panel's version stamp (`?v=<mtime>`) comes back 502
+  while the same URL without the query appears to work — which is the proxy's own cache serving
+  an old copy, so the only requests that actually reach the application are the ones that fail.
+  It reads as a broken panel: the stylesheet and the images fail together, and nothing inside
+  the application connects those two. The option buys nothing here, because the panel already
+  versions its own assets. `docs/caso-despliegue.md` says so in the NPM steps now, with
+  `/api/v1/health` as the way to tell a dead application from a proxy that is in the way.
+
+---
+
 ## [0.0.1+build.113] - 2026-08-23
 
 ### Changed

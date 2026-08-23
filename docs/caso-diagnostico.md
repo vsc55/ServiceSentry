@@ -19,6 +19,62 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Ningún contador SNMP tuvo nunca un valor
+
+**Fecha:** 2026-08-23 · **Área:** `lib/services/monitoring/check_state/store.py`, `watchfuls/snmp/sampler.py`
+
+**Síntoma.** «En información de red no hay datos.» Un NAS con veinticuatro perfiles asignados
+contestaba mil valores, y entre ellos no había una sola cifra de tráfico: ni octetos, ni
+paquetes, ni errores, ni descartes por interfaz. Tampoco los contadores IP, TCP/UDP e ICMP, ni
+la E/S de discos y volúmenes. Parecía un perfil incompleto — «a la plantilla de Synology le
+falta algo».
+
+**Diagnóstico.** El perfil declaraba los contadores: `if_in`, `if_out`, `if_hc_in`… todos con su
+OID. La pista fue mirar qué llegaba **por tipo** en lugar de por perfil:
+
+```text
+if_generic       → if_oper, if_admin, if_speed, if_mtu     (4 gauges de 16 métricas)
+tcp_udp_stats    → tcp_estab                               (el único gauge de 14)
+synology_storageio → syno_io_util + latencias              (los gauges; ninguna E/S)
+ucd_linux        → 13 valores, ninguno de los 2 counters
+```
+
+Cinco perfiles distintos, cinco MIB distintas, y el corte exacto en todos: **todo `gauge`
+presente, todo `counter` ausente**. Eso no es un dispositivo, es una rama de código.
+
+Una tasa necesita la lectura anterior, así que `sample()` devuelve `None` en la primera muestra
+y guarda la lectura como línea base. El muestreador la escribía con
+`status.set_conf([módulo, clave, 'snmp_prev'], …)` y la buscaba en el ciclo siguiente. Nunca
+estaba.
+
+**Causa raíz.** `self.status` **parece** un diccionario libre: `set_conf` acepta cualquier ruta,
+crea lo que falte y devuelve `True`. No lo es. Lo que sobrevive es lo que la tabla `check_state`
+tiene como **columna**, porque `status.read()`, al principio de cada ciclo, reconstruye cada
+entrada desde `as_status_dict()` — nueve nombres fijos. `snmp_prev` no era uno de ellos: se
+escribía en memoria y `read()` lo tiraba unos segundos después. Cada muestra era la primera
+muestra. Ni una excepción, ni un aviso, ni una línea de log en ninguno de los dos extremos.
+
+**Solución.** Una columna `module_state` (JSON) al **final** del esquema —una columna que falta
+solo se añade con `ADD COLUMN` mientras todas las anteriores ya estén—, transportada por
+`as_status_dict()` y `persist_status()`, y preservada por `set()` para que una siembra no borre
+una línea base. El muestreador escribe bajo ella. Y como guardar es reemplazar la tabla entera,
+una ejecución lanzada desde el panel ahora relee el estado antes de correr, en vez de escribir
+encima de todo con la foto que ese proceso tuviera.
+
+El test que lo habría cazado no es el que comprueba que la columna funciona: es el que simula
+**dos ciclos** y exige que el segundo dé una tasa.
+
+**Lección.** Un almacén con forma de diccionario y esquema de tabla miente en la parte que no se
+ve: el error no aparece al escribir —`set_conf` dijo que sí— sino en la **siguiente lectura**, y
+para entonces no hay nada que relacionar con nada. Cuando una capa persistente reconstruye desde
+una lista de nombres, esa lista es una whitelist, y una whitelist que no crece descarta en
+silencio (es el tercer caso de la misma forma en este repositorio; ver
+`test_history_field_meta_survives.py`). La señal que lo delató no fue un error sino un **corte
+limpio por categoría**: cuando falta justo una clase entera de datos en varios sitios sin
+relación, el sospechoso no es ninguno de esos sitios, es lo único que comparten.
+
+---
+
 ## Un formulario que se dibujaba perfecto en una página que no lo pedía
 
 **Fecha:** 2026-08-22 · **Área:** `lib/web_admin/templates/partials/servers/_save.html::_renderProfileFields`

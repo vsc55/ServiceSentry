@@ -31,29 +31,42 @@ class _WA:
         self._check_lock = threading.Lock()
         self._embedded_services = {}
         self.audited = []
+        self.lang_seen = []
         self._behaviour = behaviour or (lambda mods, cb: ({m: {} for m in mods}, []))
         self._timeout_seen = timeout_seen if timeout_seen is not None else []
 
-    def _run_checks(self, mods, *, timeout, progress_cb):
+    def _run_checks(self, mods, *, timeout, progress_cb, lang=''):
         self._timeout_seen.append(timeout)
+        self.lang_seen.append(lang)
         return self._behaviour(mods, progress_cb)
 
     def _audit_write(self, event, user, ip, detail):
         self.audited.append({'event': event, 'user': user, 'ip': ip, 'detail': detail})
 
 
-def _finish(wa, uid='u1', name='erebor', modules=('ping',), actor='javier', ip='10.0.0.2',
-            wait=5.0):
-    """Start a job with the lock held (as the route does) and wait for it to end."""
+def _start(wa, uid='u1', name='erebor', modules=('ping',), actor='javier', ip='10.0.0.2',
+           lang='es_ES'):
+    """Start a job with the lock held, exactly as the route does."""
     assert wa._check_lock.acquire(blocking=False)
-    job_id = jobs.start_collect(wa, uid, name, list(modules), actor=actor, ip=ip)
+    return jobs.start_collect(wa, uid, name, list(modules), actor=actor, ip=ip, lang=lang)
+
+
+def _until(job_id, cond, wait=5.0):
+    """The job once *cond* holds. Polled, because the work is on a thread of its own."""
     deadline = time.time() + wait
     while time.time() < deadline:
         job = jobs.job_status(job_id)
-        if job and job['done']:
-            return job_id, job
+        if job and cond(job):
+            return job
         time.sleep(0.02)
-    raise AssertionError('the job never finished')
+    raise AssertionError(f'never happened: {jobs.job_status(job_id)}')
+
+
+def _finish(wa, uid='u1', name='erebor', modules=('ping',), actor='javier', ip='10.0.0.2',
+            wait=5.0):
+    """Start a job and wait for it to end."""
+    job_id = _start(wa, uid, name, modules, actor, ip)
+    return job_id, _until(job_id, lambda j: j['done'], wait=wait)
 
 
 class TestItReportsWhileItRuns:
@@ -115,15 +128,197 @@ class TestItReportsWhileItRuns:
         _job_id, job = _finish(_WA(behaviour=stray), modules=('ping',))
         assert [m['module'] for m in job['modules']] == ['ping']
 
-    def test_a_timeout_counts_towards_the_bar(self):
-        """The module is still running, but the bar must not stop at 90 % forever — which is
-        exactly what the fleet this was written for would do."""
+    def test_a_timeout_does_not_count_as_finished(self):
+        """Reported from the screen: "100 %" over the words "one module is still working" —
+        the same box contradicting itself in one glance. A module that overran has not said
+        how it ended, so it is not counted; the bar reaches the end when the run does."""
+        jid = _start(_WA(behaviour=_late), modules=('snmp',))
+        job = _until(jid, lambda j: j['modules'][0]['state'] == 'timeout')
+        assert job['completed'] == 0
+
+    def test_the_watchers_language_is_carried_to_the_module(self):
+        """The words a module writes into the checklist are read by the person who pressed the
+        button. A worker thread has no session to ask, so the route reads it while there is
+        still a request and it travels with the job — otherwise the module answers in the
+        installation's NOTIFICATION language, which is how a Spanish dialog came to say
+        "Reading the metrics"."""
+        wa = _WA()
+        _jid, _job = _finish(wa, modules=('snmp',))
+        assert wa.lang_seen == ['es_ES']
+
+    def test_a_module_reports_the_phases_it_names_for_itself(self):
+        """The core names no steps: what arrives is drawn, in the order it arrives. A phase
+        is identified by its WORDS, so reporting the same one again moves its counter instead
+        of adding a line — twenty-four profiles are one line reading 7/24, not twenty-four."""
+        def phased(mods, cb):
+            cb('running', mods[0], 'nas', {'step': 'Resolviendo', 'n': 0, 'total': 0})
+            cb('running', mods[0], 'nas — discos', {'step': 'Leyendo', 'n': 1, 'total': 24})
+            cb('running', mods[0], 'nas — sistema', {'step': 'Leyendo', 'n': 7, 'total': 24})
+            cb('ok', mods[0], '900')
+            return {m: {} for m in mods}, []
+
+        _jid, job = _finish(_WA(behaviour=phased), modules=('snmp',))
+        steps = job['modules'][0]['steps']
+        assert [x['key'] for x in steps] == ['Resolviendo', 'Leyendo'], steps
+        assert steps[1]['note'] == 'nas — sistema'
+        assert [x['state'] for x in steps] == ['done', 'done'], (
+            'a phase left running under a module that finished is a spinner that never stops')
+        assert (steps[1]['n'], steps[1]['total']) == (0, 0), (
+            'a finished phase kept its counter — "3/24" beside a green tick is a number that '
+            'means nothing, and it is what a run looks like when it lost its place')
+
+    def test_two_things_at_once_get_a_line_each(self):
+        """The bug this exists for. A module that works on several machines in a pool was
+        writing all their progress into one line, because the line was identified by the
+        phase alone: the counter jumped between machines and froze at whatever the last
+        thread wrote. Reported as a finished run showing "3/24" of a device nobody asked
+        about."""
+        def pooled(mods, cb):
+            cb('running', mods[0], 'sistema', {'step': 'Leyendo', 'scope': 'isen',
+                                               'n': 3, 'total': 24})
+            cb('running', mods[0], 'discos', {'step': 'Leyendo', 'scope': 'erebor',
+                                              'n': 7, 'total': 24})
+            cb('running', mods[0], 'SMART', {'step': 'Leyendo', 'scope': 'isen',
+                                             'n': 4, 'total': 24})
+            return {m: {} for m in mods}, []
+
+        _jid, job = _finish(_WA(behaviour=pooled), modules=('snmp',))
+        steps = job['modules'][0]['steps']
+        assert [(x['scope'], x['note']) for x in steps] == [
+            ('isen', 'SMART'), ('erebor', 'discos')], steps
+
+    def test_a_phase_ending_does_not_close_another_machines(self):
+        """Each machine's phases follow each other; another machine's line is none of their
+        business, and closing it would tick a device that is still working."""
+        def pooled(mods, cb):
+            cb('running', mods[0], '', {'step': 'Resolviendo', 'scope': 'isen'})
+            cb('running', mods[0], '', {'step': 'Resolviendo', 'scope': 'erebor'})
+            cb('running', mods[0], '', {'step': 'Leyendo', 'scope': 'isen', 'n': 1, 'total': 9})
+            return {m: {} for m in mods}, []
+
+        jid = _start(_WA(behaviour=pooled), modules=('snmp',))
+        job = _until(jid, lambda j: len(j['modules'][0].get('steps') or []) == 3)
+        by = {(x['scope'], x['key']): x['state'] for x in job['modules'][0]['steps']}
+        assert by[('isen', 'Resolviendo')] == 'done'
+        assert by[('erebor', 'Resolviendo')] == 'run', 'the other machine was ticked off'
+
+    def test_room_is_made_by_forgetting_something_that_ended(self):
+        """A fleet of forty machines must not grow the polled answer without bound. The list
+        is a window on what is happening now — so a finished line makes way, oldest first, and
+        the module's own row still carries the summary."""
+        def fleet(mods, cb):
+            for i in range(jobs._MAX_STEPS + 5):
+                cb('running', mods[0], '', {'step': 'Leyendo', 'scope': f'nas{i}',
+                                            'n': 1, 'total': 2})
+                cb('running', mods[0], '', {'step': 'Hecho', 'scope': f'nas{i}'})
+            return {m: {} for m in mods}, []
+
+        _jid, job = _finish(_WA(behaviour=fleet), modules=('snmp',))
+        steps = job['modules'][0]['steps']
+        assert len(steps) <= jobs._MAX_STEPS
+        assert steps[-1]['scope'] == f'nas{jobs._MAX_STEPS + 4}', steps[-1]
+
+    def test_a_phase_of_a_module_that_failed_reads_as_failed(self):
+        def broke(mods, cb):
+            cb('running', mods[0], '', {'step': 'Leyendo', 'n': 1, 'total': 9})
+            cb('error', mods[0], 'no route to host')
+            return {}, ['snmp: no route to host']
+
+        _jid, job = _finish(_WA(behaviour=broke), modules=('snmp',))
+        assert job['modules'][0]['steps'][0]['state'] == 'fail'
+
+    def test_a_module_naming_a_phase_per_item_cannot_grow_the_payload(self):
+        """A checklist is a handful of lines. A module reporting a new phase per row would
+        make the polled answer grow all run, so past the cap the last line keeps moving."""
+        def chatty(mods, cb):
+            for i in range(40):
+                cb('running', mods[0], '', {'step': f'paso {i}', 'n': i, 'total': 40})
+            cb('ok', mods[0], '1')
+            return {m: {} for m in mods}, []
+
+        _jid, job = _finish(_WA(behaviour=chatty), modules=('snmp',))
+        steps = job['modules'][0]['steps']
+        assert len(steps) == jobs._MAX_STEPS
+        assert steps[-1]['key'] == 'paso 39', 'the last line stopped following the module'
+
+    def test_a_report_with_no_phase_is_still_a_sentence(self):
+        """Most modules take a second and say nothing about phases. Their line is the module,
+        and the sentence they do send belongs on it."""
+        def plain(mods, cb):
+            cb('running', mods[0], 'pinging 4 hosts')
+            cb('ok', mods[0], '4')
+            return {m: {} for m in mods}, []
+
+        _jid, job = _finish(_WA(behaviour=plain), modules=('ping',))
+        assert job['modules'][0].get('steps') in (None, [])
+
+
+def _late(mods, cb):
+    """A module that overran the batch deadline: the executor says so and returns."""
+    cb('timeout', mods[0], '120')
+    return {}, [f'{mods[0]}: timeout after 120s']
+
+
+class TestARunIsOverWhenItIsOver:
+    """A module that outlives the deadline has NOT finished.
+
+    It is still walking the device and writes its own state and history when it lands. The job
+    used to call itself done at that moment anyway and warn that "some modules are still
+    working" — a screen announcing an ending it then has to take back, reported exactly that
+    way from the panel. So it waits, and says which of the two things is true.
+    """
+
+    def test_it_does_not_call_itself_finished(self):
+        jid = _start(_WA(behaviour=_late), modules=('snmp',))
+        job = _until(jid, lambda j: j['modules'][0]['state'] == 'timeout')
+        assert not job['done'] and job['awaiting']
+
+    def test_the_straggler_landing_is_what_ends_it(self):
+        """The executor calls the same progress channel again when the module returns —
+        minutes after the batch did — and that is the only moment anything knows."""
+        seen = {}
+
         def late(mods, cb):
+            seen['cb'] = cb
             cb('timeout', mods[0], '120')
             return {}, [f'{mods[0]}: timeout after 120s']
 
-        _job_id, job = _finish(_WA(behaviour=late), modules=('snmp',))
-        assert job['completed'] == 1 and job['modules'][0]['state'] == 'timeout'
+        jid = _start(_WA(behaviour=late), modules=('snmp',))
+        _until(jid, lambda j: j['awaiting'])
+        seen['cb']('ok', 'snmp', '900')
+        job = _until(jid, lambda j: j['done'])
+        assert job['modules'][0]['state'] == 'ok' and not job['gave_up']
+
+    def test_the_lock_is_released_while_it_waits(self):
+        """The wait is the SCREEN's, not the panel's. Holding the check lock for twenty
+        minutes because one module overran would stop the scheduler's own cycle."""
+        wa = _WA(behaviour=_late)
+        jid = _start(wa, modules=('snmp',))
+        _until(jid, lambda j: j['awaiting'])
+        assert wa._check_lock.acquire(blocking=False), 'the panel is locked out'
+        wa._check_lock.release()
+
+    def test_it_gives_up_eventually_and_says_so(self):
+        """A module that never returns must not leave a bar spinning for ever. When the panel
+        stops waiting, "it carries on in the background" is finally a true thing to say."""
+        grace = jobs._LATE_GRACE
+        jobs._LATE_GRACE = 0.15
+        try:
+            jid = _start(_WA(behaviour=_late), modules=('snmp',))
+            job = _until(jid, lambda j: j['done'], wait=5.0)
+        finally:
+            jobs._LATE_GRACE = grace
+        assert job['gave_up'] and job['modules'][0]['state'] == 'timeout'
+        assert not job['awaiting']
+
+    def test_a_run_that_broke_does_not_wait_for_anybody(self):
+        """The executor itself raised: there is no straggler, only a job that has to end."""
+        def boom(_mods, cb):
+            cb('timeout', 'snmp', '120')
+            raise RuntimeError('the executor exploded')
+
+        _jid, job = _finish(_WA(behaviour=boom), modules=('snmp',))
+        assert job['done'] and job['error'] and not job['awaiting']
 
 
 class TestItAlwaysEnds:

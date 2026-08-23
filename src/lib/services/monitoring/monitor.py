@@ -708,7 +708,8 @@ class Monitor(ObjectBase):
             del mod_status[k]
         return bool(orphans)
 
-    def report_progress(self, module_name: str, detail: str) -> None:
+    def report_progress(self, module_name: str, detail: str, *, step: str = '',
+                        scope: str = '', n: int = 0, total: int = 0) -> None:
         """Say what *module_name* is doing right now, if anyone is listening.
 
         A module is a black box between "started" and "returned", and for most of them that
@@ -721,13 +722,17 @@ class Monitor(ObjectBase):
         The sink is installed by whoever is watching (the executor, from its ``progress_cb``)
         and is absent the rest of the time, so a scheduler cycle pays nothing for this. The
         detail is free text from the module — it knows what it is doing and the core does
-        not — and it is shown, never parsed.
+        not — and it is shown, never parsed. So is *step*, the phase that detail belongs to:
+        the module names its own phases and this passes them along, because a list of steps
+        written here would be one module's list wearing everybody else's name.
         """
         cb = getattr(self, '_progress_sink', None)
         if cb is None:
             return
         try:
-            cb('running', module_name, str(detail or ''))
+            cb('running', module_name, str(detail or ''),
+               {'step': str(step or ''), 'scope': str(scope or ''),
+                'n': int(n or 0), 'total': int(total or 0)})
         except Exception:  # pylint: disable=broad-except
             pass           # a progress display must never be able to fail a check
 

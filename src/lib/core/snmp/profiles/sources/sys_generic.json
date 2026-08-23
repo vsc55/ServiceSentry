@@ -44,6 +44,32 @@
             }
         },
         {
+            "key": "ip_address",
+            "walk": "1.3.6.1.2.1.4.20.1.1",
+            "with": {"oid": "1.3.6.1.2.1.4.20.1.3", "sep": "/", "as": "prefix"},
+            "kind": "text",
+            "role": "ip",
+            "of_device": true,
+            "skip": "^127[.]|^0[.]0[.]0[.]0$",
+            "label": {
+                "en_EN": "IP addresses",
+                "es_ES": "Direcciones IP"
+            }
+        },
+        {
+            "key": "ip_gateway",
+            "walk": "1.3.6.1.2.1.4.21.1.7",
+            "where": {"oid": "1.3.6.1.2.1.4.21.1.1", "equals": "0.0.0.0"},
+            "kind": "text",
+            "role": "gateway",
+            "of_device": true,
+            "skip": "^0[.]0[.]0[.]0$",
+            "label": {
+                "en_EN": "Default gateway",
+                "es_ES": "Pasarela por defecto"
+            }
+        },
+        {
             "key": "sys_location",
             "oid": "1.3.6.1.2.1.1.6.0",
             "kind": "text",

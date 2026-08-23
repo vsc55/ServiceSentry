@@ -59,10 +59,16 @@ class TestWhatShips:
 
     def test_the_generic_one_needs_no_vendor(self):
         """`sys_generic` is MIB-II: every agent answers it. It is what makes a device
-        measurable before anybody has chosen a profile for it."""
+        measurable before anybody has chosen a profile for it.
+
+        What that means is the OID tree, not the shape of the read. This asserted that every
+        metric was a scalar, which was true and was never the point — the address table is
+        MIB-II too, and as much a part of "what is this box" as its name is."""
         sysg = profiles.catalog()['sys_generic']
         assert [m['key'] for m in sysg['metrics']][:1] == ['sys_name']
-        assert all('walk' not in m for m in sysg['metrics'])
+        for m in sysg['metrics']:
+            oid = m.get('oid') or m.get('walk')
+            assert oid.startswith('1.3.6.1.2.1.'), f"{m['key']} is not MIB-II: {oid}"
 
     def test_the_interface_profile_prefers_the_64_bit_counters(self):
         """A 32-bit octet counter wraps in about 34 seconds on a gigabit link. Both are
@@ -125,10 +131,13 @@ class TestTwoNamelessTablesAreNotOneTable:
 
     def test_every_shipped_nameless_table_declares_one(self):
         """The one that does not is the one that will merge with another, silently, on the
-        first device that serves both."""
+        first device that serves both.
+
+        An `of_device` table is exempt because it has no rows to collide: its readings fold
+        into one fact about the machine before anything is filed under an index."""
         for prof in profiles.catalog().values():
             for m in prof['metrics']:
-                if 'walk' in m and not m.get('index_label'):
+                if 'walk' in m and not m.get('index_label') and not m.get('of_device'):
                     assert m.get('group'), f"{prof['id']}.{m['key']} can collide"
 
 
@@ -724,6 +733,147 @@ class TestTheHandfulSomebodyWantsFirst:
         assert flagged['hr_storage'] == {'fs_used': 'used', 'fs_size': 'total'}, (
             'the stores stopped being a proportion')
 
+    def test_a_profile_can_say_which_rows_of_a_table_it_means(self):
+        """A routing table has one row per destination and the default gateway is the next hop
+        OF ONE of them. Every other row\'s next hop answers a different question, so "the
+        column" is the wrong unit and there was no way to say "the column, filtered"."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'text',
+             'where': {'oid': '1.2.4', 'equals': '0.0.0.0'}}]))['metrics']
+        assert m[0]['where'] == {'oid': '1.2.4', 'equals': '0.0.0.0'}
+
+    def test_a_filter_that_cannot_select_anything_is_dropped(self):
+        """No column, or nothing to match, is not a filter — and a filter that matched nothing
+        would silently empty the metric, which reads as a device that stopped answering."""
+        for bad in ({'oid': '1.2.4'}, {'equals': '0.0.0.0'}, {'oid': 'nope', 'equals': 'x'},
+                    {'oid': '1.2.4', 'equals': ''}, 'nonsense', None):
+            m = profiles.normalise(_profile(metrics=[
+                {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'where': bad}]))['metrics']
+            assert 'where' not in m[0], bad
+
+    def test_the_filter_actually_filters(self):
+        """Against the real reader, because the declaration is worth nothing if the walk
+        ignores it — and what "ignores it" looks like is every route in the table filed under
+        the word "gateway"."""
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        table = {'1': '192.168.1.254', '2': '10.0.0.1', '3': '172.16.0.1'}
+        dest = {'1': '0.0.0.0', '2': '10.0.0.0', '4': '0.0.0.0'}
+        walked = {'1.3.6.1.2.1.4.21.1.7': table, '1.3.6.1.2.1.4.21.1.1': dest}
+        rows, err = snmp_sampler.read_metric(
+            {'key': 'gw', 'kind': 'text', 'walk': '1.3.6.1.2.1.4.21.1.7',
+             'where': {'oid': '1.3.6.1.2.1.4.21.1.1', 'equals': '0.0.0.0'}},
+            {}, None, lambda oid, **_kw: (walked.get(oid, {}), None), {})
+        assert not err
+        assert [r['raw'] for r in rows] == ['192.168.1.254'], rows
+
+    def test_a_row_the_filter_column_says_nothing_about_is_dropped(self):
+        """"The rows whose destination is 0.0.0.0" does not include the ones with no
+        destination. Keeping them is how a filter ends up meaning "nearly everything"."""
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        walked = {'1.1': {'1': 'a', '2': 'b'}, '1.2': {'1': 'keep'}}
+        rows, _err = snmp_sampler.read_metric(
+            {'key': 'x', 'kind': 'text', 'walk': '1.1',
+             'where': {'oid': '1.2', 'equals': 'keep'}},
+            {}, None, lambda oid, **_kw: (walked.get(oid, {}), None), {})
+        assert [r['raw'] for r in rows] == ['a']
+
+    def test_the_default_gateway_is_asked_for(self):
+        """The first edge of a map that does not exist yet, and a fact worth having on its
+        own: which way this machine gets off its own network."""
+        m = [x for x in profiles.catalog()['sys_generic']['metrics']
+             if x['key'] == 'ip_gateway']
+        assert m, 'nothing asks the device where it sends what it cannot deliver'
+        assert m[0]['walk'] == '1.3.6.1.2.1.4.21.1.7'
+        assert m[0]['where'] == {'oid': '1.3.6.1.2.1.4.21.1.1', 'equals': '0.0.0.0'}
+        assert m[0]['role'] == 'gateway' and m[0]['of_device'] is True
+
+    def test_the_proxmox_group_cannot_be_detected_and_says_so(self):
+        """A PVE node answers no MIB of its own — PVE serves nothing over SNMP and its
+        sysObjectID is net-snmp's, the same as every other Debian. A group that claimed that
+        prefix would claim most of a fleet, so this one is assigned by hand."""
+        cat = profiles.catalog()
+        grp = cat['grp_proxmox']
+        assert not (grp.get('match') or {}).get('sysobjectid_prefix'), (
+            'grp_proxmox claims a vendor prefix — it would swallow every net-snmp Linux')
+        got = profiles.expand(cat, ['grp_proxmox'])
+        assert set(profiles.expand(cat, ['grp_linux'])) <= set(got), 'it is not Linux plus more'
+        assert {'ucd_disk', 'ucd_extend'} <= set(got)
+
+    def test_a_hypervisor_measures_the_cpu_its_guests_are_using(self):
+        """The one number a node has that a plain server does not, and the one beside it that
+        says the node itself is being starved. Neither is in the percentage scalars net-snmp
+        serves, so both come off the raw jiffy counters."""
+        f = profiles.history_fields(profiles.catalog()['ucd_linux'], 'en_EN')
+        assert 'cpu_guest' in f and 'cpu_steal' in f
+        m = {x['key']: x for x in profiles.catalog()['ucd_linux']['metrics']}
+        for key in ('cpu_guest', 'cpu_steal', 'cpu_wait'):
+            assert m[key]['kind'] == 'counter', f'{key} is not a rate'
+            assert m[key]['scale'] == 0.01 and m[key]['unit'] != '%', (
+                f'{key} is drawn as a percentage — it goes past 100 on any machine with more '
+                'than one core, and the panel would clamp its bar to full and say nothing')
+
+    def test_the_filesystem_profile_does_not_report_bytes(self):
+        """`dskTotal` is a 32-bit count of kibibytes: it wraps in silence at 2 TiB, which on a
+        hypervisor is the storage pool. Percentages are right at any size, and the byte counts
+        come from HOST-RESOURCES, where every row declares its own allocation unit."""
+        m = profiles.catalog()['ucd_disk']['metrics']
+        assert all(x['unit'] != 'B' for x in m), [x['key'] for x in m if x['unit'] == 'B']
+        assert {'dsk_percent', 'dsk_error'} <= {x['key'] for x in m}
+
+    def test_the_extends_are_read_as_columns_and_not_as_known_rows(self):
+        """Each `extend` is indexed by the NAME somebody gave it in snmpd.conf, encoded into
+        the OID. Reading a row means hard-coding that spelling; reading the column means the
+        value arrives whatever it was called."""
+        m = {x['key']: x for x in profiles.catalog()['ucd_extend']['metrics']}
+        assert m, 'no extends declared'
+        for key, x in m.items():
+            assert 'walk' in x and x.get('of_device') is True, key
+            import re as _re                                   # noqa: PLC0415
+            assert _re.search(x['skip'], 'cat: /x: Permission denied'), (
+                f'{key} would record a permission error as the answer')
+
+    def test_a_table_can_say_it_describes_the_box(self):
+        """`ipAddrTable` is not a list of parts. Its rows are one machine's addresses, and a
+        row each files the answer to "what is this box on the network" where nothing opens
+        it. Only for a `text` walk: a number folded into a list is a string that used to be
+        a measurement."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'of_device': True},
+            {'key': 'b', 'oid': '1.2.4', 'kind': 'text', 'of_device': True},
+            {'key': 'c', 'walk': '1.2.5', 'kind': 'gauge', 'of_device': True},
+            {'key': 'd', 'walk': '1.2.6', 'kind': 'text'}]))['metrics']
+        assert [x.get('of_device') for x in m] == [True, None, None, None]
+
+    def test_a_profile_can_say_which_readings_are_not_answers(self):
+        """A column answers for every row it has, including the loopback. Whose pattern it is
+        matters: the core has no opinion about what 127 means."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'skip': '^127[.]'}]))['metrics']
+        assert m[0]['skip'] == '^127[.]'
+
+    def test_a_pattern_that_does_not_compile_is_no_filter(self):
+        """And not a filter that drops everything: a fact that vanishes for a reason nobody
+        can see is worse than one with noise in it."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'skip': '^(('}]))['metrics']
+        assert 'skip' not in m[0]
+
+    def test_the_addresses_are_asked_for_where_identity_lives(self):
+        f = profiles.catalog()['sys_generic']
+        m = [x for x in f['metrics'] if x['key'] == 'ip_address']
+        assert m and m[0]['of_device'] is True and m[0]['role'] == 'ip'
+        assert m[0]['walk'] == '1.3.6.1.2.1.4.20.1.1', 'that is not ipAdEntAddr'
+
+    def test_a_disk_says_how_it_is_and_how_hot_it_is(self):
+        """Heat is the half of a disk's condition that moves. `diskHealthStatus` says "Normal"
+        until the day it does not, while a drive climbing through the fifties is the same drive
+        weeks earlier — and the card is where somebody looks before there is anything to look
+        for. Both are flagged, so the card carries the badge and the degrees together."""
+        f = profiles.history_fields(profiles.catalog()['synology_disks'], 'en_EN')
+        assert {k for k, v in f.items() if v.get('headline')} == {
+            'syno_disk_health', 'syno_disk_temp'}
+        assert f['syno_disk_temp']['unit'] == '°C', 'degrees, not a bare number'
+
     def test_a_table_can_say_which_rows_the_summary_is_about(self):
         """Reported from the screen: a NAS running containers reports physical memory, swap,
         the buffers — and then forty bind mounts of the same volume, so Details came out as
@@ -773,6 +923,49 @@ class TestTheHandfulSomebodyWantsFirst:
         f = profiles.history_fields(profiles.catalog()['synology_raid'], 'en_EN')
         assert {k: v['headline'] for k, v in f.items() if v.get('headline')} == {
             'syno_raid_free': 'free', 'syno_raid_total': 'total'}
+
+    def test_a_value_can_belong_beside_a_fact(self):
+        """"Is there an update" is not a measurement anybody charts — it is a statement about
+        the firmware version, and it reads as a badge next to it rather than as a second entry
+        saying almost the same words. Which fact it annotates is the profile's to know: the
+        core names roles, it does not know that DSM has updates."""
+        p = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'oid': '1.2.3', 'kind': 'gauge', 'identity': 'firmware'},
+            {'key': 'b', 'oid': '1.2.4', 'kind': 'gauge', 'identity': True},
+            {'key': 'c', 'oid': '1.2.5', 'kind': 'gauge', 'identity': '  NOT A ROLE '},
+            {'key': 'd', 'oid': '1.2.6', 'kind': 'gauge'}]))['metrics']
+        assert [m.get('identity') for m in p] == ['firmware', True, True, None], (
+            'an unusable role should still be a line of its own, not a value that vanishes')
+
+    def test_the_update_is_about_the_firmware(self):
+        f = profiles.history_fields(profiles.catalog()['synology_system'], 'en_EN')
+        assert f['syno_upgrade']['identity'] == 'firmware'
+        assert not f['syno_upgrade']['headline'], 'and it is off the summary'
+
+    def test_a_state_that_annotates_a_fact_reads_on_its_own(self):
+        """It is drawn as a badge NEXT TO the value it qualifies, so it has to be a sentence
+        about that value and not an answer to the field's name.
+
+        Reported from the screen: "Firmware / DSM 7.3-86009 · No disponible". The words were
+        right for a field called "Update available" — unavailable meaning no update — and
+        beside a version number they say the firmware is unavailable. A bare yes/no is always
+        wrong here, because the question it answers is not on screen.
+        """
+        bare = {'sí', 'si', 'no', 'yes', 'disponible', 'no disponible',
+                'available', 'unavailable', 'true', 'false', 'ok', 'ko'}
+        bad = []
+        cat = profiles.catalog()
+        for pid, prof in cat.items():
+            for m in prof.get('metrics') or ():
+                if not isinstance(m.get('identity'), str):
+                    continue
+                for value in (m.get('states') or {}):
+                    for lang in ('en_EN', 'es_ES'):
+                        word = profiles.states_of(m, lang).get(value, {}).get('label', '')
+                        if str(word).strip().lower() in bare:
+                            bad.append(f'{pid}.{m["key"]}[{value}] = {word!r}')
+        assert not bad, ('a state drawn beside a fact answers a question that is not on '
+                         'screen: ' + '; '.join(bad))
 
     def test_memory_is_answered_once(self):
         """`hr_storage` gives physical memory, swap, cached and buffers as stores with a size

@@ -24,6 +24,7 @@
     "metrics": [
         {
             "key": "fs_used",
+            "icon": "bi-hdd",
             "headline": "used",
             "label": {
                 "en_EN": "Used",
@@ -38,6 +39,7 @@
         },
         {
             "key": "fs_size",
+            "icon": "bi-hdd",
             "headline": "total",
             "label": {
                 "en_EN": "Capacity",

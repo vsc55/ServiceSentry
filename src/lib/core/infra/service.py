@@ -307,6 +307,12 @@ def metrics(results: list, fields_by_module: dict) -> list:
                 # is a fact about the equipment: a switch's headline is its throughput and a
                 # UPS's is its battery.
                 'headline':     _headline_of(meta, row, data),
+                # What to draw beside it, when whatever produced it said. A number has no
+                # picture of its own and the core has no way to know this one is a temperature.
+                'icon':         (meta or {}).get('icon') or '',
+                # …and whether it belongs beside what the thing IS rather than among what it
+                # is doing: "is there an update" is a property of the box, not a measurement.
+                'identity':     (meta or {}).get('identity') or False,
                 'value':  value,
                 'ts':     row.get('ts', ''),
                 # What the screen needs to ask History for the series behind this number.

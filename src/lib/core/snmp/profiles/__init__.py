@@ -71,6 +71,9 @@ CUSTOM_SUBDIR = 'snmp_profiles'
 #: two words it knows what to do with beat twenty it passes through and ignores.
 HEADLINE_ROLES = ('used', 'total', 'free')
 
+#: A Bootstrap icon name, and nothing that is not one. The value reaches a `class` attribute.
+_ICON_RE = re.compile(r'^bi-[a-z0-9-]{1,40}$')
+
 
 def _label(raw, fallback: str) -> dict:
     """A metric's or profile's name per language.
@@ -154,6 +157,41 @@ def normalise_metric(raw) -> dict | None:
         grp = str(raw.get('group') or '').strip().lower()
         if grp and _ID_RE.match(grp):
             out['group'] = grp
+        # WHICH ROWS of the table this metric is about, by what another column says about
+        # them. A routing table is the case that forces it: the default gateway is the next
+        # hop OF THE ROW whose destination is 0.0.0.0, and every other row's next hop is a
+        # different answer to a different question. Without it a profile can read a column or
+        # nothing, and "the column, filtered" is not something the reader can express.
+        #
+        # An exact match on a value and not a pattern: the values this selects on are
+        # protocol constants — a destination of 0.0.0.0, a type, a status — and a regular
+        # expression here would be a way to write a filter that half-matches by accident.
+        # The column that belongs WITH this one, on the same row. An address and its
+        # netmask are two columns of one table and one fact — "192.168.1.10" and
+        # "255.255.255.0" as separate lines is arithmetic left to the reader, and as separate
+        # LISTS ("a, b, c" and "m, m, m") the pairing is gone altogether. The same shape is
+        # what an ARP table needs, and a route table, so it is declared rather than special-
+        # cased: which column, what joins them, and how the second one is written.
+        #
+        # `as: "prefix"` is the one rendering the core knows, and it is IP arithmetic rather
+        # than knowledge about any device: a dotted netmask written as the number of bits.
+        # A value that is not a contiguous mask keeps its own text — a wrong number would be
+        # worse than an ugly one.
+        pair = raw.get('with')
+        if isinstance(pair, dict):
+            p_oid = str(pair.get('oid') or '').strip()
+            if p_oid and _OID_RE.match(p_oid):
+                mode = str(pair.get('as') or '').strip().lower()
+                out['with'] = {'oid': p_oid,
+                               'sep': str(pair.get('sep') if pair.get('sep') is not None
+                                          else ' '),
+                               'as': mode if mode in ('prefix',) else ''}
+        where = raw.get('where')
+        if isinstance(where, dict):
+            w_oid = str(where.get('oid') or '').strip()
+            w_val = str(where.get('equals') if where.get('equals') is not None else '').strip()
+            if w_oid and _OID_RE.match(w_oid) and w_val:
+                out['where'] = {'oid': w_oid, 'equals': w_val}
     for num, cast in (('scale', float), ('max_rate', float), ('width', int)):
         if raw.get(num) not in (None, ''):
             try:
@@ -162,9 +200,46 @@ def normalise_metric(raw) -> dict | None:
                 pass
     # What this value IS about the machine, for the ones that are not measurements: a name, a
     # model, a serial. The section shows those as identity instead of as data.
+    # What to draw beside it. A number has no picture — only whatever produced it knows that
+    # this one is a temperature and that one a count of bad sectors — so the profile says, and
+    # a metric that says nothing simply gets none.
+    #
+    # Validated to a Bootstrap icon NAME and not passed through: this ends up in a `class`
+    # attribute, and a profile is data an administrator can write.
+    icon = str(raw.get('icon') or '').strip().lower()
+    if _ICON_RE.match(icon):
+        out['icon'] = icon
     role = str(raw.get('role') or '').strip().lower()
     if role and _ID_RE.match(role):
         out['role'] = role
+    # A table that describes the BOX rather than the things inside it.
+    #
+    # Almost every walk is a list of parts: disks, interfaces, volumes, each row a thing with
+    # a life of its own, and its model and serial belong beside it. `ipAddrTable` is not that
+    # shape. Its rows are the addresses of ONE machine, and filing them per row puts the
+    # answer to "what is this box on the network" into five rows nothing opens — collected
+    # every cycle and visible nowhere, which is the same as not asking.
+    #
+    # So the rows of such a table are folded into ONE fact about the device, joined in the
+    # order the agent walked them. Only for `text`, and only for a walk: a number folded into
+    # a list is a string that used to be a measurement.
+    if walk and kind == 'text' and raw.get('of_device'):
+        out['of_device'] = True
+    # Readings that are not answers. A column answers for every row it has, including the ones
+    # that mean nothing to a reader: `ipAddrTable` lists the loopback beside the address the
+    # machine is actually reachable on, and "127.0.0.1, 192.168.1.10" leads with the one nobody
+    # asked about. The pattern is the PROFILE's — the core has no opinion about what 127 means,
+    # and the next profile will want to drop "N/A" or "unknown" instead.
+    #
+    # A pattern that does not compile is no filter rather than a filter that drops everything:
+    # a fact that silently disappears is worse than one with noise in it.
+    skip = str(raw.get('skip') or '').strip()
+    if skip:
+        try:
+            re.compile(skip)
+            out['skip'] = skip
+        except re.error:
+            pass
     # Whether this is one of the handful somebody wants BEFORE the other thousand.
     #
     # A device with a full set of profiles answers a thousand values, and "how is this machine"
@@ -178,6 +253,21 @@ def normalise_metric(raw) -> dict | None:
     # amount used, and two numbers side by side is arithmetic left to the reader when the
     # answer is "83 %". Which of the two is which cannot be guessed from a label that says
     # "Usado" in one profile and "In use" in the next, so the profile says that too.
+    # Beside what the thing IS rather than among what it is doing. "Is there an update" is
+    # not a measurement anybody charts — it is a property of the box. Separate from `headline`
+    # because they are different questions: one asks which figures answer "how is this
+    # machine", this one asks which answer "what is this machine".
+    #
+    # `true` is a line of its own in the identity card. A ROLE NAME says the value is about
+    # that fact and belongs beside it: "is there an update" is a statement about the firmware
+    # version, so it reads as a badge next to it rather than as a second entry saying almost
+    # the same words. Which fact it annotates is the profile's to know — the core names roles,
+    # it does not know that DSM has updates.
+    ident = raw.get('identity')
+    if isinstance(ident, str) and _ID_RE.match(ident.strip().lower()):
+        out['identity'] = ident.strip().lower()
+    elif ident:
+        out['identity'] = True
     head = raw.get('headline')
     if isinstance(head, str) and head.strip().lower() in HEADLINE_ROLES:
         out['headline'] = head.strip().lower()
@@ -733,6 +823,8 @@ def history_fields(profile: dict, lang: str = 'en_EN') -> dict:
             # to a boolean here once, and the summary drew two byte counts side by side
             # instead of one percentage: the role survived normalise and died on the way out.
             'headline':     m.get('headline') or False,
+            'icon':          m.get('icon') or '',
+            'identity':      m.get('identity') or False,
             # …and, for a table, which of its rows the summary is about. Carried on every
             # field like `row_split`, because it is a fact about the TABLE and every column of
             # a table is filtered the same way.

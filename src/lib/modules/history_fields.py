@@ -55,7 +55,7 @@ _log = logging.getLogger(__name__)
 #: * ``row_split`` — how this table's row names separate the row from the thing it belongs
 #:   to, for the tables whose names carry a qualifier the MIB has no column for.
 _OPTIONAL_META = ('source', 'source_label', 'source_short', 'source_rank', 'chart',
-                  'row_split', 'headline')
+                  'row_split', 'headline', 'icon', 'identity')
 
 #: The same, for metadata that is a map rather than a word.
 _OPTIONAL_MAPS = ('states', 'headline_rows')

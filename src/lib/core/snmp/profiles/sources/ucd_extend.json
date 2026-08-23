@@ -1,0 +1,65 @@
+{
+    "id": "ucd_extend",
+    "label": {
+        "en_EN": "Facts from snmpd's own extends (NET-SNMP-EXTEND-MIB)",
+        "es_ES": "Datos de los extends del propio snmpd (NET-SNMP-EXTEND-MIB)"
+    },
+    "short_label": {"en_EN": "Machine", "es_ES": "Máquina"},
+    "description": {
+        "en_EN": "What the box runs, what it IS and who made it, from four `extend` directives in snmpd.conf. Not something a device answers by itself: somebody put `extend .1.3.6.1.4.1.2021.7890.1 distro …` in the configuration — the convention Observium and LibreNMS ask for, which most Debian-family installations therefore have. Worth declaring because a plain Linux answers no vendor MIB at all: sysDescr gives the kernel and nothing else, so the model and the manufacturer of the machine underneath appear nowhere else on the screen. Each subtree is READ AS A COLUMN rather than as one known row, because the row is indexed by the name somebody chose. A machine without the directives answers nothing here and costs four unanswered reads.",
+        "es_ES": "Qué corre la máquina, qué ES y quién la hizo, a partir de cuatro directivas `extend` de snmpd.conf. No lo contesta un aparato por sí solo: alguien puso `extend .1.3.6.1.4.1.2021.7890.1 distro …` en la configuración — la convención que piden Observium y LibreNMS, y que por eso tienen casi todas las instalaciones de la familia Debian. Vale la pena declararlo porque un Linux pelado no contesta ninguna MIB de fabricante: sysDescr da el kernel y nada más, así que el modelo y el fabricante de la máquina de debajo no salen en ninguna otra parte. Cada subárbol se lee COMO UNA COLUMNA y no como una fila conocida, porque la fila va indexada por el nombre que eligiera quien lo configuró. Una máquina sin las directivas no contesta nada aquí y cuesta cuatro lecturas sin respuesta."
+    },
+    "match": {
+        "probe": "1.3.6.1.4.1.2021.7890.1.1.0"
+    },
+    "metrics": [
+        {
+            "key": "ext_distro",
+            "walk": "1.3.6.1.4.1.2021.7890.1.3.1.1",
+            "kind": "text",
+            "role": "os",
+            "of_device": true,
+            "skip": "Permission denied|No such file|not found",
+            "label": {
+                "en_EN": "Operating system",
+                "es_ES": "Sistema operativo"
+            }
+        },
+        {
+            "key": "ext_hardware",
+            "walk": "1.3.6.1.4.1.2021.7890.2.3.1.1",
+            "kind": "text",
+            "role": "model",
+            "of_device": true,
+            "skip": "Permission denied|No such file|not found",
+            "label": {
+                "en_EN": "Model",
+                "es_ES": "Modelo"
+            }
+        },
+        {
+            "key": "ext_vendor",
+            "walk": "1.3.6.1.4.1.2021.7890.3.3.1.1",
+            "kind": "text",
+            "role": "vendor",
+            "of_device": true,
+            "skip": "Permission denied|No such file|not found",
+            "label": {
+                "en_EN": "Manufacturer",
+                "es_ES": "Fabricante"
+            }
+        },
+        {
+            "key": "ext_serial",
+            "walk": "1.3.6.1.4.1.2021.7890.4.3.1.1",
+            "kind": "text",
+            "role": "serial",
+            "of_device": true,
+            "skip": "Permission denied|No such file|not found",
+            "label": {
+                "en_EN": "Serial number",
+                "es_ES": "Número de serie"
+            }
+        }
+    ]
+}

@@ -530,7 +530,7 @@ config.json (solo lectura/arranque) → BD (editable).
 El *downsampling* por buckets usa `CAST(FLOOR((ts - ?) / ?) AS <int>)` (portable multi-motor).
 
 ### `check_state` — estado vivo por check (reemplaza status.json)
-[lib/services/monitoring/check_state/store.py:50](../src/lib/services/monitoring/check_state/store.py#L50)
+[lib/services/monitoring/check_state/store.py:56](../src/lib/services/monitoring/check_state/store.py#L56)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -545,8 +545,17 @@ El *downsampling* por buckets usa `CAST(FLOOR((ts - ?) / ?) AS <int>)` (portable
 | fail_count | INTEGER | no | `0` | |
 | last_change_ts | REAL | no | `0` | |
 | severity | TEXT | no | `''` | `''` / error / warning |
+| module_state | TEXT | sí | — | JSON, estado de trabajo propio del módulo |
 
 Restricción única: `(module, key, metric)`. Sin índices secundarios.
+
+> **`module_state` no es un resultado.** Las demás columnas son la respuesta de un
+> check; esta es lo que el módulo necesita para producir la **siguiente**, y nunca se
+> muestra. El caso que la hizo falta es un contador: una tasa es la diferencia entre dos
+> lecturas, así que la lectura anterior tiene que sobrevivir al ciclo. Se escribe como
+> `status.set_conf([módulo, clave, 'module_state', …])` y va la **última** en el esquema:
+> una columna que falta solo se añade con `ADD COLUMN` mientras todas las anteriores ya
+> estén, y en cualquier otra posición la actualización reconstruiría la tabla entera.
 
 ---
 

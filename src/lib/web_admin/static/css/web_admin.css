@@ -1137,6 +1137,80 @@
 .ss-fs-8 { font-size: 2rem; }
 .ss-fs-9 { font-size: 2.5rem; }
 .ss-pointer { cursor: pointer; }
+/* .ss-factgrid : the facts that identify a thing — a disk's bay, model and serial — above
+   whatever is being measured about it.
+   A GRID and not a flex row, which is what it was: with flex, each pair takes the width of its
+   own text, so "Tipo SATA" sits inches from "Modelo ST14000NM000J-2TX103" and the eye has no
+   column to run down. Reported as the top of the disk dialog looking unfinished. Columns of a
+   minimum width instead: they line up, they wrap whole, and a long model breaks inside its own
+   cell rather than pushing the next fact off the row. */
+.ss-factgrid {
+    /* Columns of EQUAL width was the second version, and it wrapped for a reason that has
+       nothing to do with the content: four tracks of 13rem need 56rem and the dialog offers
+       46, so "Función" dropped to a line of its own while three quarters of the row sat
+       empty. A fact is as wide as the fact — "SATA" does not need the room a part number
+       does — so the items size themselves and wrap only when they genuinely do not fit.
+       The even gap is what the FIRST version was missing: with flex and no gap of its own,
+       the spacing was whatever the text left over, which is what read as ragged. */
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem 2.5rem;
+}
+.ss-factgrid > div {
+    flex: 0 1 auto;
+    min-width: 6rem;    /* a short value still gets a column, not a sliver */
+    max-width: 26rem;   /* …and a long one is elided rather than pushing the rest off the row */
+}
+.ss-factgrid .ss-fact-v { margin: 0; }
+/* The same grid for label/value READINGS, which need more room than a fact: the pair stays on
+   one line ("Temperatura … 40 °C") and two of them fit side by side on a wide dialog. A single
+   full-width column made the eye travel the whole modal to join a label to its number. */
+/* The readings are the other shape: label and value on ONE line, in columns of equal width so
+   the values line up down the dialog. Declared in full rather than inheriting, now that the
+   base above is a flex row — two rules that disagreed about `display` is a layout that depends
+   on which one loaded last. */
+.ss-factgrid-lg {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+    gap: 0 1.5rem;
+}
+/* .ss-modal-fit : a dialog whose size follows its CONTENT, and is therefore not the reader's
+   to set — no full height, no resize handle, no maximise button (see init/_behaviors.html).
+
+   Three rules have to be undone, and missing any one of them leaves the box tall:
+     * `.modal-dialog-scrollable` sets `height: calc(100% - margin*2)`, which is what makes a
+       long body scroll inside instead of pushing the page;
+     * `.modal-dialog-centered` sets `min-height` to the same value — and a min-height beats a
+       `height: auto`, which is why the first attempt at this changed nothing at all;
+     * `.modal-lg > .modal-content` sets `resize: both` and a `min-height`, because the big
+       dialogs in this panel ARE meant to be dragged bigger. This one is not.
+   The cap stays: short content gets a short dialog, long content is capped and still scrolls
+   inside. Reported from the screen as six readings in four hundred pixels of empty box. */
+.ss-modal-fit.modal-dialog-scrollable,
+.ss-modal-fit.modal-dialog-centered.modal-dialog-scrollable {
+    /* The dialog still SPANS the viewport — that span is what `.modal-dialog-centered` centres
+       against, and taking it away (min-height: 0, the first fix) produced a compact box glued
+       to the top of the screen. It is a flex column, so it can span and still centre a child
+       that does not fill it. */
+    height: auto;
+    min-height: calc(100% - var(--bs-modal-margin) * 2);
+    max-height: none;
+    justify-content: center;
+}
+.ss-modal-fit > .modal-content {
+    resize: none;
+    min-height: 0;
+    /* …and the content is the part that must NOT stretch to that span: `flex: 0 1 auto` lets
+       it shrink when it is too tall for the screen and never grow past what it holds. This is
+       the line that empties the four hundred pixels, not the height above it. */
+    flex: 0 1 auto;
+    max-height: calc(100vh - var(--bs-modal-margin) * 2);
+}
+.ss-factgrid-lg > div {
+    display: flex; align-items: baseline; gap: .75rem;
+    min-width: 0; max-width: none;
+    padding: .35rem 0; border-bottom: 1px solid var(--bs-border-color);
+}
 .ss-empty-icon { font-size: 2.5rem; opacity: .3; display: block; margin-bottom: .75rem; }
 
 /* Services tab: static styling in CSS — only the colours stay dynamic in the

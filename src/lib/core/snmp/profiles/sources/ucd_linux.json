@@ -37,6 +37,7 @@
         },
         {
             "key": "cpu_idle",
+            "icon": "bi-cpu",
             "headline": true,
             "oid": "1.3.6.1.4.1.2021.11.11.0",
             "kind": "gauge",
@@ -49,6 +50,7 @@
         },
         {
             "key": "load_1",
+            "icon": "bi-speedometer2",
             "headline": true,
             "oid": "1.3.6.1.4.1.2021.10.1.5.1",
             "kind": "gauge",
@@ -164,6 +166,94 @@
             "oid": "1.3.6.1.4.1.2021.11.59.0",
             "kind": "counter",
             "unit": "/s",
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "mem_available",
+            "label": {
+                "en_EN": "Memory available",
+                "es_ES": "Memoria disponible"
+            },
+            "oid": "1.3.6.1.4.1.2021.4.27.0",
+            "kind": "gauge",
+            "unit": "B",
+            "scale": 1024,
+            "chart": "line"
+        },
+        {
+            "key": "cpu_steal",
+            "label": {
+                "en_EN": "CPU stolen",
+                "es_ES": "CPU robada"
+            },
+            "oid": "1.3.6.1.4.1.2021.11.64.0",
+            "kind": "counter",
+            "unit": "core",
+            "scale": 0.01,
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "cpu_guest",
+            "label": {
+                "en_EN": "CPU in guests",
+                "es_ES": "CPU en invitados"
+            },
+            "oid": "1.3.6.1.4.1.2021.11.65.0",
+            "kind": "counter",
+            "unit": "core",
+            "scale": 0.01,
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "cpu_wait",
+            "label": {
+                "en_EN": "CPU waiting on I/O",
+                "es_ES": "CPU esperando a E/S"
+            },
+            "oid": "1.3.6.1.4.1.2021.11.54.0",
+            "kind": "counter",
+            "unit": "core",
+            "scale": 0.01,
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "cpu_softirq",
+            "label": {
+                "en_EN": "CPU on soft interrupts",
+                "es_ES": "CPU en interrupciones software"
+            },
+            "oid": "1.3.6.1.4.1.2021.11.61.0",
+            "kind": "counter",
+            "unit": "core",
+            "scale": 0.01,
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "swap_in",
+            "label": {
+                "en_EN": "Swapped in",
+                "es_ES": "Entrando a swap"
+            },
+            "oid": "1.3.6.1.4.1.2021.11.62.0",
+            "kind": "counter",
+            "unit": "blk/s",
+            "width": 32,
+            "chart": "line"
+        },
+        {
+            "key": "swap_out",
+            "label": {
+                "en_EN": "Swapped out",
+                "es_ES": "Saliendo de swap"
+            },
+            "oid": "1.3.6.1.4.1.2021.11.63.0",
+            "kind": "counter",
+            "unit": "blk/s",
             "width": 32,
             "chart": "line"
         },

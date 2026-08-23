@@ -139,13 +139,23 @@ function _infraIdentityHtml(d) {
     // equipment — a NAS and the UPS plugged into it both answer "vendor", "model", "version"
     // — and side by side under one heading they read as one machine with contradictory facts.
     const groups = new Map();
+    // …and, beside them, the values that answer "what is this" rather than "how is it doing".
+    // "Is there an update" is a property of the box and belongs next to the DSM version it is
+    // about, not among the temperatures on the summary. Which values those are is the
+    // profile's word (`identity`), so the panel does not learn what an update is.
+    for (const m of (d.metrics || []).filter(m => m.identity && !m.row)) {
+        const k = m.source || '';
+        if (!groups.has(k)) groups.set(k, {source: k, label: m.source_label || k,
+                                          short: m.source_short || '', facts: [], states: []});
+        groups.get(k).states.push(m);
+    }
     for (const a of attrs.filter(a => !a.row)) {
         const k = a.source || '';
         // Insertion order IS the order: the server sorted them (standards before a vendor's
         // own MIB — see infra.service.attributes) and a Map keeps what it was given. Sorting
         // again here would be a second opinion, and the one with less to go on.
         if (!groups.has(k)) groups.set(k, {source: k, label: a.source_label || k,
-                                          short: a.source_short || '', facts: []});
+                                          short: a.source_short || '', facts: [], states: []});
         groups.get(k).facts.push(a);
     }
     // An unsourced pile beside sourced ones is stale, and stale here means WRONG: it was
@@ -160,14 +170,42 @@ function _infraIdentityHtml(d) {
     if (groups.size > 1) groups.delete('');
     // Label above value, not beside it. The column is 17rem: side by side, a "Número de
     // serie" would wrap to three lines to leave room for a number that fits on one.
-    const facts = list => `<dl class="mb-0">${list.map(([k, v]) => `
-        <dt class="text-muted fw-normal ss-fs-1 text-truncate" title="${escAttr(k)}">${esc(k)}</dt>
-        <dd class="mb-2 ss-fs-2" style="word-break:break-word">${esc(v)}</dd>`).join('')}</dl>`;
-    const block = (title, list, note) => `<div class="rounded-3 border px-3 py-2 mb-2">
+    // The fact, and the state that is ABOUT it beside its value. "Is there an update" is a
+    // statement about the firmware version, so it reads as a badge next to it — a second entry
+    // saying "Actualización disponible: Disponible" is the same word twice and pushes the
+    // thing it qualifies a line away from it.
+    // `a.label` when the caller already has the words (the registry's own record, whose
+    // labels are section strings and not attribute roles), `_attrLabel` when it has a role.
+    const factLabel = a => a.label || _attrLabel(a.key);
+    const facts = (list, st) => `<dl class="mb-0">${list.map(a => `
+        <dt class="text-muted fw-normal ss-fs-1 text-truncate"
+            title="${escAttr(factLabel(a))}">${esc(factLabel(a))}</dt>
+        <dd class="mb-2 ss-fs-2 d-flex align-items-baseline gap-2 flex-wrap"
+            style="word-break:break-word">
+            <span>${esc(a.value)}</span>
+            ${(st || []).filter(m => m.identity === a.key)
+                        .map(m => `<span title="${escAttr(m.label || m.field)}"
+                                   >${_infraValueHtml(m)}</span>`).join('')}
+        </dd>`).join('')}</dl>`;
+    // A state reads as a word and not as a row of a definition list: "Actualización
+    // disponible: Disponible" is the same word twice. Label above, badge under it, like the
+    // facts — the badge is drawn by the one renderer, so a level the profile called a warning
+    // is amber here exactly as it is everywhere else.
+    // The ones that annotate no fact — or whose fact this device did not answer — still have
+    // to appear: a value nobody shows is a value that might as well not be sampled.
+    const loose = (list, facts_) => (list || []).filter(
+        m => m.identity === true || !facts_.some(a => a.key === m.identity));
+    const states = list => !list.length ? '' : `<div class="pt-1">${list.map(m => `
+        <div class="mb-2">
+            <div class="text-muted fw-normal ss-fs-1 text-truncate">
+                ${m.icon ? `<i class="bi ${escAttr(m.icon)} me-1"></i>` : ''}${esc(m.label || m.field)}</div>
+            <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(m)}</div>
+        </div>`).join('')}</div>`;
+    const block = (title, list, note, st) => `<div class="rounded-3 border px-3 py-2 mb-2">
         <div class="d-flex align-items-baseline gap-2 mb-1">
             <span class="fw-semibold">${esc(title)}</span>
             ${note ? `<code class="text-muted ss-fs-2">${esc(note)}</code>` : ''}
-        </div>${facts(list)}</div>`;
+        </div>${facts(list, st)}${states(loose(st, list))}</div>`;
     // The source is the heading: a fact about the device still belongs to whichever of its
     // parts answered it, and "the UPS says its model is X" is a different statement from
     // "the NAS says its model is X".
@@ -189,10 +227,12 @@ function _infraIdentityHtml(d) {
     const head = g => g.source ? (g.short || _infraShortLabel(g.label || g.source))
                                : t('infra_identity_unsourced');
     const sub  = () => '';
-    return `${reg.length ? block(t('infra_record'), reg) : ''}
-        ${[...groups.values()].map(g => block(head(g),
-            g.facts.map(a => [_attrLabel(a.key), a.value]), sub(g))).join('')}
-        ${!reg.length && !attrs.length
+    // The registry's own record is not a set of attributes, so it is handed over in the same
+    // shape: a key the labeller knows and a value.
+    const regFacts = reg.map(([k, v]) => ({key: '', label: k, value: v}));
+    return `${reg.length ? block(t('infra_record'), regFacts) : ''}
+        ${[...groups.values()].map(g => block(head(g), g.facts, sub(g), g.states)).join('')}
+        ${!reg.length && !attrs.length && !groups.size
             ? `<div class="text-muted small">${esc(t('infra_no_identity'))}</div>` : ''}`;
 }
 

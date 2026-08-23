@@ -8,7 +8,7 @@ the last status message, the ``other_data`` metrics snapshot and the
 consecutive-failure counter (``fail_count``).  This is both:
 
 * the modules' per-cycle working state (``fail_streak`` counters, ``other_data``,
-  message-change detection), and
+  ``module_state``, message-change detection), and
 * the durable change-detection baseline (survives restarts, so an ongoing
   OK/DOWN state is not re-announced), and
 * the read model for the UI (``/status`` page, overview, host "Latest data").
@@ -27,6 +27,12 @@ Schema — table ``check_state`` (composite PK ``module`` + ``key`` + ``metric``
     other_data      — JSON snapshot of the check's other_data
     fail_count      — consecutive-failure counter (fail_streak)
     last_change_ts  — Unix timestamp of the last status change
+    severity        — '' (OK), 'error' or 'warning'
+    module_state    — JSON, a module's own working state for this check: what it
+                      needs to produce the NEXT answer, never a result and never
+                      shown.  Reached as ``status.set_conf([mod, key,
+                      'module_state', …])``, which is what the SNMP sampler keeps
+                      its counter baselines in.
 
 A watchful's *result key* (what the module emits, e.g. ``<uid>_ram``) is split
 on persist into ``key`` (the item UID) + ``metric`` (the suffix), and
@@ -63,6 +69,13 @@ _SCHEMA = TableSpec(
         # Severity of a non-OK status: '' (OK), 'error' (default for status=0) or
         # 'warning'. Lets the UI show avisos (yellow) distinctly from errors (red).
         Column('severity',       'TEXT', nullable=False, default="''"),
+        # A module's OWN working state for this check — not a result, never shown. The
+        # columns above are the answer; this is what the module needs to produce the NEXT
+        # one, and a counter is the case that made it necessary: a rate is the difference
+        # between two readings, so the previous reading has to outlive the cycle.
+        # Kept LAST because a missing column can only be added by ADD COLUMN when it is
+        # trailing — anything earlier means rebuilding the table on every existing install.
+        Column('module_state',   'TEXT'),
     ),
     # The (module, key, metric) natural key stays the unique lookup for a check row.
     unique_constraints=(('module', 'key', 'metric'),),
@@ -157,7 +170,8 @@ class CheckStateStore(BaseStore):
         try:
             rows = self._db.fetchall(
                 f'SELECT uid, module, {self._qk}, item_uid, metric, status, message, '
-                f'other_data, fail_count, last_change_ts, severity FROM {_T}'
+                f'other_data, fail_count, last_change_ts, severity, module_state '
+                f'FROM {_T}'
             )
             for r in rows:
                 out[(r[1], r[2], r[4] or '')] = {
@@ -170,6 +184,7 @@ class CheckStateStore(BaseStore):
                     'fail_count':     int(r[8] or 0),
                     'last_change_ts': r[9],
                     'severity':       r[10] or '',
+                    'module_state':   _load_json(r[11]),
                 }
         except Exception:  # pylint: disable=broad-except
             pass
@@ -193,6 +208,7 @@ class CheckStateStore(BaseStore):
                 'item_uid':   rec['item_uid'],
                 'metric':     metric,
                 'uid':        rec['uid'],
+                'module_state': rec.get('module_state') or {},
             }
         return out
 
@@ -202,17 +218,25 @@ class CheckStateStore(BaseStore):
         """Insert or replace the current state of one check (portable upsert).
 
         Keyword args: ``message``, ``item_uid``, ``metric``, ``other_data``,
-        ``fail_count``, ``ts``, ``severity``.  The row's own ``uid`` is preserved.
+        ``fail_count``, ``ts``, ``severity``, ``module_state``.  The row's own
+        ``uid`` is preserved — and so is its ``module_state`` unless the caller
+        passes one: this is the one-row upsert seeds and tests use, and a seed
+        that silently erased a module's counter baselines would be a device that
+        goes quiet for a cycle for a reason nothing reports.
         """
         metric = kw.get('metric') or ''
         severity = _norm_severity(kw.get('severity'), status)
         try:
             existing = self._db.fetchone(
-                f'SELECT uid FROM {_T} WHERE module=? AND {self._qk}=? AND metric=?',
+                f'SELECT uid, module_state FROM {_T} '
+                f'WHERE module=? AND {self._qk}=? AND metric=?',
                 (module, key, metric),
             )
             row_uid = (existing[0] if existing and existing[0] else None) \
                 or str(uuid.uuid4())
+            keep = (existing[1] if existing is not None and len(existing) > 1 else None)
+            mod_state = (json.dumps(kw['module_state'] or {}, ensure_ascii=False)
+                         if 'module_state' in kw else (keep or '{}'))
             with self._db.transaction():
                 self._db.execute(
                     f'DELETE FROM {_T} WHERE module=? AND {self._qk}=? AND metric=?',
@@ -220,8 +244,9 @@ class CheckStateStore(BaseStore):
                 )
                 self._db.execute(
                     f'INSERT INTO {_T}(uid, module, {self._qk}, item_uid, metric, '
-                    'status, message, other_data, fail_count, last_change_ts, severity) '
-                    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'status, message, other_data, fail_count, last_change_ts, severity, '
+                    'module_state) '
+                    'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (
                         row_uid, module, key, kw.get('item_uid'), metric,
                         1 if status else 0,
@@ -230,6 +255,7 @@ class CheckStateStore(BaseStore):
                         int(kw.get('fail_count') or 0),
                         kw.get('ts') if kw.get('ts') is not None else time.time(),
                         severity,
+                        mod_state,
                     ),
                 )
             return True
@@ -277,6 +303,7 @@ class CheckStateStore(BaseStore):
                     int(rec.get('fail_count') or 0),
                     ts,
                     _norm_severity(rec.get('severity'), status),
+                    json.dumps(rec.get('module_state') or {}, ensure_ascii=False),
                 )
         try:
             with self._db.transaction():
@@ -284,8 +311,9 @@ class CheckStateStore(BaseStore):
                 if rows:
                     self._db.executemany(
                         f'INSERT INTO {_T}(uid, module, {self._qk}, item_uid, metric, '
-                        'status, message, other_data, fail_count, last_change_ts, severity) '
-                        'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        'status, message, other_data, fail_count, last_change_ts, severity, '
+                        'module_state) '
+                        'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                         list(rows.values()),
                     )
             return True

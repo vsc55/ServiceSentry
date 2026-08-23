@@ -211,28 +211,59 @@ class TestSayingWhereItIs:
     module has to be the one that speaks — and this loop is the five minutes.
     """
 
-    def _said(self, env, monkeypatch, server, dev):
+    def _reports(self, env, monkeypatch, server, dev):
+        """Everything the module said, as the panel receives it: a sentence, the phase it
+        belongs to, and how far along that phase is."""
         said: list = []
-        monkeypatch.setattr(Watchful, 'report_progress',
-                            lambda _self, detail: said.append(detail), raising=False)
+        monkeypatch.setattr(
+            Watchful, 'report_progress',
+            lambda _self, detail='', *, step='', scope='', n=0, total=0:
+                said.append({'detail': detail, 'step': step, 'scope': scope,
+                             'n': n, 'total': total}),
+            raising=False)
         env.run(server, dev)
         return said
+
+    def _said(self, env, monkeypatch, server, dev):
+        return [r['detail'] for r in self._reports(env, monkeypatch, server, dev)]
 
     def test_it_names_the_profile_and_how_far_along(self, env, monkeypatch):
         env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
         env.profile('p2', [{'key': 'b', 'oid': '2.1', 'kind': 'gauge'}], label='System')
         dev = _Dev(gets={'1.1': (1, None), '2.1': (2, None)})
-        said = self._said(env, monkeypatch, _server(device_profiles='p1,p2'), dev)
-        assert any('Disks' in x and '(1/2)' in x for x in said), said
-        assert any('System' in x and '(2/2)' in x for x in said), said
+        got = self._reports(env, monkeypatch, _server(device_profiles='p1,p2'), dev)
+        assert any('Disks' in r['detail'] and (r['n'], r['total']) == (1, 2) for r in got), got
+        assert any('System' in r['detail'] and (r['n'], r['total']) == (2, 2) for r in got), got
+
+    def test_the_profiles_are_one_phase_and_not_one_line_each(self, env, monkeypatch):
+        """Twenty-four lines scrolling past is a list nobody reads. One line whose counter
+        moves is the thing somebody watching a five-minute run actually wants — so every
+        profile reports under the SAME phase, and the phase is the module's own words."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        env.profile('p2', [{'key': 'b', 'oid': '2.1', 'kind': 'gauge'}], label='System')
+        dev = _Dev(gets={'1.1': (1, None), '2.1': (2, None)})
+        got = self._reports(env, monkeypatch, _server(device_profiles='p1,p2'), dev)
+        reading = {(r['scope'], r['step']) for r in got if r['total']}
+        assert len(reading) == 1, f'each profile named its own phase: {reading}'
+        assert all(r['step'] for r in got), 'a report with no phase has nowhere to be drawn'
+
+    def test_a_phase_is_words_and_not_a_key(self, env, monkeypatch):
+        """The core draws what arrives and translates nothing: it has no vocabulary for
+        "which profile of a Synology am I on", and a key here would reach the screen raw."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        got = self._reports(env, monkeypatch, _server(), _Dev(gets={'1.1': (1, None)}))
+        assert got and all('snmp_step' not in r['step'] for r in got), got
 
     def test_it_says_which_device_it_is_on(self, env, monkeypatch):
-        """One module samples the whole fleet. "Disks (3/24)" with no machine in front of it
-        is a sentence about nothing in particular."""
+        """One module samples the whole fleet, IN A POOL. "Disks 3/24" with no machine
+        attached is a sentence about nothing in particular — and worse than that, four
+        machines reporting it write into the same line: a counter that jumps backwards and
+        freezes wherever the last thread left it. Reported from the screen as a finished run
+        showing "3/24" of a device nobody had asked about."""
         env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
-        said = self._said(env, monkeypatch, _server(label='nas-01'),
-                          _Dev(gets={'1.1': (1, None)}))
-        assert any('nas-01' in x for x in said), said
+        got = self._reports(env, monkeypatch, _server(label='nas-01'),
+                            _Dev(gets={'1.1': (1, None)}))
+        assert got and all(r['scope'] == 'nas-01' for r in got), got
 
     def test_a_profile_that_names_itself_per_language_is_read_and_not_printed(
             self, env, monkeypatch):
@@ -241,8 +272,50 @@ class TestSayingWhereItIs:
         env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}],
                     label={'en_EN': 'SMART attributes', 'es_ES': 'Atributos SMART'})
         said = self._said(env, monkeypatch, _server(), _Dev(gets={'1.1': (1, None)}))
-        assert said and 'en_EN' not in said[0], said
-        assert 'SMART attributes' in said[0] or 'Atributos SMART' in said[0], said
+        assert said and not any('en_EN' in x for x in said), said
+        assert any('SMART attributes' in x or 'Atributos SMART' in x for x in said), said
+
+    def test_two_machines_at_once_do_not_share_one_counter(self, env, monkeypatch):
+        """The bug in one sentence. The devices are sampled in a thread pool, so what
+        separates their progress lines is the machine each one names — nothing else can."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        env.profile('p2', [{'key': 'b', 'oid': '2.1', 'kind': 'gauge'}], label='System')
+        dev = _Dev(gets={'1.1': (1, None), '2.1': (2, None)})
+        got = []
+        for name in ('isen', 'erebor'):
+            got += self._reports(env, monkeypatch,
+                                 _server(label=name, device_profiles='p1,p2'), dev)
+        by_machine = {r['scope'] for r in got}
+        assert by_machine == {'isen', 'erebor'}, by_machine
+        for name in by_machine:
+            counts = [(r['n'], r['total']) for r in got if r['scope'] == name and r['total']]
+            assert counts == [(1, 2), (2, 2)], (name, counts)
+
+    def test_the_phase_is_written_in_the_language_of_whoever_is_watching(self, env, monkeypatch):
+        """Reported from the screen: a Spanish dialog with "Reading the metrics" inside it.
+
+        A module's sentences are resolved in the installation's NOTIFICATION language, which
+        is the right answer for a message sent to a channel and the wrong one for a line on
+        the screen of the person who just pressed the button. The executor installs the
+        watcher's language beside the progress sink, for exactly as long as somebody is
+        watching."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        mon = env.monitor(_server())
+        mon._progress_lang = 'es_ES'
+        said = []
+        monkeypatch.setattr(
+            Watchful, 'report_progress',
+            lambda _self, detail='', *, step='', scope='', n=0, total=0: said.append(step),
+            raising=False)
+        env.run(_server(), _Dev(gets={'1.1': (1, None)}), monitor=mon)
+        assert any('Leyendo' in x for x in said), said
+
+    def test_with_nobody_watching_it_falls_back_and_does_not_crash(self, env, monkeypatch):
+        """A scheduler cycle installs no language and no sink. The words still have to
+        resolve — the module cannot know whether anyone is there."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        said = self._reports(env, monkeypatch, _server(), _Dev(gets={'1.1': (1, None)}))
+        assert said and all(x['step'] for x in said), said
 
     def test_a_device_with_nothing_assigned_says_nothing(self, env, monkeypatch):
         said = self._said(env, monkeypatch, _server(device_profiles=''), _Dev())
@@ -288,8 +361,102 @@ class TestCountersAcrossCycles:
         dev = _Dev(walks={COUNTER['walk']: ({'1': '1000'}, None),
                           COUNTER['index_label']: ({'1': 'eth0'}, None)})
         env.run(_server(), dev, monitor=mon)
-        kept = mon.status.get_conf(['watchfuls.snmp', 'srv/metrics', 'snmp_prev'], {})
+        kept = mon.status.get_conf(
+            ['watchfuls.snmp', 'srv/metrics', 'module_state', 'snmp_prev'], {})
         assert kept['eth0']['if_in']['v'] == 1000.0
+
+    def test_and_that_place_is_one_the_table_actually_keeps(self):
+        """The half these tests could not see, and the reason no counter in the panel ever
+        produced a number.
+
+        The monitor here is a fake and its status is a plain dictionary, so "it survives a new
+        instance" was true of THIS status and of nothing else. The real one is
+        :class:`DbBackedStatus`: ``read()`` rebuilds every entry from the ``check_state``
+        columns at the top of each cycle, so a field the table has no column for is gone by
+        the time the next sample asks for it — no error, no log line, and every sample is the
+        first sample for ever.
+
+        So the name the sampler files under is checked against the schema, which is the only
+        thing that decides whether any of the above is true.
+        """
+        from lib.services.monitoring.check_state.store import _SCHEMA   # noqa: PLC0415
+        from watchfuls.snmp.sampler import _STATE_ROOT                  # noqa: PLC0415
+        assert _STATE_ROOT in {c.name for c in _SCHEMA.columns}, (
+            f'the sampler keeps its counter baselines under {_STATE_ROOT!r}, which check_state '
+            'does not store — they will not survive to the cycle that needs them')
+
+
+class TestATableThatDescribesTheBox:
+    """`ipAddrTable` is not a list of parts.
+
+    Almost every walk is: disks, interfaces, volumes — each row a thing with a life of its
+    own, whose model and serial belong beside it. The address table's rows are the addresses
+    of ONE machine, and filing them per row puts the answer to "what is this box on the
+    network" into five rows that nothing opens: collected every cycle, visible nowhere.
+    """
+
+    ADDRS = {'key': 'ip_address', 'walk': '1.3.6.1.2.1.4.20.1.1', 'kind': 'text',
+             'role': 'ip', 'of_device': True}
+
+    def _dev(self, *values):
+        return _Dev(walks={self.ADDRS['walk']:
+                           ({str(i): v for i, v in enumerate(values, 1)}, None)})
+
+    def test_the_rows_become_one_fact_about_the_device(self, env):
+        env.profile('p1', [self.ADDRS])
+        res, _m = env.run(_server(), self._dev('192.168.1.10', '10.0.0.2'))
+        assert list(res) == ['srv/metrics'], 'an address is not a row of its own'
+        assert res['srv/metrics']['other_data']['_attrs']['p1']['ip'] ==             '192.168.1.10, 10.0.0.2'
+
+    def test_it_keeps_the_order_the_agent_answered_in(self, env):
+        """Not sorted. The agent walks its own table in its own order, and a panel that
+        reorders it is a panel disagreeing with the machine about its own addresses."""
+        env.profile('p1', [self.ADDRS])
+        res, _m = env.run(_server(), self._dev('10.0.0.2', '192.168.1.10'))
+        assert res['srv/metrics']['other_data']['_attrs']['p1']['ip'] ==             '10.0.0.2, 192.168.1.10'
+
+    def test_the_same_address_twice_is_one_address(self, env):
+        """Two interfaces can answer the same one. "192.168.1.10, 192.168.1.10" reads as a
+        machine with a problem it does not have."""
+        env.profile('p1', [self.ADDRS])
+        res, _m = env.run(_server(), self._dev('192.168.1.10', '192.168.1.10'))
+        assert res['srv/metrics']['other_data']['_attrs']['p1']['ip'] == '192.168.1.10'
+
+    def test_a_reading_the_profile_calls_no_answer_is_dropped(self, env):
+        """The loopback answers like any other row and tells nobody anything. The pattern is
+        the profile's — the core has no opinion about what 127 means, and the next profile
+        will want to drop "N/A" instead."""
+        env.profile('p1', [dict(self.ADDRS, skip='^127[.]')])
+        res, _m = env.run(_server(), self._dev('127.0.0.1', '192.168.1.10'))
+        assert res['srv/metrics']['other_data']['_attrs']['p1']['ip'] == '192.168.1.10'
+
+    def test_a_table_of_nothing_but_skipped_rows_says_nothing(self, env):
+        """Rather than an empty fact, which reads as a device that answered blank."""
+        env.profile('p1', [dict(self.ADDRS, skip='^127[.]'), GAUGE])
+        dev = self._dev('127.0.0.1')
+        dev.gets[GAUGE['oid']] = ('41', None)
+        res, _m = env.run(_server(), dev)
+        assert 'ip' not in res['srv/metrics']['other_data'].get('_attrs', {}).get('p1', {})
+
+    def test_a_table_of_parts_is_untouched_by_any_of_this(self, env):
+        """The default, and the shape almost every table has: a fact belongs to its row."""
+        env.profile('p1', [COUNTER, {'key': 'if_mac', 'walk': '1.3.6.1.2.1.2.2.1.6',
+                                     'kind': 'text', 'role': 'mac',
+                                     'index_label': '1.3.6.1.2.1.2.2.1.2'}])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '1000'}, None),
+                          '1.3.6.1.2.1.2.2.1.6': ({'1': 'aa:bb'}, None),
+                          COUNTER['index_label']: ({'1': 'eth0'}, None)})
+        res, _m = env.run(_server(), dev)
+        assert res['srv/eth0']['other_data']['_attrs']['p1']['mac'] == 'aa:bb'
+
+    def test_the_shipped_profile_asks_for_the_address_table(self):
+        """RFC 1213, so it is answered by anything with an agent — and it belongs in the
+        profile that already answers "what is this box"."""
+        from lib.core.snmp import profiles as _p                  # noqa: PLC0415
+        m = [x for x in _p.catalog()['sys_generic']['metrics'] if x['key'] == 'ip_address']
+        assert m, 'nothing asks the device what its addresses are'
+        assert m[0]['walk'] == '1.3.6.1.2.1.4.20.1.1' and m[0]['of_device'] is True
+        assert m[0]['role'] == 'ip'
 
 
 class TestATableKeepsItsNames:

@@ -133,15 +133,25 @@ class TestSayingWhereItIs:
     is indistinguishable from one that has hung. The executor is the only thing that knows
     when a module starts and lands, so it is the only thing that can say."""
 
-    def _log(self, delays, names, timeout=5):
+    def _log(self, delays, names, timeout=5, monitor=None):
         seen = []
         lock = threading.Lock()
 
-        def cb(state, module, detail=''):
+        def cb(state, module, detail='', extra=None):
             with lock:
                 seen.append((state, module, detail))
-        run_checks(_Monitor(delays), names, timeout=timeout, progress_cb=cb)
+        run_checks(monitor or _Monitor(delays), names, timeout=timeout, progress_cb=cb)
         return seen
+
+    def test_the_callback_is_called_the_way_a_consumer_declares_it(self):
+        """A signature mismatch here is INVISIBLE: the executor swallows anything the progress
+        display raises, on purpose — it must never be able to fail a check — so a consumer
+        written for three arguments simply stops being called and the dialog goes blank with
+        nothing raised anywhere. The contract is four, and this is what says so."""
+        seen = []
+        run_checks(_Monitor({'fast': 0}), ['fast'], timeout=5,
+                   progress_cb=lambda *a: seen.append(a))
+        assert seen and all(len(a) == 4 for a in seen), seen
 
     def test_a_module_says_when_it_starts_and_when_it_lands(self):
         seen = self._log({'fast': 0}, ['fast'])
@@ -178,18 +188,59 @@ class TestSayingWhereItIs:
         seen = []
 
         class _Chatty(_Monitor):
-            def report_progress(self, module_name, detail):
+            def report_progress(self, module_name, detail, *, step='', n=0, total=0):
                 cb = getattr(self, '_progress_sink', None)
                 if cb is not None:
-                    cb('running', module_name, detail)
+                    cb('running', module_name, detail,
+                       {'step': step, 'n': n, 'total': total})
 
             def check_module(self, name):
-                self.report_progress(name, 'erebor — Synology disks (3/24)')
+                self.report_progress(name, 'erebor — Synology disks',
+                                     step='Leyendo las métricas', n=3, total=24)
                 return super().check_module(name)
 
         run_checks(_Chatty({'snmp': 0}), ['snmp'], timeout=5,
-                   progress_cb=lambda s, m, d='': seen.append((s, m, d)))
-        assert ('running', 'snmp', 'erebor — Synology disks (3/24)') in seen
+                   progress_cb=lambda s, m, d='', x=None: seen.append((s, m, d, x)))
+        assert ('running', 'snmp', 'erebor — Synology disks',
+                {'step': 'Leyendo las métricas', 'n': 3, 'total': 24}) in seen
+
+    def test_the_phase_a_module_names_reaches_the_watcher_untouched(self):
+        """The core draws what arrives and names nothing: it has no vocabulary for "which
+        profile of a Synology am I on", and one written here would be a lie for the other
+        twenty modules. So the executor carries the words, it does not interpret them."""
+        seen = []
+
+        class _Phased(_Monitor):
+            def report_progress(self, module_name, detail, *, step='', n=0, total=0):
+                cb = getattr(self, '_progress_sink', None)
+                if cb is not None:
+                    cb('running', module_name, detail,
+                       {'step': step, 'n': n, 'total': total})
+
+            def check_module(self, name):
+                self.report_progress(name, '', step='una fase que nadie del núcleo conoce')
+                return super().check_module(name)
+
+        run_checks(_Phased({'snmp': 0}), ['snmp'], timeout=5,
+                   progress_cb=lambda s, m, d='', x=None: seen.append(x))
+        assert {'step': 'una fase que nadie del núcleo conoce', 'n': 0, 'total': 0} in seen
+
+    def test_a_module_that_overran_is_reported_when_it_finally_lands(self):
+        """It writes its own state and history — that part always worked. What nobody told was
+        the SCREEN, which had been shown "still working" and never heard another word, so a
+        collection somebody was watching ended at 90 % and stayed there."""
+        seen = []
+        lock = threading.Lock()
+
+        def cb(state, module, detail='', extra=None):
+            with lock:
+                seen.append((state, module))
+        run_checks(_Monitor({'slow': 0.6}), ['slow'], timeout=0.2, progress_cb=cb)
+        assert ('timeout', 'slow') in seen
+        deadline = time.time() + 5
+        while time.time() < deadline and ('ok', 'slow') not in seen:
+            time.sleep(0.02)
+        assert ('ok', 'slow') in seen, f'the straggler landed and said nothing: {seen}'
 
     def test_the_sink_does_not_outlive_the_batch(self):
         """The scheduler shares this monitor. A sink left behind would have its cycles

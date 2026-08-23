@@ -73,6 +73,19 @@ document.addEventListener('hidden.bs.modal', function(e) {
     }
 });
 
+/** Whether a dialog may be resized and maximised.
+ *
+ *  Opt-in by size (`.modal-lg` / `.modal-xl`), because those are the dialogs with something
+ *  worth making bigger — a table, a browser, a log. Opt-OUT with `.ss-modal-fit`, which says
+ *  the dialog's size follows its content: offering a resize handle and a maximise button on a
+ *  box that is already exactly as tall as its six lines is offering to make the empty part
+ *  bigger. Both halves live here so the CSS and the header controls cannot disagree about
+ *  which dialogs are resizable. */
+function _modalResizable(dlg) {
+    return !!dlg && !dlg.classList.contains('ss-modal-fit')
+        && (dlg.classList.contains('modal-lg') || dlg.classList.contains('modal-xl'));
+}
+
 // ─── Draggable modals: move ANY modal by its header ───────────────────────
 // Resize is opt-in via CSS (dialog-style modals: .modal-lg / .modal-xl); msgbox
 // modals (confirmations, yes/no) are only movable. Position resets to centre on
@@ -127,7 +140,7 @@ document.addEventListener('hide.bs.modal', function(e) {
     const dlg     = e.target.querySelector('.modal-dialog');
     const content = e.target.querySelector('.modal-content');
     if (!dlg || !content) return;
-    if (!dlg.classList.contains('modal-lg') && !dlg.classList.contains('modal-xl')) return;
+    if (!_modalResizable(dlg)) return;
     const maxBtn = e.target.querySelector('.modal-max-btn');
     const max = !!(maxBtn && maxBtn.dataset.max === '1');
     const w = content.style.width || '', h = content.style.height || '';
@@ -151,7 +164,7 @@ document.addEventListener('show.bs.modal', function(e) {
     // Maximize toggle (resizable dialogs only): a header icon next to the X that
     // grows the dialog to ~95% of the work area, and back. Injected once per modal;
     // its state + size are restored from the last time this modal was open.
-    const _resizable = dlg && (dlg.classList.contains('modal-lg') || dlg.classList.contains('modal-xl'));
+    const _resizable = _modalResizable(dlg);
     if (_resizable && header && content) {
         let maxBtn = header.querySelector('.modal-max-btn');
         if (!maxBtn) {

@@ -10,6 +10,7 @@
 const INFRA_VIEWS = [
     { id: 'card',  label_key: 'infra_view_cards', icon: 'bi-grid-3x3-gap', render: '_infraCardsBody', mode: 'cards' },
     { id: 'table', label_key: 'infra_view_table', icon: 'bi-table',        render: null,              mode: 'table' },
+    { id: 'map',   label_key: 'infra_view_map',   icon: 'bi-diagram-3',    render: '_infraMapBody',   mode: 'summary' },
 ];
 
 const _infraView = createViewState('ss_infra_view', INFRA_VIEWS, () => {

@@ -384,6 +384,7 @@ configuración avanzada.
    - *Forward Hostname / IP*: IP del servidor (o nombre del contenedor Docker)
    - *Forward Port*: `8080`
    - Activa *Block Common Exploits*
+   - **Deja *Cache Assets* desactivado** (ver el aviso de abajo)
 
 2. En la pestaña **SSL** selecciona o solicita un certificado Let's Encrypt y
    marca *Force SSL*.
@@ -401,6 +402,26 @@ configuración avanzada.
 > Si usas Docker, pasa estas variables de entorno en `docker/.env`:
 > `SS_PROXY_COUNT=1`, `SS_PUBLIC_URL=monitor.example.com`,
 > `SS_FORCE_HTTPS=true`, `SS_SECURE_COOKIES=true`.
+
+#### *Cache Assets*: déjalo apagado
+
+Con esa opción activada, las peticiones de estáticos que llevan la marca de versión
+—`/static/css/web_admin.css?v=1787470367`, los logos, los iconos— vuelven con **502**,
+mientras que las mismas URL **sin** `?v=` parecen funcionar. Eso último es el engaño: sin la
+query las sirve la caché del propio proxy, así que lo único que llega de verdad a la
+aplicación es lo que falla, y el panel se queda sin hoja de estilos ni imágenes.
+
+Es fácil confundirlo con un panel roto: fallan a la vez el CSS y los PNG, que no comparten
+ninguna causa dentro de la aplicación.
+
+La opción, además, **no aporta nada aquí**: el panel ya versiona sus propios estáticos con la
+fecha de modificación del fichero (`asset_v`, ver `lib/web_admin/mixins/context.py`), que es
+justo lo que hace que el navegador recoja una hoja de estilos nueva sin vaciar la caché a
+mano. Cachearlos otra vez en el proxy sólo añade una capa que puede equivocarse.
+
+Para comprobar si el problema es éste o es la aplicación, pide `https://tu-dominio/api/v1/health`:
+no es estático, no lleva query y no lo cachea nadie. Si contesta `200`, la aplicación está
+viva y el 502 es del proxy.
 
 ---
 

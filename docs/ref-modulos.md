@@ -949,6 +949,9 @@ resolución host-céntrica, no el bucle de comprobaciones:
 | `group` | A qué **tabla** pertenece la métrica, para las tablas cuyas filas no tienen nombre: la identidad de una fila es su nombre, y sin él dos tablas caen a su índice SNMP — donde almacenamiento fila 3 y procesador fila 3 no son la misma fila |
 | `chart` | `line`, `area`, `value` o `none` |
 | `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina. **Un papel por perfil**: la fila tiene una casilla por papel, así que dos textos que pidan `model` son el segundo pisando al primero sin decirlo |
+| `of_device` | Sólo para los `text` de una tabla: sus filas describen **la caja**, no cosas de dentro. `ipAddrTable` son las direcciones de *una* máquina, así que se pliegan en **un** dato del dispositivo, unidas en el orden en que las anduvo el agente y sin repetir. Una fila por dirección deja la respuesta a «qué es esta caja en la red» en cinco filas que nada abre |
+| `where` | **Qué filas** de una tabla es esta métrica, por lo que diga otra columna de ellas: `{"oid": "…4.21.1.1", "equals": "0.0.0.0"}`. La pasarela por defecto es el siguiente salto **de la fila** cuyo destino es 0.0.0.0, y el de cualquier otra fila contesta otra pregunta. Coincidencia exacta y no patrón: lo que se selecciona aquí son constantes de protocolo, y una expresión regular sería una forma de escribir un filtro que acierta a medias sin querer |
+| `skip` | Lecturas que **no son respuestas**, como expresión regular: una columna contesta por todas sus filas, incluidas las que no dicen nada a nadie (`ipAddrTable` lista el loopback al lado de la dirección por la que se llega de verdad). El patrón es del **perfil** — el núcleo no tiene opinión sobre qué significa 127, y el siguiente perfil querrá descartar «N/A». Un patrón que no compila es *ningún* filtro, no uno que lo tira todo |
 | `match.sysobjectid_prefix` | **Quién fabricó** el aparato: qué aparatos reclama el perfil; gana el prefijo **más específico** |
 | `match.probe` | **Qué sirve** el aparato: un OID que, si contesta, hace que el perfil aplique. Es el que importa para los genéricos — «¿implementa la HOST-RESOURCES-MIB?» no lo puede contestar un `sysObjectID`: un Synology, un Linux y un Windows la implementan y sus `sysObjectID` no tienen nada que ver |
 | `match.supersedes` | Qué perfiles genéricos **desplaza** éste en los aparatos que reclama: un Synology contesta el sondeo de E/S de UCD y el suyo, y los dos miden los mismos discos |
@@ -972,15 +975,17 @@ grupos de más abajo):
 
 | Perfil | MIB | Qué mide |
 |---|---|---|
-| `sys_generic` | MIB-II | Nombre, descripción, ubicación, contacto, uptime |
+| `sys_generic` | MIB-II | Nombre, descripción, ubicación, contacto, **direcciones IP**, uptime |
 | `if_generic` | IF-MIB | Tráfico, paquetes, errores y descartes por interfaz **en las dos direcciones** (columnas de 32 y 64 bits), más velocidad y estado administrativo |
 | `ip_stats` | IP-MIB | Qué hizo la capa IP con los paquetes: entregados, reenviados, descartados, fragmentados. **En los dos anchos y para las dos familias** — los escalares de RFC 1213 son sólo IPv4 y de 32 bits (en una máquina con 700 GB movidos ya han dado la vuelta 167 veces, y el grupo viejo no tiene contador de octetos siquiera); la tabla propia de IP-MIB informa por familia y a 64 bits |
 | `icmp_stats` | ICMP-MIB | Ecos, inalcanzables y TTL agotado, de entrada y de salida |
 | `tcp_udp_stats` | TCP-MIB, UDP-MIB | Conexiones establecidas, retransmisiones, resets, datagramas a puertos cerrados |
-| `ucd_linux` | UCD-SNMP-MIB | CPU, carga y memoria |
+| `ucd_linux` | UCD-SNMP-MIB | CPU, carga y memoria, más los contadores que sólo importan en un hipervisor: **CPU robada** al anfitrión y **CPU gastada dentro de las invitadas** |
 | `hr_storage` | HOST-RESOURCES-MIB | Uso y capacidad por volumen |
 | `disk_io` | UCD-SNMP-MIB | Bytes y operaciones por segundo, por dispositivo de bloque |
-| `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+| `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+| `ucd_disk` | UCD-SNMP-MIB | Cuán lleno está cada sistema de ficheros **en porcentaje**, inodos incluidos, y la bandera «se pasó del límite» del propio agente. Porcentajes y no bytes: `dskTotal` es una cuenta de kibibytes de 32 bits y da la vuelta en silencio a partir de 2 TiB |
+| `ucd_extend` | NET-SNMP-EXTEND-MIB | Sistema operativo, modelo, fabricante y número de serie de la máquina, de las directivas `extend` de `snmpd.conf` (la convención de Observium/LibreNMS). Un Linux pelado no contesta ninguna MIB de fabricante, así que sin esto no hay ni modelo ni marca en ninguna parte |
 
 Los contadores de interfaz dicen *cuánto* tráfico hubo; `ip_stats` dice *qué pasó* con él, y las
 retransmisiones de `tcp_udp_stats` son el número que avisa de que un enlace va mal mucho antes
@@ -1105,9 +1110,9 @@ peor que cualquiera de las dos cosas por separado. Y aunque no reclame nada, la 
 cubre **entero** — una cobertura parcial asignaría perfiles que el aparato no contestó, que es
 justo el fallo que la detección existe para evitar.
 
-Se envían nueve. Cinco son de fabricante o de familia —`grp_synology`, `grp_mikrotik`,
-`grp_linksys`, `grp_linux` y `grp_network`— y cuatro son de Windows, y éstos enseñan lo que un
-grupo puede hacer que un perfil no: **un grupo contiene otro grupo**.
+Se envían diez. Seis son de fabricante o de familia —`grp_synology`, `grp_mikrotik`,
+`grp_linksys`, `grp_linux`, `grp_proxmox` y `grp_network`— y cuatro son de Windows, y éstos
+enseñan lo que un grupo puede hacer que un perfil no: **un grupo contiene otro grupo**.
 
 `grp_windows` es la base —lo que contesta cualquier Windows: MIB-II, HOST-RESOURCES y la MIB de
 LAN Manager— y los papeles la contienen entera y añaden lo suyo: `grp_windows_workstation` le
@@ -1131,9 +1136,28 @@ propone como **una sola fila**. Comprobado sobre el catálogo real, nueve casos:
 | Synology | `grp_synology` |
 | MikroTik | `grp_mikrotik` |
 | Linksys | `grp_linksys` |
-| Linux con net-snmp | `grp_linux` |
+| Linux con net-snmp | `grp_linux` |
+| Nodo Proxmox VE | `grp_proxmox` — **a mano** (ver abajo) |
 | SAI de APC | `grp_network` + `apc_ups` |
 | Un switch de cualquier otro | `grp_network` |
+
+#### El que no se puede detectar: `grp_proxmox`
+
+Un nodo Proxmox **no contesta ninguna MIB propia**: PVE no sirve nada por SNMP y su
+`sysObjectID` es el de net-snmp, el mismo que el de cualquier otro Debian. No hay nada en lo
+que dice un nodo PVE que lo identifique como tal, así que el grupo **se asigna a mano** — uno
+que reclamara todo Linux con net-snmp estaría reclamando media flota.
+
+Contiene `grp_linux` entero y le añade lo que necesita un **hipervisor** y no un servidor
+normal:
+
+| Añade | Por qué en un hipervisor |
+|---|---|
+| `cpu_guest` (en `ucd_linux`) | El tiempo que la CPU pasa **dentro de las máquinas invitadas**: es el trabajo que hace el nodo, y no aparece separado en ningún otro sitio |
+| `cpu_steal` | Lo que le **roban al anfitrión**. Cualquier valor distinto de cero en un nodo físico dice que hay contención por debajo; en un PVE anidado, que el de fuera va apretado |
+| `cpu_wait`, `cpu_softirq` | Un nodo esperando a E/S o quemándose en interrupciones software se ve aquí antes que en la carga media |
+| `ucd_disk` | Los **almacenes**, con el porcentaje que calcula el propio agente, y no los dispositivos de bloque de `disk_io` |
+| `ucd_extend` | Qué máquina hay debajo. Un `sysDescr` de PVE da el kernel y nada más |
 
 #### Lo que se escribe en el panel
 
