@@ -125,7 +125,7 @@ class TestOneMachine:
 
 
 class TestWhoMaySeeIt:
-    """`infra_view` and not `servers_view`: reading the live state and editing the registry
+    """`infra_view` and not `devices_view`: reading the live state and editing the registry
     that defines it are different acts, wanted by different people."""
 
     def test_a_role_without_the_flag_is_refused(self, admin):
@@ -139,12 +139,89 @@ class TestWhoMaySeeIt:
         r = c.get('/api/v1/infra/hosts')
         assert r.status_code == 200 and r.get_json()['hosts']
 
-    def test_the_flag_exists_and_grants_no_writing(self):
+    def test_the_flags_are_reading_and_collecting_and_nothing_else(self):
         """There is no `infra_edit`, and that is the design: what there is to change lives in
-        the registry, behind the permissions the registry already has."""
+        the registry, behind the permissions the registry already has. The second flag is not
+        an edit either — it asks the modules to produce their numbers again — but it is not
+        free, so it is separate from the one that lets you look."""
         from lib.core.infra.manifest import MODULE_PERMISSIONS
         flags = [p['flag'] for p in MODULE_PERMISSIONS['permissions']]
-        assert flags == ['infra_view']
+        assert flags == ['infra_view', 'infra_collect']
+
+
+class TestCollectingNow:
+    """The one endpoint that acts. It runs this device's checks through the SAME executor the
+    scheduler cycle uses, so what lands in check state and history is produced by the one path
+    that knows how to produce it — and it is gated apart from reading, because starting minutes
+    of polling on somebody's fleet is not the same act as looking at yesterday's answer.
+
+    These tests stop at the gate on purpose: what happens past it is the executor's, and it is
+    tested where it lives (tests/unit/test_monitor_executor.py). A host with no bound check
+    reaches the end of the route without running anything, which is what makes the whole gate
+    testable without a device on the other side.
+    """
+
+    def _url(self, uid):
+        return f'/api/v1/infra/hosts/{uid}/collect'
+
+    def test_it_needs_a_session(self, client):
+        assert client.post(self._url('whatever')).status_code == 401
+
+    def test_a_viewer_may_look_but_not_collect(self, admin, client):
+        """The one that matters. `viewer` holds `infra_view`, so it can read the very screen
+        the button is on; if the button's endpoint rode on that flag, a read-only role would
+        be able to make forty devices get polled by leaning on it."""
+        _login(client)
+        uid = _mkhost(client)
+        c = _as(admin, 'watcher2', role='viewer')
+        assert c.get(f'/api/v1/infra/hosts/{uid}').status_code == 200
+        assert c.post(self._url(uid)).status_code == 403
+
+    def test_an_editor_holds_it(self, admin, client):
+        """409 and not 403: the request got past the gate and found nothing to run, which is
+        the only thing this host has to say. A 403 here would mean the flag never reached the
+        role that is supposed to have it."""
+        _login(client)
+        uid = _mkhost(client)
+        c = _as(admin, 'operator', role='editor')
+        r = c.post(self._url(uid))
+        assert r.status_code == 409, r.get_json()
+
+    def test_a_machine_with_no_enabled_check_has_nothing_to_collect(self, client):
+        """Reporting success would draw a fresh timestamp over a screen where nothing was
+        collected, which is the section telling you it looked when it did not."""
+        _login(client)
+        uid = _mkhost(client)
+        r = client.post(self._url(uid))
+        assert r.status_code == 409
+        assert r.get_json()['error']
+
+    def test_an_unknown_machine_is_a_404(self, client):
+        _login(client)
+        assert client.post(self._url('not-a-host')).status_code == 404
+
+    def test_it_refuses_a_machine_this_caller_cannot_see(self, admin, client):
+        """Holding `infra_collect` says which ACT you may perform, not which machines you may
+        perform it on. Both questions are asked, and the second is the registry's own rule —
+        the same `devices_view` / `server.<uid>.view` narrowing the two GETs apply, so a flag
+        meant to refresh your own rack never becomes a way to poll somebody else's."""
+        seen = admin._hosts_store.create({**_HOST, 'name': 'mine'}, actor='admin')
+        other = admin._hosts_store.create(
+            {**_HOST, 'name': 'theirs', 'address': '10.0.0.11'}, actor='admin')
+        role_uid = '22222222-2222-4222-8222-222222222222'
+        admin._custom_roles[role_uid] = {
+            'uid': role_uid, 'name': 'infra-op', 'enabled': True,
+            'permissions': ['infra_view', 'infra_collect', f'server.{seen}.view'],
+        }
+        admin._users['infraop'] = {
+            'password_hash': admin._users['admin']['password_hash'],
+            'role': role_uid, 'display_name': 'I',
+        }
+        _login(client, 'infraop')
+        # The machine it may see: past both gates, and stopped by having nothing to run.
+        assert client.post(self._url(seen)).status_code == 409
+        # The one it may not: refused, and refused for being invisible rather than for the flag.
+        assert client.post(self._url(other)).status_code == 403
 
 
 class TestTheViewModel:

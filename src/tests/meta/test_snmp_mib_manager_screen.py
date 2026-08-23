@@ -1222,13 +1222,17 @@ class TestDeletingIsNotOneThing:
 
 class TestTheHistoryIsServerSide:
 
-    def test_the_module_declares_its_own_table(self):
-        """The mechanism for a module keeping data in the shared database, used as intended:
-        a file beside the MIBs would be per-container, and a deployment with a web container
-        and a worker container shares the database and not the disk."""
-        init = _read(SNMP_INIT)
-        assert 'def discover_db_tables' in init
-        assert 'mib_versions.SCHEMA' in init
+    def test_the_history_has_a_table_of_its_own(self):
+        """Declared for STARTUP. The store also reconciles its table when it is constructed,
+        but it is constructed on demand — the first save of a MIB — so without a declaration
+        the schema change lands inside whatever request happened to get there first.
+
+        Named `snmp_mib_versions` and not `mod_snmp_mib_versions`: the prefix said "a module
+        keeps this", and the module stopped keeping it when the library became the core\'s."""
+        from lib.core.snmp.manifest import DB_TABLES      # noqa: PLC0415
+        names = [t.name for t in DB_TABLES]
+        assert 'snmp_mib_versions' in names, names
+        assert not any(n.startswith('mod_') for n in names), names
 
     def test_editing_needs_edit_rights_and_reading_does_not(self):
         """`READ_ONLY` is what the route checks to decide whether `snmp_view` is enough.

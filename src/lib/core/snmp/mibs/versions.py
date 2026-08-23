@@ -28,25 +28,17 @@ import hashlib
 import time
 import uuid
 
-from lib.db.module_tables import module_table
-from lib.db.schema import Column, Index
-
-MODULE = 'snmp'
+from lib.db.schema import Column, Index, TableSpec
 
 # One row per saved version. `content` is the whole file: MIBs are tens of kilobytes and a
 # diff-based store would buy space at the price of being able to read a version on its own,
 # which is the only thing anybody wants from it.
-# ── Why the table is still called ``mod_snmp_mib_versions`` ───────────────────────────────────
-# The code moved to the core; the table did not, and that is deliberate. A table name is a
-# fact about DATA — every installation already has rows under this one — while where the code
-# lives is a fact about the source tree, and renaming one because the other moved would spend
-# a migration on tidiness. It buys nothing a reader of this file cannot get from this comment,
-# and it can go wrong on a database this project does not own.
-#
-# ``module_table`` is kept for the same reason: it is what produces that exact name. If the
-# name is ever changed it should be for a reason of its own, with the migration written and
-# tested on all three engines.
-SCHEMA = module_table(MODULE, 'mib_versions', (
+SCHEMA = TableSpec(
+    # `snmp_mib_versions`, not `mod_snmp_mib_versions`: the prefix belonged to a module, and
+    # the edit history of a MIB belongs to the library. Renamed rather than migrated —
+    # nothing was in production, so there is nothing to carry across.
+    name='snmp_mib_versions',
+    columns=(
     Column('uid',        'TEXT',    primary_key=True),
     # The MIB module name — what pysmi compiles by, and what survives the file being moved
     # from one imported folder to another.
@@ -65,7 +57,9 @@ SCHEMA = module_table(MODULE, 'mib_versions', (
     Column('author',     'TEXT',    nullable=False, default="''"),
     Column('note',       'TEXT',    nullable=False, default="''"),
     Column('created_at', 'REAL',    nullable=False, default='0'),
-), indexes=(Index('mib_versions_by_mib', ('mib', 'version')),))
+    ),
+    indexes=(Index('idx_snmp_mib_versions_mib', ('mib', 'version')),),
+)
 
 _T = SCHEMA.name
 

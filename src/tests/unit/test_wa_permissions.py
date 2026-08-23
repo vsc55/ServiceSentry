@@ -19,7 +19,7 @@ viewer holds the ``*_view`` perms (so it may GET but not write), editor adds the
 One ``*_view`` flag is deliberately NOT viewer's: ``config_view``, which fronts
 stored secrets unmasked. ``credentials_view`` used to be excluded as well, but the
 credential listing masks every secret and viewer already reached that endpoint
-through ``servers_view``, so withholding it only hid the tab. Recorded in each
+through ``devices_view``, so withholding it only hid the tab. Recorded in each
 domain's manifest and in ``docs/ref-permisos.md``; this file used to claim viewer
 held *every* ``*_view``, which reads like a bug the first time you meet it.
 
@@ -76,13 +76,13 @@ ENDPOINTS = [
     ("GET",    "/api/v1/history",            frozenset({"history_view"}), None),
     ("DELETE", "/api/v1/history/all",        frozenset({"history_delete"}), None),
     # Servers (host registry)
-    ("GET",    "/api/v1/hosts",              frozenset({"servers_view"}), None),
-    ("POST",   "/api/v1/hosts",              frozenset({"servers_edit"}),
+    ("GET",    "/api/v1/hosts",              frozenset({"devices_view"}), None),
+    ("POST",   "/api/v1/hosts",              frozenset({"devices_edit"}),
         {"name": "permtest_h", "address": "10.0.0.9", "kind": "remote"}),
     # Uses a real host uid (__HOST__): the PUT handler resolves the host (404 for
     # an unknown uid) before the permission check, so a fake uid wouldn't reach it.
-    ("PUT",    "/api/v1/hosts/__HOST__",     frozenset({"servers_edit"}), {"name": "permtest_h2"}),
-    ("DELETE", "/api/v1/hosts/_nouid_",      frozenset({"servers_delete"}), None),
+    ("PUT",    "/api/v1/hosts/__HOST__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
+    ("DELETE", "/api/v1/hosts/_nouid_",      frozenset({"devices_delete"}), None),
 ]
 
 

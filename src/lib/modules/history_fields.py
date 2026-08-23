@@ -38,8 +38,31 @@ import logging
 _log = logging.getLogger(__name__)
 
 
+#: Optional per-field metadata a module may hand over beside the label and the unit.
+#:
+#: The projection below is a whitelist and not a pass-through, which is the right shape — a
+#: module cannot put arbitrary keys into a core structure — but it had to grow when a module
+#: started knowing more than "what is this called". Both of these are things only the module
+#: can answer, and the union it returns is where the answer was being dropped:
+#:
+#: * ``source``/``source_label`` — which part of the device this measures. A device with a
+#:   dozen SNMP profiles answers sixty-four kinds of measurement, and "disks" is a heading a
+#:   person can read where an alphabetical list of field names is not;
+#: * ``chart`` — whether a value is a line or a state, which is the difference between drawing
+#:   a graph and drawing a badge, and cannot be guessed from a number that has no unit;
+#: * ``states`` — what the numbers a field answers with MEAN. Only the module knows: the agent
+#:   says "1" and the MIB it came from says that 1 is Normal.
+#: * ``row_split`` — how this table's row names separate the row from the thing it belongs
+#:   to, for the tables whose names carry a qualifier the MIB has no column for.
+_OPTIONAL_META = ('source', 'source_label', 'source_short', 'source_rank', 'chart',
+                  'row_split', 'headline')
+
+#: The same, for metadata that is a map rather than a word.
+_OPTIONAL_MAPS = ('states', 'headline_rows')
+
+
 def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -> dict:
-    """``{field: {label, unit}}`` the module computes now, or ``{}``.
+    """``{field: {label, unit, …}}`` the module computes now, or ``{}``.
 
     *module* is the bare watchful name (``snmp``), as the history records it.
     """
@@ -76,5 +99,8 @@ def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -
             continue
         meta = meta if isinstance(meta, dict) else {}
         out[key] = {'label': str(meta.get('label') or key),
-                    'unit':  str(meta.get('unit') or '')}
+                    'unit':  str(meta.get('unit') or ''),
+                    **{k: str(meta.get(k) or '') for k in _OPTIONAL_META if meta.get(k)},
+                    **{k: dict(meta[k]) for k in _OPTIONAL_MAPS
+                       if isinstance(meta.get(k), dict) and meta[k]}}
     return out

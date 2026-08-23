@@ -23,15 +23,33 @@ import threading
 from lib.debug import DebugLevel
 
 
-def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[dict, list]:
+def run_checks(monitor, module_names, *, timeout: int, history=None,
+               progress_cb=None) -> tuple[dict, list]:
     """Run *module_names* on *monitor* concurrently and return ``(results, errors)``.
 
     ``results`` = ``{module: {item: {'status', 'message'}}}`` for modules that ran;
     ``errors`` = a list of ``"module: reason"`` strings.  Returns after *timeout*
     seconds regardless of still-running modules — their daemon threads finish on
     their own internal (socket/subprocess) timeouts and cannot be killed.  When a
-    *history* store is given, each item's status is recorded sequentially from the
-    calling thread (no concurrent SQLite contention)."""
+    *history* store is given, each item's status is recorded under ``_hist_lock``
+    (one writer at a time — no concurrent SQLite contention).
+
+    **A module that finishes after the deadline still gets its history written**, by its
+    own thread. It has to: the thread is not killed, it comes back, and it already stores
+    its live status this way — but its history rows went into a buffer whose writer had
+    run minutes earlier, so they were dropped in silence. The symptom is a module with a
+    current status on screen and no series behind it, and nothing anywhere says why.
+
+    Found on an SNMP fleet: sampling a NAS with a full device profile took ~5 minutes
+    against a 120 s deadline, so live status appeared (late) on every cycle and the history
+    table had not one row of that module since the day it was installed.
+
+    ``progress_cb(state, module, detail)`` is called as each module STARTS and as it lands
+    (``'running'`` / ``'ok'`` / ``'error'``), from the worker's own thread. It exists for the
+    person standing in front of the screen: a collection asked for by hand runs for minutes
+    and a bar that only moves at the end is indistinguishable from one that has hung. It is
+    optional and never allowed to fail the run — a progress display that raises would take
+    down the work it is describing, which is the wrong way round."""
     if not module_names:
         return {}, []
 
@@ -40,6 +58,9 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
     _save_lock = threading.Lock()
     _hist_lock = threading.Lock()
     _hist_records: list = []
+    # Set once the buffered flush below has happened. After that a module that comes back
+    # writes its own rows instead of adding them to a list nobody reads again.
+    _flushed = threading.Event()
     _enabled_set = set(monitor._get_enabled_modules())
 
     def _has_items(mod_name: str) -> bool:
@@ -52,20 +73,36 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
                 return True
         return False
 
+    def _tell(state: str, mod_name: str, detail: str = '') -> None:
+        """Say where a module is, if anyone is listening. Never at the cost of the run."""
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(state, mod_name, detail)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
     def _run_one(mod_name: str):
+        _tell('running', mod_name)
         try:
             success, result_name, result_data = monitor.check_module(mod_name)
             if success and result_data is not None:
                 with _save_lock:
                     monitor._process_module_result(result_name, result_data)
                     monitor.status.save()
+                _recs = [(result_name, _key,
+                          result_data.get_status(_key),
+                          result_data.get_other_data(_key))
+                         for _key in result_data.list]
                 with _hist_lock:
-                    for _key in result_data.list:
-                        _hist_records.append((
-                            result_name, _key,
-                            result_data.get_status(_key),
-                            result_data.get_other_data(_key),
-                        ))
+                    # Both branches under the same lock, so a module finishing exactly at the
+                    # boundary is written once — by the flush or by itself, never by neither.
+                    if _flushed.is_set():
+                        if history:
+                            for _r in _recs:
+                                history.record(*_r)
+                    else:
+                        _hist_records.extend(_recs)
                 items = {
                     key: {
                         'status':  result_data.get_status(key),
@@ -77,19 +114,24 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
                 monitor.debug.print(
                     f"> Check > {mod_name} >> {len(items)} item(s), {_failed} not OK",
                     DebugLevel.debug)
+                _tell('ok', mod_name, f'{len(items)}')
                 return mod_name, items, None
             # check_module returned success=False.  Suppress the error only for a
             # known/enabled module with no items configured yet (user hasn't set it
             # up); unknown/non-existent modules always produce an error.
             if mod_name in _enabled_set and not _has_items(mod_name):
+                _tell('ok', mod_name, '0')
                 return mod_name, {}, None
             monitor.debug.print(f"> Check > {mod_name} >> check failed", DebugLevel.warning)
+            _tell('error', mod_name, 'check failed')
             return mod_name, None, f'{mod_name}: check failed'
         except Exception as exc:  # pylint: disable=broad-except
             if mod_name in _enabled_set and not _has_items(mod_name):
+                _tell('ok', mod_name, '0')
                 return mod_name, {}, None
             monitor.debug.print(
                 f"> Check > {mod_name} >> {type(exc).__name__}: {exc}", DebugLevel.error)
+            _tell('error', mod_name, f'{type(exc).__name__}: {exc}')
             return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
         finally:
             # This runs in a short-lived pool worker thread; close its per-thread DB
@@ -108,6 +150,12 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
         except Exception:  # pylint: disable=broad-except
             pass            # _run_one reports the real per-module error
 
+    # The channel a module uses to say where it is (monitor.report_progress). Installed for
+    # the duration of this batch and taken off afterwards: the scheduler shares this monitor,
+    # and a sink left behind would have its cycles reporting into a job that ended hours ago.
+    _prev_sink = getattr(monitor, '_progress_sink', None)
+    monitor._progress_sink = _tell if progress_cb is not None else None
+
     workers = min(len(module_names), 16)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
     try:
@@ -117,6 +165,10 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
         # wait=False: return immediately without joining still-blocking threads
         # (they cannot be forcibly killed in Python).
         executor.shutdown(wait=False, cancel_futures=True)
+        # Taken off as the batch ends, so a module that overran stops reporting into a job
+        # nobody is watching any more — and, more importantly, so the next batch does not
+        # inherit a sink pointing at a run that finished hours ago.
+        monitor._progress_sink = _prev_sink
 
     for future in done:
         mod = future_to_mod[future]
@@ -131,11 +183,19 @@ def run_checks(monitor, module_names, *, timeout: int, history=None) -> tuple[di
 
     for future in not_done:
         errors.append(f'{future_to_mod[future]}: timeout after {timeout}s')
+        # Not 'error': the module has NOT failed, it is still working and will write its own
+        # state and history when it lands (see the docstring). A screen told "error" would be
+        # a screen that has to un-say it, and nothing here is watching long enough to.
+        _tell('timeout', future_to_mod[future], str(timeout))
 
-    # Write history sequentially from this thread (no concurrent SQLite contention).
-    if history and _hist_records:
-        for _mod, _key, _status, _data in _hist_records:
-            history.record(_mod, _key, _status, _data)
+    # Write history sequentially (one writer at a time — no concurrent SQLite contention),
+    # and from here on a straggler writes its own; see the note in the docstring.
+    with _hist_lock:
+        _flushed.set()
+        if history:
+            for _mod, _key, _status, _data in _hist_records:
+                history.record(_mod, _key, _status, _data)
+        _hist_records.clear()
 
     # Flush the cycle's buffered alerts once, grouped per channel (+ summary). All
     # _process_module_result() calls above have finished, so the batch is complete.

@@ -119,6 +119,24 @@ class _MonitoringMixin:
         return self._monitoring_thread is not None and self._monitoring_thread.is_alive()
 
     @property
+    def _monitoring_module_timeout(self) -> int:
+        """Seconds a cycle waits for one module (``monitoring|module_timeout``).
+
+        A module that overruns is not lost — it finishes on its own and records both its
+        status and its history — but the cycle stops waiting for it, so its results land
+        after the ones that were on time.
+        """
+        cfg = self._read_config_file(self._CONFIG_FILE) or {}
+        ov = getattr(self, '_env_override_values', {}).get('monitoring|module_timeout')
+        if ov not in (None, ''):
+            try:
+                return max(10, int(ov))
+            except (TypeError, ValueError):
+                pass
+        return max(10, cfg_get(cfg.get('monitoring', {}),
+                               'monitoring|module_timeout', falsy=True))
+
+    @property
     def _monitoring_interval(self) -> int:
         """Interval in seconds (re-read from config so live changes take effect).
 
@@ -295,7 +313,8 @@ class _MonitoringMixin:
         monitor.debug.print(
             f"> Daemon >> Cycle start: {len(module_names)} module(s)", DebugLevel.info)
 
-        results, errors = run_checks(monitor, module_names, timeout=120,
+        results, errors = run_checks(monitor, module_names,
+                                     timeout=self._monitoring_module_timeout,
                                      history=getattr(self, '_history', None))
 
         if errors:

@@ -20,7 +20,7 @@ import uuid
 
 from lib.core.snmp import metrics as _metrics
 from lib.core.snmp.mibs import resolver as _mib_resolver
-from lib.core.snmp import profile_store as _profile_store
+from lib.core.snmp.profiles import store as _profile_store
 from lib.core.snmp import profiles as _profiles
 from lib.core.snmp.client import _HAS_PYSNMP, run_coroutine
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS

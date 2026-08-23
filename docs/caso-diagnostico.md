@@ -747,7 +747,7 @@ se queda **sin monitorizar** es el otro.
 del helper que responde por el par y prefiere el nuevo): un alta autoriza el destino, una baja el
 origen, y una modificación **ambos** cuando difieren. Ocho tests en
 `tests/unit/test_modules_authz.py`, con el caso validado reintroduciendo la regla vieja, y
-control positivo para lo que sí debe seguir permitido: `servers_edit` global sí puede mover un
+control positivo para lo que sí debe seguir permitido: `devices_edit` global sí puede mover un
 check entre hosts, porque ese permiso no está confinado a ninguno.
 
 **Lección** — Cuando un permiso se resuelve a partir de un **atributo del dato**, cambiar ese
@@ -1615,7 +1615,7 @@ no basta con documentarlo: hay que hacer que el equivocado falle el build.
 `templates/dashboard.html`)
 
 **Síntoma** — recargando con F5 sobre `/syslog` la sección se veía bien, pero si se
-navegaba a Historial y luego se volvía, Syslog (y también Servidores, Clusters y
+navegaba a Historial y luego se volvía, Syslog (y también Dispositivos, Clusters y
 Servicios) aparecía **al final de una página con scroll enorme**, precedida de una franja
 vacía de miles de píxeles, y la barra lateral —que es `sticky` dentro de un shell de
 `100vh`— se quedaba anclada arriba en vez de acompañar al contenido.

@@ -7,9 +7,7 @@
         "mdstat_path": {"type": "str", "default": "/proc/mdstat"}
     },
     "__history__": {"field": null, "unit": null, "label": "RAID Status"},
-    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
-        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
-                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host"},
     "list": {
         "__check_title_field__": "label",
         "__new_item_fields__": ["label"],

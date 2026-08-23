@@ -20,9 +20,7 @@
                                "queries": {"unit": ""}}},
     "__host_profile__": [
         {"key": "db", "address_field": "host", "fields": []},
-        {"key": "ssh", "address_field": "ssh_host",
-         "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
-                    "ssh_key", "ssh_key_string", "ssh_verify_host"]}
+        {"key": "ssh", "address_field": "ssh_host"}
     ],
     "__host_multiple__": true,
     "list": {

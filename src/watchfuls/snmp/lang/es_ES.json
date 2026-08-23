@@ -4,63 +4,24 @@
     "labels": {
         "enabled": "Habilitado",
         "threads": "Hilos",
-        "mib_dirs": "Directorios MIB",
-        "github_token": "Token de GitHub",
         "label": "Etiqueta",
-        "host": "Host / IP",
-        "port": "Puerto",
-        "version": "Versión SNMP",
-        "community": "Comunidad",
         "timeout": "Timeout (s)",
         "retries": "Reintentos",
-        "snmpv3_username": "Usuario",
-        "snmpv3_auth_key": "Clave de autenticación",
-        "snmpv3_priv_key": "Clave de privacidad",
-        "snmpv3_auth_protocol": "Protocolo de autenticación",
-        "snmpv3_priv_protocol": "Protocolo de privacidad",
-        "snmpv3_level": "Tipo de identificación",
-        "snmpv3_context": "Contexto",
-        "snmpv3_engine_id": "Engine ID",
-        "server": "Servidor",
         "oid": "OID",
         "operator": "Operador",
         "value": "Valor esperado",
-        "alert": "Umbral de alerta",
-        "device_profiles": "Perfiles de dispositivo"
+        "alert": "Umbral de alerta"
     },
     "hints": {
         "enabled": "Activa o desactiva esta entrada.",
         "threads": "Número máximo de comprobaciones de OID en paralelo.",
-        "mib_dirs": "Lista de directorios adicionales separados por comas que contienen módulos Python MIB compilados (salida de mibdump.py / pysmi). Se usan para resolver nombres y tipos de OID durante el descubrimiento. La carpeta de datos de la aplicación (snmp_mibs/compiled/) se busca siempre automáticamente — coloca ficheros .mib en snmp_mibs/raw/ para compilación automática (requiere pysmi). Dejar vacío para usar solo los MIBs estándar RFC/IETF integrados.",
-        "github_token": "Opcional, y sólo para importar MIBs desde GitHub. Sin él GitHub permite 60 peticiones por hora, y un repositorio grande —LibreNMS tiene unas 400 carpetas de fabricante, una petición cada una— se queda a medias. Un token de sólo lectura (sin permisos, para repositorios públicos) lo sube a 5000. Se guarda cifrado.",
         "label": "Nombre que se muestra en la interfaz. Si está vacío, se usa la clave del elemento.",
-        "host": "Dirección IP o nombre de host del dispositivo SNMP.",
-        "port": "Puerto UDP para las consultas SNMP (por defecto 161).",
-        "version": "Versión del protocolo SNMP.",
-        "community": "Cadena de comunidad para autenticación SNMP v1/v2c.",
         "timeout": "Segundos de espera por cada respuesta SNMP.",
         "retries": "Número de reintentos al agotar el tiempo antes de declarar fallo.",
-        "snmpv3_username": "Nombre de seguridad (usuario) para SNMP v3.",
-        "snmpv3_auth_key": "Contraseña de autenticación para SNMP v3.",
-        "snmpv3_priv_key": "Contraseña de privacidad (cifrado) para SNMP v3. Dejar vacío para authNoPriv.",
-        "snmpv3_auth_protocol": "Algoritmo de hash para autenticación SNMP v3.",
-        "snmpv3_priv_protocol": "Algoritmo de cifrado para privacidad SNMP v3.",
-        "snmpv3_level": "Qué protege la sesión SNMP v3: solo identificar al usuario, además autenticarlo, o cifrar también la conversación. Es lo que decide qué claves hacen falta debajo.",
-        "snmpv3_context": "Contexto SNMP v3 al que se dirigen las consultas. Muchos equipos exponen una VLAN o una instancia por contexto; dejar vacío para el contexto por defecto.",
-        "snmpv3_engine_id": "Engine ID del agente, en hexadecimal. Solo hace falta cuando el dispositivo no lo anuncia y falla el descubrimiento automático.",
-        "server": "Clave del servidor (de la sección Servidores) que usará esta comprobación. Dejar vacío para usar el primer servidor habilitado.",
         "oid": "OID a consultar en notación decimal puntuada (ej. 1.3.6.1.2.1.1.1.0 para sysDescr). Usa Descubrir para explorar OIDs disponibles.",
         "operator": "Operador de comparación. Usa 'any' para comprobar solo la accesibilidad.",
         "value": "Valor esperado para la comparación. Los operadores numéricos (gt/lt/gte/lte) convierten el valor del OID a float.",
-        "alert": "Fallos consecutivos antes de disparar una alerta.",
-        "device_profiles": "Qué es este dispositivo, en términos de lo que sabe contestar: un servidor, un switch y un NAS no miden lo mismo. Cada perfil es una lista de OIDs con su unidad y su tipo de gráfica, y se asignan varios — lo genérico (MIB-II, interfaces) más lo que sea propio del modelo. Vacío: el dispositivo no se muestrea, sólo se comprueban sus OIDs uno a uno."
-    },
-    "option_labels": {
-        "snmpv3_level": {
-            "noAuthNoPriv": "Sin autenticación ni cifrado",
-            "authNoPriv": "Con autenticación, sin cifrado",
-            "authPriv": "Con autenticación y cifrado"
-        }
+        "alert": "Fallos consecutivos antes de disparar una alerta."
     },
     "new_item_key_label": "Nombre o identificador de la entrada:",
     "rename_item_prompt": "Introduce el nuevo nombre o identificador:",
@@ -79,7 +40,9 @@
         "snmp_up": "SNMP: {} 🔼 [{}]",
         "snmp_down": "SNMP: {} 🔽 [{}]",
         "snmp_sampled": "SNMP: {} 📊 {} valores",
-        "snmp_sample_down": "SNMP: {} 💥 sin datos ({})"
+        "snmp_sample_down": "SNMP: {} 💥 sin datos ({})",
+        "snmp_state_bad": "SNMP: {} 💥 {}: {}",
+        "snmp_state_warn": "SNMP: {} ⚠ {}: {}"
     },
     "messages_vars": {
         "snmp_error": [
@@ -104,6 +67,16 @@
         "snmp_sample_down": [
             "dispositivo",
             "error"
+        ],
+        "snmp_state_bad": [
+            "dispositivo",
+            "medida",
+            "estado"
+        ],
+        "snmp_state_warn": [
+            "dispositivo",
+            "medida",
+            "estado"
         ]
     }
 }

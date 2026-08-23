@@ -51,6 +51,11 @@ _HOSTS_SCHEMA = TableSpec(
         # physical machine).  Purely descriptive: lets the UI and the Overview widget
         # separate physical hosts from virtual ones (keepalived VIP, proxmox cluster…).
         Column('virtual',     'INTEGER', nullable=False, default="0"),
+        # What the device IS (see manifest.HOST_TYPES): server, nas, switch, ups…
+        # Empty = unclassified, which is what every device created before this had and
+        # what one created in a hurry still has.  Named `device_type` rather than `type`
+        # because the short word is a keyword in enough dialects to be worth avoiding.
+        Column('device_type', 'TEXT', nullable=False, default="''"),
         Column('tags',        'TEXT', nullable=False, default="'[]'"),
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('profiles',    'TEXT', nullable=False, default="'{}'"),
@@ -66,7 +71,8 @@ _HOSTS_SCHEMA = TableSpec(
 
 _T = _HOSTS_SCHEMA.name  # table name — single source of truth
 
-_COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'tags', 'description',
+_COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'device_type',
+         'tags', 'description',
          'profiles', 'modules', 'created_at', 'updated_at', 'updated_by')
 _SELECT = ', '.join(_COLS)
 
@@ -98,7 +104,7 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
 
     # ── Row mapping ───────────────────────────────────────────────────────────
     def _row_to_host(self, row, decrypt: bool) -> dict:
-        (uid, name, address, kind, os_, maintenance, virtual, tags, desc,
+        (uid, name, address, kind, os_, maintenance, virtual, dev_type, tags, desc,
          profiles, modules, c_at, u_at, u_by) = row
         try:
             tags_l = json.loads(tags) if tags else []
@@ -122,6 +128,7 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
             'os':          os_ or 'auto',
             'maintenance': bool(maintenance),
             'virtual':     bool(virtual),
+            'device_type': dev_type or '',
             'tags':        tags_l if isinstance(tags_l, list) else [],
             'description': desc or '',
             'profiles':    prof if isinstance(prof, dict) else {},
@@ -134,6 +141,14 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
     @staticmethod
     def _norm_kind(value) -> str:
         return 'remote' if str(value or '').strip().lower() == 'remote' else 'local'
+
+    @staticmethod
+    def _norm_device_type(value) -> str:
+        """A declared type, or '' — an unrecognised one is not an error worth refusing a
+        save over, and storing it would put a word on screen that nothing can translate."""
+        from .manifest import host_type_ids  # noqa: PLC0415
+        v = str(value or '').strip().lower()
+        return v if v in host_type_ids() else ''
 
     @staticmethod
     def _norm_os(value) -> str:
@@ -168,12 +183,13 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'INSERT INTO {_T} ({self._qsel}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    f'INSERT INTO {_T} ({self._qsel}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (uid, name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
                      1 if data.get('maintenance') else 0,
                      1 if data.get('virtual') else 0,
+                     self._norm_device_type(data.get('device_type')),
                      json.dumps(data.get('tags') or [], ensure_ascii=False),
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),
@@ -200,12 +216,14 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
             with self._db.transaction():
                 self._db.execute(
                     f'UPDATE {_T} SET name=?, address=?, kind=?, os=?, maintenance=?, {self._qvirtual}=?, '
+                    'device_type=?, '
                     'tags=?, description=?, profiles=?, modules=?, updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
                      1 if data.get('maintenance') else 0,
                      1 if data.get('virtual') else 0,
+                     self._norm_device_type(data.get('device_type')),
                      json.dumps(data.get('tags') or [], ensure_ascii=False),
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),

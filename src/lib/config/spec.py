@@ -387,6 +387,15 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('monitoring|autostart', bool, True, env='SS_MONITORING_AUTOSTART', card='monitoring'),
     Cfg('monitoring|timer_check', int, 300, min=10, max=86400, env='SS_CHECK_INTERVAL',
         card='monitoring'),
+    # How long a cycle waits for one module before moving on. It was a 120 hard-coded in the
+    # scheduler, which is the wrong place for a number that depends on the fleet: an SNMP
+    # device with a full profile is hundreds of round trips, and the box that answers them
+    # in eight seconds today answers them in four minutes when it is busy.
+    #
+    # Passing it no longer costs the module its history (see monitoring/executor.py), so this
+    # is about how long the CYCLE is willing to wait, not about who gets recorded.
+    Cfg('monitoring|module_timeout', int, 120, min=10, max=3600, env='SS_MODULE_TIMEOUT',
+        card='monitoring'),
     # ── Platform self-monitoring (lib/core/health) — NOT the monitoring service ──
     # Service-health notifications: alert when a background service (monitor/syslog/events
     # worker) stops beating (crashed/unreachable) and when it recovers.  Off by default.

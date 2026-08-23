@@ -1272,7 +1272,12 @@ FIELD_PICKERS['snmp|servers|device_profiles'] = {
     icon:  'bi-grid-3x3-gap',
     // A function because the module's i18n block is not loaded when this line runs.
     title: () => _snmpT('device_profiles_pick', 'Device profiles'),
-    open:  (pathStr, current, onPick) => _snmpProfOpenFor(pathStr, current, onPick),
+    // `...a`, and it is not a style choice. The renderer that draws a check calls these
+    // with three arguments; the HOST modal calls them with a fourth — a function that reads
+    // the draft on screen, because on that pane the device being tested may never have been
+    // saved and its address lives in the form. An arrow that names three parameters silently
+    // drops it, and every button in here that speaks to the device answered "no host".
+    open:  (...a) => _snmpProfOpenFor(...a),
     // …and beside it, the question the assignment cannot answer about itself. It hangs off
     // the FIELD because that is what it is about: which profiles this device carries, and
     // what the device makes of them. Anywhere else on the form it would be a button whose
@@ -1280,7 +1285,7 @@ FIELD_PICKERS['snmp|servers|device_profiles'] = {
     actions: [{
         icon:  'bi-activity',
         title: () => _snmpT('test_profiles', 'Test against the device'),
-        run:   (pathStr, current, btn) => _snmpTestOpen(pathStr, current, btn),
+        run:   (...a) => _snmpTestOpen(...a),
     }],
 };
 

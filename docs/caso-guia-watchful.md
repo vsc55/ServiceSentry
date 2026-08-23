@@ -693,18 +693,19 @@ puede declararse **host-capaz**: sus campos de conexión pasan a un **Host**
 `host_uid`, heredando dirección + credenciales en tiempo de ejecución.
 
 **1. Declarar `__host_profile__` en `schema.json`** (a nivel raíz, hermano de
-`__module__`). Indica el protocolo, qué campo recibe la dirección del host
-(`address_field`) y qué campos son de conexión (van al perfil del host):
+`__module__`). Indica el protocolo y qué campo recibe la dirección del host
+(`address_field`):
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host",
-    "fields": ["host", "port", "version", "community",
-               "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key",
-               "snmpv3_auth_protocol", "snmpv3_priv_protocol",
-               "device_profiles"]},
+"__host_profile__": {"key": "snmp", "address_field": "host"},
 ```
 
-La lista marca **qué es el dispositivo**, no qué hacemos con él: su dirección, su puerto,
+**Si el protocolo lo declara el core** (`ssh`, `snmp`) no pongas `fields`: qué campos tiene un
+protocolo no es cosa del módulo y `host_profile_specs()` los completa desde la declaración del
+core. Sólo un protocolo propio del módulo (el `http` de `web`, el `db` de `datastore`) escribe
+su lista.
+
+Esos campos marcan **qué es el dispositivo**, no qué hacemos con él: su dirección, su puerto,
 la identidad con la que hay que hablarle y lo que declara ser. `timeout` y `retries` se
 quedan fuera a propósito —son cuánto esperamos antes de rendirnos, no quién es la máquina—
 y meterlos tiene un coste concreto: dos entradas de la misma IP que solo difieran en el

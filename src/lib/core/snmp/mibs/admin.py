@@ -581,8 +581,10 @@ def _confined_path(base_dir: str, *parts: str) -> str | None:
 _LOG = logging.getLogger(__name__)
 
 # Directory holding one JSON file per known public MIB repository.  Drop a new
-# file there to add a source — see mib_sources/README.md.
-_MIB_SOURCES_DIR = os.path.join(os.path.dirname(__file__), 'mib_sources')
+# file there to add a source — see sources/README.md. Named `sources/` and not
+# `mib_sources/`: inside a package called `mibs` the prefix repeats the folder above it,
+# and its sibling in `profiles/` is called the same thing for the same reason.
+_MIB_SOURCES_DIR = os.path.join(os.path.dirname(__file__), 'sources')
 
 # A vendor publishes its MIBs as one archive, and every MIB inside carries the date it was
 # last changed in its own MODULE-IDENTITY. That is what makes an update comparable: not the
@@ -788,7 +790,7 @@ def _truthy_import(value) -> bool:
     return str(value).strip().lower() not in ('false', '0', 'no', 'off', 'none', '')
 
 
-# Known public MIB repositories, loaded from mib_sources/*.json at import
+# Known public MIB repositories, loaded from sources/*.json at import
 # (defined after _parse_github_folder, which the loader uses for validation).
 _KNOWN_MIB_REPOS: list[dict] = _load_mib_sources()
 

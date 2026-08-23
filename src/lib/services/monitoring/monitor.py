@@ -263,12 +263,18 @@ class Monitor(ObjectBase):
             self.status.save()
 
     def _reconcile_module_tables(self):
-        """Let watchful modules create their own tables on the shared connector."""
+        """Create the declared tables on the shared connector: a watchful module's, and a
+        CORE package's.
+
+        Both, because both are built on demand. A store constructed inside the first request
+        or cycle that happens to need it creates its table there — which works, and puts a
+        schema change wherever the load happened to fall."""
         if self._db is None:
             return
         try:
-            from lib.db import reconcile_module_tables  # noqa: PLC0415
+            from lib.db import reconcile_core_tables, reconcile_module_tables  # noqa: PLC0415
             reconcile_module_tables(self._db)
+            reconcile_core_tables(self._db)
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -701,6 +707,29 @@ class Monitor(ObjectBase):
         for k in orphans:
             del mod_status[k]
         return bool(orphans)
+
+    def report_progress(self, module_name: str, detail: str) -> None:
+        """Say what *module_name* is doing right now, if anyone is listening.
+
+        A module is a black box between "started" and "returned", and for most of them that
+        is fine — they take a second. The one that is not fine is the one somebody presses a
+        button for: sampling a NAS through its device profiles is minutes of round trips
+        inside a SINGLE module, so a screen watching module boundaries sits at 0 % for five
+        minutes and is indistinguishable from a screen watching something that has hung.
+        Reported exactly that way.
+
+        The sink is installed by whoever is watching (the executor, from its ``progress_cb``)
+        and is absent the rest of the time, so a scheduler cycle pays nothing for this. The
+        detail is free text from the module — it knows what it is doing and the core does
+        not — and it is shown, never parsed.
+        """
+        cb = getattr(self, '_progress_sink', None)
+        if cb is None:
+            return
+        try:
+            cb('running', module_name, str(detail or ''))
+        except Exception:  # pylint: disable=broad-except
+            pass           # a progress display must never be able to fail a check
 
     def _import_watchful(self, module_name: str):
         """Import a watchful module by name (returns the imported module).

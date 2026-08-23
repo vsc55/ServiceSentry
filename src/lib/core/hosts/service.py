@@ -42,6 +42,33 @@ def enrich_hosts(hosts: list, statuses: dict, bound: dict) -> list:
     return hosts
 
 
+def _row_of(skey: str, data: dict) -> str:
+    """Which ROW of the item this result is about, or '' when the item is the whole answer.
+
+    One item can produce many results — an SNMP device profile samples a table and files one
+    per disk, per volume, per interface — and every one of them inherits the ITEM's label,
+    because that is the only name the configuration holds. On a page that is already about
+    that device the result is the device's name printed three hundred times, which says
+    nothing at all: what somebody needs to read is "Drive 1", "/volume1", "eth0".
+
+    Two sources, in order of how much they know:
+
+    * ``_row`` in the recorded data — the name the module gave the row, as a person writes it
+      ("Drive 1 (DX517-1)"). Underscore-prefixed like ``_attrs``: the recorders already treat
+      that prefix as "about the result" rather than "a measurement of it";
+    * the ``<item>/<detail>`` key, whose detail segment is the same thing with the spaces
+      taken out — the fallback for a module that files composite keys without naming them.
+
+    ``metrics`` is the sampler's word for "the item itself, not one of its rows", so it names
+    no row and answers ''.
+    """
+    row = str((data or {}).get('_row') or '').strip()
+    if row:
+        return row
+    detail = skey.split('/', 1)[1] if '/' in skey else ''
+    return '' if detail in ('', 'metrics') else detail
+
+
 def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
     """Build the host modal's "Latest data" rows: for every bound item (``bound`` =
     ``{bare_module: {item_key: label}}``) merge the live value from ``status_raw`` with a
@@ -87,10 +114,11 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
                     continue
                 data = info.get('other_data') if isinstance(info.get('other_data'), dict) else {}
                 name = str(data.get('name') or '').strip() or keys.get(base) or skey
+                row = _row_of(skey, data)
                 ok = info.get('status') is True
                 sev = (info.get('severity') or '').lower()
                 results.append({
-                    'module': bare, 'key': skey, 'name': name,
+                    'module': bare, 'key': skey, 'name': name, 'row': row,
                     'ok': ok,
                     'level': 'ok' if ok else ('warning' if sev == 'warning' else 'error'),
                     'message': info.get('message', ''),
@@ -111,6 +139,7 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
             _ok = s.get('last_status') is True
             results.append({
                 'module': bare, 'key': skey, 'name': name,
+                'row': _row_of(skey, data),
                 'ok': _ok,
                 'level': 'ok' if _ok else 'error',   # history keeps no severity
                 'message': data.get('message', '') if isinstance(data, dict) else '',
@@ -118,7 +147,9 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
                 'source': 'history',
             })
             covered.add(skey)
-    results.sort(key=lambda r: (r['module'], r['name']))
+    # By row within a module, so a table of one device's disks reads Drive 1, Drive 2…
+    # and not in whatever order the agent answered them.
+    results.sort(key=lambda r: (r['module'], r.get('row') or '', r['name']))
     return results
 
 

@@ -676,7 +676,8 @@ For host-aware / history / credential-backed modules, declare these in `__module
 | Key | Description |
 |-----|-------------|
 | `api_ver` | API version for action URLs (`/api/<ver>/watchfuls/...`). Default `"v1"` |
-| `__host_profile__` | Connection fields a check inherits when bound to a host: `{"key": <proto>, "address_field": <field>, "fields": [...]}` (dict or list). Resolved by `ModuleBase.resolve_host()` |
+| `__host_profile__` | Which protocol a check inherits its connection from when bound to a host: `{"key": <proto>, "address_field": <field>}` (dict or list). Omit `fields` for a core-owned protocol (`ssh`, `snmp`) — it says what it holds; only a module's own protocol lists them. Resolved by `ModuleBase.resolve_host()` |
+| `__profile_fields__` | Inside a collection: `"__profile_fields__": "<proto>"` expands a core protocol's connection fields into the item, so an UNBOUND check (a bare IP) can still state them without the module copying them |
 | `__host_multiple__` | `true` = a check can bind to several hosts (multi-select) |
 | `__credential__` | Reusable-credential fields: `{"type": "web_auth", "fields": [...]}` (referenceable from the credential store) |
 | `__history__` | Numeric field(s) recorded as a time series for the history graphs: `{"field": "temp", "unit": "°C", "label": "..."}`, or `{"fields": {name: {...}}}`, or `{"field": null}` for status-only |

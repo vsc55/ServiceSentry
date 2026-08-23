@@ -165,7 +165,7 @@ class TestAGroupIsResolvedBeforeAnythingIsAsked:
         dev = _Dev(gets={GAUGE['oid']: ('41', None), NAME['oid']: ('nas-01', None)})
         res, _mon = env.run(_server(device_profiles='g1'), dev)
         assert res['srv/metrics']['other_data']['cpu'] == 41
-        assert res['srv/metrics']['other_data']['_attrs'] == {'name': 'nas-01'}
+        assert res['srv/metrics']['other_data']['_attrs'] == {'p2': {'name': 'nas-01'}}
 
     def test_a_group_written_in_the_panel_reaches_the_worker(self, env, tmp_path):
         """The reason it is in the database and not in a file: a deployment with a web
@@ -173,7 +173,7 @@ class TestAGroupIsResolvedBeforeAnythingIsAsked:
         made in the panel that the sampler could not read would be a device assigned nothing
         at all."""
         from lib.db.sqlite import SQLiteConnector
-        from lib.core.snmp.profile_store import CatalogStore
+        from lib.core.snmp.profiles.store import CatalogStore
         env.profile('p1', [GAUGE])
         db = SQLiteConnector(str(tmp_path / 'test.db'))
         CatalogStore(db).save('mine', {'label': 'Mine', 'includes': ['p1']})
@@ -200,6 +200,60 @@ class TestAGroupIsResolvedBeforeAnythingIsAsked:
         dev = _Dev(gets={GAUGE['oid']: ('41', None)})
         res, _mon = env.run(_server(device_profiles='g1'), dev)
         assert res == {} and dev.asked == []
+
+
+class TestSayingWhereItIs:
+    """A NAS with twenty-four profiles is minutes of round trips inside ONE module.
+
+    Reported from the panel: press "collect now" on such a device and the dialog says
+    "snmp — running, 0 %" for five minutes, which is indistinguishable from a screen watching
+    something that has hung. The module boundary is the only thing the core can see, so the
+    module has to be the one that speaks — and this loop is the five minutes.
+    """
+
+    def _said(self, env, monkeypatch, server, dev):
+        said: list = []
+        monkeypatch.setattr(Watchful, 'report_progress',
+                            lambda _self, detail: said.append(detail), raising=False)
+        env.run(server, dev)
+        return said
+
+    def test_it_names_the_profile_and_how_far_along(self, env, monkeypatch):
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        env.profile('p2', [{'key': 'b', 'oid': '2.1', 'kind': 'gauge'}], label='System')
+        dev = _Dev(gets={'1.1': (1, None), '2.1': (2, None)})
+        said = self._said(env, monkeypatch, _server(device_profiles='p1,p2'), dev)
+        assert any('Disks' in x and '(1/2)' in x for x in said), said
+        assert any('System' in x and '(2/2)' in x for x in said), said
+
+    def test_it_says_which_device_it_is_on(self, env, monkeypatch):
+        """One module samples the whole fleet. "Disks (3/24)" with no machine in front of it
+        is a sentence about nothing in particular."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        said = self._said(env, monkeypatch, _server(label='nas-01'),
+                          _Dev(gets={'1.1': (1, None)}))
+        assert any('nas-01' in x for x in said), said
+
+    def test_a_profile_that_names_itself_per_language_is_read_and_not_printed(
+            self, env, monkeypatch):
+        """A profile's label is `{'en_EN': …, 'es_ES': …}`. Reported from the panel as a
+        progress line containing a Python dict — which is what printing it looks like."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}],
+                    label={'en_EN': 'SMART attributes', 'es_ES': 'Atributos SMART'})
+        said = self._said(env, monkeypatch, _server(), _Dev(gets={'1.1': (1, None)}))
+        assert said and 'en_EN' not in said[0], said
+        assert 'SMART attributes' in said[0] or 'Atributos SMART' in said[0], said
+
+    def test_a_device_with_nothing_assigned_says_nothing(self, env, monkeypatch):
+        said = self._said(env, monkeypatch, _server(device_profiles=''), _Dev())
+        assert said == []
+
+    def test_nobody_listening_is_the_normal_case(self, env):
+        """`report_progress` is a no-op unless somebody pressed a button, and the sampling
+        must not depend on that in any way — including not raising when the sink is absent."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}])
+        keys, _mon = env.run(_server(), _Dev(gets={'1.1': (7, None)}))
+        assert keys
 
 
 class TestCountersAcrossCycles:
@@ -374,13 +428,38 @@ class TestWhatIsNotASeries:
 
     def test_what_the_machine_IS_travels_beside_the_numbers(self, env):
         """A name identifies the thing being charted. A chart OF it would be a chart of
-        nothing, and a separate result would be a series that never moves."""
+        nothing, and a separate result would be a series that never moves.
+
+        Filed under the PROFILE that answered it — see the test below for why."""
         env.profile('p1', [GAUGE, NAME])
         dev = _Dev(gets={GAUGE['oid']: ('41', None), NAME['oid']: ('nas-01', None)})
         res, _mon = env.run(_server(), dev)
         data = res['srv/metrics']['other_data']
-        assert data['_attrs'] == {'name': 'nas-01'}
+        assert data['_attrs'] == {'p1': {'name': 'nas-01'}}
         assert 'sys_name' not in data
+
+    def test_two_profiles_describing_two_machines_do_not_overwrite_each_other(self, env):
+        """Reported from the screen: the NAS's identity and its UPS's were mixed together.
+
+        One registry entry fronts several pieces of equipment, and several of them answer the
+        same questions — a NAS and the UPS plugged into it both report a vendor, a model and a
+        version. Filed flat, the second profile sampled silently overwrote the first, so the
+        panel showed one machine's serial beside another machine's firmware and WHICH survived
+        depended on the order the profiles happened to be read in.
+
+        Nothing was reported wrong. A fact was simply gone.
+        """
+        nas = {**NAME, 'key': 'nas_name', 'role': 'vendor', 'oid': '1.9.9.1'}
+        ups = {**NAME, 'key': 'ups_name', 'role': 'vendor', 'oid': '1.9.9.2'}
+        env.profile('nas_sys', [GAUGE, nas])
+        env.profile('ups_sys', [ups])
+        dev = _Dev(gets={GAUGE['oid']: ('41', None),
+                         '1.9.9.1': ('Synology', None), '1.9.9.2': ('APC', None)})
+        res, _mon = env.run(_server(device_profiles='nas_sys,ups_sys'), dev)
+        attrs = res['srv/metrics']['other_data']['_attrs']
+        assert attrs == {'nas_sys': {'vendor': 'Synology'},
+                         'ups_sys': {'vendor': 'APC'}}, (
+            'the two machines are back in one bucket, and one of them lost its vendor')
 
 
 class TestWhenTheDeviceGoesQuiet:
@@ -630,3 +709,91 @@ class TestAHostIsADeviceOnItsOwn:
         hosts = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
         _res, dev = self._run(env, hosts)
         assert dev.asked == []
+
+
+def _one(res: dict) -> dict:
+    """The single result a one-row device produces, whatever it is keyed under."""
+    assert len(res) == 1, f'expected one result, got {sorted(res)}'
+    return next(iter(res.values()))
+
+
+class TestTheProfileIsTheVerdict:
+    """A profile that says which of a value's meanings are BAD has said everything needed to
+    check the device — and it was being thrown away.
+
+    A NAS answers "system status: Failed", "fan: Failed", "update available" on every cycle,
+    each with a level already written in the profile, and the row was recorded as fine: a
+    sample was treated as something that either arrived or did not. The map that paints the
+    badge amber is the same map that says the machine needs attention.
+    """
+
+    def _prof(self, env, levels, key='syno_status'):
+        states = {str(v): {'label': lab, 'level': lvl} for v, (lab, lvl) in levels.items()}
+        env.profile('p1', [{'key': key, 'oid': '1.1', 'kind': 'gauge', 'states': states}])
+
+    def test_a_bad_state_fails_the_row(self, env):
+        self._prof(env, {1: ('Normal', 'ok'), 2: ('Failed', 'bad')})
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
+        st = _one(res)['status']
+        assert st is False, f'a device reporting Failed was recorded as {st!r}'
+
+    def test_the_message_names_the_measurement_and_what_it_said(self, env):
+        """"SNMP: erebor" is not actionable. "Estado del sistema: Fallo" is."""
+        self._prof(env, {2: ('Failed', 'bad')})
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
+        msg = _one(res)['message']
+        assert 'Failed' in msg, msg
+
+    def test_a_warn_state_is_a_warning_and_not_a_failure(self, env):
+        """A pending DSM update must not paint a NAS red. The panel already knows the
+        difference between amber and down."""
+        self._prof(env, {1: ('Available', 'warn'), 2: ('None', 'ok')}, key='syno_upgrade')
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (1, None)}))
+        assert _one(res)['status'] is False
+        assert _one(res)['severity'] == 'warning'
+
+    def test_an_ok_state_is_still_ok(self, env):
+        self._prof(env, {1: ('Normal', 'ok'), 2: ('Failed', 'bad')})
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (1, None)}))
+        assert _one(res)['status'] is True
+
+    def test_an_info_state_is_not_a_finding(self, env):
+        """"Connecting" and "Others" are the device saying it does not know, which is neither
+        a fault nor something to wake anybody for."""
+        self._prof(env, {3: ('Connecting', 'info')}, key='syno_upgrade')
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (3, None)}))
+        assert _one(res)['status'] is True
+
+    def test_a_value_the_map_does_not_cover_is_not_a_finding(self, env):
+        """The profiles are filled in one MIB at a time. Not knowing is a fine thing to say;
+        guessing that an unmapped value is a fault is not."""
+        self._prof(env, {2: ('Failed', 'bad')})
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (9, None)}))
+        assert _one(res)['status'] is True
+
+    def test_a_metric_with_no_states_never_produces_one(self, env):
+        """Most metrics are numbers with a unit. A temperature is not an enumeration and has
+        no business being judged here."""
+        env.profile('p1', [{'key': 'temp', 'oid': '1.1', 'kind': 'gauge', 'unit': 'C'}])
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (41, None)}))
+        assert _one(res)['status'] is True
+
+    def test_bad_wins_over_warn_and_only_one_is_reported(self, env):
+        """A row with four unhappy states is one row in trouble; four messages about it is
+        four notifications for one machine."""
+        env.profile('p1', [
+            {'key': 'a', 'oid': '1.1', 'kind': 'gauge',
+             'states': {'1': {'label': 'Pending', 'level': 'warn'}}},
+            {'key': 'b', 'oid': '1.2', 'kind': 'gauge',
+             'states': {'1': {'label': 'Failed', 'level': 'bad'}}}])
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (1, None), '1.2': (1, None)}))
+        assert len(res) == 1, list(res)
+        msg = _one(res)['message']
+        assert 'Failed' in msg and 'Pending' not in msg, msg
+
+    def test_the_numbers_still_travel_with_the_verdict(self, env):
+        """A row that is in trouble is a row whose values somebody is about to want."""
+        self._prof(env, {2: ('Failed', 'bad')})
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
+        data = _one(res)['other_data']
+        assert data.get('syno_status') == 2, data

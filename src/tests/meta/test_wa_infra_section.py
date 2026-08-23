@@ -91,11 +91,154 @@ class TestItShowsWithoutHandingOver:
         assert '_HOST_FIELDS' in svc
         assert "'profiles'" not in svc, 'the projection names the credential bag'
 
-    def test_the_domain_writes_nothing(self):
-        """`infra_view` must not become a way around the registry's permissions."""
+    def test_the_domain_edits_nothing(self):
+        """`infra_view` must not become a way around the registry's permissions.
+
+        The section grew one non-GET endpoint — "collect now", which runs this device's
+        checks — and that is not an edit: it writes no record of its own, it produces the
+        same check state and history a scheduler cycle produces, through the same executor.
+        An endpoint that CHANGED something would be a second way to reach the registry, from
+        a screen deliberately handed to people who may not reach it. Hence the shape of this
+        test: the write verbs stay out, and the one POST is named rather than tolerated.
+        """
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
-        for verb in ("'POST'", "'PUT'", "'DELETE'", "'PATCH'"):
-            assert verb not in routes, f'a {verb} route appeared in a read-only section'
+        for verb in ("'PUT'", "'DELETE'", "'PATCH'"):
+            assert verb not in routes, f'a {verb} route appeared in a section that edits nothing'
+        posts = re.findall(r"@app\.route\('([^']+)',\s*methods=\['POST'\]\)", routes)
+        assert posts == ['/api/v1/infra/hosts/<uid>/collect'], (
+            f'unexpected POST route(s) in the infrastructure section: {posts}')
+
+    def test_collecting_has_its_own_permission(self):
+        """Looking at a wall screen is not the same act as starting minutes of polling.
+
+        Reading the fleet is granted to `viewer`; a button that makes forty devices get
+        polled must not come with it, or "may look" quietly becomes "may make the panel
+        work". The flag is `infra_collect`, and the route must be gated by it — not by
+        `infra_view`, which is the mistake this test exists to catch.
+        """
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        body = routes.split("methods=['POST']")[1].split('def ')[0]
+        assert 'infra_collect_req' in body, 'the collect route is not gated by its own flag'
+        assert 'infra_view_req' not in body, (
+            'collecting rides on the permission that only lets you look')
+        assert "wa._perm_required('infra_collect')" in routes
+
+    def test_the_flag_is_declared_and_not_handed_to_viewer(self):
+        manifest = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'manifest.py'))
+        m = re.search(r"\{'flag': 'infra_collect',\s*'roles':\s*\(([^)]*)\)", manifest)
+        assert m, 'infra_collect is not declared in the domain manifest'
+        roles = {r.strip().strip("'\"") for r in m.group(1).split(',') if r.strip()}
+        assert roles == {'editor'}, (
+            f'infra_collect is granted to {roles or "nobody"}; it mirrors checks_run, which is '
+            'editor-only — a viewer must not be able to start a collection')
+
+    def test_the_button_is_gated_too(self):
+        """The endpoint is the gate; the button is only where it is OFFERED. Both, though:
+        a button that 403s is a panel telling somebody to try again."""
+        render = _read(os.path.join(INFRA, '_render.html'))
+        assert "perms.has('infra_collect')" in render
+        assert 'canCollect ?' in render, 'the button is drawn for everyone'
+
+    def test_collecting_runs_whole_modules(self):
+        """A run narrowed to one machine's items would report one machine's keys — and the
+        monitor prunes, from the state it just wrote, every key the run did not report
+        (`monitor._prune_orphan_status`). One device refreshed, thirty-nine wiped."""
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        assert '_prune_orphan_status' in routes, (
+            'the reason whole modules are run is not written down where somebody would '
+            'narrow it to one host')
+        assert 'wa._run_checks(' in _read(os.path.join(SRC, 'lib', 'core', 'infra', 'jobs.py')), (
+            'collecting does not go through the shared executor — a second implementation of '
+            '"run a check and record it" is a second answer to what a result means')
+
+
+class TestWatchingItHappen:
+    """A collection runs for minutes and a bar that only moves at the end is
+    indistinguishable from one that has hung. Three properties, and all three were the same
+    complaint: say what it is doing, let the dialog be closed, and keep answering afterwards.
+    """
+
+    def _collect(self) -> str:
+        return _read(os.path.join(INFRA, '_collect.html'))
+
+    def test_the_partial_is_in_the_bundle(self):
+        """A section's JavaScript exists only if the bundle includes it, and the failure is a
+        button whose handler is not defined — silent until somebody presses it."""
+        src = _read(BUNDLE)
+        assert 'partials/infra/_collect.html' in src
+
+    def test_the_request_hands_back_a_job_and_not_results(self):
+        """Held open for the minutes a NAS takes, the request is one a browser or a reverse
+        proxy gives up on — and the operator is left unable to tell whether it worked."""
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        body = routes.split("methods=['POST']")[1].split('@app.route')[0]
+        assert "'job_id': job_id" in body
+        assert 'start_collect(' in body
+        assert '/api/v1/infra/collect/<job_id>' in routes, 'nothing can be asked about it'
+
+    def test_the_progress_route_is_narrowed_to_the_job_s_host(self):
+        """A job id is a short random string, and "hard to guess" is not a permission: without
+        this, anyone who may poll learns the NAME of a machine they may not see."""
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        # [-1]: the path is named twice — in the module header and on the decorator —
+        # and the half that matters is the one after the LAST of them.
+        body = routes.split('/api/v1/infra/collect/<job_id>')[-1]
+        assert "_may_see(job.get('host')" in body
+
+    def test_closing_the_dialog_does_not_stop_the_run(self):
+        """The whole reason the work is a thread on the server: nothing about it depends on
+        somebody watching. The dialog closing must therefore touch the DISPLAY only."""
+        src = self._collect()
+        closed = src.split('hidden.bs.modal')[1].split('{once: true});')[0]
+        assert '_infraCollectShown = false' in closed
+        for word in ('abort', 'cancel', 'clearInterval', '_infraCollectJob = null'):
+            assert word not in closed, (
+                f'closing the dialog does something to the run itself ({word})')
+
+    def test_there_is_still_a_bar_once_it_is_closed(self):
+        """"Is it still going?" has to be answerable without reopening anything."""
+        src = self._collect()
+        body = src.split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
+        assert 'progress-bar' in body and '_infraCollectPct(job)' in body
+        assert '_infraCollectOpen()' in body, 'the bar cannot be opened again'
+
+    def test_the_bar_belongs_to_its_own_machine(self):
+        """A run started on one device must not draw its progress over another's header."""
+        body = self._collect().split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
+        assert 'job.host !== uid' in body
+
+    def test_the_percentage_is_never_alone(self):
+        """Progress is per MODULE, so nine fast ones and an SNMP profile reach 90 % in two
+        seconds and stay there for four minutes. The name of what is working is what makes
+        that pause legible; a bar on its own reads as a hang."""
+        src = self._collect()
+        assert 'running.detail || running.module' in src, (
+            'the bar does not name what is working')
+        assert '_infraCollectRow' in src, 'the dialog does not list the modules'
+
+    def test_a_timeout_is_not_drawn_as_a_failure(self):
+        """The module has not failed — it is still working and writes its own state and
+        history when it lands. A red cross is a thing the screen has to take back."""
+        row = self._collect().split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
+        assert "timeout: ['bi-hourglass-split',    'text-warning'" in row
+
+    def test_a_running_module_says_what_it_is_doing(self):
+        """0 % for five minutes is the same picture as a hang. The module boundary is all the
+        core can see, so the module speaks for itself — and the screen has to draw what it
+        said, in the dialog and on the bar."""
+        src = self._collect()
+        row = src.split('function _infraCollectRow')[1].split(chr(10) + 'function ')[0]
+        assert "m.state === 'running' ? (m.detail" in row, (
+            'a running module shows no detail — the dialog is a spinner with a name on it')
+        bar = src.split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
+        assert 'running.detail' in bar, 'the bar does not say what is happening'
+
+    def test_the_poll_gives_up_on_a_job_that_is_gone(self):
+        """The jobs live in the panel's memory. After a restart, waiting longer does not
+        bring one back — and a spinner that never stops is worse than an answer."""
+        body = self._collect().split('async function _infraCollectPoll')[1].split(chr(10) + 'function ')[0]
+        assert 'infra_collect_unknown_job' in body
+        assert 'return;' in body
 
     def test_it_owns_no_store(self):
         """Every fact it shows belongs to somebody — hosts, check state, history. A fourth
@@ -112,6 +255,50 @@ class TestItShowsWithoutHandingOver:
         for state in ('ok:', 'warning:', 'error:'):
             assert state in body
         assert 'infra_unwatched' in body, 'a host nobody watches has no state of its own'
+
+
+class TestItRefreshesWithoutBlinking:
+    """Reported from the panel: the refresh button made the whole page blink.
+
+    It went through the section's ENTRY POINT, which re-asks for the fleet, then blanks the
+    pane for a spinner, then asks for the device: two round trips and an empty screen to
+    redraw one machine. On a wall display with the auto-refresh on, that is every interval.
+    """
+
+    def _render(self) -> str:
+        return _read(os.path.join(INFRA, '_render.html'))
+
+    def test_the_button_refreshes_in_place(self):
+        src = self._render()
+        assert 'onclick="_infraReload()"' in src
+        assert 'onclick="_infraDetail=null;renderInfra()"' not in src, (
+            'the refresh button still goes through the entry point, which blanks the pane')
+
+    def test_it_swaps_the_markup_only_once_the_answer_is_in_hand(self):
+        body = self._render().split('async function _infraReload(')[1].split(chr(10) + '}')[0]
+        assert body.index('await apiGet') < body.index('innerHTML'), (
+            'the pane is written before the data arrives — which is the blink')
+        assert 'if (!data) return;' in body, (
+            'a failed refresh throws away the screen it had')
+
+    def test_the_tick_uses_it_too(self):
+        """The auto-refresh is the control this section carries FOR wall screens. Blinking
+        every interval is the one thing it must not do."""
+        body = self._render().split('function _infraAutoTick(')[1].split(chr(10) + '}')[0]
+        assert '_infraReload()' in body
+
+    def test_the_spinner_is_for_an_empty_pane(self):
+        """Opening a device from the list, or a reload landing straight on one. Painting it
+        over a device already on screen is the blink itself."""
+        body = self._render().split('async function _infraOpenView(')[1].split(chr(10) + '}')[0]
+        assert "querySelector('.ss-vfill')" in body
+
+    def test_the_reload_button_does_not_call_a_device_a_server(self):
+        """`refresh_tt` is "Reload data from server" and it is right everywhere else. Beside a
+        machine it reads as the machine — and the distinction that matters in this header is
+        the other one: this button does not poll the equipment, and the one next to it does."""
+        assert "t('infra_reload_tt')" in self._render()
+        assert "t('refresh_tt')" not in self._render()
 
 
 class TestItDoesNotGoStale:

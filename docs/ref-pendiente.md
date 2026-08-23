@@ -260,7 +260,7 @@ De aquella ronda quedaron sin arreglar, clasificados como latentes o de borde:
 - **Frontend (severidad baja):** los recogidos como *frontend-lows* en la misma ronda.
 
 **Riesgo aceptado explícitamente:** exfiltración vía `api_test_host_ssh`. El endpoint se
-endureció parcialmente (`api_test_credential` perdió `servers_edit`), pero el riesgo de fondo
+endureció parcialmente (`api_test_credential` perdió `devices_edit`), pero el riesgo de fondo
 se asumió a conciencia — no lo "arregles" sin releer aquella decisión.
 
 ## Empaquetado

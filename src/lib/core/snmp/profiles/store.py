@@ -38,26 +38,19 @@ import re
 import time
 import unicodedata
 
-from lib.db.module_tables import module_table
-from lib.db.schema import Column
-
-MODULE = 'snmp'
+from lib.db.schema import Column, TableSpec
 
 # One row per entry, and the entry itself is a JSON document. Not a column per field: what a
 # profile IS is decided by `profiles.normalise`, which reads a document — a schema here would
 # be a second declaration of the same shape, and the two would disagree the first time one of
 # them gained a field.
-# ── Why the table is still called ``mod_snmp_catalog`` ───────────────────────────────────
-# The code moved to the core; the table did not, and that is deliberate. A table name is a
-# fact about DATA — every installation already has rows under this one — while where the code
-# lives is a fact about the source tree, and renaming one because the other moved would spend
-# a migration on tidiness. It buys nothing a reader of this file cannot get from this comment,
-# and it can go wrong on a database this project does not own.
-#
-# ``module_table`` is kept for the same reason: it is what produces that exact name. If the
-# name is ever changed it should be for a reason of its own, with the migration written and
-# tested on all three engines.
-SCHEMA = module_table(MODULE, 'catalog', (
+SCHEMA = TableSpec(
+    # `snmp_catalog`, not `mod_snmp_catalog`: the prefix said "a module keeps this", and the
+    # module stopped keeping it when the catalogue became the core's. Renamed outright rather
+    # than migrated — nothing was in production yet, and a rename with no data to carry is a
+    # rename, not a migration.
+    name='snmp_catalog',
+    columns=(
     # The catalogue id, and the primary key because that IS the identity: it is what a server
     # stores, and two rows answering to one id is two answers to "what does this device
     # measure".
@@ -66,7 +59,8 @@ SCHEMA = module_table(MODULE, 'catalog', (
     Column('author',     'TEXT', nullable=False, default="''"),
     Column('created_at', 'REAL', nullable=False, default='0'),
     Column('updated_at', 'REAL', nullable=False, default='0'),
-))
+    ),
+)
 
 _T = SCHEMA.name
 

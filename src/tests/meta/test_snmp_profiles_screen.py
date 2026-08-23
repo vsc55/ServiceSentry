@@ -58,6 +58,14 @@ def _schema():
         return json.load(fh)
 
 
+def _servers():
+    """The ``servers`` collection as the BROWSER gets it: the connection fields are not in
+    schema.json any more — the collection names the protocol and the panel expands the core
+    declaration into it, so this is where the answer is."""
+    from lib.modules import ModuleBase                        # noqa: PLC0415
+    return ModuleBase.discover_schemas()['snmp|servers']
+
+
 def _lang(code):
     """The MODULE's lang file — what is left of it: the labels and hints of a check's
     fields, which belong to the check."""
@@ -356,15 +364,15 @@ class TestTheFieldThatAssignsThem:
     def test_the_device_carries_its_profiles(self):
         """On the SERVER and not on a check: what a machine IS does not change because
         somebody added a fourth OID check to it."""
-        servers = _schema()['servers']
+        servers = _servers()
         assert FIELD in servers
-        assert FIELD in servers['__field_order__'], 'declared but never drawn'
+        assert FIELD in _schema()['servers']['__field_order__'], 'declared but never drawn'
 
     def test_it_is_a_list_and_not_a_choice(self):
         """A NAS is the generic profile plus the interfaces plus its own disks. One profile
         per device would mean one monolithic profile per model, which is how a catalogue
         becomes unmaintainable."""
-        meta = _schema()['servers'][FIELD]
+        meta = _servers()[FIELD]
         assert meta.get('multi') is True
         assert meta.get('default') == ''
 
@@ -445,8 +453,11 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
     """
 
     def test_the_snmp_profile_carries_the_identity_not_just_the_address(self):
+        from lib.core.hosts.resolve import host_profile_specs   # noqa: PLC0415
         hp = _schema().get('__host_profile__') or {}
-        fields = set(hp.get('fields') or [])
+        # Resolved, not as written: the module names the protocol and the core says what it
+        # holds, so the answer is what the panel acts on rather than what the file repeats.
+        fields = set(host_profile_specs(hp)[0].get('fields') or [])
         assert hp.get('key') == 'snmp' and hp.get('address_field') == 'host'
         assert {'community', 'version', 'device_profiles'} <= fields
         # …and NOT how long we wait for it: two entries for one box would then migrate
@@ -587,13 +598,23 @@ class TestNothingReadsAsItsOwnKey:
 
     def test_the_field_is_named_and_explained_in_both_languages(self):
         """An option whose label is missing shows its storage path, and one with no hint
-        leaves "what do I put here" to be answered from the source."""
+        leaves "what do I put here" to be answered from the source.
+
+        Asked of what the panel HANDS the browser rather than of the module's lang file: the
+        field is expanded from the core profile now, and so are its words. They travel by two
+        different roads — the label rides on the field, the hint goes through the module's
+        ``__i18n__`` — and one of the two breaking on its own is the failure worth catching.
+        """
+        from lib.modules import ModuleBase                    # noqa: PLC0415
+        schemas = ModuleBase.discover_schemas()
+        meta = schemas['snmp|servers'][FIELD]
         for code in ('es_ES', 'en_EN'):
-            data = _lang(code)
-            assert (data.get('labels') or {}).get(FIELD), f'{code}: no label'
-            assert (data.get('hints') or {}).get(FIELD), f'{code}: no hint'
-            assert (data.get('group_labels') or {}).get(
-                _schema()['servers'][FIELD]['group']), f'{code}: the group has no name'
+            assert (meta.get('label_i18n') or {}).get(code), f'{code}: no label'
+            words = (schemas['snmp|__i18n__'] or {}).get(code) or {}
+            assert (words.get('hints') or {}).get(FIELD), f'{code}: no hint'
+            # The group headings stay the module's: they are how ITS form is laid out.
+            assert (_lang(code).get('group_labels') or {}).get(
+                meta['group']), f'{code}: the group has no name'
 
 
 class TestTheMibManagerScreen:

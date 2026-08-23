@@ -128,7 +128,7 @@ class TestASourceDeclaresItsOwnArchive:
 
     def test_librenms_declares_the_zip_and_the_folder(self):
         import json as _json
-        src = _json.loads(_read_src('lib/core/snmp/mibs/mib_sources/librenms.json'))
+        src = _json.loads(_read_src('lib/core/snmp/mibs/sources/librenms.json'))
         assert src['archive'].startswith('https://codeload.github.com/')
         assert src['archive_only'] == 'mibs'
         assert src['folder'], 'the API route is still the cheap one and stays'
@@ -198,7 +198,7 @@ class TestASourceDeclaresItsOwnArchive:
     def test_the_format_is_documented(self):
         """This directory is the place somebody adds a source without touching code, which
         only works while the fields are written down."""
-        doc = _read_src('lib/core/snmp/mibs/mib_sources/README.md')
+        doc = _read_src('lib/core/snmp/mibs/sources/README.md')
         assert 'archive_only' in doc
 
 

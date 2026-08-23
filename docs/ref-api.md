@@ -390,17 +390,17 @@ Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo qu
 | Método | Ruta | Permiso (inline) | Propósito |
 |---|---|---|---|
 | GET/POST | `/api/v1/snmp/<acción>` | `snmp_view` (lectura) · `snmp_manage` (el resto) | La biblioteca de MIB, el catálogo de perfiles de dispositivo y preguntarle a un dispositivo qué sirve. 42 acciones; las declara `lib/core/snmp/manifest.py`. `discover` **no** está aquí: busca OIDs para el campo de un check, así que sigue en `/api/v1/modules/watchfuls/snmp/discover` |
-| GET | `/api/v1/hosts` | `servers_view` (global) o view por host | Listar hosts, secretos enmascarados |
+| GET | `/api/v1/hosts` | `devices_view` (global) o view por host | Listar hosts, secretos enmascarados |
 | GET | `/api/v1/hosts/<uid>/status` | `view` por host | Últimos resultados de checks |
-| POST | `/api/v1/hosts` | `servers_edit` | Crear host |
-| POST | `/api/v1/hosts/<uid>/clone` | `servers_edit` | Clonar host |
+| POST | `/api/v1/hosts` | `devices_edit` | Crear host |
+| POST | `/api/v1/hosts/<uid>/clone` | `devices_edit` | Clonar host |
 | PUT | `/api/v1/hosts/<uid>` | `edit` por host | Actualizar host |
 | DELETE | `/api/v1/hosts/<uid>` | `delete` por host | Borrar host |
-| POST | `/api/v1/hosts/test_ssh` | `edit` por host / `servers_edit` | Probar SSH sin guardar |
+| POST | `/api/v1/hosts/test_ssh` | `edit` por host / `devices_edit` | Probar SSH sin guardar |
 | POST | `/api/v1/hosts/test_check` | `edit` por host | Ejecutar un check una vez |
 | POST | `/api/v1/hosts/test` | `edit` por host | Test completo: SSH + todos los checks |
-| GET | `/api/v1/hosts/migrate/preview` | `servers_edit` | Propuesta de migración, secretos enmascarados |
-| POST | `/api/v1/hosts/migrate/apply` | `servers_edit` | Crear hosts para candidatos aceptados |
+| GET | `/api/v1/hosts/migrate/preview` | `devices_edit` | Propuesta de migración, secretos enmascarados |
+| POST | `/api/v1/hosts/migrate/apply` | `devices_edit` | Crear hosts para candidatos aceptados |
 
 ## Módulos — [lib/core/modules/routes.py](../src/lib/core/modules/routes.py)
 

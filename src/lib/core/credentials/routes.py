@@ -49,7 +49,7 @@ def register(app, wa):
         perms = wa._get_session_permissions()
         if not (perms & {'credentials_view', 'credentials_edit',
                          'credentials_add', 'credentials_delete',
-                         'servers_view', 'servers_edit',
+                         'devices_view', 'devices_edit',
                          'modules_view', 'modules_edit'}):
             return jsonify({'error': wa._t('access_denied')}), 403
         store = _store()
@@ -193,7 +193,7 @@ def register(app, wa):
         ssh_verify_host?}.  Masked secrets are taken from the stored credential."""
         # A stored credential's secret is decrypted server-side and sent to the target
         # address, so restrict this to the credential-management circle: a plain
-        # servers_edit holder must not be able to exfiltrate a secret it cannot see by
+        # devices_edit holder must not be able to exfiltrate a secret it cannot see by
         # pointing the test at an attacker-controlled host.
         perms = wa._get_session_permissions()
         if not (perms & {'credentials_view', 'credentials_edit', 'credentials_add'}):

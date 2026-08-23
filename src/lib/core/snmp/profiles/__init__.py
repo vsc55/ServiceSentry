@@ -56,9 +56,20 @@ KINDS = ('gauge', 'counter', 'text')
 # saying what the value IS, not how many pixels it gets.
 CHARTS = ('line', 'area', 'value', 'none')
 
-_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'profiles')
+# The shipped catalogue, inside the package that reads it. It used to be a `profiles/`
+# directory sitting BESIDE a `profiles.py`, which is a trap rather than a mess: a
+# module and a same-named directory in one package resolve by a rule nobody should
+# have to know, and the day somebody drops an __init__.py in there the imports change
+# meaning in silence.
+_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sources')
 # Where an installation's own profiles live, under the application data directory.
 CUSTOM_SUBDIR = 'snmp_profiles'
+
+
+#: The two halves of a proportion a summary can draw as one figure. Deliberately not open-
+#: ended: a vocabulary the core has to understand is one the core has to be able to draw, and
+#: two words it knows what to do with beat twenty it passes through and ignores.
+HEADLINE_ROLES = ('used', 'total', 'free')
 
 
 def _label(raw, fallback: str) -> dict:
@@ -154,6 +165,132 @@ def normalise_metric(raw) -> dict | None:
     role = str(raw.get('role') or '').strip().lower()
     if role and _ID_RE.match(role):
         out['role'] = role
+    # Whether this is one of the handful somebody wants BEFORE the other thousand.
+    #
+    # A device with a full set of profiles answers a thousand values, and "how is this machine"
+    # is four or five of them — the CPU, the memory, the temperature, whether the box says it
+    # is well. Which ones those are is a fact about the equipment and not about the panel, so
+    # the profile says it: a switch's headline is its throughput and a UPS's is its battery,
+    # and a core that picked them by name would be a core that knows what a NAS is.
+    #
+    # `true` is a figure on its own. A ROLE says this figure is one HALF of a proportion —
+    # HOST-RESOURCES-MIB gives every store, memory and filesystem alike, as a size and an
+    # amount used, and two numbers side by side is arithmetic left to the reader when the
+    # answer is "83 %". Which of the two is which cannot be guessed from a label that says
+    # "Usado" in one profile and "In use" in the next, so the profile says that too.
+    head = raw.get('headline')
+    if isinstance(head, str) and head.strip().lower() in HEADLINE_ROLES:
+        out['headline'] = head.strip().lower()
+    elif head:
+        out['headline'] = True
+    # What the numbers MEAN, for a value that answers with an enumeration. The agent says
+    # "1" and only the MIB it came from says that 1 is Normal, so a panel without this
+    # prints the integer — "System status 1, Power supply status 1" — which is a column of
+    # numbers nobody can act on.
+    states = _states(raw.get('states'))
+    if states:
+        out['states'] = states
+    return out
+
+
+#: What a state MEANS for somebody looking at it, which decides its colour. Declared and not
+#: derived from the word: "Degraded" is bad and "Repairing" is not, and no rule about the
+#: text can tell those apart.
+LEVELS = ('ok', 'warn', 'bad', 'info')
+
+
+def _headline_rows(raw) -> dict:
+    """Which ROWS of this table belong on a summary — or ``{}`` for all of them.
+
+    Reported from the screen, and it is the difference between a summary and a dump.
+    HOST-RESOURCES-MIB reports every store a host has, and on a NAS running containers that is
+    physical memory, swap, the buffers, and then forty bind mounts of the same volume: the
+    Details tab came out as five rings of memory followed by thirty-nine rings that all said
+    67 % of the same 31 TiB. Nobody can read that, and the summary was the one screen that
+    existed so nobody had to.
+
+    The table already says what each row IS — ``hrStorageType`` is a column — so the rule is
+    "these types", named by the ROLE the profile files that column under. Not by row name: a
+    volume is called ``/volume1`` on one machine and ``C:`` on the next, and a panel matching
+    on paths would be a panel that knows what Linux is.
+
+    ``{"role": "kind", "any": ["…25.2.1.2", …]}``. A rule that names no role or no values is
+    dropped rather than applied, because a filter nobody can satisfy is a summary that is
+    always empty — and an empty summary looks like a device that answered nothing.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    role = str(raw.get('role') or '').strip()
+    any_of = [str(v).strip() for v in (raw.get('any') or ()) if str(v).strip()]
+    if role and any_of:
+        out.update({'role': role, 'any': any_of})
+    # …or, for a table that has no column saying what its rows are, a pattern for their NAMES.
+    # SYNOLOGY-RAID-MIB lists a storage pool and the volumes carved out of it in one table and
+    # answers nothing that tells them apart — "Storage Pool 1" and "volume1" differ by name and
+    # by nothing else. Matching on names is an assumption about how ONE vendor names things,
+    # which is why it lives in that vendor's file, next to the OIDs it is about: the core
+    # applies a pattern it was handed and knows nothing about pools.
+    pattern = str(raw.get('row_matches') or '').strip()
+    if pattern:
+        try:
+            re.compile(pattern)
+        except re.error:
+            pattern = ''    # an unusable pattern is no filter, not an empty summary
+        if pattern:
+            out['row_matches'] = pattern
+    return out
+
+
+def _row_split(raw) -> str:
+    """A pattern that separates a row's NAME from the thing it belongs to — or ``''``.
+
+    Some tables answer with a name that already carries a qualifier. A Synology names a disk
+    in an expansion bay "Drive 1 (DX517-1)", so eight disks in two enclosures sort into each
+    other and read as one shelf of eight. SYNOLOGY-DISK-MIB has no column for the enclosure —
+    fifteen objects and not one of them says which shelf a disk is in — so the only place that
+    fact exists is inside the name the device itself composed.
+
+    Splitting it is therefore an assumption about how ONE vendor names things, and this is
+    where a vendor-specific assumption belongs: in that vendor's profile, written down, next
+    to the OIDs it is about. The core stays ignorant of parentheses.
+
+    Two named groups are required, ``row`` and ``group``, because a pattern that matched
+    positionally would silently swap them the day somebody reordered it.
+    """
+    pat = str(raw or '').strip()
+    if not pat:
+        return ''
+    try:
+        rx = re.compile(pat)
+    except re.error:
+        return ''
+    if 'row' not in rx.groupindex or 'group' not in rx.groupindex:
+        return ''
+    return pat
+
+
+def _states(raw) -> dict:
+    """``{value: {label, level}}``, checked into shape — ``{}`` when there is nothing usable.
+
+    The key is the raw value as a STRING: it is what JSON can hold as an object key and what
+    the browser compares against. A value the map does not cover is not an error and is not
+    guessed at — it falls back to its own number, which is what the whole column did before
+    any of this and is honest about not knowing.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for value, spec in raw.items():
+        key = str(value).strip()
+        if not key:
+            continue
+        spec = spec if isinstance(spec, dict) else {'label': spec}
+        label = _label(spec.get('label'), '')
+        if not label or not any(label.values()):
+            continue
+        level = str(spec.get('level') or 'info').strip().lower()
+        out[key] = {'label': label, 'level': level if level in LEVELS else 'info'}
     return out
 
 
@@ -201,10 +338,24 @@ def normalise(raw) -> dict | None:
     out = {
         'id':      pid,
         'label':   _label(raw.get('label'), pid.replace('_', ' ').capitalize()),
+        # What the thing this profile describes is CALLED, as opposed to what the profile is
+        # called. They are not the same question and neither can be derived from the other:
+        # the catalogue entry has to say "Synology — system (SYNOLOGY-SYSTEM-MIB)" so somebody
+        # choosing among forty profiles knows which MIB they are picking, while the card on a
+        # device page is naming a box in a rack — "Synology", and the UPS beside it is "UPS".
+        # Trimming the long one gets the first right and the second wrong, which is how it was
+        # reported. Optional: a profile that says nothing keeps the trimmed title.
+        'short_label': _label(raw.get('short_label'), ''),
         'metrics': metrics,
     }
     if includes:
         out['includes'] = includes
+    split = _row_split(raw.get('row_split'))
+    if split:
+        out['row_split'] = split
+    rows = _headline_rows(raw.get('headline_rows'))
+    if rows:
+        out['headline_rows'] = rows
     # What this profile is FOR, and how a device is recognised as one of them. Two ways,
     # because devices answer two different questions about themselves:
     #
@@ -470,10 +621,37 @@ def assigned(server: dict) -> list:
 
 
 def label_of(obj: dict, lang: str, default_lang: str = 'en_EN') -> str:
-    """A profile's or metric's name in the reader's language, however it names itself."""
+    """A profile's or metric's name in the reader's language, however it names itself.
+
+    A plain string is a valid label — ``_label`` says so, and a profile for one rack in one
+    company should not have to be bilingual to be usable. This function is called on profiles
+    that have been through ``normalise`` (where a string has already become a dict) AND on
+    ones that have not: a probe builds its catalogue from raw files. It crashed on the second
+    kind, and the failure was not a traceback anybody saw — the sampler caught it, recorded
+    that the device had answered nothing, and the screen said the machine was not responding.
+    """
     labels = (obj or {}).get('label') or {}
+    if isinstance(labels, str):
+        return labels.strip() or str((obj or {}).get('id') or (obj or {}).get('key') or '')
+    if not isinstance(labels, dict):
+        labels = {}
     return (labels.get(lang) or labels.get(default_lang) or labels.get('*')
             or str((obj or {}).get('id') or (obj or {}).get('key') or ''))
+
+
+def short_label_of(obj: dict, lang: str, default_lang: str = 'en_EN') -> str:
+    """What the thing a profile describes is CALLED — or ``''`` when it does not say.
+
+    Empty rather than falling back to the long title, because the two are answers to different
+    questions and the caller is the one that knows which it wants. The identity card wants this
+    one; the catalogue wants the title.
+    """
+    labels = (obj or {}).get('short_label') or {}
+    if isinstance(labels, str):
+        return labels.strip()
+    if not isinstance(labels, dict):
+        return ''
+    return str(labels.get(lang) or labels.get(default_lang) or labels.get('*') or '').strip()
 
 
 def claims_sysobjectid(profiles: dict, sysobjectid: str) -> list:
@@ -507,17 +685,87 @@ def match_sysobjectid(profiles: dict, sysobjectid: str) -> dict | None:
 
 
 def history_fields(profile: dict, lang: str = 'en_EN') -> dict:
-    """``{field: {label, unit}}`` for the metrics of this profile that are measurements.
+    """``{field: {label, unit, source, source_label}}`` for this profile's measurements.
 
     The shape :mod:`lib.core.history.service` produces from a module's static ``__history__``
     declaration — because that is what makes a value chartable in History and nameable in the
     Infrastructure section, and a profile is exactly that declaration for values that arrive
     without one. Text metrics are absent on purpose: they are what the machine IS, not what it
     is doing.
+
+    ``source`` is this profile, and it travels with every field because the union that comes
+    out the other end has no way to work it back. A device carries a dozen profiles — the
+    system, the disks, the RAID, the shares, the UPS plugged into it — and they are what a
+    person groups by when a device answers sixty-four different measurements: "disks" is a
+    heading somebody can read, and the alphabet is not. Flattened, that grouping was thrown
+    away at the only point it existed.
+
+    ``chart`` comes along for the same reason: a profile says whether a value is a line or a
+    state, and that is the difference between drawing a graph and drawing a badge.
+
+    ``states`` is what turns the badge into a word. An agent answers "1" and the MIB it came
+    from is what says that 1 means Normal — the panel has no way to know and was printing the
+    integer, so a column read "System status 1, Power supply status 1, Update available 2",
+    which is not information. A profile that declares none is unchanged: its values are still
+    numbers, and a value the map does not cover falls back to its number rather than to a
+    guess.
     """
     out = {}
     for m in (profile or {}).get('metrics') or ():
         if m.get('kind') == 'text':
             continue
-        out[m['key']] = {'label': label_of(m, lang), 'unit': m.get('unit', '')}
+        out[m['key']] = {
+            'label':        label_of(m, lang),
+            'unit':         m.get('unit', ''),
+            'source':       str((profile or {}).get('id') or ''),
+            'source_label': label_of(profile or {}, lang),
+            'source_short': short_label_of(profile or {}, lang),
+            # Whether this is a STANDARD or a vendor's own MIB, and it is not decoration: it
+            # is the reading order of a device's identity. RFC 1213 is what every SNMP agent
+            # answers, the vendor's MIB is what THIS box answers, and the UPS profile is about
+            # something plugged into it — "from what every device is, to what this one is, to
+            # what is attached" is how a person reads those three cards, and alphabetical order
+            # put the standard last. Declared by the profile (it claims a vendor tree or it
+            # does not) rather than decided by a list of ids in the panel.
+            'source_rank':  1 if ((profile or {}).get('match') or {}).get('sysobjectid_prefix')
+                              else 0,
+            # The flag AS DECLARED — `True`, or which half of a proportion it is. Flattened
+            # to a boolean here once, and the summary drew two byte counts side by side
+            # instead of one percentage: the role survived normalise and died on the way out.
+            'headline':     m.get('headline') or False,
+            # …and, for a table, which of its rows the summary is about. Carried on every
+            # field like `row_split`, because it is a fact about the TABLE and every column of
+            # a table is filtered the same way.
+            'headline_rows': (profile or {}).get('headline_rows') or {},
+            'chart':        m.get('chart', ''),
+        }
+        states = states_of(m, lang)
+        if states:
+            out[m['key']]['states'] = states
+        # The profile's, not the metric's: it is a fact about how this TABLE names its rows,
+        # and every column of the table is named the same way.
+        if (profile or {}).get('row_split'):
+            out[m['key']]['row_split'] = profile['row_split']
+    return out
+
+
+def states_of(metric: dict, lang: str = 'en_EN') -> dict:
+    """``{value: {label, level}}`` for a metric that answers with an enumeration.
+
+    Declared as ``"states": {"1": {"label": {...}, "level": "ok"}}``. The key is the raw value
+    as a STRING, because that is what a JSON object can hold and what the browser will compare
+    against; the level is one of ``ok`` / ``warn`` / ``bad`` / ``info``, which is what decides
+    the colour — and it is declared rather than derived from the word, because "Degraded" is
+    bad, "Repairing" is not, and no rule about the text can tell them apart.
+    """
+    declared = (metric or {}).get('states')
+    if not isinstance(declared, dict):
+        return {}
+    out = {}
+    for value, spec in declared.items():
+        spec = spec if isinstance(spec, dict) else {'label': spec}
+        label = label_of(spec, lang)
+        if not label:
+            continue
+        out[str(value)] = {'label': label, 'level': str(spec.get('level') or 'info')}
     return out

@@ -37,8 +37,9 @@ const SERVER_VIEWS = [
     { id: 'cards',    label_key: 'srv_view_cards',    icon: 'bi-grid-3x3-gap', render: '_srvViewCards',     mode: 'cards'   },
     { id: 'status',   label_key: 'srv_view_status',   icon: 'bi-activity',     render: '_srvViewStatus',    mode: 'summary' },
     { id: 'coverage', label_key: 'srv_view_coverage', icon: 'bi-puzzle',       render: '_srvViewCoverage',  mode: 'summary' },
+    { id: 'types',    label_key: 'srv_view_types',    icon: 'bi-tags',         render: '_srvViewTypes',     mode: 'summary' },
 ];
-const _SRV_VIEW_KEY = 'ss_servers_view';
+const _SRV_VIEW_KEY = 'ss_devices_view';
 
 let _srvViewMode = (() => {
     try {

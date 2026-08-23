@@ -33,7 +33,7 @@ import time
 from lib.debug import DebugLevel
 
 from lib.core.snmp import metrics as _metrics
-from lib.core.snmp import profile_store as _profile_store
+from lib.core.snmp.profiles import store as _profile_store
 from lib.core.snmp import profiles as _profiles
 # Reading a metric off a device is core: the scheduler, the test screen and the host
 # walk have to get the same answer, so there is one implementation of it.
@@ -128,9 +128,23 @@ class SnmpSampler:
         # device, and one value that comes back establishes it. The full sweep is the
         # scheduler's job, on its own cycle, where the numbers are kept.
         probe = self.is_probe
-        for prof in assigned:
+        # Which profile it is on, for whoever is watching. This loop IS the five minutes: a
+        # Synology carries twenty-four profiles and each is a walk of hundreds of round trips,
+        # all of it inside one module — so a screen that only sees module boundaries shows 0 %
+        # for the whole sampling and looks like something that has hung. Reported exactly that
+        # way from the panel. `report_progress` is a no-op unless somebody pressed a button.
+        lang = self._notify_lang()
+        for _i, prof in enumerate(assigned, 1):
+            # `label_of` and not `prof['label']`: a profile names itself per language
+            # (`{'en_EN': …, 'es_ES': …}`), and printing the dict is what happens when you
+            # forget — reported from the panel as a progress line with a Python dict in it.
+            # The configured NOTIFY language, because that is the one a module already uses
+            # for every sentence it produces; a worker thread has no session to ask.
+            self.report_progress(
+                f'{label} — {_profiles.label_of(prof, lang)} ({_i}/{len(assigned)})')
             for metric in prof.get('metrics') or ():
-                ok, err = self._sample_metric(metric, conn, now, state, rows, columns)
+                ok, err = self._sample_metric(metric, conn, now, state, rows, columns,
+                                              source=str(prof.get('id') or ''), lang=lang)
                 answered = answered or ok
                 if err:
                     errors.append(f"{metric['key']}: {err}")
@@ -142,29 +156,50 @@ class SnmpSampler:
         self._save_sample_state(srv_key, state)
         self._emit_samples(srv_key, label, rows, answered, errors)
 
-    def _sample_metric(self, metric: dict, conn: dict, now: float,
-                       state: dict, rows: dict, columns: dict) -> tuple:
+    def _sample_metric(self, metric: dict, conn: dict, now: float, state: dict, rows: dict,
+                       columns: dict, source: str = '', lang: str = '') -> tuple:
         """Read one metric into *rows*. Returns ``(answered, error)``."""
         got, err = read_metric(metric, conn, self._snmp_get, self._snmp_walk_oid, columns)
         if err and not got:
             return False, err
+        # Resolved once per metric, not once per row: an interface table is one metric and
+        # forty rows, and the words are the same for all of them. Only the levels worth
+        # reporting are kept — an `ok` or an `info` state is a badge and not a finding.
+        states = {}
+        if metric.get('states'):
+            _name = _profiles.label_of(metric, lang)
+            states = {v: {'level': spec['level'], 'label': str(spec.get('label') or ''),
+                          'metric': _name}
+                      for v, spec in (_profiles.states_of(metric, lang) or {}).items()
+                      if spec.get('level') in ('bad', 'warn')}
         for r in got:
             self._store_value(rows, r['key'], r['name'], metric, r['raw'], now, state,
-                              factor=r['factor'])
+                              factor=r['factor'], source=source, states=states)
         return True, (err or None)
 
     def _store_value(self, rows: dict, row_key: str, row_name: str, metric: dict,
-                     raw, now: float, state: dict, factor=1) -> None:
+                     raw, now: float, state: dict, factor=1, source: str = '',
+                     states: dict | None = None) -> None:
         """Put one reading where it belongs — a number in the series, a name beside it.
 
         *factor* is the per-row multiplier a ``scale_by`` column supplied. It is applied to the
         RESULT and not to the raw reading, which is the same rule the profile's own ``scale``
         follows and matters for the same reason: scaling a counter before differentiating it
         would move the point at which it wraps.
+
+        *source* is the profile the reading came from, and the attributes are filed UNDER it.
+        They were filed flat, and that was not untidiness: a device carries several profiles,
+        several of them describe a *different piece of equipment* — a NAS and the UPS plugged
+        into it both answer "vendor", "model", "version" — and a flat dict means the second
+        one silently overwrites the first. So the panel showed one machine's serial beside
+        another machine's firmware, and WHICH survived depended on the order the profiles
+        happened to be sampled in. Nothing was reported wrong; a fact was simply gone.
         """
-        row = rows.setdefault(row_key, {'name': row_name, 'values': {}, 'attrs': {}})
+        row = rows.setdefault(row_key, {'name': row_name, 'values': {}, 'attrs': {},
+                                        'states': []})
         if metric.get('kind') == 'text':
-            row['attrs'][metric.get('role') or metric['key']] = _metrics.attribute(metric, raw)
+            bucket = row['attrs'].setdefault(source or '_', {})
+            bucket[metric.get('role') or metric['key']] = _metrics.attribute(metric, raw)
             return
         prev = (state.get(row_key) or {}).get(metric['key'])
         value, new_state = _metrics.sample(metric, raw, prev, now)
@@ -172,6 +207,15 @@ class SnmpSampler:
             state.setdefault(row_key, {})[metric['key']] = new_state
         if value is not None:
             row['values'][metric['key']] = _metrics.scale_value(value, factor)
+            # What the profile SAYS this number means, kept beside it. The map is already
+            # written down — it is what paints the badge — and until now the check threw it
+            # away: a NAS could answer "system status: Failed" and "update available" every
+            # cycle and the panel recorded the row as fine, because a sample was treated as
+            # something that either arrived or did not. A profile that has gone to the trouble
+            # of saying which values are BAD is a profile whose device can be checked.
+            spec = (states or {}).get(str(value))
+            if spec:
+                row['states'].append(spec)
 
     # ── What comes out ────────────────────────────────────────────────────────
 
@@ -204,9 +248,31 @@ class SnmpSampler:
                 data['_attrs'] = row['attrs']
             if row['name']:
                 data['_row'] = row['name']
-            self._emit(key, True,
-                       self._msg('snmp_sampled', name, len(row['values'])),
-                       data, name=name)
+            # The verdict, and it comes from the PROFILE. A profile that has gone to the
+            # trouble of saying which of a value's meanings are bad has said everything needed
+            # to check the device — and until now that was thrown away: a NAS could answer
+            # "system status: Failed" every cycle and the row was recorded as fine, because a
+            # sample was treated as something that either arrived or did not.
+            #
+            # Worst first, and only ONE reported: a row with four unhappy states is one row in
+            # trouble, and four messages about it is four notifications for one machine.
+            bad = [f for f in row['states'] if f['level'] == 'bad']
+            warn = [f for f in row['states'] if f['level'] == 'warn']
+            worst = (bad or warn or [None])[0]
+            if worst is None:
+                self._emit(key, True,
+                           self._msg('snmp_sampled', name, len(row['values'])),
+                           data, name=name)
+            else:
+                # `warning` and not a failure for a warn level: the panel already knows the
+                # difference — an amber state is not a machine that is down — and a pending
+                # DSM update must not paint a NAS red.
+                self._emit(key, False,
+                           self._msg('snmp_state_bad' if bad else 'snmp_state_warn',
+                                     name, worst['metric'], worst['label']),
+                           data, name=name,
+                           severity=None if bad else 'warning',
+                           change_msg=f"{worst['metric']}={worst['label']}")
         if errors:
             # Partial answers are normal — a profile assigned to a device that serves half of
             # it costs those metrics and nothing else, and it is visible where it happened.

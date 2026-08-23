@@ -438,7 +438,7 @@ class TestApiMigrate:
         assert c['profiles']['ssh']['ssh_password'] is None   # secret masked
 
     def test_apply_requires_edit_permission(self, client, admin):
-        # A viewer (no servers_edit) cannot preview/apply.
+        # A viewer (no devices_edit) cannot preview/apply.
         admin._users['viewer'] = {'password_hash': admin._users['admin']['password_hash'],
                                   'role': 'viewer', 'display_name': 'V'}
         _login(client, 'viewer')

@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_78_flags(self):
+    def test_permissions_tuple_has_79_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 78
+        assert len(PERMISSIONS) == 79
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -45,7 +45,7 @@ class TestPermissionsConstants:
             'backup_restore', 'backup_delete', 'backup_verify', 'backup_schedule',
             'diagnostics_view',
             'modules_view', 'modules_add', 'modules_edit', 'modules_delete',
-            'servers_view', 'servers_add', 'servers_edit', 'servers_delete',
+            'devices_view', 'devices_add', 'devices_edit', 'devices_delete',
             # SNMP's own, rather than the modules flags the library used to hang off:
             # the MIB library could not be granted without granting every module in
             # the panel, nor withheld from somebody who needed the rest.
@@ -56,10 +56,11 @@ class TestPermissionsConstants:
             'overview_view', 'overview_edit',
             'overview_set_default', 'overview_reset_factory',
             'sessions_view', 'sessions_revoke',
-            # The live view of the fleet. Its own flag and not `servers_view`: reading what
+            # The live view of the fleet. Its own flag and not `devices_view`: reading what
             # the machines are doing and editing the registry that defines them are different
             # acts, wanted by different people (lib/core/infra/manifest.py).
             'infra_view',
+            'infra_collect',
             'mfa_reset_others',
             'checks_view', 'checks_run',
             'history_view', 'history_delete',
@@ -163,10 +164,10 @@ class TestPermissionsConstants:
         assert 'groups_delete' not in ep
         assert 'sessions_revoke' not in ep
         # Servers: edit existing only — no add (new checks) and no whole-server delete
-        assert 'servers_view' in ep
-        assert 'servers_edit' in ep
-        assert 'servers_add' not in ep
-        assert 'servers_delete' not in ep
+        assert 'devices_view' in ep
+        assert 'devices_edit' in ep
+        assert 'devices_add' not in ep
+        assert 'devices_delete' not in ep
         # Editor never performs destructive purges
         assert 'history_delete' not in ep
         assert 'audit_delete' not in ep
@@ -182,7 +183,7 @@ class TestPermissionsConstants:
         assert 'audit_view' in vp
         assert 'sessions_view' in vp
         assert 'modules_view' in vp
-        assert 'servers_view' in vp
+        assert 'devices_view' in vp
         assert 'history_view' in vp
         # no write permissions
         assert 'users_add' not in vp

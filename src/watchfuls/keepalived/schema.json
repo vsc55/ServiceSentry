@@ -9,9 +9,7 @@
     },
     "__history__": {"field": null, "unit": null, "label": "Keepalived VIP"},
     "__host_profile__": [
-        {"key": "ssh", "address_field": "ssh_host",
-         "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
-                    "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+        {"key": "ssh", "address_field": "ssh_host"},
         {"key": "keepalived", "fields": ["priority"]}
     ],
     "__host_multiple__": false,

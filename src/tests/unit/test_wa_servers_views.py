@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""The host registry can be read four ways, and two of them are about the fleet.
+"""The host registry can be read five ways, and three of them are about the fleet.
 
 Servers is the one list where the rows are not the point: what you want from it is a state
 of the fleet, and a table gives you that one host at a time. Three things it leaves out:
@@ -12,6 +12,9 @@ of the fleet, and a table gives you that one host at a time. Three things it lea
   and both mean the fleet is smaller than the list looks. That is how a panel stays green
   while a machine is down.
 * what a host IS as one object rather than eight columns you turn on and read left to right.
+* what the fleet is MADE OF. A table sorted by type can be paged through until you have the
+  answer; a rail of the types states it before you read a row, and picking one is how you say
+  "show me the switches".
 
 The two grouped views are SUMMARIES: they are handed every row the filters left standing, not
 the page, and they draw no pagination — a count that shrank as you paged would be worse than
@@ -36,7 +39,10 @@ VIEW_FILES = {
     'cards': os.path.join(SRV, '_view_cards.html'),
     'status': os.path.join(SRV, '_view_status.html'),
     'coverage': os.path.join(SRV, '_view_coverage.html'),
+    'types': os.path.join(SRV, '_view_types.html'),
 }
+#: The grouped views — handed every filtered row, no pagination.
+SUMMARIES = ('status', 'coverage', 'types')
 
 
 class TestTheScanItself:
@@ -49,14 +55,14 @@ class TestTheScanItself:
         src = _strip_comments(_read(VIEWS))
         reg = src[src.index('const SERVER_VIEWS'):]
         reg = reg[:reg.index('];')]
-        for vid in ('table', 'cards', 'status', 'coverage'):
+        for vid in ('table', 'cards', 'status', 'coverage', 'types'):
             assert f"id: '{vid}'" in reg, f'{vid} is not in the registry'
 
     def test_the_bundle_includes_them_after_the_registry(self):
         js = _read(os.path.join(TPL, 'partials', '_js_sections.html'))
         i_views = js.index('servers/_views.html')
         for f in ('servers/_view_cards.html', 'servers/_view_status.html',
-                  'servers/_view_coverage.html'):
+                  'servers/_view_coverage.html', 'servers/_view_types.html'):
             assert f in js, f'{f} is never included'
             assert js.index(f) > i_views, f'{f} is included before the registry it registers in'
 
@@ -76,7 +82,7 @@ class TestPerHostPermissionsAreAskedOnce:
         assert 'actions: (host, ctx) => _srvActionsHtml(host, ctx)' in src
 
     def test_no_view_re_derives_the_permission(self):
-        """`server.<uid>.edit` grants exactly one row. A view that asked `servers_edit`
+        """`server.<uid>.edit` grants exactly one row. A view that asked `devices_edit`
         instead would hide the buttons from somebody who may press them on that host — or,
         the other way round, show them everywhere."""
         for name, path in VIEW_FILES.items():
@@ -105,7 +111,7 @@ class TestASummaryIsNotAPage:
         reg = src[src.index('const SERVER_VIEWS'):]
         reg = reg[:reg.index('];')]
         for line in reg.splitlines():
-            for vid in ('status', 'coverage'):
+            for vid in SUMMARIES:
                 if f"id: '{vid}'" in line:
                     assert "mode: 'summary'" in line, f'{vid} is drawn as a page again'
             if "id: 'cards'" in line:
@@ -117,9 +123,9 @@ class TestASummaryIsNotAPage:
         src = _strip_comments(_read(LIST))
         assert 'cardsBody: (rows, ctx, all) => _srvViewBody(rows, ctx, all)' in src
 
-    def test_both_summaries_state_the_whole_fleet(self):
+    def test_every_summary_states_the_whole_fleet(self):
         """A view showing three groups must never suggest the fleet is three hosts."""
-        for name in ('status', 'coverage'):
+        for name in SUMMARIES:
             body = _strip_comments(_read(VIEW_FILES[name]))
             assert '_summaryHeader(' in body, name
             assert "_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)" in body, name
@@ -139,7 +145,7 @@ class TestOneStatusVocabulary:
             body = _strip_comments(_read(path))
             assert 'text-bg-success' not in body or name != 'cards', name
             assert '#fd7e14' not in body or name in ('cards', 'status'), name
-        for name in ('cards', 'status', 'coverage'):
+        for name in ('cards', 'status', 'coverage', 'types'):
             body = _strip_comments(_read(VIEW_FILES[name]))
             if name != 'status':
                 assert '_srvStatusBadge(' in body, f'{name} no longer composes the shared badge'
@@ -217,7 +223,7 @@ class TestTheLabelsExist:
     def test_every_view_is_named_in_both_languages(self):
         for lang in ('en_EN', 'es_ES'):
             src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', f'{lang}.py'))
-            for vid in ('table', 'cards', 'status', 'coverage'):
+            for vid in ('table', 'cards', 'status', 'coverage', 'types'):
                 assert f"'srv_view_{vid}':" in src, f'{lang} does not name the {vid} view'
 
     def test_the_vocabulary_exists_in_both_languages(self):
@@ -228,3 +234,57 @@ class TestTheLabelsExist:
                         'srv_cov_none_hint', 'srv_cov_inactive_hint', 'srv_cov_ok_hint',
                         'srv_cov_ratio'):
                 assert f"'{key}':" in src, f'{lang} is missing {key}'
+
+
+class TestTheTypeRailShowsWhatIsThere:
+    """A rail is an index, and an index of things that are not there is noise.
+
+    Eight empty rows for the kinds of box this site does not have would be eight rows to read
+    past — an absent printer is not news. "Unclassified" is the exception and is the whole
+    point of having it: those are the devices somebody added in a hurry, and this is where
+    they are findable.
+    """
+
+    def test_only_the_types_present_are_grouped(self):
+        body = _fn(_strip_comments(_read(VIEW_FILES['types'])), '_srvTypeGroups')
+        assert 'filter(x => by.has(x.id))' in body, 'every declared type would get a row'
+
+    def test_the_catalogue_order_wins_over_the_count(self):
+        """A rail that reshuffled as devices came and went would move the thing you were
+        about to click. Which type is biggest is what the numbers are for."""
+        body = _fn(_strip_comments(_read(VIEW_FILES['types'])), '_srvTypeGroups')
+        assert 'HOST_TYPES' in body, 'the order is no longer the declared one'
+        assert 'sort(' not in body, 'the rail reorders itself'
+
+    def test_the_unclassified_ones_are_last_and_flagged(self):
+        src = _strip_comments(_read(VIEW_FILES['types']))
+        groups = _fn(src, '_srvTypeGroups')
+        assert groups.index("by.has('-')") > groups.index('HOST_TYPES'), 'not last'
+        view = _fn(src, '_srvViewTypes')
+        assert 'text-bg-warning' in view, 'the count nobody classified is not called out'
+        assert 'unset.length ?' in view, 'zero unclassified would be painted as a warning'
+
+    def test_it_is_the_shared_railbox_and_not_a_second_one(self):
+        """`.ss-railbox` exists so the next grouped view is markup and no new rule — a rail
+        under a second name is how two lists that should look identical stop looking it."""
+        body = _strip_comments(_read(VIEW_FILES['types']))
+        for cls in ('ss-railbox', 'ss-rail-item', 'ss-railbox-main'):
+            assert cls in body, f'{cls} is not what it draws'
+
+    def test_the_selection_lives_outside_the_body(self):
+        """The body is rebuilt on every render, so a choice kept inside it would reset on
+        every reload of the fleet — and it is validated against the groups that exist NOW:
+        filter down to two switches and a stale "NAS" leaves the detail empty with nothing
+        looking selected."""
+        src = _strip_comments(_read(VIEW_FILES['types']))
+        assert 'localStorage' in src, 'the choice does not survive a reload'
+        view = _fn(src, '_srvViewTypes')
+        assert 'groups.find(g => g.id === sel) || groups[0]' in view, \
+            'a stale selection would empty the detail'
+
+    def test_unclassified_is_not_stored_as_an_empty_string(self):
+        """Through localStorage an empty string is indistinguishable from "nothing chosen",
+        so the group nobody classified would silently stop being selectable."""
+        src = _strip_comments(_read(VIEW_FILES['types']))
+        assert "h.device_type || '-'" in src
+        assert "id: '-'" in src

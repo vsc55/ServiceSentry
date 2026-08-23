@@ -55,11 +55,11 @@ def register(app, wa):
     def api_get_hosts():
         """List hosts the current user may view (secrets masked).
 
-        Users with the global ``servers_view`` see every host; otherwise only
+        Users with the global ``devices_view`` see every host; otherwise only
         hosts for which they hold a ``server.{uid}.view`` per-server permission.
         """
         perms = wa._get_session_permissions()
-        has_global_view = 'servers_view' in perms
+        has_global_view = 'devices_view' in perms
         has_any_view = has_global_view or any(
             p.startswith('server.') and p.endswith('.view') for p in perms)
         if not has_any_view:
@@ -109,7 +109,7 @@ def register(app, wa):
     @login_required
     def api_create_host():
         """Create a host."""
-        if 'servers_edit' not in wa._get_session_permissions():
+        if 'devices_edit' not in wa._get_session_permissions():
             return jsonify({'error': wa._t('access_denied')}), 403
         store = _store()
         if store is None:
@@ -129,6 +129,7 @@ def register(app, wa):
             'os': data.get('os', 'auto'),
             'maintenance': bool(data.get('maintenance')),
             'virtual': bool(data.get('virtual')),
+            'device_type': data.get('device_type', ''),
             'profiles': sorted((data.get('profiles') or {}).keys()),
         })
         return jsonify({'ok': True, 'uid': uid})
@@ -141,7 +142,7 @@ def register(app, wa):
         DECRYPTED and re-created, so inline profile secrets (ssh_password,
         ssh_key_string…) are preserved (and re-encrypted) instead of being lost as
         they would in a client-side copy of the masked data."""
-        if 'servers_edit' not in wa._get_session_permissions():
+        if 'devices_edit' not in wa._get_session_permissions():
             return jsonify({'error': wa._t('access_denied')}), 403
         store = _store()
         if store is None:
@@ -204,7 +205,8 @@ def register(app, wa):
         if not store.update(uid, data, actor=session.get('username', SYSTEM_USER)):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
         # Field-level diff (secrets masked) — same convention as config/modules.
-        _diffable = ('name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'tags',
+        _diffable = ('name', 'address', 'kind', 'os', 'maintenance', 'virtual',
+                     'device_type', 'tags',
                      'description', 'profiles', 'modules')
         changes = wa._diff_dicts(
             {k: old.get(k) for k in _diffable},
@@ -245,7 +247,7 @@ def register(app, wa):
     # ── test / probe endpoints (run a check once without saving) ─────────────────
 
     def _can_edit_body_host():
-        """Edit gate for the test endpoints — allow the global ``servers_edit``
+        """Edit gate for the test endpoints — allow the global ``devices_edit``
         or a per-server ``server.{uid}.edit`` when the body targets an existing
         host (a new draft has no uid, so it needs the global permission)."""
         uid = str((request.get_json(silent=True) or {}).get('uid') or '').strip()
@@ -260,12 +262,12 @@ def register(app, wa):
         masked (null/'') and ``uid`` is given, it is restored from the stored
         host so the user need not re-enter the password/key to test.
 
-        SECURITY (accepted risk, 2026-07): a ``servers_edit`` holder can point the test at
+        SECURITY (accepted risk, 2026-07): a ``devices_edit`` holder can point the test at
         an arbitrary ``address`` using a referenced ``cred_uid`` whose secret they cannot
         see — so in theory a stored SSH secret could be exfiltrated to an attacker-controlled
         host (or used for SSRF).  Binding the address to a registered host would break the
         legitimate "test a shared credential against a new host before saving" flow (editors
-        hold ``servers_edit`` but not ``credentials_*``), so the risk is accepted for this
+        hold ``devices_edit`` but not ``credentials_*``), so the risk is accepted for this
         semi-trusted role; every attempt is audited below (``host_ssh_tested`` with uid +
         address).  See memory ``project_bug_audit_2026_07``.
         """
@@ -459,7 +461,7 @@ def register(app, wa):
     @login_required
     def api_migrate_preview():
         """Return the migration proposal (candidate hosts; secrets masked)."""
-        if 'servers_edit' not in wa._get_session_permissions():
+        if 'devices_edit' not in wa._get_session_permissions():
             return jsonify({'error': wa._t('access_denied')}), 403
         modules = wa._load_modules()
         plan = build_migration_plan(modules, wa._modules_dir)
@@ -474,7 +476,7 @@ def register(app, wa):
         The plan is rebuilt server-side from the (decrypted) module configuration, so the
         client never supplies credentials — only which candidates to accept.
         """
-        if 'servers_edit' not in wa._get_session_permissions():
+        if 'devices_edit' not in wa._get_session_permissions():
             return jsonify({'error': wa._t('access_denied')}), 403
         store = _store()
         if store is None:

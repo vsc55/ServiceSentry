@@ -191,7 +191,7 @@ const credentialsLi = document.getElementById('tab-credentials-li');
 if (credentialsLi) credentialsLi.style.display = hasAnyCredential ? '' : 'none';
 // Infrastructure tab (Servers + Cluster sub-tabs). Shows when the user can see hosts
 // OR manage modules (cluster are multi-bind module checks).
-const hasAnyServer = ['servers_view','servers_edit','servers_delete'].some(p => perms.has(p))
+const hasAnyServer = ['devices_view','devices_edit','devices_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
 // Cluster are their OWN resource: gated strictly by cluster_* (global) or any
 // cluster.{uid}.* (per-cluster). Module permissions do NOT grant the Cluster tab.
@@ -216,7 +216,7 @@ const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.disp
         .find(btn => btn && btn.closest('li')?.style.display !== 'none');
 if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();
 // (New host / Migrate buttons now live inside the JS-rendered Servers card,
-//  gated there by servers_edit — see renderServers.)
+//  gated there by devices_edit — see renderServers.)
 // Config tab
 const configLi = document.getElementById('tab-config-li');
 const hasConfigEdit = perms.has('config_edit');

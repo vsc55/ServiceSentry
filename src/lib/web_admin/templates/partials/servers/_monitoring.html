@@ -129,10 +129,17 @@ function _hostLogsGoPage(p) { _hostLogsState.page = Math.max(1, p | 0); _hostLog
 function _hostLogsSetPageSize(v) { _hostLogsState.pageSize = parseInt(v, 10) || 0; _hostLogsState.page = 1; _hostLogsFetch(); }
 
 // Render the Logs tab shell (filter bar + table + pager) and load the first page.
-async function _loadHostLogs() {
-    const body = document.getElementById('hmLogsBody');
+//
+// Told WHERE to draw and WHICH address to draw, rather than reading the host modal's draft
+// and a fixed element id. Two screens want this now: the modal (where a device is configured)
+// and the Infrastructure page (where it is looked at), and the second is the one somebody
+// opens when a machine is misbehaving. Two copies of a syslog table with two filter bars and
+// two pagers is two places for them to stop agreeing.
+async function _loadHostLogs(containerId, address) {
+    const body = document.getElementById(containerId || 'hmLogsBody');
     if (!body) return;
-    const addr = (_hostDraft && _hostDraft.address || '').trim();
+    const addr = String(address != null ? address
+                        : (_hostDraft && _hostDraft.address || '')).trim();
     if (!addr) {
         body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('host_logs_no_address'))}</div>`;
         return;

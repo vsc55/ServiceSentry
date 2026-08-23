@@ -25,8 +25,10 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     credentials      /api/v1/credentials*
     history          /api/v1/history*
     hosts            /api/v1/hosts*             (perm group 'servers')
-    infra            /api/v1/infra*             (read-only: the fleet as it IS right
-                                                now — hosts owns the registry)
+    infra            /api/v1/infra*             (the fleet as it IS right now — hosts owns
+                                                the registry; + /infra/hosts/<uid>/collect,
+                                                the one non-GET, and /infra/collect[/<job_id>]
+                                                to watch it — perm 'infra_collect')
     modules          /api/v1/modules*           (+ /modules/checks/run, /modules/watchfuls/<mod>/<action>)
     overview         /api/v1/overview*
     notify/email     /api/v1/notify/email/test  (+ template_routes: /notify/templates*, /notify/html-templates*)

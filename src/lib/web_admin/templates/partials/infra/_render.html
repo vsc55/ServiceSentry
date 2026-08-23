@@ -9,8 +9,10 @@
 
    WHAT THIS SECTION IS NOT: it does not compute anything. Every number on it was produced by
    a module and every state by the host registry; the section arranges them by MACHINE, which
-   is the one arrangement neither of those two can offer. That is also why it is read-only —
-   see lib/core/infra/routes.py.
+   is the one arrangement neither of those two can offer. That is also why it edits nothing —
+   see lib/core/infra/routes.py. The one button that acts, "Collect now", does not edit either:
+   it asks the modules to produce their numbers again, on the spot, and carries its own
+   permission so looking at a wall screen is not the same as being able to start it.
    ================================================================ #}
 
 let _infraHosts   = [];          // the fleet, worst first (the server orders it)
@@ -28,6 +30,9 @@ let _infraTimer   = null;        // auto-refresh {_id, _interval}
  *  refetches, and the cheap redraws (a filter, a sort, a page) go through `_infraRender()`,
  *  which is the factory's and touches no network.
  */
+//: Whether the URL has been consulted yet this page-load.
+let _infraUrlRead = false;
+
 async function renderInfra() {
     const pane = document.getElementById('infra-container');
     if (!pane) return;
@@ -36,6 +41,20 @@ async function renderInfra() {
         _infraHosts   = data.hosts || [];
         _infraSummary = data.summary || {};
     }
+    // A reload lands here with no device open; the URL is what remembers which one it was.
+    // Only on the FIRST render — after that `_infraHost` is the answer, and re-reading the
+    // URL would reopen a device somebody had just closed.
+    if (!_infraHost && !_infraUrlRead) {
+        _infraUrlRead = true;
+        try {
+            const want = new URLSearchParams(window.location.search).get(_INFRA_URL_KEY);
+            if (want && _infraHosts.some(h => h.uid === want)) _infraHost = want;
+        } catch (_) { /* ignore */ }
+    }
+    // A collection that was already running when this page loaded: F5 does not stop it, so
+    // the screen has to be able to find it again. Not awaited — the section must draw now,
+    // and the bar appears a moment later when the server has answered.
+    _infraCollectAdopt();
     if (_infraHost) return _infraOpenView(pane);
     // The factory owns its own container INSIDE the pane, so switching to a machine and back
     // does not tear down the table's state (columns, filters, page) along with the markup.
@@ -43,10 +62,32 @@ async function renderInfra() {
     _infraRender();
 }
 
+//: The device a URL is pointing at. A section that answers "which machine is in trouble"
+//: is one somebody keeps open, refreshes, and sends to a colleague — and until this was
+//: here, F5 on a device answered by going back to the list of forty. Same shape the History
+//: section already uses for a series (`/history?module=&key=`).
+const _INFRA_URL_KEY = 'host';
+
+/** Put the open device in the URL (or take it out), without adding a history entry.
+ *
+ *  `replaceState` and not `pushState`: an entry per device would make Back walk the machines
+ *  you looked at rather than leave the section, and Back would then have to re-render the
+ *  page it restored — a second navigation mechanism beside the sidebar's. The URL is here to
+ *  survive a RELOAD, which is what was reported. */
+function _infraSyncUrl() {
+    try {
+        const url = new URL(window.location.href);
+        if (_infraHost) url.searchParams.set(_INFRA_URL_KEY, _infraHost);
+        else url.searchParams.delete(_INFRA_URL_KEY);
+        history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+    } catch (_) { /* a URL we cannot rewrite is not a reason to fail to open a device */ }
+}
+
 /** Open one machine (or, with no uid, go back to the fleet). */
 async function infraOpen(uid) {
     _infraHost   = uid || '';
     _infraDetail = null;
+    _infraSyncUrl();
     const pane = document.getElementById('infra-container');
     if (!pane) return;
     if (!_infraHost) {
@@ -60,11 +101,32 @@ async function infraOpen(uid) {
 
 async function _infraOpenView(pane) {
     if (!_infraDetail) {
-        pane.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
+        // The spinner is for an EMPTY pane — opening a device from the list, or a reload
+        // landing straight on one. Painting it over a device that is already on screen is
+        // what made every refresh blink the whole page, which is worse than a stale second.
+        if (!pane.querySelector('.ss-vfill'))
+            pane.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
         _infraDetail = await apiGet(`/api/v1/infra/hosts/${encodeURIComponent(_infraHost)}`);
         if (!_infraDetail) { _infraHost = ''; return renderInfra(); }
     }
     pane.innerHTML = _infraHostHtml(_infraDetail);
+}
+
+/** Re-read what is on screen, without taking it away first.
+ *
+ *  Reported from the panel: the refresh button made the whole page blink. It went through the
+ *  section's entry point, which re-asks for the FLEET, then blanks the pane for a spinner,
+ *  then asks for the device — two round trips and an empty screen to redraw one machine. This
+ *  asks for the one thing that is being looked at and swaps the markup when the answer is
+ *  already in hand, so the only thing that changes is what changed. */
+async function _infraReload() {
+    if (!_infraHost) { _infraDetail = null; return renderInfra(); }
+    const data = await apiGet(`/api/v1/infra/hosts/${encodeURIComponent(_infraHost)}`);
+    if (!data) return;                      // a failed refresh keeps the screen it had
+    _infraDetail = data;
+    const pane = document.getElementById('infra-container');
+    if (pane) pane.innerHTML = _infraHostHtml(data);
+    if (typeof _infraCollectPaint === 'function') _infraCollectPaint();
 }
 
 /** Auto-refresh, the same control the other five live sections carry.
@@ -87,7 +149,12 @@ function setInfraAutoRefresh(seconds) {
 function _infraAutoTick() {
     const pane = document.getElementById('tab-infra');
     if (!pane || !pane.classList.contains('active')) return;
-    if (_infraHost) _infraDetail = null;    // the open machine ages too
+    // A redraw underneath a running collection would throw away the button that says it is
+    // running, and put a "current" screen in front of somebody who is waiting for it.
+    if (_infraCollecting()) return;
+    // The open machine ages too — but it is refreshed in place, or the wall screen this
+    // control exists for would blink every interval.
+    if (_infraHost) return _infraReload();
     renderInfra();
 }
 
@@ -118,7 +185,9 @@ function _infraHostHtml(d) {
     const h = d.host || {};
     const metrics = d.metrics || [];
     const results = d.results || [];
-    const canRegistry = new Set(currentUser.permissions || []).has('servers_view');
+    const perms = new Set(currentUser.permissions || []);
+    const canRegistry = perms.has('devices_view');
+    const canCollect  = perms.has('infra_collect');
     const tags = (h.tags || []).map(tg =>
         `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${esc(tg)}</span>`).join('');
     return `<div class="ss-vfill ss-vscroll">
@@ -131,57 +200,48 @@ function _infraHostHtml(d) {
             ${h.virtual ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"><i class="bi bi-hdd-stack me-1"></i>${esc(t('host_virtual') || 'virtual')}</span>` : ''}
             ${tags}
             <div class="ms-auto d-flex gap-1">
-                <button class="btn btn-sm btn-secondary" onclick="_infraDetail=null;renderInfra()"
-                    title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise"></i></button>
+                ${canCollect ? `<span id="infraCollectSlot">${_infraCollectSlotHtml(h.uid)}</span>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_infraReload()"
+                    title="${escAttr(t('infra_reload_tt'))}"><i class="bi bi-arrow-clockwise"></i></button>
                 ${canRegistry ? `<a class="btn btn-sm btn-secondary" href="/admin?tab=servers" data-nav-section
                     title="${escAttr(t('infra_registry'))}"><i class="bi bi-gear"></i></a>` : ''}
             </div>
         </div>
-        ${metrics.length ? `<div class="px-3 py-3 border-bottom">
-            <div class="text-muted ss-fs-2 text-uppercase mb-2">${esc(t('infra_metrics'))}</div>
-            <div class="d-flex flex-wrap gap-2">${metrics.map(_infraMetricCard).join('')}</div>
-        </div>` : ''}
-        <div class="px-3 py-3">
-            <div class="text-muted ss-fs-2 text-uppercase mb-2">${esc(t('infra_results'))}</div>
-            ${results.length ? _infraResultsTable(results) : `<div class="text-muted small">${esc(t('infra_no_checks'))}</div>`}
+        <div class="d-flex flex-wrap gap-3 px-3 py-3 align-items-start">
+            <aside class="ss-sticky-aside">${_infraIdentityHtml(d)}</aside>
+            <div style="flex:1 1 24rem;min-width:0">${_infraTabsHtml(d)}</div>
         </div>
     </div>`;
 }
 
-/** A measurement: the number, its unit, and what produced it.
+/** How many result rows are drawn before the rest are behind a button.
  *
- *  The label and the unit come from the MODULE — it declares them in `__history__`, which is
- *  the same declaration that makes the value chartable in History. The section names nothing
- *  itself, so a module that starts recording a new field shows up here without a line of core
- *  code (and, later, so does an SNMP profile: an OID matrix is exactly this declaration for a
- *  value that arrives without one).
- */
-function _infraMetricCard(m) {
-    const canHistory = new Set(currentUser.permissions || []).has('history_view');
-    const href = `/history?module=${encodeURIComponent(m.series.module)}`
-               + `&key=${encodeURIComponent(m.series.key || '')}`
-               + `&field=${encodeURIComponent(m.series.field || '')}`;
-    return `<div class="rounded-3 border px-3 py-2" style="min-width:9rem;background:var(--bs-tertiary-bg)">
-        <div class="text-muted ss-fs-1 text-truncate" title="${escAttr(m.item || '')}">${esc(m.item || '')}</div>
-        <div class="d-flex align-items-baseline gap-1">
-            <span class="fw-semibold ss-fs-5">${esc(_fmtNum(m.value))}</span>
-            <span class="text-muted ss-fs-2">${esc(m.unit || '')}</span>
-        </div>
-        <div class="ss-fs-2">${canHistory
-            ? `<a href="${href}" data-nav-section class="text-decoration-none">${esc(m.label)}<i class="bi bi-graph-up ms-1"></i></a>`
-            : esc(m.label)}</div>
-    </div>`;
-}
+ *  A machine watched by the ordinary probes has a dozen: the cap never applies. A NAS sampled
+ *  by an SNMP profile files one result per row it serves — 295 for one Synology — and a table
+ *  that long is not a list of what happened, it is the reason nobody scrolls to the bottom of
+ *  the page. The worst ones lead, so the cap hides the quiet tail and never the news. */
+const _INFRA_RESULTS_CAP = 40;
+let _infraResultsAll = false;
 
-/** Numbers as a person reads them: two decimals at most, and none when there are none to
- *  show — "41" and not "41.00", "0.75" and not "0.7500000000000001". */
-function _fmtNum(v) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return String(v ?? '');
-    return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
-}
+function _infraShowAllResults() { _infraResultsAll = true; renderInfra(); }
 
 function _infraResultsTable(rows) {
+    // Worst first: this table is read when something is wrong, and a failure on row 200 of a
+    // list nobody scrolls is a failure nobody sees.
+    const rank = {error: 0, warning: 1, ok: 3};
+    const sorted = [...rows].sort((a, b) =>
+        (rank[a.level] ?? 2) - (rank[b.level] ?? 2)
+        || String(a.module || '').localeCompare(String(b.module || ''))
+        || String(a.name || '').localeCompare(String(b.name || '')));
+    const hidden = _infraResultsAll ? 0 : Math.max(0, sorted.length - _INFRA_RESULTS_CAP);
+    const shown  = hidden ? sorted.slice(0, _INFRA_RESULTS_CAP) : sorted;
+    return _infraResultsRows(shown) + (hidden
+        ? `<div class="pt-2"><button class="btn btn-sm btn-secondary" onclick="_infraShowAllResults()">
+               ${esc(tf('infra_results_more', hidden))}</button></div>`
+        : '');
+}
+
+function _infraResultsRows(rows) {
     return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
         <thead class="ss-thead"><tr>
             <th>${esc(t('col_module'))}</th>
@@ -192,7 +252,7 @@ function _infraResultsTable(rows) {
         </tr></thead>
         <tbody>${rows.map(r => `<tr>
             <td class="text-nowrap"><code class="ss-fs-2">${esc(r.module || '')}</code></td>
-            <td>${esc(r.name || '')}</td>
+            <td>${esc(r.row || r.name || '')}</td>
             <td class="text-nowrap">${_infraLevelBadge(r.level)}</td>
             <td class="small text-muted">${esc(r.message || '')}</td>
             <td class="text-end text-nowrap small text-muted">${esc(_fmtDateTime(r.ts))}</td>

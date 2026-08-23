@@ -1,0 +1,456 @@
+{# ================================================================
+   Infrastructure — a device's MEASUREMENTS: how they are grouped, and the chart that is
+   drawn where the number is.  Split out of _render.html, which is the shell.
+   ================================================================ #}
+
+// ── Which part of the device a measurement is of ─────────────────────────────────────────
+//
+// Sixty-four kinds of measurement is not a list somebody reads; it is a list somebody gives
+// up on. But they are not sixty-four unrelated things either — the module already groups
+// them, because a device carries PROFILES: the system, the disks, the RAID, the shares, the
+// UPS plugged into it. That grouping existed at the only point it could be known and was
+// thrown away by the union that flattens every profile's fields into one map.
+//
+// So: a rail of families, and the measurements of the one you pick. Same rail the rest of the
+// panel uses, so this is markup and no new CSS.
+//
+// A device whose modules declare no family — everything watched by the ordinary probes — has
+// exactly one, and then the rail would be a column of one button beside the thing it selects.
+// It is not drawn at all, and that page is unchanged.
+
+const _INFRA_FAM_KEY = 'ss_infra_family';
+let _infraFamily = null;
+
+function _infraSetFamily(id) {
+    _infraFamily = id;
+    try { localStorage.setItem(_INFRA_FAM_KEY, id); } catch (_) {}
+    renderInfra();
+}
+
+/** ``[{id, label, rows}]`` — the families present, in alphabetical order.
+ *
+ *  Not by size, which is what the groups INSIDE a family are sorted by and for a reason that
+ *  stops applying here: a 704-measurement family is one button, so its size no longer floods
+ *  anything, and a rail is an index — an index you can find things in is one whose order does
+ *  not change as a device grows a disk. */
+function _infraFamilies(metrics) {
+    const by = new Map();
+    for (const m of metrics || []) {
+        const id = m.source || '';
+        if (!by.has(id)) by.set(id, {id, label: m.source_label || m.source || '', rows: []});
+        by.get(id).rows.push(m);
+    }
+    return [...by.values()].sort((a, b) =>
+        String(a.label).localeCompare(String(b.label)));
+}
+
+/** A source's name, minus the MIB it came from.
+ *
+ *  A profile is titled "Synology — disks (SYNOLOGY-DISK-MIB)", and the parenthesis is the
+ *  right half of that title: on the profile catalogue it says exactly which MIB you are
+ *  looking at. On this screen you are not choosing a profile — you are reading one device —
+ *  and in a 17rem column that half is two thirds of the width spent on the part nobody needs
+ *  here. "Sistema (RFC 1213)" and "Synology — sistema (SYNOLOGY-SYSTEM-MIB)" are the same
+ *  complaint twice.
+ *
+ *  Trimmed for the DISPLAY only: the full title stays on the hover and nothing is renamed
+ *  anywhere else, so the catalogue still says which MIB a profile is. Used by the family rail
+ *  and by the identity headings, because they name the same things and two trimmers would be
+ *  two answers to "what is this called here". */
+function _infraShortLabel(label) {
+    return String(label || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || String(label || '');
+}
+
+//: The facts a module recorded ABOUT a row, indexed by the row they belong to. Built once
+//: per render rather than searched per row: a Synology answers 176 SMART rows and a linear
+//: scan of the attribute list for each of them is the repaint nobody can explain afterwards.
+let _infraRowFacts = new Map();
+
+/** Index the row-level facts. Device-level ones are the identity column's and are skipped:
+ *  drawing "model: DS916+" on every one of 176 rows is not information, it is wallpaper. */
+function _infraIndexRowFacts(attrs) {
+    _infraRowFacts = new Map();
+    for (const a of attrs || []) {
+        if (!a.row) continue;
+        const k = `${a.module}\u0000${a.row}`;
+        if (!_infraRowFacts.has(k)) _infraRowFacts.set(k, []);
+            _infraRowFacts.get(k).push(a);
+    }
+    // The names this device uses for its rows, now that its facts are in. In here rather than
+    // beside it, so the two can never be built from different payloads.
+    if (typeof _infraIndexRowAliases === 'function') _infraIndexRowAliases();
+}
+
+/** What this row IS, beside what it measures — a disk's model and serial, a SMART attribute's
+ *  status. Matched on `row_key`, the name BEFORE the profile's split: the attributes were
+ *  recorded against the name the device composed, and the split is the screen's doing. */
+function _infraFactsOf(m) {
+    return _infraRowFacts.get(`${m.module}\u0000${m.row_key || m.row || ''}`) || [];
+}
+
+/** Those facts, small and beside the value. They were being recorded and shown nowhere: a
+ *  disk's serial nobody can read from the panel is a serial somebody reads off the machine
+ *  with a torch. */
+function _infraFactsHtml(m) {
+    const facts = _infraFactsOf(m);
+    if (!facts.length) return '';
+    return `<div class="ss-fs-2 text-muted d-flex flex-wrap gap-2 ps-1">${facts.map(a =>
+        `<span><span class="opacity-75">${esc(_attrLabel(a.key))}</span> ${esc(a.value)}</span>`
+    ).join('')}</div>`;
+}
+
+function _infraMetricsPane(metrics) {
+    const fams = _infraFamilies(metrics);
+    if (fams.length <= 1) return _infraMetricsHtml(metrics);
+    let sel = _infraFamily;
+    if (sel === null) { try { sel = localStorage.getItem(_INFRA_FAM_KEY); } catch (_) {} }
+    // The first, and never the biggest: opening on the 704-attribute SMART block would
+    // greet somebody with the one family they were least likely to have come for.
+    const open = fams.find(f => f.id === sel) || fams[0];
+    // A sticky column and NOT an `.ss-railbox`. The railbox is a rail with its own scroll,
+    // and the stylesheet turns the body around one into a flex column with the overflow
+    // hidden — which is right when the rail IS the page and wrong now that the device page
+    // scrolls behind a sticky identity column. Reported from the screen as the tab strip
+    // jumping to the bottom of the document when certain families were opened: the page had
+    // stopped being able to scroll and its content went looking for somewhere to go.
+    //
+    // Same class the identity column uses, for the same reason: a column of context beside a
+    // body that scrolls past it.
+    return `<div class="d-flex flex-wrap gap-3 align-items-start">
+        <nav class="ss-sticky-aside ss-rail-group">${fams.map(f => `
+            <button type="button" class="ss-rail-item${f.id === open.id ? ' active' : ''}"
+                    onclick="_infraSetFamily(${jsStr(f.id)})" title="${escAttr(f.label)}">
+                <span class="text-truncate" style="min-width:0">${esc(_infraShortLabel(f.label))}</span>
+                <span class="badge bg-secondary rounded-pill ms-auto">${f.rows.length}</span>
+            </button>`).join('')}</nav>
+        <div style="flex:1 1 20rem;min-width:0">${_infraMetricsHtml(open.rows)}</div>
+    </div>`;
+}
+
+
+// ── Measurements ─────────────────────────────────────────────────────────────────────────
+//
+// The label and the unit come from the MODULE — it declares them in `__history__`, which is
+// the same declaration that makes the value chartable in History. The section names nothing
+// itself, so a module that starts recording a new field shows up here without a line of core
+// code, and so does an SNMP device profile: an OID matrix is exactly that declaration for a
+// value that arrives without one.
+//
+// Which is where the strip of cards stopped working. A machine watched by the ordinary probes
+// has about a dozen measurements and each is a different KIND of thing — CPU, latency, RAM,
+// days to expiry — so a card each reads at a glance. A NAS with a full SNMP profile has a
+// thousand, and they are not a thousand kinds: they are twenty kinds measured across many
+// rows. Four SMART attributes across 176 of them is 704 cards that say almost the same thing.
+//
+// So the split is by how a field is measured: a handful of rows still reads best as cards
+// side by side; past that they are a list. NS1 measures its DNS resolution time three times
+// (MX, NS, TXT) and those three cards are exactly right — collapsing them behind a heading
+// would hide something that fitted. The eight disk temperatures do not fit, and the hundred
+// and seventy-six SMART attributes are not a strip at all.
+//
+// `_INFRA_CARD_ROWS` is where that judgement lives, and it IS a judgement — how many boxes
+// fit across before a strip stops being scannable. It is not the module's business and it is
+// not the data's; it is the page's, so it is stated here with its reason rather than being
+// spread through the conditions below.
+
+/** ``[{key, label, unit, module, field, rows}]`` — one entry per FIELD, singles first.
+ *  Keyed by module+field and not by label: two modules may name a value the same thing, and
+ *  merging them would put two different measurements under one heading. */
+function _infraMetricGroups(metrics) {
+    const by = new Map();
+    for (const m of metrics || []) {
+        const k = `${m.module}|${m.field}`;
+        if (!by.has(k)) by.set(k, {key: k, label: m.label, unit: m.unit,
+                                   module: m.module, field: m.field, rows: []});
+        by.get(k).rows.push(m);
+    }
+    // Singles first — they are the at-a-glance half — then the biggest groups last, so the
+    // 176-row SMART block never sits between two things somebody wanted to read.
+    return [...by.values()].sort((a, b) =>
+        a.rows.length - b.rows.length || String(a.label).localeCompare(String(b.label)));
+}
+
+/** Every metric on screen, flat, so a click can name one by index — the ids that reach the
+ *  markup are then plain integers instead of a module/key/field triple that has to survive
+ *  two levels of quoting. */
+let _infraMetricIndex = [];
+let _infraChartHours = 24;
+
+//: Up to this many rows of one field stay cards; more than this becomes a group.
+const _INFRA_CARD_ROWS = 6;
+
+function _infraMetricsHtml(metrics) {
+    _infraMetricIndex = [];
+    const groups = _infraMetricGroups(metrics);
+    const idx = m => { _infraMetricIndex.push(m); return _infraMetricIndex.length - 1; };
+    const few  = groups.filter(g => g.rows.length <= _INFRA_CARD_ROWS);
+    const many = groups.filter(g => g.rows.length > _INFRA_CARD_ROWS);
+    const cards = few.flatMap(g => g.rows).map(m => _infraMetricCard(m, idx(m))).join('');
+    const blocks = many.map(g => `<details class="border rounded-3 mb-2">
+        <summary class="px-3 py-2 d-flex align-items-center gap-2" style="cursor:pointer">
+            <span class="fw-semibold">${esc(g.label)}</span>
+            ${g.unit ? `<span class="text-muted ss-fs-2">${esc(g.unit)}</span>` : ''}
+            <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-auto">${g.rows.length}</span>
+        </summary>
+        <div class="px-2 pb-2">${_infraGroupRows(g.rows, idx)}</div>
+    </details>`).join('');
+    return `${cards ? `<div class="d-flex flex-wrap gap-2 mb-3">${cards}</div>` : ''}${blocks}`;
+}
+
+/** A measurement measured once: the number, its unit, and what produced it. */
+/** How a state is painted. Declared by the profile and not derived from the word, because
+ *  "Degraded" is bad and "Repairing" is not and no rule about the text can tell them apart. */
+const _INFRA_LEVELS = {ok: 'text-bg-success', warn: 'text-bg-warning',
+                       bad: 'text-bg-danger',  info: 'bg-body-secondary text-body-secondary border'};
+
+/** A value that is an ENUMERATION, as a word — or `null` when it is just a number.
+ *
+ *  The agent answers "1" and only the MIB it came from says that 1 means Normal, so a panel
+ *  without that map prints the integer: "System status 1, Power supply status 1, Update
+ *  available 2" is a column nobody can act on. A value the map does not cover keeps its
+ *  number rather than being guessed at — not knowing is a fine thing to say, and the profiles
+ *  are filled in one MIB at a time. */
+function _infraState(m) {
+    const st = m.states && m.states[String(m.value)];
+    if (!st) return null;
+    const cls = _INFRA_LEVELS[st.level] || _INFRA_LEVELS.info;
+    return `<span class="badge ${cls} fw-normal">${esc(st.label)}</span>`;
+}
+
+/** A percentage, as the length of something — or `null` when the value is not one.
+ *
+ *  A percentage is the one measurement whose scale is known without asking: it runs from 0 to
+ *  100, so "13" and "97" can be drawn as what they are instead of read as two numbers of
+ *  similar length. Nothing else here has that property — 39 °C is only meaningful against
+ *  what the disk is rated for, and the profile does not say.
+ *
+ *  Deliberately UNCOLOURED. A bar that went red near 100 would be asserting that full is bad,
+ *  and half of these are "CPU idle" and "battery capacity", where full is the good news. What
+ *  a number means is a threshold, and a threshold is a check's job — this is a reading. */
+function _infraBar(m) {
+    if (m.unit !== '%') return null;
+    const n = Number(m.value);
+    if (!Number.isFinite(n)) return null;
+    const pct = Math.max(0, Math.min(100, n));
+    return `<div class="d-flex align-items-center gap-2">
+        <span class="fw-semibold ss-fs-5">${esc(_fmtNum(n))}</span>
+        <span class="text-muted ss-fs-2">%</span>
+        <div class="progress flex-grow-1" style="height:.4rem;min-width:3rem"
+             role="progressbar" aria-valuenow="${escAttr(String(pct))}" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar bg-secondary" style="width:${pct}%"></div>
+        </div>
+    </div>`;
+}
+
+/** How a measurement is drawn — the ONE place that decides.
+ *
+ *  It was three conditions in two renderers, which is how a card and a row of the same value
+ *  start looking like different things. The order is by how much is KNOWN about the value:
+ *  an enumeration the profile explained, then a percentage (whose scale needs no explaining),
+ *  then a number with whatever unit it came with.
+ *
+ *  What is not here yet is the sparkline — the small graph beside a temperature or a rate.
+ *  It is not a rendering problem: drawing eighty of them means eighty requests, because the
+ *  history API answers one series per call. It needs a batched endpoint first, and inventing
+ *  one under a card renderer is how a screen ends up hammering a database.
+ */
+function _infraValueHtml(m) {
+    return _infraState(m) || _infraBar(m) || (() => {
+        const f = _fmtMeasure(m.value, m.unit);
+        return `<span class="fw-semibold ss-fs-5">${esc(f.value)}</span>
+                <span class="text-muted ss-fs-2">${esc(f.unit)}</span>`;
+    })();
+}
+
+function _infraMetricCard(m, i) {
+    // A card and a row are the same measurement drawn at two sizes — a family with six rows or
+    // fewer gets cards — so they carry the same two things: what the row IS, and the way into
+    // everything else the device says about it. Reported from the screen: a NAS with a handful
+    // of disks drew them as cards, and the disks were the one thing you could not click.
+    return `<div class="rounded-3 border px-3 py-2" style="min-width:9rem;background:var(--bs-tertiary-bg)">
+        ${_infraWhichHtml(m)}
+        <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(m)}</div>
+        ${_infraFactsHtml(m)}
+        <div class="ss-fs-2">${_infraChartLink(m, i)}</div>
+        <div id="infra-chart-${i}"></div>
+    </div>`;
+}
+
+/** The name of the thing a measurement is of — a button when the device has more to say about
+ *  it. One place, because a card and a row disagreeing about whether a disk is clickable is
+ *  exactly the bug this replaced. */
+function _infraWhichHtml(m) {
+    // `_infraRowDetailCount` lives in _details.html, which the bundle includes right after
+    // this file. Asked for rather than assumed: a name that is not there yet turns every
+    // measurement on the screen into nothing, and a plain label is the right thing to fall
+    // back to — it is what this cell was before it could be opened.
+    const key = m.row_key || m.row;
+    const more = typeof _infraRowDetailCount === 'function' ? _infraRowDetailCount(key) : 0;
+    if (!more)
+        return `<div class="text-muted ss-fs-1 text-truncate"
+                     title="${escAttr((m.item || '') + ' · ' + (m.module || ''))}">${esc(_infraWhich(m))}&nbsp;</div>`;
+    return `<div class="ss-fs-1 text-truncate">
+        <button type="button" class="btn btn-link p-0 border-0 text-start ss-fs-1"
+                onclick="_infraOpenRow(${jsStr(key)})"
+                title="${escAttr(tf('infra_row_more', more))}">${esc(_infraWhich(m))}</button>
+    </div>`;
+}
+
+/** The rows of one group, under a heading each when they belong to different parts.
+ *
+ *  Eight disks in two enclosures sort into each other and read as one shelf of eight: the
+ *  device names them "Drive 1" and "Drive 1 (DX517-1)", so alphabetically they interleave.
+ *  Which part a row belongs to is worked out server-side from a pattern the PROFILE declares
+ *  — the MIB has no column for it, and assuming anything about parentheses is a statement
+ *  about one vendor.
+ *
+ *  No headings when nothing splits, which is every table that names its rows plainly: a
+ *  heading over the only group there is says nothing and costs a line. */
+function _infraGroupRows(rows, idx) {
+    const by = new Map();
+    for (const m of rows) {
+        const g = m.row_group || '';
+        if (!by.has(g)) by.set(g, []);
+        by.get(g).push(m);
+    }
+    if (by.size <= 1) return rows.map(m => _infraMetricRow(m, idx(m))).join('');
+    // Unqualified first — a disk in the box itself is "Drive 1", and the enclosures hang off
+    // it rather than the other way round.
+    return [...by.entries()].sort((a, b) => (a[0] === '') ? -1 : (b[0] === '') ? 1
+                                            : String(a[0]).localeCompare(String(b[0])))
+        .map(([g, list]) => `${g ? `<div class="px-2 pt-2 pb-1 text-muted ss-fs-1 text-uppercase">${esc(g)}</div>` : ''}
+            ${list.map(m => _infraMetricRow(m, idx(m))).join('')}`).join('');
+}
+
+/** One row of a group: which row of the device it is, and its value. */
+function _infraMetricRow(m, i) {
+    // The row's name opens everything the device says about that row — for a disk, its SMART.
+    // Here as well as on the summary, because this is the tab where the disks are: a person
+    // looking at "Synology — discos" and wanting one disk's attributes should not have to know
+    // that another tab has a card for it.
+    return `<div class="px-2 py-1 border-top">
+        <div class="d-flex align-items-baseline gap-2">
+            <span class="text-truncate">${_infraWhichHtml(m)}</span>
+            <span class="ms-auto d-flex align-items-baseline gap-1"
+                  style="min-width:8rem;justify-content:flex-end">${_infraValueHtml(m)}</span>
+            ${_infraChartLink(m, i, true)}
+        </div>
+        ${_infraFactsHtml(m)}
+        <div id="infra-chart-${i}"></div>
+    </div>`;
+}
+
+/** The control that draws the series — HERE, under the number it belongs to.
+ *
+ *  It used to be a link into the History section, which answered the question by leaving the
+ *  page: you lost the machine you were looking at to see one of its numbers over time, and
+ *  came back by pressing Back. The series is the same one History would draw; what changed is
+ *  that you do not have to go anywhere to see it. */
+function _infraChartLink(m, i, iconOnly) {
+    const on = `_infraChart(${i})`;
+    return iconOnly
+        ? `<button class="btn btn-sm btn-secondary py-0 px-1" onclick="${on}"
+               title="${escAttr(t('infra_chart_open'))}"><i class="bi bi-graph-up"></i></button>`
+        : `<button class="btn btn-link p-0 text-decoration-none ss-fs-2" onclick="${on}"
+               title="${escAttr(t('infra_chart_open'))}">${esc(m.label)}<i class="bi bi-graph-up ms-1"></i></button>`;
+}
+
+/** The window every chart on this page draws. One picker for the page rather than one per
+ *  chart: comparing two numbers over different windows is the mistake it would invite. */
+function _infraRangePicker() {
+    const opts = [[6, '6 h'], [24, '24 h'], [168, '7 d'], [720, '30 d']];
+    return `<div class="btn-group btn-group-sm ms-auto">${opts.map(([h, lbl]) =>
+        `<button class="btn ${h === _infraChartHours ? 'btn-primary' : 'btn-secondary'}"
+             onclick="_infraSetChartHours(${h})">${esc(lbl)}</button>`).join('')}</div>`;
+}
+
+function _infraSetChartHours(h) {
+    _infraChartHours = h;
+    // Redraw only what is open: a range change that closed every chart would make comparing
+    // two windows of the same value a matter of finding it again.
+    const open = [..._infraMetricIndex.keys()].filter(i => {
+        const el = document.getElementById('infra-chart-' + i);
+        return el && el.dataset.open === '1';
+    });
+    renderInfra();
+    setTimeout(() => open.forEach(i => _infraChart(i)), 0);
+}
+
+/** Draw (or hide) one metric's series, in place. */
+async function _infraChart(i) {
+    const m = _infraMetricIndex[i];
+    const box = document.getElementById('infra-chart-' + i);
+    if (!m || !box) return;
+    if (box.dataset.open === '1') { box.dataset.open = ''; box.innerHTML = ''; return; }
+    box.dataset.open = '1';
+    box.innerHTML = `<div class="text-muted ss-fs-2 py-2">${esc(t('loading') || '…')}</div>`;
+    const q = new URLSearchParams({
+        module: m.series.module, key: m.series.key || '',
+        field:  m.series.field  || '', hours: String(_infraChartHours), points: '400',
+    });
+    let r = null;
+    try { r = await apiGet('/api/v1/history?' + q.toString()); } catch (_) { r = null; }
+    if (box.dataset.open !== '1') return;          // closed while it was loading
+    const pts = (r && r.points) || [];
+    if (!pts.length) {
+        box.innerHTML = `<div class="text-muted ss-fs-2 py-2">${esc(t('infra_chart_empty'))}</div>`;
+        return;
+    }
+    box.innerHTML = `<div class="position-relative mt-1" style="height:170px"><canvas></canvas></div>`;
+    _historyDraw(box.querySelector('canvas'), pts, m.series.field, m.unit, m.label);
+}
+
+/** Numbers as a person reads them: two decimals at most, and none when there are none to
+ *  show — "41" and not "41.00", "0.75" and not "0.7500000000000001". */
+function _fmtNum(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? '');
+    return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+/** A measurement as `{value, unit}`, scaled to the size it actually is.
+ *
+ *  The module records the number in its base unit, which is the only sane thing for it to do
+ *  — a value that changed units with its magnitude could not be charted or compared. But the
+ *  SCREEN is not the store: "34528771842048 B" is a number nobody reads, and printing it next
+ *  to "40289542017024 B" invites exactly the arithmetic somebody will get wrong. Scaled here
+ *  and only here; what goes to the chart is untouched.
+ *
+ *  Binary steps for bytes (1024), because these come from an agent reporting memory and disk
+ *  and that is what those agents mean. Seconds become the largest unit that leaves a number
+ *  worth reading — an uptime of 205856 s is 2.4 d, and the day it is 45 s it says 45 s.
+ */
+function _fmtMeasure(value, unit) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return {value: String(value ?? ''), unit: unit || ''};
+    if (unit === 'B') {
+        const steps = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+        let v = Math.abs(n), i = 0;
+        while (v >= 1024 && i < steps.length - 1) { v /= 1024; i++; }
+        return {value: _fmtNum(n < 0 ? -v : v), unit: steps[i]};
+    }
+    if (unit === 's') {
+        const abs = Math.abs(n);
+        for (const [secs, u] of [[86400, 'd'], [3600, 'h'], [60, 'min']]) {
+            if (abs >= secs) return {value: _fmtNum(n / secs), unit: u};
+        }
+        return {value: _fmtNum(n), unit: 's'};
+    }
+    return {value: _fmtNum(n), unit: unit || ''};
+}
+
+/** What to call this measurement on a page that is ALREADY about one device.
+ *
+ *  Reported from the screen: every card said "erebor". It is the item's label, and one SNMP
+ *  item files a result per disk, per volume, per share — so the device's own name was printed
+ *  three hundred times on the device's own page, where it is the one word that cannot tell
+ *  you anything.
+ *
+ *  What identifies a measurement here is its ROW — "Drive 1", "/volume1", "eth0". When there
+ *  is none the measurement is of the device itself, and then NOTHING is the right answer: the
+ *  label under the number already says what it is, and putting the module there instead would
+ *  be the same repetition wearing a different word (thirty-seven cards reading "snmp"). The
+ *  full name stays on the hover, for the one time somebody wants it. */
+function _infraWhich(m) {
+    return m.row || '';
+}

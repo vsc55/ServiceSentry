@@ -391,3 +391,64 @@ class TestACardCannotAskForAnAccentThatDoesNotExist:
         assert used, 'no card asks for an accent — the scan is looking in the wrong place'
         missing = used - defined
         assert not missing, f'accents named by a card but never given a colour: {missing}'
+
+
+class TestARailReachesTheBottomOfItsCard:
+    """Reported from the screen: the rail stopped after its two items and the rest of the
+    card was empty.
+
+    `.ss-railbox` is `flex: 1 1 auto`, which means nothing unless its parent is a flex
+    COLUMN — and the list-table factory hands a view's body to a plain `.ss-vscroll`, which
+    is a flex item without being a flex container. The stylesheet already knew that and fixed
+    it for `> .ss-railbox`.
+
+    Then a view put a summary header above its rail. The wrapper that holds both is one box
+    between them, `> .ss-railbox` stopped matching, and the layout silently went back to what
+    the rule existed to prevent. Nothing in the markup or the stylesheet was wrong to read —
+    it is the shape of the tree that changed, which is why this is asked of both.
+    """
+
+    def _rule(self):
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        for m in re.finditer(r'\.ss-vscroll:has\(([^)]*)\)\s*\{([^}]*)\}', css):
+            if 'railbox' in m.group(1):
+                return m
+        return None
+
+    def test_the_scroll_box_around_a_rail_becomes_a_column(self):
+        m = self._rule()
+        assert m, 'nothing turns the body that holds a rail into a flex column'
+        body = m.group(2)
+        assert 'display: flex' in body and 'flex-direction: column' in body, (
+            'the rail is told to grow inside a box that is not a flex container, which is a '
+            'no-op — right in the stylesheet, wrong on the screen')
+        assert 'overflow: hidden' in body, (
+            'the box scrolls around a rail that scrolls: two scrollbars, and the rail head '
+            'scrolls away with the page')
+
+    def test_it_matches_a_rail_anywhere_below_it_and_not_only_a_child(self):
+        """The regression itself. A view is entitled to put a header above its rail, and the
+        rule has to keep holding when it does."""
+        sel = self._rule().group(1)
+        assert '>' not in sel, (
+            'back to a child selector: one wrapper between the body and the rail and the '
+            'rail draws at the height of its own items again')
+        assert '.ss-railbox' in sel
+
+    def test_nothing_between_the_body_and_the_rail_breaks_the_chain(self):
+        """The other half: the rule passes the height DOWN, and a wrapper that is not a link
+        in the fill chain keeps it. `.ss-vfill` is that link."""
+        for path in _templates():
+            src = _code(path)
+            i = src.find('ss-railbox')
+            if i < 0:
+                continue
+            j = src.rfind('return `', 0, i)
+            assert j >= 0, path
+            # The whole opening tag, not just a class attribute: a wrapper with NO class at
+            # all is the shape this is about, and a pattern that required one would have
+            # skipped exactly the case it exists to catch.
+            for attrs in re.findall(r'<(?:div|section|nav|main)(|\s[^>]*)>', src[j:i]):
+                assert 'ss-vfill' in attrs, (
+                    f'{os.path.basename(path)}: <div{attrs}> sits between the body and the '
+                    'rail without passing the height down')

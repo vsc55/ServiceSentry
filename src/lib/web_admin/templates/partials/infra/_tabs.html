@@ -1,0 +1,205 @@
+{# ================================================================
+   Infrastructure — the three tabs of a device page, and the identity one.
+
+   A device page holds three different things: what the machine IS, what it MEASURES, and
+   what its checks last SAID.  Split out of _render.html, which is the shell.
+   ================================================================ #}
+
+// ── The three questions, and one page that used to answer them all at once ────────────────
+//
+// A device page holds three different things: what the machine IS, what it MEASURES, and what
+// its checks last SAID. Stacked they read fine for a machine with a dozen values, and once a
+// full SNMP profile is attached the first is buried under a thousand of the second and the
+// third is somewhere below the fold. They are not sections of one answer, they are three
+// answers — so they are tabs.
+//
+// The identity tab leads because it is the one that was never visible at all: the serial
+// numbers, the firmware and the bay a disk sits in were recorded on every cycle and shown
+// nowhere. Measurements is what somebody opens the page for, so it is what opens.
+
+// The logs tab is the reason this section exists at all: what a machine has been SAYING is
+// the other half of what a machine has been doing, and until now it was only reachable from
+// the modal where you go to CONFIGURE the device. That is the wrong place for it — this page
+// is where somebody looks when a machine is misbehaving, and the other one is where somebody
+// changes its community string.
+//
+// It draws the same panel the modal draws, told where to put itself. Two syslog tables with
+// two filter bars and two pagers would be two places for them to stop agreeing.
+const _INFRA_TABS = [
+    // First, because it is the question a device page is opened with. The other tabs answer
+    // "show me everything"; this one answers "is this box all right".
+    {id: 'details', label_key: 'infra_tab_details', icon: 'bi-speedometer2'},
+    {id: 'metrics', label_key: 'infra_tab_metrics', icon: 'bi-graph-up'},
+    {id: 'results', label_key: 'infra_tab_results', icon: 'bi-list-check'},
+    {id: 'logs',    label_key: 'infra_tab_logs',    icon: 'bi-card-text', perm: 'syslog_view'},
+    // Last, and never the default: a thousand undifferentiated lines is the right answer to a
+    // question nobody has asked yet. It is the tab you open when a number looks wrong on one
+    // of the others and you need to know whether the problem is the device, the profile or
+    // the screen.
+    {id: 'raw',     label_key: 'infra_tab_raw',     icon: 'bi-braces'},
+];
+
+/** The tabs this caller may see. A tab whose data they cannot fetch is a tab that opens on an
+ *  error, so it is not offered. */
+function _infraTabsFor() {
+    const perms = new Set(currentUser.permissions || []);
+    return _INFRA_TABS.filter(x => !x.perm || perms.has(x.perm));
+}
+const _INFRA_TAB_KEY = 'ss_infra_tab';
+let _infraTab = (() => {
+    try {
+        const v = localStorage.getItem(_INFRA_TAB_KEY);
+        return _INFRA_TABS.some(x => x.id === v) ? v : 'details';
+    } catch (_) { return 'details'; }
+})();
+
+function setInfraTab(id) {
+    if (!_infraTabsFor().some(x => x.id === id)) return;
+    _infraTab = id;
+    try { localStorage.setItem(_INFRA_TAB_KEY, id); } catch (_) {}
+    renderInfra();
+}
+
+function _infraTabsHtml(d) {
+    const metrics = d.metrics || [];
+    const results = d.results || [];
+    const attrs   = d.attributes || [];
+    const counts  = {details: metrics.filter(m => m.headline).length,
+                     metrics: metrics.length, results: results.length,
+                     raw: metrics.length + attrs.length};
+    const tabs = _infraTabsFor();
+    const tab = tabs.some(x => x.id === _infraTab) ? _infraTab : 'details';
+    const nav = `<ul class="nav nav-tabs px-3 pt-2">${tabs.map(x => `
+        <li class="nav-item"><button class="nav-link${x.id === tab ? ' active' : ''}"
+            onclick="setInfraTab(${jsStr(x.id)})">
+            <i class="bi ${escAttr(x.icon)} me-1"></i>${esc(t(x.label_key))}
+            ${counts[x.id] === undefined ? ''
+              : `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1">${counts[x.id]}</span>`}
+        </button></li>`).join('')}</ul>`;
+    // What each ROW is, beside what it measures — a disk's model and serial, a SMART
+    // attribute's status. Indexed once per render rather than searched per row: 176 SMART rows
+    // times a linear scan of the attribute list is the repaint nobody can explain.
+    //
+    // Before the branch and not inside one: the Measures tab draws these beside every row and
+    // the row dialog leads with them, and building the index only for the tab that was open
+    // first is how a disk's model came to be missing from the dialog you reach it with.
+    _infraIndexRowFacts(attrs);
+    let body;
+    if (tab === 'logs') {
+        // The panel fills itself in — it is a page of its own with filters, a pager and its
+        // own refresh, so it is loaded after this markup lands rather than built into it.
+        const addr = String((d.host || {}).address || '').trim();
+        setTimeout(() => {
+            _loadHostLogs('infraLogsBody', addr);
+            // …and then give it the height that is left: the stylesheet's floor is what it
+            // draws at until this runs, and a floor cannot know where on the page it starts.
+            fitToViewportBottom(document.getElementById('infraLogsBody'));
+        }, 0);
+        body = `<div class="small text-muted mb-2">${esc(t('host_logs_hint'))}</div>
+            <div id="infraLogsBody" class="ss-vfill ss-pane-tall"></div>`;
+    } else if (tab === 'details') {
+        body = _infraDetailsPane(metrics);
+    } else if (tab === 'raw') {
+        body = _infraRawPane(d);
+    } else if (tab === 'results') {
+        body = results.length ? _infraResultsTable(results)
+                              : `<div class="text-muted small">${esc(t('infra_no_checks'))}</div>`;
+    } else {
+        body = metrics.length
+            ? `<div class="d-flex align-items-center gap-2 mb-2">${_infraRangePicker()}</div>
+               ${_infraMetricsPane(metrics)}`
+            : `<div class="text-muted small">${esc(t('infra_no_checks'))}</div>`;
+    }
+    // `ss-vfill` on the body: the family rail inside it is `flex: 1 1 auto`, which means
+    // nothing unless every box between it and the one that HAS a height is a link in the
+    // chain. Without it the rail draws at the height of its own items and leaves the rest of
+    // the card empty — the same trap the account pane and the token rail both hit.
+    return `${nav}<div class="px-3 py-3 ss-vfill">${body}</div>`;
+}
+
+/** What the device IS: the registry's own record, then everything its checks reported ABOUT
+ *  it rather than about a measurement — grouped by the row each fact belongs to, so a disk's
+ *  model, serial and bay read together instead of scattered through an alphabet of keys. */
+function _infraIdentityHtml(d) {
+    const h = d.host || {};
+    const attrs = d.attributes || [];
+    const reg = [
+        [t('host_address'), h.address], [t('col_host_type'), hostTypeLabel(h.device_type)],
+        [t('host_kind'), t('host_kind_' + (h.kind || 'local'))],
+        [t('host_os'), h.os && h.os !== 'auto' ? h.os : ''],
+        [t('host_description'), h.description],
+    ].filter(([, v]) => String(v || '').trim());
+    // The DEVICE's own facts, and not its rows'. Reported from the screen: the column ran
+    // for pages. One SNMP item files a result per disk, per volume, per share, and each of
+    // them carries a model and a serial — so "the identity of this machine" became two
+    // hundred blocks, which is not an identity, it is an inventory. A row's facts belong
+    // beside that row; this column answers "what is this box".
+    //
+    // Grouped by source and not merged. One registry entry can front several pieces of
+    // equipment — a NAS and the UPS plugged into it both answer "vendor", "model", "version"
+    // — and side by side under one heading they read as one machine with contradictory facts.
+    const groups = new Map();
+    for (const a of attrs.filter(a => !a.row)) {
+        const k = a.source || '';
+        // Insertion order IS the order: the server sorted them (standards before a vendor's
+        // own MIB — see infra.service.attributes) and a Map keeps what it was given. Sorting
+        // again here would be a second opinion, and the one with less to go on.
+        if (!groups.has(k)) groups.set(k, {source: k, label: a.source_label || k,
+                                          short: a.source_short || '', facts: []});
+        groups.get(k).facts.push(a);
+    }
+    // An unsourced pile beside sourced ones is stale, and stale here means WRONG: it was
+    // written before the source was recorded, so it holds a NAS's facts and those of the UPS
+    // plugged into it merged into one — the very confusion the sourced cards exist to undo.
+    // And every fact in it is already in one of them, correctly attributed, because a device
+    // that has answered once with sources has answered with all of them. So it is not a
+    // fallback here, it is a duplicate that contradicts itself: dropped.
+    //
+    // Kept when it is ALL there is — a module that records attributes without naming what
+    // answered is not stale, it is simply a module that does not have several answerers.
+    if (groups.size > 1) groups.delete('');
+    // Label above value, not beside it. The column is 17rem: side by side, a "Número de
+    // serie" would wrap to three lines to leave room for a number that fits on one.
+    const facts = list => `<dl class="mb-0">${list.map(([k, v]) => `
+        <dt class="text-muted fw-normal ss-fs-1 text-truncate" title="${escAttr(k)}">${esc(k)}</dt>
+        <dd class="mb-2 ss-fs-2" style="word-break:break-word">${esc(v)}</dd>`).join('')}</dl>`;
+    const block = (title, list, note) => `<div class="rounded-3 border px-3 py-2 mb-2">
+        <div class="d-flex align-items-baseline gap-2 mb-1">
+            <span class="fw-semibold">${esc(title)}</span>
+            ${note ? `<code class="text-muted ss-fs-2">${esc(note)}</code>` : ''}
+        </div>${facts(list)}</div>`;
+    // The source is the heading: a fact about the device still belongs to whichever of its
+    // parts answered it, and "the UPS says its model is X" is a different statement from
+    // "the NAS says its model is X".
+    //
+    // And with NO source, the heading must not be "Identity". That case is a sample written
+    // before the source was recorded — the facts of a NAS and of the UPS plugged into it, in
+    // one pile, with no way left to tell which said what. Calling that pile the machine's
+    // identity is the panel asserting exactly the thing it cannot know, and it is how a UPS's
+    // model came to be read as the NAS's in the first place. Named for what it is instead, so
+    // it reads as "these need collecting again" rather than as an answer.
+    // The name the source gives itself, per language — not its id. The ids were being printed
+    // raw ("synology_ups") beside values that were translated, which is the panel showing its
+    // own filing system to somebody who asked what the machine is.
+    // The name the profile gives the THING, when it gives one — "Synology", "SAI". Falling
+    // back to the trimmed title, which is right for the profiles that describe the box itself
+    // and wrong for the ones that describe something attached to it: "Synology — SAI" trims to
+    // "Synology — SAI", and what belongs on that card is "SAI". No rule about the text can
+    // tell those apart, so the profile says.
+    const head = g => g.source ? (g.short || _infraShortLabel(g.label || g.source))
+                               : t('infra_identity_unsourced');
+    const sub  = () => '';
+    return `${reg.length ? block(t('infra_record'), reg) : ''}
+        ${[...groups.values()].map(g => block(head(g),
+            g.facts.map(a => [_attrLabel(a.key), a.value]), sub(g))).join('')}
+        ${!reg.length && !attrs.length
+            ? `<div class="text-muted small">${esc(t('infra_no_identity'))}</div>` : ''}`;
+}
+
+/** The name of one such fact. The module records it under a ROLE — serial, firmware, mac —
+ *  and those are facts about a piece of equipment, not about the protocol that fetched them,
+ *  so the core names them. An unknown role falls back to its own key: a word somebody has to
+ *  guess at beats a fact that is not shown. */
+function _attrLabel(key) {
+    return t('attr_' + key) || key;
+}

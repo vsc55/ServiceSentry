@@ -24,8 +24,13 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **40 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **42 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
+
+> Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
+> Al pasar al core perdieron el prefijo: existe para que dos módulos no colisionen, y
+> el core ya es un espacio de nombres — `snmp_catalog` va al lado de `hosts` y
+> `history`. Se renombraron sin migración porque no había nada en producción.
 
 | Grupo | Tablas |
 | ----- | ------ |
@@ -37,6 +42,7 @@ Hay **40 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
+| SNMP | `snmp_catalog` (perfiles de dispositivo escritos en el panel), `snmp_mib_versions` (historial de ediciones de fuentes MIB) |
 | Syslog | `syslog`, `syslog_drops` |
 | Plano de control distribuido | `service_instances`, `service_leader`, `service_commands` |
 
@@ -478,6 +484,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | os | TEXT | no | `'auto'` | |
 | maintenance | INTEGER | no | `0` | |
 | virtual | INTEGER | no | `0` | (reservada, entrecomillada) |
+| device_type | TEXT | no | `''` | qué es el dispositivo (`manifest.HOST_TYPES`); vacío = sin clasificar |
 | tags | TEXT | no | `'[]'` | lista JSON |
 | description | TEXT | no | `''` | |
 | profiles | TEXT | no | `'{}'` | JSON, perfiles por protocolo; secretos cifrados |
@@ -851,6 +858,50 @@ más. Se escribe **una sola vez, al arrancar** (`ServiceInstancesStore.set_env`)
 el latido: nada de eso puede cambiar sin reiniciar, y un reinicio es una fila nueva. Va en su
 propia columna y no dentro de `detail` porque `detail` se reescribe en cada latido, y son unos
 pocos KB por instancia.
+
+### `snmp_catalog` — perfiles de dispositivo escritos en el panel
+[lib/core/snmp/profile_store.py](../src/lib/core/snmp/profile_store.py)
+
+Una fila por entrada, y la entrada **es** el documento. No una columna por campo: qué es un
+perfil lo decide `profiles.normalise`, que lee un documento — un esquema aquí sería una
+segunda declaración de la misma forma, y las dos discreparían la primera vez que una ganara
+un campo.
+
+Un *grupo* es una entrada cuyos miembros son ids de otras entradas; un *perfil*, una cuyos
+miembros son OIDs. Todo lo de abajo ya los trata como una sola cosa, así que guardarlos
+aparte sería el único sitio del producto que insiste en que son distintos.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| pid | TEXT | no | — | PK — es lo que guarda un dispositivo, y dos filas con un id son dos respuestas a «qué mide» |
+| body | TEXT | no | `'{}'` | El documento del perfil, tal cual |
+| author | TEXT | no | `''` | |
+| created_at | REAL | no | `0` | |
+| updated_at | REAL | no | `0` | |
+
+En la BD y no en ficheros junto a los MIB porque un despliegue con contenedor web y
+contenedor worker **comparte la base de datos y no el disco**: un perfil escrito en el panel
+que el muestreador no pudiera leer sería un dispositivo con algo asignado que no mide nada,
+sin error en ninguna parte.
+
+### `snmp_mib_versions` — historial de ediciones de fuentes MIB
+[lib/core/snmp/mibs/versions.py](../src/lib/core/snmp/mibs/versions.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| mib | TEXT | no | `''` | El nombre del módulo MIB: por lo que compila pysmi, y lo que sobrevive a mover el fichero de carpeta |
+| relpath | TEXT | no | `''` | Dónde estaba cuando se escribió esta versión — a donde vuelve a escribir un guardado |
+| version | INTEGER | no | `1` | |
+| content | TEXT | no | `''` | |
+| size | INTEGER | no | `0` | |
+| sha | TEXT | no | `''` | |
+| parent_sha | TEXT | no | `''` | El sha de lo que esta versión **reemplazó**. Los números no contestan sobre qué base: v2 es «el arreglo», pero ¿el arreglo a qué? |
+| author | TEXT | no | `''` | |
+| note | TEXT | no | `''` | |
+| created_at | REAL | no | `0` | |
+
+Índice: `idx_snmp_mib_versions_mib` sobre `(mib, version)`.
 
 ### `service_leader` — lease de líder (alta disponibilidad)
 [lib/services/manager/leader.py:34](../src/lib/services/manager/leader.py#L34)

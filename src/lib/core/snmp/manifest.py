@@ -21,9 +21,11 @@ from __future__ import annotations
 # module's schema.json to find out.
 #
 # The module still declares its own ``__host_profile__`` — that is how a CHECK inherits these
-# fields when it is bound to a host — and it still declares the same fields inline, because a
-# check against a bare IP has to remain possible. Those two copies and this one are pinned
-# against each other by tests/meta/test_snmp_host_profile_agrees.py.
+# fields when it is bound to a host — but it names the protocol and nothing else. This is the
+# only place the fields are written down: a check against a bare IP has to remain possible, so
+# the ``servers`` collection asks for them with ``"__profile_fields__": "snmp"`` and the panel
+# expands THIS declaration into it. What used to be three copies pinned against each other is
+# one declaration and a guard that it arrives (tests/meta/test_snmp_host_profile_agrees.py).
 HOST_PROFILE: dict = {
     'key':           'snmp',
     'module':        'snmp',      # whose credential type the form offers (snmp_auth)
@@ -31,27 +33,34 @@ HOST_PROFILE: dict = {
     # Field labels come from the lang files under this section, exactly as the built-in SSH
     # profile's do: a core-owned form takes its words from core i18n.
     'i18n':          'snmp_profile',
+    # `group` is which section of a form the field falls under, and it is a fact about the
+    # FIELD, not about one screen: a community is the identity wherever it is asked for.
+    # The check form draws the headers; the host profile's is a flat list and ignores them.
     'fields': [
-        {'name': 'host', 'type': 'str', 'placeholder': '192.168.1.1', 'default': ''},
-        {'name': 'port', 'type': 'int', 'min': 1, 'max': 65535, 'default': 161},
-        {'name': 'version', 'type': 'str', 'default': '2c', 'options': ['1', '2c', '3']},
+        {'name': 'host', 'type': 'str', 'placeholder': '192.168.1.1', 'default': '',
+         'group': 'connection'},
+        {'name': 'port', 'type': 'int', 'min': 1, 'max': 65535, 'default': 161,
+         'group': 'connection'},
+        {'name': 'version', 'type': 'str', 'default': '2c', 'options': ['1', '2c', '3'],
+         'group': 'auth'},
         {'name': 'community', 'type': 'str', 'default': 'public', 'secret': True,
-         'show_when': {'version': ['1', '2c']}},
+         'show_when': {'version': ['1', '2c']}, 'group': 'auth'},
         {'name': 'snmpv3_username', 'type': 'str', 'default': '',
-         'show_when': {'version': ['3']}},
+         'show_when': {'version': ['3']}, 'group': 'auth'},
         {'name': 'snmpv3_auth_key', 'type': 'str', 'default': '', 'secret': True,
-         'show_when': {'version': ['3']}},
+         'show_when': {'version': ['3']}, 'group': 'auth'},
         {'name': 'snmpv3_priv_key', 'type': 'str', 'default': '', 'secret': True,
-         'show_when': {'version': ['3']}},
+         'show_when': {'version': ['3']}, 'group': 'auth'},
         {'name': 'snmpv3_auth_protocol', 'type': 'str', 'default': 'MD5',
          'options': ['MD5', 'SHA', 'SHA-224', 'SHA-256', 'SHA-384', 'SHA-512', 'none'],
-         'show_when': {'version': ['3']}},
+         'show_when': {'version': ['3']}, 'group': 'auth'},
         {'name': 'snmpv3_priv_protocol', 'type': 'str', 'default': 'DES',
          'options': ['DES', '3DES', 'AES-128', 'AES-192', 'AES-256', 'none'],
-         'show_when': {'version': ['3']}},
+         'show_when': {'version': ['3']}, 'group': 'auth'},
         # What the device declares itself to be. A list, with a picker beside it — typed by
         # hand these are ids, and a misspelt one is a device that measures nothing.
-        {'name': 'device_profiles', 'type': 'str', 'default': '', 'multi': True},
+        {'name': 'device_profiles', 'type': 'str', 'default': '', 'multi': True,
+         'group': 'device'},
     ],
 }
 
@@ -176,4 +185,66 @@ BACKUP_PART: dict = {
     'id': 'mibs', 'dir': 'snmp_mibs/raw',
     'i18n': 'snmp_ui', 'label_key': 'backup_part_mibs',
     'default': False,
+}
+
+
+# ── Tables this package keeps in the shared database ─────────────────────────────────────
+#
+# The device profiles written in the panel, and the edit history of MIB sources. On the
+# general connector rather than files beside the MIBs because a deployment with a web
+# container and a worker container shares the database and not the disk — a profile written
+# in the panel has to be the one the sampler reads, exactly as a MIB corrected in the panel
+# has to be the one the worker compiles.
+#
+# Declared for the sake of STARTUP. Each store also reconciles its own table when it is
+# constructed, but these are built on demand — a request that edits a MIB, a cycle that reads
+# the catalogue — so without this the table is created inside whatever happened to reach it
+# first, and the two ways of arriving there are not equally forgiving.
+from .mibs.versions import SCHEMA as _MIB_VERSIONS   # noqa: E402
+from .profiles.store import SCHEMA as _CATALOG       # noqa: E402
+
+DB_TABLES = [_CATALOG, _MIB_VERSIONS]
+
+
+# ── What an SNMP credential IS ───────────────────────────────────────────────────────────
+#
+# A version, a community, and the seven fields SNMPv3 needs. That is a fact about the
+# PROTOCOL, and it was declared by a watchful that an installation may not have: a credential
+# type that disappears takes its stored credentials out of the editor with it, while they
+# stay in the database, still referenced by hosts that use them.
+#
+# `i18n` points at the section of core i18n these fields are worded from — the same section
+# the host profile reads, because the credential editor asks the same questions a check does
+# and there is no reason for the panel to have two vocabularies for one protocol.
+CREDENTIAL: dict = {
+    'type':   'snmp_auth',
+    'module': 'snmp',        # whose card the host form offers this credential on
+    'i18n':   'snmp_profile',
+    'fields': [
+        {'name': 'version', 'kind': 'select', 'default': '2c', 'options': ['1', '2c', '3']},
+
+        {'name': 'community', 'kind': 'password', 'secret': True,
+         'show_when': {'version': ['1', '2c']}},
+
+        {'name': 'snmpv3_level', 'kind': 'select', 'default': 'authPriv',
+         'options': ['noAuthNoPriv', 'authNoPriv', 'authPriv'],
+         'show_when': {'version': ['3']}},
+        {'name': 'snmpv3_username', 'kind': 'text',
+         'show_when': {'version': ['3']}},
+
+        {'name': 'snmpv3_auth_protocol', 'kind': 'select', 'default': 'SHA',
+         'options': ['MD5', 'SHA', 'SHA-224', 'SHA-256', 'SHA-384', 'SHA-512'],
+         'show_when': {'version': ['3'], 'snmpv3_level': ['authNoPriv', 'authPriv']}},
+        {'name': 'snmpv3_auth_key', 'kind': 'password', 'secret': True,
+         'show_when': {'version': ['3'], 'snmpv3_level': ['authNoPriv', 'authPriv']}},
+
+        {'name': 'snmpv3_priv_protocol', 'kind': 'select', 'default': 'AES-128',
+         'options': ['DES', '3DES', 'AES-128', 'AES-192', 'AES-256'],
+         'show_when': {'version': ['3'], 'snmpv3_level': ['authPriv']}},
+        {'name': 'snmpv3_priv_key', 'kind': 'password', 'secret': True,
+         'show_when': {'version': ['3'], 'snmpv3_level': ['authPriv']}},
+
+        {'name': 'snmpv3_context', 'kind': 'text', 'show_when': {'version': ['3']}},
+        {'name': 'snmpv3_engine_id', 'kind': 'text', 'show_when': {'version': ['3']}},
+    ],
 }

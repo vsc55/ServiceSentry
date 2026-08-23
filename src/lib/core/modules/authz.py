@@ -26,7 +26,7 @@ def has_any_module_write(perms) -> bool:
     host-bound check change.  Used to reject a no-write user before parsing the body."""
     return (
         'modules_edit' in perms or 'modules_add' in perms or 'modules_delete' in perms or
-        'servers_add' in perms or 'servers_edit' in perms or
+        'devices_add' in perms or 'devices_edit' in perms or
         'clusters_add' in perms or 'clusters_edit' in perms or 'clusters_delete' in perms or
         any(p.startswith('module.') and (p.endswith('.edit') or p.endswith('.add') or p.endswith('.delete'))
             for p in perms) or
@@ -67,8 +67,8 @@ def _cluster_authorized(perms, action: str, uid: str = '') -> bool:
 def _server_authorized(perms, action: str, host_uid: str) -> bool:
     """True if *perms* authorize *action* on server *host_uid* — via the global
     ``servers_*`` flag or a per-server ``server.{uid}.{action}`` override."""
-    _g = {'view': 'servers_view', 'add': 'servers_add',
-          'edit': 'servers_edit', 'delete': 'servers_delete'}
+    _g = {'view': 'devices_view', 'add': 'devices_add',
+          'edit': 'devices_edit', 'delete': 'devices_delete'}
     if _g.get(action) in perms:
         return True
     return bool(host_uid) and f'server.{host_uid}.{action}' in perms

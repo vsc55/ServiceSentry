@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Permissions the infrastructure domain owns.
+"""Permissions the infrastructure domain owns, and what it writes to the audit log.
 
 Discovered by :func:`lib.core.permissions.discover_permissions` and merged by
 :mod:`lib.web_admin.constants`, like every other domain's.
 
-**One flag, and it is not ``servers_view``.** Reading the live state of the fleet and
-editing the registry that defines it are different acts, wanted by different people: the
-person watching a screen at 3am needs the first and must not be handed the second, which
-carries the addresses, the bound credentials and the buttons that change them. That split is
-the whole reason this section exists apart from System › Infrastructure.
+**Reading is not ``devices_view``.** Reading the live state of the fleet and editing the
+registry that defines it are different acts, wanted by different people: the person watching a
+screen at 3am needs the first and must not be handed the second, which carries the addresses,
+the bound credentials and the buttons that change them. That split is the whole reason this
+section exists apart from System › Infrastructure.
 
-There is no ``infra_edit``: this domain writes nothing. What there is to change lives in the
-registry, behind the permissions the registry already has.
+**And asking for fresh numbers is neither of them.** The section shows what the last cycle
+recorded, so the newest thing on it can be an hour old — the interval is a setting, and an
+SNMP profile that takes minutes is slower still. "Collect now" is the answer to that, and it
+is a third act: it costs the device a poll, it can run for minutes, and it makes the checks
+announce whatever they find. A viewer reading a wall screen must not be able to start it by
+leaning on a button, so it has a flag of its own rather than riding on ``infra_view``.
+
+There is still no ``infra_edit``: nothing here writes a record of its own. Collecting writes
+through the modules, which is the same path the scheduler uses and the same permission model —
+what there is to CHANGE lives in the registry, behind the permissions the registry already has.
 """
 
 MODULE_PERMISSIONS = {
@@ -23,5 +31,18 @@ MODULE_PERMISSIONS = {
         # both roles can already reach one screen over, arranged by machine instead of by
         # check.
         {'flag': 'infra_view', 'roles': ('editor', 'viewer')},
+        # Run this device's checks now. `editor` and not `viewer`, exactly like `checks_run`
+        # (lib/services/monitoring/manifest.py) — the same act from the other screen, so the
+        # two roles that may operate monitoring are the same two in both places.
+        {'flag': 'infra_collect', 'roles': ('editor',)},
     ),
 }
+
+
+# What this package writes to the audit log, and how loud each one is. Declared
+# rather than guessed from the event name: the badge is the only thing a glance
+# down two hundred rows gives you, and deriving it from a noun made the colour
+# depend on what somebody called the event (see lib/core/audit/events.py).
+AUDIT_EVENTS = [
+    {'key': 'infra_collect', 'severity': 'muted'},
+]

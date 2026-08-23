@@ -4,6 +4,7 @@
         "en_EN": "Synology — UPS (SYNOLOGY-UPS-MIB)",
         "es_ES": "Synology — SAI (SYNOLOGY-UPS-MIB)"
     },
+    "short_label": {"en_EN": "UPS", "es_ES": "SAI"},
     "description": {
         "en_EN": "The UPS attached to the DiskStation: charge, runtime left, load, voltage and temperature. Runtime is the one number that says how long there is to act, and it is the one nobody looks at until the lights go out.",
         "es_ES": "El SAI conectado al DiskStation: carga, autonomía restante, consumo, voltaje y temperatura. La autonomía es el único número que dice cuánto tiempo hay para reaccionar, y es el que nadie mira hasta que se va la luz."

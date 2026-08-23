@@ -9,22 +9,38 @@ the same one the scheduler cycle uses), returning serialisable results for the U
 
 import os
 
-# Hard per-module timeout (seconds).  After this _run_checks returns; blocking
-# threads continue in the background (they cannot be killed) but do NOT delay the
-# response to the frontend.
+# Hard per-module timeout (seconds) for a run somebody is WAITING ON — the Status screen's
+# button holds the HTTP request open, so this is how long a browser is asked to sit there.
+# Blocking threads continue in the background afterwards (they cannot be killed) and write
+# their own state and history when they land; they just no longer delay the answer.
+#
+# A run that is not holding a request open should not use this number: see the `timeout`
+# argument, which is how the infrastructure section's background collection asks for the
+# configured `monitoring|module_timeout` instead of a browser's patience.
 _MODULE_CHECK_TIMEOUT = 45
 
 
 class _ChecksMixin:
     """Run module checks via Monitor and return serialisable results."""
 
-    def _run_checks(self, requested) -> tuple[dict, list[str]]:
+    def _run_checks(self, requested, *, timeout: int | None = None,
+                    progress_cb=None) -> tuple[dict, list[str]]:
         """Execute the requested module checks in parallel and return their
         serialisable results.
 
-        All modules start simultaneously; returns after ``_MODULE_CHECK_TIMEOUT``
-        seconds regardless of whether any module is still running (modules past the
-        deadline are reported as a timeout error).
+        All modules start simultaneously; returns after *timeout* seconds (default
+        ``_MODULE_CHECK_TIMEOUT``) regardless of whether any module is still running
+        (modules past the deadline are reported as a timeout error).
+
+        ``timeout`` is a parameter and not the constant because the two callers are asking
+        different questions. A button that holds the request open is asking "how long may a
+        browser be made to wait"; a background collection is asking "how long is this
+        installation willing to wait for one module", which is a setting the operator owns
+        (``monitoring|module_timeout``) — a fleet whose NAS answers in five minutes needs a
+        different answer from one whose devices answer in two seconds.
+
+        ``progress_cb(state, module, detail)`` is handed straight to the executor: it is
+        called as each module starts and lands, so a background run can be watched.
         """
         import sys
         from lib import Monitor
@@ -58,5 +74,7 @@ class _ChecksMixin:
         else:
             module_names = [m for m in requested if isinstance(m, str)]
 
-        return run_checks(monitor, module_names, timeout=_MODULE_CHECK_TIMEOUT,
-                          history=getattr(self, '_history', None))
+        return run_checks(monitor, module_names,
+                          timeout=int(timeout or _MODULE_CHECK_TIMEOUT),
+                          history=getattr(self, '_history', None),
+                          progress_cb=progress_cb)

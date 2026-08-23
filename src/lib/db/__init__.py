@@ -24,7 +24,7 @@ from .base import BaseConnector
 from .module_tables import (
     collect_module_tables,
     module_table,
-    reconcile_module_tables,
+    reconcile_core_tables, reconcile_module_tables,
 )
 
 

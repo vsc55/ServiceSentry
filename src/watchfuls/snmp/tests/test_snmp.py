@@ -1310,57 +1310,6 @@ class TestMibFilenameGuards:
         assert result is not None and result.startswith(base)
 
 
-class TestCredentialType:
-    """The reusable SNMP identity, and the one thing that makes it worth having a schema:
-    which fields apply depends on the version, and on v3 also on the security level."""
-
-    @staticmethod
-    def _fields():
-        import os
-        from lib.modules.discovery.credential_schemas import credential_schemas
-        # The module's own folder, up one: the watchfuls TREE, which is what the catalog scans.
-        watchfuls_dir = os.path.dirname(os.path.dirname(os.path.abspath(snmp.__file__)))
-        cat = credential_schemas(watchfuls_dir)
-        assert 'snmp_auth' in cat, 'the module declares no credential type'
-        return {f['name']: f for f in cat['snmp_auth']['fields']}
-
-    def test_v1_and_v2c_ask_only_for_the_community(self):
-        """Everything else on the form belongs to v3, and a form that offers a user name for
-        a v2c device is asking for something that has nowhere to go."""
-        f = self._fields()
-        assert f['community']['show_when'] == {'version': ['1', '2c']}
-        for name in ('snmpv3_username', 'snmpv3_level', 'snmpv3_context'):
-            assert f[name]['show_when']['version'] == ['3']
-
-    def test_the_keys_follow_the_security_level_not_only_the_version(self):
-        """noAuthNoPriv needs neither key, authNoPriv needs one, authPriv both. Gating them on
-        the version alone would show two key boxes that the device will ignore — and a filled
-        box that does nothing is worse than an absent one, because it looks configured."""
-        f = self._fields()
-        for name in ('snmpv3_auth_protocol', 'snmpv3_auth_key'):
-            assert f[name]['show_when'] == {'version': ['3'],
-                                            'snmpv3_level': ['authNoPriv', 'authPriv']}
-        for name in ('snmpv3_priv_protocol', 'snmpv3_priv_key'):
-            assert f[name]['show_when'] == {'version': ['3'], 'snmpv3_level': ['authPriv']}
-
-    def test_every_secret_is_marked_as_one(self):
-        """`secret` is what encrypts the value at rest and masks it in the API. A key that
-        misses it is stored in clear and returned in clear."""
-        f = self._fields()
-        for name in ('community', 'snmpv3_auth_key', 'snmpv3_priv_key'):
-            assert f[name]['secret'] is True, f'{name} is stored in the clear'
-        assert f['snmpv3_username']['secret'] is False, 'a user name is not a secret'
-
-    def test_the_protocol_lists_dropped_none(self):
-        """The collection's lists carry a "none" option because they have no level field: it
-        is how they say authNoPriv. Here the level says it, and two places to say the same
-        thing is two places to disagree."""
-        f = self._fields()
-        for name in ('snmpv3_auth_protocol', 'snmpv3_priv_protocol'):
-            values = [o.get('value') if isinstance(o, dict) else o for o in f[name]['options']]
-            assert 'none' not in values, f'{name} says authNoPriv a second way'
-
-
 class TestTheImplicitCompileIsBounded:
     """Parsing ASN.1 costs ~2.7 s per MIB and is 89% of a compile, so the number of files IS
     the number of seconds. One dropped into raw/ should still just work; a vendor folder

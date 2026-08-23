@@ -1,0 +1,91 @@
+{# ================================================================
+   Devices — by type: a rail of what the fleet is MADE OF.
+
+   The other four views answer questions about state — how is it, what is watched, what is
+   each one. This one answers a question about composition: what is in here, and how much of
+   each. A table sorted by type can be paged through until you have the answer; a rail states
+   it before you read a row, and picking one is how you get "show me the switches".
+
+   Three things it does deliberately:
+
+   * **Only the types that are present.** Eight empty rows for the kinds of box this site
+     does not have would be eight rows of noise — an absent printer is not news. But
+     "unclassified" IS news when it is not empty: those are the devices somebody added in a
+     hurry, and this is where you find them.
+   * **The catalogue's order, never the count.** A rail that reshuffled as devices came and
+     went would move the thing you were about to click. Which type is biggest is what the
+     numbers are for.
+   * **A summary**, like Status and Coverage: it is handed everything the filters left
+     standing rather than the page on screen. Counts over one page would change as you paged
+     through them, and a rail whose counts do that is worse than no counts.
+
+   The selection cannot live in the body — the body is rebuilt on every render — so it is
+   kept outside and validated against the groups that exist NOW: filter the fleet down to
+   two switches and a stale "NAS" would leave the detail empty with nothing looking selected.
+   ================================================================ #}
+
+const _SRV_TYPE_RAIL_KEY = 'ss_devices_type_rail';
+let _srvTypeSel = null;
+
+function _srvTypeRailSelect(id) {
+    _srvTypeSel = id;
+    try { localStorage.setItem(_SRV_TYPE_RAIL_KEY, id); } catch (_) {}
+    renderServers();
+}
+
+/** The groups, in the catalogue's order, with the unclassified ones last.
+ *  `id` is the type id, or '-' for unclassified: '' would be indistinguishable from "none
+ *  selected" the moment it goes through localStorage. */
+function _srvTypeGroups(hosts) {
+    const by = new Map();
+    for (const h of hosts) {
+        const k = h.device_type || '-';
+        if (!by.has(k)) by.set(k, []);
+        by.get(k).push(h);
+    }
+    const groups = HOST_TYPES
+        .filter(x => by.has(x.id))
+        .map(x => ({ id: x.id, icon: x.icon, label: hostTypeLabel(x.id), rows: by.get(x.id) }));
+    if (by.has('-')) {
+        groups.push({ id: '-', icon: 'bi-question-circle', label: t('host_type_unset'),
+                      rows: by.get('-'), unset: true });
+    }
+    return groups;
+}
+
+function _srvViewTypes(hosts, ctx) {
+    if (!hosts.length) return '';
+    const groups = _srvTypeGroups(hosts);
+    let sel = _srvTypeSel;
+    if (sel === null) { try { sel = localStorage.getItem(_SRV_TYPE_RAIL_KEY); } catch (_) {} }
+    const open = groups.find(g => g.id === sel) || groups[0];
+    const unset = (groups.find(g => g.id === '-') || {}).rows || [];
+    // The unclassified count is the one that is actionable, so it is the one that gets a
+    // colour — and only when there are any. "0 unclassified" painted amber would be a
+    // warning about nothing.
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
+        ${_summaryChip('bi-tags', t('col_host_type'), groups.length - (unset.length ? 1 : 0))}
+        ${unset.length ? _summaryChip('bi-question-circle', t('host_type_unset'),
+                                      unset.length, 'text-bg-warning') : ''}`;
+    // `ss-vfill` and not a bare div: the factory's body is what has the height, and a
+    // wrapper that is not a link in the fill chain keeps it — the rail then draws at the
+    // height of its own items and leaves the rest of the card empty.
+    return `<div class="ss-vfill">
+        ${_summaryHeader(chips)}
+        <div class="ss-railbox">
+            <nav class="ss-rail">
+                <div class="ss-rail-group">${groups.map(g => `
+                    <button type="button" class="ss-rail-item${g.id === open.id ? ' active' : ''}"
+                            onclick="_srvTypeRailSelect(${jsStr(g.id)})">
+                        <i class="bi ${escAttr(g.icon)}"></i>
+                        <span class="text-truncate">${esc(g.label)}</span>
+                        <span class="badge bg-secondary rounded-pill ms-auto">${g.rows.length}</span>
+                    </button>`).join('')}</div>
+            </nav>
+            <div class="ss-railbox-main">
+                <div class="p-2">${open.rows.map(h =>
+                    _srvHostLine(h, ctx, `${_srvStatusBadge(h)}${_srvModulesPill(h)}`)).join('')}</div>
+            </div>
+        </div>
+    </div>`;
+}

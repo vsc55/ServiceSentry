@@ -28,7 +28,7 @@ it pointing at nothing. Both are refusals here and neither is a matter of taste.
 
 import pytest
 
-from lib.core.snmp import profile_store as PS
+from lib.core.snmp.profiles import store as PS
 from lib.core.snmp import profiles as P
 from lib.core.snmp.actions import SnmpActions as A
 

@@ -3,7 +3,7 @@
 Each `*.json` file in this directory declares one public MIB repository that the
 SNMP module offers in the **MIB Manager → GitHub import** dropdown and as a
 **compile dependency source**.  Files are auto-discovered at module import by
-`_load_mib_sources()` in `../__init__.py` — **drop a new file here to add a
+`_load_mib_sources()` in `../admin.py` — **drop a new file here to add a
 source; no code changes required.**
 
 ## File format

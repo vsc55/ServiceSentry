@@ -279,7 +279,24 @@ function _sbPaneUrl(btn, paneId) {
     // A section with views is never at its bare URL: it is always showing one of them, and
     // the address bar has to say which, or a copied link reopens somebody else's view.
     const slug = _sbPageView(paneId.replace(/^tab-/, ''));
-    return slug ? base + '/' + slug : base;
+    const path = slug ? base + '/' + slug : base;
+    // ...and it keeps the section's OWN query while it is being written.
+    //
+    // Reported from the panel: open a device in Infrastructure, press F5, and you land back
+    // on the list of forty. The section does put the open device in the address bar
+    // (`?host=<uid>`) and does read it back — but this runs on the initial activation too,
+    // and it rebuilds the URL from the section and its view alone. So the landing URL was
+    // replaced by `/infra/table` before the section ever looked at it, and the parameter was
+    // gone: not lost by the section, swept away by the navigation that was only trying to
+    // say WHICH section is open.
+    //
+    // Only while we are already on this section's path. Arriving from another one, the query
+    // in the bar belongs to the page being left — `/history?module=cpu` must not follow you
+    // into Infrastructure.
+    const here = window.location.pathname;
+    const search = window.location.search;
+    const mine = here === base || here.startsWith(base + '/');
+    return (search && mine) ? path + search : path;
 }
 document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', e => {
     const btn = e.target;

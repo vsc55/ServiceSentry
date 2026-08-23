@@ -1,16 +1,65 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Permissions the servers domain owns (the host registry — see
-:mod:`lib.core.permissions`)."""
+"""What the devices domain contributes (the host registry — see :mod:`lib.discovery`)."""
+
+
+# ── What a device IS ─────────────────────────────────────────────────────────────────────
+#
+# The registry holds servers, but it also holds a NAS, a switch, a UPS and whatever else
+# answers on the network — the section was called "Servers" while the SNMP catalogue beside
+# it shipped profiles for Mikrotik, Linksys and two makes of UPS.
+#
+# So a device says what it is, and the panel stops guessing. Declared here rather than in the
+# store because it is a vocabulary, not a schema detail: the icon a row wears, the way a
+# fleet is grouped, and one day what a discovery run proposes after asking a device over
+# SNMP (`detect_profiles` already knows how to ask).
+#
+# It is a PROPERTY and deliberately not a section: everything the panel does with an entry —
+# address, credential, profiles, maintenance, tags, the checks bound to it — is the same
+# whichever of these it is, and splitting by type would force a decision at creation time
+# that is often wrong. A NAS *is* a server; a hypervisor is both.
+#
+# `''` (unset) is always allowed and is what every existing device has: making people
+# classify a fleet before they can save anything would be a worse form than none.
+HOST_TYPES: tuple[dict, ...] = (
+    {'id': 'server',      'icon': 'bi-hdd-rack'},
+    {'id': 'workstation', 'icon': 'bi-pc-display'},
+    {'id': 'nas',         'icon': 'bi-hdd-stack'},
+    {'id': 'hypervisor',  'icon': 'bi-boxes'},
+    {'id': 'switch',      'icon': 'bi-ethernet'},
+    {'id': 'router',      'icon': 'bi-router'},
+    {'id': 'firewall',    'icon': 'bi-shield-lock'},
+    {'id': 'ups',         'icon': 'bi-battery-charging'},
+    {'id': 'printer',     'icon': 'bi-printer'},
+    {'id': 'camera',      'icon': 'bi-camera-video'},
+    {'id': 'other',       'icon': 'bi-hdd-network'},
+)
+
+#: The icon an unclassified device wears — the one the section has always used.
+HOST_TYPE_FALLBACK_ICON = 'bi-hdd-network'
+
+
+def host_type_ids() -> tuple:
+    """Just the ids, for validation."""
+    return tuple(t['id'] for t in HOST_TYPES)
+
+
+def host_type_icon(type_id) -> str:
+    """The icon for a type, or the generic one for anything unrecognised."""
+    wanted = str(type_id or '').strip().lower()
+    for t in HOST_TYPES:
+        if t['id'] == wanted:
+            return t['icon']
+    return HOST_TYPE_FALLBACK_ICON
 
 MODULE_PERMISSIONS = {
-    'group': 'perm_group_servers',
+    'group': 'perm_group_devices',
     'order': 160,
     'permissions': (
-        {'flag': 'servers_view',   'roles': ('editor', 'viewer')},  # view the servers tab
-        {'flag': 'servers_add',    'roles': ()},                    # add modules/checks to a server
-        {'flag': 'servers_edit',   'roles': ('editor',)},           # edit servers / host-bound checks
-        {'flag': 'servers_delete', 'roles': ()},                    # delete servers
+        {'flag': 'devices_view',   'roles': ('editor', 'viewer')},  # view the servers tab
+        {'flag': 'devices_add',    'roles': ()},                    # add modules/checks to a server
+        {'flag': 'devices_edit',   'roles': ('editor',)},           # edit servers / host-bound checks
+        {'flag': 'devices_delete', 'roles': ()},                    # delete servers
     ),
 }
 
@@ -21,19 +70,19 @@ from .overview_widget import coverage_stat, server_list_rows, servers_stat  # no
 OVERVIEW_WIDGETS = [
     {'id': 'servers', 'icon': 'bi-hdd-network', 'label_key': 'overview_servers',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 30,
-     'perms': {'any': ['servers_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
+     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
      'stat': servers_stat,
      'view': {'kind': 'stat', 'icon': 'bi-hdd-network-fill', 'label_key': 'overview_servers',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/servers'}},
     {'id': 'coverage', 'icon': 'bi-pie-chart', 'label_key': 'overview_coverage',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 100,
-     'perms': {'any': ['servers_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
+     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
      'stat': coverage_stat,
      'view': {'kind': 'stat', 'icon': 'bi-pie-chart-fill', 'label_key': 'overview_coverage',
               'accent': 'green', 'data_url': '/api/v1/overview/widget/coverage'}},
     {'id': 'servers_list', 'icon': 'bi-hdd-network', 'label_key': 'overview_servers',
      'cols': 4, 'h': 340, 'has_h': True, 'order': 170,
-     'perms': {'any': ['servers_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
+     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
      'rows': server_list_rows,
      'view': {'kind': 'table', 'icon': 'bi-hdd-network', 'title_key': 'overview_servers',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/servers_list',

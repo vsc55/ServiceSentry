@@ -57,7 +57,8 @@ class TestTheDependencyPointsOneWay:
         """A guard that walks an empty tree passes for the wrong reason."""
         found = list(_py_files(LIB))
         assert len(found) > 100, f'only {len(found)} files under lib/ — the scan is wrong'
-        assert any(p.endswith(os.path.join('core', 'snmp', 'profiles.py')) for p in found)
+        assert any(p.endswith(os.path.join('snmp', 'profiles', '__init__.py'))
+                   for p in found)
 
     def test_the_pattern_would_catch_one(self):
         """Positive control: the regex, not the absence of offenders, is what is trusted."""

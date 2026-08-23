@@ -118,12 +118,19 @@ class TestItIsTheSharedMachinery:
         `flex: 1 1 auto` only means something inside a flex CONTAINER, and the factory hands a
         view's body to a plain `.ss-vscroll` — a flex item that is not one. The same trap the
         /account pane hit, so the fix is the same and it lives with the box rather than with
-        this view."""
+        this view.
+
+        The rail here is the body's own root, so a child selector was enough. Devices later
+        put a summary header above its rail and the child selector stopped matching, which is
+        why the rule now names a DESCENDANT — asked of loosely on purpose, so the next view
+        that wraps its rail does not silently fall out of it."""
         css = re.sub(r'/\*.*?\*/', '', _read(os.path.join(
             SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')), flags=re.S)
-        m = re.search(r'\.ss-vscroll:has\(>\s*\.ss-railbox\)\s*\{([^}]*)\}', css)
-        assert m, 'nothing makes the box that holds a rail a column, so the rail cannot grow'
-        assert 'display: flex' in m.group(1) and 'overflow: hidden' in m.group(1), (
+        rule = next((x for x in re.finditer(r'\.ss-vscroll:has\(([^)]*)\)\s*\{([^}]*)\}', css)
+                     if 'railbox' in x.group(1)), None)
+        assert rule, 'nothing makes the box that holds a rail a column, so the rail cannot grow'
+        body = rule.group(2)
+        assert 'display: flex' in body and 'overflow: hidden' in body, (
             'either the rail cannot grow, or it scrolls inside a second scrollbar')
 
     def test_the_activity_view_reuses_the_filter_strip(self):

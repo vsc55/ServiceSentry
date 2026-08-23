@@ -196,3 +196,55 @@ class TestSecretEncryption:
         # A second store on the SAME connector reads + decrypts what s1 wrote.
         s2 = HostsStore(db, fernet=f, secret_keys=_SECRET_KEYS)
         assert s2.get(uid)['profiles']['ssh']['ssh_password'] == 's3cr3t'
+
+
+class TestWhatTheDeviceIs:
+    """`device_type` — a property, and deliberately not a section.
+
+    Everything the panel does with an entry is the same whatever it is, so splitting the
+    registry by type would force a decision at creation time that is often wrong (a NAS *is*
+    a server; a hypervisor is both). Stored, filtered and drawn — never navigated.
+    """
+
+    def test_it_round_trips(self):
+        s, _ = _store(_fernet())
+        uid = s.create({**_host('nas-1'), 'device_type': 'nas'})
+        assert s.get(uid)['device_type'] == 'nas'
+
+    def test_unclassified_is_the_default_and_a_real_value(self):
+        """Every device that existed before the field did has this, and so does one added in
+        a hurry. Refusing to save without it would be a worse form than none."""
+        s, _ = _store(_fernet())
+        uid = s.create(_host('plain-1'))
+        assert s.get(uid)['device_type'] == ''
+
+    def test_an_undeclared_type_is_dropped_not_stored(self):
+        """It reaches the store from a request body. Kept, it would put a word on screen
+        that no lang file can translate — the picker would show a raw token and the icon
+        lookup would fall through to the generic one, with nothing saying why."""
+        s, _ = _store(_fernet())
+        uid = s.create({**_host('odd-1'), 'device_type': 'toaster'})
+        assert s.get(uid)['device_type'] == ''
+
+    def test_it_is_case_insensitive_on_the_way_in(self):
+        s, _ = _store(_fernet())
+        uid = s.create({**_host('sw-1'), 'device_type': 'SWITCH'})
+        assert s.get(uid)['device_type'] == 'switch'
+
+    def test_an_update_can_set_and_clear_it(self):
+        s, _ = _store(_fernet())
+        uid = s.create(_host('sw-2'))
+        h = s.get(uid)
+        assert s.update(uid, {**h, 'device_type': 'switch'})
+        assert s.get(uid)['device_type'] == 'switch'
+        assert s.update(uid, {**h, 'device_type': ''})
+        assert s.get(uid)['device_type'] == '', 'a reclassification cannot be undone'
+
+    def test_every_declared_type_is_storable(self):
+        """The catalogue and the validator read the same list; a type offered by the picker
+        and refused by the store would be a select that silently does nothing."""
+        from lib.core.hosts.manifest import host_type_ids
+        s, _ = _store(_fernet())
+        for i, tid in enumerate(host_type_ids()):
+            uid = s.create({**_host('h-%d' % i), 'device_type': tid})
+            assert s.get(uid)['device_type'] == tid, tid

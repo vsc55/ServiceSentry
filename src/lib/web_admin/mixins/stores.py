@@ -21,7 +21,8 @@ class _StoresMixin:
         groups, sessions and roles stores so they never open the database
         directly nor fight over separate connections.
         """
-        from lib.db             import get_connector, reconcile_module_tables  # noqa: PLC0415
+        from lib.db             import (get_connector, reconcile_core_tables,  # noqa: PLC0415
+                                reconcile_module_tables)
         from lib.core.users.store  import UsersStore   # noqa: PLC0415
         from lib.core.groups.store import GroupsStore  # noqa: PLC0415
         from lib.core.sessions.store import SessionsStore   # noqa: PLC0415
@@ -133,9 +134,12 @@ class _StoresMixin:
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
-        # Let watchful modules create their own tables on the shared connector.
+        # Create the declared tables on the shared connector — a watchful module's, and a
+        # core package's. Both are built on demand, so without this the table lands inside
+        # whatever request first needed it.
         try:
             reconcile_module_tables(self._db_connector)
+            reconcile_core_tables(self._db_connector)
         except Exception:  # pylint: disable=broad-except
             pass
 

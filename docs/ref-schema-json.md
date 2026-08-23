@@ -697,14 +697,49 @@ en [explica-i18n.md → Resolución de etiquetas](explica-i18n.md#resolución-de
 
 ### `__host_profile__`
 
-Declara los campos de conexión que un check puede **heredar de un host vinculado**
-del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
-<campo de dirección>, "fields": [campos a heredar]}`. Lo resuelve
-`ModuleBase.resolve_host()`. Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
+Declara a qué **protocolo** se ata el check para heredar la conexión de un host del registro.
+Dict (o lista de dicts) con `{"key": <protocolo>, "address_field": <campo de dirección>}`. Lo
+resuelve `ModuleBase.resolve_host()`. Ver
+[explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]}
+"__host_profile__": {"key": "snmp", "address_field": "host"}
 ```
+
+**No lleva `fields`** si el protocolo lo declara el core (`ssh`, `snmp`): *qué campos tiene*
+un protocolo no es del módulo, y `host_profile_specs()` los completa desde la declaración del
+core. Once módulos los repetían —diez con los mismos siete de SSH— y el catálogo ya
+sobrescribía todas esas copias, así que una que se separase no cambiaba ningún formulario:
+cambiaba qué valores podía empujar un host atado sobre el check, sin decirlo.
+
+`address_field` sí lo dice el módulo: **qué campo suyo** recibe la dirección es cosa suya
+(`web` la pone en `server`, SNMP en `host`). Entra automáticamente en lo que un check atado
+deja de dibujar.
+
+Un protocolo que el core **no** declara (`http` de `web`, `db` de `datastore`) sigue diciendo
+sus propios `fields`, o `[]` para «átame, sin formulario de credencial».
+
+### `__profile_fields__`
+
+Dentro de una **colección**: toma los campos de conexión de un protocolo del core en vez de
+copiarlos.
+
+```json
+"servers": {
+    "__profile_fields__": "snmp",
+    "timeout": {"type": "int", "default": 5},
+    "checks":  {"type": "sub_collection", ...}
+}
+```
+
+`__host_profile__` dice qué hereda un check **atado**; no pinta nada en el formulario de uno
+**sin atar**, y un check contra una IP suelta tiene que poder decir comunidad, versión y claves
+v3 por sí mismo. Eso era lo que obligaba a escribir los campos una segunda vez.
+
+`discover_schemas()` los sustituye por las declaraciones reales del core, en su orden y en esa
+posición, y sus etiquetas y ayudas salen de la i18n del core por los mismos caminos de siempre
+(`label_i18n` en el campo, `hints` a través de `__i18n__`). **El navegador recibe lo mismo que
+antes.** Un campo que la colección declare ella misma gana: la expansión nunca pisa.
 
 ### `__host_multiple__`
 
@@ -983,7 +1018,7 @@ módulos, auditoría, historial y los destinos de notificación por canal.
 | `roles` | `uid` | `name` (UNIQUE), `description`, `permissions` (JSON), `enabled`, auditoría | `idx_roles_name` (UNIQUE) | `core/roles/store.py` |
 | `sessions` | `token` | `uid` (id público), `user_uid`, `created`, `last_seen`, `ip`, `user_agent` | `idx_sessions_user_uid` | `core/sessions/store.py` |
 | `credentials` | `uid` | `name` (UNIQUE), `ctype`, `enabled`, `description`, `data` (JSON, secretos cifrados), auditoría | `idx_credentials_name` | `core/credentials/store.py` |
-| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
+| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `device_type`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
 | `module_config` | `uid` | `module` (UNIQUE), `data` (JSON: campos de módulo + meta `__*__`), auditoría | `idx_module_config_module` | `core/modules/store.py` |
 | `module_config_items` | `uid` | `module_uid` → `module_config.uid`, `collection`, `host_uid` → `hosts.uid`, `label`, `enabled`, `data` (JSON), auditoría | `idx_module_config_items_moduid`, `idx_module_config_items_host` | `core/modules/store.py` |
 | `config` | `uid` | `path` (UNIQUE, `section\|field`), `value` (JSON), auditoría | `idx_config_path` | `core/config/store.py` |
