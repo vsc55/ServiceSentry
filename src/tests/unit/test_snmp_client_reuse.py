@@ -277,3 +277,55 @@ def _read_client() -> str:
     from tests.helpers import _read                 # noqa: PLC0415
     root = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
     return _read(os.path.join(root, 'lib', 'core', 'snmp', 'client.py'))
+
+
+
+@_needs_pysnmp
+class TestWhichKindOfFailureItWas:
+    """"It did not answer" and "it answered an error" are different facts about a device.
+
+    `noSuchName` is an ANSWER: this device does not serve that OID, it is on the network, and
+    the next profile may well be one it does serve. A timeout is not an answer — and after a
+    few of them the remaining three hundred reads are three hundred timeouts nobody is waiting
+    for. Nothing could tell them apart, so the sampler could not give up on a machine that was
+    plainly not there: reported from the screen as a Proxmox node refusing SNMP that sat on
+    "reading the metrics 1/14" for an entire collection.
+
+    A `str` subclass rather than a third return value: everything that logs the error, shows
+    it or puts it in a message goes on working unchanged, and the one caller that has to tell
+    them apart can.
+    """
+
+    def test_a_timeout_is_marked_as_no_answer(self, monkeypatch, fake):
+        async def _get(_e, _a, _t, _c, *_v):
+            return 'No SNMP response received before timeout', 0, 0, []
+        monkeypatch.setattr(_client, 'get_cmd', _get)
+        _val, err = _client.SnmpClient._snmp_get('h', 161, '2c', 'public', 1, 0, '1.1')
+        assert isinstance(err, _client.NoAnswer), err
+        assert 'timeout' in str(err)
+
+    def test_an_error_the_device_returned_is_not(self, monkeypatch, fake):
+        """It answered. Counting this as silence would abandon a device for being asked the
+        wrong question — which is what a profile assigned to the wrong model looks like."""
+        class _St:
+            def __bool__(self): return True
+            def prettyPrint(self): return 'noSuchName'
+        async def _get(_e, _a, _t, _c, *_v):
+            return None, _St(), 1, []
+        monkeypatch.setattr(_client, 'get_cmd', _get)
+        _val, err = _client.SnmpClient._snmp_get('h', 161, '2c', 'public', 1, 0, '1.1')
+        assert err and not isinstance(err, _client.NoAnswer), err
+
+    def test_it_is_still_a_string_to_everyone_else(self):
+        """The whole reason for the shape: every caller carries this into a log line, a
+        message or a comparison, and none of them may need changing."""
+        err = _client.NoAnswer('nothing came back')
+        assert isinstance(err, str)
+        assert f'{err}!' == 'nothing came back!' and err == 'nothing came back'
+
+    def test_a_walk_that_got_nothing_says_so_too(self, monkeypatch, fake):
+        async def _bulk(*_a, **_k):
+            yield 'No SNMP response received before timeout', 0, 0, []
+        monkeypatch.setattr(_client, 'bulk_walk_cmd', lambda *a, **k: _bulk())
+        rows, err = _client.SnmpClient._snmp_walk_oid('h', 161, '2c', 'public', 1, 0, '1.1')
+        assert rows == {} and isinstance(err, _client.NoAnswer)

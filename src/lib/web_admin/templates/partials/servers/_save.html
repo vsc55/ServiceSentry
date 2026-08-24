@@ -331,7 +331,7 @@ function _hostProfileActionCfg(proto) {
     const d = _hostDraft || {};
     const cfg = { ...(d.profiles || {})[proto] };
     if (_editingHostUid) cfg.host_uid = _editingHostUid;
-    cfg._host = { address: d.address || '', kind: d.kind || 'local', os: d.os || 'auto',
+    cfg._host = { address: d.address || '', kind: hostKind(d.kind), os: d.os || 'auto',
                   profiles: d.profiles || {} };
     return cfg;
 }
@@ -493,7 +493,7 @@ async function saveHostModal(closeAfter = true) {
         }
     }
     const body = { name: d.name.trim(), address: d.address || '',
-                   kind: d.kind === 'remote' ? 'remote' : 'local',
+                   kind: hostKind(d.kind),
                    os: d.os || 'auto',
                    maintenance: !!d.maintenance,
                    virtual: !!d.virtual,

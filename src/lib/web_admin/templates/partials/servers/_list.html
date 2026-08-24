@@ -156,7 +156,7 @@ createListTable({
             // it is how you find the devices somebody added in a hurry.
             if (f.type === '-' && h.device_type) return false;
             if (f.type && f.type !== '-' && (h.device_type || '') !== f.type) return false;
-            if (f.kind && (h.kind || 'local') !== f.kind) return false;
+            if (f.kind && hostKind(h.kind) !== f.kind) return false;
             if (f.status && _srvStatusOf(h) !== f.status) return false;
             if (f.tag && !(h.tags || []).includes(f.tag)) return false;
             return !f.cluster || _srvClusterLabels(h.uid).includes(f.cluster);
@@ -184,7 +184,7 @@ createListTable({
             case 'uid':          return String(host.uid || '');
             case 'address':      return String(host.address || '').toLowerCase();
             case 'type':         return hostTypeLabel(host.device_type || '').toLowerCase();
-            case 'kind':         return String(host.kind || 'local');
+            case 'kind':         return hostKind(host.kind);
             case 'os':           return String(host.os || 'auto');
             case 'status':       return _srvStatusRank(host);
             case 'modules':      return host.modules_total || 0;

@@ -65,6 +65,7 @@ def test_history_quotes_key_on_mysql():
     c = _RecConn(); s = HistoryStore(c)
     s.record('mod', 'k', status=True, data={})
     s.get_index(); s.query('mod', 'k', 0, 9); s.get_stats('mod', 'k', 0, 9)
+    s.latest_by_series(); s.latest_by_series(['mod'])
     s.delete_series('mod', 'k')
     sql = '\n'.join(c.sql)
     assert '`key`' in sql and not _bare('key', sql)

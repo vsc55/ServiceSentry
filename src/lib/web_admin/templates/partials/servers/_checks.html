@@ -229,13 +229,18 @@ function _hostCheckFieldsHtml(mod, idx, it, metas) {
 // never the whole story, and re-entering a community on every check that points at one box
 // is how a device ends up authenticating two different ways.
 //
-// Placed with the module rather than with the host's own fields because that is where its
-// meaning is: SSH is the box's own connection and lives in General; SNMP is a conversation
-// one module holds with it.
+// Placed with the module because that is where its meaning is: a profile a MODULE declares
+// is a conversation that module holds with the device. One the CORE declares is the device's
+// own connection and lives in General, beside SSH — `builtin` is that distinction and it
+// travels with the profile, so this names neither protocol nor module.
+//
+// It used to read `proto !== 'ssh'`, which was the same rule with one protocol's name written
+// into it. That stopped being true the day SNMP moved to the core: its editor went on being
+// drawn here, under the module, while the thing it edits became a property of the box.
 function _hostProfileBlock(mod) {
     if (typeof HOST_PROFILES === 'undefined') return '';
     const entry = Object.entries(HOST_PROFILES).find(([proto, spec]) =>
-        proto !== 'ssh' && spec && spec.module === mod &&
+        spec && !spec.builtin && spec.module === mod &&
         (spec.fields || []).some(f => f.name !== spec.address_field));
     if (!entry) return '';
     const [proto, spec] = entry;
@@ -463,7 +468,7 @@ async function _hostDiscoverFetch(extraInput) {
         host_uid: _editingHostUid || '',
         _host: {
             address: _hostDraft.address || '',
-            kind: _hostDraft.kind || 'local',
+            kind: hostKind(_hostDraft.kind),
             os: _hostDraft.os || 'auto',
             profiles: { ssh: (_hostDraft.profiles && _hostDraft.profiles.ssh) || {} },
         },

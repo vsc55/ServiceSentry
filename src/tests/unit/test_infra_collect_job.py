@@ -32,12 +32,14 @@ class _WA:
         self._embedded_services = {}
         self.audited = []
         self.lang_seen = []
+        self.scope_seen = []
         self._behaviour = behaviour or (lambda mods, cb: ({m: {} for m in mods}, []))
         self._timeout_seen = timeout_seen if timeout_seen is not None else []
 
-    def _run_checks(self, mods, *, timeout, progress_cb, lang=''):
+    def _run_checks(self, mods, *, timeout, progress_cb, lang='', only_host=''):
         self._timeout_seen.append(timeout)
         self.lang_seen.append(lang)
+        self.scope_seen.append(only_host)
         return self._behaviour(mods, progress_cb)
 
     def _audit_write(self, event, user, ip, detail):
@@ -489,3 +491,85 @@ class TestTheChecklistKeepsMovingWhileItWaits:
             jobs._LATE_GRACE = grace
         seen['cb']('ok', 'snmp', '900')
         assert jobs.job_status(jid)['modules'][0]['state'] == 'timeout'
+
+
+
+class TestItCollectsTheDeviceItWasOpenedFor:
+    """A collection is OF a machine, and it used to be of the whole fleet.
+
+    Each module ran with its whole configuration, so asking for one NAS walked every other
+    device that module watched — on an SNMP fleet, minutes of other people's equipment for a
+    number the operator asked about one of theirs. Reported from the screen: a dialog stuck
+    on "still working" listing six devices, five of which nobody had asked about, held up by
+    one of THOSE not answering.
+    """
+
+    def test_the_uid_is_what_the_run_is_narrowed_to(self):
+        wa = _WA()
+        job_id = _start(wa, uid='u-erebor')
+        _until(job_id, lambda j: j['done'])
+        assert wa.scope_seen == ['u-erebor']
+
+    def test_it_is_the_machine_and_not_its_name(self):
+        """The name is what a person recognises and the uid is what survives a rename; a
+        collection narrowed by the label would follow the wrong machine after one."""
+        wa = _WA()
+        job_id = _start(wa, uid='u1', name='erebor')
+        _until(job_id, lambda j: j['done'])
+        assert wa.scope_seen == ['u1']
+
+
+
+class TestAPhaseThatEnded:
+    """A line on the checklist has to be able to STOP.
+
+    A phase ended only when the same scope started another one, so the last phase of anything
+    spun for ever — a device sitting at "reading the metrics 24/24" with a spinner, minutes
+    after it finished, until the whole module landed. On a fleet that is the slowest device
+    deciding when every other one looks done. And a phase that FAILED had no way to say so,
+    so a device refusing connections drew a line that looked busy.
+    """
+
+    def _row(self, *reports):
+        row = {'state': 'running', 'detail': '', 'steps': []}
+        for scope, step, state in reports:
+            jobs._step(row, 'running', '',
+                       {'step': step, 'scope': scope, 'n': 0, 'total': 0, 'state': state})
+        return row
+
+    def _states(self, row):
+        return [(s.get('scope', ''), s['key'], s['state']) for s in row['steps']]
+
+    def test_a_phase_the_module_ended_stops(self):
+        row = self._row(('nas', 'reading', ''), ('nas', 'reading', 'done'))
+        assert self._states(row) == [('nas', 'reading', 'done')]
+
+    def test_and_one_that_failed_says_so(self):
+        row = self._row(('pve02', 'reading', ''), ('pve02', 'reading', 'fail'))
+        assert self._states(row) == [('pve02', 'reading', 'fail')]
+
+    def test_it_ends_that_machines_line_and_nobody_elses(self):
+        """This module samples its devices in a pool: several lines are live at once, and an
+        ending that closed them all would tick nine machines because the tenth finished."""
+        row = self._row(('a', 'reading', ''), ('b', 'reading', ''), ('a', 'reading', 'done'))
+        assert self._states(row) == [('a', 'reading', 'done'), ('b', 'reading', 'run')]
+
+    def test_an_ending_does_not_create_a_line(self):
+        """A phase nobody was shown does not need a tick, and inventing one would put a line
+        on the checklist for work the screen never saw happening."""
+        row = self._row(('c', 'reading', 'done'))
+        assert row['steps'] == []
+
+    def test_the_counter_goes_with_it(self):
+        """"24/24" beside a green tick is a number that means nothing — the same reason the
+        module landing clears them."""
+        row = {'state': 'running', 'detail': '', 'steps': []}
+        jobs._step(row, 'running', '', {'step': 'reading', 'scope': 'nas', 'n': 7, 'total': 24})
+        jobs._step(row, 'running', '', {'step': 'reading', 'scope': 'nas', 'state': 'done'})
+        assert row['steps'][0]['n'] == 0 and row['steps'][0]['total'] == 0
+
+    def test_a_state_the_core_does_not_know_is_ignored(self):
+        """The module names its own phases; the two words for how one ENDED are the core's,
+        because they are the only part it draws rather than prints."""
+        row = self._row(('nas', 'reading', ''), ('nas', 'reading', 'whatever'))
+        assert self._states(row) == [('nas', 'reading', 'run')]

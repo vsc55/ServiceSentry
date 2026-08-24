@@ -177,7 +177,10 @@ class HostBinding:
         # 'auto' on a local host resolves to this process's platform; on a remote
         # host it stays 'auto' (resolved over SSH by the consumer when needed).
         resolved['host_os'] = resolve_os(primary.get('os'), is_remote)
-        resolved['host_kind'] = 'remote' if is_remote else 'local'
+        # The kind ITSELF and not a two-way flag: `host_exec` has three answers to give
+        # now (over SSH, here, nowhere), and collapsing them to remote/local is what made a
+        # device with no connection run its commands on the panel.
+        resolved['host_kind'] = str(primary.get('kind') or 'none').strip().lower()
         if multi:
             # Cluster roster: each member's identity + its per-node datum, read from
             # THIS module's host profile (``profiles[<module>]`` — the key the UI
@@ -263,6 +266,11 @@ class HostBinding:
         """
         if not isinstance(item, dict) or not cmd:
             return '', 'invalid item or command', -1
+        # …and nowhere, for a device that runs nothing. See `hosts/runner.py::run` — the
+        # same rule, because the two are the same decision reached from two sides.
+        if str(item.get('host_kind') or '').strip().lower() == 'none':
+            from lib.core.hosts.runner import NO_EXEC   # noqa: PLC0415
+            return '', NO_EXEC, -1
         if str(item.get('host_kind') or '').strip().lower() == 'remote':
             from lib.core.hosts import ssh_client  # noqa: PLC0415
             if not ssh_client.HAS_PARAMIKO:

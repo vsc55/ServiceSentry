@@ -51,7 +51,7 @@ class TestSendMessageBridgeCarriesSeverity:
             def __init__(self):
                 self.added = []
 
-            def add(self, kind, module, item, message):
+            def add(self, kind, module, item, message, also=''):
                 self.added.append((kind, module, item, message))
 
         m = Monitor.__new__(Monitor)          # skip heavy __init__
@@ -65,7 +65,7 @@ class TestSendMessageBridgeCarriesSeverity:
             def __init__(self):
                 self.added = []
 
-            def add(self, kind, module, item, message):
+            def add(self, kind, module, item, message, also=''):
                 self.added.append(kind)
 
         m = Monitor.__new__(Monitor)
@@ -108,7 +108,7 @@ class TestModuleBaseEmitCarriesSeverity:
             def check_status(self, *_a, **_k):
                 return True                          # force the notification path
 
-            def send_message(self, message, status=None, item='', severity=''):
+            def send_message(self, message, status=None, item='', severity='', kind=''):
                 self.sent.append((message, status, item, severity))
 
         return _M()
@@ -171,7 +171,7 @@ class TestEmitChangeMsgGate:
                 self.gates.append(('custom', status_msg))
                 return custom
 
-            def send_message(self, message, status=None, item='', severity=''):
+            def send_message(self, message, status=None, item='', severity='', kind=''):
                 self.sent.append(message)
 
         return _M()
@@ -232,3 +232,78 @@ class TestTheSeverityRuleHasOneHome:
         for sev, ok in (('warning', False), ('error', False), (None, False),
                         ('warning', True), ('', True)):
             assert store._norm_severity(sev, ok) == ReturnModuleCheck._norm_severity(sev, ok)
+
+
+
+class TestAModuleNamingItsOwnKind:
+    """A module may say "this failure is a kind of its own" — and two rules keep it safe.
+
+    A matrix cell is stored only when somebody ticks it and reads false until then, so a kind
+    the registry has never heard of routes to NO channel at all: a typo would be an alert that
+    silently stops arriving, which is the exact failure this codebase keeps finding. And a
+    recovery is a recovery wherever recoveries go — routing one as "unreachable" would put a
+    green message under a red heading.
+    """
+
+    def _notifier(self):
+        class _N:
+            def __init__(self):
+                self.added = []
+
+            def add(self, kind, module, item, message, also=''):
+                self.added.append((kind, also))
+        return _N()
+
+    def _monitor(self):
+        m = Monitor.__new__(Monitor)
+        m._notifier = self._notifier()
+        return m
+
+    def test_a_registered_kind_travels_beside_the_ordinary_one(self):
+        m = self._monitor()
+        m.send_message('no answer', status=False, module='snmp', item='pve02',
+                       kind='snmp_unreachable')
+        assert m._notifier.added == [('down', 'snmp_unreachable')]
+
+    def test_a_kind_nobody_declared_is_dropped(self):
+        """…and the alert still goes out as a plain down. The alternative is an alert routed
+        by a cell that cannot exist, which is silence."""
+        m = self._monitor()
+        m.send_message('no answer', status=False, module='snmp', item='pve02',
+                       kind='snmp_unreachabl')       # one letter short
+        assert m._notifier.added == [('down', '')]
+
+    def test_a_recovery_never_carries_it(self):
+        m = self._monitor()
+        m.send_message('back', status=True, module='snmp', item='pve02',
+                       kind='snmp_unreachable')
+        assert m._notifier.added == [('recovery', '')]
+
+    def test_no_kind_is_the_ordinary_case(self):
+        m = self._monitor()
+        m.send_message('down', status=False, module='ping', item='web01')
+        assert m._notifier.added == [('down', '')]
+
+    def test_the_kind_the_snmp_module_uses_is_the_one_it_declares(self):
+        """Two files — the manifest that declares the event and the sampler that sends it —
+        and a rename in one would be an alert routed by a cell nobody can tick."""
+        from lib.core.snmp.manifest import KIND_UNREACHABLE, NOTIFY_EVENTS
+        from lib.core.notify import events as _events
+        assert [e['key'] for e in NOTIFY_EVENTS] == [KIND_UNREACHABLE]
+        assert KIND_UNREACHABLE in {e['key'] for e in _events.events()}, (
+            'declared and not discovered: the routing screen has no row for it')
+
+    def test_it_is_worded_and_marked_like_every_other_event(self):
+        """A row with no label is a checkbox nobody can identify, and a message with no icon
+        is the one that looks broken next to the others."""
+        from lib.core.notify import formatting
+        from lib.core.snmp.manifest import KIND_UNREACHABLE
+        assert formatting.EVENT_ICON.get(KIND_UNREACHABLE)
+        key = formatting.EVENT_LABEL_KEY.get(KIND_UNREACHABLE)
+        assert key
+        for lang in ('es_ES', 'en_EN'):
+            mod = __import__(f'lib.i18n.lang.{lang}', fromlist=['x'])
+            words = getattr(mod, 'TEXT', None) or getattr(mod, 'LANG', None) or {}
+            found = key in words or any(key in v for v in words.values()
+                                        if isinstance(v, dict))
+            assert found, f'{key} is not worded in {lang}'

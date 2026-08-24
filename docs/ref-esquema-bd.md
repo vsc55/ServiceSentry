@@ -481,7 +481,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | uid | TEXT | no | — | PK |
 | name | TEXT | no | `''` | UNIQUE |
 | address | TEXT | no | `''` | |
-| kind | TEXT | no | `'local'` | local/remote |
+| kind | TEXT | no | `'none'` | Cómo ejecuta el panel comandos en el aparato: `none` (ninguno — el defecto, y la respuesta para equipo que sólo se lee por SNMP), `local` (en la máquina del panel) o `remote` (por SSH, con la conexión de `profiles['ssh']`). No es lo que el aparato **es** (`device_type`) ni los protocolos que contesta (`profiles`) |
 | os | TEXT | no | `'auto'` | |
 | maintenance | INTEGER | no | `0` | |
 | virtual | INTEGER | no | `0` | (reservada, entrecomillada) |

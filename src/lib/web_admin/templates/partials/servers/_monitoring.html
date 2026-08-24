@@ -77,9 +77,70 @@ let _hostLogsState = null;   // {addr, page, pageSize, severity_max, q, since, u
 
 let _hostLogsTimer = null;       // interval-driven / live refresh
 
+//: The columns of the host-logs table: what each one is, and the name the API sorts it by.
+//:
+//: Written down once because three things now read the same list — the header, the rows and
+//: the width/order preferences — and a table whose header and body each carry their own idea
+//: of the column order is a table that swaps its data between columns the moment somebody
+//: drags one.
+//:
+//: `sort` is the API's own name for the column (`SyslogStore._SORTABLE`), not this table's:
+//: the whitelist is the server's, and inventing a second vocabulary here would be a mapping
+//: to keep in step for nothing.
+const _HML_COLS = [
+    {id: 'when', sort: 'ts',       label: () => t('syslog_time')},
+    {id: 'sev',  sort: 'severity', label: () => t('syslog_severity')},
+    {id: 'fac',  sort: 'facility', label: () => t('syslog_facility')},
+    {id: 'app',  sort: 'app',      label: () => t('syslog_app')},
+    {id: 'msg',  sort: 'message',  label: () => t('syslog_message'), wide: true},
+];
+
+//: Where the reader's own preferences live. One key for both screens that draw this table —
+//: the host modal and the Infrastructure page — because it is one table, and a width dragged
+//: on one of them is a width somebody set for these columns.
+const _HML_ORDER_KEY = 'ss_hostlogs_col_order';
+const _HML_WIDTH_KEY = 'ss_hostlogs_col_w';
+
+function _hmlPrefs(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
+}
+
+function _hmlColOrder() {
+    const saved = _hmlPrefs(_HML_ORDER_KEY);
+    const ids = _HML_COLS.map(c => c.id);
+    if (!Array.isArray(saved)) return ids;
+    // Kept ids first, in the reader's order, then anything the product has added since. A
+    // stored order from an older version must not be able to hide a column.
+    const keep = saved.filter(id => ids.includes(id));
+    return keep.concat(ids.filter(id => !keep.includes(id)));
+}
+
+function _hmlOrderedCols() {
+    const by = Object.fromEntries(_HML_COLS.map(c => [c.id, c]));
+    return _hmlColOrder().map(id => by[id]).filter(Boolean);
+}
+
 function _hostLogsReset(addr) {
     _hostLogsState = { addr, page: 1, pageSize: _tableRowsDefault,   // not `|| 50`: 0 is "all", a real answer
-                       severity_max: '', q: '', since: '', until: '', auto: 0 };
+                       severity_max: '', q: '', since: '', until: '', auto: 0,
+                       // The API's default, said out loud: newest first. Held here so the
+                       // header can show WHICH column is sorted and which way.
+                       sort: 'ts', order: 'desc',
+                       // The last page fetched, so a column drag or a resize can redraw the
+                       // table without going back to the server for rows it already has.
+                       rows: [] };
+}
+
+/** Sort by a column — server-side, because this table is paged there too. Sorting the page
+ *  in the browser would sort the fifty rows somebody happens to be looking at and call it
+ *  the order of forty thousand. */
+function _hostLogsSort(col) {
+    const st = _hostLogsState;
+    if (!st) return;
+    st.order = (st.sort === col && st.order === 'desc') ? 'asc' : 'desc';
+    st.sort = col;
+    st.page = 1;
+    _hostLogsFetch();
 }
 
 function _hostLogsStopTimer() {
@@ -94,9 +155,17 @@ function _hostLogsApplyTimer() {
     const secs = live ? _SL_LIVE_SECS : (parseInt(a, 10) || 0);
     if (secs > 0) {
         _hostLogsTimer = setInterval(() => {
-            const pane = document.getElementById('hmTabLogs');
-            if (!pane || !document.getElementById('hml-rows')) { _hostLogsStopTimer(); return; }
-            if (pane.classList.contains('active')) _hostLogsFetch();   // skip while on another tab
+            // Keyed on the TABLE and not on one screen's tab pane. It used to look up the
+            // host modal's `#hmTabLogs` and stop when it was missing — so the day the modal
+            // stopped carrying logs (they are in Infrastructure, where a machine is looked
+            // at), the first tick on the section that DOES carry them would have found no
+            // such pane and switched the auto-refresh off. Nothing would have said so: the
+            // rows simply stop being new.
+            const rows = document.getElementById('hml-rows');
+            if (!rows) { _hostLogsStopTimer(); return; }
+            // `offsetParent` is null for anything inside a hidden tab, whichever screen it
+            // belongs to — there is no point asking the server for rows nobody is looking at.
+            if (rows.offsetParent !== null) _hostLogsFetch();
         }, secs * 1000);
     }
 }
@@ -136,7 +205,7 @@ function _hostLogsSetPageSize(v) { _hostLogsState.pageSize = parseInt(v, 10) || 
 // opens when a machine is misbehaving. Two copies of a syslog table with two filter bars and
 // two pagers is two places for them to stop agreeing.
 async function _loadHostLogs(containerId, address) {
-    const body = document.getElementById(containerId || 'hmLogsBody');
+    const body = containerId ? document.getElementById(containerId) : null;
     if (!body) return;
     const addr = String(address != null ? address
                         : (_hostDraft && _hostDraft.address || '')).trim();
@@ -163,14 +232,9 @@ async function _loadHostLogs(containerId, address) {
         </div>
         <div id="hml-pager-top" class="mb-1"></div>
         <div class="table-responsive rounded border sl-log-wrap">
-        <table class="table table-sm table-striped table-hover align-middle mb-0">
-            <thead><tr>
-                <th class="text-nowrap">${esc(t('syslog_time'))}</th>
-                <th>${esc(t('syslog_severity'))}</th>
-                <th>${esc(t('syslog_facility'))}</th>
-                <th>${esc(t('syslog_app'))}</th>
-                <th style="width:55%">${esc(t('syslog_message'))}</th>
-            </tr></thead><tbody id="hml-rows"></tbody>
+        <table class="table table-sm table-striped table-hover align-middle mb-0 ss-table"
+               id="hml-table" style="table-layout:auto;width:100%">
+            <thead class="ss-thead"><tr id="hml-head"></tr></thead><tbody id="hml-rows"></tbody>
         </table>
         <div id="hml-state" class="sl-log-state" style="display:none"></div></div>
         <div id="hml-pager" class="mt-2"></div>`;
@@ -187,12 +251,8 @@ async function _loadHostLogs(containerId, address) {
         clearTimeout(qTimer);
         qTimer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; _hostLogsFetch(); }, 350);
     };
-    // Stop polling when the host modal closes (bind once).
-    const modalEl = document.getElementById('hostModal');
-    if (modalEl && !modalEl._hmLogsHideBound) {
-        modalEl._hmLogsHideBound = true;
-        modalEl.addEventListener('hidden.bs.modal', _hostLogsStopTimer);
-    }
+    // Nothing to unbind from a dialog: this table is drawn by the Infrastructure section,
+    // and the tick above stops itself the moment the table is no longer on the page.
     _hostLogsRenderAutoRefresh();
     _hostLogsApplyTimer();
     _hostLogsFetch();
@@ -213,7 +273,8 @@ async function _hostLogsFetch() {
     const all = !st.pageSize;
     const limit = all ? 5000 : st.pageSize;
     const offset = all ? 0 : (st.page - 1) * st.pageSize;
-    const qs = new URLSearchParams({ host: st.addr, limit: String(limit), offset: String(offset) });
+    const qs = new URLSearchParams({ host: st.addr, limit: String(limit), offset: String(offset),
+                                     sort: st.sort || 'ts', order: st.order || 'desc' });
     for (const k of ['severity_max', 'q', 'since', 'until']) if (st[k] !== '' && st[k] != null) qs.set(k, st[k]);
     const data = await apiGet('/api/v1/syslog?' + qs.toString());
     const msgs = (data && data.messages) || [];
@@ -226,31 +287,74 @@ async function _hostLogsFetch() {
         stateEl.style.display = msgs.length ? 'none' : '';
         if (!msgs.length) stateEl.innerHTML = `<i class="bi bi-inbox"></i><div>${esc(t('host_logs_none'))}</div>`;
     }
-    tbody.innerHTML = !msgs.length ? '' : msgs.map(m => {
-        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
-        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : '')).replace('T', ' ').replace('Z', '');
-        const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');
-        return `<tr class="sl-row-${cls}">
-            <td class="text-muted text-nowrap">${esc(when)}</td>
-            <td><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>
-            <td class="text-muted">${esc(m.facility_name || '')}</td>
-            <td><code style="font-size:.78rem">${esc(appp)}</code></td>
-            <td style="word-break:break-word">
-                <div class="d-flex align-items-start gap-2">
-                    <span class="flex-grow-1">${esc(m.message || '')}</span>
-                    <button class="btn btn-sm btn-link p-0 text-muted sl-copy-btn" tabindex="-1"
-                        title="${escAttr(t('syslog_copy'))}" data-msg="${escAttr(m.message || '')}"
-                        onclick="_syslogCopyMsg(this)"><i class="bi bi-clipboard"></i></button>
-                </div>
-            </td>
-        </tr>`;
-    }).join('');
+    st.rows = msgs;
+    _hostLogsDrawTable();
     const pagerHtml = total > 0
         ? _renderPagination(total, all ? 1 : st.page, all ? 0 : st.pageSize, '_hostLogsGoPage', '_hostLogsSetPageSize')
         : '';
     for (const id of ['hml-pager-top', 'hml-pager']) {
         const el = document.getElementById(id); if (el) el.innerHTML = pagerHtml;
     }
+}
+
+/** One cell of one message, per column id. */
+function _hmlCell(m, id) {
+    const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
+    if (id === 'when') {
+        const when = (m.received_at || (m.ts ? new Date(m.ts * 1000).toISOString() : ''))
+            .replace('T', ' ').replace('Z', '');
+        return `<td class="text-muted text-nowrap">${esc(when)}</td>`;
+    }
+    if (id === 'sev') return `<td><span class="badge bg-${cls}">${esc(m.severity_name || '')}</span></td>`;
+    if (id === 'fac') return `<td class="text-muted">${esc(m.facility_name || '')}</td>`;
+    if (id === 'app') {
+        const appp = (m.app || '') + (m.procid ? `[${m.procid}]` : '');
+        return `<td><code style="font-size:.78rem">${esc(appp)}</code></td>`;
+    }
+    return `<td style="word-break:break-word">
+        <div class="d-flex align-items-start gap-2">
+            <span class="flex-grow-1">${esc(m.message || '')}</span>
+            <button class="btn btn-sm btn-link p-0 text-muted sl-copy-btn" tabindex="-1"
+                title="${escAttr(t('syslog_copy'))}" data-msg="${escAttr(m.message || '')}"
+                onclick="_syslogCopyMsg(this)"><i class="bi bi-clipboard"></i></button>
+        </div></td>`;
+}
+
+/** Header and rows, from the rows already fetched — no request.
+ *
+ *  Both from the same ordered column list, in one function, because a header and a body that
+ *  each decide their own order is a table that puts one column's data under another's name
+ *  the first time somebody drags one. */
+function _hostLogsDrawTable() {
+    const st = _hostLogsState;
+    const head = document.getElementById('hml-head');
+    const tbody = document.getElementById('hml-rows');
+    if (!st || !head || !tbody) return;
+    const cols = _hmlOrderedCols();
+    const widths = _hmlPrefs(_HML_WIDTH_KEY) || {};
+    head.innerHTML = cols.map(c => {
+        const inner = _thSortInner(c.label(), c.sort, st.sort, st.order, '_hostLogsSort');
+        // The reader's width if they set one; otherwise the message column takes what is
+        // left, which is the shape this table has always had.
+        const w = widths[c.id] ? widths[c.id] : (c.wide ? '55%' : '');
+        return `<th class="ss-th ss-th-resizable" data-col="${c.id}" draggable="true"${
+            w ? ` style="width:${escAttr(w)}"` : ''}>${inner}</th>`;
+    }).join('');
+    tbody.innerHTML = (st.rows || []).map(m => {
+        const cls = (typeof _SYSLOG_SEV_CLS !== 'undefined' && _SYSLOG_SEV_CLS[m.severity]) || 'secondary';
+        return `<tr class="sl-row-${cls}">${cols.map(c => _hmlCell(m, c.id)).join('')}</tr>`;
+    }).join('');
+    // After the markup: the handles are appended to the very cells drawn above.
+    setTimeout(() => _attachColFeatures('hml-table',
+        _hmlColOrder,
+        o => { try { localStorage.setItem(_HML_ORDER_KEY, JSON.stringify(o)); } catch (_) {} },
+        () => {},
+        _hostLogsDrawTable,
+        (col, w) => {
+            const m = _hmlPrefs(_HML_WIDTH_KEY) || {};
+            m[col] = w;
+            try { localStorage.setItem(_HML_WIDTH_KEY, JSON.stringify(m)); } catch (_) {}
+        }), 0);
 }
 
 // Jump from a "Latest data" row to that series' chart in the History tab.

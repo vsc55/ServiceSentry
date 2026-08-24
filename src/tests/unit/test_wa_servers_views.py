@@ -169,18 +169,59 @@ class TestOneStatusVocabulary:
         assert 'srv_all_healthy' in body
 
 
-class TestCoverageHasThreeAnswers:
+class TestCoverageHasFourAnswers:
 
     def test_never_checked_and_all_disabled_are_not_the_same(self):
         """0/0 was never given a check; 0/3 had every check switched off, which is worse
         because the row looks configured. The table draws both in the same grey pill."""
         body = _fn(_strip_comments(_read(VIEWS)), '_srvCoverage')
-        assert "return 'none'" in body and "'inactive'" in body and "'ok'" in body
+        for state in ("'none'", "'inactive'", "'ok'", "'profiles'"):
+            assert state in body, state
         assert 'modules_total' in body and 'modules_active' in body
+
+    def test_a_device_read_by_its_own_profiles_is_not_unmonitored(self):
+        """Reported from the screen: every switch in the rack wore a red "monitored by
+        nothing" while the panel was collecting from it every cycle. A device polled over
+        SNMP has no module item at all — the profiles assigned to it ARE its monitoring, and
+        `snmp/devices.py::devices_to_sample` samples exactly those."""
+        body = _fn(_strip_comments(_read(VIEWS)), '_srvSampledByProfile')
+        assert 'device_profiles' in body, 'nothing looks at what the record assigns'
+        assert 'Array.isArray(' in body, (
+            'one profile is stored as a string and several as a list; only one shape is read')
+        cov = _fn(_strip_comments(_read(VIEWS)), '_srvCoverage')
+        assert '_srvSampledByProfile(' in cov, 'the coverage never asks'
+
+    def test_it_names_the_field_and_not_a_protocol(self):
+        """`device_profiles` is part of the host-profile format, so a second protocol that
+        declares one is covered the day it arrives — and this view goes on naming no module."""
+        body = _fn(_strip_comments(_read(VIEWS)), '_srvSampledByProfile')
+        for word in ("'snmp'", '"snmp"'):
+            assert word not in body, 'a protocol is written into the rule'
 
     def test_the_gaps_lead(self):
         body = _strip_comments(_read(VIEW_FILES['coverage']))
-        assert "['none', 'inactive', 'ok']" in body
+        assert "['none', 'inactive', 'profiles', 'ok']" in body
+
+    def test_every_answer_has_a_bucket(self):
+        """`buckets[_srvCoverage(h)].push(h)` on an answer with no bucket is not an empty
+        group — it throws, and the section draws nothing at all. Built from the same list the
+        groups are drawn from, so the two cannot disagree."""
+        body = _strip_comments(_read(VIEW_FILES['coverage']))
+        assert 'Object.fromEntries(order.map(' in body, (
+            'the buckets are written out by hand beside the order')
+        assert '|| buckets.none' in body, 'an unknown answer still throws'
+        views = _strip_comments(_read(VIEWS))
+        import re as _re                                       # noqa: PLC0415
+        declared = set(_re.findall(r"^\s{4}(\w+):\s*\{ cls:", views, _re.M))
+        for k in ('none', 'inactive', 'ok', 'profiles'):
+            assert k in declared, f'{k} has no badge'
+
+    def test_the_chip_takes_its_colour_from_the_badge(self):
+        """It was a ternary per key, which is a second list of the buckets — and the one
+        nobody remembers to extend."""
+        body = _strip_comments(_read(VIEW_FILES['coverage']))
+        assert '_SRV_COVERAGE[k].cls' in body
+        assert "k === 'none' ? 'text-bg-danger'" not in body
 
     def test_the_pill_always_shows_both_numbers(self):
         """"3" alone cannot say whether the other two were never added or were turned off."""

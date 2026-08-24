@@ -121,13 +121,34 @@ function _srvStateLabel(state) { return t((_SRV_STATE_META[state] || {}).key) ||
  *   - `inactive`: it has checks and every one of them is off. Worse than none, because the
  *                 row looks configured and somebody turned it off.
  *   - `ok`:       at least one check is running. */
+/** Whether the panel reads this device through its own RECORD rather than through a module.
+ *
+ *  A switch, a router or a UPS polled over SNMP has no module item at all: the profiles
+ *  assigned to it ARE its monitoring, and the collection samples exactly those (see
+ *  `snmp/devices.py::devices_to_sample`, which is the rule this mirrors). Counting only
+ *  modules put a red "monitored by nothing" on every switch in the rack while the panel was
+ *  collecting from them every cycle — reported from the screen in those words.
+ *
+ *  By the declared FIELD and not by naming a protocol: `device_profiles` is part of the host
+ *  profile format (`lib/core/snmp/manifest.py::HOST_PROFILE`), so a second protocol that
+ *  declares one is covered here the day it arrives, and this file goes on naming no module. */
+function _srvSampledByProfile(host) {
+    return Object.values((host && host.profiles) || {}).some(p => {
+        const v = p && p.device_profiles;
+        return Array.isArray(v) ? v.length > 0 : String(v || '').trim() !== '';
+    });
+}
+
 function _srvCoverage(host) {
     const total = host.modules_total || 0, active = host.modules_active || 0;
-    if (!total) return 'none';
+    if (!total) return _srvSampledByProfile(host) ? 'profiles' : 'none';
     return active ? 'ok' : 'inactive';
 }
 const _SRV_COVERAGE = {
     none:     { cls: 'text-bg-danger',    icon: 'bi-slash-circle',  key: 'srv_cov_none'     },
+    // Its own bucket and not `ok`: it IS being read, and by what is worth saying — nothing
+    // was added to this machine, its own record is what the collection works from.
+    profiles: { cls: 'text-bg-success',   icon: 'bi-broadcast-pin', key: 'srv_cov_profiles' },
     inactive: { cls: 'text-bg-warning',   icon: 'bi-pause-circle',  key: 'srv_cov_inactive' },
     ok:       { cls: 'text-bg-success',   icon: 'bi-check2-circle', key: 'srv_cov_ok'       },
 };
@@ -140,7 +161,7 @@ function _srvCoverageBadge(state) {
  *  whether the other two were never added or were switched off. */
 function _srvModulesPill(host) {
     const tot = host.modules_total || 0, act = host.modules_active || 0;
-    if (!tot) return `<span class="badge text-bg-danger fw-normal"><i class="bi bi-slash-circle me-1"></i>${esc(t('srv_cov_none'))}</span>`;
+    if (!tot) return _srvCoverageBadge(_srvCoverage(host));
     return `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">
         <i class="bi bi-puzzle me-1"></i>${act}/${tot}</span>`;
 }
@@ -155,9 +176,10 @@ function _srvHostLine(host, ctx, extraHtml) {
     return `<div class="d-flex align-items-center gap-2 px-2 py-1">
         <span class="fw-semibold text-nowrap"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}</span>
         <code class="text-muted ss-fs-2 text-nowrap">${esc(host.address || '')}</code>
-        ${host.kind === 'remote'
-            ? `<span class="badge bg-body-secondary text-body-secondary fw-normal ss-fs-1"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_kind_remote'))}</span>`
-            : `<span class="badge bg-body-secondary text-body-secondary fw-normal ss-fs-1">${esc(t('host_kind_local'))}</span>`}
+        ${hostKind(host.kind) === 'none' ? ''
+            : `<span class="badge bg-body-secondary text-body-secondary fw-normal ss-fs-1">${
+                hostKind(host.kind) === 'remote' ? '<i class="bi bi-hdd-network me-1"></i>' : ''
+              }${esc(t('host_kind_' + hostKind(host.kind)))}</span>`}
         ${extraHtml || ''}
         <span class="ms-auto d-flex align-items-center flex-shrink-0 text-nowrap">${_srvActionsHtml(host, ctx)}</span>
     </div>`;

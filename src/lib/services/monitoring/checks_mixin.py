@@ -24,7 +24,8 @@ class _ChecksMixin:
     """Run module checks via Monitor and return serialisable results."""
 
     def _run_checks(self, requested, *, timeout: int | None = None,
-                    progress_cb=None, lang: str = '') -> tuple[dict, list[str]]:
+                    progress_cb=None, lang: str = '',
+                    only_host: str = '') -> tuple[dict, list[str]]:
         """Execute the requested module checks in parallel and return their
         serialisable results.
 
@@ -41,6 +42,10 @@ class _ChecksMixin:
 
         ``progress_cb(state, module, detail, extra)`` is handed straight to the executor: it
         is called as each module starts and lands, so a background run can be watched.
+
+        ``only_host`` narrows the run to one machine's items — what "collect this device"
+        means. Absent, every module runs with its whole configuration, which is what a cycle
+        and the Status screen's "run all" are asking for.
 
         ``lang`` is the language of whoever is WATCHING, carried through so a module's progress
         lines come out in it. Without it they are resolved in the installation's notification
@@ -82,4 +87,4 @@ class _ChecksMixin:
         return run_checks(monitor, module_names, lang=lang,
                           timeout=int(timeout or _MODULE_CHECK_TIMEOUT),
                           history=getattr(self, '_history', None),
-                          progress_cb=progress_cb)
+                          progress_cb=progress_cb, only_host=only_host)

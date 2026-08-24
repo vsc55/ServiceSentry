@@ -353,6 +353,114 @@ class TestWhatTheMachineHasBeenSaying:
         assert 'containerId' in body, 'it still knows which box it lives in'
         assert 'address != null' in body, 'it still reads the modal draft'
 
+    def test_it_is_drawn_HERE_and_not_in_the_host_dialog_too(self):
+        """The dialog is where a device is CONFIGURED; this is where it is looked at, and a
+        machine misbehaving is looked at here. Two copies of one syslog table, with two filter
+        bars and two pagers, is two places for them to stop agreeing — and the second is
+        always the one nobody updates."""
+        modal = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_modal.html')))
+        for gone in ('hmTabLogs', 'hmLogsBody', '_loadHostLogs'):
+            assert gone not in modal, f'the dialog draws the logs again ({gone})'
+
+    def test_the_refresh_tick_belongs_to_the_table(self):
+        """It looked up the dialog's own tab pane and stopped when it was missing. The day
+        the dialog stopped carrying logs, the first tick on the section that DOES carry them
+        would have found no such pane and switched the auto-refresh off — with nothing to say
+        so, because the only symptom is that rows stop being new."""
+        js = _strip_comments(_read(self.MONITORING))
+        tick = _fn(js, '_hostLogsApplyTimer')
+        assert 'hmTabLogs' not in tick, 'the tick still looks for the dialog'
+        assert "getElementById('hml-rows')" in tick, 'it is not keyed on the table'
+        assert 'offsetParent' in tick, (
+            'it polls for rows on a hidden tab, whichever screen they are on')
+
+    def test_nothing_is_bound_to_a_dialog_it_cannot_be_inside(self):
+        js = _strip_comments(_read(self.MONITORING))
+        body = _fn(js, '_loadHostLogs')
+        assert 'hostModal' not in body, 'it still unbinds from a dialog that never holds it'
+        assert "containerId ? document.getElementById(containerId)" in body, (
+            'it falls back to an element the dialog used to have')
+
+    def test_its_columns_sort_and_resize_like_every_other_table(self):
+        """Both asked for from the screen, and both already existed: `_thSortInner` for the
+        header and `_attachColFeatures` for resize / auto-fit / reorder. The logs table was
+        the one that did not use them."""
+        js = _strip_comments(_read(self.MONITORING))
+        draw = _fn(js, '_hostLogsDrawTable')
+        assert '_thSortInner(' in draw and '_hostLogsSort' in draw
+        assert 'ss-th-resizable' in draw and 'draggable="true"' in draw
+        assert '_attachColFeatures(' in draw, 'a second resize implementation'
+
+    def test_the_sort_is_the_servers_and_not_the_pages(self):
+        """This table is paged server-side. Sorting the page in the browser would sort the
+        fifty rows somebody happens to be looking at and call it the order of forty
+        thousand."""
+        js = _strip_comments(_read(self.MONITORING))
+        assert 'sort: st.sort' in js and 'order: st.order' in js, (
+            'the sort never reaches the request')
+        fn = _fn(js, '_hostLogsSort')
+        assert '_hostLogsFetch()' in fn and 'st.page = 1' in fn, (
+            'sorting leaves the reader on page nine of a different order')
+
+    def test_the_header_and_the_rows_read_one_list(self):
+        """A header and a body that each decide their own column order is a table that puts
+        one column's data under another's name the first time somebody drags one."""
+        js = _strip_comments(_read(self.MONITORING))
+        draw = _fn(js, '_hostLogsDrawTable')
+        assert draw.count('_hmlOrderedCols()') == 1, 'two orders in one table'
+        assert 'hml-head' in draw and 'hml-rows' in draw, (
+            'the header and the rows are not drawn together')
+
+    def test_a_stored_column_order_cannot_hide_a_column(self):
+        """A preference saved by an older version names the columns of that version. Taking
+        it as the whole list is how a column added since disappears for whoever had one."""
+        js = _strip_comments(_read(self.MONITORING))
+        fn = _fn(js, '_hmlColOrder')
+        assert 'concat(' in fn and 'includes(id)' in fn
+
+    def test_the_tab_carries_a_count_like_the_others(self):
+        """Reported from the screen: every other tab says how many, and this one did not.
+
+        It could not: the others count what is already in the device's payload and logs are
+        not in it — they are rows of the syslog table. So the badge is asked for AFTER the
+        section paints (~60 ms with the index behind it, on 60.000 rows) and patched in place
+        when the answer lands. Re-rendering the device instead would throw away whatever tab
+        somebody had just opened."""
+        js = _js()
+        assert 'counts.logs = _infraLogCount(' in js, 'the logs tab has no count'
+        fn = _fn(js, '_infraLogCount')
+        assert 'apiGet(' in fn and 'limit=1' in fn, (
+            'the count is fetched with a page of rows behind it')
+        assert '.then(' in fn, (
+            'it is awaited, so the section waits on syslog before drawing anything')
+        assert 'getElementById(' in fn and 'classList.remove' in fn, (
+            'the badge is not patched in place — a re-render loses the open tab')
+
+    def test_a_count_nobody_knows_yet_is_not_a_zero(self):
+        """The trap the Jobs history badge fell into from the other side: a badge that reads
+        the number it has instead of admitting it has none says "0 logs" about a machine with
+        forty thousand, for as long as the request takes."""
+        js = _js()
+        fn = _fn(js, '_infraLogCount')
+        assert 'return undefined' in fn, 'an unknown count is reported as a number'
+        assert "'d-none'" in js, 'nothing hides the badge while the count is unknown'
+
+    def test_it_is_asked_once_per_machine(self):
+        """A tab switch re-renders the tabs. Asking there is a query per click for a figure
+        that changed by three."""
+        js = _js()
+        fn = _fn(js, '_infraLogCount')
+        assert 'hasOwnProperty.call(_INFRA_LOG_COUNTS' in fn, (
+            'the count is re-fetched on every render')
+        assert '_INFRA_LOG_COUNTS[addr] = undefined' in fn, (
+            'two renders before the first answer send two requests')
+
+    def test_a_machine_with_no_address_asks_nothing(self):
+        js = _js()
+        assert 'if (_addr) counts.logs' in js, (
+            'a device with no address still queries syslog for it')
+
     def test_a_caller_who_may_not_read_syslog_is_not_offered_it(self):
         """A tab whose data the caller cannot fetch is a tab that opens on an error."""
         js = _js()
@@ -655,12 +763,14 @@ class TestNothingIsPushedOutOfItsColumn:
         assert 'min-width: 0' in item
         assert '.ss-rail-item > .text-truncate { min-width: 0; }' in css
 
-    def test_the_record_block_has_a_heading_of_its_own(self):
-        """It was titled with the gear button's tooltip — "Open in the registry" over a list
-        of facts, which reads as an instruction and is not one."""
+    def test_no_heading_in_that_column_is_a_tooltip(self):
+        """The registry block was titled with the gear button's tooltip — "Open in the
+        registry" over a list of facts, which reads as an instruction and is not one. That
+        block has since gone (it repeated the header above it), and the rule it was written
+        for applies to whatever heads a card there now."""
         body = _fn(_js(), '_infraIdentityHtml')
-        assert "t('infra_record')" in body
-        assert "t('infra_registry')" not in body, 'the heading is a tooltip again'
+        assert "t('infra_registry')" not in body, 'a heading is a tooltip again'
+        assert 'head(g)' in body, 'the cards are no longer headed by their source'
 
 
 class TestAPanelFillsWhatIsActuallyLeft:

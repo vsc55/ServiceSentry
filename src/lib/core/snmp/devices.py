@@ -49,11 +49,17 @@ KEY_PREFIX = HOST_RESULT_PREFIX
 device_key = host_result_key
 
 
-def devices_to_sample(hosts_store, covered=()) -> list[tuple[str, dict]]:
+def devices_to_sample(hosts_store, covered=(), only: str = '') -> list[tuple[str, dict]]:
     """``[(key, item)]`` for every host that is an SNMP device and is not already *covered*.
 
     *covered* is the set of host uids some module item already binds to — those are sampled
     through that item, which may carry settings of its own.
+
+    *only* narrows the answer to ONE host: a collection asked for by hand is about the device
+    somebody is looking at, and walking the other six to get its numbers is minutes of other
+    people's equipment — and a run that cannot finish because one of them is not answering.
+    The module items are narrowed by the same uid, in the module's own config resolution; this
+    is the half of the fleet that has no item to narrow.
 
     Never raises: a registry that cannot be read means no extra devices this cycle, which is
     the same outcome as having none, and is not worth taking a monitoring cycle down for.
@@ -66,12 +72,15 @@ def devices_to_sample(hosts_store, covered=()) -> list[tuple[str, dict]]:
         return []
 
     covered = {str(u).strip() for u in (covered or ()) if str(u).strip()}
+    only = str(only or '').strip()
     out: list[tuple[str, dict]] = []
     for host in hosts or ():
         if not isinstance(host, dict):
             continue
         uid = str(host.get('uid') or '').strip()
         if not uid or uid in covered:
+            continue
+        if only and uid != only:
             continue
         prof = (host.get('profiles') or {}).get('snmp')
         if not isinstance(prof, dict) or not _profiles.assigned(prof):

@@ -71,7 +71,7 @@ class TestNotifier:
     def test_process_result_buffers_alert(self, monitor):
         """A changed, sendable item is buffered into the notifier with the mapped kind."""
         added = []
-        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        monitor._notifier = type('N', (), {'add': lambda self, *a, **k: added.append(a)})()
         rmc = ReturnModuleCheck()
         rmc.set('item1', False, 'boom', send_msg=True)
         monitor._process_module_result('ping', rmc)
@@ -80,14 +80,14 @@ class TestNotifier:
     def test_send_message_carries_module_and_item(self, monitor):
         """The ad-hoc bridge path buffers the watchful's name (Module) + friendly item."""
         added = []
-        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        monitor._notifier = type('N', (), {'add': lambda self, *a, **k: added.append(a)})()
         monitor.send_message('boom', False, module='ntp', item='NS1')
         assert added == [('down', 'ntp', 'NS1', 'boom')]
 
     def test_module_supplied_name_wins_over_uid_key(self, monitor):
         """A result carrying a friendly name shows that name, not its UID key."""
         added = []
-        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        monitor._notifier = type('N', (), {'add': lambda self, *a, **k: added.append(a)})()
         rmc = ReturnModuleCheck()
         rmc.set('c41dc992-uid', False, 'CPU high', send_msg=True, name='PVE02')
         monitor._process_module_result('cpu', rmc)
@@ -238,7 +238,7 @@ class TestCheckStatePersistence:
     def _recorder(monitor):
         """Attach a recording notifier; returns the list of (kind, module, item, msg)."""
         added = []
-        monitor._notifier = type('N', (), {'add': lambda self, *a: added.append(a)})()
+        monitor._notifier = type('N', (), {'add': lambda self, *a, **k: added.append(a)})()
         return added
 
     def test_first_record_notifies_and_persists(self, monitor):
@@ -414,6 +414,20 @@ class TestOrphanStatusPruning:
         assert set(monitor.status.data['m365']) == {'item_1/site', 'item_1/tenant'}
         monitor._process_module_result('m365', self._multi('item_1/site'))
         assert set(monitor.status.data['m365']) == {'item_1/site'}
+
+    def test_a_run_narrowed_to_one_machine_never_prunes(self, monitor):
+        """"Collect this device" runs the module with only that machine's items, so the
+        result set is one machine's keys. Pruning against it would delete the live state of
+        every OTHER machine that module watches — the button that refreshes one device
+        emptying the screen for thirty-nine. The prune answers "the module stopped reporting
+        this"; a narrowed run was never asked."""
+        monitor._process_module_result('mod', self._multi('a', 'b'))
+        changed = monitor._process_module_result('mod', self._multi('a'), prune=False)
+        assert set(monitor.status.data['mod']) == {'a', 'b'}
+        assert changed is False                      # nothing changed and nothing to save
+        # …and the same result WITH the prune is what the difference looks like.
+        monitor._process_module_result('mod', self._multi('a'))
+        assert set(monitor.status.data['mod']) == {'a'}
 
     def test_errored_module_never_prunes(self, monitor):
         # The caller only calls _process_module_result on success, so a module that

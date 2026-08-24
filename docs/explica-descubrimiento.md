@@ -455,6 +455,17 @@ y para saber qué campos ocultar en un check una vez ligado a un host.
 nombre. El módulo entonces sólo lo *nombra*: `{"key": "ssh", "address_field": "ssh_host"}`, sin
 `fields`. Un protocolo propio del módulo sigue escribiendo los suyos.
 
+**Y ese dueño decide en qué formulario se edita.** Un protocolo del core es la conexión
+**del aparato** —su puerto, la identidad con la que contesta— y se edita en la pestaña
+*General* del dispositivo, en una tarjeta plegable por protocolo, junto a la de SSH. Uno
+declarado por un módulo es una conversación que **ese módulo** mantiene con el aparato y se
+queda con él, en *Monitorización*. La marca es `builtin`, que ya viaja con cada perfil en el
+catálogo, así que ninguna de las dos pantallas nombra un protocolo y uno nuevo del core
+aparece solo. La regla se escribió una vez como `proto !== 'ssh'` —la misma regla con el
+nombre de un protocolo dentro— y dejó de ser cierta en silencio el día que SNMP pasó al core:
+su editor siguió dibujándose bajo el módulo mientras lo que editaba ya era propiedad del
+aparato. Guardado en `tests/meta/test_snmp_profiles_screen.py`.
+
 Y como `__host_profile__` sólo dice qué hereda un check **atado** —no pinta nada en el
 formulario de uno sin atar—, una colección que necesite la conexión inline (el caso «IP
 suelta») la pide con `"__profile_fields__": "<protocolo>"` y `discover_schemas()` la expande

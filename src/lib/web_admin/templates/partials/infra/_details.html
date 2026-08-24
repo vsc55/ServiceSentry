@@ -300,18 +300,66 @@ function _infraRowsPane(metrics) {
                 >${esc(rows.length)}</span>
         </div>
         <div class="d-flex flex-wrap gap-3 align-items-start">
-            <nav class="ss-sticky-aside ss-rail-group ss-scrollbox">${rows.map(r => `
+            <nav id="infra-rows-rail"
+                 class="ss-sticky-aside ss-rail-group ss-scrollbox">${rows.map(r => `
                 <button type="button" class="ss-rail-item${r.key === open.key ? ' active' : ''}"
                         onclick="_infraRowsPick(${jsStr(r.key)})"
                         title="${escAttr(r.group ? `${r.name} (${r.group})` : r.name)}">
                     ${_infraRowMarkHtml(r.items)}
                     <span class="text-truncate">${esc(r.name)}</span>
-                    ${_infraIsWatched((r.items[0] || {}).module, r.key)
-                        ? `<i class="bi bi-bell-fill ms-auto ss-fs-1"
-                             title="${escAttr(t('infra_watch_on'))}"></i>` : ''}
+                    <span class="ms-auto" data-watch-bell="${escAttr(r.key)}">${
+                        _infraIsWatched((r.items[0] || {}).module, r.key)
+                            ? _infraWatchBell() : ''}</span>
                 </button>`).join('')}</nav>
             <div style="flex:1 1 22rem;min-width:0">${_infraRowBody(open)}</div>
         </div>`;
+}
+
+//: The bell on the rail, and the inside of the button in the body. Written once each because
+//: both are drawn TWICE — when the pane is built and again when the flag changes — and a
+//: second copy of a fragment is a second thing to keep in step.
+function _infraWatchBell() {
+    return `<i class="bi bi-bell-fill ss-fs-1" title="${escAttr(t('infra_watch_on'))}"></i>`;
+}
+
+function _infraWatchBtnInner(on) {
+    return `<i class="bi ${on ? 'bi-bell-fill' : 'bi-bell'} me-1"></i>${
+        esc(t(on ? 'infra_watch_on' : 'infra_watch_off'))}`;
+}
+
+/** Repaint what a watch flag decides, and nothing else: one bell on the rail, one button in
+ *  the body.
+ *
+ *  NOT `_infraPaint`, which rewrites the device's whole markup. Reported from the screen:
+ *  flagging a port reloaded every chart on it. A chart is a request to the history API and a
+ *  canvas drawn from the answer, so throwing them all away to move one icon is the section
+ *  re-reading a week of traffic because somebody pressed a bell — and the pictures blink back
+ *  in one at a time while they arrive.
+ *
+ *  Nothing else on screen depends on the flag: it turns a profile's verdict back on for that
+ *  row, which is the SAMPLER's business on the next collection, not this payload's. */
+function _infraWatchPaint(mod, row) {
+    const on = _infraIsWatched(mod, row);
+    // By comparison and not by selector: a row key is the name the device gave it, and
+    // building a selector out of that is one apostrophe away from matching nothing. The rail
+    // is a few dozen items.
+    document.querySelectorAll('[data-watch-bell]').forEach(el => {
+        if (el.dataset.watchBell === row) el.innerHTML = on ? _infraWatchBell() : '';
+    });
+    const btn = document.getElementById('infra-watch-btn');
+    if (!btn || btn.dataset.row !== row) return;    // the body shows another port
+    btn.classList.toggle('btn-warning', on);
+    btn.classList.toggle('btn-secondary', !on);
+    btn.title = t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt');
+    // A FUNCTION and not an `onclick` attribute. `jsStr` HTML-escapes what it quotes,
+    // because everywhere else it is written INTO markup and the parser undoes that when it
+    // compiles the handler. `setAttribute` sets the value literally, so the handler read
+    // `_infraSetWatch(&quot;snmp&quot;,…)` — a syntax error, and the button stopped
+    // responding until something re-rendered it through the HTML path. Reported from the
+    // screen exactly that way: flag a port, then nothing happens until you switch ports and
+    // come back. Patching a live element has no markup in it, so it needs no quoting.
+    btn.onclick = () => _infraSetWatch(mod, row, !on);
+    btn.innerHTML = _infraWatchBtnInner(on);
 }
 
 /** Whether somebody has said this row is worth an alert.
@@ -334,10 +382,22 @@ async function _infraSetWatch(module, row, on) {
     if (!uid) return;
     const r = await apiPost(`/api/v1/infra/hosts/${encodeURIComponent(uid)}/watch`,
                             {module, row, on: !!on});
-    if (!r) return;
-    if (_infraDetail && _infraDetail.host) _infraDetail.host.watch = r.watch || [];
+    // `apiPost` answers `{status, data}` — the payload is one level down. Read as `r.watch`
+    // it was ALWAYS undefined, so every click replaced the list with an empty one: the bell
+    // never appeared on the rail, the button never changed colour, and a flag set on another
+    // row vanished with it. Only F5 showed the truth, which had been saved all along —
+    // reported from the screen in exactly those words.
+    const said = (r && r.data) || {};
+    // …and the status, which nothing was reading either: a refusal (no permission) or a
+    // failed write toasted "watched" and left the screen claiming something that had not
+    // happened. The rule this function's own docstring states, now true.
+    if (!r || r.status >= 400 || !Array.isArray(said.watch)) {
+        showToast(said.error || t('save_failed'), 'danger');
+        return;
+    }
+    if (_infraDetail && _infraDetail.host) _infraDetail.host.watch = said.watch;
     showToast(t(on ? 'infra_watch_added' : 'infra_watch_removed'), 'success');
-    _infraPaint();
+    _infraWatchPaint(module, row);
 }
 
 /** The state of a row on the rail, so which ports are down is readable without opening any.
@@ -386,11 +446,11 @@ function _infraRowBody(r) {
             <span class="fw-semibold ss-fs-5 text-truncate">${esc(r.name)}</span>
             ${r.group ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
                 >${esc(r.group)}</span>` : ''}
-            ${may && mod ? `<button class="btn btn-sm ${on ? 'btn-warning' : 'btn-secondary'} ms-auto"
+            ${may && mod ? `<button id="infra-watch-btn" data-row="${escAttr(r.key)}"
+                class="btn btn-sm ${on ? 'btn-warning' : 'btn-secondary'} ms-auto"
                 onclick="_infraSetWatch(${jsStr(mod)},${jsStr(r.key)},${on ? 'false' : 'true'})"
-                title="${escAttr(t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt'))}">
-                <i class="bi ${on ? 'bi-bell-fill' : 'bi-bell'} me-1"></i>${
-                    esc(t(on ? 'infra_watch_on' : 'infra_watch_off'))}</button>` : ''}
+                title="${escAttr(t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt'))}"
+                >${_infraWatchBtnInner(on)}</button>` : ''}
         </div>
         ${_infraRowFactsHtml(r.key)}
         ${tiles.length

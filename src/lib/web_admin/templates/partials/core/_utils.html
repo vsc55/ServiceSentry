@@ -468,6 +468,21 @@ function escAttr(s) {
  * surrounding double-quotes so they don't terminate the HTML attribute. */
 function jsStr(s) { return escAttr(JSON.stringify(s)); }
 
+//: How the panel runs commands on a device — the same three the store keeps
+//: (`HostsStore.KINDS`), and the one thing that decides which.
+//:
+//: Here because it was written EIGHT times across the panel, as
+//: `kind === 'remote' ? 'remote' : 'local'` and as `kind || 'local'`, and every one of those
+//: collapses "no connection" into "the panel's own machine". The SAVE did it last, which is
+//: why choosing None looked like it worked, said it had saved, and came back as Local: the
+//: value was correct in the draft, in the select and in the store, and was flattened on its
+//: way out of the browser.
+const HOST_KINDS = ['none', 'local', 'remote'];
+function hostKind(v) {
+    const k = String(v || '').trim().toLowerCase();
+    return HOST_KINDS.includes(k) ? k : 'none';
+}
+
 // ── List/card view toggle (createListTable tables that offer both views) ─────
 function _loadViewMode(key, def = 'table') { try { return localStorage.getItem(key) || def; } catch (_) { return def; } }
 // The list/card switch, placed via the table's headerLead. `setter` = the name of
@@ -500,6 +515,40 @@ function fitToViewportBottom(el, gap = 16) {
         // Below a floor there is nothing worth fitting to — on a short window the answer is
         // to scroll, not to draw a panel two rows tall.
         el.style.minHeight = Math.max(240, left) + 'px';
+    };
+    apply();
+    window.addEventListener('resize', apply);
+}
+
+/** Cap a scroll box to the height of the box it SCROLLS INSIDE, not to a guess at the
+ *  viewport.
+ *
+ *  The other half of `fitToViewportBottom`: that one grows a short panel down to the window,
+ *  this one stops a long one from being capped short of it.
+ *
+ *  For a `position: sticky` list — a rail of sixty interfaces — the useful height is exactly
+ *  the scrollport it sticks to the top of, and that is a number only the layout knows.
+ *  Written as `calc(100vh - <a constant>)` it is a guess at everything above and below: the
+ *  app header, the breadcrumb, the section's own header, whichever of those that page has.
+ *  The interfaces rail guessed 13rem and stopped 208 px short of the bottom of the window —
+ *  reported from the screen as a rail that ends before the page does.
+ *
+ *  The scrollport's HEIGHT, and not the rail's distance to the bottom of the window, because
+ *  the rail moves: it starts below the section header and slides up until it sticks.
+ *  Measuring where it happens to be gives an answer that is wrong at every other scroll
+ *  position; the box it sticks inside is the same height wherever it has got to.
+ *
+ *  Leaves the stylesheet's own cap alone when there is no scroll box to measure — a list
+ *  drawn outside one still needs a ceiling, and no `max-height` is a rail as long as its
+ *  list. */
+function capToScrollBox(el, selector = '.ss-vscroll', gap = 12) {
+    if (!el) return;
+    const box = el.closest(selector);
+    if (!box) return;
+    const apply = () => {
+        if (!el.isConnected) { window.removeEventListener('resize', apply); return; }
+        const h = box.clientHeight;
+        if (h > 0) el.style.maxHeight = Math.max(160, h - gap) + 'px';
     };
     apply();
     window.addEventListener('resize', apply);

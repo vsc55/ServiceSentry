@@ -66,6 +66,37 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         # Init Var's
         self._init_var()
 
+    #: The machine this run is about, or '' for the whole configuration.
+    #:
+    #: A check runs for everything the module has, and that is right for a cycle: the
+    #: scheduler is asking "what is the state of the installation". It is the wrong answer to
+    #: "collect this device now", which is about ONE machine and used to poll the other
+    #: thirty-nine to get there — minutes of somebody else's devices for a number the operator
+    #: asked about one of theirs, and a run that could not finish because a device three racks
+    #: away was not answering.
+    #:
+    #: Set on the INSTANCE by whoever asks (`Monitor.check_module(only_host=…)`), never on the
+    #: monitor: two runs may be in flight in one process and a scope on the shared object would
+    #: be one run narrowing the other's.
+    _host_scope = ''
+
+    @property
+    def host_scope(self) -> str:
+        """The uid this run is narrowed to, or ''."""
+        return str(getattr(self, '_host_scope', '') or '').strip()
+
+    def _item_collections(self) -> set:
+        """The module's own item collections, as its schema declares them.
+
+        Everything else at the top of a schema is a `__dunder__` declaration; what is left is
+        where the items live (`list` for most, `servers` for SNMP). Read from the schema and
+        not from a list in the core, which would be the core naming a module's shape.
+        """
+        schema = getattr(self, 'ITEM_SCHEMA', None)
+        if not isinstance(schema, dict):
+            return set()
+        return {k for k in schema if not str(k).startswith('__')}
+
     def _init_var(self):
         """ Initialize the variables of the module. """
         self.paths = DictFilesPath()
@@ -76,7 +107,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         self.debug.debug_obj(self.name_module, self.dict_return.list, "Data Return")
 
     def report_progress(self, detail: str = '', *, step: str = '', scope: str = '',
-                        n: int = 0, total: int = 0) -> None:
+                        n: int = 0, total: int = 0, state: str = '') -> None:
         """Say what this module is doing right now, to whoever is watching.
 
         Only somebody who pressed a button is ever listening (the infrastructure section's
@@ -95,7 +126,15 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         last thread happened to write. Reported exactly that way — a finished run showing a
         green tick beside "3/24" of a machine nobody had asked about.
 
-        All of it is the module's own words. A core vocabulary of steps would fit whichever
+        *state* is how a phase ENDED — ``'done'`` or ``'fail'`` — and it is the one word here
+        the core owns, because it is the only thing about a phase the core has to draw rather
+        than print: a tick or a cross. Without it a phase only ends when the same *scope*
+        starts another one, so the LAST phase of anything spins for ever: reported from the
+        screen as a device sitting at "reading the metrics 24/24" with a spinner beside it,
+        having finished minutes earlier. And a phase that failed had no way to say so at all,
+        so a device refusing connections looked exactly like one still working.
+
+        All the rest is the module's own words. A core vocabulary of steps would fit whichever
         module was in front of whoever wrote it and be a lie for the other twenty — so the
         core draws the phases it is given, in the order they arrive, and names none of them.
         """
@@ -105,7 +144,8 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
             return
         try:
             report(self.name_module, str(detail or ''), step=str(step or ''),
-                   scope=str(scope or ''), n=int(n or 0), total=int(total or 0))
+                   scope=str(scope or ''), n=int(n or 0), total=int(total or 0),
+                   state=str(state or ''))
         except TypeError:
             # An older monitor that only knows the sentence. The phase is a nicety; losing
             # the progress line entirely because of it would not be.
@@ -247,7 +287,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         """ Check if the module is enabled in the configuration. """
         return self.get_conf('enabled', self.module_field_default('enabled'))
 
-    def send_message(self, message, status=None, item='', severity=''):
+    def send_message(self, message, status=None, item='', severity='', kind=''):
         """
         Bridge function to the send_message function of the Monitor object, checking if the
         Monitor is defined and valid before sending the data.
@@ -255,11 +295,17 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         ``item`` is the friendly name of the thing this alert is about (host/service/…);
         it fills the notification digest's Item column for ad-hoc sends.  ``severity='warning'``
         routes a non-OK alert as a ``warn`` (soft threshold breach) rather than ``down``.
+
+        ``kind`` says this failure is a KIND of its own — one the module DECLARES as a notify
+        event, so it gets a row in the routing matrix. The monitor decides whether it may be
+        used (it has to be registered, and it never survives a recovery); here it is only
+        carried, because a module naming a kind the core has never heard of is a module
+        talking to itself.
         """
         if self.is_monitor_exist:
             # Pass the watchful's name so the notification digest can fill its Module column.
             self._monitor.send_message(message, status, module=self.name_module, item=item,
-                                       severity=severity)
+                                       severity=severity, kind=kind)
         else:
             self.debug.print(
                 f">> {self.name_module} > send_message: Error, Monitor is not defined!!",
@@ -383,10 +429,25 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
                     str_split
                 )
                 keys_list.insert(0, select_module)
-                return self._monitor.config_modules.get_conf(
+                got = self._monitor.config_modules.get_conf(
                     keys_list, default_val, str_split=str_split,
                     r_type=r_type
                 )
+                # A narrowed run sees only the items bound to its machine, and it is applied
+                # HERE because this is the one place all twenty modules ask through. Every one
+                # of them enumerates its items the same way — `self.get_conf('list', {})` —
+                # so the alternative is twenty modules each learning what a scope is, and the
+                # nineteenth to get it right is a module that silently polls the whole fleet.
+                #
+                # Only the collection itself: reading one item's field (`['list', k, 'label']`)
+                # is a module asking about something it has already chosen.
+                if (self.host_scope and len(keys_list) == 2
+                        and keys_list[1] in self._item_collections()
+                        and isinstance(got, dict)):
+                    return {k: v for k, v in got.items()
+                            if isinstance(v, dict)
+                            and str(v.get('host_uid') or '').strip() == self.host_scope}
+                return got
 
         if find_key or default_val:
             return default_val
@@ -487,7 +548,8 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         return cache[key]
 
     def _emit(self, key: str, status: bool, message: str, other: dict = None,
-              severity: str = None, name: str = None, change_msg: str = None) -> None:
+              severity: str = None, name: str = None, change_msg: str = None,
+              kind: str = '') -> None:
         """Record a result and notify ONLY on a status change.
 
         The pairing of :meth:`ReturnModuleCheck.set` with :meth:`check_status` +
@@ -528,7 +590,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         changed = (self.check_status_custom(status, key, change_msg) if change_msg is not None
                    else self.check_status(status, self.name_module, key))
         if changed:
-            self.send_message(message, status, item=name, severity=severity or '')
+            self.send_message(message, status, item=name, severity=severity or '', kind=kind)
 
     def check_status_custom(self, status, key, status_msg):
         """

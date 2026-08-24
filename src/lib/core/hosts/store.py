@@ -39,9 +39,18 @@ _HOSTS_SCHEMA = TableSpec(
         Column('uid',         'TEXT', primary_key=True),
         Column('name',        'TEXT', nullable=False, default="''", unique=True),
         Column('address',     'TEXT', nullable=False, default="''"),
-        # 'local' (monitored directly, no SSH) or 'remote' (reachable via the
-        # SSH connection stored in profiles['ssh']).
-        Column('kind',        'TEXT', nullable=False, default="'local'"),
+        # How the panel RUNS COMMANDS on this device, which is not the same question as
+        # what the device is (`device_type`) or which protocols it answers (`profiles`):
+        #
+        #   'none'   — it does not run any. The default, and the answer for most equipment: a
+        #              switch, a router, a UPS or a NAS is read over SNMP and there is nothing
+        #              to run a shell command on. It used to default to 'local', which meant
+        #              the panel's OWN machine — so a check bound to a new switch measured the
+        #              panel's CPU and filed it under the switch's name, with nothing to say
+        #              it had. Now that is refused instead.
+        #   'local'  — commands run on the machine the panel is running on.
+        #   'remote' — over SSH, with the connection stored in profiles['ssh'].
+        Column('kind',        'TEXT', nullable=False, default="'none'"),
         # Operating system: 'auto' (local→this host's platform; remote→detected
         # over SSH) or a fixed token (linux/windows/darwin/freebsd/other).
         Column('os',          'TEXT', nullable=False, default="'auto'"),
@@ -156,9 +165,19 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
                             if isinstance(w, dict) and w.get('module') and w.get('row')],
         }
 
+    #: How commands are run on a device. See the `kind` column for what each means.
+    KINDS = ('none', 'local', 'remote')
+
     @staticmethod
     def _norm_kind(value) -> str:
-        return 'remote' if str(value or '').strip().lower() == 'remote' else 'local'
+        """One of :data:`KINDS`, defaulting to ``none``.
+
+        Anything unrecognised is ``none`` and not ``local``: the two differ in where a command
+        RUNS, and guessing "the panel's own machine" from a value nobody wrote is how a check
+        comes to measure the wrong box quietly. A record that says nothing gets nothing.
+        """
+        v = str(value or '').strip().lower()
+        return v if v in HostsStore.KINDS else 'none'
 
     @staticmethod
     def _norm_device_type(value) -> str:

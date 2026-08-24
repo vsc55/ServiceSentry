@@ -19,6 +19,171 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## SNMP tardaba un minuto en empezar, y era un MIB roto que nadie podía arreglar
+
+**Fecha:** 2026-08-24 · **Área:** `lib/core/snmp/mibs/admin.py::startup_compile_mibs`
+
+**Síntoma.** «¿Por qué tarda tanto en empezar a obtener datos de SNMP?». Al pulsar «obtener
+datos», el módulo SNMP se pasaba un minuto largo sin decir nada antes de la primera línea de
+progreso —y lo mismo en cada ronda del planificador, donde no se ve—. En la base de datos, el
+módulo caducaba con `snmp: timeout after 120s` en ocho ciclos seguidos y llevaba horas sin
+escribir una sola fila de histórico.
+
+**Diagnóstico.** Cronometrando las piezas del arranque del módulo: importar pysnmp 1,2 s, crear
+el `SnmpEngine` 0,3 s, el catálogo de perfiles 32 ms… y `startup_compile_mibs` **66 segundos**,
+idénticos en las tres ejecuciones seguidas. Dentro, cuatro MIB en bruto: `TEST-BAD-GRAMMAR-MIB`,
+`TEST-NO-END-MIB`, `TEST-BAD-DESCRIPTOR-MIB`, `TEST-UNKNOWN-TYPE-MIB` — fixtures rotos **a
+propósito**, importados a la biblioteca en algún momento. Entre 10 y 14 segundos cada uno: pysmi
+parsea, falla, y sale a los espejos HTTP a buscar las dependencias que el fichero nombra.
+
+**Causa raíz.** «Pendiente de compilar» se decide **por fechas**: no hay módulo compilado, o el
+compilado es más viejo que su fuente. Un fichero que no puede compilar no tendrá jamás ninguna de
+las dos cosas, así que es pendiente **para siempre**, y cada ejecución vuelve a por él. Cuatro
+son menos que `AUTO_COMPILE_LIMIT` (5), así que ni siquiera se activaba el freno que existe para
+las bibliotecas grandes. Y `startup_compile_mibs` se llama desde `Watchful.__init__`, no una vez
+al arrancar pese al nombre: el watchful se construye **cada ciclo**, así que el minuto se pagaba
+cada ciclo y cada obtención manual. El panel ya guardaba el motivo de cada fallo en
+`compile_errors.json`, con el tamaño y la fecha del fuente que lo produjo — lo tenía escrito y no
+lo miraba.
+
+**Solución.** La compilación automática consulta ese almacén antes de reintentar, con la regla
+que el gestor de MIB ya usa para decidir si una fila roja sigue siendo cierta: no ha compilado
+desde entonces, el fuente sigue ahí, y son **los mismos bytes** que cuando falló. Y escribe sus
+propios fallos, que antes sólo escribía el trabajo manual — sin eso el salto no puede activarse
+nunca para un MIB que nadie compila a mano. Reemplazar un MIB roto por uno arreglado le cambia
+tamaño y fecha, así que el reintento vuelve solo. 66 s → 0,15 s.
+
+**Lección.** Dos estados que se parecen: «todavía no compilado» y «no puede compilarse». El
+reloj sólo sabe distinguir el primero, y confundirlos convierte un fichero roto en trabajo
+perpetuo. Cuando ya existe un sitio donde se anota *por qué* algo falló, el camino automático
+tiene que leerlo — si no, el conocimiento está escrito para la pantalla y no para el programa.
+Y el detalle que casi se cuela: lo pendiente son **ficheros** y los fallos son **módulos**,
+nombres que coinciden en un `TEST-NO-END-MIB.mib` y no coinciden en un `trunk.mib` que declara
+`IEEE8023-LAG-MIB`. Comparados a pelo el salto funcionaba en la biblioteca donde se midió y no
+habría hecho nada en ninguna otra. Lo cazó un test, no una relectura.
+
+---
+
+## Abrir un dispositivo tardaba segundos, y la URL cambiaba antes que nada
+
+**Fecha:** 2026-08-24 · **Área:** `lib/core/history/store.py::get_index`
+
+**Síntoma.** «En la lista de dispositivos, al hacer click en alguno tarda unos segundos en
+saltar y mostrar los datos; sí veo que en la URL cambia y añade `infra?host=f451a2…`.»
+
+**Diagnóstico.** La URL era la pista: se reescribe de forma **síncrona** y todo lo que va
+después espera a la red. Así que el problema estaba en la respuesta de
+`/api/v1/infra/hosts/<uid>`, y había cinco candidatos. Se midieron todos contra los datos
+reales en vez de razonar:
+
+```text
+_host_statuses(wa)  (toda la flota)                 1,3 ms
+history_meta(snmp)                                 35,4 ms
+history_meta(ping|cpu|filesystemusage)             ~1   ms
+check_state.as_status_dict()                         27 ms
+history.get_index()                                 672 ms   <-- 949 series, 54.813 filas
+```
+
+Uno solo, y con diferencia. Y al mirar para qué se usa, la desproporción era mayor: el índice
+se pide entero —de **toda la flota**— y `build_host_status` lo consulta sólo como *fallback*
+para un check sin estado en vivo, leyendo cuatro campos: `key`, `last_data`, `last_status` y
+`last_ts`.
+
+**Causa raíz.** `get_index` contesta una pregunta más rica —cuántas muestras, desde cuándo, qué
+proporción en verde— y la paga dos veces:
+
+- el agregado (`COUNT`, `MIN`, `AVG`) es una **segunda pasada** por la tabla entera;
+- y la clave de agrupación, `COALESCE(item_uid, module || ':' || key)`, es una **expresión que
+  ningún índice puede servir** —lo advierte su propio docstring—, así que las dos pasadas
+  ordenan todo en un B-tree temporal.
+
+El plan lo confirmaba: `USE TEMP B-TREE FOR ORDER BY` y otro para el `GROUP BY`. Y al inspeccionar
+la tabla salió el dato que abría la puerta:
+
+```text
+item_uid: 54813 filas sin el, de 54813
+indices: idx_history_mkts ON history(module, key, ts)
+```
+
+**Nada** escribe `item_uid` — el monitor graba `record(module, key, status, data)` — así que el
+`COALESCE` cae siempre en el concat, y la identidad real de una serie es `(module, key)`, que es
+exactamente el orden del índice que ya existe.
+
+**Solución.** Un método nuevo, `latest_by_series`, que pide sólo la última muestra de cada
+serie agrupando por `(module, key)`. La agrupación va en streaming sobre el índice:
+
+```text
+SCAN history USING COVERING INDEX idx_history_mkts
+get_index()        777 ms   949 series
+latest_by_series()  67 ms   949 series   (mismas series, mismos valores)
+```
+
+Además se estrecha a los módulos atados a **esa** máquina, porque el fallback sólo puede
+aportar series de sus propios checks. Y la otra mitad del síntoma, que era de pantalla: la
+vista de dispositivo pinta su spinner sólo sobre un panel vacío —la guarda que evita que un
+refresco parpadee sobre un dispositivo ya abierto— y llegando desde la lista el panel **no**
+está vacío, tiene la tabla. La única navegación con una persona esperando era la única sin
+señal ninguna.
+
+**Lección.** «Tarda» no es un diagnóstico: cinco candidatos plausibles y sólo uno valía 700 ms.
+Y el patrón de fondo: una función que contesta **más de lo que se le pide** parece gratis
+porque el resultado sobrante se descarta — pero el coste se paga entero, y aquí era una segunda
+pasada sobre la tabla más grande de la base. Cuando algo lento devuelve un objeto rico, la
+primera pregunta es qué campos usa quien llama.
+
+---
+
+## Un 500 por una comprobación hecha demasiado pronto
+
+**Fecha:** 2026-08-24 · **Área:** `lib/core/infra/routes.py::api_infra_collect`
+
+**Síntoma.** CI en rojo con cuatro fallos de `tests/integration/test_wa_infra.py`. Tres de
+ellos pedían **409** a «recoger ahora» sobre una máquina sin checks y recibían **500** con
+`{'error': 'Modules directory not configured'}`.
+
+**Diagnóstico.** Lo primero fue descartar que lo hubiera roto el trabajo del día. Se comparó
+la ruta contra el commit anterior:
+
+```bash
+git show f3edbac:src/lib/core/infra/routes.py | sed -n '228,262p'
+```
+
+Idéntica: mismo orden, misma guarda. Y los tres tests también existían ya. O sea que **nunca
+habían pasado** — la suite de integración no se lanzaba, y CI fue la primera en mirarla.
+
+La fixture construye `WebAdmin(config_dir, "admin", "secret", var_dir)` y `modules_dir` es un
+parámetro con defecto `None`, así que `wa._modules_dir` es falso y la guarda dispara siempre.
+
+**Causa raíz.** El orden de las precondiciones:
+
+```python
+if not wa._modules_dir:                    # precondicion de EJECUTAR
+    return ..., 500
+modules = _modules_to_collect(uid)         # ...decidir si hay algo que ejecutar
+if not modules:
+    return ..., 409
+```
+
+`_modules_to_collect` lee `wa._load_modules()`, que es **la base de datos**: la configuración
+de módulos vive ahí desde la migración. El directorio de módulos es donde está el *código*, y
+sólo hace falta cuando de verdad se va a ejecutar algo. Preguntar por él antes de saber si hay
+algo que ejecutar convierte «esta máquina no tiene nada que recoger» en «el servidor está mal
+configurado».
+
+**Solución.** La guarda baja a después del 409. Un despliegue sin directorio de módulos y con
+checks configurados sigue dando 500 —correcto, y es lo que la guarda protege—; una máquina sin
+checks contesta lo que le corresponde. Y el cuarto fallo era otra cosa: un test que fijaba la
+lista de permisos de la sección en dos (`infra_view`, `infra_collect`) y detectó la llegada de
+`infra_watch`, que es exactamente para lo que sirve una lista cerrada.
+
+**Lección.** Las precondiciones de una ruta se comprueban en orden, y ese orden **es** la
+respuesta que da: comprobar primero lo que hace falta para *actuar* enmascara la respuesta
+sobre si hay algo que hacer. Y la otra, más cara: una suite que no se lanza no es una suite.
+Estos tres tests eran correctos, estaban escritos, describían la conducta que se quería, y
+llevaban desde el primer día en rojo sin que nadie lo supiera.
+
+---
+
 ## Dos NAS en aviso con todas sus lecturas en verde
 
 **Fecha:** 2026-08-24 · **Área:** `lib/core/hosts/service.py::_host_statuses`

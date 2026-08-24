@@ -193,6 +193,21 @@ async def _target(host: str, port: int, timeout: int, retries: int):
         return _TARGETS[key]
 
 
+class NoAnswer(str):
+    """An error from a device that did not answer AT ALL.
+
+    A str subclass, so every caller that logs it, shows it or puts it in a message goes on
+    working unchanged — and the one caller that has to tell the two apart can, with
+    `isinstance`. The alternative, a third return value, is a change to every call site for a
+    fact almost none of them care about.
+
+    The distinction is the whole difference between a device that is off the network and one
+    that is talking: `noSuchName` is an ANSWER — this device does not serve that OID, and the
+    next profile may well be one it does. A timeout is not an answer, and after a few of them
+    the remaining three hundred reads are three hundred timeouts nobody is waiting for.
+    """
+
+
 class SnmpClient:
     """The two SNMP primitives, mixed into ``Watchful``."""
 
@@ -274,7 +289,9 @@ class SnmpClient:
                 ObjectType(ObjectIdentity(oid)),
             )
             if error_indication:
-                return None, str(error_indication)
+                # The engine could not get an answer — a timeout, an unreachable host, a
+                # broken credential. Not the device saying no.
+                return None, NoAnswer(str(error_indication))
             if error_status:
                 idx = int(error_index) - 1
                 return None, f'{error_status.prettyPrint()} at index {idx}'
@@ -285,7 +302,7 @@ class SnmpClient:
         try:
             return run_coroutine(_run())
         except Exception as exc:  # pylint: disable=broad-except
-            return None, str(exc)
+            return None, NoAnswer(str(exc))
 
     # ── SNMP Walk of ONE subtree (used by sampling) ────────────────────────────
 
@@ -351,7 +368,7 @@ class SnmpClient:
                                lexicographicMode=False)
             async for err_ind, err_st, err_idx, var_binds in cmd:
                 if err_ind:
-                    return rows, str(err_ind)
+                    return rows, NoAnswer(str(err_ind))
                 if err_st:
                     return rows, f'{err_st.prettyPrint()} at index {int(err_idx) - 1}'
                 for vb in var_binds:
@@ -370,7 +387,7 @@ class SnmpClient:
         try:
             return run_coroutine(_run())
         except Exception as exc:  # pylint: disable=broad-except
-            return {}, str(exc)
+            return {}, NoAnswer(str(exc))
 
     # ── SNMP Walk (used by discover) ───────────────────────────────────────────
 

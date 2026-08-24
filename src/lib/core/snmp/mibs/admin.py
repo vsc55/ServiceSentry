@@ -1952,9 +1952,25 @@ class MibAdmin:
             '_cancel': _cancel,
         }
 
+        def _note(**fields):
+            """Write into this job's entry, if it is still there.
+
+            A job is collected by the first status poll that sees it done, so the entry can
+            be gone before the thread that owns it has stopped touching it. Indexed directly,
+            that is a `KeyError` raised on a daemon thread: the traceback goes to stderr, the
+            thread dies where it stood, and the compile it was recording is simply never
+            recorded — a job that ran, finished, and left no trace of either.
+
+            Surfaced by CI as eight `PytestUnhandledThreadExceptionWarning`s, from tests that
+            clear the registry while a previous test's thread is still running. Nothing failed
+            and nothing went red, which is the same shape as the bug it protects against.
+            """
+            entry = _compile_jobs.get(job_id)
+            if entry is not None:
+                entry.update(fields)
+
         def _progress_cb(current, completed, _total):
-            _compile_jobs[job_id]['current']   = current
-            _compile_jobs[job_id]['completed'] = completed
+            _note(current=current, completed=completed)
 
         _idx_extra = [d.strip() for d in str(cfg.get('mib_dirs') or '').split(',') if d.strip()]
         _repo_tpls = cls._repo_templates(cfg)
@@ -1973,8 +1989,7 @@ class MibAdmin:
             # show it instead of looking like the compile is still running.
             # Skip indexing when cancelled (the user wants it to stop now).
             if result.get('compiled') and not _cancel.is_set():
-                _compile_jobs[job_id]['phase'] = 'indexing'
-                _compile_jobs[job_id]['current'] = None
+                _note(phase='indexing', current=None)
                 try:
                     _mib_resolver.build_oid_index(var_dir, _idx_extra)
                 except Exception:  # pylint: disable=broad-except
@@ -2000,7 +2015,7 @@ class MibAdmin:
                      for _st in [os.stat(_full)]})
             except OSError:      # a listing that fails must not lose the compile's result
                 pass
-            _compile_jobs[job_id].update({
+            _note(**{
                 'done':      True,
                 'result_ok': result.get('ok', False),
                 'compiled':  result.get('compiled', False),
@@ -2013,7 +2028,10 @@ class MibAdmin:
                 'message':   result.get('message', ''),
                 'cancelled': result.get('cancelled', False),
                 'current':   None,
-                'completed': _compile_jobs[job_id].get('completed', 0),
+                # `completed` is deliberately absent: it was being set to its own current
+                # value, read back out of the entry — a no-op that also happened to be the
+                # last direct index left, and so the last way this thread could still die
+                # on an entry somebody had already collected. Merging leaves it alone.
             })
 
         threading.Thread(target=_run, daemon=True).start()
@@ -3068,6 +3086,28 @@ class MibAdmin:
         return row
 
 
+def _raw_index(walk) -> tuple:
+    """``({module: {name, size, mtime}}, {file stem: module})`` for a walk of the raw tree.
+
+    Both, because both names are asked about the same file and they are not the same name.
+    A compile error is about the MODULE — pysmi compiles a module by name, and `trunk.mib`
+    produces IEEE8023-LAG-MIB — while what is PENDING is a file, which is what pysmi is
+    handed. Answering one with the other is the identity split this whole file exists for.
+    """
+    by_module: dict = {}
+    by_stem: dict = {}
+    for rel, full in walk or ():
+        try:
+            st = os.stat(full)
+        except OSError:
+            continue
+        stem = os.path.splitext(os.path.basename(rel))[0]
+        mod = _mib_resolver.raw_module_name(full) or stem
+        by_module[mod] = {'name': rel, 'size': int(st.st_size), 'mtime': int(st.st_mtime)}
+        by_stem.setdefault(stem, mod)
+    return by_module, by_stem
+
+
 def startup_compile_mibs(var_dir: str, debug=None) -> None:
     """Compile raw ASN.1 MIBs at startup.
 
@@ -3093,7 +3133,8 @@ def startup_compile_mibs(var_dir: str, debug=None) -> None:
     # Count raw MIB files so we can warn if pysmi is missing. Recursive: an imported
     # archive or repository keeps its folders, and counting only the top level reports
     # zero for an installation whose MIBs all came from one.
-    raw_files = [rel for rel, _full in _mib_resolver.iter_raw_mibs(raw_dir)]
+    _walk = list(_mib_resolver.iter_raw_mibs(raw_dir))
+    raw_files = [rel for rel, _full in _walk]
 
     # Only invoke pysmi when new/updated raw MIBs exist.  compile_raw_mibs()
     # initialises an HttpReader (→ DNS lookup for mibs.pysnmp.com) even for
@@ -3104,7 +3145,48 @@ def startup_compile_mibs(var_dir: str, debug=None) -> None:
     # files, ~2.7 s of ASN.1 parsing each — bought a panel that does not come up for
     # the best part of an hour, with nothing on screen to say what it is doing. Past
     # the limit they stay raw until the MIB manager is told to compile them.
-    _pending = _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir)
+    _pending = _mib_resolver.pending_raw_mibs(raw_dir, compiled_dir, files=_walk)
+
+    # A MIB that FAILED is not a MIB waiting to be compiled, and this is where those two
+    # stopped being told apart. "Pending" is decided by timestamps — no compiled module, or one
+    # older than its source — and a file that cannot compile has neither, for ever. So every
+    # run retried them, and because this is called from the watchful's constructor rather than
+    # once at startup, "every run" means every scheduler cycle and every "collect now".
+    #
+    # Measured on a real library: four raw MIBs that can never compile (deliberately broken
+    # test fixtures somebody had imported) cost 66 SECONDS on every single run — pysmi parsing
+    # them and then reaching for the HTTP mirrors after the dependencies they name. That is
+    # the whole of "why does SNMP take so long to start", and nothing anywhere said a word:
+    # the log line is a debug one, and the time is spent before the first OID is asked.
+    #
+    # The store this reads is the same one the MIB manager writes and shows, and the rule for
+    # "is that failure still true" is its rule: not compiled since, source still there, and the
+    # same bytes as when it failed. Replacing a broken MIB with a fixed one changes its size
+    # and mtime, so the retry comes back by itself — which is the answer to a broken MIB.
+    _index, _module_of = _raw_index(_walk)
+    _compiled_now = set()
+    if os.path.isdir(compiled_dir):
+        _compiled_now = {os.path.splitext(f)[0] for f in os.listdir(compiled_dir)
+                         if f.endswith('.py') and not f.startswith('__')}
+    _known_bad = MibAdmin._live_compile_errors(          # pylint: disable=protected-access
+        MibAdmin._read_compile_errors(var_dir), _index, _compiled_now)
+    # By the MODULE each pending FILE declares: `_pending` is file stems (that is what pysmi
+    # is handed) and the failures are keyed by module. Compared directly the skip works only
+    # for the files that happen to be named after their module, and silently does nothing for
+    # every vendor MIB — which is the exact trap `trunk.mib` → IEEE8023-LAG-MIB sets three
+    # times over in this package. Caught by the test, not by reading it.
+    _skipped = [m for m in _pending if _module_of.get(m, m) in _known_bad]
+    if _skipped:
+        _pending = [m for m in _pending if _module_of.get(m, m) not in _known_bad]
+        # Said out loud, because a MIB that is silently never compiled again is the same
+        # shape as the bug this replaced: something not happening, with nothing saying so.
+        _log(
+            f'SNMP: not retrying {len(_skipped)} raw MIB(s) that failed to compile and have '
+            f'not changed since — fix or replace the file, or compile them from the MIB '
+            f'manager ({", ".join(sorted(_skipped)[:5])})',
+            DebugLevel.debug,
+        )
+
     if not _pending:
         compile_result = {'ok': True, 'compiled': False}
     elif len(_pending) > _mib_resolver.AUTO_COMPILE_LIMIT:
@@ -3117,6 +3199,13 @@ def startup_compile_mibs(var_dir: str, debug=None) -> None:
     else:
         compile_result = _mib_resolver.compile_raw_mibs(
             raw_dir, compiled_dir, mibs_filter=_pending)
+        # Write the verdict down, so the first automatic attempt on a file is also the last
+        # until that file changes. Without this the skip above can never engage for a MIB
+        # that only ever gets compiled from here: the failures would happen for ever and be
+        # recorded nowhere, which is exactly what was happening.
+        MibAdmin._record_compile_errors(       # pylint: disable=protected-access
+            var_dir, compile_result.get('attempted') or list(_pending),
+            compile_result.get('errors') or {}, _index)
 
     if not compile_result.get('ok'):
         _log(

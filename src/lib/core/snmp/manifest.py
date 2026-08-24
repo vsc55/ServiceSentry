@@ -33,6 +33,17 @@ HOST_PROFILE: dict = {
     # Field labels come from the lang files under this section, exactly as the built-in SSH
     # profile's do: a core-owned form takes its words from core i18n.
     'i18n':          'snmp_profile',
+    # A host carrying this profile with THIS field filled in is a device this module samples,
+    # with no check and no module item anywhere — `devices.devices_to_sample` is the rule and
+    # this is that rule declared, so the core can read it without naming SNMP.
+    #
+    # It has to be declared because "what would run against this machine" is asked in places
+    # that have nothing to do with sampling. "Collect now" worked it out from what had been
+    # RECORDED about the host, which cannot include a device that has never been sampled: a
+    # NAS whose module item had just been removed offered to collect its ping and nothing
+    # else, and the button that exists to take the first sample was the one thing that could
+    # not. Reported from the screen in those words.
+    'samples_when':  'device_profiles',
     # `group` is which section of a form the field falls under, and it is a fact about the
     # FIELD, not about one screen: a community is the identity wherever it is asked for.
     # The check form draws the headers; the host profile's is a flat list and ignores them.
@@ -63,6 +74,28 @@ HOST_PROFILE: dict = {
          'group': 'device'},
     ],
 }
+
+
+# ── What this domain can notify about ────────────────────────────────────────────────────
+#
+# A device that answers NOTHING is not a check that failed: it is the collection itself not
+# happening, and until now it was indistinguishable from any other down — one line among
+# forty in a digest, with nowhere to say "these are the ones I want to hear about". It has a
+# row of its own in the routing matrix now, discovered like every other event
+# (lib/core/notify/events.py) from this manifest.
+#
+# ADDITIVE, and that is the point of the fallback below rather than a plain switch: a new
+# matrix cell is stored only when somebody ticks it and reads FALSE until then
+# (lib/config/spec.py says so), so routing this alert to the new kind and nothing else would
+# have silently stopped every SNMP failure notification that arrives today as a `down`.
+# Where the row is off the alert still travels as a `down`, exactly as it does now; where it
+# is on, that channel gets it whether or not it takes `down`.
+KIND_UNREACHABLE = 'snmp_unreachable'
+
+NOTIFY_EVENTS = [
+    {'key': KIND_UNREACHABLE, 'source': 'snmp',
+     'label_key': 'notif_event_snmp_unreachable', 'matrix': True, 'order': 80},
+]
 
 
 # ── The operations the panel may invoke ──────────────────────────────────────────────────

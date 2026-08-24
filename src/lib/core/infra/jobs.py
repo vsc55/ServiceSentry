@@ -174,8 +174,15 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
 
     def _work():
         try:
+            # `only_host`: this is a collection OF A DEVICE. It used to run each module
+            # with its whole configuration — so asking for one NAS walked every other machine
+            # that module watches, which on an SNMP fleet is minutes of other people's
+            # equipment and, when one of them is not answering, a run that never lands.
+            # Reported from the screen as a dialog stuck on "still working" with six devices
+            # in it, only one of which had been asked about.
             results, errors = wa._run_checks(
-                modules, timeout=_timeout_of(wa), progress_cb=_progress, lang=lang)
+                modules, timeout=_timeout_of(wa), progress_cb=_progress, lang=lang,
+                only_host=uid)
             job['answered'] = sorted(results.keys())
             job['errors'] = list(errors or [])
         except Exception as exc:      # pylint: disable=broad-except
@@ -313,6 +320,18 @@ def _step(row: dict, state: str, detail: str, extra: dict | None) -> None:
     if not name:
         return
     scope = str((extra or {}).get('scope') or '').strip()[:80]
+    # The module saying how this phase ENDED. Before it, a phase ended only when the same
+    # scope started another one — so the last phase of every device spun for ever, at N/N,
+    # minutes after it had finished, and a device that answered nothing looked identical to
+    # one still working. Reported from the screen as both.
+    ended = str((extra or {}).get('state') or '').strip()
+    if ended in ('done', 'fail'):
+        for st in row.get('steps') or ():
+            if st['state'] == 'run' and st.get('scope', '') == scope \
+                    and (st['key'] == name or not name):
+                st['state'] = ended
+                st['n'] = st['total'] = 0
+        return
     steps = row.setdefault('steps', [])
     cur = next((s for s in steps if s['key'] == name and s.get('scope', '') == scope), None)
     if cur is None:

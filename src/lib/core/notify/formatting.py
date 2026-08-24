@@ -17,8 +17,15 @@ EVENT_ICON = {
     'service_started': '▶️', 'service_stopped': '⏹️',
     'service_down': '💥', 'service_up': '💚',
     'cert_expiring': '📜',
+    'snmp_unreachable': '📡',
     'secret_expiring': '🔑', 'secret_rotated': '🔄',
     'syslog': '📄', 'event': '🔔',
+    # Not a notify EVENT — there is no routing row for it and there must not be: nothing
+    # dispatches this, an admin presses a button. It is here because the test message goes
+    # through the same formatter every real one does, and that formatter asks these two maps
+    # what to draw. A test that arrives looking like nothing else the panel sends is a test of
+    # the wrong thing.
+    'test': '🧪',
 }
 
 # i18n label key per event kind — the human title lives in the lang files (en_EN/es_ES…),
@@ -34,9 +41,11 @@ EVENT_LABEL_KEY = {
     'service_started': 'notif_event_service_started', 'service_stopped': 'notif_event_service_stopped',
     'service_down': 'notif_event_service_down', 'service_up': 'notif_event_service_up',
     'cert_expiring': 'notif_event_cert_expiring',
+    'snmp_unreachable': 'notif_event_snmp_unreachable',
     'secret_expiring': 'notif_event_secret_expiring',
     'secret_rotated': 'notif_event_secret_rotated',
     'syslog': 'notif_event_syslog', 'event': 'notif_event',
+    'test': 'notif_event_test',
 }
 
 

@@ -19,6 +19,8 @@ Routes registered by this file:
     GET    /api/v1/config/db/targets/<op>  what a run will walk (tables, or nothing when
                                         the engine cannot split the operation)
     POST   /api/v1/config/db/<op>       database maintenance: optimize | compact
+    GET    /api/v1/config/db/orphans    readings stored under a key nothing owns any more
+    DELETE /api/v1/config/db/orphans    …and the sweep that removes them
 """
 
 import uuid
@@ -29,6 +31,7 @@ from lib.debug import DebugLevel
 from lib.config.spec import CFG_BY_PATH, admin_only_fields
 from lib.config.layout import config_layout
 from lib.core.config import service as config_svc
+from lib.core.config import orphans
 from lib.core.config.service import AdminOpError
 from lib.security import secret_manager
 from lib.util import fmt_bytes
@@ -230,6 +233,107 @@ def register(app, wa):
         'optimize': ('optimize', 'db_optimized'),
         'compact':  ('compact',  'db_compacted'),
     }
+
+    def _orphan_inputs():
+        """What still exists, from the two places that know.
+
+        The configuration for what a module still claims, the registry for what a device
+        still is. Read once per request and handed to the sweep, which is arithmetic on two
+        lists and stays testable that way.
+        """
+        saved = wa._load_modules() or {}
+        items: dict = {}
+        present = set()
+        for mod_key, cfg in saved.items():
+            bare = orphans._bare(mod_key)
+            present.add(bare)
+            keys = items.setdefault(bare, set())
+            if not isinstance(cfg, dict):
+                continue
+            for coll, entries in cfg.items():
+                if str(coll).startswith('__') or not isinstance(entries, dict):
+                    continue
+                keys.update(str(k) for k in entries)
+        store = getattr(wa, '_hosts_store', None)
+        hosts = set()
+        if store is not None:
+            try:
+                hosts = {str(h.get('uid') or '') for h in (store.list(decrypt=False) or ())}
+            except Exception:  # pylint: disable=broad-except
+                hosts = set()
+        return items, hosts, present
+
+    def _orphan_series():
+        """Every stored series, per table, with what it would cost to keep."""
+        out = {}
+        hist = getattr(wa, '_history', None)
+        if hist is not None:
+            try:
+                out['history'] = [{'module': s.get('module'), 'key': s.get('key'),
+                                   'count': int(s.get('count') or 0)}
+                                  for s in hist.get_index()]
+            except Exception:  # pylint: disable=broad-except
+                out['history'] = []
+        state = getattr(wa, '_check_state_store', None)
+        if state is not None:
+            try:
+                # One entry per KEY and not per stored row: a key is what the sweep deletes,
+                # and a device profile files hundreds of metrics under one of them. The count
+                # is the rows that would go with it, so the screen says what it will cost.
+                seen: dict = {}
+                for (mod, key, _metric), _rec in (state.get_all() or {}).items():
+                    e = seen.setdefault((mod, key), 0)
+                    seen[(mod, key)] = e + 1
+                out['check_state'] = [{'module': m, 'key': k, 'count': n}
+                                      for (m, k), n in seen.items()]
+            except Exception:  # pylint: disable=broad-except
+                out['check_state'] = []
+        return out
+
+    @app.route('/api/v1/config/db/orphans', methods=['GET'])
+    @wa._perm_required('db_maintenance')
+    def api_db_orphans():
+        """Readings stored under a key nothing owns any more.
+
+        Reported and never swept on its own: "the item is gone" and "the data is worthless"
+        are different statements, and the second is the operator's to make. So this answers
+        what there is and what it would cost, and the sweep is a separate press.
+        """
+        items, hosts, present = _orphan_inputs()
+        out = {}
+        for table, rows in _orphan_series().items():
+            found = orphans.scan(rows, items, hosts, modules=present)
+            out[table] = {**orphans.summary(found), 'rows': found}
+        return jsonify(out)
+
+    @app.route('/api/v1/config/db/orphans', methods=['DELETE'])
+    @wa._perm_required('db_maintenance')
+    def api_db_orphans_purge():
+        """Delete them. Found again HERE rather than trusting the list the browser was shown.
+
+        That list was true when it was drawn; a cycle since may have recorded a reading under
+        a key it now owns, and deleting what a screen remembers is how a sweep removes
+        something that stopped being an orphan while somebody read the dialog.
+        """
+        items, hosts, present = _orphan_inputs()
+        hist = getattr(wa, '_history', None)
+        state = getattr(wa, '_check_state_store', None)
+        deleted = {'history': 0, 'check_state': 0}
+        series = 0
+        for table, rows in _orphan_series().items():
+            for row in orphans.scan(rows, items, hosts, modules=present):
+                series += 1
+                try:
+                    if table == 'history' and hist is not None:
+                        deleted['history'] += int(
+                            hist.delete_series(row['module'], row['key']) or 0)
+                    elif table == 'check_state' and state is not None:
+                        if state.delete(row['module'], row['key']):
+                            deleted['check_state'] += int(row.get('count') or 0)
+                except Exception:  # pylint: disable=broad-except
+                    continue        # one series that will not go is not the sweep failing
+        wa._audit('db_orphans_purged', detail={'series': series, **deleted})
+        return jsonify({'ok': True, 'series': series, **deleted})
 
     @app.route('/api/v1/config/db/targets/<op>', methods=['GET'])
     @wa._perm_required('db_maintenance')

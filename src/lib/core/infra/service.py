@@ -56,7 +56,8 @@ def split_row(name: str, pattern: str) -> tuple:
 # "the record minus a few keys": the host record carries `profiles`, which holds the bound
 # credential of every protocol that reaches it, and a projection written as a subtraction is
 # one field away from shipping those the day somebody adds a key.
-_HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'os', 'virtual', 'maintenance',
+_HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual',
+                'maintenance',
                 'tags', 'description', 'status', 'modules_total', 'modules_active',
                 # …and which of its rows somebody said are worth an alert, so the screen can
                 # show the mark it set. A list of names it already displays: no secret in it,

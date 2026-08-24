@@ -108,7 +108,8 @@ class TestItShowsWithoutHandingOver:
         for verb in ("'PUT'", "'DELETE'", "'PATCH'"):
             assert verb not in routes, f'a {verb} route appeared in a section that edits nothing'
         posts = re.findall(r"@app\.route\('([^']+)',\s*methods=\['POST'\]\)", routes)
-        assert sorted(posts) == sorted(['/api/v1/infra/hosts/<uid>/collect',
+        assert sorted(posts) == sorted(['/api/v1/infra/collect',
+                                        '/api/v1/infra/hosts/<uid>/collect',
                                         '/api/v1/infra/hosts/<uid>/watch']), (
             f'unexpected POST route(s) in the infrastructure section: {posts}')
         # The registry's own write path is what must not be reachable from here.
@@ -219,7 +220,9 @@ class TestWatchingItHappen:
     def test_there_is_still_a_bar_once_it_is_closed(self):
         """"Is it still going?" has to be answerable without reopening anything."""
         src = self._collect()
-        body = src.split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
+        # The bar itself, which is shared by both header slots — the device's and the fleet
+        # list's. Two bars drawn from two copies would be two answers to "how far along".
+        body = src.split('function _infraCollectBarHtml')[1].split(chr(10) + 'function ')[0]
         assert 'progress-bar' in body and '_infraCollectPct(job)' in body
         assert '_infraCollectOpen()' in body, 'the bar cannot be opened again'
 
@@ -233,7 +236,7 @@ class TestWatchingItHappen:
         seconds and stay there for four minutes. What is being done is what makes that pause
         legible; a bar on its own reads as a hang."""
         src = self._collect()
-        bar = src.split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
+        bar = src.split('function _infraCollectBarHtml')[1].split(chr(10) + 'function ')[0]
         assert 'step.key' in bar and 'running.detail' in bar, (
             'the bar does not name what is working')
         assert '_infraCollectRow' in src, 'the dialog does not list what is being done'
@@ -320,6 +323,78 @@ class TestWatchingItHappen:
         for state in ('ok:', 'warning:', 'error:'):
             assert state in body
         assert 'infra_unwatched' in body, 'a host nobody watches has no state of its own'
+
+
+class TestRefreshingTheWholeFleet:
+    """The list's own button, beside the per-device one, and they are different acts.
+
+    A device collection is narrowed to that device — quick, and it does not walk somebody
+    else's rack. The list's is the un-narrowed run: every module with its whole configuration,
+    which is what a scheduler cycle is and costs what one costs. Two buttons that look alike
+    and cost differently need three things pinned: who may press it, that the screen says
+    which of the two is running, and that it cannot be pressed while one is out.
+    """
+
+    def _collect(self) -> str:
+        return _read(os.path.join(INFRA, '_collect.html'))
+
+    def test_the_list_offers_it(self):
+        src = _read(os.path.join(INFRA, '_list.html'))
+        assert 'infraCollectAllSlot' in src and '_infraCollectAllSlotHtml()' in src
+
+    def test_it_takes_both_flags_on_the_screen_and_in_the_route(self):
+        """`infra_collect` says which ACT you may perform, not on which machines. A run over
+        the whole fleet polls machines a narrowed operator may not be allowed to SEE, so the
+        flag that says "you see the whole fleet" is what decides you may refresh it — and the
+        screen and the route have to agree, or the button is offered and then refused."""
+        src = _read(os.path.join(INFRA, '_list.html'))
+        block = src.split('headerButtons')[1].split('refreshButton')[0]
+        assert "has('infra_collect')" in block and "has('devices_view')" in block
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        body = routes.split('def api_infra_collect_all(')[1].split(chr(10) + '    @app.route')[0]
+        assert "'devices_view' not in set(" in body, 'the route trusts the screen'
+
+    def test_it_asks_first(self):
+        """The per-device button does not, and should not: it is quick and it is about the
+        machine you are looking at. This one costs a scheduler cycle and makes every check
+        alert on what it finds, and the difference is invisible until it has started."""
+        body = _fn(self._collect(), '_infraCollectAll')
+        assert 'showConfirmModal(' in body
+        assert 'infra_collect_all_confirm' in body
+
+    def test_the_list_button_becomes_the_bar_for_ANY_run(self):
+        """One collection runs at a time — the server holds the same lock the Status screen's
+        run takes — so while a device is being collected this button cannot be pressed either.
+        Leaving it as a button offers something that answers "already running"."""
+        body = _fn(self._collect(), '_infraCollectAllSlotHtml')
+        assert 'job.done' in body and 'job.host' not in body, (
+            'it decides by whose run it is, so another run leaves it looking pressable')
+
+    def test_both_slots_are_repainted(self):
+        """Only one of the two is ever on screen, and painting only the device one is how the
+        list's button sat there saying "collect" while a collection was running."""
+        body = _fn(self._collect(), '_infraCollectPaint')
+        assert "getElementById('infraCollectSlot')" in body
+        assert "getElementById('infraCollectAllSlot')" in body
+
+    def test_the_dialog_says_which_of_the_two_it_is(self):
+        """The note under the bar is a claim about what is being polled. Fixed at "this device
+        only" it is a lie for half the runs — and it is the only thing on the dialog that says
+        which button started it."""
+        body = _fn(self._collect(), '_infraCollectBody')
+        assert 'infra_collect_this_device' in body and 'infra_collect_all_note' in body
+        assert 'job.host' in body, 'it does not read the scope it is describing'
+
+    def test_a_fleet_job_is_visible_to_whoever_sees_the_fleet(self):
+        """Its job carries no host, and the two polling routes narrow by exactly that: with no
+        host, `_may_see` is true only for `devices_view` — which is the same rule that let the
+        run start. A job nobody can poll is a dialog that never updates."""
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        # Nested inside `register`, so read as text: what matters is the RULE, and the rule is
+        # that with no uid only the fleet-wide flag can answer true.
+        gate = routes.split('def _may_see(')[1].split('def ')[0]
+        assert "'devices_view' in perms" in gate
+        assert "f'server.{uid}.view' in perms" in gate
 
 
 class TestItRefreshesWithoutBlinking:
@@ -592,3 +667,209 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         assert 'stroke-dasharray="1 4"' in links, 'a port sighting reads as a cable again'
         legend = _fn(self._js(), '_infraMapLegend')
         assert legend.count('<svg') == 4, 'the legend stopped matching the lines'
+
+
+class TestTheRailReachesTheBottom:
+    """Reported from the screen: on a device with sixty interfaces the rail stopped well
+    short of the bottom of the window, with a band of empty page under it.
+
+    Its ceiling was `calc(100vh - 13rem)` — a guess at everything above and below it, and on
+    that page 208 px too many. What the rail can actually use is the height of the box it
+    sticks inside, which is a number only the layout knows.
+    """
+
+    def _utils(self):
+        return _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'core', '_utils.html')))
+
+    def _tabs(self):
+        return _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra', '_tabs.html')))
+
+    def test_the_ceiling_is_measured_and_not_guessed(self):
+        fn = _fn(self._utils(), 'capToScrollBox')
+        assert 'clientHeight' in fn, 'it still works from a constant'
+        assert 'closest(' in fn, 'nothing finds the box the list scrolls inside'
+
+    def test_it_measures_the_BOX_and_not_where_the_rail_happens_to_be(self):
+        """The rail moves: it starts under the section header and slides up until it sticks.
+        An answer taken from where it is at render time is wrong at every other scroll
+        position — which is the same class of mistake as the constant, with extra steps."""
+        fn = _fn(self._utils(), 'capToScrollBox')
+        assert 'getBoundingClientRect' not in fn, (
+            'the cap is derived from the rail\'s current position')
+        assert 'window.innerHeight' not in fn, 'back to measuring the window'
+
+    def test_a_window_resized_is_measured_again(self):
+        fn = _fn(self._utils(), 'capToScrollBox')
+        assert "addEventListener('resize'" in fn
+        assert 'isConnected' in fn and 'removeEventListener' in fn, (
+            'a rail that has left the page keeps a listener alive for ever')
+
+    def test_a_short_window_still_leaves_a_usable_rail(self):
+        fn = _fn(self._utils(), 'capToScrollBox')
+        assert 'Math.max(' in fn, 'a short window draws a rail two rows tall'
+
+    def test_with_no_box_to_measure_the_stylesheet_keeps_its_ceiling(self):
+        """A list drawn outside a scroll box still needs one, and no `max-height` at all is a
+        rail as long as its list."""
+        fn = _fn(self._utils(), 'capToScrollBox')
+        assert 'if (!box) return;' in fn
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-scrollbox { overflow: auto; max-height:' in css, (
+            'the fallback ceiling is gone — the jobs dialog uses it too')
+
+    def test_the_rail_actually_asks_for_it(self):
+        """The CALL and not the name: a function nobody calls is the trap this section has
+        already fallen into once."""
+        tabs = self._tabs()
+        assert "capToScrollBox(document.getElementById('infra-rows-rail'))" in tabs, (
+            'the ceiling is worked out by something the tab never calls')
+        details = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra', '_details.html')))
+        assert 'id="infra-rows-rail"' in details, 'the rail has no name to be found by'
+
+    def test_it_is_asked_on_every_render_of_the_tab(self):
+        """Picking a port rebuilds the rail, so a cap applied only on the first paint is a
+        cap on an element that no longer exists."""
+        tabs = self._tabs()
+        block = tabs.split("tab === 'details'")[1].split('else if')[0]
+        assert 'capToScrollBox(' in block, (
+            'the cap is applied outside the branch that draws the rail')
+
+
+class TestFlaggingARowShowsOnTheScreen:
+    """Reported from the screen: pressing "watch" on a port left the rail without its bell
+    and the button its old colour until F5 — and after F5 the flag was there, so the write
+    had worked all along.
+
+    `apiPost` answers `{status, data}`; the payload is one level down. Read as `r.watch` it
+    was always `undefined`, so `r.watch || []` replaced the list with an EMPTY one on every
+    click: the new flag never showed, and a flag already set on another row disappeared with
+    it until the next load.
+    """
+
+    def _js(self):
+        return _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra', '_details.html')))
+
+    def test_it_reads_the_payload_where_the_payload_is(self):
+        fn = _fn(self._js(), '_infraSetWatch')
+        assert 'r.data' in fn, 'the answer is read one level too high'
+        assert 'r.watch' not in fn.replace('r.data', ''), (
+            'the response is still read as if apiPost returned the body')
+
+    def test_a_reply_with_no_list_does_not_empty_the_one_on_screen(self):
+        """The shape of the bug: `x || []` turns "I could not read it" into "there is
+        nothing", which is a statement about the device rather than about the reply."""
+        fn = _fn(self._js(), '_infraSetWatch')
+        assert 'Array.isArray(' in fn, 'an unreadable answer still wipes the list'
+        assert '|| []' not in fn, 'the empty-list fallback is back'
+
+    def test_a_refusal_is_not_reported_as_a_success(self):
+        """`infra_watch` is a permission of its own, so a refusal is a real answer here — and
+        nothing was reading the status: a 403 toasted "watched" and left the screen claiming
+        something that had not happened. The function's own docstring already promised this."""
+        fn = _fn(self._js(), '_infraSetWatch')
+        assert 'r.status >= 400' in fn
+        assert "'danger'" in fn, 'a failure is announced as good news'
+
+    def test_the_screen_is_repainted_from_what_came_back(self):
+        """Not patched from what was clicked: what is on screen then IS what is stored."""
+        fn = _fn(self._js(), '_infraSetWatch')
+        assert '_infraWatchPaint(' in fn
+        assert fn.index('_infraDetail.host.watch') < fn.index('_infraWatchPaint('), (
+            'it repaints before it has the new list')
+
+    def test_it_repaints_the_flag_and_not_the_device(self):
+        """Reported from the screen: flagging a port reloaded every chart on it. It went
+        through `_infraPaint`, which rewrites the device's whole markup — and a chart is a
+        request to the history API and a canvas drawn from the answer, so moving one icon
+        threw away a week of traffic per picture and blinked them back in as they arrived.
+
+        Nothing else on screen depends on the flag: it turns a profile's verdict back on for
+        that row, which is the SAMPLER's business on the next collection."""
+        fn = _fn(self._js(), '_infraSetWatch')
+        assert '_infraPaint()' not in fn, (
+            'the whole device is rebuilt to move one bell')
+        paint = _fn(self._js(), '_infraWatchPaint')
+        assert 'data-watch-bell' in paint and "getElementById('infra-watch-btn')" in paint, (
+            'it does not reach the two things the flag decides')
+        assert 'innerHTML = _infraHostHtml' not in paint
+
+    def test_only_the_row_that_changed_changes(self):
+        """The rail carries one slot per row; a flag on one of them must not touch the
+        others, and the body may be showing a different port entirely."""
+        paint = _fn(self._js(), '_infraWatchPaint')
+        assert 'el.dataset.watchBell === row' in paint, (
+            'every bell on the rail is rewritten, whichever row was flagged')
+        assert "btn.dataset.row !== row" in paint, (
+            'the button is repainted for a row it is not showing')
+
+    def test_a_live_button_gets_a_function_and_not_an_attribute(self):
+        """`jsStr` HTML-ESCAPES what it quotes — everywhere else it is written into markup,
+        and the parser undoes that when it compiles the handler. `setAttribute` sets the value
+        literally, so the handler read `_infraSetWatch(&quot;snmp&quot;,...)`: a syntax error,
+        and the button stopped responding until something re-rendered it through the HTML
+        path. Reported from the screen exactly that way — flag a port, then nothing happens
+        until you switch ports and come back.
+
+        Patching a live element has no markup in it, so it needs no quoting."""
+        paint = _fn(self._js(), '_infraWatchPaint')
+        assert 'btn.onclick =' in paint, 'the handler is installed as a string again'
+        assert "setAttribute('onclick'" not in paint
+        assert 'jsStr(' not in paint, (
+            'a value is being quoted for markup while patching a live element')
+
+    def test_the_two_fragments_are_written_once(self):
+        """Both are drawn twice — when the pane is built and again when the flag changes — and
+        a second copy of a fragment is a second thing to keep in step."""
+        js = self._js()
+        assert 'function _infraWatchBell(' in js and 'function _infraWatchBtnInner(' in js
+        # Twice in the whole file: once in each helper, and nowhere else.
+        assert js.count('bi-bell-fill') == 2, (
+            'the bell markup is spelt out somewhere instead of being asked for')
+        for fn in ('_infraWatchBell', '_infraWatchBtnInner'):
+            assert 'bi-bell-fill' in _fn(js, fn), f'{fn} no longer draws it'
+
+
+class TestTheIdentityColumnDoesNotRepeatTheHeader:
+    """The registry's own record used to lead that column — address, type, how it is reached,
+    OS, description. Every one is already on the page or one click from it: the header above
+    carries the name, the address, the state and the tags, and the rest is the registry's,
+    behind the button that opens it. A card that repeats the line above it costs a screenful
+    and answers nothing new."""
+
+    def _tabs(self):
+        return _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra', '_tabs.html')))
+
+    def test_the_record_card_is_gone(self):
+        fn = _fn(self._tabs(), '_infraIdentityHtml')
+        assert 'infra_record' not in fn
+        assert 'host_address' not in fn, 'the address is repeated under the header again'
+
+    def test_and_so_is_the_word_it_used(self):
+        for lang in ('es_ES', 'en_EN'):
+            src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
+            assert "'infra_record'" not in src, f'{lang} keeps a label nothing draws'
+
+    def test_what_the_device_says_about_itself_stays(self):
+        """That is the half nothing else on the page shows."""
+        fn = _fn(self._tabs(), '_infraIdentityHtml')
+        assert 'groups.values()' in fn and 'g.facts' in fn
+
+    def test_a_device_that_says_nothing_still_says_so(self):
+        """The empty state used to be reached only when the registry card was empty too."""
+        fn = _fn(self._tabs(), '_infraIdentityHtml')
+        assert 'infra_no_identity' in fn
+        assert '!reg.length' not in fn, (
+            'the empty state is still gated on a card that no longer exists')
+
+    def test_the_header_is_where_those_facts_are(self):
+        """Removing a card is only right while the thing it said is somewhere else."""
+        render = _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra', '_render.html')))
+        head = _fn(render, '_infraHostHtml')
+        assert 'h.address' in head and 'h.name' in head, (
+            'the device header no longer carries what the record card used to')

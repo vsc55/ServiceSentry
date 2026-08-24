@@ -38,6 +38,8 @@ from lib.core.snmp import profiles as _profiles
 # Reading a metric off a device is core: the scheduler, the test screen and the host
 # walk have to get the same answer, so there is one implementation of it.
 from lib.core.snmp.sampler import _row_factor, _safe_key, read_metric
+from lib.core.snmp import manifest as _manifest
+from lib.core.snmp.client import NoAnswer as _NoAnswer
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
 
 def _skipped(metric: dict, text: str) -> bool:
@@ -78,6 +80,20 @@ _STATE_FIELD = 'snmp_prev'
 # twice running is not a device having a bad moment. The OID checks have their own `alert`
 # threshold because there the admin chose what to ask; here the profile did.
 _SAMPLE_ALERT = 2
+
+# How many reads in a row may come back with NO ANSWER before a device is given up on for
+# this cycle. Only while nothing has answered yet: a device that has produced a value is on
+# the network, and a later metric it does not serve is an answer of its own.
+#
+# Reported from the screen: a Proxmox node refusing SNMP sat on "reading the metrics 1/14"
+# for the whole run. Fourteen profiles of a dozen metrics each, every one of them a five-
+# second timeout with a retry — half an hour of waiting for a machine that said nothing in
+# the first ten seconds, holding up a collection somebody was watching and, on the scheduler,
+# the module's whole cycle.
+#
+# Three and not one: a first timeout is a lost datagram, and the point is not to be quick to
+# judge a device — it is to stop asking one that has already answered nothing three times.
+_SILENT_GIVE_UP = 3
 
 
 class SnmpSampler:
@@ -154,10 +170,16 @@ class SnmpSampler:
         # in them, deduplicated, so two groups that share a profile do not sample it twice.
         assigned = [catalog[p] for p in _profiles.expand(catalog, wanted)]
         if not assigned:
+            # The resolve line is already on the screen; leaving without a word leaves it
+            # spinning for the rest of the run.
+            self.report_progress(label, scope=label, state='fail',
+                                 step=self._msg('snmp_step_resolve', lang=watching))
             return
 
         conn = self._conn_params(server)
         if not conn:
+            self.report_progress(label, scope=label, state='fail',
+                                 step=self._msg('snmp_step_resolve', lang=watching))
             return
 
         now = time.time()
@@ -189,6 +211,8 @@ class SnmpSampler:
         # device: it is one small list and the alternative is a database round trip per
         # metric of every profile it carries.
         watched = self._watched_rows(server)
+        silent = 0               # reads in a row that got no answer at all
+        gave_up = False
         for _i, prof in enumerate(assigned, 1):
             # `label_of` and not `prof['label']`: a profile names itself per language
             # (`{'en_EN': …, 'es_ES': …}`), and printing the dict is what happens when you
@@ -212,15 +236,47 @@ class SnmpSampler:
                                               sightings=sightings, watched=watched)
                 answered = answered or ok
                 if err:
-                    errors.append(f"{metric['key']}: {err}")
+                    # The metric's NAME and the error, kept apart. `metric['key']` is the
+                    # internal id a profile files a value under (`sys_name`, `hr_mem_used`)
+                    # and it went straight into a notification — "no data (sys_name: No SNMP
+                    # response…)", reported from a message as a word that had not been
+                    # replaced by anything. A profile names its metrics per language for
+                    # exactly this; the key is what the value is STORED as.
+                    errors.append((_profiles.label_of(metric, lang) or metric['key'],
+                                   str(err)))
+                # A device that is not on the network is not going to be on it three hundred
+                # reads later. `NoAnswer` and not "err": `noSuchName` IS an answer — this
+                # device does not serve that OID and the next profile may be one it does, so
+                # counting it here would abandon a device for being asked the wrong question.
+                silent = silent + 1 if isinstance(err, _NoAnswer) else 0
+                if not answered and silent >= _SILENT_GIVE_UP:
+                    gave_up = True
+                    break
                 if probe and answered:
                     break
+            if gave_up:
+                self._debug(f'SNMP: {label} — no answer in {silent} reads, giving up on it '
+                            f'for this cycle', DebugLevel.warning)
+                break
             if probe and answered:
                 break
 
         self._save_sample_state(srv_key, state)
         self._save_sightings(server, sightings)
         self._emit_samples(srv_key, label, rows, answered, errors)
+        # This device is finished, and whether it ANSWERED is the thing worth seeing on a
+        # checklist somebody is watching. Without it the last phase of every device spun at
+        # N/N until the whole module landed — minutes, on a fleet — and a device refusing
+        # connections was indistinguishable from one still being read. Both reported from
+        # the screen, in one sentence.
+        #
+        # `fail` on nothing at all, and not on `errors`: a profile assigned to a device that
+        # serves half of it costs those metrics and is the normal case, so a partial answer
+        # is a device that answered. The result recorded for it is a separate question, and
+        # `_emit_samples` debounces that on purpose — one lost datagram is not an outage.
+        self.report_progress(label, scope=label,
+                             step=self._msg('snmp_step_read', lang=watching),
+                             state='done' if answered else 'fail')
 
     def _watched_rows(self, server: dict) -> set:
         """The rows of this machine somebody has said are worth an alert.
@@ -408,19 +464,32 @@ class SnmpSampler:
 
     def _emit_samples(self, srv_key: str, label: str, rows: dict,
                       answered: bool, errors: list) -> None:
-        """One result for the device's own metrics, one per row of every table it serves."""
+        """One result for the device's own metrics, one per row of every table it serves.
+
+        *errors* is ``[(metric name, error)]`` — the two kept apart because the two places
+        that use them want different halves. A device that answered NOTHING has one reason
+        and it is about the device, not about whichever metric happened to be asked first;
+        the partial case is the opposite, and naming the metrics is the whole point of it.
+        """
         if not answered:
             # Nothing answered at all. Debounced like a check, because a single lost datagram
             # is not an outage — and reported once for the device rather than once per metric,
             # which would be forty notifications about one unplugged cable.
             streak = self.fail_streak(f'{srv_key}/metrics', True)
             status = streak < _SAMPLE_ALERT
-            reason = errors[0] if errors else 'no answer'
+            # The error alone. When nothing answered, every metric failed the same way and
+            # the first one is not a fact about the device — putting its name in the message
+            # made "PVE02 no data (sys_name: …)" read as though sys_name were the problem.
+            reason = errors[0][1] if errors else 'no answer'
             self._debug(f'SNMP: {label} — sampling got nothing: {reason} '
                         f'(fails={streak}/{_SAMPLE_ALERT})', DebugLevel.warning)
+            # `kind`: this is the collection not happening, which is a different thing
+            # from a check finding something wrong — and now something an operator can route
+            # on its own. It still travels as a `down` wherever that row is not ticked.
             self._emit(f'{srv_key}/metrics', status,
                        self._msg('snmp_sample_down', label, reason),
-                       {'error': reason}, name=label, change_msg=reason)
+                       {'error': reason}, name=label, change_msg=reason,
+                       kind=_manifest.KIND_UNREACHABLE)
             return
 
         self.fail_streak(f'{srv_key}/metrics', False)
@@ -464,7 +533,8 @@ class SnmpSampler:
             # Partial answers are normal — a profile assigned to a device that serves half of
             # it costs those metrics and nothing else, and it is visible where it happened.
             self._debug(f'SNMP: {label} — {len(errors)} metric(s) unanswered: '
-                        f'{"; ".join(errors[:5])}', DebugLevel.info)
+                        f'{"; ".join(f"{n}: {e}" for n, e in errors[:5])}',
+                        DebugLevel.info)
 
     def _save_sightings(self, server: dict, sightings: dict) -> None:
         """Hand what this device SAW to the store that keeps sightings.

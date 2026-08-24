@@ -42,11 +42,24 @@ class MonitorNotifier:
         # down/recovery states. None → the normal per-kind daemon routing.
         self._route_kind = route_kind
 
-    def add(self, kind: str, module: str, item: str, message: str) -> None:
-        """Buffer one alert. ``kind`` ∈ {down, recovery, warn}."""
+    def add(self, kind: str, module: str, item: str, message: str,
+            also: str = '') -> None:
+        """Buffer one alert. ``kind`` ∈ {down, recovery, warn}.
+
+        ``also`` is a SECOND kind this alert may be routed by — a module saying "this failure
+        is a kind of its own" (an SNMP device that answered nothing is the collection not
+        happening, not a check that failed). It is additive: a channel takes the alert if
+        EITHER row is ticked.
+
+        Additive and not a replacement, because a matrix cell is stored only when somebody
+        ticks it and reads false until then. Routing by the new kind alone would have silently
+        stopped every alert that arrives today as a `down` — the alert would not have failed,
+        it would simply have stopped, which is the worst shape a notification bug takes.
+        """
         if kind and message:
             self._alerts.append({'kind': kind, 'module': module or '',
-                                 'item': item or '', 'message': message})
+                                 'item': item or '', 'message': message,
+                                 'also': str(also or '')})
 
     def has_pending(self) -> bool:
         return bool(self._alerts)
@@ -74,7 +87,10 @@ class MonitorNotifier:
                 # Route the whole batch as one kind (e.g. manual_run): all-or-nothing per channel.
                 picked = alerts if notif.get(f'{name}_on_{self._route_kind}', False) else []
             else:
-                picked = [a for a in alerts if notif.get(f'{name}_on_{a["kind"]}', False)]
+                picked = [a for a in alerts
+                          if notif.get(f'{name}_on_{a["kind"]}', False)
+                          or (a.get('also')
+                              and notif.get(f'{name}_on_{a["also"]}', False))]
             if not picked:
                 continue
             try:

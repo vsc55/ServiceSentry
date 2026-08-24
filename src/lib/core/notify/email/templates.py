@@ -11,6 +11,8 @@ falling back to English when the language is not available.
 from __future__ import annotations
 
 import html
+
+from lib.core.notify.email import brand as _brand
 import re
 
 from lib import APP_NAME
@@ -107,6 +109,23 @@ def _wrap(kind: str, title: str, body_html: str, footer_html: str = '',
     c = _COLORS.get(kind, _COLORS['info'])
     badge = s.get(f'badge_{kind}') or kind.upper()
     esc_title = html.escape(title)
+    # A nested table and not an <img> beside text: Outlook lays an inline image out on its own
+    # baseline and the name ends up a few pixels below it. Two cells sit level in every client
+    # there is, which is why every email in the world is built out of tables.
+    # Empty string when there is no logo to send — the header is then the name alone, which
+    # looks deliberate, where a broken-image icon looks like a bug somebody has to report.
+    # 68, from 26. This emblem is a hooded figure inside a ring of glitch lines and at 26 px
+    # none of that survived — reported from an inbox as a smudge you cannot make out. It is
+    # what the header is FOR, so it sets the row's height: 68 plus the padding is a band of
+    # about a hundred pixels on a card six hundred wide.
+    #
+    # An <img> in a cell and NOT a background image, which is the obvious way to make it big
+    # without it dominating and is the one thing that does not survive an inbox: Outlook on
+    # Windows renders mail with Word, which ignores `background-image` on almost everything,
+    # and the usual workaround is a block of VML — a second markup language, in every
+    # template, for a decoration. A header that is a plain cell with a picture in it looks the
+    # same in every client there is.
+    _logo = _brand.img_tag(68)
     footer_text = html.escape(s.get('footer', _DEFAULT_STRINGS['footer']))
     return f"""\
 <!DOCTYPE html>
@@ -135,7 +154,12 @@ def _wrap(kind: str, title: str, body_html: str, footer_html: str = '',
               <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
                   <td style="font-size:18px;font-weight:700;color:#212529;letter-spacing:-.3px">
-                    {APP_NAME}
+                    <table cellpadding="0" cellspacing="0" role="presentation"><tr>
+                      {"<td style='padding-right:10px'>" + _logo + "</td>" if _logo else ""}
+                      <td style="font-size:18px;font-weight:700;color:#212529;letter-spacing:-.3px">
+                        {APP_NAME}
+                      </td>
+                    </tr></table>
                   </td>
                   <td align="right">
                     <span style="display:inline-block;font-size:11px;font-weight:700;

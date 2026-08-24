@@ -63,16 +63,20 @@ class _Monitor:
         self.saves = []
         self._per_module = per_module
         self._db = None
+        self.scopes = []
+        self.prunes = []
 
     def _get_enabled_modules(self):
         return list(self._delays)
 
-    def check_module(self, name):
+    def check_module(self, name, only_host=''):
+        self.scopes.append(only_host)
         time.sleep(self._delays[name])
         return True, name, _Result({f'{name}-item': (True, 'ok', {'v': 1})})
 
-    def _process_module_result(self, name, _data):
+    def _process_module_result(self, name, _data, prune=True):
         self.saved.append(name)
+        self.prunes.append(prune)
 
     @property
     def status(self):
@@ -235,10 +239,10 @@ class TestSayingWhereItIs:
                     cb('running', module_name, detail,
                        {'step': step, 'n': n, 'total': total})
 
-            def check_module(self, name):
+            def check_module(self, name, only_host=''):
                 self.report_progress(name, 'erebor — Synology disks',
                                      step='Leyendo las métricas', n=3, total=24)
-                return super().check_module(name)
+                return super().check_module(name, only_host)
 
         run_checks(_Chatty({'snmp': 0}), ['snmp'], timeout=5,
                    progress_cb=lambda s, m, d='', x=None: seen.append((s, m, d, x)))
@@ -258,9 +262,9 @@ class TestSayingWhereItIs:
                     cb('running', module_name, detail,
                        {'step': step, 'n': n, 'total': total})
 
-            def check_module(self, name):
+            def check_module(self, name, only_host=''):
                 self.report_progress(name, '', step='una fase que nadie del núcleo conoce')
-                return super().check_module(name)
+                return super().check_module(name, only_host)
 
         run_checks(_Phased({'snmp': 0}), ['snmp'], timeout=5,
                    progress_cb=lambda s, m, d='', x=None: seen.append(x))
@@ -376,3 +380,33 @@ class TestTheChannelOutlivesTheBatchWhenTheWorkDoes:
         while time.time() < deadline and getattr(mon, '_progress_sink', None) is not None:
             time.sleep(0.02)
         assert getattr(mon, '_progress_sink', None) is None
+
+
+
+class TestARunAboutOneMachine:
+    """"Collect this device" is not a cycle, and the difference is what gets deleted.
+
+    The prune below the result — every stored key the run did not report — is right when the
+    run covered everything and catastrophic when it did not: a collection of one NAS would
+    wipe the live state of every other machine that module watches. So a narrowed run carries
+    its scope down to the module AND turns the prune off, and those two facts have to travel
+    together or the feature is a data-loss bug with a progress bar on it.
+    """
+
+    def test_without_a_scope_nothing_changes(self):
+        mon = _Monitor({'ping': 0})
+        run_checks(mon, ['ping'], timeout=5)
+        assert mon.scopes == [''] and mon.prunes == [True]
+
+    def test_the_machine_reaches_the_module(self):
+        mon = _Monitor({'ping': 0})
+        run_checks(mon, ['ping'], timeout=5, only_host='h1')
+        assert mon.scopes == ['h1']
+
+    def test_and_a_narrowed_run_never_prunes(self):
+        """The half that deletes. A narrowed run did not fail to report the other machines —
+        it was never asked about them, and treating the two the same is how a button that
+        refreshes one device empties the screen for thirty-nine."""
+        mon = _Monitor({'ping': 0})
+        run_checks(mon, ['ping'], timeout=5, only_host='h1')
+        assert mon.prunes == [False]

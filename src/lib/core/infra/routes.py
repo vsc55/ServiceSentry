@@ -37,6 +37,7 @@ from flask import jsonify, request, session
 from lib.core.history import service as history_svc
 from lib.core.hosts import service as hosts_svc
 from lib.core.hosts.service import _checks_for_host
+from lib.core.hosts import profiles as host_profiles
 from lib.core.infra import jobs as infra_jobs
 from lib.core.infra import service as infra_svc
 from lib.core.infra import evidence as infra_evidence
@@ -115,14 +116,24 @@ def register(app, wa):
         for bare, keys in hosts_svc.host_sampled_keys(status_raw, uid).items():
             for key in keys:
                 bound.setdefault(bare, {}).setdefault(key, '')
-        # The history index, grouped by module, is the fallback for a check with no live
-        # state — a host in maintenance has had its live records purged, and "nothing here"
-        # would read as a machine that has never reported.
+        # The last sample of each series, as the fallback for a check with no live state —
+        # a host in maintenance has had its live records purged, and "nothing here" would
+        # read as a machine that has never reported.
+        #
+        # `latest_by_series` and not `get_index`: the index also counts the samples, dates the
+        # first one and works out the uptime, none of which this page reads, and paying for
+        # them is a second pass over the whole history plus a sort of it. Reported from the
+        # screen as "clicking a device takes seconds, and the URL changes before anything
+        # does" — ~700 ms of that was this call, on a 54.000-row history, for four fields.
+        #
+        # …and only the modules bound to THIS machine. The fallback can only ever contribute
+        # a series that maps to one of its own checks, so the rest of the fleet's is fetched
+        # and discarded.
         hist_by_mod: dict = {}
         hist_store = getattr(wa, '_history', None)
-        if hist_store is not None:
+        if hist_store is not None and bound:
             try:
-                for series in hist_store.get_index():
+                for series in hist_store.latest_by_series(list(bound)):
                     hist_by_mod.setdefault(series.get('module'), []).append(series)
             except Exception:                       # pylint: disable=broad-except
                 pass                                # a chart is not worth failing the page for
@@ -243,15 +254,18 @@ def register(app, wa):
                 evidence = {}                       # a map without the ports beats no map
         return jsonify(infra_topology.build(hosts, attrs_by_host, evidence))
 
-    def _modules_to_collect(uid):
+    def _modules_to_collect(uid, record=None):
         """The enabled modules with at least one enabled check bound to this machine.
 
-        Whole MODULES and not this host's items alone, and that is not laziness. A module runs
-        once for its whole configuration and the monitor prunes, from the state it just wrote,
-        every key the run did not report (``monitor._prune_orphan_status``) — so a run narrowed
-        to one machine would report one machine's keys and silently delete the other thirty-
-        nine's. The collection therefore costs what a scheduler cycle of those modules costs,
-        which is the honest price of "give me a fresh number now".
+        The modules are then RUN narrowed to this machine (``_run_checks(only_host=…)``), which
+        is what the button says it does. It did not always: a module ran with its whole
+        configuration, because the monitor prunes from the state it just wrote every key the
+        run did not report (``monitor._prune_orphan_status``) — so a narrowed run would have
+        deleted the other thirty-nine machines' live state. The prune is now off for a narrowed
+        run, which is the difference between "this run did not find that key" and "this run was
+        never asked about it". Reported from the screen: a collection of one NAS sat on "still
+        working" with six devices in it, five of which nobody had asked about, and could not
+        land because one of THOSE was not answering.
 
         A module the admin disabled is skipped: "collect" must not be a way to run something
         that was turned off. A module ABSENT from the configuration is enabled — absent means
@@ -274,7 +288,126 @@ def register(app, wa):
         # numbers are on the screen behind it.
         out |= {bare for bare in hosts_svc.host_sampled_keys(wa._read_check_status(), uid)
                 if _enabled(bare)}
+        # …and one that has never been sampled has recorded nothing to be found that way. The
+        # line above reads the RESULTS, so it can only name a module that has already run:
+        # a device whose module item was removed a minute ago, and which the registry alone
+        # now makes a device, offered its ping and left out the collection that is the reason
+        # anybody pressed the button. What the host's own record DECLARES answers before the
+        # first cycle, which is when it is asked.
+        out |= {bare for bare in host_profiles.profile_sampled_modules(record or {})
+                if _enabled(bare)}
         return sorted(out)
+
+    def _modules_to_collect_all():
+        """What watches the DEVICES IN THE LIST — the union of what each of them would run.
+
+        The button lives in the device list and that is what it is about. Written first as
+        "every enabled module with anything to run", it swept up the modules that watch no
+        device at all — a Microsoft 365 tenant, an Azure subscription — and the dialog opened
+        on seventeen lines for a fleet of seventeen machines. Reported from the screen in
+        exactly those words: "I mean the devices in the infrastructure list".
+
+        So it is the same question `_modules_to_collect` answers, asked of every machine and
+        unioned — which also means the two can never disagree about what watches a device.
+        The configuration and the live state are read ONCE here rather than per machine: the
+        per-device path re-reads both, which is right for one host and is forty times the work
+        for a fleet.
+        """
+        saved = wa._load_modules() or {}
+
+        def _enabled(bare):
+            for key in (bare, f'watchfuls.{bare}'):
+                cfg = saved.get(key)
+                if isinstance(cfg, dict):
+                    return bool(cfg.get('enabled', True))
+            return True
+
+        store = getattr(wa, '_hosts_store', None)
+        try:
+            hosts = store.list(decrypt=False) if store is not None else []
+        except Exception:                       # pylint: disable=broad-except
+            hosts = []
+        uids = {str((h or {}).get('uid') or '').strip() for h in hosts or ()}
+        uids.discard('')
+        if not uids:
+            return []
+
+        def _binds(item):
+            """Whether one item watches a machine that is in the list.
+
+            BOTH bindings, because there are two and the second is not a special case: a
+            cluster check — a keepalived VIP, a Proxmox cluster — is ONE item bound to several
+            machines through ``host_uids``, which is the core's own convention (host_binding,
+            authz and the permission service all key on it). Read only as ``host_uid`` it
+            binds to nothing, so a module watching eight machines on this very screen was left
+            out of the button that says it collects them.
+            """
+            if not isinstance(item, dict) or item.get('enabled') is False:
+                return False
+            if str(item.get('host_uid') or '').strip() in uids:
+                return True
+            many = item.get('host_uids')
+            return isinstance(many, list) and any(str(u).strip() in uids for u in many)
+
+        out = set()
+        # An enabled item bound to a machine that is IN THE LIST. Bound to nothing, or to a
+        # machine the registry no longer has, is not a device on this screen.
+        for mod_key, mod_cfg in saved.items():
+            if not isinstance(mod_cfg, dict):
+                continue
+            bare = str(mod_key).strip().rsplit('.', 1)[-1]
+            if bare in out or not _enabled(bare):
+                continue
+            for coll, items in mod_cfg.items():
+                if str(coll).startswith('__') or not isinstance(items, dict):
+                    continue
+                if any(_binds(it) for it in items.values()):
+                    out.add(bare)
+                    break
+        # The devices the REGISTRY alone makes devices: no item anywhere to be found above,
+        # and the numbers on the screen behind the button come from them.
+        status_raw = wa._read_check_status()
+        for host in hosts or ():
+            out |= {b for b in host_profiles.profile_sampled_modules(host) if _enabled(b)}
+            out |= {b for b in hosts_svc.host_sampled_keys(
+                status_raw, str((host or {}).get('uid') or '')) if _enabled(b)}
+        return sorted(out)
+
+    @app.route('/api/v1/infra/collect', methods=['POST'])
+    @infra_collect_req
+    def api_infra_collect_all():
+        """Collect from the WHOLE fleet, from the list rather than from one machine.
+
+        The per-device button narrows its run to that device (`only_host`), which is what
+        makes it quick and what keeps it from walking somebody else's rack. This is the other
+        question — "refresh everything" — and it is the un-narrowed run: every module with its
+        whole configuration, which is what a scheduler cycle is. The orphan prune therefore
+        stays ON, because this run really did cover everything.
+
+        Behind `devices_view` as well as `infra_collect`, and that is the point of asking
+        twice. `infra_collect` says which ACT you may perform; a run over the whole fleet
+        polls machines a narrowed operator may not be allowed to see, so the flag that says
+        "you see the whole fleet" is what decides you may refresh it. Somebody scoped to three
+        racks still has the per-device button, which is scoped the same way they are.
+        """
+        if 'devices_view' not in set(wa._get_session_permissions() or []):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        modules = _modules_to_collect_all()
+        if not modules:
+            return jsonify({'error': wa._t('infra_collect_nothing_all')}), 409
+        if not wa._modules_dir:
+            return jsonify({'error': wa._t('checks_no_modules_dir')}), 500
+        if not wa._check_lock.acquire(blocking=False):
+            return jsonify({'error': wa._t('checks_already_running')}), 409
+        try:
+            job_id = infra_jobs.start_collect(
+                wa, '', wa._t('infra_collect_all_scope'), modules,
+                actor=session.get('username', ''), ip=request.remote_addr or '',
+                lang=session.get('lang', '') or wa._DEFAULT_LANG)
+        except Exception:                       # pylint: disable=broad-except
+            wa._check_lock.release()
+            raise
+        return jsonify({'ok': True, 'job_id': job_id, 'modules': modules})
 
     @app.route('/api/v1/infra/hosts/<uid>/collect', methods=['POST'])
     @infra_collect_req
@@ -307,13 +440,24 @@ def register(app, wa):
             return jsonify({'error': wa._t('host_not_found')}), 404
         if not _may_see(uid, set(wa._get_session_permissions() or [])):
             return jsonify({'error': wa._t('access_denied')}), 403
-        if not wa._modules_dir:
-            return jsonify({'error': wa._t('checks_no_modules_dir')}), 500
-        modules = _modules_to_collect(uid)
+        modules = _modules_to_collect(uid, record)
         if not modules:
             # Not an error and not a lie: a machine nobody watches has nothing to collect,
             # and reporting "done" would draw a fresh timestamp over an empty screen.
             return jsonify({'error': wa._t('infra_collect_nothing')}), 409
+        # AFTER deciding there is something to run, and that order is the fix rather than the
+        # detail. This is a precondition of RUNNING — the executor loads the modules' code
+        # from that directory — and it was being checked before working out whether anything
+        # was going to run at all. What a machine with no checks bound to it has to say is
+        # "there is nothing to collect", and that answer does not depend on where the module
+        # code lives: the configuration this reads comes from the database.
+        #
+        # So a host nobody watches answered 500 "Modules directory not configured", which
+        # reads as a broken server and is neither the truth nor actionable. Found by the
+        # integration suite, which had never been run against this route: three of its tests
+        # asked for 409 and got 500, and had done so since the route was written.
+        if not wa._modules_dir:
+            return jsonify({'error': wa._t('checks_no_modules_dir')}), 500
         # The same lock the Status screen's run takes, so the two cannot overlap — they would
         # be running the same modules against the same state table. Taken HERE and released by
         # the job: between deciding to start and the thread actually starting there must be no

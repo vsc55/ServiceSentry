@@ -69,6 +69,41 @@ async function _infraCollect() {
     _infraCollectPoll(jobId);
 }
 
+/** The other question: refresh EVERYTHING, from the list.
+ *
+ *  The per-device button narrows its run to that device, which is what makes it quick. This
+ *  is the un-narrowed run — every module with its whole configuration, which is what a
+ *  scheduler cycle is — so it costs what a cycle costs: on a fleet with SNMP, minutes.
+ *
+ *  Hence the confirmation, which the per-device button does not have. It is not a dangerous
+ *  act, it is an EXPENSIVE one that also makes every check alert on what it finds, and the
+ *  difference between the two buttons is invisible until it has already started. */
+function _infraCollectAll() {
+    if (_infraCollecting()) return;
+    showConfirmModal(t('infra_collect_all_confirm'), () => _infraCollectAllRun());
+}
+
+async function _infraCollectAllRun() {
+    const res = await apiPost('/api/v1/infra/collect', {});
+    if (!res || res.status !== 200) {
+        showToast(res?.data?.error || t('infra_collect_failed'), 'danger');
+        return;
+    }
+    const jobId = (res.data || {}).job_id;
+    if (!jobId) { showToast(t('infra_collect_failed'), 'danger'); return; }
+    // `host: ''` is what says "this one is about the fleet" — the dialog's title, its note and
+    // which header slot shows the bar all read it, and it is the same thing the server means
+    // by a job with no host.
+    _infraCollectJob = {
+        id: jobId, host: '', host_name: t('infra_collect_all_scope'), done: false,
+        total: (res.data.modules || []).length, completed: 0,
+        modules: (res.data.modules || []).map(m => ({module: m, state: 'pending', detail: ''})),
+        answered: [], errors: [], error: '',
+    };
+    _infraCollectOpen();
+    _infraCollectPoll(jobId);
+}
+
 //: Whether this page-load has already asked whether something was running. Once: the answer
 //: only matters while the page does not know, and after that `_infraCollectJob` is the answer.
 let _infraCollectAdopted = false;
@@ -173,6 +208,11 @@ function _infraCollectPaint() {
         body.innerHTML = `<div class="ss-modal-primary">${_infraCollectBody(_infraCollectJob)}</div>`;
     const slot = document.getElementById('infraCollectSlot');
     if (slot) slot.innerHTML = _infraCollectSlotHtml(_infraHost);
+    // The fleet list has a slot of its own, and only one of the two is ever on screen — but
+    // painting only the device one is how the list's button sat there saying "collect" while
+    // a collection was running.
+    const all = document.getElementById('infraCollectAllSlot');
+    if (all) all.innerHTML = _infraCollectAllSlotHtml();
 }
 
 /** How far along, 0–100.
@@ -188,13 +228,33 @@ function _infraCollectPct(job) {
     return Math.min(100, Math.round((job.completed / job.total) * 100));
 }
 
-/** The header slot: the button, or — while a run is out — the bar that replaced it. */
+/** The device header's slot: its button, or — while ITS run is out — the bar. */
 function _infraCollectSlotHtml(uid) {
     const job = _infraCollectJob;
     if (!job || job.done || (uid && job.host !== uid))
         return `<button class="btn btn-sm btn-secondary" onclick="_infraCollect()"
                         title="${escAttr(t('infra_collect_tt'))}">
                     <i class="bi bi-broadcast me-1"></i>${esc(t('infra_collect'))}</button>`;
+    return _infraCollectBarHtml(job);
+}
+
+/** The fleet list's slot: its button, or the bar for WHATEVER is running.
+ *
+ *  Whatever, and not only its own: one collection runs at a time — the server holds the same
+ *  lock the Status screen's run takes — so while a device is being collected this button
+ *  cannot be pressed either. Showing it as a button would be offering something that answers
+ *  "already running"; showing the bar says what is actually happening and opens it. */
+function _infraCollectAllSlotHtml() {
+    const job = _infraCollectJob;
+    if (!job || job.done)
+        return `<button class="btn btn-sm btn-secondary" onclick="_infraCollectAll()"
+                        title="${escAttr(t('infra_collect_all_tt'))}">
+                    <i class="bi bi-broadcast me-1"></i>${esc(t('infra_collect_all'))}</button>`;
+    return _infraCollectBarHtml(job);
+}
+
+/** The bar that replaces either button while a run is out. */
+function _infraCollectBarHtml(job) {
     const pct = _infraCollectPct(job);
     const running = (job.modules || []).find(m => m.state === 'running');
     // What the bar says it is doing: the phase a module named for itself if there is one,
@@ -250,7 +310,8 @@ function _infraCollectBody(job) {
                  style="width:${pct}%"></div>
         </div>
         <div class="text-muted ss-fs-2 mb-2">
-            <i class="bi bi-diagram-3 me-1"></i>${esc(t('infra_collect_whole_module'))}</div>
+            <i class="bi ${job.host ? 'bi-bullseye' : 'bi-diagram-3'} me-1"></i>${
+                esc(t(job.host ? 'infra_collect_this_device' : 'infra_collect_all_note'))}</div>
         <div class="small">${(job.modules || []).map(_infraCollectRow).join('')}</div>
         ${job.error ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-0">${esc(job.error)}</div>` : ''}
         <div class="small text-muted mt-3">

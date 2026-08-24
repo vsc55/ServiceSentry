@@ -50,6 +50,65 @@ class TestHostExecLocal:
         assert code == -1 and 'command' in err
 
 
+class TestADeviceThatRunsNothing:
+    """`kind == 'none'` — the default, and the answer for most equipment: a switch, a router,
+    a UPS or a NAS is read over SNMP and there is nothing to run a shell command on.
+
+    It has to REFUSE, not fall through. Every value that was not `remote` used to mean "here",
+    so a check bound to a device with no connection ran on the panel's own machine and filed
+    the answer under that device's name — no error, no warning, a number that was true about
+    the wrong box. An option that changes nothing would be worse than not having one.
+    """
+
+    def test_it_does_not_run_the_command_anywhere(self):
+        with patch('subprocess.run') as sr:
+            out, err, code = _w().host_exec({'host_kind': 'none'}, 'echo hi')
+        assert code == -1 and out == ''
+        assert not sr.called, "it ran the device's command on the panel"
+
+    def test_it_says_why(self):
+        _, err, _ = _w().host_exec({'host_kind': 'none'}, 'echo hi')
+        assert 'connection' in err.lower(), err
+
+    def test_the_runner_agrees_with_it(self):
+        """Two entry points, one decision: `hosts.runner.run` is the other side of the same
+        question and must answer it the same way."""
+        from lib.core.hosts import runner                      # noqa: PLC0415
+        with patch('subprocess.run') as sr:
+            out, err, code = runner.run({'kind': 'none', 'address': 'sw1'}, 'echo hi')
+        assert (out, code) == ('', -1) and not sr.called
+        assert err == runner.NO_EXEC
+        _, err2, _ = _w().host_exec({'host_kind': 'none'}, 'echo hi')
+        assert err2 == runner.NO_EXEC, 'two wordings for one refusal'
+
+    def test_no_host_at_all_still_runs_here(self):
+        """A classic inline check has always meant this machine, and says so by having no host
+        to disagree with. Refusing that would be reading "no connection" out of "no device"."""
+        from lib.core.hosts import runner                      # noqa: PLC0415
+        fake = MagicMock(stdout='OUT', stderr='', returncode=0)
+        with patch('subprocess.run', return_value=fake):
+            assert runner.run(None, 'echo hi') == ('OUT', '', 0)
+
+    def test_a_bound_host_always_carries_one_of_the_three(self):
+        """An item with NO `host_kind` is the inline case and runs here — that is the classic
+        check and it has no device to disagree with. What must not exist is a BOUND host whose
+        kind arrives as something else: the binding writes the store's own value through, so
+        the refusal above can be trusted to fire when it should."""
+        from lib.core.hosts.store import HostsStore            # noqa: PLC0415
+        src = _read_binding()
+        assert "resolved['host_kind'] = str(primary.get('kind') or 'none')" in src, (
+            'the binding collapses the kind again, so `none` never reaches host_exec')
+        assert set(HostsStore.KINDS) == {'none', 'local', 'remote'}
+
+
+def _read_binding():
+    import os as _os                                            # noqa: PLC0415
+    root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
+    with open(_os.path.join(root, 'lib', 'modules', 'host_binding.py'),
+              encoding='utf-8') as fh:
+        return fh.read()
+
+
 class TestHostExecRemote:
 
     def _remote_item(self):

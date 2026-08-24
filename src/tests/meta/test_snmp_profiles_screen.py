@@ -759,3 +759,98 @@ class TestTheDeviceGetsAskedWhetherItAgrees:
         block = py.split('def _test_read(')[1].split('    @staticmethod')[0]
         assert "m.get('index_label')" in block and "m.get('scale_by')" in block
         assert 'def _covered_by(' in py and "'.'.join(parts[:i]) in roots" in py
+
+
+class TestWhereAConnectionProfileIsDrawn:
+    """Which FORM a protocol's connection belongs in, and the rule that decides.
+
+    A profile the CORE declares is the device's own connection — its address, its port, the
+    identity it answers to — and belongs in General beside SSH. One a MODULE declares is a
+    conversation that module holds with the box and stays with the module, in Monitoring.
+    `builtin` is that distinction and it already travels with every profile, so neither side
+    has to name a protocol.
+
+    Reported from the screen as "add SNMP as a connection method". It already was one: its
+    profile moved to the core precisely because an SNMP connection is a property of the
+    DEVICE, and the form was the only place that had not been told — the editor went on being
+    drawn under the module, in another tab, while SSH sat in General.
+    """
+
+    def _modal(self):
+        # `_modal.html` and not HOST_MODAL: the constant points at `_save.html`, which is
+        # where the shared field renderer lives. The cards are drawn in the modal body.
+        return _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_modal.html')))
+
+    def _checks(self):
+        return _strip_comments(_read(os.path.join(
+            SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_checks.html')))
+
+    def test_the_core_owns_the_snmp_connection(self):
+        """The premise of everything below: if SNMP stopped being core-declared, its editor
+        would belong back with the module and this whole placement would be wrong."""
+        from lib.core.hosts.profiles import core_profiles     # noqa: PLC0415
+        assert set(core_profiles()) == {'ssh', 'snmp'}, (
+            'the set of connections the core owns changed — check where each is drawn')
+
+    def test_general_draws_every_core_profile(self):
+        js = self._modal()
+        # The CALL and not the name: `function _renderCoreProfileCards()` contains the name
+        # too, so a guard that looks for it alone passes on a function nobody calls — which
+        # is the exact trap the neighbouring test was written about.
+        assert '${_renderCoreProfileCards()}' in js, (
+            'the cards are built by a function the form never calls')
+        fn = _fn(js, '_renderCoreProfileCards')
+        assert 'spec.builtin' in fn, 'it no longer selects by who declared the profile'
+        assert '_renderCoreProfileCard(' in fn
+
+    def test_and_the_module_form_draws_the_rest(self):
+        fn = _fn(self._checks(), '_hostProfileBlock')
+        assert '!spec.builtin' in fn, (
+            'the module form draws core profiles too, so the same editor appears twice — '
+            'two forms writing one draft, and only one of them repainted')
+
+    def test_neither_side_writes_a_protocol_name_into_the_rule(self):
+        """It used to read `proto !== 'ssh'`: the same rule with one protocol's name in it.
+        That is what stopped being true the day SNMP moved to the core, silently — the code
+        went on doing exactly what it said and what it said was no longer the rule."""
+        for fn in (_fn(self._checks(), '_hostProfileBlock'),
+                   _fn(self._modal(), '_renderCoreProfileCards')):
+            for name in ("'ssh'", '"ssh"', "'snmp'", '"snmp"'):
+                assert name not in fn, f'{name} is written into the rule'
+
+    def test_ssh_is_not_drawn_twice(self):
+        """The Local/Remote selector already draws it, and it IS that selector's answer —
+        not a second opinion about how the box is reached."""
+        fn = _fn(self._modal(), '_renderCoreProfileCards')
+        assert "'__host__'" in fn, 'nothing excludes the profile the selector governs'
+        assert '_renderSshConnection' in self._modal()
+
+    def test_the_card_reuses_the_one_field_renderer(self):
+        """A second copy would be a second set of rules about show_when, credentials and the
+        address field — free to disagree the day one of them changes."""
+        fn = _fn(self._modal(), '_renderCoreProfileCard')
+        assert '_renderProfileFields(' in fn
+        assert 'hmProfFields_' in fn, 'the repaint looks up an element nothing creates'
+
+    def test_the_card_can_be_tested_through_the_profiles_own_module(self):
+        """Named by the declaration, so the button knows what to run without anything here
+        knowing what SNMP is."""
+        fn = _fn(self._modal(), '_renderCoreProfileCard')
+        assert 'spec.module' in fn and '_testHostProfile(' in fn
+        assert 'testHostModule(' in _fn(self._modal(), '_testHostProfile'), (
+            'a second test endpoint is a second answer free to disagree with the module card')
+
+    def test_the_two_type_fields_are_not_both_called_type(self):
+        """Reported from the screen: one is WHAT the box is, the other is HOW the panel
+        reaches it, and both labels said "Tipo". Nothing failed — the form simply could not
+        be read."""
+        for lang in ('es_ES', 'en_EN'):
+            src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
+            words = {}
+            for key in ('host_type', 'host_kind'):
+                line = next(ln for ln in src.splitlines()
+                            if ln.strip().startswith(f"'{key}':"))
+                words[key] = line.split(':', 1)[1].strip().rstrip(',')
+            assert words['host_type'] != words['host_kind'], (
+                f'{lang}: both fields are labelled {words["host_type"]}')

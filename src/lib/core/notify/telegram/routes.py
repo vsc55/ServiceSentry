@@ -8,6 +8,8 @@ Routes registered by this file:
 """
 
 import re
+import socket
+import time
 
 import requests as req
 from flask import jsonify
@@ -38,14 +40,25 @@ def register(app, wa):
             return jsonify({'error': wa._t('telegram_invalid_token')}), 400
         if not _CHAT_ID_RE.match(chat_id):
             return jsonify({'error': wa._t('telegram_invalid_chat_id')}), 400
+        # Through the SAME formatter every real notification goes through, in the same
+        # parse mode. It used to be a hand-written Markdown one-liner, which made the test
+        # the one message this panel sends that looks like nothing else it sends — so it
+        # could not answer the question somebody presses it for ("will an alert arrive, and
+        # will it be readable"), and it broke differently: Markdown chokes on the
+        # underscores and asterisks that module names are full of, which is precisely why
+        # the real path moved to HTML.
+        from lib.core.notify.telegram import notify as _tg   # noqa: PLC0415
+        from lib.core.notify.formatting import notify_lang   # noqa: PLC0415
+        full_cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        lang = notify_lang(full_cfg)
+        text = _tg._format(
+            'test', module='', item=socket.gethostname(), status='',
+            message=wa._t('telegram_test_message'),
+            timestamp=time.strftime('%Y-%m-%d %H:%M:%S'), lang=lang, cfg=full_cfg)
         try:
             result = req.post(
                 f'https://api.telegram.org/bot{token}/sendMessage',
-                data={
-                    'chat_id': chat_id,
-                    'text': wa._t('telegram_test_message'),
-                    'parse_mode': 'Markdown',
-                },
+                data={'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'},
                 timeout=10,
             )
             if result.status_code == 200:

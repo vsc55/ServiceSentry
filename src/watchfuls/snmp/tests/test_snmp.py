@@ -1627,3 +1627,43 @@ class TestDiscoveryShowsTheValue:
                 'servers': {'sw1': self._srv(), 'sw2': self._srv()},
             })
         assert {r['display_name'] for r in out} == {'[sw1] up', '[sw2] up'}
+
+
+class TestTheCompileThreadOutlivesItsOwnEntry:
+    """A compile job is collected by the first status poll that sees it done, so its entry can
+    be gone while the thread that owns it is still writing. Indexed directly that is a
+    `KeyError` on a daemon thread: the traceback goes to stderr, the thread dies where it
+    stood, and the compile it was recording is never recorded — a job that ran, finished, and
+    left no trace of either.
+
+    Surfaced by CI as eight `PytestUnhandledThreadExceptionWarning`s. Nothing failed and
+    nothing went red, which is the same shape as the bug this protects against.
+    """
+
+    @staticmethod
+    def _run_body():
+        with open(mib_admin.__file__, encoding='utf-8') as fh:
+            src = fh.read()
+        return src.split('def compile_mibs_start(')[1].split(
+            chr(10) + '    @classmethod')[0]
+
+    def test_the_thread_never_indexes_the_registry_directly(self):
+        body = self._run_body()
+        after = body.split('def _note(')[1]
+        assert '_compile_jobs[job_id]' not in after, (
+            'the worker can still die on an entry somebody already collected')
+
+    def test_it_writes_through_something_that_tolerates_the_entry_being_gone(self):
+        body = self._run_body()
+        note = body.split('def _note(')[1].split('def _progress_cb(')[0]
+        assert '_compile_jobs.get(job_id)' in note and 'is not None' in note
+
+    def test_every_write_the_thread_makes_goes_through_it(self):
+        """Progress, the indexing phase and the final result — the last one is the one that
+        matters, and it is also the one racing the poll that collects the entry."""
+        body = self._run_body()
+        assert body.count('_note(') >= 4, 'a write went back to indexing the dict'
+
+    def test_a_finished_job_still_records_what_it_did(self):
+        body = self._run_body()
+        assert "'done':      True" in body and "'result_ok'" in body

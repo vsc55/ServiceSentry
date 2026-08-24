@@ -29,6 +29,10 @@ const _INFRA_COLS = [
     { id: 'address', label: () => t('col_host_address'), sortKey: 'address', always: false },
     { id: 'status',  label: () => t('col_host_status'),  sortKey: 'status',  always: false, resizable: false },
     { id: 'modules', label: () => t('col_host_modules'), sortKey: 'modules', always: false, resizable: false },
+    // Two different questions, and the column headed "Tipo" was answering the second one
+    // with the first one's name: it printed `local` / `remote`, raw and untranslated, under a
+    // heading that everywhere else on this screen means hypervisor / NAS / switch.
+    { id: 'device_type', label: () => t('col_host_type'), sortKey: 'device_type', always: false },
     { id: 'kind',    label: () => t('col_host_kind'),    sortKey: 'kind',    always: false },
     { id: 'os',      label: () => t('col_host_os'),      sortKey: 'os',      always: false },
     { id: 'tags',    label: () => t('col_host_tags'),    sortKey: null,      always: false },
@@ -119,7 +123,8 @@ createListTable({
             // but it is not the good news an OK is either.
             case 'status':  return ({error: 0, warning: 1, '': 2, ok: 3})[h.status || ''] ?? 2;
             case 'modules': return (h.modules_active || 0) - (h.modules_total || 0);
-            case 'kind':    return h.kind || '';
+            case 'device_type': return hostTypeLabel(h.device_type) || '';
+            case 'kind':    return t('host_kind_' + (h.kind || 'none'));
             case 'os':      return h.os || '';
             default:        return (h.name || '').toLowerCase();
         }
@@ -131,7 +136,14 @@ createListTable({
             case 'address': return `<td class="text-nowrap"><code class="text-muted ss-fs-3">${esc(h.address || '—')}</code></td>`;
             case 'status':  return `<td class="text-nowrap">${_infraStateBadge(h.status, h.maintenance)}</td>`;
             case 'modules': return `<td class="text-nowrap small text-muted">${h.modules_active || 0}/${h.modules_total || 0}</td>`;
-            case 'kind':    return `<td class="text-nowrap small text-muted">${esc(h.kind || '')}</td>`;
+            case 'device_type': return `<td class="text-nowrap small">${h.device_type
+                ? `<i class="bi ${escAttr(hostTypeIcon(h.device_type))} me-1 text-muted"></i>${
+                    esc(hostTypeLabel(h.device_type))}`
+                : `<span class="text-muted">${esc(t('host_type_unset'))}</span>`}</td>`;
+            // Translated, not the stored token: `remote` is a value in a column, not a word
+            // anybody asked to read.
+            case 'kind':    return `<td class="text-nowrap small text-muted">${
+                esc(t('host_kind_' + (h.kind || 'none')))}</td>`;
             case 'os':      return `<td class="text-nowrap small text-muted">${esc(h.os || '')}</td>`;
             case 'tags':    return `<td class="small">${(h.tags || []).map(tg =>
                 `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${esc(tg)}</span>`).join('')}</td>`;
@@ -148,6 +160,15 @@ createListTable({
     actions: uid => `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="infraOpen(${jsStr(uid)})"
         title="${escAttr(t('infra_open_host'))}"><i class="bi bi-box-arrow-in-right"></i></button>`,
     headerLead: () => _infraView.switcher('setInfraView'),
+    // Collect from the WHOLE fleet. Behind `devices_view` as well as `infra_collect`, the
+    // same pair the route asks for: the flag says which act you may perform, and a run over
+    // every machine is only offered to somebody who sees every machine. A narrowed operator
+    // still has the per-device button, which is scoped the way they are.
+    headerButtons: () => {
+        const perms = new Set(currentUser.permissions || []);
+        if (!perms.has('infra_collect') || !perms.has('devices_view')) return '';
+        return `<span id="infraCollectAllSlot">${_infraCollectAllSlotHtml()}</span>`;
+    },
     // The shared split button: its main side refreshes now, its caret sets the interval.
     // Regenerated on every render on purpose — it is a pure function of the current interval,
     // so it cannot go stale against the timer it describes.

@@ -101,6 +101,18 @@ async function infraOpen(uid) {
         pane.innerHTML = '<div id="infra-fleet"></div>';
         return _infraRender();
     }
+    // Somebody CLICKED, so say so before going to ask. `_infraOpenView` paints its spinner
+    // only into an empty pane — the guard that stops a refresh blinking a device already on
+    // screen — and arriving here from the fleet list the pane is not empty: it holds the
+    // table. So the one navigation with a person waiting at the other end was the one with no
+    // feedback at all. Reported from the screen as "the URL changes and then it sits there
+    // for seconds", which is exactly what it looked like: `_infraSyncUrl()` above is
+    // instant, and everything after it waits on the network.
+    //
+    // Here and not in `_infraOpenView`, because only this path KNOWS a person is navigating:
+    // its other callers are a re-render of what is already open.
+    pane.innerHTML = `<div class="text-center py-5">
+        <div class="spinner-border spinner-border-sm"></div></div>`;
     // The machine's own payload, not the fleet's: opening one is not a reason to re-ask for
     // the other forty.
     return _infraOpenView(pane);

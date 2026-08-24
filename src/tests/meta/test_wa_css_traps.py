@@ -452,3 +452,50 @@ class TestARailReachesTheBottomOfItsCard:
                 assert 'ss-vfill' in attrs, (
                     f'{os.path.basename(path)}: <div{attrs}> sits between the body and the '
                     'rail without passing the height down')
+
+
+class TestARowHoverThatPaintsTheWholeTable:
+    """A hover meant for one row, applied to the container of forty.
+
+    The configuration sheet lights up the field row under the cursor, which is right for a
+    field — a label and its control on one line. The notification routing matrix is not one
+    of those: it is a whole TABLE inside a single `cfg-field-wrap`, so the rule painted the
+    wrapper and every row in it changed colour at once. Reported from the screen in exactly
+    those words: "hovering one row changes the colour of all of them".
+
+    A table brings its own row hover (`.table-hover` + `.ss-hover-rows`) and that is the one
+    that means something, so the container's must stand aside — the same `:not(:has(table))`
+    the dashboard widgets already use, for the same reason.
+    """
+
+    def _css(self):
+        return _read(CSS)
+
+    def test_the_field_hover_stands_aside_for_a_table(self):
+        rule = [ln for ln in self._css().splitlines()
+                if '.cfg-field-wrap' in ln and ':hover' in ln and 'background' in ln]
+        assert rule, 'the field hover is gone — this guard needs updating with what replaced it'
+        assert all(':not(:has(table))' in ln for ln in rule), rule
+
+    def test_the_routing_matrix_is_still_one_wrap_around_a_table(self):
+        """Which is what makes the guard necessary: change this to a wrap per ROW and the
+        rule above stops mattering — but nothing would tell you it had."""
+        src = _read(os.path.join(TPL, 'partials', 'cfg', 'notify', '_routing.html'))
+        assert 'cfg-field-wrap' in src and '<table' in src
+
+    def test_the_table_carries_its_own_row_hover(self):
+        """Because the container no longer paints anything, this IS the hover now. Without
+        it the fix would read as "the highlight disappeared".
+
+        And it is the ACCENT one: this table's group headers are filled with the same grey a
+        default hover uses, so the row under the cursor read as another heading rather than as
+        a selection — reported in those words right after the first fix landed.
+        """
+        src = _read(os.path.join(TPL, 'partials', 'cfg', 'notify', '_routing.html'))
+        assert 'table-hover' in src and 'ss-hover-accent' in src
+        css = self._css()
+        assert '.ss-hover-accent' in css, 'the class it asks for is not defined'
+        # …and the two are actually different colours, which is the whole point.
+        grey = css.split('.ss-hover-rows {')[1].split('}')[0]
+        accent = css.split('.ss-hover-accent {')[1].split('}')[0]
+        assert grey.strip() != accent.strip()

@@ -52,6 +52,7 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from lib import APP_NAME
+from lib.core.notify.email import brand as _brand
 
 _VALID_HTML_TYPES = {'test', 'alert', 'summary'}
 
@@ -265,7 +266,10 @@ def register(app, wa):
             html_out = email_templates.render_summary(
                 items=_SAMPLE_ITEMS, timestamp='{timestamp}',
                 lang=lang, strings=template_strings)
-        return jsonify({'html': html_out, 'strings': strings}), 200
+        # A preview is drawn in a browser, where `cid:` resolves to nothing — so without
+        # this the one screen that exists to show what the email looks like is the only place
+        # it looks broken.
+        return jsonify({'html': _brand.for_preview(html_out), 'strings': strings}), 200
 
     @app.route('/api/v1/notify/html-templates/<tpl_type>/preview', methods=['POST'])
     @config_view_req
@@ -308,7 +312,8 @@ def register(app, wa):
                 items=_SAMPLE_ITEMS, timestamp=_SAMPLE_ALERT['timestamp'],
                 lang=lang, strings=strings,
                 html_override=html_override)
-        return jsonify({'html': html_out}), 200
+        # Same reason as the built-in preview above: a browser cannot resolve a `cid:`.
+        return jsonify({'html': _brand.for_preview(html_out)}), 200
 
     @app.route('/api/v1/notify/html-templates/<tpl_type>/<lang>', methods=['PUT'])
     @config_edit_req

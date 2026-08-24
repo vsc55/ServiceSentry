@@ -8,6 +8,370 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.116] - 2026-08-24
+
+### Added
+- **The device's SNMP connection is edited where its SSH one is.** Reported from the screen
+  as "add SNMP as a connection method": it already was one — the profile moved to the core
+  precisely because an SNMP connection is a property of the DEVICE, its port, the identity it
+  answers to and the profiles it declares itself to serve not stopping being true when no
+  check points at it — and the form was the only place that had not been told. Its editor
+  went on being drawn under the module, in another tab, while SSH (the same kind of thing)
+  sat in General. Now General draws a collapsible card per connection **the core declares**,
+  with that protocol's credential picker, its device profiles and a test that runs through
+  the profile's own module. The rule is `builtin`, which already travels with every profile,
+  so nothing on either side names a protocol: the module form draws what a MODULE declared,
+  General draws what the CORE declared, and a core profile added tomorrow appears there on
+  its own. The old rule read `proto !== 'ssh'` — the same rule with one protocol's name
+  written into it, which is what silently stopped being true the day SNMP moved.
+- **…and NOT as a third value of Local / Remote (SSH).** That is what it looked like it
+  should be, and it would have cost data: those two are exclusive and connections are not.
+  Two of this fleet's hypervisors answer SSH *and* SNMP, six carry `keepalived` and `proxmox`
+  as well, and `hosts.profiles` has been a map per protocol from the start. A device forced
+  to pick one would have lost the other.
+
+### Added
+- **The Logs tab counts its messages, like every other tab.** It could not before: the others
+  count what is already in the device's payload, and logs are not in it — they are rows of the
+  syslog table. So the badge is asked for AFTER the section paints (one count, ~60 ms with the
+  index behind it on a 60.000-row table) and patched in place when the answer lands; rendering
+  the device again would throw away whatever tab somebody had just opened. Asked once per
+  machine rather than per render, since a tab switch redraws the tabs and the figure changed
+  by three. And a count nobody knows yet draws NO badge rather than a zero — "0 logs" about a
+  machine with forty thousand is worse than saying nothing while the answer is on its way.
+- **The Logs table sorts and its columns resize.** Both already existed and this was the one
+  table not using them: `_thSortInner` for the header, `_attachColFeatures` for resize,
+  double-click auto-fit and drag-to-reorder — the same controls the audit, event-log and list
+  tables have. The sort is the SERVER's (`sort` / `order`, already whitelisted in
+  `SyslogStore._SORTABLE`), because this table is paged there too: sorting the page in the
+  browser would sort the fifty rows somebody happens to be looking at and call it the order of
+  forty thousand. Widths and column order are remembered per reader, under one key for both
+  screens that draw this table — it is one table, and a width dragged on one of them is a
+  width somebody set for these columns.
+
+### Fixed
+- **Flagging a port as worth an alert showed nothing until F5.** Reported from the screen: the
+  bell did not appear on the rail and the button kept its old colour — and after a refresh the
+  flag WAS there, so the write had worked all along. `apiPost` answers `{status, data}` and
+  the payload is one level down; read as `r.watch` it was always `undefined`, so `r.watch ||
+  []` replaced the machine's list with an EMPTY one on every click. The new flag never showed,
+  and a flag already set on another row disappeared with it. Two more things nothing was
+  reading: the status — `infra_watch` is a permission of its own, so a refusal is a real
+  answer here, and a 403 toasted "watched" over a screen where nothing had happened — and
+  whether the reply carried a list at all, since `x || []` turns "I could not read it" into a
+  statement about the device.
+- **…and flagging one reloaded every chart on the device.** It repainted through the function
+  that rewrites the machine's whole markup. A chart is a request to the history API and a
+  canvas drawn from the answer, so moving one bell threw away a week of traffic per picture
+  and blinked them back in as they arrived. Only two things on screen depend on the flag — the
+  bell on the rail and the button in the body — and those are what get repainted now; the rest
+  of what it decides is the SAMPLER's business on the next collection, not this payload's.
+
+### Fixed
+- **An SNMP failure notification named a metric by its internal key.** Reported from a
+  message: `SNMP: PVE02 💥 no data (sys_name: No SNMP response received before timeout)`.
+  `sys_name` is the id a profile files a value under — what the value is STORED as — and it
+  reads as a word that failed to be replaced by anything.
+
+  The deeper half is that it should not have been there at all: when a device answers NOTHING,
+  every metric fails the same way, so whichever one happened to be asked first is not a fact
+  about the device. A silent device is now reported as a device — the error and nothing else —
+  which also makes the recorded reason stable, and the re-alert gate compares against that
+  reason. Where a metric genuinely is worth naming (a device that answered but does not serve
+  one column) it is named the way its profile names it, per language.
+
+- **Hovering one row of the notification routing table lit up all of them.** The configuration
+  sheet highlights the field row under the cursor, which is right for a field — a label and
+  its control on one line. The routing matrix is a whole TABLE inside a single
+  `cfg-field-wrap`, so the rule painted the wrapper and every row in it changed colour at
+  once. The container's hover now stands aside for a wrap that holds a table (the same
+  `:not(:has(table))` the dashboard widgets already use); the table's own row hover, which is
+  the one that means something, is what shows.
+
+- **A device that answers nothing is now given up on instead of asked three hundred times.**
+  Reported from the screen: a Proxmox node refusing SNMP sat on "reading the metrics 1/14" for
+  a whole collection — fourteen profiles of a dozen metrics each, every one a five-second
+  timeout with a retry. Half an hour of waiting on a machine that had said nothing in the
+  first ten seconds, holding up a collection somebody was watching and, on the scheduler, the
+  module's entire cycle.
+
+  Nothing could tell the two kinds of failure apart, and they are different facts:
+  `noSuchName` is an ANSWER — this device does not serve that OID, it is on the network, and
+  the next profile may be one it does — while a timeout is not. The client now marks the
+  second (`NoAnswer`, a `str` subclass, so every caller that logs it or shows it is unchanged)
+  and the sampler stops after three in a row **while nothing has answered yet**: one value
+  proves the device is there, and everything after that is its answer rather than its silence.
+  What gets recorded for it is unchanged — the debounce is a separate decision, and giving up
+  early must not become a different verdict.
+
+- **A phase on the collection checklist could never say it had ENDED.** It ended only when the
+  same device started another one, so the last phase of anything spun for ever: a NAS sitting
+  at "reading the metrics 24/24" with a spinner beside it, minutes after it had finished, until
+  the whole module landed. On a fleet that is the slowest device deciding when every other one
+  looks done. And a phase that FAILED had no way to say so at all, so a device refusing
+  connections drew a line indistinguishable from one still being read. Reported from the screen
+  as both, in one sentence.
+
+  A module can now say how a phase ended (`report_progress(state='done'|'fail')`), and those
+  two words are the only part of a phase the core owns — because they are the only part it
+  DRAWS (a tick or a cross) rather than prints. The SNMP sampler says it per device, which is
+  what it knows: answered, or answered nothing. A partial answer is a device that answered — a
+  profile assigned to a device that serves half of it costs those metrics and is the normal
+  case. What gets RECORDED for a silent device is a separate question and unchanged: it is
+  debounced on purpose, because one lost datagram is not an outage.
+
+### Added
+- **A button to LOOK at the test email instead of spending one.** Beside the send, opening the
+  same preview dialog the template editor uses. A test email costs a real message to a real
+  inbox, and "does the header look right" is a question nobody should have to answer by going
+  to find it in somebody else's mailbox.
+
+  The preview and the send now build the message in one place, with the same config the form
+  currently holds — unsaved edits included. Two copies of "what the test email is" is a preview
+  of an email nobody sends, and a customised HTML template that breaks it is exactly the case
+  somebody most wants to see before pressing send.
+
+- **Notification emails carry the logo.** In the header, beside the name — the mark and not
+  the full lockup, because the header already says "ServiceSentry" in text and the wordmark
+  would be the same name twice.
+
+  It travels WITH the message and the HTML points at it by content id. The two obvious
+  alternatives both fail somewhere that matters: a remote `https://` src needs the panel to be
+  reachable from wherever the mail was opened (it usually is not, and Gmail and Outlook block
+  remote images by default anyway), and a `data:` URI is stripped outright by Gmail.
+
+  The sender attaches it only when the body it was handed actually references the id — a part
+  nothing points at is a paperclip on a notification, and that rule is also what lets a
+  hand-edited HTML template get the logo by writing `cid:ss-logo` and nothing else. Missing or
+  unreadable, the header is the name alone: an email that goes out without its logo is a small
+  thing, one that does not go out because a PNG was missing is not. The template previews swap
+  the id for the panel's own copy, since a browser resolves a `cid:` to nothing.
+
+- **An SNMP device that answers nothing has a row of its own in the notification routing.**
+  It was indistinguishable from any other check going down: one line among forty in a digest,
+  with nowhere to say "these are the ones I want to hear about". A device that answers nothing
+  is the collection not happening, not a check that found something wrong.
+
+  A module can now name the KIND of one alert (`send_message(kind=…)`), declared as a notify
+  event in its own manifest so it appears in the routing matrix like every other. Two rules
+  keep it safe: the kind has to be REGISTERED — a matrix cell is stored only when ticked and
+  reads false until then, so an unknown kind would route to no channel at all and the alert
+  would silently stop arriving — and it never survives a recovery.
+
+  The new row is ADDITIVE: a channel takes the alert if either row is ticked. Routing it by
+  the new kind alone would have quietly stopped every one of these that arrives today as a
+  `down`, on every installation, until somebody opened a screen they had no reason to open.
+
+- **The device list has a "collect from all" button.** The per-device one narrows its run to
+  that device; this is the other question — refresh the whole list — and it is the un-narrowed
+  run, so the orphan prune stays on because this run really did cover everything.
+
+  What it runs is the union of what each machine IN THE LIST would run, which is narrower than
+  "everything enabled": written the other way it swept up the modules that watch no device at
+  all — a Microsoft 365 tenant, an Azure subscription — and opened on seventeen lines for a
+  fleet of seventeen machines. A cluster check counts through `host_uids`, the core's own
+  multi-host binding, or a module watching eight machines on that very screen is left out of
+  the button that says it collects them.
+
+  It asks first, which the per-device button does not: that one is quick and is about the
+  machine in front of you, while this costs what a scheduler cycle costs and makes every check
+  alert on what it finds. It is behind `devices_view` as well as `infra_collect` — the flag
+  says which act you may perform, and a run over every machine is only offered to somebody who
+  sees every machine.
+
+### Changed
+- **The Telegram test message is a Telegram notification.** It was a hand-written Markdown
+  one-liner while every real notification goes out as HTML through one formatter — so the test
+  was the only message this panel sends that looks like nothing else it sends, and it could
+  not answer the question somebody presses it for. It broke differently too: Markdown chokes
+  on the underscores and asterisks that module names are full of, which is precisely why the
+  real path moved to HTML.
+
+  It now goes through that formatter: icon and bold title, the machine as inline code, the
+  body as a quote block, a dimmed timestamp. Its kind is presentation only — nothing
+  dispatches it, so it gets no row in the routing matrix.
+
+- **"Collect now" collects THAT device, and not the whole fleet.** Each module ran with its
+  whole configuration, so asking a NAS for fresh numbers walked every other device that module
+  watches — on an SNMP fleet, minutes of somebody else's equipment for a number the operator
+  asked about one of theirs, and, when one of those others is not answering, a collection that
+  never lands. Reported from the screen as a dialog stuck on "still working" listing six
+  devices, five of which nobody had asked about.
+
+  It ran wide for a real reason: the monitor prunes from the state it just wrote every key the
+  run did not report, so a narrowed run would have deleted the other machines' live state. The
+  prune is now off for a narrowed run — "this run did not find that key" and "this run was
+  never asked about it" are different statements, and only the first is a reason to delete.
+
+  The narrowing is applied in one place, `ModuleBase.get_conf`, because all twenty modules
+  enumerate their items the same way; no module knows what a scope is. The collection it
+  narrows is the one the module's own schema declares (`list`, `servers`), and a module's own
+  settings are not items. SNMP's registry-only devices — the ones with no item to narrow — are
+  narrowed by the same uid in `devices_to_sample`.
+
+### Fixed
+- **A MIB that cannot compile was retried on every single run — 66 seconds of it.** "Pending
+  compilation" is decided by timestamps: no compiled module, or one older than its source. A
+  file that cannot compile has neither, for ever, so it is pending for ever — and because the
+  automatic compile is called from the watchful's constructor rather than once at startup,
+  "every run" means every scheduler cycle and every "collect now".
+
+  Measured on a real library: four raw MIBs that can never compile (deliberately broken test
+  fixtures somebody had imported) cost **66 seconds before the first OID was asked** — pysmi
+  parsing them and then reaching for the HTTP mirrors after the dependencies they name. Four
+  is under `AUTO_COMPILE_LIMIT`, so even the brake that exists for large libraries never
+  engaged. Reported from the screen as "why does it take so long to start collecting SNMP".
+
+  The automatic compile now consults the failure store the MIB manager already writes and
+  shows, using its rule for whether a recorded failure is still true: not compiled since,
+  source still there, same bytes as when it failed. It also records its own failures, which
+  only the manual job did — without that the skip could never engage for a MIB nobody compiles
+  by hand. Replacing a broken MIB with a fixed one changes its size and mtime, so the retry
+  comes back by itself. 66 s → 0.15 s.
+
+- **"Collect now" left out the collection on a device the registry alone makes a device.**
+  A switch, a router or a NAS read over SNMP has no check and no module item: the device
+  profiles on its own record ARE its monitoring, and the module samples it every cycle without
+  anything else existing. What the button offered was worked out from what had been RECORDED
+  about the machine — which, for a device that has never been sampled, is nothing. So a NAS
+  whose module item had just been removed offered to collect its ping and left out the SNMP,
+  and the button that exists to take the FIRST sample was the one thing that could not take
+  it. Reported from the screen a minute after the item was removed.
+
+  The rule is now DECLARED rather than inferred: a host profile may name the field that turns
+  a connection into a collection (`samples_when`, `device_profiles` for SNMP), so the core
+  answers before the first cycle and still names no module. A community with nothing assigned
+  to it is unchanged — SNMP reachable is not SNMP sampled, and the sampler skips it too.
+
+### Added
+- **Maintenance can find and delete readings nothing owns any more.** A reading is filed under
+  the key of whatever produced it — a module item's key while an item exists, `host.<uid>` for
+  a device read from its own record — and neither is deleted when its owner is. Reported from
+  the screen: a NAS whose module item had been removed showed zero on every tab while
+  **18.881 of its samples** were still in the table, under a key nothing could resolve. Not
+  deleted, not reachable, and counted by nothing.
+
+  The new action reports what it found — series and rows, per table and per module — and only
+  then offers the sweep: "the item is gone" and "the data is worthless" are different
+  statements, and the second is the operator's to make. It sits with the DELETIONS and not
+  with optimize/compact, which reclaim and re-measure and destroy no record; grouping it with
+  those would have put a delete under the heading that says otherwise.
+
+  What it must not touch is the careful half: the rows of a table an item samples
+  (`<item>/<row>`), derived keys (`<item>_<suffix>`), a device read from its own record, an
+  item keyed by its own name rather than a uid, and every module the configuration no longer
+  mentions — absent means "not added", which is also what a module whose folder was moved
+  looks like, and deleting its history for that would be the sweep doing the very thing it
+  exists to prevent. The purge finds them again itself rather than trusting the list the
+  browser was shown, because a cycle in between may have recorded a reading under a key that
+  now has an owner.
+
+### Changed
+- **A device can now say it runs no commands at all** (`none`, and it is the default). `kind`
+  answers "how does the panel run commands on this box", which is not what the box IS
+  (`device_type`) nor which protocols it answers (`profiles`) — and it offered only `local`
+  and `remote`. Most of a fleet is neither: a switch, a router, a UPS or a NAS read over SNMP
+  has nothing to run a shell command on. It defaulted to `local`, which is not "nothing" — it
+  is the panel's OWN machine — so a check bound to a newly added switch measured the panel and
+  filed the answer under the switch's name, with no error and no warning. Both places that run
+  a command now REFUSE for `none` instead of falling through to the local branch, which is
+  what makes the option mean something: an unrecognised value normalises to `none` and not to
+  `local`, for the same reason. Nothing stored moves — a machine somebody set to `local` is
+  one whose checks are meant to run here — but a host created without saying will no longer
+  run them on the panel by default. A check with no host at all still runs locally: that is
+  the classic inline check, and it says so by having no device to disagree with.
+- **The host dialog no longer carries a Logs tab.** The dialog is where a device is
+  configured; the Infrastructure section is where it is looked at, and a machine misbehaving
+  is looked at there. Two copies of one syslog table, with two filter bars and two pagers, is
+  two places for them to stop agreeing — and the second is always the one nobody updates.
+  Removing it needed one thing fixing first: the auto-refresh tick looked up the DIALOG's tab
+  pane and stopped when it was missing, so the first tick on the section that does carry the
+  logs would have switched itself off, with nothing to say so beyond rows that stop being new.
+  It is keyed on the table now, and skips a fetch while the table is on a hidden tab
+  whichever screen that is.
+- **A device read by its own profiles was labelled "monitored by nothing".** Reported from
+  the screen: every switch in the rack wore a red badge saying so while the panel was
+  collecting from it every cycle. Coverage counted MODULES, and a device polled over SNMP has
+  no module item at all — the profiles assigned to its record ARE its monitoring, and that is
+  exactly what the collection samples. It now has a bucket of its own rather than being folded
+  into "everything is fine": what is worth saying about those machines is that nothing was
+  added to them and their own record is what the panel works from. Decided by the declared
+  FIELD (`device_profiles`) and not by naming a protocol, so a second one that declares it is
+  covered the day it arrives.
+- **…and a coverage answer with no bucket did not draw an empty group — it threw.** The
+  buckets were written out by hand beside the order they are drawn in, so the fourth would
+  have taken the whole section down. They are built from that order now, and an answer nobody
+  recognises lands in the one for gaps instead of nowhere.
+- **The fleet list had a column headed "Tipo" that was the CONNECTION type.** It printed
+  `local` / `remote` — raw, untranslated — under a heading that everywhere else on that screen
+  means hypervisor / NAS / switch. Now there are two: the device type, with its icon, and how
+  it is reached, in words.
+- **The device's identity column no longer repeats the header above it.** It led with the
+  registry's own record — address, type, how it is reached, OS, description — and every one of
+  those is already on the page or one click from it: the header carries the name, the address,
+  the state and the tags, and the rest is the registry's, behind the button that opens it. A
+  card that restates the line above it costs a screenful and answers nothing new. What stays
+  is what the DEVICE says about itself, which is the half nothing else on the page shows.
+
+### Fixed
+- **The interfaces rail stopped short of the bottom of the window.** Reported from the screen
+  on a device with sixty of them: the rail ended with a band of empty page under it, and the
+  list carried on scrolling inside a box smaller than the room it had. Its ceiling was
+  `calc(100vh - 13rem)` — a guess at everything above and below it (the app header, the
+  breadcrumb, the section's own header), and on that page 208 px too many. A rail that STICKS
+  can use exactly the height of the box it sticks inside, and that is a number only the layout
+  knows: `capToScrollBox` measures it once the page is laid out and again when the window
+  changes. On the reported layout, 727 px of ceiling became 868. The box's height and not the
+  rail's distance to the bottom of the window, because the rail moves — it starts under the
+  section header and slides up until it sticks, so an answer taken from where it happens to be
+  is wrong at every other scroll position. The stylesheet's constant stays as the floor for
+  the lists that do not stick inside anything (the jobs dialog, where a fraction of the
+  viewport is exactly right).
+
+### Performance
+- **Opening a device in Infrastructure took seconds, and the URL changed before anything
+  else did.** Reported from the screen, and the URL was the clue: it is rewritten
+  synchronously and everything after it waits on the network. About **700 ms** of that wait
+  was one call — the page asking for the WHOLE fleet's history index and reading four fields
+  of it. `get_index` also counts each series' samples, dates the first and works out the
+  uptime, and pays for that twice over: the aggregate is a second pass across the table, and
+  its grouping key `COALESCE(item_uid, module || ':' || key)` is an expression no index can
+  serve, so both passes sort the lot in a temporary B-tree. The page reads none of it — the
+  index is a FALLBACK there, for a check with no live state. A new `latest_by_series` asks
+  only for the last sample of each series, grouped on `(module, key)`, which is how the rest
+  of the product addresses a series and exactly what `idx_history_mkts` is ordered by: the
+  grouping streams off the index instead of sorting. Against a real 54.000-row history,
+  **777 ms → 67 ms**, the same series with the same values — and narrowed to the modules
+  actually bound to that machine, since the fallback can only ever contribute one of its own.
+- **…and the one navigation with somebody waiting was the one with no feedback.** The device
+  view paints its spinner only into an empty pane — the guard that stops a refresh blinking a
+  device already on screen — and arriving from the fleet list the pane is not empty, it holds
+  the table. So a click did nothing visible until the payload landed. The click path says so
+  before going to ask; the other callers, which re-render what is already open, are unchanged.
+
+### Fixed
+- **A machine with nothing to collect answered "Modules directory not configured".** 500 and
+  not 409, which reads as a broken server and is neither the truth nor actionable. The
+  precondition of RUNNING — the executor loads the modules' code from that directory — was
+  checked before working out whether anything was going to run at all. What a machine with no
+  checks bound to it has to say is "there is nothing to collect", and that answer does not
+  depend on where the module code lives: the configuration this reads comes from the database.
+  Caught by the integration suite, which had never been run against this route: three of its
+  tests asked for 409 and had been getting 500 since the route was written.
+- **A MIB compile's thread could die on the entry it was writing into.** A job is collected
+  by the first status poll that sees it done, so its registry entry can be gone while the
+  thread that owns it is still writing — and indexed directly that is a `KeyError` raised on a
+  daemon thread: the traceback goes to stderr, the thread stops where it stood, and the
+  compile it was recording is never recorded. A job that ran, finished, and left no trace of
+  either. Every write the worker makes now goes through one helper that tolerates the entry
+  being gone. Surfaced by CI as eight `PytestUnhandledThreadExceptionWarning`s — nothing
+  failed and nothing went red, which is the same shape as the bug itself.
+- **Two fields in the device form were both labelled "Tipo".** One is WHAT the box is
+  (hypervisor, NAS, switch) and the other is HOW the panel reaches it (local, or over SSH);
+  with the same word on both there is nothing to tell them apart, and the hint under each was
+  doing the whole job. Now "Tipo de dispositivo" and "Cómo se le llega". Nothing failed here
+  either — the form was simply unreadable.
+
 ## [0.0.1+build.115] - 2026-08-24
 
 ### Added

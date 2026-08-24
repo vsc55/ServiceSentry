@@ -87,13 +87,18 @@ class SnmpChecks:
         # nothing until a module entry pointed back at it, which made the module — not the
         # device — the thing that decided it was worth looking at.
         sampled.extend(_devices.devices_to_sample(
-            getattr(self._monitor, '_hosts_store', None), bound))
+            getattr(self._monitor, '_hosts_store', None), bound, only=self.host_scope))
 
         # Whoever is watching gets told about the devices this module will NOT sample, once
         # and by name. Silence is what made the reported bug unreadable: the device somebody
         # pressed the button for simply was not in the list, alongside two that were.
         left = {uid: name for uid, name in unsampled.items()
                 if uid not in {str((s or {}).get('host_uid') or '') for _k, s in sampled}}
+        if self.host_scope:
+            # A narrowed run speaks about its own machine and no other: naming the devices
+            # this run is not sampling would list the whole fleet on a dialog somebody opened
+            # about one NAS.
+            left = {u: n for u, n in left.items() if u == self.host_scope}
         if left:
             self.report_progress(', '.join(sorted(left.values())),
                                  step=self._msg('snmp_step_unsampled',

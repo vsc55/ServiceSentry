@@ -114,12 +114,32 @@ class TestCrud:
 class TestKindAndMaintenance:
     """Local/remote kind and maintenance flag are first-class host columns."""
 
-    def test_kind_defaults_to_local(self):
+    def test_kind_defaults_to_none(self):
+        """A device says nothing about running commands until somebody says something.
+
+        It defaulted to `local`, which is not "nothing" — it is the panel's OWN machine. Most
+        of a fleet is equipment read over SNMP (a switch, a router, a UPS, a NAS) where there
+        is nothing to run a shell command on, so a check bound to a newly added switch
+        measured the panel and filed the answer under the switch's name."""
         s, _ = _store()
         uid = s.create(_host('k1'))
         h = s.get(uid)
-        assert h['kind'] == 'local'
+        assert h['kind'] == 'none'
         assert h['maintenance'] is False
+
+    def test_all_three_kinds_survive_a_round_trip(self):
+        s, _ = _store()
+        for i, kind in enumerate(('none', 'local', 'remote')):
+            uid = s.create({**_host('k1r%d' % i), 'kind': kind})
+            assert s.get(uid)['kind'] == kind
+
+    def test_an_existing_local_host_stays_local(self):
+        """The default changed; nothing stored did. A machine somebody set to `local` is one
+        whose checks are meant to run here, and a new default must not move it."""
+        s, _ = _store()
+        uid = s.create({**_host('k1keep'), 'kind': 'local'})
+        s.update(uid, {'name': 'k1keep', 'kind': 'local'}, actor='t')
+        assert s.get(uid)['kind'] == 'local'
 
     def test_create_remote_and_maintenance(self):
         s, _ = _store()
@@ -128,10 +148,20 @@ class TestKindAndMaintenance:
         assert h['kind'] == 'remote'
         assert h['maintenance'] is True
 
-    def test_invalid_kind_normalised_to_local(self):
+    def test_invalid_kind_normalised_to_none(self):
+        """To `none` and not to `local`: the two differ in WHERE a command runs, and reading
+        "the panel's own machine" out of a value nobody wrote is how a check comes to measure
+        the wrong box quietly. A record that says nothing gets nothing."""
         s, _ = _store()
-        uid = s.create({**_host('k3'), 'kind': 'banana'})
-        assert s.get(uid)['kind'] == 'local'
+        for bad in ('banana', '', None, 'LOCALHOST', 0):
+            uid = s.create({**_host('k3-%s' % bad), 'kind': bad})
+            assert s.get(uid)['kind'] == 'none', bad
+
+    def test_the_kinds_are_written_down_once(self):
+        """The form offers them and the runner branches on them; a fourth list somewhere is a
+        fourth place for them to stop agreeing."""
+        from lib.core.hosts.store import HostsStore              # noqa: PLC0415
+        assert HostsStore.KINDS == ('none', 'local', 'remote')
 
     def test_os_defaults_to_auto_and_persists(self):
         s, _ = _store()

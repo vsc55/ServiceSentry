@@ -5,6 +5,7 @@
 Routes registered by this file:
 
     POST   /api/v1/notify/email/test          send a test email (current UI config)
+    POST   /api/v1/notify/email/preview       the same email, rendered instead of sent
     GET    /api/v1/notify/recipients/suggest  users/groups for the recipients typeahead
 """
 
@@ -37,6 +38,59 @@ def register(app, wa):
         groups.sort(key=lambda x: x['name'].lower())
         return jsonify({'users': users, 'groups': groups})
 
+    def _test_message(data):
+        """``(cfg, lang, subject, body_html)`` for the test email — built ONCE.
+
+        The send and the preview are the same email or the preview is a picture of something
+        else. Both the customised strings and a hand-edited HTML template are applied here, so
+        a preview shows what would actually leave the building — including an override that
+        breaks it, which is the case somebody most wants to see before pressing send.
+
+        *data* is the request body: the config as the form currently holds it, so an unsaved
+        change is previewed and sent alike. ``null`` in it means a masked sensitive field —
+        the stored value stands.
+        """
+        from lib.core.notify.email import templates as email_templates   # noqa: PLC0415
+        from lib.core.notify.formatting import notify_lang               # noqa: PLC0415
+        full_cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
+        cfg = dict(full_cfg.get('email') or {})
+        test_to = None
+        for k, v in (data or {}).items():
+            if k == 'test_to':
+                test_to = v or None
+            elif v is not None:
+                cfg[k] = v
+        lang = notify_lang(full_cfg)          # global notification language
+        lang_key = lang or 'en_EN'
+        str_overrides = (full_cfg.get('notif_templates') or {}).get(lang_key) or None
+        strings = email_templates.get_strings(lang, overrides=str_overrides)
+        html_override = (
+            (full_cfg.get('notif_html_templates') or {}).get('test', {}).get(lang_key)
+        ) or None
+        body = email_templates.render_test(
+            sender_name=cfg.get('from_name') or APP_NAME, lang=lang, strings=strings,
+            html_override=html_override)
+        return cfg, test_to, lang, strings['test_subject'], body
+
+    @app.route('/api/v1/notify/email/preview', methods=['POST'])
+    @config_edit_req
+    def api_preview_email():
+        """What the test email looks like, without sending it.
+
+        Beside the send button and not instead of it: a test email costs a real message to a
+        real inbox, and "does the header look right" is a question you should not have to spend
+        one on — nor find the answer to in somebody else's mailbox.
+
+        Behind ``config_edit`` like the send it previews: it renders the stored configuration,
+        which is not a screen to hand to whoever may only read.
+
+        The logo is swapped for the panel's own copy, because this is drawn in a browser and a
+        `cid:` resolves to nothing there — see `lib/core/notify/email/brand.py`.
+        """
+        from lib.core.notify.email import brand as _brand      # noqa: PLC0415
+        _cfg, _to, _lang, subject, body = _test_message(wa._optional_json() or {})
+        return jsonify({'ok': True, 'subject': subject, 'html': _brand.for_preview(body)})
+
     @app.route('/api/v1/notify/email/test', methods=['POST'])
     @config_edit_req
     def api_test_email():
@@ -45,30 +99,10 @@ def register(app, wa):
         An optional ``test_to`` field in the request body overrides the
         configured recipients for this test send only.
         """
-        from lib.core.notify.email import notify as email_notify, templates as email_templates
-        data = wa._optional_json() or {}
-        full_cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
-        stored = full_cfg.get('email') or {}
-        # Merge: stored values (already decrypted) + UI overrides.
-        # null in the request means a masked sensitive field — keep stored value.
-        cfg = dict(stored)
-        test_to = None
-        for k, v in data.items():
-            if k == 'test_to':
-                test_to = v or None
-            elif v is not None:
-                cfg[k] = v
-        sender_name = cfg.get('from_name') or APP_NAME
-        from lib.core.notify.formatting import notify_lang  # noqa: PLC0415
-        lang = notify_lang(full_cfg)   # global notification language
-        lang_key = lang or 'en_EN'
-        # Apply the admin's saved customisations so the test email matches what
-        # the live notifications (and the editor preview) actually produce.
-        str_overrides = (full_cfg.get('notif_templates') or {}).get(lang_key) or None
-        strings = email_templates.get_strings(lang, overrides=str_overrides)
-        html_override = (
-            (full_cfg.get('notif_html_templates') or {}).get('test', {}).get(lang_key)
-        ) or None
+        from lib.core.notify.email import notify as email_notify
+        # The message itself is built where the preview builds it: two copies of "what the
+        # test email is" is a preview of an email nobody sends.
+        cfg, test_to, lang, subject, body = _test_message(wa._optional_json() or {})
         # No test_to override → resolve the configured recipients (expand group tokens
         # to member emails); a warning surfaces empty/unknown groups. test_to (a plain
         # address typed by the admin) bypasses resolution.
@@ -81,14 +115,8 @@ def register(app, wa):
             recipients = res['emails']
             if res['skipped']:
                 warn = ' (' + ', '.join(res['skipped']) + ')'
-        ok, msg = email_notify._dispatch(
-            cfg,
-            subject=strings['test_subject'],
-            body_html=email_templates.render_test(
-                sender_name=sender_name, lang=lang, strings=strings,
-                html_override=html_override),
-            recipients=recipients, lang=lang,
-        )
+        ok, msg = email_notify._dispatch(cfg, subject=subject, body_html=body,
+                                         recipients=recipients, lang=lang)
         if warn:
             msg = (msg or '') + warn
         if ok:

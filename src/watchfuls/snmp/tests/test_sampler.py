@@ -217,9 +217,9 @@ class TestSayingWhereItIs:
         said: list = []
         monkeypatch.setattr(
             Watchful, 'report_progress',
-            lambda _self, detail='', *, step='', scope='', n=0, total=0:
+            lambda _self, detail='', *, step='', scope='', n=0, total=0, state='':
                 said.append({'detail': detail, 'step': step, 'scope': scope,
-                             'n': n, 'total': total}),
+                             'n': n, 'total': total, 'state': state}),
             raising=False)
         env.run(server, dev)
         return said
@@ -1128,3 +1128,205 @@ class TestTheProfileIsTheVerdict:
         res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
         data = _one(res)['other_data']
         assert data.get('syno_status') == 2, data
+
+
+
+class TestSayingWhenADeviceIsFinished:
+    """A phase used to end only when the SAME device started another one.
+
+    So the last phase of every device spun for ever: a NAS sat at "reading the metrics 24/24"
+    with a spinner beside it, minutes after it had finished, until the whole module landed —
+    and on a fleet that is the slowest device deciding when every other device looks done. A
+    device that answered NOTHING was indistinguishable from one still being read, which is
+    the worse half: somebody watching a collection of a machine that is refusing connections
+    saw a line that looked busy. Both reported from the screen, in one sentence.
+
+    The module is what knows, so the module is what says it.
+    """
+
+    def _reports(self, env, monkeypatch, server, dev):
+        said: list = []
+        monkeypatch.setattr(
+            Watchful, 'report_progress',
+            lambda _self, detail='', *, step='', scope='', n=0, total=0, state='':
+                said.append({'detail': detail, 'step': step, 'scope': scope,
+                             'n': n, 'total': total, 'state': state}),
+            raising=False)
+        env.run(server, dev)
+        return said
+
+    def _ends(self, got):
+        return [(r['scope'], r['state']) for r in got if r['state']]
+
+    def test_a_device_that_answered_ends_its_phase(self, env, monkeypatch):
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        dev = _Dev(gets={'1.1': (1, None)})
+        got = self._reports(env, monkeypatch, _server(label='nas', device_profiles='p1'), dev)
+        assert self._ends(got) == [('nas', 'done')], got
+
+    def test_a_device_that_answered_nothing_says_so(self, env, monkeypatch):
+        """The reported one: a machine refusing connections drew a line that looked busy."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        dev = _Dev(gets={'1.1': (None, 'connection refused')})
+        got = self._reports(env, monkeypatch, _server(label='pve02', device_profiles='p1'), dev)
+        assert self._ends(got) == [('pve02', 'fail')], got
+
+    def test_a_partial_answer_is_a_device_that_answered(self, env, monkeypatch):
+        """A profile assigned to a device that serves half of it costs those metrics and is
+        the normal case. Painting it red would make the normal case look broken."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'},
+                           {'key': 'b', 'oid': '2.1', 'kind': 'gauge'}], label='Disks')
+        dev = _Dev(gets={'1.1': (1, None), '2.1': (None, 'no such name')})
+        got = self._reports(env, monkeypatch, _server(label='nas', device_profiles='p1'), dev)
+        assert self._ends(got) == [('nas', 'done')], got
+
+    def test_the_ending_names_the_phase_it_ends(self, env, monkeypatch):
+        """A device has more than one phase. An ending with no phase would close whichever
+        line the core happened to have open for that machine."""
+        env.profile('p1', [{'key': 'a', 'oid': '1.1', 'kind': 'gauge'}], label='Disks')
+        dev = _Dev(gets={'1.1': (1, None)})
+        got = self._reports(env, monkeypatch, _server(label='nas', device_profiles='p1'), dev)
+        end = next(r for r in got if r['state'])
+        reading = next(r for r in got if r['total'])
+        assert end['step'] == reading['step'] and end['scope'] == 'nas'
+
+    def test_a_device_with_no_usable_profile_does_not_spin_either(self, env, monkeypatch):
+        """It said "resolving" and then left without a word, so the line stayed."""
+        got = self._reports(env, monkeypatch,
+                            _server(label='sw', device_profiles='gone'), _Dev())
+        assert self._ends(got) == [('sw', 'fail')], got
+
+
+
+class TestGivingUpOnADeviceThatIsNotThere:
+    """A device off the network is not going to be on it three hundred reads later.
+
+    Reported from the screen: a Proxmox node refusing SNMP sat on "reading the metrics 1/14"
+    for a whole collection. Fourteen profiles of a dozen metrics each, every one a five-second
+    timeout with a retry — half an hour of waiting for a machine that had said nothing in the
+    first ten seconds, holding up a collection somebody was watching and, on the scheduler,
+    the module's entire cycle.
+
+    The care is in what must NOT be given up on: `noSuchName` is an answer, and a device that
+    has produced one value is on the network.
+    """
+
+    def _silent(self, msg='No SNMP response received before timeout'):
+        from lib.core.snmp.client import NoAnswer         # noqa: PLC0415
+        return NoAnswer(msg)
+
+    def _oids(self, n):
+        return [f'1.3.6.1.4.1.99.{i}.0' for i in range(n)]
+
+    def _profile(self, env, n):
+        env.profile('p1', [{'key': f'k{i}', 'oid': o, 'kind': 'gauge'}
+                           for i, o in enumerate(self._oids(n))], label='P')
+
+    def test_a_device_that_says_nothing_stops_being_asked(self, env):
+        self._profile(env, 6)
+        dev = _Dev(gets={o: (None, self._silent()) for o in self._oids(6)})
+        env.run(_server(device_profiles='p1'), dev)
+        assert len(dev.asked) == 3, dev.asked
+
+    def test_an_error_the_device_returned_is_not_silence(self, env):
+        """`noSuchName` means it is talking. A profile assigned to the wrong model answers
+        this to every metric, and abandoning the device for it would leave the profiles that
+        DO fit it unread — a device quietly monitoring less than it should."""
+        self._profile(env, 6)
+        dev = _Dev()          # its default answer is 'no such name', a plain string
+        env.run(_server(device_profiles='p1'), dev)
+        assert len(dev.asked) == 6, dev.asked
+
+    def test_a_device_that_has_answered_is_not_given_up_on(self, env):
+        """One value proves it is on the network. Later metrics it does not serve are its
+        answer, not its silence — and a NAS that answers profile one and times out on a
+        column of profile two must not lose the other twenty-two."""
+        self._profile(env, 6)
+        gets = {o: (None, self._silent()) for o in self._oids(6)}
+        gets[self._oids(6)[0]] = ('7', None)
+        dev = _Dev(gets=gets)
+        env.run(_server(device_profiles='p1'), dev)
+        assert len(dev.asked) == 6, dev.asked
+
+    def test_giving_up_is_still_a_device_that_answered_nothing(self, env):
+        """The result recorded for it is unchanged — the debounce is somebody else's decision
+        (`_SAMPLE_ALERT`), and giving up early must not turn into a different verdict."""
+        self._profile(env, 6)
+        dev = _Dev(gets={o: (None, self._silent()) for o in self._oids(6)})
+        res, _mon = env.run(_server(label='pve02', device_profiles='p1'), dev)
+        assert [k for k in res if k.endswith('/metrics')], res
+
+
+class TestWhatTheFailureMessageSays:
+    """The sentence somebody actually receives.
+
+    Reported from a notification: `SNMP: PVE02 💥 no data (sys_name: No SNMP response received
+    before timeout)`. `sys_name` is the internal id a profile files a value under — the key it
+    is STORED as — and it went straight into a message, where it reads as a word that failed to
+    be replaced by anything.
+
+    Two things wrong with it, and the second is the one that matters: when a device answered
+    NOTHING, every metric failed the same way, so naming whichever one happened to be asked
+    first is not a fact about the device — it reads as though `sys_name` were the problem.
+    """
+
+    _OID = '1.3.6.1.2.1.1.5.0'
+
+    def _silent(self):
+        from lib.core.snmp.client import NoAnswer         # noqa: PLC0415
+        return NoAnswer('No SNMP response received before timeout')
+
+    def _named(self, env):
+        env.profile('p1', [{'key': 'sys_name', 'oid': self._OID, 'kind': 'text',
+                            'label': {'en_EN': 'Name', 'es_ES': 'Nombre'}}], label='P')
+
+    def test_a_device_that_answered_nothing_is_told_about_as_a_device(self, env):
+        self._named(env)
+        dev = _Dev(gets={self._OID: (None, self._silent())})
+        res, _mon = env.run(_server(label='pve02', device_profiles='p1'), dev)
+        msg = res['srv/metrics']['message']
+        assert 'sys_name' not in msg, msg
+        assert 'timeout' in msg, msg
+
+    def test_and_the_reason_it_records_is_the_error_itself(self):
+        """`other_data['error']` is what the screen shows beside the device and what the
+        re-alert gate compares against: a reason that carries an arbitrary metric name changes
+        when the order does, which is an alert that fires for nothing."""
+        from watchfuls.snmp.sampler import SnmpSampler     # noqa: PLC0415
+        recorded = {}
+
+        class _S(SnmpSampler):
+            def fail_streak(self, _k, _f):
+                return 1
+
+            def _msg(self, _k, *a):
+                return ' '.join(str(x) for x in a)
+
+            def _debug(self, *_a, **_k):
+                pass
+
+            def _emit(self, key, status, message, other=None, **kw):
+                recorded.update({'key': key, 'other': other or {}, 'message': message})
+
+        _S()._emit_samples('srv', 'pve02', {}, False,
+                           [('Nombre', 'No SNMP response received before timeout')])
+        assert recorded['other']['error'] == 'No SNMP response received before timeout'
+        assert 'Nombre' not in recorded['message']
+
+    def test_a_metric_that_IS_named_is_named_by_its_label(self, env, monkeypatch):
+        """The other half: where a metric genuinely is worth naming — a device that answered
+        but did not serve one column — it is named the way a profile names it, per language,
+        which is what those labels are for."""
+        env.profile('p1', [{'key': 'sys_name', 'oid': self._OID, 'kind': 'text',
+                            'label': {'en_EN': 'Name', 'es_ES': 'Nombre'}},
+                           {'key': 'sys_descr', 'oid': '1.3.6.1.2.1.1.1.0', 'kind': 'text'}],
+                    label='P')
+        said = []
+        monkeypatch.setattr(Watchful, '_debug',
+                            lambda _s, msg, *_a, **_k: said.append(str(msg)), raising=False)
+        dev = _Dev(gets={'1.3.6.1.2.1.1.1.0': ('a linux box', None),
+                         self._OID: (None, 'no such name')})
+        env.run(_server(label='pve02', device_profiles='p1'), dev)
+        line = next((s for s in said if 'unanswered' in s), '')
+        assert line, said
+        assert 'Name' in line and 'sys_name' not in line, line

@@ -18,6 +18,7 @@ import os
 
 import pytest
 
+from lib.core.snmp.mibs import admin as mib_admin
 from lib.core.snmp.mibs import resolver as mib_resolver
 
 
@@ -598,3 +599,105 @@ class TestWhereTheStandardModulesComeFrom:
     def test_more_than_one_is_offered(self):
         """A single default is a single point of failure, and it failed."""
         assert len(mib_resolver._DEFAULT_MIB_SOURCES) > 1
+
+
+
+class TestABrokenMibIsNotRetriedForEver:
+    """A MIB that cannot compile is not a MIB waiting to be compiled.
+
+    "Pending" is decided by timestamps — no compiled module, or one older than its source —
+    and a file that cannot compile has neither, for ever. So the automatic compile retried
+    them on every run, and because it is called from the watchful's CONSTRUCTOR rather than
+    once at startup, "every run" means every scheduler cycle and every "collect now".
+
+    Measured on a real library: four raw MIBs that can never compile (deliberately broken test
+    fixtures somebody had imported) cost **66 seconds on every single run** — pysmi parsing
+    them and then reaching for the HTTP mirrors after the dependencies they name. That is the
+    whole of "why does SNMP take so long to start", and nothing said a word: the log line is a
+    debug one and the time is spent before the first OID is asked. With the skip: 0.15 s.
+
+    The store consulted is the one the MIB manager already writes and shows, and the rule for
+    "is that failure still true" is its rule — so a fixed file comes back by itself.
+    """
+
+    def _lib(self, tmp_path, body='ROTO-MIB DEFINITIONS ::= BEGIN\nnot smi }{\nEND\n'):
+        var = tmp_path / 'var'
+        raw = var / 'snmp_mibs' / 'raw'
+        raw.mkdir(parents=True)
+        (raw / 'roto.mib').write_text(body, encoding='utf-8')
+        return var, raw
+
+    @pytest.fixture
+    def tries(self, monkeypatch):
+        """Every automatic compile attempt, and what it was asked to compile.
+
+        Stubbed rather than run: what is being measured is whether it is ASKED, and the real
+        thing is thirty seconds of mirror timeouts per attempt — which is the bug, not the
+        test's business.
+        """
+        seen = []
+
+        def _fake(_raw, _compiled, mibs_filter=None, **_kw):
+            seen.append(sorted(mibs_filter or []))
+            return {'ok': False, 'message': 'no', 'failed': ['ROTO-MIB'],
+                    'errors': {'ROTO-MIB': 'not SMI'}, 'results': {'ROTO-MIB': 'failed'},
+                    'attempted': ['ROTO-MIB']}
+        monkeypatch.setattr(mib_resolver, 'compile_raw_mibs', _fake)
+        return seen
+
+    def test_it_is_tried_once_and_then_remembered(self, tmp_path, tries):
+        var, _raw = self._lib(tmp_path)
+        mib_admin.startup_compile_mibs(str(var))
+        mib_admin.startup_compile_mibs(str(var))
+        mib_admin.startup_compile_mibs(str(var))
+        # `roto` and not `ROTO-MIB`: pysmi is handed FILES, and the failure is recorded
+        # against the MODULE the file declares. Asserted as the two different names
+        # they are, because comparing them directly is how this skip silently did
+        # nothing for every MIB whose file is not named after its module.
+        assert tries == [['roto']], 'it went back for one it already knows cannot compile'
+
+    def test_the_reason_is_written_down_by_this_path_too(self, tmp_path, tries):
+        """The skip can only work if the failure is recorded, and until now only the MIB
+        manager's own job recorded one — so a MIB that is never compiled by hand failed for
+        ever and was written down nowhere."""
+        var, _raw = self._lib(tmp_path)
+        mib_admin.startup_compile_mibs(str(var))
+        stored = mib_admin.MibAdmin._read_compile_errors(str(var))
+        assert 'ROTO-MIB' in stored and stored['ROTO-MIB']['error']
+        assert stored['ROTO-MIB']['size'] > 0, 'without the source it was about, it is not a fact'
+
+    def test_a_file_somebody_fixed_is_tried_again(self, tmp_path, tries):
+        """Which is the answer to a broken MIB, and the reason the rule is about the FILE and
+        not about the name: a fixed MIB is a different file under the same name."""
+        var, raw = self._lib(tmp_path)
+        mib_admin.startup_compile_mibs(str(var))
+        (raw / 'roto.mib').write_text(
+            'ROTO-MIB DEFINITIONS ::= BEGIN\n-- somebody had a go\nEND\n', encoding='utf-8')
+        mib_admin.startup_compile_mibs(str(var))
+        assert tries == [['roto'], ['roto']]
+
+    def test_one_that_has_never_failed_is_still_compiled(self, tmp_path, tries):
+        """The skip must not become "nothing is ever compiled automatically" — that is the
+        same shape as the bug it replaces, something not happening with nothing saying so."""
+        var, _raw = self._lib(tmp_path)
+        mib_admin.startup_compile_mibs(str(var))
+        assert tries == [['roto']]
+
+    def test_a_recorded_failure_about_a_module_that_compiled_since_is_not_one(self, tmp_path,
+                                                                             tries):
+        """It compiled at some point, so the red row is stale — and a stale row must not be
+        what stops the compile that would clear it."""
+        var, raw = self._lib(tmp_path)
+        mib_admin.startup_compile_mibs(str(var))
+        compiled = var / 'snmp_mibs' / 'compiled'
+        compiled.mkdir(parents=True, exist_ok=True)
+        (compiled / 'ROTO-MIB.py').write_text('# compiled once\n', encoding='utf-8')
+        os.utime(compiled / 'ROTO-MIB.py', (0, 0))      # …but older than its source
+        mib_admin.startup_compile_mibs(str(var))
+        assert tries == [['roto'], ['roto']]
+
+    def test_an_empty_library_asks_for_nothing(self, tmp_path, tries):
+        var = tmp_path / 'var'
+        (var / 'snmp_mibs' / 'raw').mkdir(parents=True)
+        mib_admin.startup_compile_mibs(str(var))
+        assert tries == []

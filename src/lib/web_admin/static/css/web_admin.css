@@ -1215,6 +1215,12 @@
    screen, and that column is short by construction. This one is not, and the alternative is
    worse: a rail sixty items tall pushes the thing it selects off the bottom of the document,
    so picking the last port means scrolling past every other one to see what you picked. */
+   The constant is a FLOOR, not the answer: it guesses at everything above and below — the
+   app header, the breadcrumb, the section's own header — and on the interfaces rail it
+   guessed 208 px too many, so the rail stopped that far short of the bottom of the window.
+   A list that sticks inside a scroll box asks `capToScrollBox` for the real number once it
+   is laid out; this stays for the ones that do not (the jobs dialog, where a viewport
+   fraction is exactly right) and as the value before that runs. */
 .ss-scrollbox { overflow: auto; max-height: calc(100vh - 13rem); }
 
 /* .ss-chartbox : a drawn chart, and the room it can be given.
@@ -1358,6 +1364,14 @@
    theme-agnostic tint so the row under the cursor stands out. Reusable on any table. */
 .ss-hover-rows { --bs-table-hover-bg: rgba(128,128,128,.18); }
 .ss-hover-rows > tbody > tr > * { transition: background-color .12s; }
+
+/* The same thing tinted with the ACCENT, for a table whose ordinary rows already carry a grey
+   fill — group headers, a tinted band, striping. A grey hover there lands on the same shade
+   as those and the row under the cursor reads as another heading rather than as a selection:
+   reported from the routing matrix in exactly those words. Two classes and not one option,
+   because which of the two is right is a fact about the TABLE, not a preference. */
+.ss-hover-accent { --bs-table-hover-bg: rgba(var(--bs-primary-rgb), .22); }
+.ss-hover-accent > tbody > tr > * { transition: background-color .12s; }
 
 /* ── Notifications sub-tab nav-pills ───────────────────────────────── */
 /* Wrap the pill bar with the same visual language as cfg-card headers  */
@@ -1857,7 +1871,7 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 /* Logo inside a ring: a faint full track (the border) with a bright arc sweeping around it —
    a conic gradient masked to the ring's width, which reads better than a plain spinner. */
 .ss-boot-logo {
-    position: relative; width: 96px; height: 96px;
+    position: relative; width: 116px; height: 116px;
     display: grid; place-items: center;
     border-radius: 50%;
     border: 3px solid rgba(255, 255, 255, .15);
@@ -1870,10 +1884,11 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     animation: ss-boot-spin 1.1s linear infinite;
 }
 /* The mark sits INSIDE the ring track rather than filling the circle: the artwork is a badge
-   with glitch lines running past its edge, and sized to the full 96px those lines cross the
-   ring that is supposed to frame them. */
+   with glitch lines running past its edge, and sized to the full circle those lines cross the
+   ring that is supposed to frame them. Both grew together — 96/72 was a legible ring around an
+   emblem too small to make out — so the clearance is the same and the badge is what changed. */
 .ss-boot-logo img {
-    width: 72px; height: 72px; object-fit: contain;
+    width: 92px; height: 92px; object-fit: contain;
 }
 .ss-boot-name { font-size: 1.35rem; font-weight: 600; letter-spacing: .04em; }
 /* Indeterminate progress: boot has no measurable percentage, so it sweeps rather than fills. */
@@ -2339,7 +2354,13 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     border-radius: .25rem;
     transition: background-color .15s ease-in-out;
 }
-.cfg-sheet .cfg-fields .cfg-field-wrap:hover { background: var(--bs-tertiary-bg); }
+/* The field row under the cursor lights up — unless the "field" is a whole TABLE.
+   The routing matrix is one `cfg-field-wrap` holding a grid of rows, so this painted the
+   wrapper and every row in it changed colour at once: reported from the screen as "hovering
+   one row changes the colour of all of them". A table has row hover of its own
+   (`.table-hover` + `.ss-hover-rows`) and that is the one that means something. Same
+   `:not(:has(table))` the dashboard widgets already use for the same reason. */
+.cfg-sheet .cfg-fields .cfg-field-wrap:not(:has(table)):hover { background: var(--bs-tertiary-bg); }
 .cfg-sheet .cfg-fields .cfg-field-wrap .row { margin-bottom: 0; }
 .cfg-sheet .cfg-fields > hr { margin: .9rem 0 .5rem; opacity: .25; }
 

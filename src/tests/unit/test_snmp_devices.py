@@ -129,3 +129,35 @@ class TestTheKeyIsStable:
         """Item keys are bare uids; this one is prefixed, so the two namespaces never meet."""
         from lib.core.snmp.devices import KEY_PREFIX      # noqa: PLC0415
         assert device_key('h1').startswith(KEY_PREFIX) and KEY_PREFIX
+
+
+
+class TestNarrowingToOneDevice:
+    """A collection asked for by hand is about ONE machine. The module items are narrowed by
+    the module's own config resolution; these are the devices that have no item to narrow —
+    so without this, "collect erebor" still walked every switch in the rack."""
+
+    def test_only_the_one_asked_for_comes_back(self):
+        hosts = [_host('h1', 'erebor', {'snmp': _SNMP}),
+                 _host('h2', 'isen', {'snmp': _SNMP}),
+                 _host('h3', 'switch', {'snmp': _SNMP})]
+        out = devices_to_sample(_Store(hosts), only='h2')
+        assert [i['host_uid'] for _k, i in out] == ['h2']
+
+    def test_asking_for_a_machine_that_is_not_a_device_yields_nothing(self):
+        """It narrows; it does not promote. A host with no profiles assigned is not sampled
+        because somebody asked about it by name."""
+        hosts = [_host('h1', 'erebor', {'snmp': _SNMP}),
+                 _host('h2', 'plain', {'ssh': {'ssh_user': 'r'}})]
+        assert devices_to_sample(_Store(hosts), only='h2') == []
+
+    def test_no_scope_is_the_whole_fleet(self):
+        hosts = [_host('h1', profiles={'snmp': _SNMP}), _host('h2', profiles={'snmp': _SNMP})]
+        assert len(devices_to_sample(_Store(hosts), only='')) == 2
+        assert len(devices_to_sample(_Store(hosts))) == 2
+
+    def test_a_covered_host_stays_covered_even_when_it_is_the_one_asked_for(self):
+        """Its item speaks for it, and that item may carry settings of its own. Sampling it
+        BOTH ways would file the same device twice, under two different keys."""
+        hosts = [_host('h1', profiles={'snmp': _SNMP})]
+        assert devices_to_sample(_Store(hosts), covered={'h1'}, only='h1') == []

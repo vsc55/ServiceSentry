@@ -212,6 +212,9 @@ def _core_profiles() -> dict:
             'module':        _BUILTIN_SSH['module'],
             'builtin':       True,
             'address_field': _BUILTIN_SSH['address_field'],
+            # A way IN, not a collection: nothing about having credentials says the panel
+            # charts this machine.
+            'samples_when':  '',
             'fields':        list(_BUILTIN_SSH['fields']),
         },
     }
@@ -236,6 +239,7 @@ def _core_profiles() -> dict:
             'module':        decl.get('module') or pkg,
             'builtin':       True,
             'address_field': decl.get('address_field'),
+            'samples_when':  decl.get('samples_when') or '',
             'fields':        fields,
         }
     return out
@@ -246,6 +250,39 @@ def core_profiles() -> dict:
     and the catalogue it feeds is handed to code that edits its entries."""
     return {k: {**v, 'fields': [dict(f) for f in v['fields']]}
             for k, v in _core_profiles().items()}
+
+
+def profile_sampled_modules(host: dict) -> set:
+    """The modules that sample *host* because of its OWN record, with no item anywhere.
+
+    A protocol may declare (``samples_when``) the field that turns a connection into a
+    collection: for SNMP it is ``device_profiles``, and a host that carries one IS a device —
+    a switch, a router, a UPS — read every cycle without a check existing. That is not an
+    SNMP fact the core has to know, it is a sentence the protocol writes down.
+
+    Read from the DECLARATION and not from what has been recorded, which is the whole point:
+    the recorded answer is empty for a device that has never been sampled, so "what would run
+    against this machine" said "nothing" about exactly the machine somebody was trying to take
+    a first sample of.
+    """
+    out: set = set()
+    profiles = (host or {}).get('profiles')
+    if not isinstance(profiles, dict):
+        return out
+    for key, entry in _core_profiles().items():
+        field = entry.get('samples_when')
+        prof = profiles.get(key)
+        if not field or not isinstance(prof, dict):
+            continue
+        raw = prof.get(field)
+        # A list or a separated string: the field is edited as chips and stored as text, and
+        # both shapes reach here (lib/core/snmp/profiles.assigned parses the same two).
+        filled = (any(str(x).strip() for x in raw) if isinstance(raw, (list, tuple))
+                  else str(raw or '').strip() != '')
+        if filled:
+            out.add(str(entry.get('module') or '').strip().rsplit('.', 1)[-1])
+    out.discard('')
+    return out
 
 
 def core_profile_fields(key: str) -> list[dict]:

@@ -139,14 +139,21 @@ class TestWhoMaySeeIt:
         r = c.get('/api/v1/infra/hosts')
         assert r.status_code == 200 and r.get_json()['hosts']
 
-    def test_the_flags_are_reading_and_collecting_and_nothing_else(self):
-        """There is no `infra_edit`, and that is the design: what there is to change lives in
-        the registry, behind the permissions the registry already has. The second flag is not
-        an edit either — it asks the modules to produce their numbers again — but it is not
-        free, so it is separate from the one that lets you look."""
+    def test_no_flag_here_is_an_edit_of_the_registry(self):
+        """There is no `infra_edit`, and that is the design: what there is to CHANGE lives in
+        the registry, behind the permissions the registry already has. Every flag this section
+        declares is about looking at the fleet or operating the monitoring of it — asking the
+        modules for fresh numbers, or saying which row is worth an alert. None stores an
+        address, a credential or a name.
+
+        The list is closed on purpose. It read `== ['infra_view', 'infra_collect']` and was
+        the first thing to notice `infra_watch` arriving, which is what a closed list is for —
+        a third flag has to be argued for here rather than appearing."""
         from lib.core.infra.manifest import MODULE_PERMISSIONS
         flags = [p['flag'] for p in MODULE_PERMISSIONS['permissions']]
-        assert flags == ['infra_view', 'infra_collect']
+        assert flags == ['infra_view', 'infra_collect', 'infra_watch']
+        assert not any(f.endswith('_edit') or f.startswith('devices_') for f in flags), (
+            'this section grew a permission over the registry, which has its own')
 
 
 class TestCollectingNow:
@@ -196,6 +203,37 @@ class TestCollectingNow:
         assert r.status_code == 409
         assert r.get_json()['error']
 
+    def test_a_device_the_registry_alone_makes_a_device_has_something_to_collect(self, client):
+        """The one this route got wrong. A switch or a NAS read over SNMP has no check and no
+        module item: the device profiles on its own record ARE its monitoring, and the module
+        samples it every cycle without anything else existing.
+
+        What "collect now" offered was worked out from what had been RECORDED about the
+        machine, which for a device that has never been sampled is nothing — so the answer was
+        "this device has no check to run" about a device the scheduler collects from, and the
+        button that exists to take the FIRST sample was the one thing that could not take it.
+        Reported from the screen a minute after the module item was removed from a NAS.
+
+        Not asserting a 200: what happens past this point is the executor's, and this suite has
+        no modules directory to run one from. What is asserted is that the route stopped saying
+        there is nothing to collect — which is the whole of the bug.
+        """
+        _login(client)
+        uid = _mkhost(client, name='switch-1', address='10.0.0.30', profiles={
+            'snmp': {'community': 'public', 'version': '2c',
+                     'device_profiles': 'grp_generic'}})
+        r = client.post(self._url(uid))
+        assert r.status_code != 409, r.get_json()
+
+    def test_and_a_community_with_nothing_assigned_still_has_not(self, client):
+        """The other half of the same rule: SNMP reachable is not SNMP sampled. A device with
+        a community and no profiles assigned is one you can ASK things of, not one anybody is
+        charting — `devices_to_sample` skips it, so the button must not claim otherwise."""
+        _login(client)
+        uid = _mkhost(client, name='switch-2', address='10.0.0.31', profiles={
+            'snmp': {'community': 'public', 'version': '2c', 'device_profiles': ''}})
+        assert client.post(self._url(uid)).status_code == 409
+
     def test_an_unknown_machine_is_a_404(self, client):
         _login(client)
         assert client.post(self._url('not-a-host')).status_code == 404
@@ -222,6 +260,148 @@ class TestCollectingNow:
         assert client.post(self._url(seen)).status_code == 409
         # The one it may not: refused, and refused for being invisible rather than for the flag.
         assert client.post(self._url(other)).status_code == 403
+
+
+class TestCollectingFromTheWholeFleet:
+    """The other question the section is asked: refresh EVERYTHING.
+
+    The per-device button narrows its run to that device, which is what makes it quick and
+    what stops it walking somebody else's rack. This is the un-narrowed run — every module
+    with its whole configuration, which is what a scheduler cycle is — so the orphan prune
+    stays on, because this run really did cover everything.
+
+    What has to be got right is who may press it. `infra_collect` says which ACT you may
+    perform, not which machines you may perform it on, and a run over the whole fleet polls
+    machines a narrowed operator may not be allowed to see. So it asks twice.
+    """
+
+    def _url(self):
+        return '/api/v1/infra/collect'
+
+    def test_it_needs_a_session(self, client):
+        assert client.post(self._url()).status_code == 401
+
+    def test_a_viewer_may_watch_the_fleet_and_not_refresh_it(self, admin, client):
+        _login(client)
+        c = _as(admin, 'fleetwatcher', role='viewer')
+        assert c.get('/api/v1/infra/hosts').status_code == 200
+        assert c.post(self._url()).status_code == 403
+
+    def test_holding_the_flag_is_not_enough_without_seeing_the_fleet(self, admin, client):
+        """The one that matters, and the reason for the second check. An operator scoped to
+        three racks holds `infra_collect` — it is what their per-device button runs on — and
+        without this that flag would poll every machine in the building, including the ones
+        the same session is refused a GET on two routes above.
+        """
+        seen = admin._hosts_store.create({**_HOST, 'name': 'theirs'}, actor='admin')
+        role_uid = '33333333-3333-4333-8333-333333333333'
+        admin._custom_roles[role_uid] = {
+            'uid': role_uid, 'name': 'rack-op', 'enabled': True,
+            'permissions': ['infra_view', 'infra_collect', f'server.{seen}.view'],
+        }
+        admin._users['rackop'] = {
+            'password_hash': admin._users['admin']['password_hash'],
+            'role': role_uid, 'display_name': 'R',
+        }
+        _login(client, 'rackop')
+        assert client.post(self._url()).status_code == 403
+        # …and the button they DO have still works, scoped the way they are.
+        assert client.post(f'/api/v1/infra/hosts/{seen}/collect').status_code == 409
+
+    def test_an_installation_with_nothing_to_run_says_so(self, admin, client, monkeypatch):
+        """409 and not "done": reporting success would draw a fresh timestamp over a panel
+        where nothing was collected, which is the section telling you it looked when it did
+        not — the same lie the per-device button refuses to tell.
+
+        And it is answered BEFORE the modules directory is looked at, for the reason three of
+        the tests above exist: "there is nothing to collect" is true whatever happened to the
+        module code, and answering it with a 500 reads as a broken server."""
+        _login(client)
+        monkeypatch.setattr(admin, '_load_modules', lambda: {})
+        r = client.post(self._url())
+        assert r.status_code == 409
+        assert r.get_json()['error']
+
+    def test_a_device_the_registry_alone_makes_a_device_is_something_to_run(self, client):
+        """A fleet with nothing but a switch read over SNMP has something to collect: the
+        device profiles on its own record ARE its monitoring, and there is no item anywhere
+        for a list built from the module configuration to find.
+        """
+        _login(client)
+        _mkhost(client, name='switch-fleet', address='10.0.0.40', profiles={
+            'snmp': {'community': 'public', 'version': '2c',
+                     'device_profiles': 'grp_generic'}})
+        r = client.post(self._url())
+        assert r.status_code != 409, r.get_json()
+
+
+class TestWhatTheFleetButtonRuns:
+    """It is the DEVICES IN THE LIST, and that is narrower than "everything enabled".
+
+    Written first as "every enabled module with anything to run", it swept up the modules that
+    watch no device at all — a Microsoft 365 tenant, an Azure subscription — and the dialog
+    opened on seventeen lines for a fleet of seventeen machines. Reported from the screen in
+    those words: "I mean the devices in the infrastructure list".
+
+    Asserted at the 409 boundary rather than on the returned list: what happens past it is the
+    executor's, and this suite has no modules directory to run one from.
+    """
+
+    def _url(self):
+        return '/api/v1/infra/collect'
+
+    def _only(self, admin, monkeypatch, cfg):
+        monkeypatch.setattr(admin, '_load_modules', lambda: cfg)
+
+    def test_a_module_watching_no_device_is_not_the_fleet(self, admin, client, monkeypatch):
+        """A cloud tenant is a check that runs and is not a machine on this screen. Collecting
+        it because the button says "all" is the button doing more than it says."""
+        _login(client)
+        _mkhost(client, name='in-the-list', address='10.0.0.50')
+        self._only(admin, monkeypatch, {
+            'm365': {'enabled': True, 'list': {'tenant': {'enabled': True}}},
+            'azure': {'enabled': True, 'list': {'sub': {'enabled': True, 'host_uid': ''}}},
+        })
+        r = client.post(self._url())
+        assert r.status_code == 409, r.get_json()
+
+    def test_an_item_bound_to_a_listed_device_is(self, admin, client, monkeypatch):
+        _login(client)
+        uid = _mkhost(client, name='in-the-list', address='10.0.0.51')
+        self._only(admin, monkeypatch, {
+            'ping': {'enabled': True, 'list': {'p': {'enabled': True, 'host_uid': uid}}}})
+        assert client.post(self._url()).status_code != 409
+
+    def test_a_cluster_check_counts_through_its_member_list(self, admin, client, monkeypatch):
+        """The binding that is not `host_uid`. A keepalived VIP or a Proxmox cluster is ONE
+        item bound to several machines through `host_uids` — the core's own convention, which
+        host_binding, authz and the permission service all key on. Read only as `host_uid` it
+        binds to nothing, so a module watching eight machines on this very screen was left out
+        of the button that says it collects them. Caught against a real fleet, not by reading.
+        """
+        _login(client)
+        uid = _mkhost(client, name='node-1', address='10.0.0.52')
+        self._only(admin, monkeypatch, {
+            'keepalived': {'enabled': True,
+                           'list': {'vip': {'enabled': True, 'host_uids': [uid, 'gone']}}}})
+        assert client.post(self._url()).status_code != 409
+
+    def test_an_item_bound_to_a_machine_the_registry_no_longer_has_is_not(self, admin, client,
+                                                                          monkeypatch):
+        _login(client)
+        _mkhost(client, name='in-the-list', address='10.0.0.53')
+        self._only(admin, monkeypatch, {
+            'ping': {'enabled': True,
+                     'list': {'p': {'enabled': True, 'host_uid': 'deleted-long-ago'}}}})
+        assert client.post(self._url()).status_code == 409
+
+    def test_a_module_the_admin_switched_off_is_not_run(self, admin, client, monkeypatch):
+        """"Collect" must not be a way to run something that was turned off."""
+        _login(client)
+        uid = _mkhost(client, name='in-the-list', address='10.0.0.54')
+        self._only(admin, monkeypatch, {
+            'ping': {'enabled': False, 'list': {'p': {'enabled': True, 'host_uid': uid}}}})
+        assert client.post(self._url()).status_code == 409
 
 
 class TestTheViewModel:

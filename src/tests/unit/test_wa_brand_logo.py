@@ -108,6 +108,20 @@ class TestThePagesUseThem:
         block = src[src.index('ss-boot-logo'):src.index('ss-boot-name')]
         assert 'bi-shield-check' not in block
 
+    def test_the_mark_fits_inside_the_ring(self):
+        """The badge has glitch lines running past its edge: sized to the full circle they
+        cross the ring that is supposed to frame them. The two are set in different rules and
+        both were grown at once (96/72 was a legible ring around an emblem too small to make
+        out), so what has to hold is the RELATIONSHIP and not either number."""
+        import re                                        # noqa: PLC0415
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        ring = css.split('.ss-boot-logo {')[1].split('}')[0]
+        mark = css.split('.ss-boot-logo img {')[1].split('}')[0]
+        ring_px = int(re.search(r'width:\s*(\d+)px', ring).group(1))
+        mark_px = int(re.search(r'width:\s*(\d+)px', mark).group(1))
+        assert mark_px < ring_px - 6, f'the mark ({mark_px}px) crowds the ring ({ring_px}px)'
+        assert mark_px >= 80, f'the emblem is drawn at {mark_px}px — too small to make out'
+
     def test_both_are_cache_busted_like_the_stylesheet(self):
         """An image the browser pinned forever is the one nobody thinks to hard-refresh — the
         same reason the favicon carries `asset_v`."""

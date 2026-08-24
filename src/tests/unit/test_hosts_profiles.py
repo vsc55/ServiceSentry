@@ -3,10 +3,12 @@
 """Tests for the host connection-profile catalog (lib/core/hosts/profiles.py)."""
 
 from lib.core.hosts.profiles import (
+    core_profiles,
     host_profiles_catalog,
     module_host_collections,
     module_host_fields,
     module_host_multiple,
+    profile_sampled_modules,
 )
 
 
@@ -152,3 +154,70 @@ class TestCatalog:
         assert host_profiles_catalog(str(tmp_path / 'nope')) == {}
         assert module_host_fields(str(tmp_path / 'nope')) == {}
         assert module_host_collections(str(tmp_path / 'nope')) == {}
+
+
+
+class TestWhatMakesAHostADevice:
+    """A connection profile can say that carrying it IS the monitoring.
+
+    A switch, a router or a UPS read over SNMP has no check and no module item: the device
+    profiles assigned to it are what gets collected every cycle. Anything asking "what would
+    run against this machine" has to be able to answer that BEFORE the first cycle, which is
+    exactly when it is asked — and the only answer available until now was what had already
+    been recorded, which for a device that has never been sampled is nothing.
+
+    Reported from the screen: a NAS whose module item had just been removed offered to collect
+    its ping and left out the collection, so the button that exists to take the first sample
+    was the one thing that could not take it.
+    """
+
+    def test_a_host_with_device_profiles_is_sampled_by_the_module_that_declared_them(self):
+        assert profile_sampled_modules(
+            {'profiles': {'snmp': {'cred_uid': 'c', 'device_profiles': 'grp_synology'}}}
+        ) == {'snmp'}
+
+    def test_the_field_is_read_in_both_shapes_it_is_stored_in(self):
+        """Edited as chips, stored as text — and both reach here."""
+        assert profile_sampled_modules(
+            {'profiles': {'snmp': {'device_profiles': ['a', 'b']}}}) == {'snmp'}
+        assert profile_sampled_modules(
+            {'profiles': {'snmp': {'device_profiles': 'a, b'}}}) == {'snmp'}
+
+    def test_the_profile_alone_is_not_enough(self):
+        """A community with nothing assigned to it is a device somebody can ASK things of,
+        not one anybody is charting: `devices_to_sample` skips it, so this must too, or the
+        collection would offer a module that then samples nothing."""
+        for empty in ('', '   ', [], ['  '], None):
+            assert profile_sampled_modules(
+                {'profiles': {'snmp': {'community': 'public', 'device_profiles': empty}}}
+            ) == set(), empty
+
+    def test_a_profile_that_declares_no_such_field_never_counts(self):
+        """SSH is a way IN, not a collection. Reading "has a profile" as "is sampled" would
+        put every machine with credentials on it into every collection."""
+        assert profile_sampled_modules(
+            {'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'x'}}}) == set()
+
+    def test_a_record_with_nothing_to_go_on(self):
+        for host in ({}, None, {'profiles': None}, {'profiles': 'nope'}, {'profiles': {}}):
+            assert profile_sampled_modules(host) == set(), host
+
+    def test_the_declared_field_is_the_one_the_module_actually_parses(self):
+        """The declaration and the sampler must name the SAME field. They are two files —
+        the core reads `samples_when` to decide what to offer, and SNMP reads the field
+        itself to decide what to walk — so a rename on one side would produce a button that
+        offers a collection nobody runs, with nothing raising anywhere.
+        """
+        from lib.core.snmp.manifest import HOST_PROFILE          # noqa: PLC0415
+        from lib.core.snmp.profiles import assigned              # noqa: PLC0415
+        field = HOST_PROFILE['samples_when']
+        assert field in {f['name'] for f in HOST_PROFILE['fields']}, (
+            'it declares a field the profile does not have')
+        assert assigned({field: 'grp_x'}) == ['grp_x'], (
+            'the sampler does not read the field the declaration names')
+        assert not assigned({field: ''})
+
+    def test_it_is_carried_by_the_catalogue_and_not_invented_here(self):
+        core = core_profiles()
+        assert core['snmp']['samples_when'] == 'device_profiles'
+        assert not core['ssh']['samples_when']

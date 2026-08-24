@@ -60,6 +60,32 @@ function setInfraTab(id) {
     renderInfra();
 }
 
+//: How many syslog messages each device has, once asked. Kept for the section's lifetime:
+//: the number is a headline and not a live reading, and re-asking it on every tab switch is a
+//: query per click for a figure that changed by three.
+const _INFRA_LOG_COUNTS = {};
+
+/** The log count for one address — the number if it is known, and a request for it if not.
+ *
+ *  Returns `undefined` the first time, which draws no badge: a tab whose count is not known
+ *  yet must not claim zero. When the answer lands the badge is patched in place rather than
+ *  re-rendering the device, which would throw away whatever tab somebody had opened. */
+function _infraLogCount(addr) {
+    if (Object.prototype.hasOwnProperty.call(_INFRA_LOG_COUNTS, addr)) {
+        return _INFRA_LOG_COUNTS[addr];
+    }
+    _INFRA_LOG_COUNTS[addr] = undefined;
+    // `limit=1` because only the total is wanted: the endpoint counts the filtered set
+    // whatever page it is asked for, so this is the count without a page of rows behind it.
+    apiGet('/api/v1/syslog?limit=1&host=' + encodeURIComponent(addr)).then(data => {
+        const total = (data && data.total) || 0;
+        _INFRA_LOG_COUNTS[addr] = total;
+        const el = document.getElementById('infra-tabcount-logs');
+        if (el) { el.textContent = String(total); el.classList.remove('d-none'); }
+    }).catch(() => { /* a badge is not worth failing the page for */ });
+    return undefined;
+}
+
 function _infraTabsHtml(d) {
     const metrics = d.metrics || [];
     const results = d.results || [];
@@ -67,14 +93,22 @@ function _infraTabsHtml(d) {
     const counts  = {details: metrics.filter(m => m.headline).length,
                      metrics: metrics.length, results: results.length,
                      raw: metrics.length + attrs.length};
+    // Logs are counted somewhere else — they are not in this payload, they are rows of the
+    // syslog table — so the badge is filled in when the answer arrives rather than left off.
+    // Asked for AFTER this paints: a count over 60.000 rows is ~60 ms with the index behind
+    // it, and the section must draw now. The same rule the collection bar follows.
+    const _addr = String((d.host || {}).address || '').trim();
+    if (_addr) counts.logs = _infraLogCount(_addr);
     const tabs = _infraTabsFor();
     const tab = tabs.some(x => x.id === _infraTab) ? _infraTab : 'details';
     const nav = `<ul class="nav nav-tabs px-3 pt-2">${tabs.map(x => `
         <li class="nav-item"><button class="nav-link${x.id === tab ? ' active' : ''}"
             onclick="setInfraTab(${jsStr(x.id)})">
             <i class="bi ${escAttr(x.icon)} me-1"></i>${esc(t(x.label_key))}
-            ${counts[x.id] === undefined ? ''
-              : `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1">${counts[x.id]}</span>`}
+            <span id="infra-tabcount-${escAttr(x.id)}"
+                  class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1${
+                      counts[x.id] === undefined ? ' d-none' : ''}">${
+                      counts[x.id] === undefined ? '' : counts[x.id]}</span>
         </button></li>`).join('')}</ul>`;
     // What each ROW is, beside what it measures — a disk's model and serial, a SMART
     // attribute's status. Indexed once per render rather than searched per row: 176 SMART rows
@@ -103,6 +137,11 @@ function _infraTabsHtml(d) {
         // The charts this tab draws on sight need their elements to exist first: the
         // string above is HTML until whoever called us puts it on the page.
         setTimeout(_infraDetailsCharts, 0);
+        // …and so does the rail: its ceiling is the height of the box it scrolls inside,
+        // which nothing can measure until both are laid out. Here rather than inside
+        // `_infraRowsPane`, which builds a string and has no page to measure on; and on every
+        // render of this tab, because picking a port rebuilds the rail with it.
+        setTimeout(() => capToScrollBox(document.getElementById('infra-rows-rail')), 0);
     } else if (tab === 'raw') {
         body = _infraRawPane(d);
     } else if (tab === 'results') {
@@ -127,12 +166,6 @@ function _infraTabsHtml(d) {
 function _infraIdentityHtml(d) {
     const h = d.host || {};
     const attrs = d.attributes || [];
-    const reg = [
-        [t('host_address'), h.address], [t('col_host_type'), hostTypeLabel(h.device_type)],
-        [t('host_kind'), t('host_kind_' + (h.kind || 'local'))],
-        [t('host_os'), h.os && h.os !== 'auto' ? h.os : ''],
-        [t('host_description'), h.description],
-    ].filter(([, v]) => String(v || '').trim());
     // The DEVICE's own facts, and not its rows'. Reported from the screen: the column ran
     // for pages. One SNMP item files a result per disk, per volume, per share, and each of
     // them carries a model and a serial — so "the identity of this machine" became two
@@ -231,12 +264,16 @@ function _infraIdentityHtml(d) {
     const head = g => g.source ? (g.short || _infraShortLabel(g.label || g.source))
                                : t('infra_identity_unsourced');
     const sub  = () => '';
-    // The registry's own record is not a set of attributes, so it is handed over in the same
-    // shape: a key the labeller knows and a value.
-    const regFacts = reg.map(([k, v]) => ({key: '', label: k, value: v}));
-    return `${reg.length ? block(t('infra_record'), regFacts) : ''}
-        ${[...groups.values()].map(g => block(head(g), g.facts, sub(g), g.states)).join('')}
-        ${!reg.length && !attrs.length && !groups.size
+    // The registry's own record used to lead this column — address, type, how it is reached,
+    // OS, description. Every one of those is already on the page or one click from it: the
+    // header above carries the name, the address, the state and the tags, and the rest is the
+    // registry's, behind the button that opens it. A card that repeats the line above it is a
+    // card that costs a screenful and answers nothing new.
+    //
+    // This column is for what the DEVICE says about itself — what its checks reported — which
+    // is the half nothing else on the page shows.
+    return `${[...groups.values()].map(g => block(head(g), g.facts, sub(g), g.states)).join('')}
+        ${!attrs.length && !groups.size
             ? `<div class="text-muted small">${esc(t('infra_no_identity'))}</div>` : ''}`;
 }
 
