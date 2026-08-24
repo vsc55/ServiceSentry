@@ -35,6 +35,11 @@ MODULE_PERMISSIONS = {
         # (lib/services/monitoring/manifest.py) — the same act from the other screen, so the
         # two roles that may operate monitoring are the same two in both places.
         {'flag': 'infra_collect', 'roles': ('editor',)},
+        # Say that one row of one machine is worth an alert. `editor`, like collecting: it
+        # decides what wakes somebody up, which is operating the monitoring and not looking
+        # at it. NOT `devices_edit`: it stores no address, no credential and no name — the
+        # registry stays behind its own permission.
+        {'flag': 'infra_watch', 'roles': ('editor',)},
     ),
 }
 
@@ -45,4 +50,27 @@ MODULE_PERMISSIONS = {
 # depend on what somebody called the event (see lib/core/audit/events.py).
 AUDIT_EVENTS = [
     {'key': 'infra_collect', 'severity': 'muted'},
+    # Louder than a collection: this one changes what the panel will and will not report,
+    # and "why did nobody get told" is a question answered by this line.
+    {'key': 'infra_watch', 'severity': 'info'},
 ]
+
+
+# ── Tables this package keeps in the shared database ─────────────────────────────────────
+#
+# What devices SAW, which is not what checks found: a switch's forwarding table and a
+# machine's ARP cache. Hundreds of volatile rows per device that nobody wants alerts about
+# and that are only worth anything joined across the fleet — see `evidence.py` for why they
+# are not results.
+#
+# Declared for the sake of STARTUP: the store reconciles its own table when it is built, but
+# it is built on demand (a cycle that samples a switch, a request that draws the map), and
+# the two ways of arriving there are not equally forgiving.
+from .evidence import SCHEMA as _EVIDENCE   # noqa: E402
+
+DB_TABLES = [_EVIDENCE]
+
+# What this package runs in the background, for the screen that lists all of it
+# (lib/core/jobs). Declared rather than reached into: a core that imported four job
+# registries by name would have to be edited to learn about a fifth.
+from .jobs import live as BACKGROUND_JOBS      # noqa: E402,F401  (a descriptor)

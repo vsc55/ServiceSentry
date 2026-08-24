@@ -131,6 +131,9 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
         'done': False, 'awaiting': False, 'gave_up': False,
         'error': '', 'answered': [], 'errors': [],
         '_started': now, '_ended': 0.0,
+        # The history row, opened NOW: a collection interrupted by a restart never reaches
+        # `_finish`, and a note written only at the end is the note that machine never gets.
+        '_hist': '',
     }
     index = {m: i for i, m in enumerate(modules)}
 
@@ -144,10 +147,15 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
         progress display in the path of the work it is describing.
         """
         i = index.get(module)
-        if i is None:
-            return
+        if i is None or job.get('done'):
+            return               # a finished job takes no more reports, ever
         row = job['modules'][i]
-        row['state'] = state
+        # A module that overran keeps reporting — it is still working — and those reports are
+        # what keeps the checklist moving while the job waits for it. What they must NOT do is
+        # take the row back out of `timeout`: that state is what says "still out", and losing
+        # it would end the run the moment the straggler said anything.
+        if not (row['state'] == 'timeout' and state == 'running'):
+            row['state'] = state
         row['detail'] = detail
         _step(row, state, detail, extra)
         # `completed` counts modules that have SAID how they ended. A timeout has not: the
@@ -199,6 +207,13 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
                 timer.daemon = True
                 timer.start()
 
+    # The history row, opened before the work does. A collection interrupted by a
+    # restart never reaches `_finish`, and a note written only at the end is the note
+    # that machine never gets — it did not end and it did not appear to have started.
+    from lib.core.jobs import record as _record         # noqa: PLC0415
+    job['_hist'] = _record.start({
+        'id': job_id, 'kind': 'collect', 'source': 'infra',
+        'label': host_name, 'started': now, 'total': len(modules)})
     threading.Thread(target=_work, daemon=True, name='ss-infra-collect').start()
     return job_id
 
@@ -226,6 +241,49 @@ def _finish(job: dict, gave_up: bool = False) -> None:
     # Last, and always: `done` is what stops the browser polling, so a job that raised
     # before setting it is one the screen waits on forever.
     job['done'] = True
+    _archive(job)
+
+
+def _archive(job: dict) -> None:
+    """Close the note about what this collection did.
+
+    Here and not from the screen: these are pruned from memory half an hour after they end,
+    so archiving when somebody happens to look would mean a collection nobody opened is one
+    that never happened. The row itself was opened when the collection started.
+    """
+    from lib.core.jobs import record as _record       # noqa: PLC0415
+    rows = job.get('modules') or []
+    done = len([r for r in rows if r.get('state') in ('done', 'failed', 'timeout')])
+    bad = [r for r in rows if r.get('state') in ('failed', 'timeout')]
+    _record.finish(job.get('_hist') or '', {
+        'id': job.get('id') or '', 'kind': 'collect', 'source': 'infra',
+        'label': str(job.get('host_name') or ''),
+        'state': 'failed' if (job.get('error') or bad) else 'done',
+        'started': float(job.get('_started') or 0),
+        'ended': float(job.get('_ended') or time.time()),
+        'done': done, 'total': len(rows), 'error': str(job.get('error') or ''),
+    }, _log_of(job))
+
+
+def _log_of(job: dict) -> list:
+    """What the collection said, one line per step of every module.
+
+    Every step and not a summary: "which module was it on when it stopped" and "what did the
+    one that timed out actually get through" are the questions afterwards, and a summary
+    answers neither. The cap that keeps this from filling a database is the installation's
+    (`web_admin|jobs_history_lines`) and is applied where it is written.
+    """
+    out = []
+    for row in job.get('modules') or ():
+        name = str(row.get('label') or row.get('module') or '')
+        state = str(row.get('state') or '')
+        for step in row.get('steps') or ():
+            detail = str((step or {}).get('detail') or (step or {}).get('step') or '')
+            scope = str((step or {}).get('scope') or '')
+            out.append(' · '.join(x for x in (name, scope, detail) if x))
+        if not (row.get('steps') or ()):
+            out.append(f'{name} · {state}')
+    return out
 
 
 def _step(row: dict, state: str, detail: str, extra: dict | None) -> None:
@@ -307,3 +365,101 @@ def _timeout_of(wa) -> int:
         # short deadline is better than one that did not run.
         from lib.services.monitoring.checks_mixin import _MODULE_CHECK_TIMEOUT  # noqa: PLC0415
         return _MODULE_CHECK_TIMEOUT
+
+def live(_wa) -> list:
+    """What this package is running now, for the background-jobs screen.
+
+    Declared in the manifest (`BACKGROUND_JOBS`) rather than the screen reaching in here: a
+    core that imported four job registries by name would be a core that has to be edited to
+    learn about a fifth.
+
+    Finished ones travel too, for as long as this module keeps them (`_KEEP_FINISHED`) — a
+    collection that ended two minutes ago is exactly what somebody who looked away came back
+    to find out about.
+    """
+    now = time.time()
+    out = []
+    for jid, job in list(_JOBS.items()):
+        rows = job.get('modules') or []
+        # `timeout` is NOT one of these. It means the batch's deadline passed and the module
+        # is still working — it keeps reporting, and this screen keeps showing it. Counting it
+        # as finished put the bar at 1/1 under the words "running", which is the jobs screen
+        # contradicting the collection screen about the same module at the same moment.
+        done = len([r for r in rows if r.get('state') in ('done', 'failed')])
+        out.append({
+            'id': jid,
+            'kind': 'collect',
+            'label': str(job.get('host_name') or ''),
+            'detail': _live_detail(rows),
+            'state': ('done' if not job.get('error') else 'failed') if job.get('done')
+                     else 'running',
+            'started': float(job.get('_started') or job.get('started') or now),
+            'done': done, 'total': len(rows),
+            'error': str(job.get('error') or ''),
+            'steps': _live_steps(rows),
+        })
+    return out
+
+
+#: A module's state, as the words the jobs screen colours. Its own vocabulary does not
+#: travel — a screen cannot colour a word it has never heard of.
+#:
+#: `timeout` is NOT a failure. Reported from the screen: a switch's collection showed the SNMP
+#: module in red on the jobs list while the collection dialog, at that same moment, said "still
+#: working" — and the collection dialog was right. The batch's deadline passed; the module did
+#: not stop, and nothing here can stop it. It is still running, and it is drawn as what it is.
+#: What it means at the END is a different question, and `_archive` answers that one.
+_LIVE_STATE = {'pending': 'pending', 'running': 'running', 'done': 'ok',
+               'failed': 'failed', 'timeout': 'running'}
+
+
+#: A step's own state, as the words the jobs screen colours. `timeout` is `running` here for
+#: the same reason it is on a module: the deadline passed and the work did not stop.
+_STEP_STATE = {'run': 'running', 'ok': 'ok', 'error': 'failed', 'timeout': 'running'}
+
+
+def _live_steps(rows: list) -> list:
+    """The checklist behind the one line a list row has room for.
+
+    The SAME lines the collection dialog draws, with the same columns: which device, what is
+    being done to it, and how far through. Reported from the screen — the jobs dialog showed
+    "0 / 1  0 %" and a single red word while the collection dialog, at that moment, was
+    listing five machines and what each was reading.
+    """
+    out = []
+    for row in rows or ():
+        state = str(row.get('state') or '')
+        out.append({'state': _LIVE_STATE.get(state, ''),
+                    'text': str(row.get('label') or row.get('module') or ''),
+                    'note': str(row.get('detail') or '')})
+        if state not in ('running', 'timeout'):
+            continue
+        for step in row.get('steps') or ():
+            text = str((step or {}).get('key') or '')
+            if not text:
+                continue
+            out.append({
+                'state': _STEP_STATE.get(str((step or {}).get('state') or ''), 'running'),
+                'text': text,
+                # The device this step is about. Its own column, because forty steps of one
+                # module differ by exactly this and nothing else.
+                'scope': str((step or {}).get('scope') or ''),
+                'n': (step or {}).get('n') or 0, 'total': (step or {}).get('total') or 0,
+                'note': str((step or {}).get('note') or ''),
+                'sub': True,
+            })
+    return out
+
+
+def _live_detail(rows: list) -> str:
+    """The module that is working, and what it said it was doing — one line.
+
+    The row that is RUNNING, because that is the answer to "what is it doing"; with none
+    running the job is between modules or over, and a stale step would read as current.
+    """
+    for row in rows or ():
+        if row.get('state') == 'running':
+            step = str(row.get('step') or '').strip()
+            name = str(row.get('label') or row.get('module') or '')
+            return f'{name} — {step}' if step else name
+    return ''

@@ -78,6 +78,10 @@ CARDS: tuple[dict, ...] = (
     # where it would read as a platform setting nobody connects to a graph.
     {'tab': 'monitoring', 'id': 'snmp_library', 'title_key': 'cfg_card_snmp_library',
      'icon': 'bi-hdd-stack'},
+    # What the panel did in the background, after it did it. GENERAL, because the work it
+    # keeps is not one section's: a collection is monitoring, a copy is backup, a MIB compile
+    # is SNMP, and the retention is one answer for all of them.
+    {'tab': 'general', 'id': 'jobs', 'title_key': 'cfg_card_jobs', 'icon': 'bi-hourglass-split'},
     {'tab': 'general', 'id': 'maintenance', 'title_key': 'cfg_card_maintenance',
      'icon': 'bi-trash3'},
     # Where copies are written. A card of its own rather than a line in General: the section

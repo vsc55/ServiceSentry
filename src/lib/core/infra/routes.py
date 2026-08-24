@@ -7,6 +7,7 @@ Routes registered by this file:
     GET    /api/v1/infra/hosts             every machine, its state and how much of it is watched
     GET    /api/v1/infra/hosts/<uid>       one machine: what its checks last returned, as numbers
     POST   /api/v1/infra/hosts/<uid>/collect   run this machine's checks now, and record them
+    POST   /api/v1/infra/hosts/<uid>/watch     say one row of it is worth an alert (or stop)
     GET    /api/v1/infra/collect              the collection in flight, if any
     GET    /api/v1/infra/collect/<job_id>      how that collection is going
     GET    /api/v1/infra/map              how the fleet is wired, out of what it answered
@@ -38,6 +39,7 @@ from lib.core.hosts import service as hosts_svc
 from lib.core.hosts.service import _checks_for_host
 from lib.core.infra import jobs as infra_jobs
 from lib.core.infra import service as infra_svc
+from lib.core.infra import evidence as infra_evidence
 from lib.core.infra import topology as infra_topology
 
 
@@ -45,6 +47,7 @@ def register(app, wa):
     infra_view_req = wa._perm_required('infra_view')
 
     infra_collect_req = wa._perm_required('infra_collect')
+    infra_watch_req = wa._perm_required('infra_watch')
 
     def _may_see(uid, perms):
         """Whether this caller may see ONE machine — the same rule as the listing below."""
@@ -104,6 +107,14 @@ def register(app, wa):
             for key, item in items.items():
                 bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
         status_raw = wa._read_check_status()
+        # …and what a module recorded about the HOST itself, with no check behind it: a device
+        # read because the registry says it is one. The status column has always counted those
+        # and this page did not, so a switch sampled that way went red in the fleet and showed
+        # four empty tabs when opened — the machine with the numbers being the one nobody could
+        # see. One source for both, so they cannot disagree again.
+        for bare, keys in hosts_svc.host_sampled_keys(status_raw, uid).items():
+            for key in keys:
+                bound.setdefault(bare, {}).setdefault(key, '')
         # The history index, grouped by module, is the fallback for a check with no live
         # state — a host in maintenance has had its live records purged, and "nothing here"
         # would read as a machine that has never reported.
@@ -126,6 +137,42 @@ def register(app, wa):
                         'metrics':    infra_svc.metrics(results, fields),
                         'attributes': infra_svc.attributes(
                             results, infra_svc.sources_of(fields))})
+
+    @app.route('/api/v1/infra/hosts/<uid>/watch', methods=['POST'])
+    @infra_watch_req
+    def api_infra_watch(uid):
+        """Say that one row of this machine is worth an alert, or stop saying it.
+
+        A switch port that is down may be a PC switched off at seven — which is not news, and
+        made a rack of half-populated switches permanently red — or it may be the link to a
+        server, which is a phone call. Nothing in any MIB separates the two: what is at the
+        other end of the cable is knowledge about THIS installation, and this is where it is
+        recorded.
+
+        The one thing on this section that WRITES, and it deliberately does not write the
+        registry: no name, no address, no credential — one flag against one row, behind a
+        permission of its own. The narrowing every other route here applies still applies: a
+        machine you may not see is not a machine you may set a flag on.
+        """
+        store = getattr(wa, '_hosts_store', None)
+        record = store.get(uid, decrypt=False) if store is not None else None
+        if not record:
+            return jsonify({'error': wa._t('host_not_found')}), 404
+        if not _may_see(uid, set(wa._get_session_permissions() or [])):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        body = request.get_json(silent=True) or {}
+        module = str(body.get('module') or '').strip()
+        row = str(body.get('row') or '').strip()
+        if not module or not row:
+            return jsonify({'error': wa._t('infra_watch_bad')}), 400
+        on = bool(body.get('on'))
+        actor = session.get('username', '')
+        if not store.set_watch(uid, module, row, on, actor=actor):
+            return jsonify({'error': wa._t('save_failed')}), 500
+        wa._audit('infra_watch', detail={'host': record.get('name') or uid,
+                                         'module': module, 'row': row,
+                                         'on': bool(on)})
+        return jsonify({'ok': True, 'watch': (store.get(uid, decrypt=False) or {}).get('watch')})
 
     @app.route('/api/v1/infra/map', methods=['GET'])
     @infra_view_req
@@ -170,6 +217,11 @@ def register(app, wa):
             for (bare, _coll), items in _checks_for_host(wa, uid).items():
                 for key, item in items.items():
                     bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
+            # A device sampled through the registry has no item to be bound BY, and its
+            # addresses are exactly what places it on the map.
+            for bare, keys in hosts_svc.host_sampled_keys(status_raw, uid).items():
+                for key in keys:
+                    bound.setdefault(bare, {}).setdefault(key, '')
             for mod in bound:
                 if mod not in fields_cache:
                     fields_cache[mod] = (history_svc.history_meta(
@@ -177,7 +229,19 @@ def register(app, wa):
             results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
             fields = {mod: fields_cache.get(mod) or {} for mod in bound}
             attrs_by_host[uid] = infra_svc.attributes(results, infra_svc.sources_of(fields))
-        return jsonify(infra_topology.build(hosts, attrs_by_host))
+        # What devices SAW, which is what places a machine on a switch port when it speaks
+        # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
+        # are not checks (see lib/core/infra/evidence.py); read here in one go for every kind.
+        evidence: dict = {}
+        db = getattr(wa, '_db_connector', None) or getattr(wa, '_db', None)
+        if db is not None:
+            try:
+                store = infra_evidence.EvidenceStore(db)
+                for kind in ('fdb', 'bridgeport', 'ifname', 'arp'):
+                    evidence[kind] = store.by_device(kind)
+            except Exception:                       # pylint: disable=broad-except
+                evidence = {}                       # a map without the ports beats no map
+        return jsonify(infra_topology.build(hosts, attrs_by_host, evidence))
 
     def _modules_to_collect(uid):
         """The enabled modules with at least one enabled check bound to this machine.
@@ -202,9 +266,15 @@ def register(app, wa):
                 if isinstance(cfg, dict):
                     return bool(cfg.get('enabled', True))
             return True
-        return sorted({bare for (bare, _coll), items in _checks_for_host(wa, uid).items()
-                       if _enabled(bare)
-                       and any((it or {}).get('enabled') is not False for it in items.values())})
+        out = {bare for (bare, _coll), items in _checks_for_host(wa, uid).items()
+               if _enabled(bare)
+               and any((it or {}).get('enabled') is not False for it in items.values())}
+        # A device the registry alone makes a device has no item to be enabled, and refusing
+        # to collect it would be the button saying "nothing to run" about a machine whose
+        # numbers are on the screen behind it.
+        out |= {bare for bare in hosts_svc.host_sampled_keys(wa._read_check_status(), uid)
+                if _enabled(bare)}
+        return sorted(out)
 
     @app.route('/api/v1/infra/hosts/<uid>/collect', methods=['POST'])
     @infra_collect_req

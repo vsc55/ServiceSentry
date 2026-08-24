@@ -13,6 +13,10 @@
     "if_generic",
     "ip_stats",
     "tcp_udp_stats",
-    "icmp_stats"
+    "icmp_stats",
+    "lldp",
+    "ip_neighbours",
+    "bridge_fdb",
+    "bridge_vlans"
   ]
 }

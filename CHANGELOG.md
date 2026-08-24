@@ -8,6 +8,461 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.115] - 2026-08-24
+
+### Added
+- **A switch's VLANs, from the table every other tool reads them in** (`bridge_vlans`,
+  Q-BRIDGE-MIB — standard, so any switch that does 802.1Q answers it whoever made it). The
+  interface table only says a row is "virtual": it cannot say which VLAN it is, what it is
+  called, or that it exists at all when nothing is bridged to it yet.
+- **…and a profile can say the whole PIECE is not there** (`present_when`). An agent answers
+  a table whether or not the hardware behind it exists: SYNOLOGY-GPUINFO-MIB is answered by
+  every NAS, GPU or no GPU — utilisation 0 %, memory 0 B — so the summary of every one of them
+  grew a GPU card saying nothing. Zero is a reading and cannot say "there is nothing here" on
+  its own, and the panel may not decide it either: the profile names the column that is the
+  evidence, because a GPU with no memory at all is not a GPU that is idle. A reading that is
+  MISSING is not a reading of zero — the piece stays present, or one lost datagram would empty
+  a summary.
+- **A state can say the thing IS NOT THERE** (`"absent": true`). A passive switch answers
+  "fan: not present", which is true and is not news — the summary answers "how is this box",
+  and a component the box says it does not have has no condition to report. It stays in
+  Measures, where the question is what it said rather than how it is.
+- **A switch's overall traffic, as a graph** (`"aggregate": "sum"`). Every other monitoring
+  tool draws it and no agent serves it: it is the sum of the ports, and only something holding
+  all the ports at once can add them up. Unlike the tally on the screen this is a MEASUREMENT —
+  summed where the reading happens, so it lands in the series like any other, which is the
+  difference between a number on a card and a graph with a week behind it. Each row keeps its
+  own baseline: summing raw counters and differentiating THAT would spike every time a port is
+  added. Only the Ethernet ports are summed, because a switch's VLAN interfaces carry the
+  traffic that already crossed a physical port and the total would be about twice the truth.
+- **Details draws the figures that are a SHAPE.** `chart: "area"` is already the profile's word
+  for "this is a shape over time and not a level" — the CPU it is busy with, the power it is
+  drawing, the traffic crossing it — and those are what somebody opens that tab to see the
+  shape of. Capped at four, and the cap is the reason the tab drew none before: the history API
+  answers one series per call, so eighty sparklines is eighty requests. Everything else keeps a
+  button, which costs nothing until it is pressed.
+- **A profile can say a column is worth COUNTING** (`"tally"`), and the summary draws how many
+  of its rows are in each state. Twenty-four ports each with a badge answers "what is each port
+  doing" and not "how is this switch", where the number wanted is "six up, eighteen down". The
+  core cannot decide that on its own — it would have to know that an interface's state is worth
+  adding up and a disk's serial is not, which is knowledge about a MIB.
+- **…over the rows the table says its summary is about.** IF-MIB counts everything a switch has
+  an ifIndex for — the VLANs, the aggregates, the loopback, the CPU port — so a 24-port switch
+  first reported "60 in total", which is true of the MIB and wrong about the box. Filtered by
+  what the DEVICE says each row is (`ifType`), the same rule and the same predicate the row
+  summaries already use.
+- **…and `"all"` for the one summary whose subject is the rows the other leaves out**: how many
+  of each KIND of interface there are, which answers "how many VLANs" and "how many LAGs". Its
+  own metric over the same column, because `ifType` is a FACT (what the port filter matches on)
+  and a count needs a number: one reading of the device answering two questions about it.
+- **A count is a question, so every count opens — onto a screen of its own.** "21 Virtual
+  (VLAN)" is the summary and "which 21" is the next sentence, and the answer is not a row of a
+  table: a port is a thing with a state, a speed, an address and four counters worth a graph
+  each. So the count opens onto the interfaces on a rail, with the one you pick beside it —
+  what it is, what it is doing, and its counters drawing themselves. The rail marks the ports
+  that are down, so which one to open is readable without opening any: the worst of whatever
+  that row's own columns declare a level for, so the core names no column. WHICH rows are
+  behind a count travels WITH the count, from the side that did the counting — the rule that
+  decides what a count is about lives there, and a screen re-deriving it would be a second
+  implementation free to disagree, and the day it did a switch would say "28 Ethernet" over a
+  list of thirty.
+- **A chart can be given the whole work area.** A week of two series in a 380 px card is a
+  shape you can see and not one you can read. The card grows to fill everything the panel gives
+  a section — the screen minus the sidebar — with the rest of the page underneath it, and comes
+  back with the same button (now pointing inwards) or with Escape. Not the browser's own full
+  screen, which answers the same question by taking the panel away with the picture: no
+  sidebar, no breadcrumb, nothing around the chart, a way out that is a browser gesture rather
+  than something on the page, and an offer a policy or an iframe can refuse outright. It
+  animates between the two rectangles by their four edges rather than by a transform, because
+  a scaled card stretches its own text on the way there and back, and it leaves a gap the size
+  of itself behind — without one the cards beside it close over the hole the moment one is
+  expanded, and it is given back to a family that has rearranged itself.
+- **…and the control is only there while there is a chart.** Reported from the screen: a card
+  showing one number — a processor temperature — carried an expand button next to the one that
+  draws the chart. Expanding a picture that is not there is not an offer; it is a second icon
+  on every card that has a series, which is how a pair of controls stops reading as controls
+  and starts reading as texture. It follows the chart at all three of its ends, including the
+  one that is easy to miss: a device with nothing recorded yet leaves the box open with a line
+  of text in it, and there is nothing to enlarge about that either. The control still sits
+  WITH the one that draws the chart rather than on top of the picture, where the one thing it
+  covered was the picture.
+- **A screen for what the panel is doing when nobody is looking at it** (`/jobs`, permission
+  `jobs_view`). A collection polling forty machines, a copy of the database, a MIB tree
+  compiling, a profile being tested: four pieces of work in four background threads, each with
+  its own dict of jobs in its own module, each visible ONLY from the page that started it —
+  navigate away and it carried on with nowhere to look at it. "Why is the panel slow" and "did
+  my backup finish" had no answer anybody could reach. The core names nobody: a package that
+  runs work in the background declares it in its own manifest (`BACKGROUND_JOBS`) and the
+  screen collects whatever is declared, the same way permissions, overview widgets and notify
+  events already work. It STARTS nothing and STOPS nothing — every row is work another
+  permission already let somebody begin, and a control here would be a second way into four
+  pieces of machinery from one place that understands none of them. Granted to `viewer`
+  deliberately, for the same reason.
+- **A job interrupted by a restart vanished completely.** Reported from the screen, and it is
+  the worst shape a gap can have: it did not end and it did not appear to have started. Gone
+  from the live list, because that lives in the process that died; never in the history,
+  because the row was only written when a job FINISHED. The row is now opened when the work
+  starts, in state `running` — and a row still in that state when the process comes back up
+  belongs to a run that is gone (a job is threads in one process and dies with it), so those
+  are closed as **interrupted**. Amber, not red and not green: "we do not know how it went" is
+  its own answer. A row still open stays out of the history and on the live list, because it
+  is the present.
+- **A finished backup showed a printed Python dict.** `{'part': 'core', 'ok': True, 'tables':
+  42, 'rows': 20723, 'error': ''}` — a step of a copy is a dict that package composes, and
+  only that package knows what its fields mean. It translates its own words now; a count of
+  zero is not a count, because a part with no tables is not a part with "0 tables".
+- **The history tab's badge stayed blank until the tab was opened**, which is the one moment
+  the number is no longer news. It came from the loaded list; it comes from the live answer
+  now, as a `COUNT(*)` on a capped table rather than the hundred rows.
+- **A module that overran its deadline was drawn as FAILED.** Reported from the screen with
+  both windows open at once: the collection dialog said "still working" and the jobs list, at
+  that same moment, showed the SNMP module in red — and the collection dialog was right.
+  `timeout` means the batch's deadline passed; the module did not stop, and nothing can stop
+  it. It also counted as finished, so the bar sat at 1/1 under the word "running". Two screens
+  contradicting each other about one module at one moment, which is worse than either being
+  wrong on its own.
+- **…and the dialog it opens now draws the columns the collection dialog draws** — which
+  device, what is being done to it, how far through. A step travels as `{state, text, scope,
+  n, total, note}` instead of one flattened sentence: "erebor · Reading the metrics · 2/24
+  Disks" is the same words with the thing that makes forty of them scannable taken away.
+- **A dialog closed with the X reopened itself on the next visit to the section.** It was
+  checked against a variable rather than against the dialog, and closing one tells this file
+  nothing — so the variable outlived the dialog, and coming back repainted, saw it set, and
+  opened a dialog nobody had asked for.
+- **…and a running job opens onto its own checklist.** A list row gets one line, which
+  answers "is it going" and not "what is it doing" — and on a collection that has been running
+  four minutes those are different questions. The steps come from the package doing the work;
+  this screen colours four words (`pending`, `running`, `ok`, `failed`) and knows nothing else,
+  so a package reporting a fifth gets a line with no mark rather than a wrong one. The dialog
+  keeps up with the job, and a job that ENDS while it is open does not close it: that would be
+  the screen taking the answer away at the moment it arrived.
+- **…and a history of what each one DID** (`job_history`). The live list answers "what is
+  happening"; nothing answered "what happened". Every job lived in a dict in the process that
+  ran it — the collections were forgotten half an hour after they ended and the rest went with
+  the next restart — so "did last night's collection finish", "why did Tuesday's backup fail"
+  and "how long does this normally take" had no answer at all. Written where the work ENDS and
+  not where somebody looks: archiving from the screen would make a job nobody happened to open
+  a job that never happened. Each row carries what it was, what it was working on, how far it
+  got, how long it took and everything it said while doing it. The log is capped, keeps the
+  END of itself — that is where whatever went wrong is — and says how many lines it dropped,
+  because a log that silently stops is one nobody can trust the end of. Two limits, because
+  they answer different questions: how many are kept and how far back
+  (`web_admin|jobs_history_keep` / `_days` / `_lines`, 500 / 30 days / 200 lines).
+- **…and the server's clock travels with the answer.** "Running for 4 minutes" is arithmetic
+  on two clocks otherwise, and a laptop a minute out would show a job that started in the
+  future.
+- **Two machines cannot hold the same address on one network**, so the map stops drawing them
+  as neighbours. Reported from the screen: two NAS both showed as living in 172.17.0.0/16 and
+  cannot reach each other — it is `docker0`, every machine running containers has one, every
+  one of them is 172.17.0.1, and they are as many separate networks as there are machines.
+  Detected from something universally true rather than from knowing what Docker is: if both
+  claim one address, either it is not the same network or one of them is unreachable, and
+  drawing them together is a lie in both cases. Each gets its own plate, saying so.
+- **The network map is a tree now, read downwards.** Reported from the screen as "you cannot
+  see any of it", and the picture explained why: a lane per network and a line per membership,
+  which on a router that declares twenty-nine routes came out as twenty-nine lanes — twenty-five
+  of them with nobody in them — 3744 px tall, with every line crossing the same ten-pixel
+  channel to place five machines. Two rules replaced it. **A network with nobody in it is not on
+  the map**: it is a route the router declares, and it belongs in a sentence under the picture
+  rather than as a lane the eye has to skip. **Membership is not a line**: a machine hangs off
+  the network it is in, one short elbow, and the second network it is also on gets a thin dashed
+  one — because that IS the rare case and drawing it faintly is what says so. What is outside
+  goes on top, then the ways out, then the networks, then what is on them. Same fleet: 342 px
+  instead of 3744. A machine is still drawn exactly ONCE, and the four kinds of line are still
+  told apart, because each is a different claim.
+- **…and a cloud is drawn only when something reported a route off the fleet.** An "internet"
+  above a set of machines that never mentioned one would be the map inventing the one thing it
+  is there to show.
+- **A card that draws a shape takes the line it is on.** Four across left the traffic chart
+  about 380 px wide, with a week of two series in it. A number is a card; a shape is a figure,
+  and one sharing a row with three numbers is one nobody reads. The plain figures group above
+  them, because a full-width card in the middle of the run strands the ones before it on a
+  line of their own.
+- **Two columns can be ONE picture** (`chart_with`, `chart_label`). Traffic in and traffic out
+  are not two questions — nobody looks at what a link received without looking at what it sent
+  — and two charts side by side, on two y-scales fitted separately, is that comparison made
+  impossible. One card with both figures, one chart with both lines on one axis, one request:
+  they are columns of the same result, so every point already carries both numbers. Which
+  columns are a pair is the profile's word, because the core would have to know that in and
+  out belong together and that CPU and temperature do not. A declared companion the device
+  never answered is dropped rather than drawn as an empty line with a name on the legend.
+- **One card per counted value.** All of it in one box came out as "28 Ethernet 1 22 1
+  Loopback 21 Virtual (VLAN)": a run of numbers and words with nothing between one pair and
+  the next, where the eye has to work out which figure goes with which word. A mark is drawn
+  only where the level SAYS something — every interface type is `info`, and a grey dot in
+  front of all six of them is six pixels of nothing repeated; up and down are not, and they
+  keep their tick and their octagon.
+- **The types a real switch actually answers.** IANA's list runs past 300 and a profile writes
+  down what a person meets: a console port (22), a serial line, Fast and Gigabit Ethernet, a
+  tunnel, an aggregate. A value with no declared word now reads as its code rather than as a
+  bare number — "1 22" under a heading that says "Interface type" looks like a label the panel
+  lost, not like a value nobody has named yet.
+- **`.ss-widebody` / `.ss-scrollbox`**: content that asks the dialog around it for room, and a
+  table that scrolls inside a box owning both of its bars.
+
+- **The counts get a section of their own, and it reads last.** "44 up, 10 down, 6 not present"
+  beside "CPU 7 %" is two kinds of answer in one row, and the eye has to work out which number
+  belongs to which sentence. By shape and not by name — a section with nothing to open in it —
+  so a profile that gains rows moves back up on its own.
+
+- **…and one row of one machine can turn the verdict back on** (`infra_watch`). Two levels of
+  decision, and they belong to different people: the profile knows what `ifOperStatus` means
+  on every switch ever made, and only whoever ran the cable knows that gi3 goes to the server.
+  So the row is marked where the row is — in the interfaces view, with a bell on the rail so a
+  watched port is findable without opening every one — and it is recorded against the MACHINE
+  rather than in a profile, which describes equipment in general. The one thing this section
+  writes, and it deliberately writes no name, no address and no credential: the registry stays
+  behind its own permission, this one is its own flag, and the audit log says who decided what
+  the panel would report.
+- **`ifAlias` is read** — the one column of IF-MIB a person fills in, and the label that says
+  whether the cable goes to a desk or to a server. Empty is the normal answer and is skipped:
+  a blank description filed on sixty ports is a column of nothing.
+- **A column can COLOUR without JUDGING** (`"verdict": false`). `level` was doing two jobs:
+  it paints the badge and it decides whether the machine is in trouble. For a fan or a power
+  supply those are the same answer; for a switch port they are not.
+### Performance
+- **A collection rewrote the whole `check_state` table once per module.** Reported from the
+  panel as "it takes ages and the pages go slow while it runs", and the second half was the
+  measurable one: a run saves after every module it finishes, and saving replaced the ENTIRE
+  table — read it all back, `DELETE FROM check_state`, insert it all again — so eleven
+  modules' rows were read and rewritten to record the twelfth. Measured on a fleet-sized table
+  (1400 rows, twelve modules): ~60 ms a time, **three quarters of a second per run**, with a
+  page load waiting 3.3x longer for every read while it happened. A module now writes back its
+  own rows and reads back only its own: the same run costs **77 ms instead of 782** — ten
+  times less — and a reader waits 2.6x instead of 3.3x. The rules are unchanged: a row keeps
+  its `uid` and its `last_change_ts` while its status holds, and a row the module stopped
+  reporting is still gone.
+- **...and a monitor with no database would have failed every module it saved.** Its status is
+  then a plain `ConfigControl`, which has no per-module write — and the `AttributeError` is
+  swallowed by the executor's own `except`, so the module would have been recorded as having
+  FAILED for the sole reason that it was saved. Asked for rather than assumed, and the
+  whole-table write is the fallback.
+- **...and the other half of that report was an SNMP engine built once per OID.** Rebuilding
+  it is what the client did on every GET and every walk, and it costs about **a second** —
+  measured on loopback against a local agent answering instantly, so none of it is the network
+  or the device. Two things happen inside `SnmpEngine()` and pysnmp does both once per engine:
+  it recompiles thirteen MIB modules from their Python source (`runpy.run_path` compiles the
+  file each time, so the `.pyc` beside it is never what gets used), and the first OID resolved
+  builds a **full LALR parser for the SMI grammar** — an ASN.1 compiler, constructed to look
+  up an OID the caller already holds in numbers. Neither is a cost of asking anything; both
+  are costs of *being* an engine. A device carrying the whole shipped catalogue is 348 reads,
+  so a sampling cycle was **365 seconds of which about six were the device** — and that second
+  per read is CPU, spent by a sampling thread pool inside a process that is also serving
+  pages, which is the "goes slow while it runs" half. The engine, its transports and its
+  credentials are now built once and kept, on one event loop of the module's own: the same 348
+  reads against the same agent take **5.9 seconds**. Safe to keep, and pysnmp is written for
+  it — its local configuration datastore configures per target, so one engine serves many
+  devices, and v3 time sync is discovered per device and expires after 300 s, so a device that
+  reboots is re-discovered rather than locked out. Verified against two local agents answering
+  deliberately different values, forty walks concurrently: no answer arrived from the wrong
+  one.
+- **The panel no longer needs a loop of its own to ask anything.** `asyncio.run` refuses on a
+  thread that already has one running, so the module used to hand that case to a thread it
+  spawned per call. Everything now runs on the SNMP loop, so no caller is asked for one and a
+  wedged device holds up only its own caller.
+
+### Fixed
+- **Two machines sat in warning with every reading they answer green.** Reported from the
+  panel about two NAS, and nothing on the screen said why: no failed check, no severity, no
+  message. A host is `warning` when it has enabled checks and none of them has been evaluated
+  yet — the newly-added case — and that is what it was saying. Each NAS has one enabled SNMP
+  item with **no OID checks and twelve device profiles**, so all 295 of its readings are filed
+  as `<key>/<row>` or `<key>_<metric>` and not one of them under the item's own key. Looked up
+  by key alone the check was absent, so the machine reported "I have a check nobody has
+  evaluated" about a check evaluated 295 times a cycle. The switches and routers were fine
+  throughout, which is what made it hard to see: they have no configured item at all and are
+  rescued by the `host.<uid>` branch further down. Results are now indexed by the `item_uid`
+  they name — the same uid the configuration keys the check by, so no result key has to be
+  taken apart — and a check that answered only sub-metrics has been evaluated. One bad row
+  among forty still makes the check bad, a check with no results at all is still pending, and
+  a result under the check's own key still wins.
+- **A port that is switched off was counted and painted as a port that is down**
+  (`quiet_when`, plus a state that carries its own mark). One column says what something is
+  DOING and another says what somebody ASKED it to do: down while it was asked to be up is a
+  fault, down while it was asked to be **down** is a switch in the off position, and reporting
+  that as a fault is reporting the administrator's own decision back at them. Reported from
+  the panel about `ovs-system`, `sit0` and three VLAN interfaces — all `ifAdminStatus = 2`,
+  Open vSwitch's datapath device and the IPv6-in-IPv4 tunnel device being down by design and
+  always will be. The profile names the column that excuses this one, by FIELD rather than by
+  OID, so the rule is written in the same words as the rest of the profile and everything
+  downstream applies it without walking anything. It is a state of its own — "Switched off",
+  with its own mark — and not a `Down` with the colour taken out: relabelling still says the
+  wrong thing on the card. Row by row and never column-wide, so `docker0` on the same box,
+  admin-UP and genuinely down, goes on saying so; and a row whose evidence is missing is not
+  excused, because treating silence as permission would quietly stop reporting the faults this
+  exists to keep reporting.
+- **…and the mark a state declared never reached the screen.** `states_of` REBUILDS each state
+  rather than copying it — the right shape for something that ends on a screen, and also how a
+  declaration goes missing. The profile said `icon`, the normaliser kept it, the projection
+  dropped it: the state arrived with nothing to draw, the interface rail went from a wrong mark
+  to no mark at all, and nothing anywhere said why.
+- **The Infrastructure list stopped short of the bottom of the work area.** The flex chain that
+  gives a section the height of the pane runs pane → container → card, and every other list
+  puts its table straight into the pane's own child, which `createListTable` makes `ss-vfill`
+  itself. Infrastructure is the one hand-written pane whose table lives a level deeper
+  (`#infra-fleet` inside `#infra-container`), so the chain broke at the container: the table
+  ended under its last row with the rest of the screen empty below it, and the device view did
+  not fill either. One class, the same one the generated sections' containers already carry.
+- **Half the columns of a wide table were off the edge of the dialog, unreachably.**
+  `.modal-dialog-scrollable` scrolls the body vertically, which left the `.table-responsive`
+  as tall as its table and put its horizontal scrollbar at the bottom of forty rows — below
+  the fold, so the way to the columns you could not see was past everything you wanted to
+  read. Answered by not having a table: seventeen columns is not what a port is, and the
+  interfaces view above is what replaced it.
+- **A 28-port switch with nine empty ports was permanently in error.** An access port with
+  nothing plugged into it is `down`, IF-MIB says so, and the profile said `down` is bad — so
+  the switch was red because nine of its ports had no cable. That is the state that stops
+  meaning anything the first time it is right. Which ports matter is a decision about the
+  installation and the panel has not been given one; a switch's own condition is its CPU, its
+  temperature, its fans and its power supplies, and those still report. The red mark beside a
+  port that is down is unchanged — what stopped is it becoming a finding.
+- **A switch's power draw opened a chart nobody asked for.** It is a level, not a shape: 7 W
+  that has been 7 W all week is a number, and `chart: "area"` is the profile's word for the
+  figures somebody opens the tab to see the SHAPE of. It keeps its button, and the traffic
+  chart gets the line it was sharing.
+- **…and the y labels ran into the axis title beside them.** The left gutter was 58 px,
+  which is enough for "8.50W" and not for "13.39MB/s" — two pieces of text on top of each
+  other. The labels are composed before the padding that has to hold them, and the padding is
+  measured from them, with room kept for the rotated title drawn in the same gutter.
+- **A chart's y-axis printed its base unit**: "13420000B/s", five times up the side, running
+  into the axis title on anything narrower than the full width. Scaled through the same
+  formatter as every other value on the screen, and in ONE unit for the whole axis — taken from
+  its top, because scaling each label on its own gives "13.4 MB/s" above "980 kB/s", an axis
+  that changes unit halfway up.
+- **A link's speed read as 1000000000 bit/s.** A rate climbs in THOUSANDS: a gigabit is 10^9
+  bits per second by definition — it is what is printed on the port, the cable and the invoice
+  — and scaling it in 1024s would answer 0.93 to a question everybody already knows the answer
+  to. Bytes still climb in 1024s, because an agent reporting memory and disk means that.
+  Matched on the shape of the unit, so anything recorded "per second" reads properly.
+- **An MTU read as 1.46 KiB.** It is a count of bytes and not a quantity of storage; 1500 is
+  the number every network tool prints and the one somebody is comparing against.
+- **A MAC address was recorded as `0x94103e692443`.** That is what an OctetString with nothing
+  printable in it prints as, and it is the same six bytes that are on the sticker, in the
+  switch's own CLI and in every other tool — written the way nobody writes them. Spelled once,
+  where it is recorded, on the ROLE the profile declared: a serial that happens to look like
+  twelve hex digits is left exactly as it came.
+- **A coded fact had no word beside the count that names it.** An interface's type arrives as
+  "6"; the profile already says 6 is Ethernet, in the states of the column that counts it. The
+  table reads that map rather than carrying a second copy — which would be a second thing to
+  keep up to date, and the panel naming a MIB's values on its own authority.
+- **The interface breakdown counts a FACT instead of reading the column twice.** It was a
+  second, numeric copy of `ifType` — a series per interface of a value that never changes, and
+  one that needed a fresh collection before it showed anything. What a row IS was already
+  recorded as an attribute, so the count reads that: no extra walk, no dead series, and it
+  works on data already on disk.
+- **`_states` was dropping `absent` in silence**, which is what a whitelist does: every state
+  is rebuilt rather than copied — a profile is data an administrator writes — so a key added
+  to the format and not added there disappears in the one place that would not raise.
+- **…and so was a router's, and a UPS's, and a GPU's.** The same omission in five more vendor
+  profiles: MikroTik reads twelve scalars — temperatures, input voltage, power, fans, both
+  power supplies — and flagged none, so a RouterOS device showed its uptime and its memory and
+  nothing of itself. An APC UPS flagged none of nineteen, on the one device in a rack whose
+  whole reason for being monitored is a number that falls. Flagged now, with the enumerations
+  PowerNet-MIB fixes so a power supply reads as a word instead of a 2 — and only those, because
+  a wrong word is worse than a number. SYNOLOGY-SHA-MIB's cluster states are deliberately left
+  as numbers: those are not something to guess at.
+- **A guard for the omission itself.** It shipped three times before anybody named it: a vendor
+  profile that reads scalars and flags none of them gives its device an empty Details tab, and
+  nothing failed — every test passed, every value was collected, and the screen said nothing.
+  The three profiles that legitimately flag nothing (LAN Manager's activity counters) are named
+  with the reason rather than tolerated, and a headline figure with no icon now fails too.
+- **`hrProcessorLoad` is a headline** — how hard a machine is working, on every device that
+  answers HOST-RESOURCES-MIB rather than only on the ones with a UCD agent.
+- **A switch's Details tab was blank**, which reads as a machine that answered nothing. None
+  of the profiles it carries flagged a single summary figure: a switch's condition is its CPU,
+  its temperature, its fans and its power supplies, and those live in the vendor profile
+  (`linksys_switch`), which had them all and said none of them were headline. Flagging the
+  interface counters instead would have put fifty ports on the summary of every NAS and
+  hypervisor in the fleet, which is the reason it belongs there and not in `if_generic`.
+- **…and its fans and power supplies read as words.** They were integers on a summary whose
+  whole job is to be glanceable. The enumeration is the EnvMon convention rlmgmt reuses, and
+  only the values that convention fixes are declared — anything else keeps its number, because
+  not knowing is a fine thing to say and a wrong word is not.
+- **No device has a blank Details tab now**: uptime is flagged in `sys_generic`, which is the
+  one figure every agent answers and belongs to "how is this box" — a machine that rebooted an
+  hour ago is news. It appears on every device, which is a change to every Details tab.
+- **A device the registry alone makes a device showed four empty tabs and a red badge.** Some
+  machines are watched because somebody configured a check; some because the REGISTRY says
+  what they are — an SNMP profile with device profiles assigned is enough — and what comes
+  back is filed under the host (`host.<uid>/…`) rather than under any item. The fleet column
+  already counted those, so such a switch turned red; the device page built its rows from the
+  configured checks alone, so opening it said "no check points at this device" over four empty
+  tabs. Two answers about one machine, and the one with the numbers in it was the invisible
+  one. Worked out in one place now, from what was actually recorded rather than from a list of
+  which modules sample hosts — a list would be a third thing to keep in step.
+- **…and "collect now" works on one.** It has no item to be enabled, and the button was
+  answering "nothing to run" about a machine whose readings are on the screen behind it.
+- **The checklist froze mid-read under the words "still working".** Both halves were nearly
+  right: the job waits for a module that overran the deadline, and the module keeps working
+  and keeps reporting — but the executor took the progress channel off the moment the batch
+  returned, which was correct when a run ENDED at its deadline and is wrong now that it does
+  not. The channel stays installed until the last straggler lands, and never longer, or the
+  scheduler's own cycles would report into a job that ended hours ago.
+- **…and a straggler saying something no longer ends the run.** Its row is in `timeout`, which
+  is the state that means "still out"; an ordinary progress report was taking it back out of
+  that, so the first word from the module it was waiting for closed the job.
+- **A finished job takes no more reports.** A module can outlive the panel's patience, and
+  once the run is closed its rows are the record of what happened.
+- **A device could be claimed by an item that sampled nothing, and so be collected by
+  nobody.** Reported from the panel: a switch whose own SNMP connection test kept returning
+  OIDs was simply absent from the collection list, with no error, no log line and no row on
+  any screen. The SNMP module treats a host as "covered" when an item is bound to it — but an
+  item carrying OID checks and no device profiles binds without sampling, so it took the host
+  out of the registry fallback and then read nothing from it. Covered now means the item would
+  SAMPLE it, which leaves the deliberate "a disabled item still speaks for its host" intact: a
+  switched-off item is a decision somebody made, an item with no profiles is the absence of
+  one.
+- **…and the module says which devices it is not going to sample**, by name, in the checklist.
+  From the outside the bug looked like a button that does nothing, and the silence was most of
+  what made it unreadable.
+
+### Added
+- **A machine that speaks no LLDP can still be placed on a port** — which is the case the map
+  most needed, because a NAS cannot be given an LLDP agent: DSM has no apt, and a container
+  would not help either, since the panel reads LLDP out of the device's OWN snmpd. What can
+  answer is the switch. Its forwarding table has learned that MAC on one of its ports, and the
+  fleet already records every machine's interface MACs (`bridge_fdb` profile: the MAC's port,
+  the port's interface, the interface's name — three tables the switch answers and joins none
+  of).
+- **A port is only claimed when exactly one machine the panel knows is on it.** Reachable
+  through a port is not the same as plugged into it: everything behind another switch is
+  reachable through the port that switch is on. Counting KNOWN machines rather than MACs is
+  what makes that rule work — a threshold on the number of addresses would throw away the
+  hypervisor whose guests each have one, which is exactly the machine somebody is looking for.
+- **A MAC written four ways is one MAC.** SNMP answers them as raw octets, as `0x…`, colon-
+  separated, dot-separated and with leading zeros dropped — the same address, from four
+  agents, on one network. A comparison that is not normalised is a map with no links on it and
+  nothing saying why.
+- **`net_evidence`: what a device SAW, which is not what a check found.** A forwarding table
+  and an ARP cache are many (one row per MAC), volatile (they age out in minutes), wanted by
+  nobody as alerts, and worth something only joined across the fleet. As results they would be
+  thousands of `check_state` rows and history series churning every cycle. Their own table
+  instead, holding only the current picture, replaced wholesale per device and kind — because
+  an entry HAVING GONE is information, and merging would leave the map drawing a cable
+  somebody unplugged last week.
+- **A profile can say a table is a sighting** (`"evidence": "<kind>"`). The core does not know
+  what a forwarding table is, and a vocabulary written there would be the one device in front
+  of whoever wrote it — so the module declares it and the core files it, the same rule as
+  everywhere else in this domain. `ip_neighbours` (ARP) rides on the same mechanism.
+- **The map draws cables where anything reports one** (`lldp` profile, LLDP-MIB). It is the
+  only thing in SNMP that answers the topology question exactly: everything else on that
+  picture says who can REACH whom, and a device reporting an LLDP neighbour is saying it sees
+  that machine down one of its own cables, on that machine's port 3. One row per neighbour AND
+  port, because a device with two cables to the same switch is two links; probe-gated and in
+  the generic groups, so a machine without an agent costs one walk that answers nothing.
+- **A cable is one line however many ends reported it.** With an agent at both ends the link
+  arrives twice, once from each side, and two lines between two boxes would say there are two
+  cables. Merged — and the merge is worth more than the tidiness: each end names the OTHER's
+  port, so the pair of reports is what fills in both, and an adjacency both ends agree on is
+  drawn as the stronger statement it is.
+- **A neighbour nobody registered is not acquired as inventory.** It is real, and the map is
+  the wrong place to add machines to the fleet.
+- **"erebor" and "erebor.cerebelum.lan" are one machine.** LLDP reports a hostname and the
+  registry holds whatever somebody typed; refusing to join them would draw every link missing
+  on precisely the fleets that have a search domain.
+
+---
+
 ## [0.0.1+build.114] - 2026-08-23
 
 ### Changed

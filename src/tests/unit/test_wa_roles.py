@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_79_flags(self):
+    def test_permissions_tuple_has_81_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 79
+        assert len(PERMISSIONS) == 81
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -61,6 +61,8 @@ class TestPermissionsConstants:
             # acts, wanted by different people (lib/core/infra/manifest.py).
             'infra_view',
             'infra_collect',
+            'infra_watch',
+            'jobs_view',
             'mfa_reset_others',
             'checks_view', 'checks_run',
             'history_view', 'history_delete',

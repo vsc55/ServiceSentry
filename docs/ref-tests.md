@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~6.960 tests** (6919 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-23). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~7.295 tests** (7191 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-08-23). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -672,7 +672,7 @@ nombrar un campo que no existía cuando se escribió.
 
 ## 9c. Hosts — Qué resultados son de esta máquina
 
-**Archivo:** `tests/unit/test_hosts_status_rows.py` — 11 tests
+**Archivo:** `tests/unit/test_hosts_status_rows.py` — 18 tests
 
 Un módulo graba resultados con claves suyas; un host sabe qué **items** tiene enlazados. Todo lo
 que enseñan «Últimos datos» e Infraestructura sale de emparejar lo uno con lo otro, y equivocarse
@@ -2610,7 +2610,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 38b. Monitor — el módulo que llega tarde
 
-**Archivo:** `tests/unit/test_monitor_executor.py` — 17 tests
+**Archivo:** `tests/unit/test_monitor_executor.py` — 23 tests
 
 La ronda le da un plazo a cada módulo y sigue. Lo que **no** hace es matar el hilo —no puede—,
 así que el módulo vuelve, y al volver guarda su estado en vivo como siempre. Sus filas de
@@ -2662,7 +2662,7 @@ no significa nada».
 
 ## 38c. Infraestructura — la obtención que alguien está mirando
 
-**Archivo:** `tests/unit/test_infra_collect_job.py` — 29 tests
+**Archivo:** `tests/unit/test_infra_collect_job.py` — 32 tests
 
 Pedirle datos frescos a un aparato tarda lo que tarde el aparato. Las sondas normales contestan
 en segundos; un NAS con un perfil SNMP completo contesta unos mil valores y tarda minutos. Así
@@ -2692,7 +2692,7 @@ que la forma entera se comprueba con un doble que apunta lo que le pidieron.
 
 ## 39. BD — HostsStore
 
-**Archivo:** `tests/unit/test_hosts_store.py` — 26 tests
+**Archivo:** `tests/unit/test_hosts_store.py` — 32 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3659,7 +3659,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 70 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 81 tests
 
 **Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
 veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
@@ -3706,7 +3706,31 @@ nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del
 
 ---
 
-**Archivo:** `tests/unit/test_snmp_profiles.py` — 98 tests
+**Archivo:** `tests/unit/test_snmp_client_reuse.py` — 18 tests
+
+**Lo que cuesta un `SnmpEngine`**, y por qué sólo hay uno. Reportado desde la pantalla: la
+recogida SNMP tarda muchísimo y el panel va lento mientras corre. Nada de eso era la red.
+Reconstruido por petición —que es lo que hacía el cliente— un motor cuesta cerca de **un
+segundo**, medido en loopback contra un agente local que contesta al instante: pysnmp
+recompila trece módulos MIB desde su fuente Python (`runpy.run_path` compila el fichero cada
+vez, así que el `.pyc` de al lado no llega a usarse) y el primer OID resuelto construye un
+**parser LALR completo de la gramática SMI** —un compilador ASN.1— para buscar un OID que ya
+se tiene en números. Ninguna de las dos cosas es el coste de *preguntar*: son el coste de
+**ser** un motor, y se pagan una vez por motor. Un aparato con todo el catálogo son 348
+lecturas: 365 segundos pasaron a 6. Nada de esto se ve desde fuera —las lecturas eran
+correctas, no había error ni aviso, y el único síntoma era la espera—, y por eso lo que se
+fija aquí es la **cuenta de motores** y no ninguna respuesta.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestTheEngineIsBuiltOnce::*` (5) | Diez lecturas construyen **un** motor y resuelven **una** dirección; un segundo aparato comparte el motor y no la dirección (y se le pregunta por su propio transporte); un `timeout` distinto **sí** es un transporte distinto —va dentro del target, y compartirlo aplicaría a un aparato la paciencia de otro—; y el walk comparte motor con el GET |
+| `TestTheEngineIsNotThrownAway::*` (3) | Ninguna ruta de petición llama a `close_dispatcher` — sobre un motor compartido eso no es limpieza, es cerrar el socket que necesita la lectura siguiente, y lo que fallaría después se lee como si fuera el aparato. Sólo `_reset` lo cierra, y **no queda ningún `SnmpEngine()` fuera de `_engine()`**: como el coste es el constructor, uno olvidado en cualquier camino es el bug entero de vuelta para ese camino |
+| `TestTheCredentialIsTheSameObject::*` (4) | La credencial es **el mismo objeto**, no uno igual: el datastore de configuración local de pysnmp indexa por el objeto, así que uno nuevo por petición es una fila nueva por petición —el motor crece durante toda la vida del proceso y cada lectura paga por configurar lo que configuró la anterior—. Comunidad, versión, usuario, claves y protocolos v3 cuentan todos como credencial distinta, o una clave rotada seguiría siendo la vieja |
+| `TestTheLoopIsOursAndStaysUp::*` (6) | El motor no puede sobrevivir al loop en el que se abrió su socket, así que conservar uno es conservar el otro: siempre el mismo loop; **uno cuyo hilo se ha ido se reemplaza** (si no, todos los que llamen esperan para siempre — un cuelgue sin nada que leer); contesta desde un hilo con loop y desde uno sin él (`asyncio.run` **se niega** en el primero, y esto se llama desde el hilo en el que el panel esté sirviendo); la excepción llega a quien llamó; y **una petición atascada no para a las demás** — ahora comparten loop, y si un aparato lento lo retuviera, una máquina inalcanzable pararía la recogida de todas |
+
+---
+
+**Archivo:** `tests/unit/test_snmp_profiles.py` — 144 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -4000,7 +4024,7 @@ sería un aparato al que no se le asignó nada.
 
 ---
 
-**Archivo:** `tests/unit/test_snmp_metrics.py` — 28 tests
+**Archivo:** `tests/unit/test_snmp_metrics.py` — 25 tests
 
 **Los contadores, y las dos formas en que mienten.** Un contador de bytes es acumulativo:
 dibujado en crudo es una línea que sólo sube, en la que una caída de servicio es un tramo plano
@@ -5456,7 +5480,7 @@ contraseña** — y nada de eso levanta un error en ninguna parte.
 
 ## 99e. Meta — Mil medidas no son mil tarjetas
 
-**Archivo:** `tests/meta/test_wa_infra_metrics.py` — 136 tests
+**Archivo:** `tests/meta/test_wa_infra_metrics.py` — 168 tests
 
 La tira de tarjetas se escribió para una máquina vigilada por las sondas normales: una docena
 de valores, cada uno de una **clase** distinta —CPU, latencia, RAM, días hasta caducar—, donde
@@ -8907,7 +8931,7 @@ compilado?» se respondía leyendo las dos y comparando a ojo.
 
 ---
 
-**Archivo:** `tests/meta/test_wa_infra_section.py` — 41 tests
+**Archivo:** `tests/meta/test_wa_infra_section.py` — 60 tests
 
 El cableado que una **sección raíz** necesita para existir. No es un fichero: es una entrada en
 el registro de páginas (que es lo que le da URL, ruta, filtro por permiso y entrada en la barra
@@ -9019,7 +9043,7 @@ antes de medir nada.
 
 ## 169. El estado propio de un módulo tiene que sobrevivir al ciclo que lo escribió
 
-**Archivo:** `tests/unit/test_check_state_module_state.py` — 12 tests
+**Archivo:** `tests/unit/test_check_state_module_state.py` — 19 tests
 
 `self.status` del monitor **parece** un diccionario libre —`set_conf` acepta cualquier ruta y
 devuelve `True`— y no lo es: lo que sobrevive es lo que la tabla `check_state` tiene como
@@ -9047,7 +9071,7 @@ tráfico. La ficha completa está en [caso-diagnostico.md](caso-diagnostico.md).
 | `test_it_is_the_last_column_declared` | La regla que hace que la migración sea un `ADD COLUMN` y no una reconstrucción de la tabla |
 ## 170. Infraestructura — el mapa, y la raya que no puede cruzar
 
-**Archivo:** `tests/unit/test_infra_topology.py` — 15 tests
+**Archivo:** `tests/unit/test_infra_topology.py` — 36 tests
 
 Un dibujo de una red se lee como un dibujo de cables. Éste no lo es: se construye con las
 direcciones que declara cada máquina, el prefijo que va al lado de cada una, y el siguiente
@@ -9070,4 +9094,77 @@ tentación es decir más de lo que se sabe.
 | `::test_a_machine_that_never_answered_is_still_on_the_map` | Colocada por la dirección que alguien tecleó en el registro, que es un dato **de la ficha** y no del aparato: nombra el nodo y nunca reclama una red |
 | `::test_a_fact_belonging_to_a_disk_is_not_a_fact_about_the_machine` | Una máquina no está en una red porque uno de sus discos contestara algo con una barra |
 | `TestTheEdgesSayWhatKindTheyAre::*` (5) | Una pasarela que **es** una máquina conocida une dos nodos; una que no lo es se dibuja como el afuera, sin inventar inventario; sin ruta por defecto no hay arista, porque un aparato que no lo dijo no es un aparato que dijo «ninguna»; `0.0.0.0` como siguiente salto significa «directamente conectado» y no un router en la dirección no especificada; y con varias por defecto se dibuja una, no se elige ganadora sin criterio |
+| `TestAMachineThatSpeaksNoLldpCanStillBePlaced::*` (8) | El caso por el que existe todo esto: un NAS. Un aparato cuyo fabricante nunca hizo agente LLDP no puede decir a qué está enchufado, y no hay forma de instalárselo —DSM no tiene apt, y ni un contenedor valdría, porque el panel lee LLDP del `snmpd` **del propio aparato**—. Quien sí puede contestar es el switch: ha aprendido esa MAC en uno de sus puertos, y la flota ya guarda las MAC de interfaz de cada máquina. Una MAC sola en un puerto coloca la máquina ahí, con la cadena MAC→puerto puente→interfaz→nombre resuelta; la misma dirección escrita de cuatro formas es una dirección; un puerto con **dos máquinas conocidas** es un troncal y se descarta (alcanzable por un puerto no es estar enchufado a él); un hipervisor **no** se confunde con un troncal, porque se cuentan máquinas conocidas y no MAC —contarlas tiraría justo la máquina que se busca—; una MAC de nadie no coloca nada; LLDP gana sobre un avistamiento de puerto para el mismo par; y la evidencia de un switch sin registrar no dibuja un extremo inventado |
+| `TestTheEdgesThatAreNotInferred::*` (8) | LLDP es lo único en SNMP que contesta la topología con exactitud. Un vecino que **es** una máquina conocida se vuelve enlace, con el puerto que el reporte nombra —que es el **del vecino**, no el del que informa—; un cable con agente en los dos extremos llega dos veces y se dibuja **una**, porque dos líneas entre dos cajas dirían que hay dos cables (y el par de reportes es justo lo que rellena los dos extremos); con un solo extremo sigue siendo enlace y se dibuja más flojo; un vecino sin registrar no se adquiere como inventario; «erebor» y «erebor.cerebelum.lan» son una máquina, porque no unirlos dejaría el mapa sin enlaces justo en las flotas con dominio de búsqueda; una máquina viéndose a sí misma no es un enlace; y el perfil enviado pide la tabla correcta y va en los grupos genéricos |
 | `TestItIsReadableWithoutBeingRead::*` (3) | Las redes salen en orden de dirección, que es como se lee una tabla de rutas (alfabético pondría 10.0.0.0/8 detrás de 1.1.1.0/24); cada red lista a los suyos; y una flota vacía es una respuesta, no una excepción |
+## 171. Infraestructura — un avistamiento no es un check
+
+**Archivo:** `tests/unit/test_infra_evidence.py` — 11 tests
+
+La tabla de reenvío de un switch y la caché ARP de una máquina son lo único que dice qué equipo
+hay de verdad al otro lado de un cable. Y la tentación es archivarlas como medidas normales —una
+fila por MAC, como una fila por disco—. El coste no se ve hasta que alguien tiene un switch con
+cuatrocientas entradas: cuatrocientas filas de `check_state` y cuatrocientas series de historial,
+casi todas un portátil que se conectó una vez, creadas y podadas **cada ciclo**, sin alertar a
+nadie.
+
+Así que tienen tabla propia con **sólo la foto actual**. Estos tests son de las dos propiedades
+que la hacen valer: que se reemplaza entera por aparato y clase, y que nada de esto puede tumbar
+un ciclo.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestItKeepsTheCurrentPicture::*` (7) | Lo visto vuelve; una segunda lectura **reemplaza** en vez de fusionar (que una entrada haya desaparecido es información: una MAC caducada es una máquina que ya no está en ese puerto, y fusionar dejaría el mapa dibujando un cable desenchufado la semana pasada); un aparato que no ve nada se graba viendo nada; las clases no se pisan; dos switches pueden ver la misma MAC sin borrarse; y una máquina que se da de baja se lleva sus avistamientos |
+| `TestItCannotTakeACycleDown::*` (4) | La evidencia es un adorno encima del ciclo: una escritura o una lectura imposibles contestan vacío en vez de lanzar, un avistamiento sin clave no es un avistamiento, y no se archiva nada bajo un aparato sin nombre —acabaría indexado bajo la cadena vacía, junto a todos los demás huérfanos |
+## 172. Un aparato al que hace de aparato el registro
+
+**Archivo:** `tests/unit/test_host_sampled_keys.py` — 9 tests
+
+Casi todas las máquinas se vigilan porque alguien configuró un check contra ellas. Algunas se
+vigilan porque lo dice el **registro**: un perfil SNMP con perfiles de dispositivo asignados
+basta, y lo que graba el muestreador vuelve archivado **bajo el host** (`host.<uid>/…`) y no
+bajo ningún item.
+
+Dos pantallas lo sabían y una no, y el fallo tenía la peor forma que puede tener un desacuerdo:
+no un error, sino **dos respuestas sobre una misma máquina**, con la útil invisible. La columna
+de la flota contaba esos resultados, así que un switch muestreado así se ponía rojo; la ficha
+del dispositivo montaba sus filas sólo con los checks configurados, así que ese mismo switch
+decía «ningún check apunta a este dispositivo» sobre cuatro pestañas vacías.
+
+Las claves se calculan ahora en **un** sitio, a partir de lo que se grabó de verdad y no de una
+lista de qué módulos muestrean hosts — una lista sería una tercera cosa que mantener a la par.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestWhatAModuleRecordedAboutTheHostItself::*` (6) | Se encuentra el aparato muestreado por el registro; las filas de un dispositivo (una por interfaz, por volumen, por disco) son **una** entrada, porque `build_host_status` mapea `<base>/<fila>` de vuelta; un check configurado no es de éstos; los resultados de otra máquina no son los de ésta; el módulo se nombra como lo nombra el resto del panel (`snmp`, no `watchfuls.snmp`); y varios módulos pueden haber grabado algo del mismo host |
+| `TestItSaysNothingRatherThanSomethingWrong::*` (3) | Sin nada grabado, respuesta vacía; **sin máquina por la que preguntar, ninguna respuesta** —si no, la cadena vacía casaría con el prefijo y toda clave huérfana se le atribuiría a una máquina que no lo es—; y una tabla de estado con la forma equivocada no lanza, que se lee de la BD y de los módulos |
+
+## 173. Trabajos en segundo plano — lo que el panel hace cuando nadie mira
+
+**Archivo:** `tests/unit/test_core_jobs.py` — 66 tests
+
+Una obtención de datos sondeando cuarenta máquinas tarda minutos; una copia de la base tarda
+más; compilar un árbol de MIBs recorre miles de ficheros. Las tres corren en hilos y, hasta esta
+pantalla, **cada una sólo se veía desde la página que la lanzó**: te ibas a otra sección y el
+trabajo seguía sin ningún sitio donde mirarlo. «¿Por qué va lento el panel?» y «¿ha terminado mi
+copia?» no tenían respuesta a la que nadie pudiera llegar.
+
+El recolector es genérico por el mismo mecanismo que todo lo demás del panel: cada paquete
+**declara** lo que corre (`BACKGROUND_JOBS` en su `manifest.py`) y `lib.discovery` lo recoge. El
+núcleo no nombra a nadie — un núcleo que importara cuatro registros de trabajos por su nombre
+sería un núcleo que hay que editar para enterarse del quinto.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestThePackagesDeclareAndTheCoreCollects::*` (4) | El recolector no nombra ningún paquete; los tres que corren trabajo en segundo plano lo declaran; cada declaración es invocable y contesta una lista; y la pantalla que los lista **no se lista a sí misma** (sería la fila que siempre está) |
+| `TestOneBrokenPackageIsNotAnEmptyScreen::*` (5) | Un paquete que lanza se salta —tres de cuatro vale más que nada porque el cuarto esté roto—; uno que contesta basura da una fila y no una excepción; un avance por encima de su total se recorta (es lo que fue «compilando 28 de 3» con la barra al 933 %); un total de cero es «ni idea de cuántos» y no una barra al 0 %; y un campo que nadie rellenó es un hueco, no una clave que falta |
+| `TestTheOrderIsWhatSomebodyOpensItFor::*` (3) | En marcha primero, luego lo que acaba de pasar, y dentro de cada grupo lo más reciente arriba —un trabajo terminado no puede quedar por encima de otro que sigue corriendo—; el resumen y la lista no pueden discrepar; y un trabajo que nunca dijo cuándo empezó no tiene antigüedad |
+| `TestItStartsNothing::*` (5) | La ruta es un GET y sólo un GET: cada fila es trabajo que otro permiso ya dejó empezar, y los botones que lo empiezan viven en las pantallas que lo entienden. Mirar se concede a `viewer`; el reloj **del servidor** viaja con la respuesta (si no, «lleva 4 minutos» es aritmética entre dos relojes y un portátil desfasado mostraría un trabajo empezado en el futuro); se sondea más rápido mientras algo corre y nunca sobre un panel oculto; y la sección está cableada de punta a punta —registro, panel, `bundle`, renderizador y ruta, que es donde fallan en silencio |
+| `TestOpeningARunningJob::*` (17) | Una fila da una línea, que contesta «¿va?» y no «¿qué está haciendo?» — y en una obtención que lleva cuatro minutos son preguntas distintas. La fila es la vía de entrada; el diálogo se mantiene al día con el trabajo (abrir uno y verlo quieto es la misma queja que motivó toda la pantalla, un nivel más abajo); un trabajo que termina mientras está abierto **no cierra** el diálogo —sería la pantalla quitando la respuesta justo cuando llega—; se colorean cuatro palabras y sólo cuatro, así que un paquete que reporte una quinta se lleva una línea sin marca en vez de una marca equivocada; el vocabulario propio de cada paquete no viaja (`timeout` es un fallo visto desde fuera, por precisa que sea la distinción dentro); y un paso sin texto no es un paso |
+| `TestWhoWasRunningIt::*` (7) | `owner` es la identidad que el panel ya se da a sí mismo —`host:pid:rol`, el mismo nombre que el heartbeat escribe en el registro de servicios y que enseña la pantalla de estado—: un uuid nuevo habría sido único y no habría significado nada en ningún otro sitio. Es distinto en cada arranque, que es justo la propiedad que necesita la barrida; la fila lo recuerda; **un panel que sigue vivo conserva su trabajo** (dos paneles compartiendo base de datos no pueden declararse muertos el trabajo entre ellos); sin registro al que preguntar se cierra todo, que es lo correcto para el panel único; un latido viejo no es un pulso (un proceso muerto deja el último detrás); y el panel entrega el nombre en vez de inventarse el suyo |
+| `TestAPackageTranslatesItsOwnWords::*` (4) | Abrir una copia terminada mostraba `{'part': 'core', 'ok': True, 'tables': 42, …}`: un paso de una copia es un dict que compone **ese** paquete, y sólo él sabe qué significan sus campos — entregado en crudo llegaba a la pantalla como un dict de Python impreso. Ahora la línea del historial es una frase, un recuento de cero **no** es un recuento (una parte sin tablas no es una parte con «0 tablas»), las columnas en vivo llevan el veredicto, y algo que no es un paso no lo tumba |
+| `TestEveryKindOfWorkSaysWhatItIs::*` (1) | Cada clase de trabajo tiene palabra en los dos idiomas. El respaldo existe a propósito —una clase que nadie ha traducido sigue mereciendo salir en la lista— pero las de hoy no deberían necesitarlo |
+| `TestWhatEachJobDid::*` (7) | El historial: un trabajo terminado vuelve entero y su duración es deducible; de un log largo se conserva el **final** —que es donde está lo que falló— diciendo cuántas líneas descartó; un tope de cero guarda la ficha y no el log; las líneas en blanco no son líneas; la lista **no** arrastra los logs (cien filas con doscientas líneas cada una es un megabyte de JSON para pintar nombres y fechas) pero sí dice que hay uno que abrir; lo más reciente primero y filtrable por clase y por estado; y un trabajo que no está contesta `None` |
+| `TestItDoesNotGrowForEver::*` (3) | El techo conserva los más nuevos; el límite de edad es una **segunda** pregunta (hasta dónde mira alguien, frente al techo que alcanza un día movido); y sin límites no se olvida nada |
+| `TestFilingItNeverBreaksTheWorkThatJustEnded::*` (3) | Un trabajo que terminó, terminó: que falle escribir la nota no puede convertir una copia hecha en una excepción dentro del hilo que la hizo. Sin base de datos atada no se escribe nada y se dice; y los límites son los de la instalación, con la basura rechazada en vez de pisando un límite real |
+| `TestTheWorkArchivesItselfWhereItEnds::*` (11) | Se archiva **donde el trabajo termina**, no donde alguien mira —archivar desde la pantalla haría que un trabajo que nadie abrió fuera un trabajo que nunca pasó, y las obtenciones se podan de memoria a la media hora—; una copia que lanzó excepción deja igual su nota (la fila que dice que falló es la que alguien viene a buscar); las rutas del historial son GET; y «no hay dónde guardarlo» se dice en voz alta, porque una lista vacía se lee como «aquí no ha corrido nunca nada» |

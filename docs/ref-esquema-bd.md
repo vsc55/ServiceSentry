@@ -24,7 +24,7 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **42 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **44 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -38,7 +38,8 @@ Hay **42 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
-| Auditoría / historial / estado | `audit`, `history`, `check_state` |
+| Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
+| Infraestructura | `net_evidence` (lo que cada aparato ha *visto*: tabla de reenvío y caché ARP) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -492,6 +493,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | created_at | TEXT | no | `''` | |
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
+| watch | TEXT | no | `'[]'` | lista JSON de `{module, row}`: las filas de esta máquina que alguien ha dicho que merecen aviso. Un puerto de switch caído puede ser un PC apagado o el enlace del servidor, y ningún MIB los distingue — se anota contra la máquina, no en un perfil, porque es conocimiento de ESTA instalación |
 
 Índices: `idx_hosts_name(name)`. Ver [explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
 
@@ -556,6 +558,80 @@ Restricción única: `(module, key, metric)`. Sin índices secundarios.
 > `status.set_conf([módulo, clave, 'module_state', …])` y va la **última** en el esquema:
 > una columna que falta solo se añade con `ADD COLUMN` mientras todas las anteriores ya
 > estén, y en cualquier otra posición la actualización reconstruiría la tabla entera.
+
+### `job_history` — qué hizo cada trabajo en segundo plano
+
+[lib/core/jobs/history.py:31](../src/lib/core/jobs/history.py#L31)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| job_id | TEXT | no | `''` | el id con el que lo sondeaba su propia pantalla, para poder volver a ella mientras el trabajo está en los dos sitios |
+| source | TEXT | no | `''` | el paquete que lo corrió (`infra`, `backup`, `snmp`) |
+| kind | TEXT | no | `''` | qué clase de trabajo (`collect`, `backup`, `mib_compile`, `snmp_test`) |
+| label | TEXT | no | `''` | sobre qué: el nombre de una máquina, de una tarea, de un MIB |
+| state | TEXT | no | `''` | `running` / `done` / `failed` / `interrupted` |
+| started_at | REAL | no | `0` | |
+| ended_at | REAL | no | `0` | |
+| done | INTEGER | no | `0` | hasta dónde llegó |
+| total | INTEGER | no | `0` | de cuánto, cuando el trabajo tiene tamaño contable |
+| error | TEXT | no | `''` | recortado a 2000 caracteres |
+| owner | TEXT | no | `''` | **quién** lo lanzó: `host:pid:rol`, la misma identidad que el heartbeat escribe en el registro de servicios (`ServiceInstancesStore`) y que enseña la pantalla de estado — un nombre que se puede buscar, no doce dígitos hex. Cambia en cada arranque, y eso es lo que permite que la barrida sólo cierre las filas cuyo dueño ya no está: dos paneles sobre la misma base de datos no se declaran el trabajo muerto el uno al otro |
+| log | TEXT | no | `'[]'` | lo que dijo mientras lo hacía, como lista JSON de líneas |
+| log_dropped | INTEGER | no | `0` | cuántas líneas se descartaron para caber en el tope |
+
+Índices: `idx_job_history_ended(ended_at)`, `idx_job_history_kind(kind)`.
+
+> **Se abre cuando el trabajo EMPIEZA y se cierra cuando termina.** Dos motivos, y el segundo
+> salió de la pantalla: archivar desde la pantalla haría que un trabajo que nadie abrió fuera
+> un trabajo que nunca pasó; y archivar **al final** pierde todo lo que nunca lo tiene.
+> Reinicia el panel con una obtención en marcha y desaparecía por completo — fuera de la
+> lista de trabajos en marcha, porque ésa vive en el proceso que murió, y nunca en el historial,
+> porque nunca terminó. Ni acabó ni pareció haber empezado.
+>
+> Por eso la fila existe desde el primer momento en estado `running` — y una fila así cuando
+> el proceso **arranca** es de un proceso que ya no está: un trabajo son hilos de un proceso
+> y muere con él. Ésas se cierran como `interrupted`, que es verdad y es justo lo que nadie
+> podía ver. Una fila `running` no sale en el historial: es el presente, y está en la otra
+> pestaña.
+>
+> **Por qué el registro es una columna JSON y no una tabla.** El log de un trabajo se lee
+> entero o no se lee; una segunda tabla sería un *join* por cada fila de una lista que no lo
+> muestra. El tope de líneas es de la instalación (`web_admin|jobs_history_lines`) y conserva
+> el **final** —que es donde está lo que falló—, dejando dicho cuántas descartó: un log que se
+> corta en silencio es uno del que nadie se fía del final.
+>
+> Se poda cada 25 escrituras, no con un hilo propio: un hilo para borrar un puñado de filas
+> sería un hilo que explicar en cada volcado, y un `DELETE` en cada escritura sería un borrado
+> para una tabla que crece de una en una. Dos límites, porque contestan preguntas distintas:
+> cuántos se guardan (`jobs_history_keep`) y hasta dónde atrás (`jobs_history_days`).
+
+### `net_evidence` — lo que un aparato ha visto (no lo que un check ha encontrado)
+
+[lib/core/infra/evidence.py:38](../src/lib/core/infra/evidence.py#L38)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | el aparato que lo VIO |
+| kind | TEXT | no | — | qué clase de avistamiento (`fdb`, `bridgeport`, `ifname`, `arp`) |
+| key | TEXT | no | — | lo visto (una MAC, una dirección) |
+| value | TEXT | sí | — | dónde se vio (un puerto, una MAC) |
+| ts | REAL | no | `0` | |
+
+Restricción única: `(uid, kind, key)`. Índice: `idx_net_evidence_kind(kind, key)`.
+
+> **Por qué no son resultados.** La tabla de reenvío de un switch y la caché ARP de una máquina
+> son lo único que dice qué equipo hay de verdad al otro lado de un cable, y no caben en
+> `check_state` por cuatro motivos a la vez: son **muchas** (una fila por MAC aprendida, miles
+> en un switch), son **volátiles** (caducan en minutos, así que se crearían y podarían cada
+> ciclo), **nadie las quiere como checks** («la MAC aa:bb ya no está en el puerto 8» no es una
+> alerta, es alguien yendo a una reunión) y sólo valen algo **cruzadas** entre aparatos. Se
+> guarda sólo la foto actual, **reemplazada entera** por aparato y clase: que una entrada
+> desaparezca es información —una MAC que caducó es una máquina que ya no está en ese puerto—
+> y fusionar dejaría el mapa dibujando un cable que se desenchufó la semana pasada.
+>
+> Quién la escribe es el **módulo**, y qué cuenta como avistamiento lo dice el **perfil**
+> (`"evidence": "<clase>"` en una métrica): el núcleo no sabe qué es una tabla de reenvío.
 
 ---
 

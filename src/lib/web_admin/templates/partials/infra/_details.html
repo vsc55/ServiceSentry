@@ -23,10 +23,34 @@
  *  second kind as loose tiles would be twelve numbers with no way to tell which volume each
  *  belongs to. */
 function _infraDetailsPane(metrics) {
+    _infraDrawn = 0;
     const flagged = (metrics || []).filter(m => m.headline);
     if (!flagged.length)
         return `<div class="text-muted small">${esc(t('infra_no_headline'))}</div>`;
-    const own = flagged.filter(m => !m.row);
+    // A tally is about the box, like the other loose figures, and does not read like one:
+    // "44 up, 10 down, 6 not present" beside "CPU 7 %" is two kinds of answer in one row, and
+    // the eye has to work out which number belongs to which sentence. Its own section, headed
+    // by whatever produced it — so on a switch the ports get a heading of their own and on a
+    // NAS the interfaces do, without the panel deciding what either of them is called.
+    // The chart index this tab hands to `_infraChart`, which is shared with the Measures
+    // tab. One tab is on screen at a time, so one index is enough — and rebuilding it here
+    // rather than reusing theirs keeps a tile's number from meaning a different metric
+    // depending on which tab was drawn last.
+    _infraMetricIndex = [];
+    // A figure that another one says belongs in ITS picture does not also get a tile of its
+    // own. Traffic out under traffic in is the same number twice, once with a chart that
+    // already has it on the axis — and the pair is what somebody reads, not two cards.
+    const mated = new Set();
+    for (const m of flagged)
+        for (const f of m.chart_with || []) mated.add(`${m.module}\u0000${m.key}\u0000${f}`);
+    const own = flagged.filter(m => !m.row && m.headline !== 'tally'
+        && !mated.has(`${m.module}\u0000${m.key}\u0000${m.field}`))
+        // The figures that are a LEVEL first, then the ones that are a SHAPE — because a
+        // shape takes a whole line (see `_infraDetailTile`) and one in the middle of the run
+        // would leave the cards before it stranded on a line of their own. Stable, so within
+        // each group the payload's order survives.
+        .sort((a, b) => (_infraWantsChart(a) ? 1 : 0) - (_infraWantsChart(b) ? 1 : 0));
+    const counted = flagged.filter(m => !m.row && m.headline === 'tally');
     const rows = new Map();
     for (const m of flagged.filter(m => m.row)) {
         const k = `${m.row_group || ''}\u0000${m.row}`;
@@ -43,24 +67,40 @@ function _infraDetailsPane(metrics) {
     // "8 GiB" reads as one list of the same kind of thing. The heading is the source's own
     // name, so a device that adds a fourth kind of store gets a fourth section for free.
     const sections = new Map();
-    for (const r of list) {
-        const k = r.items[0].source || '';
+    const _section = (m) => {
+        const k = m.source || '';
         if (!sections.has(k)) sections.set(k, {
-            key: k, rank: r.items[0].source_rank || 0,
-            label: r.items[0].source_short || _infraShortLabel(r.items[0].source_label || k),
-            rows: []});
-        sections.get(k).rows.push(r);
-    }
+            key: k, rank: m.source_rank || 0,
+            label: m.source_short || _infraShortLabel(m.source_label || k),
+            rows: [], tiles: []});
+        return sections.get(k);
+    };
+    for (const r of list) _section(r.items[0]).rows.push(r);
+    for (const m of counted) _section(m).tiles.push(m);
+    // Sections of COUNTS last, whatever produced them. A tally is a summary of a long list
+    // — how many ports are up out of how many — and it reads after the things somebody looks
+    // at one by one, not in front of them. By shape and not by name: the rule is "a section
+    // with nothing to open in it", so a profile that gains rows moves up on its own.
     const ordered = [...sections.values()].sort((a, b) =>
-        a.rank - b.rank || String(a.label).localeCompare(String(b.label)));
+        (a.rows.length ? 0 : 1) - (b.rows.length ? 0 : 1)
+        || a.rank - b.rank || String(a.label).localeCompare(String(b.label)));
     return `${own.length ? `<div class="d-flex flex-wrap gap-2 mb-3">
-            ${own.map(_infraDetailTile).join('')}</div>` : ''}
+            ${own.map(m => _infraDetailTile(m)).join('')}</div>` : ''}
         ${ordered.map(sec => `
             ${ordered.length > 1 || own.length
                 ? `<div class="text-muted ss-fs-1 text-uppercase mb-1 mt-2">${esc(sec.label)}</div>`
                 : ''}
+            ${sec.tiles.map(_infraTallyTile).join('')}
             <div class="d-flex flex-wrap gap-2">${sec.rows.map(_infraDetailRow).join('')}</div>
         `).join('')}`;
+}
+
+/** Whether this figure is drawn as a SHAPE — the one thing the tile and the order it is
+ *  drawn in both have to agree on. `chart: "area"` is the profile's word for "a shape and not
+ *  a level"; a caller can ask for more (the interfaces view does, because a port's counters
+ *  ARE what somebody opened that port to look at). Either way it needs a series to draw. */
+function _infraWantsChart(m, shape) {
+    return !!((shape || (m || {}).chart === 'area') && (m || {}).series && m.series.field);
 }
 
 /** One figure, big enough to read from across the room.
@@ -69,14 +109,314 @@ function _infraDetailsPane(metrics) {
  *  badge with the word the MIB gives it, a byte count is scaled to something a person reads,
  *  a percentage gets its bar. Two renderers for one value is two answers to "what does 2
  *  mean", and the one on the summary screen would be the one that stayed wrong. */
-function _infraDetailTile(m) {
-    return `<div class="rounded-3 border px-3 py-2" style="min-width:11rem;flex:1 1 11rem">
-        <div class="text-muted ss-fs-1 text-truncate" title="${escAttr(_infraTileTitle(m))}">
-            ${esc(m.label || m.field)}</div>
-        <div class="d-flex align-items-baseline gap-1 ss-fs-5">${_infraValueHtml(m)}</div>
+function _infraDetailTile(m, shape) {
+    // A shape over time, drawn here rather than waiting to be asked for. `chart: "area"` is
+    // already the profile's word for "this is a shape and not a level" — the CPU it is busy
+    // with, the power it is drawing, the traffic crossing it — and those are exactly the
+    // figures somebody opens this tab to look at the shape of.
+    //
+    // CAPPED, and the cap is the reason the rest of this tab draws no charts at all: the
+    // history API answers one series per call, so eighty sparklines is eighty requests. Four
+    // is a summary; the rest keep a button, which costs nothing until it is pressed.
+    // `chart: "area"` is the profile's word for "a shape and not a level" and is what the
+    // summary opens on its own. A caller can ask for more — the interfaces view does, because
+    // a port's counters ARE what somebody opened that port to look at, and there they are not
+    // four figures among forty.
+    const wants = _infraWantsChart(m, shape);
+    const i = wants || m.series ? _infraMetricIndex.push(m) - 1 : -1;
+    const auto = wants && _infraDrawn < _INFRA_DETAIL_CHARTS;
+    if (auto) _infraDrawn += 1;
+    // …and the figures the profile says belong in the same picture, on the same card. Traffic
+    // in without traffic out is half an answer, and the pair on two cards is the comparison
+    // somebody came for made into arithmetic.
+    const mates = _infraChartMates(m);
+    const head = mates.length ? (m.chart_label || m.label || m.field) : (m.label || m.field);
+    // A LINE OF ITS OWN for a card that draws. Reported from the screen: four cards across
+    // left the traffic chart about 380 px wide, with a week of two series in it and a y-axis
+    // whose labels ran into the axis title. A number is a card; a shape is a figure, and a
+    // figure that has to share a row with three numbers is one nobody reads. `flex-basis:100%`
+    // rather than a container of its own, so nothing has to know in advance how many there
+    // are — a card at full width takes the line it is on and the wrap does the rest.
+    return `<div class="rounded-3 border px-3 py-2" data-zoom="1"
+                style="min-width:${auto ? '19rem' : '11rem'};flex:1 1 ${auto ? '100%' : '11rem'}">
+        <div class="text-muted ss-fs-1 text-truncate d-flex align-items-center gap-1"
+             title="${escAttr(_infraTileTitle(m))}">
+            ${m.icon && !mates.length ? `<i class="bi ${escAttr(m.icon)}"></i>` : ''}
+            <span class="text-truncate">${esc(head)}</span>
+            ${i >= 0 ? `<span class="ms-auto">${_infraChartLink(m, i, true)}</span>` : ''}
+        </div>
+        <div class="d-flex align-items-baseline gap-3 flex-wrap ss-fs-5">${
+            [m, ...mates].map(x => `<span class="d-inline-flex align-items-baseline gap-1"
+                 title="${escAttr(x.label || x.field)}">${x.icon && mates.length
+                    ? `<i class="bi ${escAttr(x.icon)} ss-fs-2"></i>` : ''
+                 }${_infraValueHtml(x)}</span>`).join('')}</div>
         <div class="text-muted ss-fs-1 text-truncate">${esc(
             m.source_short || _infraShortLabel(m.source_label || ''))}</div>
+        ${i >= 0 ? `<div id="infra-chart-${i}"${auto ? ' data-auto="1"' : ''}></div>` : ''}
     </div>`;
+}
+
+//: How many of a device's headline figures get a chart drawn without being asked. The history
+//: API answers one series per call, so this is a number of REQUESTS as much as of pictures.
+const _INFRA_DETAIL_CHARTS = 4;
+let _infraDrawn = 0;
+
+/** Open the charts this tab marked as worth drawing on sight.
+ *
+ *  After the paint and not during it: `_infraChart` writes into an element by id, and the
+ *  element does not exist until the HTML this function is part of has been put on the page. */
+function _infraDetailsCharts() {
+    document.querySelectorAll('#infra-details [data-auto="1"]').forEach(el => {
+        const i = Number(String(el.id).replace('infra-chart-', ''));
+        if (Number.isFinite(i) && el.dataset.open !== '1') _infraChart(i);
+    });
+}
+
+/** A counted column: how many rows are in each state, as ONE CARD PER STATE.
+ *
+ *  Twenty-four ports each with a badge is the right answer to "what is each port doing" and
+ *  the wrong one to "how is this switch" — nobody reads twenty-four badges, and the number
+ *  somebody wants is "six up, eighteen down". WHICH columns are worth counting is the
+ *  profile's word (`"tally": true`): the core would otherwise have to know that an interface's
+ *  state is worth adding up and a disk's serial is not.
+ *
+ *  Reported from the screen, about the first version: all of it in one box came out as
+ *  "28 Ethernet 1 22 1 Loopback 21 Virtual (VLAN)" — a run of numbers and words with nothing
+ *  separating one pair from the next, where the eye has to work out which number goes with
+ *  which word and a value the profile has no name for ("22") looks like a number that lost its
+ *  label. So each value is its own card: one figure, one word under it, and a way in.
+ *
+ *  Ordered by the state's own key, so a device that answers 1 and 2 draws them in that order
+ *  every time. Sorting by the count would make the cards rearrange themselves as ports go up
+ *  and down, which is the one thing an index must not do. */
+function _infraTallyTile(m) {
+    const values = Object.keys(m.counts || {}).sort((a, b) => {
+        const na = Number(a), nb = Number(b);
+        return (Number.isFinite(na) && Number.isFinite(nb)) ? na - nb : String(a).localeCompare(b);
+    });
+    return `<div class="w-100 mb-3">
+        <div class="d-flex align-items-baseline gap-2 mb-1">
+            ${m.icon ? `<i class="bi ${escAttr(m.icon)} text-muted ss-fs-2"></i>` : ''}
+            <span class="ss-fs-2 fw-semibold"
+                  title="${escAttr(_infraTileTitle(m))}">${esc(m.label || m.field)}</span>
+            <span class="text-muted ss-fs-1">${esc(tf('infra_tally_of', m.value))}</span>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            ${values.map(v => _infraTallyCard(m, v)).join('')}</div>
+    </div>`;
+}
+
+/** One counted value: the number, what it means, and the way into the rows behind it.
+ *
+ *  The mark is drawn only where the level SAYS something. Every interface type is `info` — a
+ *  VLAN is not better or worse than a port — and a grey dot in front of all six of them is six
+ *  pixels of nothing repeated. An operational state is not: a tick and an octagon are the
+ *  difference between the two numbers somebody came to this card to compare. */
+function _infraTallyCard(m, v) {
+    const st = (m.states || {})[v] || {};
+    const mark = _infraStateMark(st);
+    const name = _infraStateName(m, v);
+    const behind = ((m.rows || {})[v] || []).length;
+    const open = behind
+        ? `onclick="_infraOpenTally(${jsStr(m.source)},${jsStr(m.field)},${jsStr(v)})"
+           title="${escAttr(tf('infra_tally_open', behind))}"` : '';
+    return `<div class="rounded-3 border px-3 py-2${behind ? ' ss-pointer' : ''}"
+                style="min-width:8.5rem;max-width:14rem;flex:0 1 auto" ${open}>
+        <div class="d-flex align-items-center gap-2">
+            ${mark ? `<i class="bi ${mark.icon} ${mark.cls} ss-fs-3"></i>` : ''}
+            <span class="fw-semibold ss-fs-5">${esc(m.counts[v])}</span>
+            ${behind ? `<i class="bi bi-chevron-right text-muted ms-auto ss-fs-1"></i>` : ''}
+        </div>
+        <div class="text-muted ss-fs-2 text-truncate" title="${escAttr(name)}">${esc(name)}</div>
+    </div>`;
+}
+
+/** What a counted value is CALLED.
+ *
+ *  The profile's word where it has one, and the code itself where it has not. IANA's list of
+ *  interface types runs past 300 and a profile writes down the ones a person meets; the rest
+ *  came out as a bare number in a row of words — "1 22" under a heading that says "Interface
+ *  type" reads as a panel that lost half a label, not as a value nobody has named yet. Saying
+ *  "code 22" is the honest version of the same answer, and it is one search away from
+ *  propPointToPointSerial. */
+function _infraStateName(m, v) {
+    return ((m.states || {})[v] || {}).label || tf('infra_state_code', v);
+}
+
+/** WHICH count is open, and which of its rows is on screen. `null` is the summary.
+ *
+ *  A count is a question — "21 Virtual (VLAN)" is the summary and "which 21" is the next
+ *  sentence — and the first answer to it was a table with every column the device reports.
+ *  Reported from the screen: seventeen columns do not fit in a dialog, and the horizontal
+ *  scrollbar that was supposed to reach them sat at the bottom of forty rows. A port is not a
+ *  row of a table anyway; it is a thing with a state, a speed, an address and four counters
+ *  worth a graph each, which is a screen of its own. So the count opens onto one: the rows on
+ *  a rail, and the one you pick beside it. */
+let _infraRowsOf = null;         // {source, field, value} — null is the summary
+let _infraRowPick = '';          // …and which of its rows is drawn
+
+/** Open a count onto its rows. Same entry point the cards have always called. */
+function _infraOpenTally(source, field, value) {
+    _infraRowsOf = {source, field, value: String(value)};
+    _infraRowPick = '';
+    _infraPaint();
+}
+
+function _infraRowsBack() { _infraRowsOf = null; _infraRowPick = ''; _infraPaint(); }
+function _infraRowsPick(key) { _infraRowPick = String(key || ''); _infraPaint(); }
+
+/** The rows behind one count: a rail of them, and the one that is picked beside it.
+ *
+ *  WHICH rows those are came WITH the count, from the side that did the counting. Re-deriving
+ *  them here would mean re-applying the rule that decided what the count is about —
+ *  `headline_rows`, `tally: "all"`, the state a reading maps to — in a second place, and the
+ *  day the two disagreed the switch would say "28 Ethernet" over a list of thirty. */
+function _infraRowsPane(metrics) {
+    _infraDrawn = 0;
+    _infraMetricIndex = [];
+    const all = (_infraDetail && _infraDetail.metrics) || [];
+    const m = all.find(x => x.headline === 'tally' && x.source === _infraRowsOf.source
+                            && x.field === _infraRowsOf.field);
+    const keys = m ? ((m.rows || {})[_infraRowsOf.value] || []) : [];
+    // The payload was refreshed and the count is gone — a port removed, a profile unassigned.
+    // Back to the summary rather than onto an empty screen with a back button on it.
+    if (!keys.length) { _infraRowsOf = null; return _infraDetailsPane(metrics); }
+    const rows = keys
+        .map(k => {
+            const items = all.filter(x => x.row_key === k), first = items[0] || {};
+            return {key: k, items, name: first.row || k, group: first.row_group || ''};
+        })
+        // Numeric-aware, or a switch lists gi1, gi10, gi11 … gi2. The port after 1 is 2 on
+        // every piece of equipment ever made, and an index nobody can read down is not one.
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, {numeric: true}));
+    const open = rows.find(r => r.key === _infraRowPick) || rows[0];
+    _infraRowPick = open.key;
+    return `<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <button class="btn btn-sm btn-secondary" onclick="_infraRowsBack()">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('infra_rows_back'))}</button>
+            <span class="fw-semibold">${esc(m.label || m.field)}</span>
+            <span class="text-muted">${esc(_infraStateName(m, _infraRowsOf.value))}</span>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal"
+                >${esc(rows.length)}</span>
+        </div>
+        <div class="d-flex flex-wrap gap-3 align-items-start">
+            <nav class="ss-sticky-aside ss-rail-group ss-scrollbox">${rows.map(r => `
+                <button type="button" class="ss-rail-item${r.key === open.key ? ' active' : ''}"
+                        onclick="_infraRowsPick(${jsStr(r.key)})"
+                        title="${escAttr(r.group ? `${r.name} (${r.group})` : r.name)}">
+                    ${_infraRowMarkHtml(r.items)}
+                    <span class="text-truncate">${esc(r.name)}</span>
+                    ${_infraIsWatched((r.items[0] || {}).module, r.key)
+                        ? `<i class="bi bi-bell-fill ms-auto ss-fs-1"
+                             title="${escAttr(t('infra_watch_on'))}"></i>` : ''}
+                </button>`).join('')}</nav>
+            <div style="flex:1 1 22rem;min-width:0">${_infraRowBody(open)}</div>
+        </div>`;
+}
+
+/** Whether somebody has said this row is worth an alert.
+ *
+ *  A switch port that is down may be a PC switched off at seven — which is not news, and made
+ *  a rack of half-populated switches permanently red — or it may be the link to a server,
+ *  which is a phone call. Nothing in any MIB separates the two: what is at the other end of
+ *  the cable is knowledge about THIS installation, so it is recorded against the machine and
+ *  read back from the machine's own record. */
+function _infraIsWatched(module, row) {
+    const list = ((_infraDetail || {}).host || {}).watch || [];
+    return list.some(w => w && w.module === module && w.row === row);
+}
+
+/** Say so, or stop saying so. The record comes back from the server rather than being
+ *  patched here: what is on screen then IS what is stored, and a failed save leaves the
+ *  button where it was instead of lying about it until the next refresh. */
+async function _infraSetWatch(module, row, on) {
+    const uid = _infraHost;
+    if (!uid) return;
+    const r = await apiPost(`/api/v1/infra/hosts/${encodeURIComponent(uid)}/watch`,
+                            {module, row, on: !!on});
+    if (!r) return;
+    if (_infraDetail && _infraDetail.host) _infraDetail.host.watch = r.watch || [];
+    showToast(t(on ? 'infra_watch_added' : 'infra_watch_removed'), 'success');
+    _infraPaint();
+}
+
+/** The state of a row on the rail, so which ports are down is readable without opening any.
+ *
+ *  The worst of whatever the row's own columns DECLARE a level for — the core is not deciding
+ *  that an interface's operational state outranks its administrative one, it is taking the
+ *  worst thing the profile said about it. `info` carries no mark: that is the level for "this
+ *  is what it answered", and a grey dot on every row is a column of nothing. */
+function _infraRowMarkHtml(items) {
+    const rank = {bad: 0, warn: 1, ok: 2};
+    let worst = null;
+    for (const m of items || []) {
+        // `state_key` where the payload sent one: a port that is down because somebody
+        // switched it off is not a port that is down, and the rail was drawing it with the
+        // same red octagon as a cable that fell out.
+        const st = (m.states || {})[m.state_key || String(m.value)];
+        if (!st) continue;
+        // A level, or — for one that has none — a state the profile gave a mark of its own.
+        // Last, because "switched off" is a condition and not a fault: it shows on a row
+        // where nothing worse happened, and never instead of something that did.
+        const r = (st.level in rank) ? rank[st.level] : (st.icon ? 3 : -1);
+        if (r < 0) continue;
+        if (!worst || r < worst.rank) worst = {rank: r, st};
+    }
+    if (!worst) return '';
+    const mark = _infraStateMark(worst.st) || _INFRA_LEVEL_MARKS.info;
+    return `<i class="bi ${mark.icon} ${mark.cls} ss-fs-1" role="img"
+               title="${escAttr(worst.st.label)}" aria-label="${escAttr(worst.st.label)}"></i>`;
+}
+
+/** One row, whole: what it IS, what it is doing, and the shape of each of those over time.
+ *
+ *  The figures that are a LEVEL first — state, speed, MTU — and the ones that are a SHAPE
+ *  after them: the first lot answer "what is this port" in one line each, and the second want
+ *  a picture. The pictures are capped like everywhere else on this tab, because the history
+ *  API answers one series per call. */
+function _infraRowBody(r) {
+    const shape = (m) => m.chart === 'line' || m.chart === 'area';
+    const tiles = r.items.slice().sort((a, b) =>
+        (shape(a) ? 1 : 0) - (shape(b) ? 1 : 0)
+        || String(a.label || a.field).localeCompare(String(b.label || b.field)));
+    const mod = (r.items[0] || {}).module || '';
+    const on = _infraIsWatched(mod, r.key);
+    const may = (currentUser.permissions || []).includes('infra_watch');
+    return `<div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+            <span class="fw-semibold ss-fs-5 text-truncate">${esc(r.name)}</span>
+            ${r.group ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+                >${esc(r.group)}</span>` : ''}
+            ${may && mod ? `<button class="btn btn-sm ${on ? 'btn-warning' : 'btn-secondary'} ms-auto"
+                onclick="_infraSetWatch(${jsStr(mod)},${jsStr(r.key)},${on ? 'false' : 'true'})"
+                title="${escAttr(t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt'))}">
+                <i class="bi ${on ? 'bi-bell-fill' : 'bi-bell'} me-1"></i>${
+                    esc(t(on ? 'infra_watch_on' : 'infra_watch_off'))}</button>` : ''}
+        </div>
+        ${_infraRowFactsHtml(r.key)}
+        ${tiles.length
+            ? `<div class="d-flex flex-wrap gap-2">${
+                tiles.map(x => _infraDetailTile(x, shape(x))).join('')}</div>`
+            : `<div class="text-muted small">${esc(t('infra_no_checks'))}</div>`}`;
+}
+
+/** What a CODED fact means, from the column that counts it.
+ *
+ *  A row's type arrives as "6" — it is what the device answered — and the profile has already
+ *  written down that 6 is Ethernet, in the states of the tally over that column. Read from
+ *  there rather than spelled out again: a second copy of that map is a second thing to keep up
+ *  to date, and the panel would be naming a MIB's values on its own authority. */
+function _infraStateWords() {
+    const words = new Map();
+    for (const x of (_infraDetail && _infraDetail.metrics) || [])
+        if (x.headline === 'tally' && x.tally_role && x.states)
+            words.set(x.tally_role, x.states);
+    return words;
+}
+
+/** A coded fact as the word its profile gives it, or as it came when there is none. */
+function _infraFactWord(words, key, value) {
+    const st = (words.get(key) || {})[String(value)];
+    return st && st.label ? st.label : value;
 }
 
 /** Where a figure came from, for the hover: the part of the device, then the check. */
@@ -141,6 +481,21 @@ function _infraDetailRow(g) {
  *  badge is coloured by, so a symbol and a colour can never disagree. Shape and colour both
  *  carry it (a tick, a triangle, an octagon), because colour alone is not a distinction for
  *  everybody, and the word itself is on the hover and on the row's own dialog. */
+/** The mark one state is drawn with, or nothing.
+ *
+ *  The profile's own where it declared one, and the level's otherwise — except for `info`,
+ *  which draws none: that is the level for "this is what it answered", and every interface
+ *  TYPE is `info`, so a grey dot in front of all six of them is six pixels of nothing
+ *  repeated. A state that earned a mark says so itself. */
+function _infraStateMark(st) {
+    if (st && st.icon) {
+        return {icon: st.icon, cls: (_INFRA_LEVEL_MARKS[st.level] || {}).cls
+                                    || _INFRA_LEVEL_MARKS.info.cls};
+    }
+    const mark = _INFRA_LEVEL_MARKS[(st || {}).level];
+    return (mark && st.level !== 'info') ? mark : null;
+}
+
 const _INFRA_LEVEL_MARKS = {
     ok:   {icon: 'bi-check-circle-fill',        cls: 'text-success'},
     warn: {icon: 'bi-exclamation-triangle-fill', cls: 'text-warning'},
@@ -149,9 +504,12 @@ const _INFRA_LEVEL_MARKS = {
 };
 
 function _infraCardValueHtml(m) {
-    const st = m.states && m.states[String(m.value)];
+    // `state_key` where the payload sent one: a reading whose own value is not the
+    // whole answer — an interface down because somebody switched it off.
+    const st = m.states && m.states[m.state_key || String(m.value)];
     if (!st) return _infraValueHtml(m);
-    const mark = _INFRA_LEVEL_MARKS[st.level] || _INFRA_LEVEL_MARKS.info;
+    const mark = _infraStateMark(st) || _INFRA_LEVEL_MARKS[st.level]
+                 || _INFRA_LEVEL_MARKS.info;
     return `<i class="bi ${mark.icon} ${mark.cls} ss-fs-5" role="img"
                title="${escAttr(st.label)}" aria-label="${escAttr(st.label)}"></i>`;
 }
@@ -474,11 +832,15 @@ function _infraRowFactsHtml(key) {
     const uniq = facts.filter(a => !seen.has(a.key) && seen.add(a.key));
     uniq.sort((a, b) => _infraFactRank(a.key) - _infraFactRank(b.key)
                      || String(a.key).localeCompare(String(b.key)));
+    const words = _infraStateWords();
     return `<div class="ss-factgrid rounded-3 border bg-body-tertiary px-3 py-3 mb-3">
-        ${uniq.map(a => `<div>
+        ${uniq.map(a => {
+            const text = _infraFactWord(words, a.key, a.value);
+            return `<div>
             <div class="text-muted ss-fs-1 text-uppercase">${esc(_attrLabel(a.key))}</div>
             <div class="ss-fact-v fw-semibold text-truncate"
-                 title="${escAttr(a.value)}">${esc(a.value)}</div>
-        </div>`).join('')}
+                 title="${escAttr(text)}">${esc(text)}</div>
+        </div>`;
+        }).join('')}
     </div>`;
 }

@@ -386,6 +386,65 @@ class TestCountersAcrossCycles:
             'does not store — they will not survive to the cycle that needs them')
 
 
+class TestAColumnRecordedAsOneTotal:
+    """A switch's overall traffic: every other monitoring tool draws it and no agent serves it.
+
+    It is the sum of the ports, and only something holding all the ports at once can add them
+    up. Unlike the tally on the screen this is a MEASUREMENT — summed where the reading happens
+    so it lands in the series like any other, which is the difference between a number on a
+    card and a graph with a week behind it.
+    """
+
+    TOTAL = {'key': 'total_in', 'walk': '1.3.6.1.2.1.31.1.1.1.6', 'kind': 'counter',
+             'aggregate': 'sum', 'unit': 'B/s', 'width': 64,
+             'index_label': '1.3.6.1.2.1.2.2.1.2'}
+
+    def _walks(self, values, names=None):
+        names = names or {k: f'gi{k}' for k in values}
+        return {self.TOTAL['walk']: (values, None),
+                '1.3.6.1.2.1.2.2.1.2': (names, None)}
+
+    def test_the_rows_are_added_up_under_the_device(self, env):
+        env.profile('p1', [self.TOTAL])
+        mon = env.monitor(_server())
+        env.run(_server(), _Dev(walks=self._walks({'1': '1000', '2': '2000'})), monitor=mon)
+        res, _d = env.run(_server(), _Dev(walks=self._walks({'1': '3000', '2': '7000'})),
+                          monitor=mon)
+        assert list(res) == ['srv/metrics'], 'a total is about the device, not about a row'
+        assert res['srv/metrics']['other_data']['total_in'] > 0
+
+    def test_each_row_keeps_its_own_baseline(self, env):
+        """Summing raw counters and differentiating THAT would produce a spike every time a
+        port is added, and a hole every time one goes away. Each row is sampled the ordinary
+        way and the results are what gets added."""
+        env.profile('p1', [self.TOTAL])
+        mon = env.monitor(_server())
+        env.run(_server(), _Dev(walks=self._walks({'1': '1000', '2': '1000'})), monitor=mon)
+        # 10 s later: +100 on one port, +200 on the other. Whatever the interval was, the two
+        # rates add up, and a third port appearing from nothing contributes nothing yet.
+        res, _d = env.run(_server(),
+                          _Dev(walks=self._walks({'1': '1100', '2': '1200', '3': '999999'})),
+                          monitor=mon)
+        assert res['srv/metrics']['other_data']['total_in'] > 0
+        assert 'srv/gi3' not in res, 'the new port did not become a row of its own'
+
+    def test_the_first_cycle_records_nothing_rather_than_a_lump(self, env):
+        """Every row is a baseline, so the total has nothing to be a total OF."""
+        env.profile('p1', [self.TOTAL])
+        res, _d = env.run(_server(), _Dev(walks=self._walks({'1': '1000'})))
+        assert 'total_in' not in (res.get('srv/metrics') or {}).get('other_data', {})
+
+    def test_the_shipped_profile_totals_only_the_ports(self, env):
+        """Summing every interface double-counts: a switch's VLAN interfaces carry the traffic
+        that already crossed a physical port, so the total would be roughly twice the truth."""
+        from lib.core.snmp import profiles as _p                  # noqa: PLC0415
+        m = {x['key']: x for x in _p.catalog()['if_generic']['metrics']}
+        for key in ('if_total_in', 'if_total_out'):
+            assert m[key]['aggregate'] == 'sum'
+            assert m[key]['where'] == {'oid': '1.3.6.1.2.1.2.2.1.3', 'equals': '6'}
+            assert m[key]['width'] == 64, 'a 32-bit octet counter wraps in 34 s on a gigabit'
+
+
 class TestATableThatDescribesTheBox:
     """`ipAddrTable` is not a list of parts.
 
@@ -872,6 +931,30 @@ class TestAHostIsADeviceOnItsOwn:
         _res, dev = self._run(env, [self._host()], servers)
         assert dev.asked == []
 
+    def test_an_item_that_samples_nothing_does_not_claim_the_host(self, env):
+        """Reported from the panel, and it is the whole reason "covered" is about PROFILES and
+        not about the binding.
+
+        A switch had an SNMP item bound to it carrying OID checks and no device profiles. The
+        item claimed the host — so the registry fallback skipped it — and then sampled nothing,
+        because it had nothing to sample. The device was collected by NOBODY: no error, no log
+        line, and no row on any screen. Its own connection test kept returning OIDs the whole
+        time, which is what made it unreadable from outside.
+        """
+        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'label': 'SW',
+                           'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
+        res, dev = self._run(env, [self._host()], servers)
+        assert 'host.h1/metrics' in res.list, 'the device is sampled by nobody'
+        assert dev.asked, 'and nothing was ever asked of it'
+
+    def test_an_item_with_profiles_still_claims_it(self, env):
+        """The other half: two samplers on one machine would chart every series against
+        itself."""
+        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'device_profiles': 'p1',
+                           'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
+        res, _dev = self._run(env, [self._host()], servers)
+        assert 'srv/metrics' in res.list and 'host.h1/metrics' not in res.list
+
     def test_a_host_with_no_assignment_is_left_alone(self, env):
         hosts = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
         _res, dev = self._run(env, hosts)
@@ -937,6 +1020,87 @@ class TestTheProfileIsTheVerdict:
         self._prof(env, {2: ('Failed', 'bad')})
         res, _mon = env.run(_server(), _Dev(gets={'1.1': (9, None)}))
         assert _one(res)['status'] is True
+
+    def test_a_column_can_colour_without_judging(self, env):
+        """`level` was doing two jobs: it paints the badge and it decides whether the machine
+        is in trouble. For a fan those are the same answer; for a switch port they are not.
+
+        An access port with nothing plugged into it is `down`, which is worth a red mark on a
+        list of thirty ports and is NOT a fault of the switch — a rack of half-populated
+        switches came out permanently red, which is the state that stops meaning anything the
+        first time it is wrong. Which ports matter is a decision about the installation and
+        the panel has not been given one.
+        """
+        env.profile('p1', [{'key': 'if_oper', 'oid': '1.1', 'kind': 'gauge', 'verdict': False,
+                            'states': {'1': {'label': 'Up', 'level': 'ok'},
+                                       '2': {'label': 'Down', 'level': 'bad'}}}])
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
+        assert _one(res)['status'] is True, (
+            'a port with nothing plugged into it puts the switch in error')
+
+    #: A table read per row, whose state colours but does not judge — a switch's ports.
+    PORTS = {'key': 'if_oper', 'walk': '1.2.3', 'kind': 'gauge', 'verdict': False,
+             'index_label': '1.2.4',
+             'states': {'1': {'label': 'Up', 'level': 'ok'},
+                        '2': {'label': 'Down', 'level': 'bad'}}}
+
+    def _switch(self, env, watched):
+        """Two ports, both down; *watched* is what somebody said matters."""
+        env.profile('p1', [self.PORTS])
+        srv = _server(device_profiles='p1', host_uid='h1')
+        mon = env.monitor(srv)
+
+        class _Store:
+            def watch(self_inner, uid):        # noqa: N805
+                return set(watched)
+            def get(self_inner, uid, **_kw):   # noqa: N805
+                return {'uid': uid, 'name': 'sw', 'address': '10.0.0.9', 'kind': 'local',
+                        'os': 'auto', 'maintenance': False, 'profiles': {'snmp': {}},
+                        'modules': [], 'watch': []}
+
+        mon._hosts_store = _Store()
+        dev = _Dev(walks={'1.2.3': ({'1': '2', '2': '2'}, None),
+                          '1.2.4': ({'1': 'gi1', '2': 'gi3'}, None)})
+        return env.run(srv, dev, monitor=mon)[0]
+
+    def test_a_row_somebody_named_is_news_again(self, env):
+        """The profile knows what ifOperStatus means on every switch ever made; only whoever
+        ran the cable knows that gi3 goes to the server. Two levels of decision, and they
+        belong to different people — so the reading that is silence on gi1 is a finding on the
+        port somebody marked."""
+        res = self._switch(env, {'snmp' + chr(0) + 'gi3'})
+        assert res['srv/gi3']['status'] is False, 'the port that was marked stayed quiet'
+        assert 'Down' in res['srv/gi3']['message']
+        assert res['srv/gi1']['status'] is True, (
+            'marking one port made every port on the switch report')
+
+    def test_and_with_nothing_marked_the_switch_stays_quiet(self, env):
+        res = self._switch(env, set())
+        assert [r['status'] for r in (res['srv/gi1'], res['srv/gi3'])] == [True, True]
+
+    def test_a_registry_that_cannot_be_reached_reports_no_less_than_before(self, env):
+        """It turns a verdict back ON. An empty answer is the behaviour without the feature,
+        which is the right way for a preference to fail."""
+        env.profile('p1', [self.PORTS])
+        srv = _server(device_profiles='p1', host_uid='h1')
+        mon = env.monitor(srv)
+
+        class _Broken:
+            def watch(self_inner, uid):        # noqa: N805
+                raise RuntimeError('no database today')
+
+        mon._hosts_store = _Broken()
+        dev = _Dev(walks={'1.2.3': ({'1': '2'}, None), '1.2.4': ({'1': 'gi1'}, None)})
+        res = env.run(srv, dev, monitor=mon)[0]
+        assert res['srv/gi1']['status'] is True
+
+    def test_the_same_column_still_judges_when_it_does_not_say_otherwise(self, env):
+        """The flag is opt-OUT: a profile that says nothing keeps reporting, or every device
+        already described would go quiet on the day this was added."""
+        env.profile('p1', [{'key': 'fan', 'oid': '1.1', 'kind': 'gauge',
+                            'states': {'2': {'label': 'Failed', 'level': 'bad'}}}])
+        res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
+        assert _one(res)['status'] is False
 
     def test_a_metric_with_no_states_never_produces_one(self, env):
         """Most metrics are numbers with a unit. A temperature is not an enumeration and has

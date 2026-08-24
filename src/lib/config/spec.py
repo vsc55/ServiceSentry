@@ -100,6 +100,24 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
         min=1, max=365, env='SS_REMEMBER_ME_DAYS', admin_only=True,
         flask_cfg=('PERMANENT_SESSION_LIFETIME', lambda v: timedelta(days=v)),
         card='login_security'),
+    Cfg('web_admin|jobs_history_keep', int, 500, attr='_JOBS_HISTORY_KEEP',
+        # How many finished background jobs are kept. A ceiling and not a window: a busy
+        # install hits this inside a day, and "the last five hundred" is the answer to "what
+        # has this panel been doing" without a table that grows with uptime.
+        # 0 = no ceiling; the days below are then the only limit.
+        min=0, max=100000, env='SS_JOBS_HISTORY_KEEP', card='jobs'),
+    Cfg('web_admin|jobs_history_days', int, 30, attr='_JOBS_HISTORY_DAYS',
+        # …and how far back. Two limits and not one, because they answer different questions:
+        # this is how far anybody looks, and the count above is the ceiling a busy day hits.
+        # 0 = no age limit.
+        min=0, max=3650, env='SS_JOBS_HISTORY_DAYS', card='jobs'),
+    Cfg('web_admin|jobs_history_lines', int, 200, attr='_JOBS_HISTORY_LINES',
+        # How much of each job's OWN log is kept. A collection of a Synology reports hundreds
+        # of lines, and every line of every cycle for a month is a database full of the part
+        # nobody reads. The END is what is kept — that is where whatever went wrong is — and
+        # the row says how many were dropped, because a log that silently stops is one nobody
+        # can trust the end of.
+        min=0, max=10000, env='SS_JOBS_HISTORY_LINES', card='jobs'),
     Cfg('web_admin|api_token_log_enabled', bool, True, attr='_API_TOKEN_LOG_ENABLED',
         # WHETHER to record at all. Separate from the ceiling below, because "no limit" and
         # "no rows" are opposite answers and one number cannot carry both — it used to, and

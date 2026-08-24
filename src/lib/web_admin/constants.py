@@ -53,6 +53,14 @@ HOME_PAGES = (
                     'perm': 'syslog_view', 'icon': 'bi-hdd-stack',
                     'nav_label_key': 'tab_syslog'}},
     {'id': 'status',   'url': '/status',   'label_key': 'landing_status'},
+    # What the panel is DOING, as opposed to what it found. Placed in the System panel
+    # rather than beside the monitoring sections: it is about this process — its threads,
+    # its progress — and not about the fleet. Same `placement` a module section uses, so it
+    # sorts into that menu alphabetically with everything else there.
+    {'id': 'jobs',     'url': '/jobs',     'label_key': 'landing_jobs',
+     'standalone': {'pane': 'tab-jobs', 'render': 'renderJobs',
+                    'perm': 'jobs_view', 'icon': 'bi-hourglass-split',
+                    'placement': 'system', 'nav_label_key': 'tab_jobs'}},
 )
 
 

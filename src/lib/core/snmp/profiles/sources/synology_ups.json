@@ -16,6 +16,8 @@
     "metrics": [
         {
             "key": "syno_ups_charge",
+            "icon": "bi-battery-charging",
+            "headline": true,
             "label": {"en_EN": "Battery charge", "es_ES": "Carga de batería"},
             "oid": "1.3.6.1.4.1.6574.4.3.1.1.0",
             "kind": "gauge",
@@ -24,6 +26,8 @@
         },
         {
             "key": "syno_ups_runtime",
+            "icon": "bi-hourglass-split",
+            "headline": true,
             "label": {"en_EN": "Runtime left", "es_ES": "Autonomía restante"},
             "oid": "1.3.6.1.4.1.6574.4.3.6.1.0",
             "kind": "gauge",
@@ -32,6 +36,8 @@
         },
         {
             "key": "syno_ups_load",
+            "icon": "bi-speedometer2",
+            "headline": true,
             "label": {"en_EN": "Load", "es_ES": "Consumo"},
             "oid": "1.3.6.1.4.1.6574.4.2.12.1.0",
             "kind": "gauge",
@@ -48,6 +54,8 @@
         },
         {
             "key": "syno_ups_temp",
+            "icon": "bi-thermometer-half",
+            "headline": true,
             "label": {"en_EN": "UPS temperature", "es_ES": "Temperatura del SAI"},
             "oid": "1.3.6.1.4.1.6574.4.2.11.0",
             "kind": "gauge",

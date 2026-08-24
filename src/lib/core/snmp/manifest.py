@@ -248,3 +248,8 @@ CREDENTIAL: dict = {
         {'name': 'snmpv3_engine_id', 'kind': 'text', 'show_when': {'version': ['3']}},
     ],
 }
+
+# What this package runs in the background, for the screen that lists all of it
+# (lib/core/jobs). Declared rather than reached into: a core that imported four job
+# registries by name would have to be edited to learn about a fifth.
+from .jobs import live as BACKGROUND_JOBS      # noqa: E402,F401  (a descriptor)

@@ -424,3 +424,68 @@ class TestHowLongAModuleIsGiven:
         wa = _WA(timeout_seen=seen)
         _finish(wa)
         assert seen and isinstance(seen[0], int) and seen[0] > 0
+
+
+class TestTheChecklistKeepsMovingWhileItWaits:
+    """Reported from the screen: the module says "still working", the run is legitimately
+    waiting for it, and every line under it is frozen mid-read.
+
+    Two things had to be true and only one was. The job waits — that part worked. But the
+    executor took the progress channel off the moment the batch returned, which was right when
+    a run ended at its deadline and is wrong now that it does not: the straggler kept working
+    and kept reporting into nothing.
+    """
+
+    def test_a_straggler_that_keeps_talking_keeps_the_lines_moving(self):
+        seen = {}
+
+        def late(mods, cb):
+            seen['cb'] = cb
+            cb('running', mods[0], 'isen', {'step': 'Leyendo', 'scope': 'isen',
+                                            'n': 2, 'total': 24})
+            cb('timeout', mods[0], '120')
+            return {}, [f'{mods[0]}: timeout after 120s']
+
+        jid = _start(_WA(behaviour=late), modules=('snmp',))
+        _until(jid, lambda j: j['awaiting'])
+        seen['cb']('running', 'snmp', 'isen', {'step': 'Leyendo', 'scope': 'isen',
+                                               'n': 9, 'total': 24})
+        job = _until(jid, lambda j: j['modules'][0]['steps'][0]['n'] == 9)
+        assert not job['done'], 'a report from a straggler must not end the run'
+        assert job['modules'][0]['state'] == 'timeout', (
+            'the row left the state that says it is still out, and the run would end early')
+
+    def test_and_it_still_ends_when_the_straggler_actually_lands(self):
+        seen = {}
+
+        def late(mods, cb):
+            seen['cb'] = cb
+            cb('timeout', mods[0], '120')
+            return {}, []
+
+        jid = _start(_WA(behaviour=late), modules=('snmp',))
+        _until(jid, lambda j: j['awaiting'])
+        seen['cb']('running', 'snmp', '', {'step': 'Leyendo', 'n': 3, 'total': 24})
+        seen['cb']('ok', 'snmp', '900')
+        job = _until(jid, lambda j: j['done'])
+        assert job['modules'][0]['state'] == 'ok' and not job['gave_up']
+
+    def test_a_finished_job_takes_no_more_reports(self):
+        """A module can outlive the panel's patience. Once the run is closed its rows are the
+        record of what happened, and a late write would edit history nobody is watching."""
+        seen = {}
+
+        def late(mods, cb):
+            seen['cb'] = cb
+            cb('timeout', mods[0], '120')
+            return {}, []
+
+        grace = jobs._LATE_GRACE
+        jobs._LATE_GRACE = 0.15
+        try:
+            jid = _start(_WA(behaviour=late), modules=('snmp',))
+            _until(jid, lambda j: j['done'], wait=5.0)
+        finally:
+            jobs._LATE_GRACE = grace
+        seen['cb']('ok', 'snmp', '900')
+        assert jobs.job_status(jid)['modules'][0]['state'] == 'timeout'

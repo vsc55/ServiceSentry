@@ -186,12 +186,74 @@ def normalise_metric(raw) -> dict | None:
                                'sep': str(pair.get('sep') if pair.get('sep') is not None
                                           else ' '),
                                'as': mode if mode in ('prefix',) else ''}
+        # A table of things this device SAW, rather than of things it is. A switch's
+        # forwarding table and a machine's ARP cache are hundreds of volatile rows that
+        # nobody wants alerts about and that are only worth anything joined across the fleet
+        # — as ordinary rows they would be a `check_state` row and a history series per MAC.
+        # So they go to their own store (`lib.core.infra.evidence`) and never become results.
+        #
+        # The KIND is the profile's word. The core does not know what a forwarding table is,
+        # and a vocabulary written there would be the one device in front of whoever wrote it.
+        # A table whose summary is a TALLY: how many of its rows are in each state.
+        #
+        # Twenty-four ports, each with its own row, is the right answer to "what is each port
+        # doing" and the wrong one to "how is this switch" — nobody reads twenty-four badges,
+        # and the number they want is "six up, eighteen down". The core cannot derive that on
+        # its own: it would have to know that ifOperStatus is worth counting and that a serial
+        # number is not, which is knowledge about a MIB and not about a panel.
+        #
+        # `true` counts the rows the TABLE says its summary is about — the ports of a switch,
+        # not its VLANs and its loopback. `"all"` counts every row, which is what a column
+        # that answers "what KIND of thing is this row" needs: it is the one summary whose
+        # subject is the rows the other one leaves out.
+        if raw.get('tally') and isinstance(raw.get('states'), dict):
+            out['tally'] = 'all' if str(raw.get('tally')).strip().lower() == 'all' else True
+        # A column recorded as ONE number for the whole device: what all its rows add up
+        # to. The tally counts rows and is worked out when the screen is drawn; this is a
+        # MEASUREMENT, so it is summed where the reading happens and lands in the series like
+        # any other — which is the difference between a number on a card and a graph.
+        #
+        # A switch's overall traffic is the case: every other monitoring tool draws it and no
+        # agent serves it, because it is the sum of the ports and only something holding all
+        # the ports at once can add them up.
+        if str(raw.get('aggregate') or '').strip().lower() == 'sum':
+            out['aggregate'] = 'sum'
+        ev = str(raw.get('evidence') or '').strip().lower()
+        if ev and _ID_RE.match(ev):
+            out['evidence'] = ev
         where = raw.get('where')
         if isinstance(where, dict):
             w_oid = str(where.get('oid') or '').strip()
             w_val = str(where.get('equals') if where.get('equals') is not None else '').strip()
             if w_oid and _OID_RE.match(w_oid) and w_val:
                 out['where'] = {'oid': w_oid, 'equals': w_val}
+    # A column whose states COLOUR but do not JUDGE.
+    #
+    # `level` was doing two jobs: it paints the badge and it decides whether the device is
+    # in trouble. For a fan or a power supply those are the same answer. For a switch port
+    # they are not — an access port with nothing plugged into it is `down`, which is worth
+    # a red mark on a list of thirty ports and is NOT a fault of the switch. A rack full
+    # of half-populated switches came out permanently red, which is the state that stops
+    # meaning anything the first time it is wrong.
+    #
+    # Which ports matter is a decision about the installation, and the panel has not been
+    # given one; the switch's own condition is its CPU, its temperature, its fans and its
+    # power supplies, and those still judge. Declared and defaulting to ON, so a profile
+    # that says nothing keeps reporting.
+    if raw.get('verdict') is False:
+        out['verdict'] = False
+    # Two columns that are ONE picture. Traffic in and traffic out are not two questions —
+    # nobody looks at what a link received without looking at what it sent — and two
+    # charts side by side on two different y-scales is that comparison made impossible.
+    # Which columns belong together is the profile's word, because the core would have to
+    # know that in and out are a pair and that CPU and temperature are not.
+    with_keys = [str(k).strip() for k in (raw.get('chart_with') or ())
+                 if str(k).strip() and _ID_RE.match(str(k).strip())]
+    if with_keys:
+        out['chart_with'] = with_keys
+        # …and what the combined picture is CALLED. The tile's own label names one half of
+        # it, and a chart of both headed "Traffic in" is a chart that lies about itself.
+        out['chart_label'] = _label(raw.get('chart_label'), out['label'])
     for num, cast in (('scale', float), ('max_rate', float), ('width', int)):
         if raw.get(num) not in (None, ''):
             try:
@@ -280,13 +342,84 @@ def normalise_metric(raw) -> dict | None:
     states = _states(raw.get('states'))
     if states:
         out['states'] = states
+        quiet = _quiet_when(raw.get('quiet_when'), states)
+        if quiet:
+            out['quiet_when'] = quiet
     return out
+
+
+def _quiet_when(raw, states: dict) -> dict:
+    """When a reading is not news because ANOTHER column says it was never meant to be.
+
+    ``ifOperStatus`` is the case, and nothing about it is special to interfaces: one column
+    reports what something IS DOING and a second reports what somebody ASKED it to do. Down
+    while it was asked to be up is a fault. Down while it was asked to be DOWN is a switch in
+    the off position, and reporting that as a fault is reporting the administrator's own
+    decision back at them.
+
+    Reported from the panel: two NAS counting `ovs-system`, `sit0` and three VLAN interfaces
+    as down. Every one of those answers ``ifAdminStatus = 2`` — Open vSwitch's datapath device
+    and the IPv6-in-IPv4 tunnel device are down by design and always will be. The same reading
+    on the same box also covered `docker0`, which is admin-UP and genuinely down, and that one
+    has to go on saying so: the rule is about what was ASKED, not about which names look
+    virtual.
+
+    ``{"field": "if_admin", "equals": 2, "state": "off"}`` — on a row where that field reads
+    that value, this reading counts as the named state instead of the one its own value maps
+    to. A FIELD and not an OID, so the rule is written in the same words as the rest of the
+    profile and everything downstream can apply it without walking anything: the column is
+    already sampled and already sits beside this one on the same row.
+
+    The named state has to exist in this metric's own map or the rule is dropped. A
+    substitution that lands nowhere would leave the reading judged exactly as it was, wearing
+    a declaration that says otherwise — which is worse than not declaring it.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    field = str(raw.get('field') or '').strip()
+    state = str(raw.get('state') or '').strip()
+    if not field or not _ID_RE.match(field) or not state or 'equals' not in raw:
+        return {}
+    if state not in (states or {}):
+        return {}
+    return {'field': field, 'equals': str(raw.get('equals')).strip(), 'state': state}
 
 
 #: What a state MEANS for somebody looking at it, which decides its colour. Declared and not
 #: derived from the word: "Degraded" is bad and "Repairing" is not, and no rule about the
 #: text can tell those apart.
 LEVELS = ('ok', 'warn', 'bad', 'info')
+
+
+def _present_when(raw) -> dict:
+    """How to tell whether the thing this profile describes is actually THERE.
+
+    An agent answers a table whether or not the hardware behind it exists. SYNOLOGY-GPUINFO-MIB
+    is the case reported from the panel: a NAS with no GPU answers it anyway — utilisation 0 %,
+    memory 0 B — and the summary of every one of those machines grew a GPU card saying nothing.
+    A reading of zero is a reading; "there is no GPU here" is not something zero can say on its
+    own, and it is not something the panel may decide either.
+
+    So the PROFILE says which column is the evidence: a GPU with no memory at all is not a
+    GPU that is idle. ``{"field": "syno_gpu_mem_total", "above": 0}`` — the piece is present
+    when that field is a number greater than the threshold, and while it is not, none of this
+    profile's readings are news. They stay in Measures, where the question is what the device
+    answered rather than how it is; the same place `absent` leaves a component a switch says
+    it does not have.
+
+    A rule naming no field is dropped rather than applied: a gate nobody can pass would empty
+    a summary for a reason nothing on the screen could explain.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    field = str(raw.get('field') or '').strip()
+    if not field or not _ID_RE.match(field):
+        return {}
+    try:
+        above = float(raw.get('above') if raw.get('above') is not None else 0)
+    except (TypeError, ValueError):
+        return {}
+    return {'field': field, 'above': above}
 
 
 def _headline_rows(raw) -> dict:
@@ -367,6 +500,11 @@ def _states(raw) -> dict:
     the browser compares against. A value the map does not cover is not an error and is not
     guessed at — it falls back to its own number, which is what the whole column did before
     any of this and is honest about not knowing.
+
+    Each state is REBUILT rather than copied, because a profile is data an administrator
+    writes and this ends up on a screen. Which means this is a whitelist: a key added to the
+    format and not added here is dropped here, quietly, and the guard is the round-trip test
+    in `test_snmp_profiles.py` rather than anything raising.
     """
     if not isinstance(raw, dict):
         return {}
@@ -381,6 +519,23 @@ def _states(raw) -> dict:
             continue
         level = str(spec.get('level') or 'info').strip().lower()
         out[key] = {'label': label, 'level': level if level in LEVELS else 'info'}
+        # …and whether this value means the thing IS NOT THERE, which the summary needs: a
+        # passive switch answers "fan: not present", and a component the box says it does not
+        # have has no condition to report. Rebuilt state by state on purpose — a profile is
+        # data an administrator writes — so anything not named here is dropped, silently, in
+        # the one place that would not raise about it.
+        if spec.get('absent'):
+            out[key]['absent'] = True
+        # …and a MARK of its own, for a state that is worth seeing at a glance without being
+        # good or bad. The screen draws one per level, and `info` deliberately draws none:
+        # every interface TYPE is `info` — a VLAN is not better or worse than a port — and a
+        # grey dot in front of all six of them is six pixels of nothing repeated. "Switched
+        # off" is `info` too and is the exact opposite case: neither good nor bad, and the
+        # one thing somebody scanning a rail of interfaces wants to pick out. So the profile
+        # says which of its `info` states earned a mark, because only the profile knows.
+        icon = str(spec.get('icon') or '').strip().lower()
+        if _ICON_RE.match(icon):
+            out[key]['icon'] = icon
     return out
 
 
@@ -446,6 +601,9 @@ def normalise(raw) -> dict | None:
     rows = _headline_rows(raw.get('headline_rows'))
     if rows:
         out['headline_rows'] = rows
+    gate = _present_when(raw.get('present_when'))
+    if gate:
+        out['present_when'] = gate
     # What this profile is FOR, and how a device is recognised as one of them. Two ways,
     # because devices answer two different questions about themselves:
     #
@@ -802,7 +960,14 @@ def history_fields(profile: dict, lang: str = 'en_EN') -> dict:
     """
     out = {}
     for m in (profile or {}).get('metrics') or ():
-        if m.get('kind') == 'text':
+        # Text metrics are absent on purpose: they are what the machine IS, not what it is
+        # doing, and nothing charts them. One exception, and it is not an exception to that
+        # rule: a text column the profile says is worth COUNTING. The count is a measurement
+        # about the device even though the thing being counted is a fact — "twenty-nine of
+        # these are VLANs" — and the field entry is what carries the words for it. It never
+        # reaches the value path, because a text metric's answer is filed as an attribute and
+        # is never in `data`.
+        if m.get('kind') == 'text' and not m.get('tally'):
             continue
         out[m['key']] = {
             'label':        label_of(m, lang),
@@ -825,10 +990,31 @@ def history_fields(profile: dict, lang: str = 'en_EN') -> dict:
             'headline':     m.get('headline') or False,
             'icon':          m.get('icon') or '',
             'identity':      m.get('identity') or False,
+            # Whether the summary of this column is a count of its rows by state.
+            'tally':         m.get('tally') or False,
+            # Two columns that are one picture. Traffic in and traffic out are not two
+            # questions — nobody looks at what a link received without looking at what it
+            # sent, and two charts side by side on two different y-scales is the comparison
+            # made impossible. Which columns belong together is the PROFILE's word: the core
+            # would have to know that in and out are a pair and that CPU and temperature are
+            # not, which is knowledge about the MIB.
+            'chart_with':    list(m.get('chart_with') or ()),
+            # …and what the combined picture is CALLED. The tile's own label names one half of
+            # it, and a chart of both headed "Traffic in" is a chart that lies about itself.
+            'chart_label':   (label_of({'label': m['chart_label']}, lang)
+                              if m.get('chart_with') else ''),
+            # For a tally over a FACT: which of the row's facts holds the value to count.
+            'tally_role':    m.get('role') if m.get('kind') == 'text' else '',
+            # …and the column that can excuse this one, when the profile named one.
+            'quiet_when':    dict(m.get('quiet_when') or {}),
             # …and, for a table, which of its rows the summary is about. Carried on every
             # field like `row_split`, because it is a fact about the TABLE and every column of
             # a table is filtered the same way.
             'headline_rows': (profile or {}).get('headline_rows') or {},
+            # …and how to tell whether the thing this profile describes is there at all.
+            # Carried on every field for the same reason: it is a fact about the PROFILE, and
+            # a GPU that is not fitted is not fitted for all of its columns at once.
+            'present_when': (profile or {}).get('present_when') or {},
             'chart':        m.get('chart', ''),
         }
         states = states_of(m, lang)
@@ -860,4 +1046,17 @@ def states_of(metric: dict, lang: str = 'en_EN') -> dict:
         if not label:
             continue
         out[str(value)] = {'label': label, 'level': str(spec.get('level') or 'info')}
+        # …and whether this value means the thing IS NOT THERE. A passive switch answers
+        # "fan: not present", which is true and is not news: the summary is "how is this
+        # box", and a component the box says it does not have has no condition to report.
+        # Declared rather than guessed from the word, for the same reason the level is.
+        if spec.get('absent'):
+            out[str(value)]['absent'] = True
+        # …and the mark it earned. This function REBUILDS each state rather than copying it,
+        # which is the right shape for something that reaches a screen and is also how a
+        # declaration goes missing: the profile said `icon`, the normaliser kept it, and the
+        # projection to the panel quietly dropped it — so the state arrived with nothing to
+        # draw and nothing anywhere said why.
+        if spec.get('icon'):
+            out[str(value)]['icon'] = str(spec['icon'])
     return out

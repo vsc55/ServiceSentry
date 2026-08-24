@@ -19,6 +19,223 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Dos NAS en aviso con todas sus lecturas en verde
+
+**Fecha:** 2026-08-24 · **Área:** `lib/core/hosts/service.py::_host_statuses`
+
+**Síntoma.** «¿Por qué los NAS erebor e isen salen en warning?» En la lista de Infraestructura
+los dos con la insignia ámbar. Ningún check fallando, ninguna severidad, ningún mensaje. El
+resto de la flota —switches, routers, hipervisores— correcta.
+
+**Diagnóstico.** Lo primero fue mirar el estado guardado en vez de razonar sobre la pantalla.
+De **903 filas** de `check_state`, las que no están en verde son **once**, y ninguna es de esos
+dos equipos:
+
+```text
+snmp   host.8ee8366a… (PVE01)  warning  /var/lib/ceph/osd/ceph-1 - pasado del limite
+azure  846d9832…              error/warning  (secretos caducados)
+m365   d19b5737…              error
+```
+
+Sus 437 filas SNMP estaban todas en `status=1, severity=''`. Así que el aviso **no salía del
+estado guardado**, y había que ir a quien lo agrega. La regla, escrita en el propio docstring:
+
+```python
+elif a['has_warn'] or a['known'] == 0:
+    out[uid] = 'warning'      # tiene checks activos y ninguno evaluado todavia
+```
+
+`known == 0`. Reproducido ejecutando `_host_statuses` con sus datos reales:
+
+```text
+warning  PVE01      <- de verdad (el disco ceph)
+warning  erebor     <- el fantasma
+warning  isen       <- el fantasma
+```
+
+Faltaba por qué. La agregación busca el estado del check por su **clave pelada** (el uid del
+item). Y al mirar cómo se archivan las lecturas de esos dos:
+
+```text
+erebor   checks OID: 0   perfiles: 12   filas: 295   clave pelada: NO
+isen     checks OID: 0   perfiles: 12   filas: 140   clave pelada: NO
+         se archivan como  <item_uid>/<fila>   (metric='/AFP', '/Cached_memory', …)
+```
+
+**Causa raíz.** `as_status_dict` reconstruye la clave de resultado como `<key>+<metric>`, así
+que un item **sin checks OID y solo con perfiles de dispositivo** no produce ni una sola
+entrada bajo su propia clave: todas son submétricas. La búsqueda por clave devolvía «ausente»,
+`known` se quedaba en 0, y la máquina declaraba «tengo un check que nadie ha evaluado» sobre un
+check que se evalúa 295 veces por ciclo.
+
+Los switches y routers no lo sufrían, y eso es lo que lo hacía difícil de ver: **no tienen item
+configurado**, sus resultados se archivan como `host.<uid>/…` y los recoge una segunda pasada
+pensada justo para ellos.
+
+**Solución.** Los resultados se indexan además por el `item_uid` que cada uno nombra —el mismo
+uid con el que la configuración indexa el check— así que no hay que destripar ninguna clave
+para saber de quién es. Un check que solo contestó submétricas **ha sido evaluado**. Se
+conservan las tres propiedades que importaban: una fila mala entre cuarenta buenas sigue
+haciendo malo al check, un check sin ningún resultado sigue estando pendiente, y un resultado
+bajo la clave propia del check sigue mandando.
+
+**Lección.** Cuando un estado agregado no cuadra con los datos, la pregunta no es «qué está
+mal» sino **por qué rama entró**. Aquí las tres ramas eran correctas y el fallo estaba en el
+paso anterior: una búsqueda que no encuentra devuelve «no hay», y «no hay» significaba algo muy
+concreto —«recién añadido»— que era mentira. Un valor ausente que se interpreta como un caso
+con nombre es un fallo que no se parece a un fallo: no hay error, no hay aviso, solo una
+insignia que dice algo razonable y falso.
+
+---
+
+## Un compilador de ASN.1 construido entero, por cada OID
+
+**Fecha:** 2026-08-24 · **Área:** `lib/core/snmp/client.py::_snmp_get` / `_snmp_walk_oid`
+
+**Síntoma.** «Cuando está obteniendo los datos SNMP, además de que tarda muchísimo, el sistema
+va lento al cargar algunas páginas.» Con un NAS que lleva veinticuatro perfiles, el paso
+**«Leyendo las métricas»** se quedaba minutos en la barra de progreso. Las lecturas eran
+correctas, no había error, no había aviso: el único síntoma era la espera.
+
+**Diagnóstico.** Lo primero fue descartar la red, porque era la explicación cómoda y habría
+cerrado la investigación en falso. Se levantó un **agente SNMP local** con pysnmp (una tabla de
+seis columnas por cuarenta filas, más escalares) en `127.0.0.1:11611` y se midió el cliente del
+proyecto contra él:
+
+```text
+get   1037,5 ms/llamada
+walk  1061,4 ms/llamada   (40 filas, loopback)
+```
+
+Un segundo por lectura **contra un agente en la misma máquina que contesta al instante**. Nada
+de eso era la red ni el aparato. Se contaron las llamadas que hace un ciclo:
+
+```text
+TOTAL catálogo: gets 180 · walks 130 · columnas únicas 38  →  348 lecturas
+348 × ~1,05 s = 365 s
+```
+
+Un `cProfile` de tres GET señaló al culpable, y no era pysnmp hablando:
+
+```text
+0.796s  lark/parsers/grammar_analysis.py:78(calculate_sets)
+0.747s  lark/grammar.py:26(__hash__)
+0.516s  {built-in method builtins.compile}
+```
+
+**`lark`** — un generador de parsers. En una petición SNMP. Poniendo una traza en
+`lark.Lark.__init__` salió la cadena entera:
+
+```text
+client.py:_snmp_get → get_cmd → make_varbinds → ObjectIdentity.resolve_with_mib
+                    → pysnmp/smi/compiler.py:add_mib_compiler
+                    → pysmi/parser/lark_parser.py:__init__
+```
+
+Y perfilando `SnmpEngine()` a solas, 202 ms de los que 0,74 s de cada 1,02 s eran
+`builtins.compile`: `runpy.run_path` sobre trece módulos MIB, que compila el `.py` cada vez
+porque nunca llega a usar el `.pyc` de al lado.
+
+**Causa raíz.** `_snmp_get` y `_snmp_walk_oid` construían un `SnmpEngine()` por llamada y lo
+cerraban en un `finally`, y cada uno corría en su propio `asyncio.run`. Los dos costes que eso
+paga son **por motor**, no por pregunta:
+
+- recompilar los trece módulos MIB desde el fuente Python;
+- construir un **parser LALR completo de la gramática SMI** —el compilador ASN.1 de pysmi— la
+  primera vez que se resuelve un OID, para buscar uno que el módulo ya tiene en números.
+
+Un motor de usar y tirar los paga los dos, enteros, en cada lectura. Y los paga en **CPU**: por
+eso el panel iba lento a la vez, porque el muestreo corre en un pool de hilos dentro del proceso
+que también sirve páginas.
+
+**Solución.** El motor, sus transportes y sus credenciales se construyen **una vez y se
+conservan**, sobre un event loop propio del módulo. El loop va con el motor y no es un detalle:
+un motor no sobrevive al loop donde se abrió su socket, así que conservar uno obliga a conservar
+el otro. `close_dispatcher` sale de la ruta de petición —sobre un motor compartido no es
+limpieza, es cerrar el socket que necesita la lectura siguiente— y queda sólo en `_reset`.
+
+De paso, `run_coroutine` deja de necesitar dos caminos: ya no corre en el loop de quien llama
+—que puede tener uno o no— sino siempre en el suyo.
+
+```text
+get      4,2 ms/llamada   (era 1037,5)
+walk    29,8 ms/llamada   (era 1061,4)
+348 lecturas: 5,9 s       (era 365 s)
+```
+
+Compartir un motor entre aparatos era el riesgo que había que descartar, porque el fallo sería
+**una respuesta atribuida a la máquina equivocada**, que no se parece a un error. Con dos
+agentes locales contestando valores deliberadamente distintos, ocho hilos y cuarenta walks
+concurrentes: ninguna respuesta llegó del equipo que no era. Es además el uso para el que pysnmp
+está escrito — su datastore de configuración local configura por destino, y la sincronía de
+tiempo de v3 se descubre por aparato y **caduca a los 300 s**, así que un equipo que se reinicia
+se vuelve a descubrir en vez de quedarse fuera.
+
+**Lección.** Un coste de **construcción** disfrazado de coste de operación no aparece en ningún
+sitio: no hay error, no hay aviso, el resultado es correcto y lo único que se ve es que tarda.
+Cuando algo «tarda muchísimo», medir contra un servidor local de mentira separa en un minuto lo
+que es la red de lo que es el proceso — y aquí el 99,6 % era el proceso. Y cuando el perfil
+señala una biblioteca que no pinta nada en lo que estás haciendo (un generador de parsers dentro
+de una petición UDP), esa es la pista: no la optimices, averigua quién la llama.
+
+---
+
+## Un switch que contestaba a todo y no lo recogía nadie
+
+**Fecha:** 2026-08-23 · **Área:** `watchfuls/snmp/checks.py::check`
+
+**Síntoma.** Un host «SW - Linksys» dado de alta, con su perfil SNMP correcto: el botón de
+probar la conexión devolvía OIDs y valores sin un fallo. Al pulsar «obtener datos ahora» **en
+ese dispositivo**, la lista de la recogida enseñaba a las otras dos máquinas de la flota y a él
+no. Ni una línea, ni un error, ni una entrada en el log.
+
+**Diagnóstico.** La recogida corrió el módulo SNMP —así que la ruta sí encontró checks ligados
+al switch— y el módulo muestreó a los otros dos. O sea: el módulo se ejecutó y decidió no
+mirarlo.
+
+Un aparato entra en el muestreo por dos caminos, y la clave es cómo se reparten:
+
+```python
+_uid = str(srv.get('host_uid') or '').strip()
+if _uid:
+    bound.add(_uid)                       # "de este ya habla un item"
+...
+if self.profiles_of(srv):
+    sampled.append((srv_key, srv))        # …pero solo si el item tiene perfiles
+...
+sampled.extend(_devices.devices_to_sample(hosts_store, bound))   # el resto, del registro
+```
+
+`bound` es el conjunto de hosts de los que «ya se encarga un item», y el rescate desde el
+registro salta a los que están dentro. El switch tenía un item SNMP ligado **con checks OID y
+sin perfiles de dispositivo**: entraba en `bound` por tener `host_uid`, y no entraba en
+`sampled` por no tener perfiles.
+
+Reclamado por un item que no muestrea nada, y por eso descartado por el único que lo habría
+muestreado.
+
+**Causa raíz.** «Cubierto» estaba definido como *ligado* cuando significa *muestreado*. Las dos
+cosas coinciden en el caso normal —un item con perfiles— y se separan exactamente en el caso
+que nadie prueba: un item que solo lleva comprobaciones.
+
+Hay una decisión deliberada al lado que confunde el asunto y hay que respetar: `bound` se llena
+**antes** de mirar si el item está activo, porque un item desactivado sigue hablando por su host
+—alguien apagó ese aparato, y resucitarlo desde el registro sería una actualización deshaciendo
+una decisión en silencio—. Pero eso es sobre una decisión que alguien tomó; un item **sin
+perfiles** no es una decisión sobre el muestreo, es la ausencia de una.
+
+**Solución.** `if _uid and self.profiles_of(srv)`. Un item reclama a su host cuando lo
+muestrearía, activo o no. Y como desde fuera esto se ve como un botón que no hace nada, el
+módulo dice ahora por su nombre qué aparatos no va a muestrear, en una línea de la lista.
+
+**Lección.** Dos condiciones que casi siempre coinciden acaban usándose la una por la otra, y el
+día que divergen no falla nada: se deja de hacer algo. Aquí el sospechoso era el aparato —lo
+normal es que un switch conteste raro— y el aparato contestaba perfectamente; lo que había que
+mirar era **quién decidió no preguntarle**. Cuando un dispositivo no aparece en una lista, la
+pregunta no es qué contesta, sino qué conjunto lo excluyó.
+
+---
+
 ## Ningún contador SNMP tuvo nunca un valor
 
 **Fecha:** 2026-08-23 · **Área:** `lib/services/monitoring/check_state/store.py`, `watchfuls/snmp/sampler.py`

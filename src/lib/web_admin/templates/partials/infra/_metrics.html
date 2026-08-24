@@ -211,7 +211,9 @@ const _INFRA_LEVELS = {ok: 'text-bg-success', warn: 'text-bg-warning',
  *  number rather than being guessed at — not knowing is a fine thing to say, and the profiles
  *  are filled in one MIB at a time. */
 function _infraState(m) {
-    const st = m.states && m.states[String(m.value)];
+    // `state_key` where the payload sent one: a reading whose own value is not the
+    // whole answer — an interface down because somebody switched it off.
+    const st = m.states && m.states[m.state_key || String(m.value)];
     if (!st) return null;
     const cls = _INFRA_LEVELS[st.level] || _INFRA_LEVELS.info;
     return `<span class="badge ${cls} fw-normal">${esc(st.label)}</span>`;
@@ -328,7 +330,7 @@ function _infraMetricRow(m, i) {
     // Here as well as on the summary, because this is the tab where the disks are: a person
     // looking at "Synology — discos" and wanting one disk's attributes should not have to know
     // that another tab has a card for it.
-    return `<div class="px-2 py-1 border-top">
+    return `<div class="px-2 py-1 border-top" data-zoom="1">
         <div class="d-flex align-items-baseline gap-2">
             <span class="text-truncate">${_infraWhichHtml(m)}</span>
             <span class="ms-auto d-flex align-items-baseline gap-1"
@@ -348,9 +350,22 @@ function _infraMetricRow(m, i) {
  *  that you do not have to go anywhere to see it. */
 function _infraChartLink(m, i, iconOnly) {
     const on = `_infraChart(${i})`;
+    // Full screen sits WITH the control that draws the chart, not on top of the chart. It was
+    // floating in the corner of the picture, where the one thing it covered was the picture —
+    // reported from the screen, and it is the corner a legend and the newest point share.
+    //
+    // Only where the controls are already a group of icons: the measurements table is one row
+    // per reading and a second button on every one of six hundred is not a control, it is
+    // texture.
     return iconOnly
-        ? `<button class="btn btn-sm btn-secondary py-0 px-1" onclick="${on}"
-               title="${escAttr(t('infra_chart_open'))}"><i class="bi bi-graph-up"></i></button>`
+        ? `<span class="btn-group btn-group-sm">
+               <button class="btn btn-secondary py-0 px-1" onclick="${on}"
+                   title="${escAttr(t('infra_chart_open'))}"><i class="bi bi-graph-up"></i></button>
+               <button id="infra-zoom-${i}" class="btn btn-secondary py-0 px-1 d-none"
+                   onclick="_infraChartZoom(${i})"
+                   title="${escAttr(t('infra_chart_zoom'))}"
+                   ><i class="bi bi-arrows-angle-expand"></i></button>
+           </span>`
         : `<button class="btn btn-link p-0 text-decoration-none ss-fs-2" onclick="${on}"
                title="${escAttr(t('infra_chart_open'))}">${esc(m.label)}<i class="bi bi-graph-up ms-1"></i></button>`;
 }
@@ -381,7 +396,15 @@ async function _infraChart(i) {
     const m = _infraMetricIndex[i];
     const box = document.getElementById('infra-chart-' + i);
     if (!m || !box) return;
-    if (box.dataset.open === '1') { box.dataset.open = ''; box.innerHTML = ''; return; }
+    if (box.dataset.open === '1') {
+        box.dataset.open = ''; box.innerHTML = '';
+        box.classList.remove('ss-chartbox');
+        // Closing the chart of an expanded card leaves a card the size of the work area with
+        // nothing in it, and a way back that is no longer on screen.
+        if (_infraZoom && _infraZoom.i === i) _infraZoomOut(true);
+        _infraZoomShown(i, false);
+        return;
+    }
     box.dataset.open = '1';
     box.innerHTML = `<div class="text-muted ss-fs-2 py-2">${esc(t('loading') || '…')}</div>`;
     const q = new URLSearchParams({
@@ -394,10 +417,221 @@ async function _infraChart(i) {
     const pts = (r && r.points) || [];
     if (!pts.length) {
         box.innerHTML = `<div class="text-muted ss-fs-2 py-2">${esc(t('infra_chart_empty'))}</div>`;
+        _infraZoomShown(i, false);
         return;
     }
-    box.innerHTML = `<div class="position-relative mt-1" style="height:170px"><canvas></canvas></div>`;
-    _historyDraw(box.querySelector('canvas'), pts, m.series.field, m.unit, m.label);
+    box.classList.add('ss-chartbox');
+    _infraZoomShown(i, true);
+    box.innerHTML = `<div class="position-relative mt-1 ss-charth"><canvas></canvas></div>`;
+    // The companion series the profile said belong in this picture. One request either way:
+    // they are columns of the same result, so every point already carries both numbers.
+    _historyDraw(box.querySelector('canvas'), pts, m.series.field, m.unit, m.label,
+                 _infraChartMates(m).map(x => ({field: x.field, label: x.label || x.field})));
+}
+
+/** Whether the full-screen control is on screen. It belongs to a chart, so it is there
+ *  while there is one.
+ *
+ *  Reported from the screen: a card showing one number — a processor temperature — carried a
+ *  full-screen button next to the one that draws the chart, and full screen of a picture that
+ *  is not there is not an offer. It is a second icon on every card that has a series, which is
+ *  how a pair of controls stops reading as controls and starts reading as texture.
+ *
+ *  Driven from `_infraChart` and not from the click, because that is the one place that knows
+ *  whether a chart ended up drawn: a series the device has no history for closes again with a
+ *  line of text, and there is nothing to enlarge about that either. */
+function _infraZoomShown(i, on) {
+    const btn = document.getElementById('infra-zoom-' + i);
+    if (btn) btn.classList.toggle('d-none', !on);
+}
+
+//: The card that is expanded right now, and what putting it back needs: which metric it is
+//: (for the button's icon and the redraw) and the gap it left behind.
+let _infraZoom = null;
+
+//: The card animates between two rectangles, so the number is in both the style sheet and
+//: here — the wait before the canvas is redrawn at its final size.
+const _INFRA_ZOOM_MS = 220;
+
+//: How much of the page an expanded card takes. Not all of it: the margin that is left is
+//: what says the panel is still there underneath rather than gone, and it is where somebody
+//: clicks to get out of something they did not mean to open.
+const _INFRA_ZOOM_FILL = 0.9;
+
+/** Where an expanded card goes: the whole page less that margin, centred.
+ *
+ *  The whole page and not the work area beside the sidebar, which is what this was: a chart is
+ *  worth every pixel there is, and the sidebar is the one part of the panel nobody is reading
+ *  while they look at a week of traffic. */
+function _infraZoomArea() {
+    const w = window.innerWidth, h = window.innerHeight;
+    const ww = Math.round(w * _INFRA_ZOOM_FILL), hh = Math.round(h * _INFRA_ZOOM_FILL);
+    return {top: Math.round((h - hh) / 2), left: Math.round((w - ww) / 2),
+            width: ww, height: hh};
+}
+
+/** The layer between the expanded card and the page, built when there is one to build it for.
+ *
+ *  It does two jobs and they are the same job: it darkens and blurs what is behind so the
+ *  chart is what the eye lands on, and it catches the click outside — the gesture anybody
+ *  tries before they look for a button. */
+function _infraZoomBack() {
+    let back = document.getElementById('infra-zoom-back');
+    if (!back) {
+        back = document.createElement('div');
+        back.id = 'infra-zoom-back';
+        back.className = 'ss-zoom-back';
+        back.addEventListener('click', () => _infraZoomOut());
+        document.body.appendChild(back);
+    }
+    return back;
+}
+
+/** Put a card at a rectangle. Four properties rather than a transform: a scaled card stretches
+ *  its own text on the way, and these four animate without touching what is inside it. */
+function _infraZoomAt(card, r) {
+    if (!card) return;
+    card.style.top = r.top + 'px';
+    card.style.left = r.left + 'px';
+    card.style.width = r.width + 'px';
+    card.style.height = r.height + 'px';
+}
+
+/** Which way the control points, and what it says it will do. */
+function _infraZoomIcon(i, out) {
+    const btn = document.getElementById('infra-zoom-' + i);
+    if (!btn) return;
+    btn.title = t(out ? 'infra_chart_zoom_out' : 'infra_chart_zoom');
+    const ic = btn.querySelector('i');
+    if (ic) ic.className = 'bi ' + (out ? 'bi-arrows-angle-contract' : 'bi-arrows-angle-expand');
+}
+
+/** Expand one chart's card to fill the work area, and give it back.
+ *
+ *  A week of two series in a 380 px card is a shape you can see and not one you can read. This
+ *  used to be the browser's own full screen, which answers that by taking the panel away with
+ *  the picture: no sidebar, no breadcrumb, nothing around the chart, and a way out that is a
+ *  browser gesture rather than something on the page — and it can be refused outright by a
+ *  policy or an iframe. Growing to fill the WORK AREA instead keeps the panel around it, puts
+ *  the rest of the page underneath, and cannot be refused by anybody. */
+async function _infraChartZoom(i) {
+    // The same button both ways, and a second card's button gives the first one back before
+    // taking over — two cards the size of the work area, stacked, is not a state to be in.
+    if (_infraZoom) {
+        const was = _infraZoom.i;
+        _infraZoomOut();
+        if (was === i) return;
+        await new Promise(done => setTimeout(done, _INFRA_ZOOM_MS));
+    }
+    const box = document.getElementById('infra-chart-' + i);
+    if (!box) return;
+    // Draw it first rather than expand an empty box. Kept although the button is only on
+    // screen while a chart is: it is what makes this safe to call from anywhere.
+    if (box.dataset.open !== '1') await _infraChart(i);
+    const card = box.closest('[data-zoom]');
+    // Whether there is a PICTURE in it, which `dataset.open` does not answer: a series the
+    // device has no history for leaves the box open with a line of text in it, and the work
+    // area filled with "no data yet" is not what the button offered. `ss-chartbox` is put
+    // there by the drawing and by nothing else.
+    if (!card || !box.classList.contains('ss-chartbox')) return;
+
+    const from = card.getBoundingClientRect();
+    // The gap the card leaves. Without it the cards beside it close over the hole the moment
+    // one is expanded, and giving it back drops it into a family that has rearranged itself.
+    const hold = document.createElement('div');
+    hold.className = 'ss-zoom-hold';
+    hold.style.cssText = `flex:0 0 ${from.width}px;width:${from.width}px;height:${from.height}px`;
+    card.parentNode.insertBefore(hold, card);
+
+    _infraZoom = {i, card, hold, back: _infraZoomBack()};
+    card.classList.add('ss-zoom');
+    _infraZoomAt(card, from);              // where it already is, so there is a start to move from
+    _infraZoomIcon(i, true);
+    // TWO frames. In one, the browser coalesces the start and the end into the end state and
+    // the card simply appears at full size with no movement to see.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!_infraZoom || _infraZoom.card !== card) return;
+        _infraZoomAt(card, _infraZoomArea());
+        _infraZoom.back.classList.add('show');      // faded in, or it is a flash of black
+    }));
+    // A canvas is drawn at a pixel size and does not reflow, so the picture has to be drawn
+    // again once the card has finished growing — not during, when its size is still changing.
+    setTimeout(() => _infraChartRedraw(box), _INFRA_ZOOM_MS + 20);
+}
+
+/** Give the card back to where it came from. *now* skips the animation, for the cases where
+ *  there is nothing left to animate — the pane is about to be rewritten, or the chart the card
+ *  was expanded for has just been closed. */
+function _infraZoomOut(now) {
+    const z = _infraZoom;
+    if (!z) return;
+    _infraZoom = null;
+    _infraZoomIcon(z.i, false);
+    const gone = !document.body.contains(z.card) || !document.body.contains(z.hold);
+    z.back.classList.remove('show');
+    const done = () => {
+        z.card.classList.remove('ss-zoom');
+        z.card.style.top = z.card.style.left = '';
+        z.card.style.width = z.card.style.height = '';
+        if (z.hold.parentNode) z.hold.parentNode.removeChild(z.hold);
+        // Removed and not just faded: a transparent sheet over the whole page still swallows
+        // every click on it, and the section would look alive and answer nothing.
+        if (z.back.parentNode) z.back.parentNode.removeChild(z.back);
+        _infraChartRedraw(document.getElementById('infra-chart-' + z.i));
+    };
+    if (now || gone) return done();
+    _infraZoomAt(z.card, z.hold.getBoundingClientRect());
+    setTimeout(done, _INFRA_ZOOM_MS);
+}
+
+// Escape gives it back — the gesture anybody tries first, and the one the browser's full
+// screen trained them to. Not while a dialog is open: there it is the dialog's, and taking it
+// would close the card underneath instead of the thing somebody is looking at.
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !_infraZoom) return;
+    if (document.querySelector('.modal.show')) return;
+    e.preventDefault();
+    _infraZoomOut();
+});
+
+// The work area is a rectangle that changes: a window resized, a sidebar folded away.
+window.addEventListener('resize', () => {
+    if (!_infraZoom) return;
+    _infraZoomAt(_infraZoom.card, _infraZoomArea());
+    setTimeout(() => _infraChartRedraw(
+        document.getElementById('infra-chart-' + _infraZoom.i)), _INFRA_ZOOM_MS + 20);
+});
+
+/** Redraw whatever chart is on screen at the size it now has.
+ *
+ *  A canvas is drawn at a pixel size and does not reflow: entering full screen makes its box
+ *  five times wider and leaves the picture where it was, stretched. Everything the drawing
+ *  needs was kept beside it (`_histMeta`) when it was drawn the first time, so this is the
+ *  same call again and not a second fetch. */
+function _infraChartRedraw(el) {
+    const canvas = el && el.querySelector && el.querySelector('canvas');
+    const meta = canvas && canvas._histMeta;
+    if (!meta) return;
+    _historyDraw(canvas, meta.points, meta.field, meta.unit, meta.metricLabel, meta.mates);
+}
+
+/** The other measurements that belong in one metric's picture.
+ *
+ *  Named by the PROFILE (`chart_with`) and looked up in the payload — same module, same key,
+ *  so they are columns of one result and one history request carries all of them. A named
+ *  field the device has not answered is dropped here rather than drawn as an empty line with
+ *  a name on the legend.
+ *
+ *  Whole metrics and not just their names, because both callers want the same two things: the
+ *  chart wants the field and the word for the legend, the tile wants the value and the icon —
+ *  and two lookups would be two answers to "is this pair complete". */
+function _infraChartMates(m) {
+    const want = (m || {}).chart_with || [];
+    if (!want.length) return [];
+    const all = (_infraDetail && _infraDetail.metrics) || [];
+    return want.map(f => all.find(x => x.field === f && x.module === m.module
+                                       && x.key === m.key))
+               .filter(Boolean);
 }
 
 /** Numbers as a person reads them: two decimals at most, and none when there are none to
@@ -428,6 +662,23 @@ function _fmtMeasure(value, unit) {
         let v = Math.abs(n), i = 0;
         while (v >= 1024 && i < steps.length - 1) { v /= 1024; i++; }
         return {value: _fmtNum(n < 0 ? -v : v), unit: steps[i]};
+    }
+    // A RATE, and it climbs in THOUSANDS. "1000000000 bit/s" is the number nobody reads on
+    // this screen and "1 Gbit/s" is what is printed on the port, the cable and the invoice —
+    // a gigabit is 10^9 bits per second by definition, and scaling it in 1024s would answer
+    // 0.93 to a question everybody already knows the answer to. Bytes are the other way round
+    // (above) because an agent reporting memory and disk means 1024, and the two rules are
+    // different for that reason and not by oversight.
+    //
+    // By the shape of the unit and not by a list of them: anything the module records "per
+    // second" is a rate, so a profile that starts reporting frames or sessions per second
+    // reads properly without this function learning the word.
+    if (unit.slice(-2) === '/s') {
+        const steps = ['', 'k', 'M', 'G', 'T', 'P'];
+        const base = unit.slice(0, -2);
+        let v = Math.abs(n), i = 0;
+        while (v >= 1000 && i < steps.length - 1) { v /= 1000; i++; }
+        return {value: _fmtNum(n < 0 ? -v : v), unit: steps[i] + base + '/s'};
     }
     if (unit === 's') {
         const abs = Math.abs(n);

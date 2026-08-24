@@ -102,8 +102,11 @@ def history_meta(modules_dir: str | None, module: str, lang: str,
         fields[name] = {
             **{k: v for k, v in (fields.get(name) or {}).items()
                if k in ('source', 'source_label', 'source_short', 'source_rank', 'chart',
-                        'states', 'row_split', 'headline', 'headline_rows', 'icon',
-                        'identity')},
+                        'states', 'row_split', 'headline', 'headline_rows', 'present_when',
+                        'quiet_when',
+                        'icon',
+                        'identity', 'tally', 'tally_role', 'chart_with',
+                        'chart_label')},
             'unit':  meta.get('unit', cfg.get('unit') or ''),
             'label': labels.get(name) or meta.get('label')
                      or (cfg.get('label') if name == primary else None)

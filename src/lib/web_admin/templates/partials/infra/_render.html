@@ -36,6 +36,9 @@ let _infraUrlRead = false;
 async function renderInfra() {
     const pane = document.getElementById('infra-container');
     if (!pane) return;
+    // Whatever was expanded is about to stop existing: this rewrites the markup it lives in,
+    // and a card given back after that is given back to a parent that is no longer there.
+    if (typeof _infraZoomOut === 'function') _infraZoomOut(true);
     const data = await apiGet('/api/v1/infra/hosts');
     if (data) {
         _infraHosts   = data.hosts || [];
@@ -87,6 +90,10 @@ function _infraSyncUrl() {
 async function infraOpen(uid) {
     _infraHost   = uid || '';
     _infraDetail = null;
+    // The drill-down belongs to the device that was open. Kept, and the next machine's
+    // Details tab would open on a count of the previous one's ports.
+    _infraRowsOf = null;
+    _infraRowPick = '';
     _infraSyncUrl();
     const pane = document.getElementById('infra-container');
     if (!pane) return;
@@ -112,6 +119,17 @@ async function _infraOpenView(pane) {
     pane.innerHTML = _infraHostHtml(_infraDetail);
 }
 
+/** Redraw the open device from the payload already in hand.
+ *
+ *  For the moves that are a change of VIEW and not of data — opening a count onto its rows,
+ *  picking a port on the rail. Those must not go through the section's entry point, which
+ *  re-asks for the fleet and then for the device: two round trips and a blank pane to show
+ *  something that was already in memory. */
+function _infraPaint() {
+    const pane = document.getElementById('infra-container');
+    if (pane && _infraDetail) pane.innerHTML = _infraHostHtml(_infraDetail);
+}
+
 /** Re-read what is on screen, without taking it away first.
  *
  *  Reported from the panel: the refresh button made the whole page blink. It went through the
@@ -125,6 +143,8 @@ async function _infraReload() {
     if (!data) return;                      // a failed refresh keeps the screen it had
     _infraDetail = data;
     const pane = document.getElementById('infra-container');
+    // The same reason as in `renderInfra`: what is expanded is about to stop existing.
+    if (typeof _infraZoomOut === 'function') _infraZoomOut(true);
     if (pane) pane.innerHTML = _infraHostHtml(data);
     if (typeof _infraCollectPaint === 'function') _infraCollectPaint();
 }
@@ -152,6 +172,10 @@ function _infraAutoTick() {
     // A redraw underneath a running collection would throw away the button that says it is
     // running, and put a "current" screen in front of somebody who is waiting for it.
     if (_infraCollecting()) return;
+    // …and one underneath an expanded chart would close it: this rewrites the markup the card
+    // lives in, so a wall screen on a thirty-second poll would take the picture away from
+    // whoever expanded it, every thirty seconds.
+    if (typeof _infraZoom !== 'undefined' && _infraZoom) return;
     // The open machine ages too — but it is refreshed in place, or the wall screen this
     // control exists for would blink every interval.
     if (_infraHost) return _infraReload();

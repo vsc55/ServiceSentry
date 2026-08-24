@@ -14,6 +14,8 @@
   "metrics": [
     {
       "key": "hr_cpu",
+      "icon": "bi-cpu",
+      "headline": true,
       "label": {
         "en_EN": "Processor load",
         "es_ES": "Carga del procesador"

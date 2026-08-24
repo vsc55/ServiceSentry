@@ -1,0 +1,72 @@
+{
+    "id": "lldp",
+    "label": {
+        "en_EN": "Neighbours (LLDP-MIB)",
+        "es_ES": "Vecinos (LLDP-MIB)"
+    },
+    "short_label": {"en_EN": "Neighbours", "es_ES": "Vecinos"},
+    "description": {
+        "en_EN": "Who this device can see on the other end of its own cables, and on which of THEIR ports. The only thing in SNMP that answers the topology question exactly: everything else — addresses, subnets, ARP — says who can reach whom, which is not the same as what is plugged into what. One row per neighbour per port, named by the neighbour and the port it answered on, because a device with two cables to the same switch is two links and not one. A machine only answers this where somebody runs an LLDP agent (`lldpd` on Linux, on by default on most managed switches).",
+        "es_ES": "A quién ve este aparato al otro lado de sus propios cables, y por cuál de LOS PUERTOS DE ELLOS. Es lo único en SNMP que contesta la pregunta de la topología con exactitud: todo lo demás —direcciones, subredes, ARP— dice quién alcanza a quién, que no es lo mismo que qué está enchufado a qué. Una fila por vecino y puerto, nombrada por el vecino y el puerto por el que contestó, porque un aparato con dos cables al mismo switch son dos enlaces y no uno. Una máquina sólo contesta esto si alguien corre un agente LLDP (`lldpd` en Linux, de fábrica en casi todo switch gestionable)."
+    },
+    "match": {
+        "probe": "1.0.8802.1.1.2.1.3.2.0"
+    },
+    "metrics": [
+        {
+            "key": "lldp_sysname",
+            "label": {
+                "en_EN": "Neighbour",
+                "es_ES": "Vecino"
+            },
+            "walk": "1.0.8802.1.1.2.1.4.1.1.9",
+            "kind": "text",
+            "role": "neighbour",
+            "index_label": ["1.0.8802.1.1.2.1.4.1.1.9", "1.0.8802.1.1.2.1.4.1.1.7"]
+        },
+        {
+            "key": "lldp_portid",
+            "label": {
+                "en_EN": "Its port",
+                "es_ES": "Su puerto"
+            },
+            "walk": "1.0.8802.1.1.2.1.4.1.1.7",
+            "kind": "text",
+            "role": "port",
+            "index_label": ["1.0.8802.1.1.2.1.4.1.1.9", "1.0.8802.1.1.2.1.4.1.1.7"]
+        },
+        {
+            "key": "lldp_portdesc",
+            "label": {
+                "en_EN": "What it calls that port",
+                "es_ES": "Cómo llama a ese puerto"
+            },
+            "walk": "1.0.8802.1.1.2.1.4.1.1.8",
+            "kind": "text",
+            "role": "port_desc",
+            "index_label": ["1.0.8802.1.1.2.1.4.1.1.9", "1.0.8802.1.1.2.1.4.1.1.7"]
+        },
+        {
+            "key": "lldp_chassis",
+            "label": {
+                "en_EN": "Chassis id",
+                "es_ES": "Id de chasis"
+            },
+            "walk": "1.0.8802.1.1.2.1.4.1.1.5",
+            "kind": "text",
+            "role": "chassis",
+            "index_label": ["1.0.8802.1.1.2.1.4.1.1.9", "1.0.8802.1.1.2.1.4.1.1.7"]
+        },
+        {
+            "key": "lldp_sysdesc",
+            "label": {
+                "en_EN": "What it says it is",
+                "es_ES": "Qué dice que es"
+            },
+            "walk": "1.0.8802.1.1.2.1.4.1.1.10",
+            "kind": "text",
+            "role": "description",
+            "index_label": ["1.0.8802.1.1.2.1.4.1.1.9", "1.0.8802.1.1.2.1.4.1.1.7"]
+        }
+    ]
+}

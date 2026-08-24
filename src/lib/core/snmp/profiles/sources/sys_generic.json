@@ -91,6 +91,8 @@
         },
         {
             "key": "uptime",
+            "icon": "bi-clock-history",
+            "headline": true,
             "oid": "1.3.6.1.2.1.1.3.0",
             "kind": "gauge",
             "unit": "s",

@@ -98,7 +98,11 @@ function _infraTabsHtml(d) {
         body = `<div class="small text-muted mb-2">${esc(t('host_logs_hint'))}</div>
             <div id="infraLogsBody" class="ss-vfill ss-pane-tall"></div>`;
     } else if (tab === 'details') {
-        body = _infraDetailsPane(metrics);
+        body = `<div id="infra-details">${_infraRowsOf ? _infraRowsPane(metrics)
+                                                       : _infraDetailsPane(metrics)}</div>`;
+        // The charts this tab draws on sight need their elements to exist first: the
+        // string above is HTML until whoever called us puts it on the page.
+        setTimeout(_infraDetailsCharts, 0);
     } else if (tab === 'raw') {
         body = _infraRawPane(d);
     } else if (tab === 'results') {

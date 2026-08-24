@@ -35,6 +35,8 @@
         },
         {
             "key": "syno_ha_heartbeat_latency",
+            "icon": "bi-activity",
+            "headline": true,
             "label": {
                 "en_EN": "Heartbeat latency",
                 "es_ES": "Latencia del heartbeat"

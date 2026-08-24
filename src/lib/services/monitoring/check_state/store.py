@@ -163,16 +163,21 @@ class CheckStateStore(BaseStore):
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
-    def get_all(self) -> dict:
+    def get_all(self, module: str | None = None) -> dict:
         """Return ``{(module, key, metric): {uid, item_uid, status, message,
-        other_data, fail_count, last_change_ts}}`` (flat, keyed by tuple)."""
+        other_data, fail_count, last_change_ts}}`` (flat, keyed by tuple).
+
+        *module* narrows it to one watchful's rows. A whole-table read is what the monitor
+        does once, at the top of a cycle; a save is about ONE module and reading the other
+        eleven to write one is the shape that made a collection slow.
+        """
         out: dict = {}
         try:
-            rows = self._db.fetchall(
-                f'SELECT uid, module, {self._qk}, item_uid, metric, status, message, '
-                f'other_data, fail_count, last_change_ts, severity, module_state '
-                f'FROM {_T}'
-            )
+            sql = (f'SELECT uid, module, {self._qk}, item_uid, metric, status, message, '
+                   f'other_data, fail_count, last_change_ts, severity, module_state '
+                   f'FROM {_T}')
+            rows = (self._db.fetchall(sql + ' WHERE module = ?', (module,)) if module
+                    else self._db.fetchall(sql))
             for r in rows:
                 out[(r[1], r[2], r[4] or '')] = {
                     'uid':            r[0],
@@ -264,6 +269,75 @@ class CheckStateStore(BaseStore):
                   f'{type(exc).__name__}: {exc}', file=sys.stderr, flush=True)
             return False
 
+    def persist_module(self, module: str, checks: dict, *, item_uid_resolver=None) -> bool:
+        """Replace the rows of ONE watchful, leaving every other module's alone.
+
+        Measured on a fleet-sized table (1400 rows, twelve modules): a whole-table save is
+        ~60 ms, and the collection path did one PER MODULE — three quarters of a second of
+        `DELETE FROM check_state` per run, with a reader waiting three times longer for every
+        page while it happened. A module's own rows are a fraction of that, and the eleven it
+        is not about are neither read nor rewritten.
+
+        Same rules as the whole-table version, applied to one module: a row keeps its `uid`
+        and its `last_change_ts` while its status is unchanged, and a row this module no
+        longer reports is gone — which is what the whole-table write was for.
+        """
+        mod = str(module or '').strip()
+        if not mod:
+            return False
+        rows = self._rows_for(mod, checks if isinstance(checks, dict) else {},
+                              self.get_all(mod), item_uid_resolver)
+        try:
+            with self._db.transaction():
+                self._db.execute(f'DELETE FROM {_T} WHERE module = ?', (mod,))
+                if rows:
+                    self._db.executemany(self._insert_sql(), list(rows.values()))
+            return True
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f'[check_state] persist_module({mod!r}) FAILED: '
+                  f'{type(exc).__name__}: {exc}', file=sys.stderr, flush=True)
+            return False
+
+    def _insert_sql(self) -> str:
+        return (f'INSERT INTO {_T}(uid, module, {self._qk}, item_uid, metric, '
+                'status, message, other_data, fail_count, last_change_ts, severity, '
+                'module_state) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+
+    def _rows_for(self, module: str, checks: dict, existing: dict,
+                  item_uid_resolver) -> dict:
+        """One module's result dict as insertable tuples, keyed by the composite PK.
+
+        Keyed by ``(module, key, metric)`` so two result keys that resolve to the same row
+        (a stale bare ``<item>`` left beside a fresh ``<item>/site``) collapse to one entry —
+        last write wins — instead of tripping the UNIQUE constraint and aborting the write.
+        """
+        now = time.time()
+        rows: dict = {}
+        for result_key, rec in list(checks.items()):
+            if not isinstance(rec, dict):
+                continue
+            key, metric, item_uid = _split_key(module, result_key, item_uid_resolver)
+            if not item_uid:
+                item_uid = rec.get('item_uid')
+            status = bool(rec.get('status'))
+            ex = existing.get((module, key, metric))
+            if ex and ex['status'] == status and ex.get('last_change_ts'):
+                ts = ex['last_change_ts']
+            else:
+                ts = rec.get('last_change_ts') or now
+            row_uid = (ex.get('uid') if ex else None) or str(uuid.uuid4())
+            rows[(module, key, metric)] = (
+                row_uid, module, key, item_uid, metric,
+                1 if status else 0,
+                rec.get('message'),
+                json.dumps(rec.get('other_data') or {}, ensure_ascii=False),
+                int(rec.get('fail_count') or 0),
+                ts,
+                _norm_severity(rec.get('severity'), status),
+                json.dumps(rec.get('module_state') or {}, ensure_ascii=False),
+            )
+        return rows
+
     def persist_status(self, data: dict, *, item_uid_resolver=None) -> bool:
         """Replace the whole table from the nested ``{module: {result_key: rec}}``
         dict.  Each result key is split into ``key`` + ``metric`` (via
@@ -271,51 +345,18 @@ class CheckStateStore(BaseStore):
         while the status is unchanged.
         """
         existing = self.get_all()
-        now = time.time()
-        # Keyed by the composite PK (module, key, metric) so two result keys that
-        # resolve to the same row (e.g. a stale bare '<item>' left next to a fresh
-        # '<item>/site') collapse to one entry — last write wins — instead of
-        # tripping the UNIQUE constraint and aborting the whole table write.
         rows: dict = {}
         # Snapshot to avoid "dict changed size during iteration" if a worker
         # thread mutates the live status dict while we persist.
         for module, checks in list(data.items()):
             if not isinstance(checks, dict):
                 continue
-            for result_key, rec in list(checks.items()):
-                if not isinstance(rec, dict):
-                    continue
-                key, metric, item_uid = _split_key(module, result_key, item_uid_resolver)
-                if not item_uid:
-                    item_uid = rec.get('item_uid')
-                status = bool(rec.get('status'))
-                ex = existing.get((module, key, metric))
-                if ex and ex['status'] == status and ex.get('last_change_ts'):
-                    ts = ex['last_change_ts']
-                else:
-                    ts = rec.get('last_change_ts') or now
-                row_uid = (ex.get('uid') if ex else None) or str(uuid.uuid4())
-                rows[(module, key, metric)] = (
-                    row_uid, module, key, item_uid, metric,
-                    1 if status else 0,
-                    rec.get('message'),
-                    json.dumps(rec.get('other_data') or {}, ensure_ascii=False),
-                    int(rec.get('fail_count') or 0),
-                    ts,
-                    _norm_severity(rec.get('severity'), status),
-                    json.dumps(rec.get('module_state') or {}, ensure_ascii=False),
-                )
+            rows.update(self._rows_for(module, checks, existing, item_uid_resolver))
         try:
             with self._db.transaction():
                 self._db.execute(f'DELETE FROM {_T}')
                 if rows:
-                    self._db.executemany(
-                        f'INSERT INTO {_T}(uid, module, {self._qk}, item_uid, metric, '
-                        'status, message, other_data, fail_count, last_change_ts, severity, '
-                        'module_state) '
-                        'VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                        list(rows.values()),
-                    )
+                    self._db.executemany(self._insert_sql(), list(rows.values()))
             return True
         except Exception as exc:  # pylint: disable=broad-except
             print(f'[check_state] persist_status() FAILED: '

@@ -9,7 +9,13 @@
    floating in a card.
 #}
 <div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'infra' %} show active{% endif %}" id="tab-infra">
-    <div id="infra-container">
+    {# `ss-vfill`, like the generated sections' containers: the flex chain that gives a
+       section the height of the work area runs pane -> container -> card, and this is
+       the one hand-written pane whose table lives one level deeper (#infra-fleet, which
+       createListTable makes `ss-vfill` itself). Without it the chain breaks here and
+       both views stop short — the fleet table ended under its last row with the rest of
+       the screen empty below it, and the device view did not fill either. #}
+    <div id="infra-container" class="ss-vfill">
         {% if not standalone %}   {# see #overview-container #}
         <div class="text-center py-4">
             <div class="spinner-border spinner-border-sm"></div>

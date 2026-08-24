@@ -40,6 +40,8 @@ one costs the chart.
 
 from __future__ import annotations
 
+import re
+
 # The two widths SNMP actually uses (Counter32 / Counter64). A profile may say which; without
 # it, 32 is assumed, because that is what a device that does not implement the 64-bit counters
 # is serving — and treating a 32-bit wrap as a reset would drop a sample every few minutes on a
@@ -135,6 +137,10 @@ def _num(v):
         return None
 
 
+#: The octet-string spelling of a MAC, which is what most agents answer with.
+_RAW_MAC = re.compile(r'0[xX][0-9a-fA-F]{12}')
+
+
 def attribute(metric: dict, raw):
     """What a ``text`` metric contributes: the string that makes a machine recognisable.
 
@@ -149,4 +155,16 @@ def attribute(metric: dict, raw):
             raw = raw.decode('utf-8', 'replace')
         except Exception:                       # pylint: disable=broad-except
             raw = str(raw)
-    return str(raw).strip()
+    text = str(raw).strip()
+    # An address the agent answered as raw octets. `0x94103e692443` is what an OctetString
+    # with no printable characters in it prints as, and it is the same six bytes that are on
+    # the sticker, in the switch's own CLI and in every other tool — written the way nobody
+    # writes them. Spelled here, once, so what is RECORDED is what a person reads.
+    #
+    # Not the same thing as the join that matches an address across agents
+    # (`lib.core.infra.topology.mac_key`): that one has to cope with four spellings arriving
+    # from four devices and answers a comparison key. This one produces the single spelling.
+    if str(metric.get('role') or '') == 'mac' and _RAW_MAC.fullmatch(text):
+        low = text[2:].lower()
+        return ':'.join(low[i:i + 2] for i in range(0, 12, 2))
+    return text

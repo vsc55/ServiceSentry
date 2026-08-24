@@ -427,6 +427,39 @@ def _checks_for_host(wa, uid):
     return grouped
 
 
+def host_sampled_keys(status_raw: dict, uid: str) -> dict:
+    """``{bare_module: {result_key: ''}}`` for what a module recorded about the HOST itself.
+
+    Some devices are read because the REGISTRY says they are devices, not because somebody
+    configured a check: an SNMP profile with device profiles assigned is enough, and what comes
+    back is filed under the host (``host.<uid>/…``) rather than under an item.
+
+    Two screens already knew that and one did not. The status column reads these keys, so a
+    switch sampled this way turned red; the device page built its rows from the configured
+    checks alone, so the same switch showed "no check points at this device" and four empty
+    tabs. One machine, two answers, and the one with the numbers in it was the one nobody
+    could see — reported exactly that way.
+
+    Read from what was RECORDED rather than from what could be: this needs no list of which
+    modules sample hosts, and cannot disagree with the column that already does it.
+    """
+    uid = str(uid or '').strip()
+    out: dict = {}
+    if not uid or not isinstance(status_raw, dict):
+        return out
+    for mod_key, mod_status in status_raw.items():
+        if not isinstance(mod_status, dict):
+            continue
+        bare = _bare(str(mod_key))
+        for res_key in mod_status:
+            if host_uid_from_key(res_key) != uid:
+                continue
+            # The base key, not the row: `build_host_status` maps `<base>/<row>` back to it,
+            # which is what makes one entry stand for a device's whole table.
+            out.setdefault(bare, {})[str(res_key).split('/', 1)[0]] = ''
+    return out
+
+
 def _host_statuses(wa):
     """Return ``{host_uid: 'ok'|'error'|'warning'}`` derived from the daemon's status file and
     the host_uid binding of each check in the module configuration.
@@ -442,6 +475,29 @@ def _host_statuses(wa):
     NOT folded in here — the UI shows it as an override."""
     status_raw = wa._read_check_status()
 
+    # Every result, indexed by the CHECK it belongs to rather than by the key it was filed
+    # under. A watchful that samples rows files `<key>/<row>` or `<key>_<metric>` and nothing
+    # at all under the bare key, so a look-up by key alone finds nothing — and "nothing" is
+    # the newly-added case, which paints as a warning.
+    #
+    # Reported from the screen: two NAS sitting in warning with everything they answer green.
+    # Each has one enabled SNMP item with no OID checks and twelve device profiles, so all 295
+    # of its readings are sub-metrics and not one of them is under the item's own key. The
+    # machine said "I have a check nobody has evaluated yet" about a check evaluated 295 times
+    # a cycle. The switches and routers were fine because they have no configured item at all
+    # and are rescued further down, by the `host.<uid>` branch.
+    #
+    # By `item_uid`, which is the same uid the configuration keys the check by, so no result
+    # key has to be taken apart to find out whose it is.
+    _by_item: dict = {}
+    for _mk, _mod_status in status_raw.items():
+        if not isinstance(_mod_status, dict):
+            continue
+        bucket = _by_item.setdefault(_bare(_mk), {})
+        for _info in _mod_status.values():
+            if isinstance(_info, dict) and _info.get('item_uid'):
+                bucket.setdefault(_info['item_uid'], []).append(_info)
+
     def _check_info(mod_key, check_key):
         """The recorded (status, severity) for a check, trying full and bare keys."""
         for mk in (mod_key, _bare(mod_key)):
@@ -451,6 +507,17 @@ def _host_statuses(wa):
                 if isinstance(info, dict):
                     return info.get('status'), (info.get('severity') or '')
                 return None, ''
+        # Nothing under its own key: the rows it produced, if it produced any. Worst first —
+        # one row in trouble is the check in trouble, and a machine with one failed disk and
+        # forty good ones is not a machine that is fine.
+        rows = _by_item.get(_bare(mod_key), {}).get(check_key) or []
+        if rows:
+            if any(r.get('status') is not True and (r.get('severity') or '') != 'warning'
+                   for r in rows):
+                return False, ''
+            if any(r.get('status') is not True for r in rows):
+                return False, 'warning'
+            return True, ''
         return '__absent__', ''
 
     modules = wa._load_modules()

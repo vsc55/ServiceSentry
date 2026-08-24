@@ -1206,6 +1206,84 @@
     flex: 0 1 auto;
     max-height: calc(100vh - var(--bs-modal-margin) * 2);
 }
+
+/* .ss-scrollbox : a box that scrolls its own overflow, capped to what is on screen.
+
+   For a list that is long by construction — a switch's sixty interfaces on a rail. The
+   `.ss-sticky-aside` beside it is deliberately NOT a scroll region, and says why: a second
+   scrollbar inside a page that already scrolls is how a rail ends up with its head off the
+   screen, and that column is short by construction. This one is not, and the alternative is
+   worse: a rail sixty items tall pushes the thing it selects off the bottom of the document,
+   so picking the last port means scrolling past every other one to see what you picked. */
+.ss-scrollbox { overflow: auto; max-height: calc(100vh - 13rem); }
+
+/* .ss-chartbox : a drawn chart, and the room it can be given.
+
+   A canvas is drawn at a pixel size and does not reflow, so the height lives in a class the
+   full-screen rule can override rather than in a style attribute it would have to fight. The
+   background is painted here because a full-screen element has none of the page behind it —
+   a transparent canvas over the browser's default black is a chart drawn in the dark. */
+.ss-chartbox { position: relative; }
+.ss-charth { height: 170px; }
+/* .ss-zoom : a card lifted out of the flow to fill the work area, with the rest of the page
+   underneath it. `position: fixed` and four animated edges rather than a transform, because a
+   scaled card stretches its own text on the way there and back.
+
+   z-index sits ABOVE everything the panel puts on screen by itself and BELOW a dialog
+   (Bootstrap's modal, 1055). "Everything" is more than it looks: the sticky header is 1020,
+   the SIDEBAR is 1040, a content dropdown 1045 and the sidebar's flyout menu 1050 — reported
+   from the screen with the sidebar sitting on top of the veil, undimmed, with an open submenu
+   over the chart. A number chosen to clear the header alone clears none of those.
+
+   .ss-zoom-hold is the gap it left — hidden, not removed, or the cards beside it close over
+   the hole the moment one of them is expanded. */
+.ss-zoom {
+    position: fixed;
+    z-index: 1052;
+    margin: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--bs-body-bg);
+    border-radius: var(--bs-border-radius-lg, .5rem);
+    /* Lifted off the page rather than laid on it: a long soft shadow plus a tight dark one,
+       which is what reads as height instead of as a grey border. */
+    box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, .45), 0 .25rem .75rem rgba(0, 0, 0, .3);
+    transition: top .22s ease, left .22s ease, width .22s ease, height .22s ease;
+}
+
+/* .ss-zoom-back : the veil under an expanded card. Darkens and blurs the page so the chart is
+   what the eye lands on, and catches the click outside — the gesture anybody tries before
+   they look for a button. Under the card, over everything else.
+
+   Blur is progressive: a browser without `backdrop-filter` still gets the dark sheet, which is
+   the half that carries the effect. */
+.ss-zoom-back {
+    position: fixed;
+    inset: 0;
+    z-index: 1051;
+    background: rgba(0, 0, 0, .45);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    transition: opacity .22s ease;
+}
+.ss-zoom-back.show { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .ss-zoom-back { transition: none; } }
+.ss-zoom > .ss-chartbox { flex: 1 1 auto; min-height: 0; }
+.ss-zoom .ss-charth { height: 100%; }
+.ss-zoom-hold { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .ss-zoom { transition: none; } }
+
+/* A button group rounds its ends by POSITION IN THE DOM, so a button whose only neighbour is
+   hidden keeps the square edge it had for a neighbour nobody can see — half a rounded control.
+   Generic rather than aimed at the chart controls: any group that hides its trailing buttons
+   has the same corner. */
+.btn-group > .btn:not(:has(~ .btn:not(.d-none))) {
+    border-top-right-radius: var(--bs-btn-border-radius, .375rem);
+    border-bottom-right-radius: var(--bs-btn-border-radius, .375rem);
+}
+
 .ss-factgrid-lg > div {
     display: flex; align-items: baseline; gap: .75rem;
     min-width: 0; max-width: none;

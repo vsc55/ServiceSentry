@@ -18,6 +18,8 @@
     "lm_sensors",
     "ip_stats",
     "tcp_udp_stats",
-    "icmp_stats"
+    "icmp_stats",
+    "lldp",
+    "ip_neighbours"
   ]
 }

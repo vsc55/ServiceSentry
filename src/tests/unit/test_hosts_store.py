@@ -248,3 +248,61 @@ class TestWhatTheDeviceIs:
         for i, tid in enumerate(host_type_ids()):
             uid = s.create({**_host('h-%d' % i), 'device_type': tid})
             assert s.get(uid)['device_type'] == tid, tid
+
+
+class TestWhatMattersOnThisMachine:
+    """A switch port that is down may be a PC switched off at seven — which is not news, and
+    made a rack of half-populated switches permanently red — or it may be the link to a server,
+    which is a phone call. Nothing in any MIB separates those two: what is at the other end of
+    the cable is knowledge about THIS installation."""
+
+    def test_a_machine_starts_watching_nothing(self):
+        s, _db = _store()
+        uid = s.create({'name': 'sw'})
+        assert s.get(uid)['watch'] == []
+        assert s.watch(uid) == set()
+
+    def test_a_row_can_be_marked_and_unmarked(self):
+        s, _db = _store()
+        uid = s.create({'name': 'sw'})
+        assert s.set_watch(uid, 'snmp', 'gi3', True)
+        assert s.watch(uid) == {s.watch_key('snmp', 'gi3')}
+        assert s.set_watch(uid, 'snmp', 'gi3', True), 'marking twice is not an error'
+        assert len(s.get(uid)['watch']) == 1, 'and does not file it twice'
+        assert s.set_watch(uid, 'snmp', 'gi3', False)
+        assert s.watch(uid) == set()
+
+    def test_two_modules_can_name_the_same_row(self):
+        """`gi3` of the SNMP module and `gi3` of something else are two rows."""
+        s, _db = _store()
+        uid = s.create({'name': 'sw'})
+        s.set_watch(uid, 'snmp', 'gi3', True)
+        s.set_watch(uid, 'other', 'gi3', True)
+        assert len(s.watch(uid)) == 2
+        s.set_watch(uid, 'snmp', 'gi3', False)
+        assert s.watch(uid) == {s.watch_key('other', 'gi3')}
+
+    def test_editing_the_machine_does_not_forget_what_it_watches(self):
+        """`update` replaces the record wholesale, and a rename must not silently stop an
+        alert somebody set up."""
+        s, _db = _store()
+        uid = s.create({'name': 'sw'})
+        s.set_watch(uid, 'snmp', 'gi3', True)
+        assert s.update(uid, {'name': 'sw-core', 'address': '10.0.0.2'})
+        assert s.watch(uid) == {s.watch_key('snmp', 'gi3')}
+
+    def test_a_machine_that_is_not_there_is_not_marked(self):
+        s, _db = _store()
+        assert s.set_watch('nope', 'snmp', 'gi3', True) is False
+        uid = s.create({'name': 'sw'})
+        assert s.set_watch(uid, '', 'gi3', True) is False
+        assert s.set_watch(uid, 'snmp', '  ', True) is False
+
+    def test_rubbish_in_the_column_is_not_a_watched_row(self):
+        """It is JSON in a text column: a hand-edited database must not make the sampler
+        iterate over strings looking for a module name."""
+        s, db = _store()
+        uid = s.create({'name': 'sw'})
+        db.execute("UPDATE hosts SET watch = ? WHERE uid = ?",
+                   ('["gi3", {"module": "snmp"}, {"module": "snmp", "row": "gi4"}]', uid))
+        assert s.get(uid)['watch'] == [{'module': 'snmp', 'row': 'gi4'}]

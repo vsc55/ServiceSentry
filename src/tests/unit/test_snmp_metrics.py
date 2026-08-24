@@ -146,3 +146,21 @@ class TestAttributes:
 
     def test_nothing_is_an_empty_name_and_not_the_word_none(self):
         assert metrics.attribute({}, None) == ''
+
+    def test_an_address_is_recorded_the_way_people_write_it(self):
+        """`0x94103e692443` is what an OctetString with nothing printable in it prints as, and
+        it is the same six bytes that are on the sticker, in the switch's own CLI and in every
+        other tool — written the way nobody writes them. On the ROLE the profile declared, so
+        a serial that happens to look like twelve hex digits is left exactly as it came."""
+        assert metrics.attribute({'role': 'mac'}, '0x94103E692443') == '94:10:3e:69:24:43'
+        assert metrics.attribute({'role': 'serial'}, '0x94103E692443') == '0x94103E692443'
+
+    def test_an_address_that_already_reads_as_one_is_left_alone(self):
+        for text in ('94:10:3e:69:24:43', '94-10-3e-69-24-43', '9410.3e69.2443'):
+            assert metrics.attribute({'role': 'mac'}, text) == text, (
+                'a second spelling of the same address, invented by the panel')
+
+    def test_only_six_bytes_are_an_address(self):
+        """An OID or a hex serial of another length is not a MAC with something missing."""
+        for text in ('0xdeadbeef', '0x94103e69244312', '0xzzzzzzzzzzzz'):
+            assert metrics.attribute({'role': 'mac'}, text) == text

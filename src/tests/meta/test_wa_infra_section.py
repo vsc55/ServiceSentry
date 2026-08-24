@@ -17,7 +17,7 @@ import io
 import os
 import re
 
-from tests.helpers import _read, _strip_comments
+from tests.helpers import _fn, _read, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
@@ -91,37 +91,56 @@ class TestItShowsWithoutHandingOver:
         assert '_HOST_FIELDS' in svc
         assert "'profiles'" not in svc, 'the projection names the credential bag'
 
-    def test_the_domain_edits_nothing(self):
+    def test_the_domain_does_not_reach_the_registry(self):
         """`infra_view` must not become a way around the registry's permissions.
 
-        The section grew one non-GET endpoint — "collect now", which runs this device's
-        checks — and that is not an edit: it writes no record of its own, it produces the
-        same check state and history a scheduler cycle produces, through the same executor.
-        An endpoint that CHANGED something would be a second way to reach the registry, from
-        a screen deliberately handed to people who may not reach it. Hence the shape of this
-        test: the write verbs stay out, and the one POST is named rather than tolerated.
+        This is not "the section is read-only" — it has two POSTs and both are deliberate:
+        "collect now" runs this device's checks, which writes no record of its own and
+        produces exactly what a scheduler cycle produces; "watch" sets one flag against one
+        row. Neither stores a name, an address or a credential, and neither can create or
+        delete a machine. THAT is the property: an endpoint that edited the registry would be
+        a second way into it from a screen deliberately handed to people who may not reach it.
+
+        So the write verbs stay out, every POST is named rather than tolerated, and each one
+        carries a flag of its own — checked below.
         """
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         for verb in ("'PUT'", "'DELETE'", "'PATCH'"):
             assert verb not in routes, f'a {verb} route appeared in a section that edits nothing'
         posts = re.findall(r"@app\.route\('([^']+)',\s*methods=\['POST'\]\)", routes)
-        assert posts == ['/api/v1/infra/hosts/<uid>/collect'], (
+        assert sorted(posts) == sorted(['/api/v1/infra/hosts/<uid>/collect',
+                                        '/api/v1/infra/hosts/<uid>/watch']), (
             f'unexpected POST route(s) in the infrastructure section: {posts}')
+        # The registry's own write path is what must not be reachable from here.
+        for call in ('.create(', '.update(', '.delete('):
+            assert f'store{call}' not in routes, (
+                f'the section calls store{call} — that is the registry, behind its own '
+                'permission, and this screen is not it')
 
-    def test_collecting_has_its_own_permission(self):
-        """Looking at a wall screen is not the same act as starting minutes of polling.
+    def test_each_write_has_its_own_permission(self):
+        """Looking at a wall screen is not the same act as starting minutes of polling, nor
+        the same as deciding what wakes somebody up.
 
-        Reading the fleet is granted to `viewer`; a button that makes forty devices get
-        polled must not come with it, or "may look" quietly becomes "may make the panel
-        work". The flag is `infra_collect`, and the route must be gated by it — not by
-        `infra_view`, which is the mistake this test exists to catch.
+        Reading the fleet is granted to `viewer`; neither of those two must come with it, or
+        "may look" quietly becomes "may make the panel work". Each POST is gated by a flag of
+        its own — not by `infra_view`, which is the mistake this test exists to catch.
         """
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
-        body = routes.split("methods=['POST']")[1].split('def ')[0]
-        assert 'infra_collect_req' in body, 'the collect route is not gated by its own flag'
-        assert 'infra_view_req' not in body, (
-            'collecting rides on the permission that only lets you look')
-        assert "wa._perm_required('infra_collect')" in routes
+        for path, flag in (('/collect', 'infra_collect'), ('/watch', 'infra_watch')):
+            body = routes.split(f"'/api/v1/infra/hosts/<uid>{path}'")[1].split('def ')[0]
+            assert f'{flag}_req' in body, f'the {path} route is not gated by its own flag'
+            assert 'infra_view_req' not in body, (
+                f'{path} rides on the permission that only lets you look')
+            assert f"wa._perm_required('{flag}')" in routes
+
+    def test_marking_a_row_still_cannot_reach_a_machine_you_cannot_see(self):
+        """Holding `infra_watch` is not being shown a machine. Every other route here narrows
+        to what the caller may see, and a write must not be the one that forgets."""
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        body = routes.split("'/api/v1/infra/hosts/<uid>/watch'")[1].split('\n    @app.route')[0]
+        assert '_may_see(' in body, 'the write does not narrow to what the caller may see'
+        assert "wa._audit('infra_watch'" in body, (
+            'nothing records who decided what the panel would report')
 
     def test_the_flag_is_declared_and_not_handed_to_viewer(self):
         manifest = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'manifest.py'))
@@ -171,7 +190,9 @@ class TestWatchingItHappen:
         """Held open for the minutes a NAS takes, the request is one a browser or a reverse
         proxy gives up on — and the operator is left unable to tell whether it worked."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
-        body = routes.split("methods=['POST']")[1].split('@app.route')[0]
+        # By its own path: the section has more than one POST, and "the first one" stopped
+        # meaning the collection the day a second was added.
+        body = routes.split("'/api/v1/infra/hosts/<uid>/collect'")[1].split('@app.route')[0]
         assert "'job_id': job_id" in body
         assert 'start_collect(' in body
         assert '/api/v1/infra/collect/<job_id>' in routes, 'nothing can be asked about it'
@@ -386,3 +407,188 @@ class TestItDoesNotGoStale:
         src = self._render()
         assert "localStorage.setItem('ss_infra_auto'" in src
         assert "localStorage.getItem('ss_infra_auto'" in src
+
+
+class TestACountIsAQuestion:
+    """A tally answers "how is this switch" and immediately raises the next one.
+
+    All of it in one box came out as "28 Ethernet 1 22 1 Loopback 21 Virtual (VLAN)" — a run
+    of numbers and words with nothing between one pair and the next, where the eye has to work
+    out which figure goes with which word, and a value the profile has no name for looks like a
+    number whose label went missing. One card per value, and each of them opens onto its rows.
+    """
+
+    def test_each_counted_value_is_its_own_card(self):
+        det = _read(os.path.join(INFRA, '_details.html'))
+        assert 'function _infraTallyCard(' in det, 'the counts are drawn as one box again'
+        assert '_infraTallyCard(m, v)' in det, 'the cards are not drawn per value'
+
+    def test_every_card_opens_onto_the_rows_behind_it(self):
+        det = _read(os.path.join(INFRA, '_details.html'))
+        assert '_infraOpenTally(' in det, 'a count that cannot be opened is a dead end'
+        # …and only when there is something to open. A chevron over an empty screen is a
+        # promise the panel does not keep, so the click, the pointer and the arrow all hang
+        # off the same count of what is behind the card.
+        card = det.split('function _infraTallyCard(')[1].split('\nfunction ')[0]
+        assert 'const behind = ((m.rows || {})[v] || []).length;' in card
+        assert card.count('behind') >= 4, (
+            'the card offers the click whether or not the payload carried the rows')
+
+    def test_a_value_with_no_declared_word_still_reads_as_something(self):
+        det = _read(os.path.join(INFRA, '_details.html'))
+        assert 'infra_state_code' in det, 'an undeclared state prints as a bare number again'
+
+    def test_a_count_opens_onto_a_screen_and_not_a_dialog(self):
+        """The first answer was a table of every column the device reports, in the shared
+        dialog. Reported from the screen: seventeen columns do not fit in one, and the
+        horizontal scrollbar that was supposed to reach them sat at the bottom of forty rows.
+        A port is not a row of a table anyway — it is a thing with a state, a speed, an address
+        and four counters worth a graph each, which is a screen of its own."""
+        det = _read(os.path.join(INFRA, '_details.html'))
+        assert 'function _infraRowsPane(' in det
+        assert 'function _infraTallyTable(' not in det, 'the table that did not fit is back'
+        opener = det.split('function _infraOpenTally(')[1].split('\nfunction ')[0]
+        assert 'showHtmlModal' not in opener, 'a count opens a dialog again'
+        assert '_infraPaint()' in opener, 'and does not repaint what it opened'
+
+    def test_the_rows_are_a_rail_and_the_one_you_pick_is_beside_it(self):
+        det = _read(os.path.join(INFRA, '_details.html'))
+        pane = det.split('function _infraRowsPane(')[1].split('\nfunction ')[0]
+        for word in ('ss-rail-item', 'ss-sticky-aside', '_infraRowBody('):
+            assert word in pane, f'{word} is not in the interfaces view'
+        assert 'ss-scrollbox' in pane, (
+            'a rail of sixty ports pushes what it selects off the bottom of the document')
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-scrollbox' in css, 'a class the markup uses and nothing defines'
+        assert 'ss-widebody' not in css, 'a rule left behind by the table that is gone'
+
+    def test_the_rows_come_from_the_payload_and_are_not_re_derived(self):
+        """The filter that decides what a count is about lives on the server (`headline_rows`,
+        `tally: "all"`, the state a reading maps to). A screen that re-applied it would be a
+        second implementation, free to disagree — and the day it did, the switch would say
+        "28 Ethernet" over a list of thirty."""
+        det = _read(os.path.join(INFRA, '_details.html'))
+        pane = det.split('function _infraRowsPane(')[1].split('\nfunction ')[0]
+        assert '(m.rows || {})[_infraRowsOf.value]' in pane, 'the view picks its own rows'
+        assert 'headline_rows' not in pane and 'tally_role' not in pane, (
+            'the browser has started deciding which rows a count is about')
+        svc = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'service.py'))
+        assert "bucket['rows'].setdefault" in svc, 'the server stopped saying which rows'
+
+    def test_the_way_back_and_the_way_out(self):
+        """A drill-down with no way back is a screen somebody reloads the page to leave. And it
+        belongs to the device that was open: kept, the next machine's Details tab would open on
+        a count of the previous one's ports."""
+        det = _read(os.path.join(INFRA, '_details.html'))
+        assert 'function _infraRowsBack(' in det and 'infra_rows_back' in det
+        render = _read(os.path.join(INFRA, '_render.html'))
+        opener = render.split('async function infraOpen(')[1].split('\n}')[0]
+        assert '_infraRowsOf = null' in opener, 'the drill-down outlives the device'
+
+    def test_a_view_change_asks_the_network_for_nothing(self):
+        """Opening a count and picking a port are changes of VIEW. Through the section's entry
+        point they would be two round trips and a blank pane to redraw what was already in
+        memory."""
+        render = _read(os.path.join(INFRA, '_render.html'))
+        paint = render.split('function _infraPaint(')[1].split('\n}')[0]
+        assert 'apiGet' not in paint and 'await' not in paint
+        det = _read(os.path.join(INFRA, '_details.html'))
+        for fn in ('_infraOpenTally', '_infraRowsBack', '_infraRowsPick'):
+            body = det.split('function ' + fn + '(')[1].split('\nfunction ')[0]
+            assert 'renderInfra()' not in body, f'{fn} refetches the fleet to change a view'
+
+    def test_a_port_that_is_down_is_visible_without_opening_it(self):
+        """Thirty ports on a rail, and the one that matters is the one that is down. The mark
+        is the WORST of whatever the row's own columns declare a level for — the core is not
+        deciding that an operational state outranks an administrative one."""
+        det = _read(os.path.join(INFRA, '_details.html'))
+        mark = det.split('function _infraRowMarkHtml(')[1].split('\nfunction ')[0]
+        assert '_INFRA_LEVEL_MARKS' in mark, 'the rail invented its own symbols'
+        assert 'oper' not in mark, (
+            'the core has started naming the column that decides a port is down')
+        assert 'r < worst.rank' in mark, 'the worst no longer wins'
+        assert 'm.state_key || String(m.value)' in mark, (
+            'the rail reads the raw value again, so a port that is down because somebody '
+            'switched it off gets the same red octagon as a cable that fell out')
+        assert 'st.icon ? 3 : -1' in mark, (
+            'a state the profile gave a mark of its own no longer earns one — and "switched '
+            'off" has no level, so the row goes back to having no mark at all')
+
+    def test_a_coded_fact_is_named_by_the_profile_and_not_by_the_panel(self):
+        """An interface's type arrives as "6". The profile already says 6 is Ethernet, in the
+        states of the column that counts it — so the screen reads that map instead of carrying
+        a second copy, which would be a second thing to keep up to date, and the panel naming
+        a MIB's values on its own authority."""
+        det = _read(os.path.join(INFRA, '_details.html'))
+        fn = det.split('function _infraFactWord(')[1].split('\nfunction ')[0]
+        assert 'st.label' in fn and 'value' in fn, 'a fact with no declared word is dropped'
+        assert 'words.set(x.tally_role, x.states)' in det, (
+            'the words no longer come from the column that counts them')
+        assert 'Ethernet' not in _strip_comments(det), (
+            'the panel has started writing down what a MIB means')
+
+
+class TestTheMapIsReadAtAGlanceOrItIsNothing:
+    """Reported from the screen: "no se ve la trazabilidad en absoluto".
+
+    A lane per network and a line per membership, down the page — which on a router that
+    declares twenty-nine routes came out as twenty-nine lanes, twenty-five of them with nobody
+    in them, 3744 px tall, every line crossing the same ten-pixel channel to place five
+    machines. Two rules replaced it: a network with nobody in it is not on the map, and
+    membership is drawn by hanging off a plate rather than by a line across the picture.
+    """
+
+    def _js(self):
+        return _read(os.path.join(INFRA, '_map.html'))
+
+    def test_an_empty_network_is_not_a_branch(self):
+        layout = _fn(self._js(), '_infraMapLayout')
+        assert "(n.members || []).some(" in layout, (
+            'every declared route is drawn again, whether anything lives there or not')
+
+    def test_but_the_count_of_them_is_said(self):
+        """Silently dropping them would be a map that knows something and does not say it."""
+        js = self._js()
+        assert 'function _infraMapFolded(' in js and 'infra_map_folded' in js
+
+    def test_the_folded_count_is_the_networks_with_nobody_in_them(self):
+        """Not "every network without a branch": a router's own network HAS a member, it is
+        just drawn on the router. Counting it here puts a number under the picture that says
+        something untrue about the fleet — which it did."""
+        layout = _fn(self._js(), '_infraMapLayout')
+        assert 'filter(n => !(n.members || []).length).length' in layout
+        assert 'length - nets.length' not in layout
+
+    def test_a_machine_is_drawn_once(self):
+        """Once per network would be four boxes with one name, and "which of these is the
+        machine" is not a question a map should raise."""
+        layout = _fn(self._js(), '_infraMapLayout')
+        assert '!home.has(uid)' in layout, 'a machine on three networks is drawn three times'
+
+    def test_the_way_out_is_what_the_device_said_and_not_a_guess(self):
+        """A machine another one points at, or one pointing at an address nobody here owns.
+        Both are the device talking, which is what earns it the top of the picture."""
+        layout = _fn(self._js(), '_infraMapLayout')
+        assert "e.kind === 'gateway' && e.to" in layout and "e.kind === 'exit'" in layout
+        assert 'device_type' not in layout, (
+            'the map has started deciding what a router is from the registry')
+
+    def test_a_fleet_with_no_route_off_it_gets_no_cloud(self):
+        cloud = _fn(self._js(), '_infraMapCloud')
+        assert 'if (!L.exits.length) return' in cloud
+
+    def test_the_lanes_are_gone(self):
+        js = self._js()
+        assert 'function _infraMapLane(' not in js, 'the lane layout is back'
+        assert 'function _infraMapElbow(' in js, 'the short orthogonal links are gone'
+
+    def test_the_kinds_of_line_are_still_told_apart(self):
+        """Each is a different CLAIM — an address, a statement the device made, a cable it can
+        see. Flattening them into "connected" would be the picture saying more than the data
+        does, which is the one thing a map must not do."""
+        links = _fn(self._js(), '_infraMapLinks')
+        for kind in ("'lldp'", "'port'", "'gateway'"):
+            assert kind in links, f'{kind} lines are no longer drawn as their own thing'
+        assert 'stroke-dasharray="1 4"' in links, 'a port sighting reads as a cable again'
+        legend = _fn(self._js(), '_infraMapLegend')
+        assert legend.count('<svg') == 4, 'the legend stopped matching the lines'

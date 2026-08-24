@@ -8,6 +8,7 @@
     "en_EN": "What a RouterOS device knows about its own hardware: temperatures, input voltage, power and current, fans and power supplies, the RouterOS and RouterBOOT it runs, its SFP modules and its PoE ports. Interfaces, filesystems and memory are standard MIBs and belong to the generic profiles.",
     "es_ES": "Lo que un equipo con RouterOS sabe de su propio hardware: temperaturas, tensión de entrada, potencia y corriente, ventiladores y fuentes, el RouterOS y el RouterBOOT que corre, sus módulos SFP y sus puertos PoE. Interfaces, sistemas de ficheros y memoria son MIBs estándar y son de los perfiles genéricos."
   },
+  "short_label": {"en_EN": "RouterOS", "es_ES": "RouterOS"},
   "match": {
     "sysobjectid_prefix": "1.3.6.1.4.1.14988",
     "probe": "1.3.6.1.4.1.14988.1.1.7.3.0"
@@ -53,6 +54,8 @@
     },
     {
       "key": "mt_temp",
+      "icon": "bi-thermometer-half",
+      "headline": true,
       "label": {"en_EN": "Temperature", "es_ES": "Temperatura"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.10.0",
       "kind": "gauge",
@@ -62,6 +65,8 @@
     },
     {
       "key": "mt_processor_temp",
+      "icon": "bi-cpu",
+      "headline": true,
       "label": {"en_EN": "Processor temperature", "es_ES": "Temperatura del procesador"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.11.0",
       "kind": "gauge",
@@ -71,6 +76,8 @@
     },
     {
       "key": "mt_cpu_temp",
+      "icon": "bi-cpu",
+      "headline": true,
       "label": {"en_EN": "Temperature near the CPU", "es_ES": "Temperatura junto a la CPU"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.6.0",
       "kind": "gauge",
@@ -80,6 +87,8 @@
     },
     {
       "key": "mt_board_temp",
+      "icon": "bi-thermometer-half",
+      "headline": true,
       "label": {"en_EN": "Board temperature", "es_ES": "Temperatura de la placa"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.7.0",
       "kind": "gauge",
@@ -89,6 +98,8 @@
     },
     {
       "key": "mt_voltage",
+      "icon": "bi-lightning",
+      "headline": true,
       "label": {"en_EN": "Input voltage", "es_ES": "Tensión de entrada"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.8.0",
       "kind": "gauge",
@@ -98,6 +109,8 @@
     },
     {
       "key": "mt_power",
+      "icon": "bi-lightning-charge",
+      "headline": true,
       "label": {"en_EN": "Power drawn", "es_ES": "Consumo"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.12.0",
       "kind": "gauge",
@@ -123,6 +136,12 @@
     },
     {
       "key": "mt_psu",
+      "icon": "bi-plug",
+      "headline": true,
+      "states": {
+        "0": {"label": {"en_EN": "Failed", "es_ES": "Fallo"}, "level": "bad"},
+        "1": {"label": {"en_EN": "OK", "es_ES": "Correcta"}, "level": "ok"}
+      },
       "label": {"en_EN": "Power supply", "es_ES": "Fuente de alimentación"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.15.0",
       "kind": "gauge",
@@ -130,6 +149,12 @@
     },
     {
       "key": "mt_psu_backup",
+      "icon": "bi-plug",
+      "headline": true,
+      "states": {
+        "0": {"label": {"en_EN": "Failed", "es_ES": "Fallo"}, "level": "bad"},
+        "1": {"label": {"en_EN": "OK", "es_ES": "Correcta"}, "level": "ok"}
+      },
       "label": {"en_EN": "Backup power supply", "es_ES": "Fuente de respaldo"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.16.0",
       "kind": "gauge",
@@ -137,6 +162,8 @@
     },
     {
       "key": "mt_fan1",
+      "icon": "bi-fan",
+      "headline": true,
       "label": {"en_EN": "Fan 1", "es_ES": "Ventilador 1"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.17.0",
       "kind": "gauge",
@@ -145,6 +172,8 @@
     },
     {
       "key": "mt_fan2",
+      "icon": "bi-fan",
+      "headline": true,
       "label": {"en_EN": "Fan 2", "es_ES": "Ventilador 2"},
       "oid": "1.3.6.1.4.1.14988.1.1.3.18.0",
       "kind": "gauge",

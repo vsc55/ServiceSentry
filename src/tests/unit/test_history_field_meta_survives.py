@@ -42,8 +42,11 @@ def _richest_field() -> dict:
         'metrics': [{
             'key': 'state', 'label': 'State', 'kind': 'gauge', 'walk': '1.2.3',
             'unit': '', 'chart': 'state',
+            'chart_with': ['mate'], 'chart_label': 'State and its mate',
             'states': {'1': {'label': 'Normal', 'level': 'ok'},
                        '2': {'label': 'Failed', 'level': 'bad'}},
+        }, {
+            'key': 'mate', 'label': 'Mate', 'kind': 'gauge', 'walk': '1.2.4',
         }],
     })
     fields = profiles.history_fields(prof, 'en_EN')
@@ -57,11 +60,12 @@ class TestTheModuleProjection:
         """`lib.modules.history_fields` copies a fixed set of keys. One it does not know is
         dropped without a word — which is what "the badge is a number again" looks like from
         the outside."""
-        known = set(_ALWAYS) | set(mod_fields._OPTIONAL_META) | set(mod_fields._OPTIONAL_MAPS)
+        known = (set(_ALWAYS) | set(mod_fields._OPTIONAL_META)
+                 | set(mod_fields._OPTIONAL_MAPS) | set(mod_fields._OPTIONAL_LISTS))
         missing = sorted(set(_richest_field()) - known)
         assert not missing, (
             f'a module can declare {missing} and the projection drops it silently — add it to '
-            '_OPTIONAL_META (a word) or _OPTIONAL_MAPS (a map)')
+            '_OPTIONAL_META (a word), _OPTIONAL_MAPS (a map) or _OPTIONAL_LISTS (a list)')
 
     def test_the_whitelist_names_nothing_imaginary(self):
         """The other direction: a key in the whitelist that nothing emits is either a typo or

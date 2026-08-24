@@ -81,10 +81,13 @@ class TestWhatShips:
     def test_a_table_metric_says_what_names_its_rows(self):
         """Without it, eight interfaces are eight numbered lines — and the number is the SNMP
         index, which is not the port on the front of the switch and is the first thing
-        somebody assumes it is."""
+        somebody assumes it is.
+
+        Unless the metric produces no rows at all: a column recorded as one TOTAL has nothing
+        to name, and neither has one filed as evidence."""
         ifg = profiles.catalog()['if_generic']
         for m in ifg['metrics']:
-            if 'walk' in m:
+            if 'walk' in m and not m.get('aggregate') and not m.get('evidence'):
                 assert m.get('index_label'), f"{m['key']} walks a table it cannot name"
 
 
@@ -134,10 +137,13 @@ class TestTwoNamelessTablesAreNotOneTable:
         first device that serves both.
 
         An `of_device` table is exempt because it has no rows to collide: its readings fold
-        into one fact about the machine before anything is filed under an index."""
+        into one fact about the machine before anything is filed under an index. So is an
+        `evidence` one, which never becomes a row at all — it goes to its own store — and so
+        is an `aggregate` one, which is recorded as a single total under the device."""
         for prof in profiles.catalog().values():
             for m in prof['metrics']:
-                if 'walk' in m and not m.get('index_label') and not m.get('of_device'):
+                if ('walk' in m and not m.get('index_label') and not m.get('of_device')
+                        and not m.get('evidence') and not m.get('aggregate')):
                     assert m.get('group'), f"{prof['id']}.{m['key']} can collide"
 
 
@@ -641,7 +647,7 @@ class TestHowADevicesIdentityReads:
     def test_saying_nothing_is_the_normal_case(self):
         """Forty profiles do not need a second name. Empty rather than falling back to the
         title, because the caller is the one that knows which question it is asking."""
-        assert profiles.short_label_of(profiles.catalog()['if_generic'], 'es_ES') == ''
+        assert profiles.short_label_of(profiles.catalog()['ip_stats'], 'es_ES') == ''
         assert profiles.short_label_of({}, 'es_ES') == ''
         assert profiles.short_label_of({'short_label': 'Plano'}, 'es_ES') == 'Plano'
 
@@ -864,6 +870,424 @@ class TestTheHandfulSomebodyWantsFirst:
         assert m and m[0]['of_device'] is True and m[0]['role'] == 'ip'
         assert m[0]['walk'] == '1.3.6.1.2.1.4.20.1.1', 'that is not ipAdEntAddr'
 
+    def test_a_column_of_states_can_be_worth_counting(self):
+        """Twenty-four ports each with a badge answers "what is each port doing" and not "how
+        is this switch", where the number wanted is "six up, eighteen down". The core cannot
+        decide that: it would have to know that an interface's state is worth adding up and a
+        disk's serial is not, which is knowledge about a MIB."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'gauge', 'tally': True,
+             'states': {'1': {'label': 'Up', 'level': 'ok'}}},
+            {'key': 'b', 'walk': '1.2.4', 'kind': 'gauge', 'tally': True},
+            {'key': 'c', 'walk': '1.2.5', 'kind': 'gauge'}]))['metrics']
+        assert [x.get('tally') for x in m] == [True, None, None], (
+            'counting a column with no states would tally raw integers, which is a row of '
+            'numbers labelled by other numbers')
+
+    def test_the_ports_of_a_switch_are_counted(self):
+        f = profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')
+        assert f['if_oper'].get('tally'), 'nothing counts how many ports are up'
+        assert f['if_oper'].get('states'), 'and the count would have no words'
+
+    def test_a_count_carries_the_rows_it_counted(self):
+        """"21 Virtual (VLAN)" is a summary, and "which 21" is the next thing anybody asks.
+
+        Answered by the side that DID the counting, and not left to the screen to work out
+        again: the rule that decides what a count is about — `headline_rows`, `tally: "all"`,
+        the state a reading maps to — would then exist in two places, free to disagree, and
+        the day they did the switch would say "28 Ethernet" over a list of thirty.
+        """
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')}
+
+        def _row(name, oper, kind):
+            return {'module': 'snmp', 'key': f'sw/{name}', 'name': 'sw', 'row': name,
+                    'ts': 't', 'data': {'if_oper': oper,
+                                        '_attrs': {'if_generic': {'kind': str(kind)}}}}
+
+        out = infra.metrics([_row('gi1', 1, 6), _row('gi2', 2, 6),
+                             _row('110', 1, 53), _row('Po1', 1, 161)], fields)
+        by = {m['field']: m for m in out if m['headline'] == 'tally'}
+        assert by['if_type']['rows'] == {'6': ['gi1', 'gi2'], '53': ['110'], '161': ['Po1']}
+        assert by['if_oper']['rows'] == {'1': ['gi1'], '2': ['gi2']}, (
+            'the rows behind a count are exactly the ones it counted — the VLAN is up and '
+            'was never a port')
+        for m in by.values():
+            assert sum(len(v) for v in m['rows'].values()) == m['value'], (
+                f'{m["field"]}: the list and the number disagree')
+
+    def test_a_column_can_colour_without_judging(self):
+        """`level` was doing two jobs: it paints the badge and it decides whether the machine
+        is in trouble. For a fan those are the same answer; for a switch port they are not —
+        an access port with nothing plugged into it is `down`, which is worth a red mark on a
+        list of thirty ports and is not a fault of the switch.
+
+        The badge is untouched: what the flag turns off is only whether the state becomes a
+        finding, and the map that paints it is read on the screen and not by the sampler."""
+        m = {x['key']: x for x in profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'gauge', 'verdict': False,
+             'states': {'2': {'label': 'Down', 'level': 'bad'}}},
+            {'key': 'b', 'walk': '1.2.4', 'kind': 'gauge',
+             'states': {'2': {'label': 'Failed', 'level': 'bad'}}},
+        ]))['metrics']}
+        assert m['a']['verdict'] is False
+        assert m['a']['states']['2']['level'] == 'bad', 'the red mark went with the verdict'
+        assert 'verdict' not in m['b'], (
+            'the flag is opt-out; a profile that says nothing stopped reporting')
+
+    def test_a_profile_can_say_how_to_tell_the_thing_is_there(self):
+        """An agent answers a table whether or not the hardware behind it exists.
+
+        Reported from the panel: SYNOLOGY-GPUINFO-MIB is answered by every NAS, GPU or no GPU
+        — utilisation 0 %, memory 0 B — so the summary of every one of them grew a GPU card
+        saying nothing. Zero is a reading and cannot say "there is nothing here" on its own,
+        and the panel may not decide it either: the PROFILE names the column that is the
+        evidence, because a GPU with no memory at all is not a GPU that is idle.
+        """
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        prof = profiles.catalog()['synology_gpu']
+        assert prof['present_when'] == {'field': 'syno_gpu_mem_total', 'above': 0}
+        fields = {'snmp': profiles.history_fields(prof, 'en_EN')}
+
+        def _seen(total):
+            rows = [{'module': 'snmp', 'key': 'nas/metrics', 'name': 'nas', 'row': '',
+                     'ts': 't', 'data': {'syno_gpu_mem_total': total, 'syno_gpu_util': 0,
+                                         'syno_gpu_mem_used': 0}}]
+            out = infra.metrics(rows, fields)
+            return ([m['field'] for m in out if m['headline']],
+                    [m['field'] for m in out])
+
+        head, all_of = _seen(0)
+        assert head == [], 'a NAS with no GPU still gets a GPU card on its summary'
+        assert len(all_of) == 3, (
+            'the readings themselves were dropped too — Measures answers "what did it say", '
+            'and a device that answered zero did answer')
+        head, _ = _seen(8 * 1024 ** 3)
+        assert sorted(head) == ['syno_gpu_mem_total', 'syno_gpu_mem_used', 'syno_gpu_util'], (
+            'a NAS that HAS a GPU stopped showing it')
+
+    def test_a_gate_nobody_can_pass_is_not_a_gate(self):
+        """A rule naming no field would empty a summary for a reason nothing on the screen
+        could explain."""
+        for bad in ({}, {'above': 0}, {'field': ''}, {'field': 'a b'}, 'nonsense', None):
+            p = profiles.normalise(_profile(present_when=bad, metrics=[
+                {'key': 'a', 'walk': '1.2.3', 'kind': 'gauge'}]))
+            assert 'present_when' not in p, f'{bad!r} became a gate'
+
+    def test_a_missing_reading_is_not_a_reading_of_zero(self):
+        """The evidence column did not answer this cycle. Present, because the alternative is
+        a summary that empties itself on one lost datagram."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        prof = profiles.normalise(_profile(
+            present_when={'field': 'mem', 'above': 0},
+            metrics=[{'key': 'util', 'walk': '1.2.3', 'kind': 'gauge', 'headline': True,
+                      'icon': 'bi-gpu-card'},
+                     {'key': 'mem', 'walk': '1.2.4', 'kind': 'gauge'}]))
+        fields = {'snmp': profiles.history_fields(prof, 'en_EN')}
+        rows = [{'module': 'snmp', 'key': 'x/metrics', 'name': 'x', 'row': '', 'ts': 't',
+                 'data': {'util': 7}}]
+        out = infra.metrics(rows, fields)
+        assert [m['field'] for m in out if m['headline']] == ['util']
+
+    #: Vendor profiles whose scalars are NOT the condition of a piece of equipment, and why.
+    #: Named rather than tolerated: the rule below exists because the same omission shipped
+    #: three times, and an exemption that is not written down is the fourth.
+    _NO_HEADLINE_BY_DESIGN = {
+        'windows_lm': 'LAN Manager network operations — what the service is doing, not how '
+                      'the machine is; a Windows box answers that through hr_* and ucd_*',
+        'windows_server_lm': 'sessions, shares and print queues: activity of one service',
+        'windows_workstation_lm': 'connections this machine made to others: activity again',
+    }
+
+    def test_a_vendor_profile_says_which_of_its_readings_answer_how_the_box_is(self):
+        """A profile that flags nothing gives its device an empty Details tab.
+
+        Reported from the panel three times over: a switch, then a router, then a UPS — each
+        with a full vendor profile behind it, every reading being collected every cycle, and
+        the one screen somebody opens the device with saying nothing. The values were there;
+        no one had said which of them answer "how is this box".
+
+        Only VENDOR profiles (they claim an enterprise tree) and only their SCALARS: a table
+        is rows and a row summary is a different declaration. A profile whose scalars are not
+        a condition at all is named above, with the reason.
+        """
+        for pid, prof in sorted(profiles.catalog().items()):
+            if not ((prof.get('match') or {}).get('sysobjectid_prefix')) or prof.get('supersedes'):
+                continue
+            scalars = [m for m in prof.get('metrics') or ()
+                       if m.get('oid') and m.get('kind') != 'text']
+            if not scalars or pid in self._NO_HEADLINE_BY_DESIGN:
+                continue
+            assert any(m.get('headline') for m in prof['metrics']), (
+                f'{pid} reads {len(scalars)} scalars and flags none of them: its devices get '
+                'an empty Details tab. Flag the handful that answer "how is this box", or '
+                'name the profile in _NO_HEADLINE_BY_DESIGN with the reason')
+
+    def test_the_exemptions_are_still_real_profiles(self):
+        """An exemption for a profile that no longer exists reads as "this is handled"."""
+        cat = profiles.catalog()
+        gone = sorted(set(self._NO_HEADLINE_BY_DESIGN) - set(cat))
+        assert not gone, f'exempted profiles that are not in the catalogue: {gone}'
+        for pid in self._NO_HEADLINE_BY_DESIGN:
+            assert not any(m.get('headline') for m in cat[pid].get('metrics') or ()), (
+                f'{pid} now flags a headline and no longer needs its exemption')
+
+    def test_a_headline_figure_carries_a_picture(self):
+        """A number has none of its own, and a summary of eight unlabelled figures is eight
+        numbers. The profile says, because only whatever produced it knows this one is a
+        temperature and that one a battery."""
+        missing = []
+        for pid, prof in sorted(profiles.catalog().items()):
+            for m in prof.get('metrics') or ():
+                # A row's half of a proportion is drawn as a ring, which is its own picture.
+                if m.get('headline') is True and not m.get('icon'):
+                    missing.append(f'{pid}.{m["key"]}')
+        assert not missing, f'headline figures with no icon: {missing}'
+
+    def test_the_label_the_administrator_wrote_on_the_switch_is_read(self):
+        """`ifAlias` is the one column of IF-MIB a person fills in — "uplink-core",
+        "srv-proxmox1" — and it is what separates a port whose PC is switched off from the port
+        of a server. Empty is the normal answer and is skipped: a blank description is not a
+        fact about a port, and one filed per port is a column of nothing on sixty rows."""
+        m = {x['key']: x for x in profiles.catalog()['if_generic']['metrics']}
+        assert m['if_alias']['walk'] == '1.3.6.1.2.1.31.1.1.1.18', 'that is not ifAlias'
+        assert m['if_alias']['kind'] == 'text' and m['if_alias']['role'] == 'alias'
+        assert m['if_alias'].get('skip'), 'every undescribed port files an empty description'
+        assert m['if_alias']['index_label'] == m['if_oper']['index_label'], (
+            'the description lands on a different row from the state of the same port')
+
+    def test_a_switch_port_is_not_a_fault_of_the_switch(self):
+        """Reported from the panel: a 28-port switch with nine empty ports was permanently in
+        error. Which ports matter is a decision about the installation and the panel has not
+        been given one; the switch's own condition is its CPU, its temperature, its fans and
+        its power supplies, and those still judge."""
+        f = {x['key']: x for x in profiles.catalog()['if_generic']['metrics']}
+        assert f['if_oper']['verdict'] is False
+        assert f['if_oper']['states']['2']['level'] == 'bad', (
+            'a port that is down is not marked on the list any more')
+        lks = {x['key']: x for x in profiles.catalog()['linksys_switch']['metrics']}
+        for key in ('lks_fan_state', 'lks_psu_state'):
+            assert lks[key].get('verdict') is not False, (
+                f'{key} stopped reporting — a dead fan IS a fault of the switch')
+
+    def test_two_columns_can_be_one_picture(self):
+        """Traffic in and traffic out are not two questions — nobody looks at what a link
+        received without looking at what it sent — and two charts side by side on two different
+        y-scales is that comparison made impossible. The core cannot pair them on its own: it
+        would have to know that in and out belong together and that CPU and temperature do
+        not, which is knowledge about a MIB."""
+        m = {x['key']: x for x in profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'counter', 'chart_with': ['b'],
+             'chart_label': {'en_EN': 'Both', 'es_ES': 'Las dos'}, 'label': 'A'},
+            {'key': 'b', 'walk': '1.2.4', 'kind': 'counter', 'label': 'B'},
+            {'key': 'c', 'walk': '1.2.5', 'kind': 'counter', 'chart_with': ['not an id!']},
+        ]))['metrics']}
+        assert m['a']['chart_with'] == ['b']
+        assert 'chart_with' not in m['b'], 'the pairing became symmetric on its own'
+        assert 'chart_with' not in m['c'], 'a name that cannot be a field key got through'
+        f = profiles.history_fields(_profile(metrics=list(m.values())), 'es_ES')
+        assert f['a']['chart_with'] == ['b'], 'the pair died on the way to the screen'
+        assert f['a']['chart_label'] == 'Las dos', (
+            'a chart of both headed with the name of one half is a chart that lies')
+        assert f['b']['chart_label'] == '', 'the companion is not the one that names it'
+
+    def test_a_switchs_traffic_is_one_chart_and_not_two(self):
+        f = profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')
+        assert f['if_total_in']['chart_with'] == ['if_total_out']
+        assert 'all ports' in f['if_total_in']['chart_label'], (
+            f'the combined chart is called {f["if_total_in"]["chart_label"]!r}')
+        for key in ('if_total_in', 'if_total_out'):
+            assert f[key]['headline'] and f[key]['chart'] == 'area'
+
+    def test_the_types_a_real_switch_answers_have_a_word(self):
+        """IANA's list runs past 300 and a profile writes down what a person meets. The rest
+        came out as a bare number in a row of words — "1 22" under a heading that says
+        "Interface type" reads as a label the panel lost, not as a value nobody has named."""
+        st = {x['key']: x for x in profiles.catalog()['if_generic']['metrics']}['if_type']
+        # Reported from a live switch: a console port (22) and a tunnel (131) beside the
+        # ports, the VLANs and the aggregate.
+        for kind in ('1', '6', '22', '24', '53', '117', '131', '135', '161'):
+            assert kind in st['states'], f'ifType {kind} has no word'
+        assert 'VLAN' in st['states']['53']['label']['en_EN']
+
+    def test_counting_does_not_replace_the_rows(self):
+        """The per-port values stay exactly as they were: the tally is a summary BESIDE them,
+        and the Measures tab is still where you find out which port is down."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')}
+        rows = [{'module': 'snmp', 'key': f'sw/{n}', 'name': 'sw', 'row': n, 'ts': 't',
+                 'data': {'if_oper': v, '_attrs': {'if_generic': {'kind': '6'}}}}
+                for n, v in (('gi1', 1), ('gi2', 1), ('gi3', 2))]
+        out = infra.metrics(rows, fields)
+        tally = [m for m in out if m['headline'] == 'tally' and m['field'] == 'if_oper'][0]
+        assert tally['counts'] == {'1': 2, '2': 1}
+        assert tally['value'] == 3, 'the total is what the counts add up to'
+        assert tally['row'] == '', 'a tally is about the box and not about one row'
+        assert len([m for m in out if m['headline'] != 'tally']) == 3
+
+    def test_only_the_rows_the_table_calls_ports_are_counted(self):
+        """IF-MIB counts everything a switch has an ifIndex for — the VLANs, the link
+        aggregations, the loopback — so a 24-port switch reported "60 in total", which is true
+        of the MIB and wrong about the box. Filtered by what the DEVICE said each row is
+        (`ifType`), not by its name: what counts as a port is the MIB's answer."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')}
+
+        def _row(name, oper, kind):
+            return {'module': 'snmp', 'key': f'sw/{name}', 'name': 'sw', 'row': name,
+                    'ts': 't', 'data': {'if_oper': oper,
+                                        '_attrs': {'if_generic': {'kind': str(kind)}}}}
+
+        rows = [_row('gi1', 1, 6), _row('gi2', 2, 6),
+                _row('vlan1', 1, 135), _row('lo', 1, 24), _row('lag1', 1, 161)]
+        out = infra.metrics(rows, fields)
+        tally = [m for m in out if m['headline'] == 'tally' and m['field'] == 'if_oper'][0]
+        assert tally['counts'] == {'1': 1, '2': 1} and tally['value'] == 2
+
+    def test_a_tally_can_be_about_the_whole_table_instead(self):
+        """`true` counts the rows the table says its summary is about — the ports of a switch,
+        not its VLANs. `"all"` counts every row, which is what a column answering "what KIND of
+        thing is this row" needs: it is the one summary whose subject is precisely the rows the
+        other one leaves out."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'gauge', 'tally': 'all',
+             'states': {'1': {'label': 'x', 'level': 'info'}}},
+            {'key': 'b', 'walk': '1.2.4', 'kind': 'gauge', 'tally': True,
+             'states': {'1': {'label': 'x', 'level': 'info'}}},
+            {'key': 'c', 'walk': '1.2.5', 'kind': 'gauge', 'tally': 'nonsense',
+             'states': {'1': {'label': 'x', 'level': 'info'}}}]))['metrics']
+        assert [x.get('tally') for x in m] == ['all', True, True], (
+            'a word nobody knows falls back to the table rule, which is the safer of the two')
+
+    def test_the_vlans_and_the_aggregates_are_counted_too(self):
+        """A switch reports them and they are not ports: the ports tally leaves them out on
+        purpose, so the count of what each row IS is what answers "how many VLANs".
+
+        Reported from a real switch: its VLANs come back as `propVirtual(53)` and not as
+        `l2vlan(135)`, which the IANA list allows and half the vendors do."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')}
+
+        def _row(name, kind):
+            return {'module': 'snmp', 'key': f'sw/{name}', 'name': 'sw', 'row': name,
+                    'ts': 't', 'data': {'_attrs': {'if_generic': {'kind': str(kind)}}}}
+
+        out = infra.metrics([_row('gi1', 6), _row('110', 53), _row('120', 53),
+                             _row('Po1', 161), _row('lo', 24)], fields)
+        kinds = [m for m in out if m['field'] == 'if_type' and m['headline'] == 'tally'][0]
+        assert kinds['counts'] == {'6': 1, '53': 2, '161': 1, '24': 1}
+        assert 'VLAN' in kinds['states']['53']['label'], (
+            'the type a switch actually uses for a VLAN has to READ as one')
+        assert 'LAG' in kinds['states']['161']['label']
+
+    def test_the_type_of_a_row_is_counted_where_it_was_already_recorded(self):
+        """`if_type` is a FACT — what the port filter matches on, recorded as an attribute and
+        never as a series. Counting it needed a number, and reading the same column twice to
+        get one meant a series per interface of a value that never changes. So the count reads
+        the fact instead, which also means it works on data already on disk."""
+        m = {x['key']: x for x in profiles.catalog()['if_generic']['metrics']}
+        assert m['if_type']['kind'] == 'text' and m['if_type']['role'] == 'kind'
+        assert m['if_type']['tally'] == 'all'
+        assert 'if_kind' not in m, 'the numeric copy of ifType is back'
+        f = profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')
+        assert f['if_type']['tally_role'] == 'kind', (
+            'the count has no way to know which of the row facts it is counting')
+
+    def test_a_component_the_device_says_it_does_not_have_is_not_news(self):
+        """Reported from a passive switch: "Fan: not present" on the summary. It is true, and
+        the summary answers "how is this box" — a component the box says it does not have has
+        no condition to report. It stays in Measures, where the question is what it said."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['linksys_switch'],
+                                                  'en_EN')}
+
+        def _row(name, value):
+            return {'module': 'snmp', 'key': f'sw/{name}', 'name': 'sw', 'row': name,
+                    'ts': 't', 'data': {'lks_fan_state': value}}
+
+        out = {m['row']: m['headline'] for m in infra.metrics(
+            [_row('fan1', 5), _row('fan2', 1), _row('fan3', 3)], fields)}
+        assert out == {'fan1': False, 'fan2': True, 'fan3': True}, out
+
+    def test_absent_survives_the_state_whitelist(self):
+        """`_states` rebuilds every state rather than copying it — a profile is data an
+        administrator writes — which makes it a whitelist, and a whitelist that does not grow
+        drops the new key in the one place that would not raise about it."""
+        m = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'oid': '1.2.3', 'kind': 'gauge', 'states': {
+                '5': {'label': 'Not there', 'level': 'info', 'absent': True},
+                '1': {'label': 'Fine', 'level': 'ok'}}}]))['metrics'][0]
+        assert m['states']['5'].get('absent') is True
+        assert 'absent' not in m['states']['1'], 'only where it was declared'
+        f = profiles.history_fields({'id': 'p', 'metrics': [m]}, 'en_EN')
+        assert f['a']['states']['5'].get('absent') is True, 'it died on the way to the screen'
+
+    def test_the_switch_reports_its_vlans_where_every_tool_reads_them(self):
+        """The interface table only says a row is "virtual": it cannot say which VLAN it is,
+        what it is called, or that it exists at all when nothing is bridged to it yet."""
+        cat = profiles.catalog()
+        assert 'bridge_vlans' in cat
+        m = cat['bridge_vlans']['metrics'][0]
+        assert m['walk'] == '1.3.6.1.2.1.17.7.1.4.3.1.1', 'that is not dot1qVlanStaticName'
+        assert m['role'] == 'vlan' and m['of_device'] is True
+        assert 'bridge_vlans' in profiles.expand(cat, ['grp_network'])
+
+    def test_the_interface_table_says_which_of_its_rows_are_ports(self):
+        rule = profiles.catalog()['if_generic'].get('headline_rows') or {}
+        assert rule.get('role') == 'kind' and list(rule.get('any') or ()) == ['6'], rule
+
+    def test_a_row_that_does_not_say_what_it_is_is_not_counted(self):
+        """The same rule the row summaries follow: a row the filter column says nothing about
+        is not one the filter admits. A tally is a claim about a number of things, and
+        counting the ones it cannot identify would be the panel guessing."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')}
+        out = infra.metrics([{'module': 'snmp', 'key': 'x/lo', 'name': 'x', 'row': 'lo',
+                              'ts': 't', 'data': {'if_oper': 1}}], fields)
+        assert [m for m in out if m['headline'] == 'tally'] == []
+
+    def test_a_device_with_one_interface_is_still_counted(self):
+        """A count of one is a count. Skipping it would make the tile appear and disappear
+        depending on how many interfaces a machine happens to have."""
+        from lib.core.infra import service as infra          # noqa: PLC0415
+        fields = {'snmp': profiles.history_fields(profiles.catalog()['if_generic'], 'en_EN')}
+        out = infra.metrics([{'module': 'snmp', 'key': 'x/eth0', 'name': 'x', 'row': 'eth0',
+                              'ts': 't',
+                              'data': {'if_oper': 1,
+                                       '_attrs': {'if_generic': {'kind': '6'}}}}], fields)
+        counts = {m['field']: m['counts'] for m in out if m['headline'] == 'tally'}
+        assert counts == {'if_oper': {'1': 1}, 'if_type': {'6': 1}}
+
+    def test_every_device_has_something_to_say_about_itself(self):
+        """A blank Details tab reads as a machine that answered nothing, and it was what a
+        switch got: none of the profiles it carries flagged anything. Uptime is the one figure
+        every agent answers and it belongs to "how is this box" — a device that rebooted an
+        hour ago is news."""
+        f = profiles.history_fields(profiles.catalog()['sys_generic'], 'en_EN')
+        assert f['uptime']['headline'], 'a device with only the generic profiles shows nothing'
+
+    def test_a_switch_answers_how_it_is_too(self):
+        """The vendor profile and not the interface one. A switch's condition is its CPU, its
+        temperature, its fans and its power supplies; flagging the interface counters instead
+        would put fifty ports on the summary of every NAS and hypervisor in the fleet."""
+        f = profiles.history_fields(profiles.catalog()['linksys_switch'], 'en_EN')
+        flagged = {k for k, v in f.items() if v.get('headline')}
+        assert flagged == {'lks_cpu_1m', 'lks_power', 'lks_unit_temp',
+                           'lks_fan_state', 'lks_psu_state'}, flagged
+        assert 'if_generic' not in profiles.catalog()['linksys_switch'].get('includes', [])
+
+    def test_a_fan_reads_as_a_word_and_not_as_a_three(self):
+        """The state a switch reports about its own hardware is the one thing on that summary
+        somebody acts on. An integer there is a column nobody can act on."""
+        f = profiles.history_fields(profiles.catalog()['linksys_switch'], 'en_EN')
+        for key in ('lks_fan_state', 'lks_psu_state'):
+            states = f[key].get('states') or {}
+            assert states.get('1', {}).get('level') == 'ok', key
+            assert states.get('3', {}).get('level') == 'bad', key
+            assert '7' not in states, (
+                'a value the convention does not fix keeps its number — not knowing is a fine '
+                'thing to say, and a wrong word is not')
+
     def test_a_disk_says_how_it_is_and_how_hot_it_is(self):
         """Heat is the half of a disk's condition that moves. `diskHealthStatus` says "Normal"
         until the day it does not, while a drive climbing through the fifties is the same drive
@@ -975,3 +1399,166 @@ class TestTheHandfulSomebodyWantsFirst:
         ucd = profiles.history_fields(cat['ucd_linux'], 'en_EN')
         assert not any(ucd[k].get('headline') for k in ucd if k.startswith('mem_')), (
             'net-snmp memory is on the summary beside the HOST-RESOURCES stores')
+
+
+class TestWhenADownReadingIsNotAFault:
+    """A column says what something IS DOING; another says what somebody ASKED it to do.
+
+    Down while it was asked to be up is a fault. Down while it was asked to be DOWN is a
+    switch in the off position, and reporting that as a fault is reporting the administrator's
+    own decision back at them. Reported from the panel: two NAS counting `ovs-system`, `sit0`
+    and three VLAN interfaces among their down ports — every one of them administratively
+    down, and `docker0` on the same box admin-UP and genuinely down.
+    """
+
+    @staticmethod
+    def _oper(**extra):
+        base = {'key': 'if_oper', 'walk': '1.3.6.1.2.1.2.2.1.8', 'kind': 'gauge',
+                'states': {'1': {'label': 'Up', 'level': 'ok'},
+                           '2': {'label': 'Down', 'level': 'bad'},
+                           'off': {'label': 'Switched off', 'level': 'info'}}}
+        base.update(extra)
+        return profiles.normalise_metric(base)
+
+    def test_the_profile_names_the_column_that_excuses_this_one(self):
+        m = self._oper(quiet_when={'field': 'if_admin', 'equals': 2, 'state': 'off'})
+        assert m['quiet_when'] == {'field': 'if_admin', 'equals': '2', 'state': 'off'}
+
+    def test_the_value_is_compared_as_a_string(self):
+        """It is compared against a reading, and a reading arrives as a number: `2` and `"2"`
+        have to mean the same thing or the rule silently never matches."""
+        m = self._oper(quiet_when={'field': 'if_admin', 'equals': '2', 'state': 'off'})
+        assert m['quiet_when']['equals'] == '2'
+
+    def test_a_rule_pointing_at_a_state_that_does_not_exist_is_dropped(self):
+        """A substitution that lands nowhere leaves the reading judged exactly as it was,
+        wearing a declaration that says otherwise — which is worse than not declaring it."""
+        assert 'quiet_when' not in self._oper(
+            quiet_when={'field': 'if_admin', 'equals': 2, 'state': 'nope'})
+
+    def test_and_so_is_one_that_names_no_column_or_no_value(self):
+        for bad in ({'equals': 2, 'state': 'off'},
+                    {'field': 'if_admin', 'state': 'off'},
+                    {'field': 'if admin', 'equals': 2, 'state': 'off'},
+                    {'field': 'if_admin', 'equals': 2},
+                    'if_admin', None, []):
+            assert 'quiet_when' not in self._oper(quiet_when=bad), bad
+
+    def test_a_metric_with_no_states_has_nothing_to_substitute(self):
+        m = profiles.normalise_metric({'key': 'if_speed', 'walk': '1.3.6.1.2.1.2.2.1.5',
+                                        'kind': 'gauge',
+                                        'quiet_when': {'field': 'if_admin', 'equals': 2,
+                                                       'state': 'off'}})
+        assert 'quiet_when' not in m
+
+    def test_the_shipped_interface_profile_declares_it(self):
+        """And declares it against the STANDARD column, so it is true of every device that
+        answers IF-MIB rather than of the two that were reported."""
+        cat = profiles.catalog()
+        oper = next(m for m in cat['if_generic']['metrics'] if m['key'] == 'if_oper')
+        rule = oper.get('quiet_when') or {}
+        assert rule.get('field') == 'if_admin' and rule.get('equals') == '2'
+        assert rule['state'] in oper['states']
+        admin = next(m for m in cat['if_generic']['metrics'] if m['key'] == 'if_admin')
+        assert admin['walk'] == '1.3.6.1.2.1.2.2.1.7', 'ifAdminStatus is not what it reads'
+
+    def test_switched_off_is_its_own_state_and_not_a_quiet_down(self):
+        """Reported in those words: it is not down, it is off. A reading relabelled `Down`
+        with the colour taken out still says the wrong thing on the card."""
+        cat = profiles.catalog()
+        oper = next(m for m in cat['if_generic']['metrics'] if m['key'] == 'if_oper')
+        off = oper['states'][oper['quiet_when']['state']]
+        assert off['level'] == 'info'
+        assert off['label']['es_ES'] != oper['states']['2']['label']['es_ES']
+
+
+class TestAStateCanCarryItsOwnMark:
+    """The screen draws one mark per LEVEL and `info` deliberately draws none: that is the
+    level for "this is what it answered", and every interface TYPE is `info` — a VLAN is not
+    better or worse than a port — so a grey dot in front of all six is six pixels of nothing.
+    "Switched off" is `info` too and is the exact opposite: the one thing somebody scanning a
+    rail of interfaces wants to pick out. Only the profile knows which is which."""
+
+    def test_a_state_may_declare_an_icon(self):
+        m = profiles.normalise_metric({
+            'key': 'if_oper', 'walk': '1.3.6.1.2.1.2.2.1.8', 'kind': 'gauge',
+            'states': {'1': {'label': 'Up', 'level': 'ok'},
+                       'off': {'label': 'Off', 'level': 'info', 'icon': 'bi-power'}}})
+        assert m['states']['off']['icon'] == 'bi-power'
+        assert 'icon' not in m['states']['1']
+
+    def test_anything_that_is_not_an_icon_name_is_dropped(self):
+        for bad in ('power', '<i>', 'bi-' + 'x' * 60, '', None, 7):
+            m = profiles.normalise_metric({
+                'key': 'k', 'walk': '1.2.3', 'kind': 'gauge',
+                'states': {'1': {'label': 'Up', 'level': 'info', 'icon': bad}}})
+            assert 'icon' not in m['states']['1'], bad
+
+    def test_it_survives_the_projection_to_the_screen(self):
+        """`states_of` REBUILDS each state rather than copying it — the right shape for
+        something that reaches a screen, and also how a declaration goes missing. The profile
+        said `icon`, the normaliser kept it, and the projection dropped it: the state arrived
+        with nothing to draw and nothing anywhere said why."""
+        cat = profiles.catalog()
+        oper = next(m for m in cat['if_generic']['metrics'] if m['key'] == 'if_oper')
+        seen = profiles.states_of(oper, 'es_ES')
+        assert seen[oper['quiet_when']['state']].get('icon'), (
+            'the mark never reaches the panel')
+        assert not seen['2'].get('icon'), 'a state that declared none was given one'
+
+
+class TestAReadingThatAnotherColumnExcuses:
+    """`quiet_when`, where it is applied: the panel's own projection of a reading.
+
+    A column says what something IS DOING, another says what somebody ASKED it to do. Down
+    while it was asked to be up is a fault; down while it was asked to be DOWN is a switch in
+    the off position, and reporting that as a fault is reporting the administrator's own
+    decision back at them.
+    """
+
+    RULE = {'quiet_when': {'field': 'if_admin', 'equals': '2', 'state': 'off'}}
+
+    @staticmethod
+    def _key(meta, data, raw):
+        from lib.core.infra.service import _quiet_key       # noqa: PLC0415
+        return _quiet_key(meta, data, raw)
+
+    def test_a_row_that_was_asked_to_be_down_counts_as_switched_off(self):
+        assert self._key(self.RULE, {'if_oper': 2, 'if_admin': 2}, '2') == 'off'
+
+    def test_a_row_that_was_asked_to_be_up_is_still_down(self):
+        """`docker0` on the machines this was reported from: the box says it is meant to be
+        up, so it is a fault and has to go on saying so."""
+        assert self._key(self.RULE, {'if_oper': 2, 'if_admin': 1}, '2') == '2'
+
+    def test_a_row_the_evidence_is_missing_from_is_not_excused(self):
+        """Silence is not permission: a row with no reading of the other column excused would
+        quietly stop reporting the faults this exists to keep reporting."""
+        assert self._key(self.RULE, {'if_oper': 2}, '2') == '2'
+        assert self._key(self.RULE, None, '2') == '2'
+
+    def test_no_rule_changes_nothing(self):
+        assert self._key({}, {'if_admin': 2}, '2') == '2'
+        assert self._key({'quiet_when': {}}, {'if_admin': 2}, '2') == '2'
+
+    def test_it_excuses_the_ROW_and_not_the_COLUMN(self):
+        """Two ports of one switch answering the same thing: one with nothing plugged into it,
+        one turned off. Not the same answer, and they must not be counted together."""
+        rows = [{'if_oper': 2, 'if_admin': 1}, {'if_oper': 2, 'if_admin': 2}]
+        assert [self._key(self.RULE, r, '2') for r in rows] == ['2', 'off']
+
+    def test_the_value_compares_across_types(self):
+        """The rule is written in JSON and the reading arrives as a number."""
+        assert self._key(self.RULE, {'if_admin': 2.0}, '2') == 'off'
+        assert self._key(self.RULE, {'if_admin': '2'}, '2') == 'off'
+
+    def test_the_count_and_the_badge_read_the_same_row_the_same_way(self):
+        """Both come out of `metrics()`, and a card that says "2 switched off" over a rail of
+        red octagons is one screen contradicting itself."""
+        from tests.helpers import _read                  # noqa: PLC0415
+        root = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+        src = _read(os.path.join(root, 'lib', 'core', 'infra', 'service.py'))
+        body = src.split('def metrics(')[1].split(chr(10) + 'def ')[0]
+        assert body.count('_quiet_key(meta, data, _state_key(value))') == 2, (
+            'the tally and the payload no longer agree about which state a row is in')
+        assert "'state_key'" in body, 'the screen is left to work it out again'

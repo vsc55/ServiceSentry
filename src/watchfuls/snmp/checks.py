@@ -48,17 +48,30 @@ class SnmpChecks:
         # and a device may well be worth one and not the other.
         items: list[tuple[str, dict, dict]] = []
         sampled: list[tuple[str, dict]] = []
-        bound: set[str] = set()      # hosts an item speaks for, enabled or not
+        bound: set[str] = set()      # hosts an item SAMPLES, enabled or not
+        unsampled: dict = {}         # …and ones it only checks, which is worth saying
         for srv_key, srv in self.get_conf('servers', {}).items():
             if not isinstance(srv, dict):
                 continue
+            # Covered means "this item SAMPLES it", which is why the condition is the
+            # profiles and not merely the binding. Reported from the panel: a switch whose
+            # SNMP profile test returned OIDs was in nobody's collection, because the module
+            # item bound to it carried OID checks and no device profiles — so it claimed the
+            # host from the registry fallback and then sampled nothing. A device sampled by
+            # nobody, with no error anywhere and no line on any screen.
+            #
             # Collected BEFORE the enabled gate on purpose: a disabled item still speaks for
             # its host. Somebody switched that device off, and resuming it from the other end
             # because the configuration also lives on the host would be an upgrade quietly
-            # undoing a decision.
+            # undoing a decision. That is about a decision somebody made; an item with no
+            # profiles is not a decision about sampling at all.
             _uid = str(srv.get('host_uid') or '').strip()
-            if _uid:
+            if _uid and self.profiles_of(srv):
                 bound.add(_uid)
+            elif _uid and (srv.get('checks') or {}):
+                # …and one that only holds checks is worth SAYING, because from the outside
+                # "collect now" on that device looks like a button that does nothing.
+                unsampled[_uid] = str(srv.get('label') or '').strip() or _uid
             if not srv.get('enabled', _SERVER_DEFAULTS['enabled']):
                 continue
             if self.profiles_of(srv):
@@ -75,6 +88,16 @@ class SnmpChecks:
         # device — the thing that decided it was worth looking at.
         sampled.extend(_devices.devices_to_sample(
             getattr(self._monitor, '_hosts_store', None), bound))
+
+        # Whoever is watching gets told about the devices this module will NOT sample, once
+        # and by name. Silence is what made the reported bug unreadable: the device somebody
+        # pressed the button for simply was not in the list, alongside two that were.
+        left = {uid: name for uid, name in unsampled.items()
+                if uid not in {str((s or {}).get('host_uid') or '') for _k, s in sampled}}
+        if left:
+            self.report_progress(', '.join(sorted(left.values())),
+                                 step=self._msg('snmp_step_unsampled',
+                                                lang=self.watcher_lang()))
 
         # Friendly label per result key (keys are opaque "<srv_uid>.<chk_uid>").
         labels = {k: (str(c.get('label') or '').strip() or k) for k, c, _ in items}

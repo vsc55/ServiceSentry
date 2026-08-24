@@ -24,7 +24,7 @@ durante la espera.
 | Entre módulos (un ciclo) | `ThreadPoolExecutor` compartido | `max_workers = min(nº módulos, 16)` | [executor.py:153](../src/lib/services/monitoring/executor.py#L153) |
 | Entre items (dentro de un módulo) | `ThreadPoolExecutor` por módulo | `max_workers = workers` (config del módulo) | [module_base.py:88](../src/lib/modules/module_base.py#L88) |
 | Camino legacy `Monitor.check()` | `ThreadPoolExecutor` propio | `max_workers = max_threads` | [monitor.py:822](../src/lib/services/monitoring/monitor.py#L822) |
-| Notificaciones | **síncrono** en `flush()` al final del ciclo | — (sin hilo de fondo) | [executor.py:193](../src/lib/services/monitoring/executor.py#L193) |
+| Notificaciones | **síncrono** en `flush()` al final del ciclo | — (sin hilo de fondo) | [executor.py:268](../src/lib/services/monitoring/executor.py#L268) |
 
 El **on-demand** (botón "ejecutar checks" de la UI) y el **scheduler** comparten el mismo
 `run_checks` de [executor.py](../src/lib/services/monitoring/executor.py); solo difieren en el

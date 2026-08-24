@@ -1112,7 +1112,8 @@ class SnmpActions:
 
         job_id = uuid.uuid4().hex[:12]
         steps = _TestSteps(str(cfg.get('host') or ''))
-        _test_jobs[job_id] = {'done': False, 'steps': steps, 'result': None}
+        _test_jobs[job_id] = {'done': False, 'steps': steps, 'result': None,
+                              '_started': time.time()}
 
         def _run():
             try:

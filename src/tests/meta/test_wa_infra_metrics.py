@@ -193,6 +193,17 @@ class TestAValueIsShownAtTheSizeItIs:
         assert '1024' in body, 'bytes scaled in thousands — not what an agent means by B'
         assert 'KiB' in body and 'TiB' in body
 
+    def test_a_rate_climbs_in_thousands(self):
+        """A gigabit is 10^9 bits per second by definition — it is what is printed on the
+        port, on the cable and on the invoice — so scaling it in 1024s would answer 0.93 to a
+        question everybody already knows the answer to. Bytes go the other way because an
+        agent reporting memory and disk means 1024, and the two rules differ for that reason
+        and not by oversight. Matched on the SHAPE of the unit, so a profile that starts
+        reporting frames per second reads properly without this function learning the word."""
+        body = _fn(_js(), '_fmtMeasure')
+        assert "unit.slice(-2) === '/s'" in body, 'a rate is printed at its base magnitude'
+        assert "'k', 'M', 'G'" in body and '1000' in body
+
     def test_seconds_become_the_unit_worth_reading(self):
         body = _fn(_js(), '_fmtMeasure')
         assert "86400, 'd'" in body and "3600, 'h'" in body
@@ -278,7 +289,10 @@ class TestAStateIsAWordAndNotAnInteger:
         js = _js()
         assert 'function _infraState' in js, 'nothing turns a state into a word'
         body = _fn(js, '_infraState')
-        assert 'm.states[String(m.value)]' in body
+        assert 'm.states[m.state_key || String(m.value)]' in body, (
+            'the badge reads the raw value again — a reading whose own value is not the '
+            'whole answer (a port down because somebody switched it off) is drawn as '
+            'whatever it would have been without the rule that excused it')
 
     def test_a_value_the_map_does_not_cover_keeps_its_number(self):
         """The profiles are filled in one MIB at a time, and not knowing is a fine thing to
@@ -1234,7 +1248,7 @@ class TestOneRowsWholeStory:
         the next line, which reads as two things. Truncated with the whole of it on the hover,
         which is what the rest of the panel does with a value that will not fit."""
         body = _fn(self._src(), '_infraRowFactsHtml')
-        assert 'text-truncate' in body and 'title="${escAttr(a.value)}"' in body
+        assert 'text-truncate' in body and 'title="${escAttr(text)}"' in body
         css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
         grid = css.split('.ss-factgrid {')[1].split('}')[0]
         assert 'word-break' not in grid, 'the browser is still told to split a part number'
@@ -1367,3 +1381,366 @@ class TestHowIsThisMachineStill:
         body = self._src()
         assert 'flagged.filter(m => m.row)' in body
         assert 'm.row_group' in body, 'two disks called "Drive 1" would merge'
+
+
+class TestTwoColumnsThatAreOnePicture:
+    """Traffic in and traffic out are one question. Two charts side by side, on two y-scales
+    fitted separately, is that comparison made impossible — and two cards showing the two
+    numbers is the same comparison left to the reader as arithmetic."""
+
+    def _js(self):
+        return _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra',
+                                  '_details.html'))
+
+    def test_the_pair_is_one_card(self):
+        det = self._js()
+        pane = _fn(det, '_infraDetailsPane')
+        assert 'mated' in pane and 'chart_with' in pane, (
+            'a figure named by another as its companion still gets a card of its own')
+        tile = _fn(det, '_infraDetailTile')
+        assert '_infraChartMates(m)' in tile and '[m, ...mates]' in tile, (
+            'the card shows one of the two numbers it is about')
+        assert 'm.chart_label' in tile, (
+            'the combined card is headed with the name of one half of it')
+
+    def test_the_companion_comes_from_the_payload_and_not_from_a_second_call(self):
+        """They are columns of ONE result, so every point of the series already carries both
+        numbers — the pairing costs no extra request, and a second one would be two windows of
+        the same picture free to disagree."""
+        metrics = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra',
+                                     '_metrics.html'))
+        mates = _fn(metrics, '_infraChartMates')
+        assert 'x.module === m.module' in mates and 'x.key === m.key' in mates
+        assert 'apiGet' not in mates and 'await' not in mates
+        chart = _fn(metrics, '_infraChart')
+        assert chart.count('apiGet') == 1, 'a paired chart asks twice'
+
+    def test_a_companion_the_device_never_answered_is_not_drawn(self):
+        """A profile can declare a pair whose second half this box does not serve. An empty
+        line with a name on the legend is a chart claiming a series that is not there."""
+        chart = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'history',
+                                   '_chart.html'))
+        draw = _fn(chart, '_historyDraw')
+        assert 'const mates = (extra || []).filter' in draw
+        assert "typeof (p.data || {})[x.field] === 'number'" in draw, (
+            'a declared companion is drawn whether or not the payload carries it')
+
+    def test_the_axis_holds_every_series_on_it(self):
+        """Fitted to the first series alone, the second is drawn off the top of the box — which
+        is the same lie as two charts on two scales, with less warning."""
+        chart = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'history',
+                                   '_chart.html'))
+        draw = _fn(chart, '_historyDraw')
+        assert 'vals.concat(...mateVals)' in draw, 'the y-range is fitted to one of them'
+
+    def test_with_two_lines_the_colour_names_them(self):
+        """One series is coloured by whether the device was up, one segment at a time. With two
+        on the axis the eye has to tell the lines apart first, and the strip under the chart
+        already answers the other question for every series at once."""
+        chart = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'history',
+                                   '_chart.html'))
+        draw = _fn(chart, '_historyDraw')
+        assert 'MATE_COLOURS' in draw and "'#0d6efd'" in draw
+        assert 'mates.length ? MATE_COLOURS[0]' in draw, 'status colouring survives the pair'
+        assert 'ctx.fillRect(lx' in draw, 'two lines and nothing saying which is which'
+
+
+class TestAShapeGetsALineOfItsOwn:
+    """Reported from the screen: four cards across left the traffic chart about 380 px wide,
+    with a week of two series in it and a y-axis whose labels ran into the axis title. A number
+    is a card; a shape is a figure, and a figure sharing a row with three numbers is one nobody
+    reads."""
+
+    def _det(self):
+        return _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra',
+                                  '_details.html'))
+
+    def test_a_card_that_draws_takes_the_line_it_is_on(self):
+        tile = _fn(self._det(), '_infraDetailTile')
+        assert "auto ? '100%' : '11rem'" in tile, 'a chart shares its row again'
+
+    def test_the_plain_figures_come_first(self):
+        """A full-width card in the middle of the run leaves the cards before it stranded on a
+        line of their own, with the rest of that line empty."""
+        pane = _fn(self._det(), '_infraDetailsPane')
+        assert '_infraWantsChart(a)' in pane, 'the order no longer knows which cards draw'
+
+    def test_one_answer_to_whether_a_figure_draws(self):
+        """The tile and the order it is drawn in have to agree, or the sort puts a card at the
+        end that then renders narrow — or worse, leaves a full-width one in the middle."""
+        det = self._det()
+        assert 'function _infraWantsChart(' in det
+        tile = _fn(det, '_infraDetailTile')
+        assert '_infraWantsChart(m, shape)' in tile
+        assert "m.chart === 'area'" not in tile, 'the tile decides again, on its own'
+
+
+class TestAnAxisIsReadOrItIsDecoration:
+
+    def _chart(self):
+        return _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'history',
+                                  '_chart.html'))
+
+    def test_the_labels_are_scaled(self):
+        """"13420000B/s" is a number nobody reads, and on a narrow chart it ran into the axis
+        title. Through the same scaler as every other value on the screen."""
+        draw = _fn(self._chart(), '_historyDraw')
+        assert '_fmtMeasure' in draw and 'axisDiv' in draw
+        assert '_hFmtNum(v / axisDiv) + axisUnit' in draw, 'the axis prints its base unit again'
+
+    def test_the_gutter_is_measured_and_not_guessed(self):
+        """58 px was enough for "8.50W" and not for "13.39MB/s", which ran straight into the
+        rotated axis title beside it — two pieces of text on top of each other. The labels are
+        composed BEFORE the padding that has to hold them, and the padding is their width."""
+        draw = _fn(self._chart(), '_historyDraw')
+        assert 'yLabels.map(l => ctx.measureText(l).width)' in draw, (
+            'the left gutter is a number somebody typed again')
+        assert 'l: 58' not in draw and "b: 38, l: 58" not in draw
+        assert draw.index('const yLabels') < draw.index('const PAD'), (
+            'the padding is decided before the labels it has to hold')
+        assert "(metricLabel ? 24 : 10)" in draw, (
+            'no room kept for the rotated title, which is drawn inside that gutter')
+
+    def test_one_unit_for_the_whole_axis(self):
+        """Scaling each label on its own gives "13.4 MB/s" above "980 kB/s" — an axis that
+        changes unit halfway up and cannot be read at a glance. The top decides for all."""
+        draw = _fn(self._chart(), '_historyDraw')
+        assert 'Math.max(Math.abs(ymin), Math.abs(ymax))' in draw
+
+    def test_the_scaler_is_asked_for_and_not_assumed(self):
+        """History is a section of its own and must still draw when the infrastructure bundle
+        is not on the page — `_fmtMeasure` lives over there."""
+        draw = _fn(self._chart(), '_historyDraw')
+        assert "typeof _fmtMeasure === 'function'" in draw
+        assert 'axis ? axis.unit : unit' in draw, 'no fallback to the unit it was given'
+
+
+class TestAChartCanHaveTheWholePage:
+    """A week of two series in a 380 px card is a shape you can see and not one you can read.
+
+    This was the browser's own full screen, which answers that by taking the panel away with
+    the picture: no sidebar, no breadcrumb, nothing around the chart, and a way out that is a
+    browser gesture rather than something on the page — and it can be refused outright by a
+    policy or an iframe. The card grows over the page instead, to 90 % of it, on a veil that
+    darkens and blurs what is behind. The margin left around it is what says the panel is
+    still there underneath rather than gone, and it is where somebody clicks to get out of
+    something they did not mean to open."""
+
+    def _js(self):
+        return _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra',
+                                  '_metrics.html'))
+
+    def test_the_control_sits_with_the_one_that_draws_the_chart(self):
+        """It was floating in the corner of the picture, where the one thing it covered was
+        the picture — the corner a legend and the newest point share. And only where the
+        controls are already a group of icons: the measurements table is one row per reading,
+        and a second button on every one of six hundred is texture and not a control."""
+        js = self._js()
+        link = _fn(js, '_infraChartLink')
+        assert '_infraChartZoom(' in link and 'infra_chart_zoom' in link
+        assert 'btn-group' in link, 'two loose buttons where the card had one'
+        assert link.index('_infraChartZoom(') < link.index('btn-link'), (
+            'the expand button reached the table of six hundred readings')
+        chart = _fn(js, '_infraChart')
+        assert 'ss-chartfull' not in chart, 'the button is back on top of the picture'
+
+    def test_the_control_is_there_only_while_a_chart_is(self):
+        """Reported from the screen: a card showing one number — a processor temperature —
+        carried an expand button beside the one that draws the chart. Expanding a picture that
+        is not there is not an offer; it is a second icon on every card that has a series,
+        which is how a pair of controls stops reading as controls and starts reading as
+        texture."""
+        js = self._js()
+        link = _fn(js, '_infraChartLink')
+        expand = link.split('_infraChartZoom(')[0]
+        assert 'd-none' in link.split('_infraChartZoom(')[1].split('</button>')[0] \
+            or 'd-none' in expand.rsplit('<button', 1)[-1], 'it does not start hidden'
+        assert 'bi-graph-up' not in link.split('d-none')[0].rsplit('<button', 1)[-1], (
+            'the button that OPENS the chart was hidden too — then nothing can open one')
+        chart = _fn(js, '_infraChart')
+        assert chart.count('_infraZoomShown(') == 3, (
+            'the three ways a chart ends do not all agree about the button: closed, '
+            'drawn, and a series with no history to draw')
+
+    def test_it_draws_the_chart_it_was_asked_to_enlarge(self):
+        """Kept although the button is only on screen while a chart is: it is what makes this
+        safe to call from anywhere, and an expanded empty box is what it avoids."""
+        zoom = _fn(self._js(), '_infraChartZoom')
+        assert "box.dataset.open !== '1'" in zoom and 'await _infraChart(i)' in zoom
+
+    def test_a_series_with_no_history_is_not_a_picture(self):
+        """`dataset.open` does not answer whether there is one: a device with nothing recorded
+        yet leaves the box open with a line of text in it, and the work area filled with "no
+        data yet" is not what the button offered. `ss-chartbox` is put there by the drawing
+        and by nothing else."""
+        zoom = _fn(self._js(), '_infraChartZoom')
+        assert "classList.contains('ss-chartbox')" in zoom
+
+    def test_it_takes_the_page_and_not_the_column_beside_the_sidebar(self):
+        """A chart is worth every pixel there is, and the sidebar is the one part of the panel
+        nobody is reading while they look at a week of traffic."""
+        js = self._js()
+        area = _fn(js, '_infraZoomArea')
+        assert 'window.innerWidth' in area and 'window.innerHeight' in area
+        assert 'ss-main' not in js, 'it is back to the column beside the sidebar'
+
+    def test_it_stops_short_of_the_edges(self):
+        """All of it would be a full screen with extra steps: the margin is what keeps the
+        panel visible underneath, and what somebody clicks to get out."""
+        js = self._js()
+        fill = float(js.split('_INFRA_ZOOM_FILL = ')[1].split(';')[0])
+        assert 0.5 < fill < 1, f'{fill} is not a margin'
+        area = _fn(js, '_infraZoomArea')
+        assert '_INFRA_ZOOM_FILL' in area
+        assert area.count('/ 2)') == 2, 'it is not centred — the margin is all on one side'
+
+    def test_there_is_a_veil_between_the_card_and_the_page(self):
+        """It does two jobs and they are the same job: it darkens and blurs what is behind so
+        the chart is what the eye lands on, and it catches the click outside — the gesture
+        anybody tries before they look for a button."""
+        js = self._js()
+        back = _fn(js, '_infraZoomBack')
+        assert "addEventListener('click'" in back and '_infraZoomOut()' in back
+        assert 'ss-zoom-back' in back
+        out = _fn(js, '_infraZoomOut')
+        assert 'z.back.parentNode.removeChild' in out, (
+            'a transparent sheet over the whole page still swallows every click on it, and '
+            'the section would look alive and answer nothing')
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        veil = css.split('.ss-zoom-back {')[1].split('}')[0]
+        assert 'backdrop-filter: blur(' in veil and 'rgba(0, 0, 0' in veil, (
+            'the veil neither darkens nor blurs')
+        assert '-webkit-backdrop-filter' in veil, 'no blur on a WebKit browser'
+        assert 'opacity: 0' in veil and '.ss-zoom-back.show { opacity: 1; }' in css, (
+            'it appears at once, which is a flash of black rather than a fade')
+        z_back = int(veil.split('z-index:')[1].split(';')[0].strip())
+        z_card = int(css.split('.ss-zoom {')[1].split('}')[0]
+                     .split('z-index:')[1].split(';')[0].strip())
+        assert z_back < z_card, 'the veil is over the card it is supposed to be under'
+
+    def test_the_card_looks_lifted_and_not_pasted_on(self):
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        block = css.split('.ss-zoom {')[1].split('}')[0]
+        assert block.count('rgba(0, 0, 0') >= 2, (
+            'one flat shadow reads as a grey border rather than as height')
+        assert 'border-radius' in block, 'square corners on something floating over the page' 
+
+    def test_the_card_leaves_a_gap_the_size_of_itself(self):
+        """Without it the cards beside it close over the hole the moment one is expanded, and
+        giving it back drops it into a family that has rearranged itself."""
+        zoom = _fn(self._js(), '_infraChartZoom')
+        assert 'ss-zoom-hold' in zoom and 'insertBefore' in zoom
+        assert 'from.width' in zoom and 'from.height' in zoom
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-zoom-hold { visibility: hidden; }' in css, (
+            'the gap is removed rather than hidden, which is the reflow it exists to stop')
+
+    def test_there_are_two_frames_before_it_moves(self):
+        """In one, the browser coalesces the start and the end into the end state: the card
+        appears at full size with no movement to see, which is the animation not happening."""
+        zoom = _fn(self._js(), '_infraChartZoom')
+        assert zoom.count('requestAnimationFrame') == 2
+
+    def test_the_way_back_is_the_button_and_the_key(self):
+        js = self._js()
+        assert '_infraZoomOut()' in _fn(js, '_infraChartZoom'), 'the same button both ways'
+        assert "e.key !== 'Escape'" in js, 'Escape does not give the card back'
+        assert "querySelector('.modal.show')" in js, (
+            "Escape is taken from a dialog that is open, closing the card underneath instead "
+            "of the thing somebody is looking at")
+
+    def test_what_is_expanded_is_put_back_before_the_markup_is_rewritten(self):
+        """A card given back after the pane is redrawn is given back to a parent that is no
+        longer there. Both of the two places that rewrite it — the section, and the open
+        device, which refreshes in place."""
+        render = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra',
+                                    '_render.html'))
+        assert '_infraZoomOut(true)' in _fn(render, 'renderInfra')
+        assert '_infraZoomOut(true)' in _fn(render, '_infraReload')
+        out = _fn(self._js(), '_infraZoomOut')
+        assert 'document.body.contains' in out, 'it puts back a card that is already gone'
+
+    def test_the_auto_refresh_does_not_take_the_picture_away(self):
+        """This is the screen somebody leaves open on a wall, on a poll. A redraw underneath
+        an expanded chart closes it, so a thirty-second interval would take it back from
+        whoever expanded it, every thirty seconds — the same reason the tick already stands
+        aside for a running collection."""
+        render = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra',
+                                    '_render.html'))
+        tick = _fn(render, '_infraAutoTick')
+        assert '_infraZoom' in tick and 'return' in tick
+
+    def test_closing_the_chart_cannot_leave_a_card_the_size_of_the_screen(self):
+        """…with nothing in it, and a way back that is no longer on screen."""
+        chart = _fn(self._js(), '_infraChart')
+        assert '_infraZoomOut(true)' in chart
+
+    def test_nothing_is_left_pinned_where_it_was_dropped(self):
+        """The four properties are set inline to animate them, so they have to be taken off
+        again or the card keeps the size of the work area once it is back in the flow."""
+        out = _fn(self._js(), '_infraZoomOut')
+        assert "style.top = z.card.style.left = ''" in out
+        assert "style.width = z.card.style.height = ''" in out
+        assert "classList.remove('ss-zoom')" in out
+
+    def test_the_canvas_is_redrawn_at_its_new_size(self):
+        """A canvas is drawn at a pixel size and does not reflow: the box gets three times
+        wider and the picture stays where it was, stretched. After the card has finished
+        growing, not during, when its size is still changing."""
+        js = self._js()
+        assert '_INFRA_ZOOM_MS' in _fn(js, '_infraChartZoom')
+        assert '_infraChartRedraw' in _fn(js, '_infraChartZoom')
+        assert '_infraChartRedraw' in _fn(js, '_infraZoomOut')
+        assert "addEventListener('resize'" in js, 'a window resized leaves it the wrong size'
+        redraw = _fn(js, '_infraChartRedraw')
+        assert '_historyDraw(' in redraw and 'canvas._histMeta' in redraw
+        assert 'apiGet' not in redraw, 'resizing a chart re-fetches its series'
+
+    def test_the_expanded_card_sits_over_the_panel_and_under_a_dialog(self):
+        """Reported from the screen: the sidebar sat on top of the veil, undimmed, with an
+        open submenu over the chart. The panel puts more on screen than the sticky header,
+        and a number chosen to clear that one clears none of the others — so they are read
+        off the style sheet rather than written down here, and a sidebar raised tomorrow
+        fails this instead of covering the chart again."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        block = css.split('.ss-zoom {')[1].split('}')[0]
+        assert 'position: fixed' in block
+        z = int(block.split('z-index:')[1].split(';')[0].strip())
+
+        def _z(sel):
+            """The HIGHEST one declared for that selector, not the first block that carries
+            it: a selector is written more than once — a theme override, a media query — and
+            the veil has to clear whichever of them wins."""
+            found = [int(b.split('z-index:')[1].split(';')[0].strip())
+                     for b in css.split(sel + ' {')[1:]
+                     if 'z-index:' in b.split('}')[0]
+                     for b in [b.split('}')[0]]]
+            assert found, sel + ' declares no z-index any more'
+            return max(found)
+
+        for sel in ('.ss-sidebar', '.ss-sb-flyout', '.dropdown-menu'):
+            assert z > _z(sel), f'{sel} ({_z(sel)}) stays over the expanded card ({z})'
+        assert z < 1055, f'z-index {z} is over a dialog'
+
+    def test_the_browsers_own_full_screen_is_gone(self):
+        """Both halves of it: the call that asked for it and the rules that styled it. A
+        `:fullscreen` block nothing can enter is a rule that will be read as live."""
+        js = self._js()
+        for word in ('requestFullscreen', 'exitFullscreen', 'fullscreenchange',
+                     'fullscreenElement'):
+            assert word not in js, f'{word} outlived the mechanism it belonged to'
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert ':fullscreen' not in css
+
+    def test_the_height_is_a_class_and_not_a_style_attribute(self):
+        """…or the expanded rule would have to fight an inline style with `!important`."""
+        chart = _fn(self._js(), '_infraChart')
+        assert 'ss-charth' in chart and 'height:170px' not in chart
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-zoom .ss-charth' in css, 'the chart does not grow with the card'
+        assert '.ss-zoom > .ss-chartbox' in css, (
+            'the chart is not what takes the room the card gained — it keeps its 170 px and '
+            'the rest of the work area is empty')
+        block = css.split('.ss-zoom {')[1].split('}')[0]
+        assert 'background:' in block, (
+            'a transparent card over whatever it covers is a chart drawn on top of the page')

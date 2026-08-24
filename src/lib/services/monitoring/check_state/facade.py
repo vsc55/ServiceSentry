@@ -31,3 +31,17 @@ class DbBackedStatus(ConfigControl):
             return self._store.persist_status(
                 self.data, item_uid_resolver=self._uid_resolver)
         return True
+
+    def save_module(self, module: str):
+        """Write back the rows of ONE watchful.
+
+        For the caller that has just finished one and knows it: a run saves after every
+        module, and `save()` replaces the whole table — so eleven modules' rows were read
+        and rewritten to record the twelfth. Measured at ~60 ms a time on a fleet-sized
+        table, once per module, with every page load waiting behind it.
+        """
+        if self._store is None:
+            return True
+        return self._store.persist_module(
+            str(module or ''), (self.data or {}).get(module) or {},
+            item_uid_resolver=self._uid_resolver)

@@ -55,11 +55,13 @@ class _History:
 class _Monitor:
     """A monitor whose modules are functions: name → seconds to take."""
 
-    def __init__(self, delays):
+    def __init__(self, delays, per_module=True):
         self._delays = delays
         self.debug = type('D', (), {'print': staticmethod(lambda *a, **k: None)})()
         self.config_modules = type('C', (), {'get_conf': staticmethod(lambda *a, **k: {'x': {}})})()
         self.saved = []
+        self.saves = []
+        self._per_module = per_module
         self._db = None
 
     def _get_enabled_modules(self):
@@ -74,10 +76,49 @@ class _Monitor:
 
     @property
     def status(self):
-        return type('S', (), {'save': staticmethod(lambda: None)})()
+        # Both, because the executor prefers the narrow one and must survive its absence:
+        # with no database the monitor's status is a plain ConfigControl, which has neither.
+        outer = self
+
+        class _S:
+            @staticmethod
+            def save():
+                outer.saves.append('*')
+
+            @staticmethod
+            def save_module(module):
+                outer.saves.append(module)
+
+        if not self._per_module:
+            del _S.save_module
+        return _S()
 
     def flush_alerts(self):
         pass
+
+
+class TestSavingWhatOneModuleSaid:
+    """A run saves after every module, and the whole-table write it used to do meant eleven
+    modules' rows were read and rewritten to record the twelfth — measured at ~60 ms a time on
+    a fleet-sized table, three quarters of a second per run, with every page load waiting
+    behind it."""
+
+    def test_only_the_module_that_finished_is_written(self):
+        mon = _Monitor({'fast': 0, 'other': 0})
+        run_checks(mon, ['fast', 'other'], timeout=5)
+        assert sorted(mon.saves) == ['fast', 'other']
+        assert '*' not in mon.saves, 'the whole table is rewritten per module again'
+
+    def test_a_status_that_cannot_do_it_still_gets_saved(self):
+        """With no database the monitor's status is a plain ConfigControl, which has no
+        `save_module`. An AttributeError here is swallowed by the executor's own `except`, so
+        the module would be recorded as having FAILED for the sole reason that it was saved."""
+        mon = _Monitor({'fast': 0}, per_module=False)
+        hist = _History()
+        run_checks(mon, ['fast'], timeout=5, history=hist)
+        assert mon.saves == ['*'], 'nothing was saved at all'
+        assert [r[0] for r in hist.rows] == ['fast'], (
+            'the module was recorded as failed because saving it raised')
 
 
 class TestTheOnesThatArriveOnTime:
@@ -294,3 +335,44 @@ class TestTheAccessorsAreProperties:
                     if re.search(r'(?<!def )' + re.escape(name) + r'\s*\(', body):
                         bad.append(f'{fname}: {name}()')
         assert not bad, f'called as a method: {bad}'
+
+
+class TestTheChannelOutlivesTheBatchWhenTheWorkDoes:
+    """Taking it off when the call returns was right when a run ENDED at its deadline.
+
+    It does not any more: a module past the deadline is still working, still reporting, and
+    the job on the screen is open waiting for it. Reported as a checklist frozen mid-read
+    under the words "still working".
+    """
+
+    def test_it_stays_while_a_module_is_still_out(self):
+        mon = _Monitor({'slow': 0.6})
+        run_checks(mon, ['slow'], timeout=0.2, progress_cb=lambda *_a, **_k: None)
+        assert getattr(mon, '_progress_sink', None) is not None, (
+            'the straggler is reporting into nothing')
+
+    def test_and_comes_off_when_it_lands(self):
+        """Never taking it off would leave the scheduler's own cycles reporting into a job
+        that ended hours ago."""
+        mon = _Monitor({'slow': 0.4})
+        run_checks(mon, ['slow'], timeout=0.15, progress_cb=lambda *_a, **_k: None)
+        deadline = time.time() + 5
+        while time.time() < deadline and getattr(mon, '_progress_sink', None) is not None:
+            time.sleep(0.02)
+        assert getattr(mon, '_progress_sink', None) is None
+
+    def test_a_batch_that_did_not_overrun_lets_go_at_once(self):
+        mon = _Monitor({'fast': 0})
+        run_checks(mon, ['fast'], timeout=5, progress_cb=lambda *_a, **_k: None)
+        assert getattr(mon, '_progress_sink', None) is None
+
+    def test_several_stragglers_all_have_to_land(self):
+        """The count is what decides, and it is taken under a lock: `-= 1` is three bytecodes,
+        and two threads doing it at once is a count that never reaches zero."""
+        mon = _Monitor({'a': 0.5, 'b': 0.7})
+        run_checks(mon, ['a', 'b'], timeout=0.15, progress_cb=lambda *_a, **_k: None)
+        assert getattr(mon, '_progress_sink', None) is not None
+        deadline = time.time() + 5
+        while time.time() < deadline and getattr(mon, '_progress_sink', None) is not None:
+            time.sleep(0.02)
+        assert getattr(mon, '_progress_sink', None) is None

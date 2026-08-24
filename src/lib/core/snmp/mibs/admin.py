@@ -1945,6 +1945,7 @@ class MibAdmin:
         job_id = uuid.uuid4().hex[:12]
         _cancel = threading.Event()
         _compile_jobs[job_id] = {
+            '_started': time.time(),      # for the background-jobs screen
             'done': False, 'phase': 'compiling', 'total': len(raw_mibs), 'completed': 0,
             'current': None, 'result_ok': None, 'compiled': False,
             'partial': False, 'failed': [], 'errors': {}, 'message': '', 'cancelled': False,

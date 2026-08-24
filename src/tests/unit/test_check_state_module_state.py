@@ -230,3 +230,84 @@ class TestAnExistingInstallJustGainsAColumn:
         the whole table on every install that upgrades."""
         from lib.services.monitoring.check_state.store import _SCHEMA   # noqa: PLC0415
         assert _SCHEMA.columns[-1].name == _ROOT
+
+
+class TestWritingBackOneModule:
+    """A run saves after every module it finishes, and `save()` replaces the WHOLE table — so
+    eleven modules' rows were read and rewritten to record the twelfth.
+
+    Measured on a fleet-sized table (1400 rows, twelve modules): ~60 ms a time, three quarters
+    of a second per run of `DELETE FROM check_state`, with a page load waiting three times
+    longer for every read while it happened. One module's rows are a fraction of that.
+    """
+
+    def _seed(self):
+        st = _store()
+        st.persist_status({
+            'snmp': {'nas/cpu': {'status': True, 'message': 'ok',
+                                 'other_data': {'cpu': 40}}},
+            'ping': {'gw': {'status': True, 'message': 'up'}},
+        })
+        return st
+
+    def test_the_other_modules_are_left_alone(self):
+        st = self._seed()
+        assert st.persist_module('snmp', {'nas/cpu': {'status': False, 'message': 'gone'}})
+        rows = st.get_all()
+        assert rows[('ping', 'gw', '')]['message'] == 'up', (
+            'writing one module rewrote another'"'"'s rows')
+        assert rows[('snmp', 'nas/cpu', '')]['status'] is False
+
+    def test_a_row_the_module_no_longer_reports_is_gone(self):
+        """Which is what the whole-table write was for: a check that stops existing must not
+        stay on the screen for ever."""
+        st = self._seed()
+        st.persist_module('snmp', {})
+        rows = st.get_all()
+        assert not [k for k in rows if k[0] == 'snmp']
+        assert ('ping', 'gw', '') in rows, 'and only that module'
+
+    def test_a_row_that_did_not_change_keeps_its_identity(self):
+        """`uid` and `last_change_ts` are what "since when" is answered from — rewriting them
+        every cycle would say every check changed a moment ago."""
+        st = self._seed()
+        before = st.get_all()[('snmp', 'nas/cpu', '')]
+        st.persist_module('snmp', {'nas/cpu': {'status': True, 'message': 'ok'}})
+        after = st.get_all()[('snmp', 'nas/cpu', '')]
+        assert after['uid'] == before['uid']
+        assert after['last_change_ts'] == before['last_change_ts']
+
+    def test_a_status_that_flipped_moves_its_timestamp(self):
+        st = self._seed()
+        before = st.get_all()[('snmp', 'nas/cpu', '')]
+        st.persist_module('snmp', {'nas/cpu': {'status': False, 'message': 'down'}})
+        after = st.get_all()[('snmp', 'nas/cpu', '')]
+        assert after['last_change_ts'] != before['last_change_ts']
+
+    def test_it_reads_only_the_module_it_is_about(self):
+        """The read at the top of a save is half its cost, and eleven twelfths of it was for
+        rows the write would put back exactly as it found them."""
+        st = self._seed()
+        assert sorted(st.get_all('snmp')) == [('snmp', 'nas/cpu', '')]
+        assert sorted(st.get_all('ping')) == [('ping', 'gw', '')]
+        assert len(st.get_all()) == 2, 'the unnarrowed read stopped reading everything'
+
+    def test_a_nameless_module_writes_nothing(self):
+        """`DELETE FROM check_state WHERE module = ''` would be a no-op, and an empty name
+        reaching here means a caller lost track of what it was saving."""
+        st = self._seed()
+        assert st.persist_module('', {'x': {'status': True}}) is False
+        assert len(st.get_all()) == 2
+
+    def test_the_facade_saves_what_the_monitor_holds(self):
+        """`save_module` writes the module'"'"'s slice of the live status dict, and nothing else
+        in it — the monitor'"'"'s working state carries every module at once."""
+        status = DbBackedStatus(self._seed())
+        status.read()
+        status.data['snmp']['nas/cpu']['message'] = 'changed'
+        status.data['ping']['gw']['message'] = 'not this one'
+        assert status.save_module('snmp')
+        fresh = DbBackedStatus(status._store)
+        fresh.read()
+        assert fresh.data['snmp']['nas/cpu']['message'] == 'changed'
+        assert fresh.data['ping']['gw']['message'] == 'up'

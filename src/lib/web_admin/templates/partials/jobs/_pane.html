@@ -1,0 +1,19 @@
+{#
+   Background jobs: the markup of its tab pane.
+
+   What this process is doing right now — a collection polling forty machines, a copy of the
+   database, a MIB tree compiling, a profile being tested. Until this screen each of those was
+   visible only from the page that started it: navigate away and the work carried on with
+   nowhere to look at it, and "why is the panel slow" had no answer anybody could reach.
+
+   Read-only by construction: it starts nothing and stops nothing (see lib/core/jobs/routes.py).
+#}
+<div class="tab-pane fade{% if standalone == 'jobs' %} show active{% endif %}" id="tab-jobs">
+    <div id="jobs-container">
+        {% if not standalone %}   {# see #overview-container #}
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm"></div>
+        </div>
+        {% endif %}
+    </div>
+</div>

@@ -102,3 +102,82 @@ class TestWhatTheRowIsCalled:
     def test_it_falls_back_to_the_bound_items_label(self):
         rows = build_host_status(BOUND, _live(**{'srv-uid/metrics': {}}), {})
         assert rows[0]['name'] == 'nas-01'
+
+
+class TestACheckWhoseResultsAreAllSubMetrics:
+    """Reported from the panel: two NAS sitting in warning with every reading they answer
+    green, and nothing anywhere saying why.
+
+    A host is `warning` when it has enabled checks and none of them has been evaluated yet —
+    the newly-added case. Each NAS has one enabled SNMP item with no OID checks and twelve
+    device profiles, so every one of its 295 readings is filed as `<key>/<row>` or
+    `<key>_<metric>` and NOT ONE under the item's own key. Looked up by key alone the check
+    was absent, so the machine said "I have a check nobody has evaluated" about a check
+    evaluated 295 times a cycle.
+
+    The switches and routers were fine throughout, which is what made it hard to see: they
+    have no configured item at all and are rescued by the `host.<uid>` branch further down.
+    """
+
+    UID = 'host-1'
+    ITEM = 'item-1'
+
+    def _wa(self, results):
+        modules = {'watchfuls.snmp': {'servers': {self.ITEM: {'host_uid': self.UID,
+                                                              'enabled': True}}}}
+
+        class _WA:
+            @staticmethod
+            def _read_check_status():
+                return {'snmp': results}
+
+            @staticmethod
+            def _load_modules():
+                return modules
+        return _WA()
+
+    @staticmethod
+    def _statuses(wa):
+        from lib.core.hosts.service import _host_statuses    # noqa: PLC0415
+        return _host_statuses(wa)
+
+    def _row(self, ok=True, severity='', metric='/eth0'):
+        return {self.ITEM + metric: {'status': ok, 'severity': severity,
+                                     'item_uid': self.ITEM}}
+
+    def test_a_check_answering_only_sub_metrics_has_been_evaluated(self):
+        assert self._statuses(self._wa(self._row())) == {self.UID: 'ok'}
+
+    def test_a_check_with_no_results_at_all_is_still_pending(self):
+        """The case `warning` was written for, and it has to survive the fix."""
+        assert self._statuses(self._wa({})) == {self.UID: 'warning'}
+
+    def test_one_bad_row_among_forty_good_ones_is_a_bad_check(self):
+        rows = {}
+        for i in range(40):
+            rows.update(self._row(metric='/eth%d' % i))
+        rows.update(self._row(ok=False, metric='/eth99'))
+        assert self._statuses(self._wa(rows)) == {self.UID: 'error'}
+
+    def test_a_warning_row_is_a_warning_and_not_an_error(self):
+        rows = dict(self._row())
+        rows.update(self._row(ok=False, severity='warning', metric='/eth9'))
+        assert self._statuses(self._wa(rows)) == {self.UID: 'warning'}
+
+    def test_a_hard_failure_outranks_a_warning_whatever_the_order(self):
+        rows = dict(self._row(ok=False, severity='warning', metric='/a'))
+        rows.update(self._row(ok=False, metric='/b'))
+        assert self._statuses(self._wa(rows)) == {self.UID: 'error'}
+
+    def test_the_result_under_the_checks_OWN_key_still_wins(self):
+        """The ordinary case, and it must not start being decided by the rows beside it."""
+        rows = {self.ITEM: {'status': False, 'severity': '', 'item_uid': self.ITEM}}
+        rows.update(self._row())
+        assert self._statuses(self._wa(rows)) == {self.UID: 'error'}
+
+    def test_another_items_rows_are_not_this_ones(self):
+        """Indexed by the item each result names, so nothing has to take a key apart — and a
+        result belonging to a different check cannot answer for this one."""
+        rows = dict(self._row())
+        rows['other/eth0'] = {'status': False, 'severity': '', 'item_uid': 'item-2'}
+        assert self._statuses(self._wa(rows)) == {self.UID: 'ok'}

@@ -55,10 +55,16 @@ _log = logging.getLogger(__name__)
 #: * ``row_split`` — how this table's row names separate the row from the thing it belongs
 #:   to, for the tables whose names carry a qualifier the MIB has no column for.
 _OPTIONAL_META = ('source', 'source_label', 'source_short', 'source_rank', 'chart',
-                  'row_split', 'headline', 'icon', 'identity')
+                  'row_split', 'headline', 'icon', 'identity', 'tally', 'tally_role',
+                  'chart_label')
 
 #: The same, for metadata that is a map rather than a word.
-_OPTIONAL_MAPS = ('states', 'headline_rows')
+_OPTIONAL_MAPS = ('states', 'headline_rows', 'present_when', 'quiet_when')
+
+#: …and for the metadata that is a LIST. Kept apart because the two above coerce — a list run
+#: through `str()` becomes the string "['if_total_out']", which is a field name nothing
+#: matches and no error anywhere.
+_OPTIONAL_LISTS = ('chart_with',)
 
 
 def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -> dict:
@@ -102,5 +108,7 @@ def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -
                     'unit':  str(meta.get('unit') or ''),
                     **{k: str(meta.get(k) or '') for k in _OPTIONAL_META if meta.get(k)},
                     **{k: dict(meta[k]) for k in _OPTIONAL_MAPS
-                       if isinstance(meta.get(k), dict) and meta[k]}}
+                       if isinstance(meta.get(k), dict) and meta[k]},
+                    **{k: [str(x) for x in meta[k]] for k in _OPTIONAL_LISTS
+                       if isinstance(meta.get(k), (list, tuple)) and meta[k]}}
     return out

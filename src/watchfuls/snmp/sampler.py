@@ -163,6 +163,7 @@ class SnmpSampler:
         now = time.time()
         state = self._sample_state(srv_key)
         rows: dict = {}          # row key → {'name': …, 'values': {}, 'attrs': {}}
+        sightings: dict = {}     # evidence kind → {what was seen: where}
         answered = False
         errors: list = []
 
@@ -184,6 +185,10 @@ class SnmpSampler:
         # for the whole sampling and looks like something that has hung. Reported exactly that
         # way from the panel. `report_progress` is a no-op unless somebody pressed a button.
         lang = self._notify_lang()
+        # Which of this machine's rows somebody said are worth an alert. Read once for the
+        # device: it is one small list and the alternative is a database round trip per
+        # metric of every profile it carries.
+        watched = self._watched_rows(server)
         for _i, prof in enumerate(assigned, 1):
             # `label_of` and not `prof['label']`: a profile names itself per language
             # (`{'en_EN': …, 'es_ES': …}`), and printing the dict is what happens when you
@@ -203,7 +208,8 @@ class SnmpSampler:
                                  n=_i, total=len(assigned))
             for metric in prof.get('metrics') or ():
                 ok, err = self._sample_metric(metric, conn, now, state, rows, columns,
-                                              source=str(prof.get('id') or ''), lang=lang)
+                                              source=str(prof.get('id') or ''), lang=lang,
+                                              sightings=sightings, watched=watched)
                 answered = answered or ok
                 if err:
                     errors.append(f"{metric['key']}: {err}")
@@ -213,10 +219,31 @@ class SnmpSampler:
                 break
 
         self._save_sample_state(srv_key, state)
+        self._save_sightings(server, sightings)
         self._emit_samples(srv_key, label, rows, answered, errors)
 
+    def _watched_rows(self, server: dict) -> set:
+        """The rows of this machine somebody has said are worth an alert.
+
+        Empty for a device with no host bound to it, and empty when the registry cannot be
+        reached: a cycle that fails because of a preference is worse than one that reports a
+        little less. What it turns back ON is a verdict the profile switched off — see
+        `verdict` in the profile format — so the failure mode of an empty answer is the
+        current behaviour and not a device that stops being checked.
+        """
+        uid = str(server.get('host_uid') or server.get('_host_uid') or '').strip()
+        store = getattr(self._monitor, '_hosts_store', None) if self.is_monitor_exist else None
+        if not uid or store is None:
+            return set()
+        try:
+            return store.watch(uid)
+        except Exception as exc:      # pylint: disable=broad-except
+            self._debug(f'SNMP: watched rows not read: {exc}', DebugLevel.warning)
+            return set()
+
     def _sample_metric(self, metric: dict, conn: dict, now: float, state: dict, rows: dict,
-                       columns: dict, source: str = '', lang: str = '') -> tuple:
+                       columns: dict, source: str = '', lang: str = '',
+                       sightings: dict | None = None, watched: set | None = None) -> tuple:
         """Read one metric into *rows*. Returns ``(answered, error)``."""
         got, err = read_metric(metric, conn, self._snmp_get, self._snmp_walk_oid, columns)
         if err and not got:
@@ -224,17 +251,84 @@ class SnmpSampler:
         # Resolved once per metric, not once per row: an interface table is one metric and
         # forty rows, and the words are the same for all of them. Only the levels worth
         # reporting are kept — an `ok` or an `info` state is a badge and not a finding.
+        # …and a column the profile says COLOURS without JUDGING keeps none of them. An
+        # access port with nothing plugged into it is `down`, which is worth a red mark beside
+        # that port and is not a fault of the switch — the badge is drawn from the same map on
+        # the screen, so what changes here is only whether it becomes a finding.
+        #
+        # …unless somebody has said THIS row matters. Then the same reading is news again, and
+        # the map that was already written down is what says so. Two levels of decision and
+        # they belong to different people: the profile knows what ifOperStatus means on every
+        # switch ever made, and only whoever ran the cable knows that gi3 goes to the server.
+        quiet = metric.get('verdict') is False
         states = {}
-        if metric.get('states'):
+        if metric.get('states') and (not quiet or watched):
             _name = _profiles.label_of(metric, lang)
             states = {v: {'level': spec['level'], 'label': str(spec.get('label') or ''),
                           'metric': _name}
                       for v, spec in (_profiles.states_of(metric, lang) or {}).items()
                       if spec.get('level') in ('bad', 'warn')}
+        # A sighting is not a reading: it goes to the evidence store and never becomes a
+        # result. Handled here rather than in `_store_value` because it does not belong in
+        # `rows` at all — not even as an empty one, which would still be a `check_state` row.
+        # A column the profile wants as one total. Each row is still sampled the ordinary
+        # way — a counter needs ITS OWN baseline, and summing raw counters before
+        # differentiating them would produce a spike every time a port is added — and what is
+        # recorded is the sum of the per-row results, under the device itself.
+        if str(metric.get('aggregate') or '') == 'sum':
+            total, seen = 0.0, False
+            for r in got:
+                prev = (state.get(r['key']) or {}).get(metric['key'])
+                value, new_state = _metrics.sample(metric, r['raw'], prev, now)
+                if new_state is not None:
+                    state.setdefault(r['key'], {})[metric['key']] = new_state
+                if value is not None:
+                    total += float(_metrics.scale_value(value, r['factor']))
+                    seen = True
+            if seen:
+                row = rows.setdefault('', {'name': '', 'values': {}, 'attrs': {},
+                                           'states': []})
+                row['values'][metric['key']] = total
+            return True, (err or None)
+        kind = str(metric.get('evidence') or '')
+        if kind and sightings is not None:
+            seen = sightings.setdefault(kind, {})
+            for r in got:
+                key = str(r['name'] or r['index'] or '').strip()
+                if key:
+                    seen[key] = _metrics.attribute(metric, r['raw'])
+            return True, (err or None)
         for r in got:
+            # A quiet column judges only the rows that were named. The row key is what the
+            # screen marked, which is the name the device gave it before any split.
+            mine = states
+            if quiet and states:
+                mine = states if self._is_watched(watched, r['name'], r['key']) else {}
             self._store_value(rows, r['key'], r['name'], metric, r['raw'], now, state,
-                              factor=r['factor'], source=source, states=states)
+                              factor=r['factor'], source=source, states=mine)
         return True, (err or None)
+
+    def _is_watched(self, watched, *names) -> bool:
+        """Whether any of the names this row goes by was marked.
+
+        More than one because a row is filed under the name the device composed and read back
+        under the key that name was made safe as — and which of the two the screen sent
+        depends on the table. Cheap either way: this is a set of a handful.
+        """
+        if not watched:
+            return False
+        return any(self._hosts_watch_key(n) in watched for n in names if n)
+
+    def _hosts_watch_key(self, row: str) -> str:
+        """The key the registry files a watched row under — ITS function, not a second copy
+        of the composition: two places building this string is two places to get it wrong the
+        day one of them changes."""
+        from lib.core.hosts.store import HostsStore   # noqa: PLC0415
+        # The BARE name — `snmp` and not `watchfuls.snmp`. It is what a result records as its
+        # module and therefore what the screen sends back when somebody marks a row; the
+        # dotted one is this class's import path and matches nothing anybody stored.
+        bare = str(self.name_module or '').rsplit('.', 1)[-1]
+        return HostsStore.watch_key(bare, row)
 
     def _store_value(self, rows: dict, row_key: str, row_name: str, metric: dict,
                      raw, now: float, state: dict, factor=1, source: str = '',
@@ -371,6 +465,33 @@ class SnmpSampler:
             # it costs those metrics and nothing else, and it is visible where it happened.
             self._debug(f'SNMP: {label} — {len(errors)} metric(s) unanswered: '
                         f'{"; ".join(errors[:5])}', DebugLevel.info)
+
+    def _save_sightings(self, server: dict, sightings: dict) -> None:
+        """Hand what this device SAW to the store that keeps sightings.
+
+        Filed under the HOST and not the server key: the map joins across machines, and a
+        machine is what it joins on. A server with no host bound to it is a sighting nobody
+        can place, so it is dropped rather than filed under something that is not a machine.
+
+        Written even when a kind came back empty — a switch that has forgotten every MAC is a
+        switch whose forwarding table is empty, and leaving last cycle's in place would draw
+        cables that were unplugged last week.
+        """
+        if not sightings:
+            return
+        uid = str(server.get('host_uid') or server.get('_host_uid') or '').strip()
+        db = getattr(self, 'db', None)
+        if not uid or db is None:
+            return
+        try:
+            from lib.core.infra.evidence import EvidenceStore   # noqa: PLC0415
+            store = EvidenceStore(db)
+            for kind, seen in sightings.items():
+                store.replace(uid, kind, seen)
+        except Exception as exc:      # pylint: disable=broad-except
+            # Evidence is a nicety on top of the cycle. A map that misses a link is a worse
+            # map; a cycle that fails because of one is a worse panel.
+            self._debug(f'SNMP: sightings not stored: {exc}', DebugLevel.warning)
 
     # ── State that has to outlive the process ─────────────────────────────────
 

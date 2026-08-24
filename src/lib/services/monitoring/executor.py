@@ -105,7 +105,20 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
             if success and result_data is not None:
                 with _save_lock:
                     monitor._process_module_result(result_name, result_data)
-                    monitor.status.save()
+                    # This module's rows and not the whole table: a run saves once per
+                    # module, and rewriting every other module's to record this one is
+                    # three quarters of a second per run of `DELETE FROM check_state`,
+                    # with every page load waiting three times longer behind it.
+                    #
+                    # Asked for rather than assumed: with no database the monitor's status is
+                    # a plain ConfigControl, which has no such method — and an AttributeError
+                    # here is swallowed by the `except` below, so the module would be recorded
+                    # as having FAILED for the sole reason that it was saved.
+                    _save = getattr(monitor.status, 'save_module', None)
+                    if callable(_save):
+                        _save(result_name)
+                    else:
+                        monitor.status.save()
                 _recs = [(result_name, _key,
                           result_data.get_status(_key),
                           result_data.get_other_data(_key))
@@ -167,8 +180,11 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
             pass            # _run_one reports the real per-module error
 
     # The channel a module uses to say where it is (monitor.report_progress). Installed for
-    # the duration of this batch and taken off afterwards: the scheduler shares this monitor,
-    # and a sink left behind would have its cycles reporting into a job that ended hours ago.
+    # as long as the RUN is watched, which is not the same as the length of this call: a module
+    # that overran the deadline is still working and still reporting, and the job is still open
+    # on the screen waiting for it. Taken off when the last straggler lands — sooner froze the
+    # checklist mid-read (reported exactly that way), and never would leave the scheduler's own
+    # cycles reporting into a job that ended hours ago.
     _prev_sink = getattr(monitor, '_progress_sink', None)
     _prev_lang = getattr(monitor, '_progress_lang', '')
     monitor._progress_sink = _tell if progress_cb is not None else None
@@ -187,9 +203,9 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
         # wait=False: return immediately without joining still-blocking threads
         # (they cannot be forcibly killed in Python).
         executor.shutdown(wait=False, cancel_futures=True)
-        # Taken off as the batch ends, so a module that overran stops reporting into a job
-        # nobody is watching any more — and, more importantly, so the next batch does not
-        # inherit a sink pointing at a run that finished hours ago.
+
+    def _unhook() -> None:
+        """Put back whatever was listening before this batch."""
         monitor._progress_sink = _prev_sink
         monitor._progress_lang = _prev_lang
 
@@ -204,6 +220,13 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
         except Exception as exc:  # pylint: disable=broad-except
             errors.append(f'{mod}: {exc}')
 
+    #: How many modules are still out. The sink comes off when it reaches zero, and it is
+    #: a lock and not a bare integer because the stragglers land on their own threads: `-= 1`
+    #: is three bytecodes, and two of them at once is a count that never reaches zero and a
+    #: sink that never comes off.
+    _left = {'n': len(not_done)}
+    _left_lock = threading.Lock()
+
     def _late(future) -> None:
         """A module that overran, landing after the batch had already returned.
 
@@ -217,12 +240,24 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
             name, items, err = future.result()
         except Exception as exc:  # pylint: disable=broad-except
             _tell('error', mod_name, f'{type(exc).__name__}: {exc}')
+            with _left_lock:
+                _left['n'] -= 1
+                last = _left['n'] <= 0
+            if last:
+                _unhook()
             return
         if items is None:
             _tell('error', mod_name, err or name)
         else:
             _tell('ok', mod_name, f'{len(items)}')
+        with _left_lock:
+            _left['n'] -= 1
+            last = _left['n'] <= 0
+        if last:
+            _unhook()
 
+    if not not_done:
+        _unhook()          # nothing overran: the run is over and so is the listening
     for future in not_done:
         errors.append(f'{future_to_mod[future]}: timeout after {timeout}s')
         # Not 'error': the module has NOT failed, it is still working and will write its own

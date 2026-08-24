@@ -1,0 +1,357 @@
+{# ================================================================
+   Background jobs — what the panel is doing when nobody is looking at it.
+
+   A collection polling forty machines takes minutes; a copy of a large install takes longer;
+   compiling a MIB tree walks thousands of files. All three run in threads and, until this
+   screen, each was visible only from the page that started it — navigate away and the work
+   carried on with nowhere to look at it. "Why is the panel slow" and "did my backup finish"
+   had no answer anybody could reach.
+
+   It STARTS nothing and STOPS nothing. Every row here is work another permission already let
+   somebody begin, and the buttons that begin it live on the screens that own it — a control
+   here would be a second way into four pieces of machinery from one place that understands
+   none of them.
+   ================================================================ #}
+
+//: The last answer, and the poll that keeps it fresh. Kept between renders because the
+//: section redraws on every tick and a blank screen for a moment is worse than a stale row.
+let _jobsData = null;
+let _jobsTimer = null;
+//: The other half: what has FINISHED. Fetched when the tab is opened rather than on every
+//: tick — a table of finished work does not change while you read it, and re-asking for a
+//: hundred rows every two seconds to watch a running job is traffic for nothing.
+let _jobsPast = null;
+let _jobsTab = 'live';
+//: The running job whose progress is open in the dialog, if any. Kept so the poll can keep
+//: the dialog fresh: opening one and watching it stop moving is the same complaint the whole
+//: screen exists to answer, one level down.
+let _jobsWatching = '';
+
+//: How often the list re-asks WHILE something is running, and while nothing is. A screen
+//: showing a progress bar that moves once a minute reads as one that has hung; a screen
+//: showing an empty list has nothing to be fresh about.
+const _JOBS_TICK = {busy: 2000, idle: 15000};
+
+/** The section's entry point (declared in HOME_PAGES → standalone.render). */
+async function renderJobs() {
+    const pane = document.getElementById('jobs-container');
+    if (!pane) return;
+    await _jobsLoad();
+    if (_jobsTab === 'past' && !_jobsPast) await _jobsPastLoad();
+    _jobsPaint();
+    _jobsSchedule();
+}
+
+async function _jobsPastLoad() {
+    _jobsPast = await apiGet('/api/v1/jobs/history?limit=100') || {jobs: [], kept: true};
+}
+
+async function setJobsTab(which) {
+    _jobsTab = which === 'past' ? 'past' : 'live';
+    if (_jobsTab === 'past' && !_jobsPast) await _jobsPastLoad();
+    _jobsPaint();
+}
+
+/** Re-ask for the history — the only half of this screen with a refresh button, because the
+ *  live one refreshes itself. */
+async function _jobsPastRefresh() { _jobsPast = null; await _jobsPastLoad(); _jobsPaint(); }
+
+async function _jobsLoad() {
+    const got = await apiGet('/api/v1/jobs');
+    if (got) _jobsData = got;
+}
+
+/** Re-ask at the rate the answer deserves, and only while the section is on screen: a timer
+ *  polling a hidden pane is traffic for nobody's benefit. */
+function _jobsSchedule() {
+    if (_jobsTimer) { clearTimeout(_jobsTimer); _jobsTimer = null; }
+    const busy = ((_jobsData || {}).summary || {}).running > 0;
+    _jobsTimer = setTimeout(async () => {
+        const pane = document.getElementById('tab-jobs');
+        if (!pane || !pane.classList.contains('active')) return _jobsSchedule();
+        await _jobsLoad();
+        _jobsPaint();
+        _jobsSchedule();
+    }, busy ? _JOBS_TICK.busy : _JOBS_TICK.idle);
+}
+
+function _jobsPaint() {
+    const pane = document.getElementById('jobs-container');
+    if (!pane) return;
+    pane.innerHTML = _jobsHtml(_jobsData || {jobs: [], summary: {}, now: 0});
+    // …and the dialog on top of it, if one is OPEN on a job that just moved.
+    //
+    // Checked against the dialog itself and not against the variable: closing it with the X
+    // or with Escape tells this file nothing, so the variable outlived the dialog — and
+    // coming back to the section repainted, saw it set, and opened a dialog nobody asked for.
+    // Reported exactly that way.
+    if (_jobsWatching) {
+        const box = document.getElementById('infoModal');
+        if (box && box.classList.contains('show')) _jobsShowLive(_jobsWatching);
+        else _jobsWatching = '';
+    }
+}
+
+/** One running job's checklist, in a dialog.
+ *
+ *  The list gives a row one line, which answers "is it going" and not "what is it doing" — and
+ *  on a collection that has been running four minutes those are different questions. The
+ *  steps come from the package that is doing the work: this file colours four words
+ *  (`pending`, `running`, `ok`, `failed`) and knows nothing else about them, so a package
+ *  reporting a fifth gets a line with no mark rather than a wrong one.
+ */
+function _jobsOpenLive(id) {
+    _jobsWatching = String(id || '');
+    _jobsShowLive(_jobsWatching);
+}
+
+//: What a step looks like. `''` is a package saying something this screen has not heard of,
+//: which is honestly "no verdict yet" and is drawn as exactly that.
+const _JOBS_STEP = {
+    pending: {icon: 'bi-circle',        cls: 'text-body-tertiary'},
+    running: {icon: 'bi-arrow-repeat',  cls: 'text-primary'},
+    ok:      {icon: 'bi-check-circle',  cls: 'text-success'},
+    failed:  {icon: 'bi-x-octagon',     cls: 'text-danger'},
+    '':      {icon: 'bi-dash',          cls: 'text-body-tertiary'},
+};
+
+function _jobsShowLive(id) {
+    const d = _jobsData || {};
+    const j = (d.jobs || []).find(x => x.id === id);
+    if (!j) {
+        // It ended and was pruned while the dialog was open. Closing it would be the screen
+        // taking the answer away at the moment it arrived; the dialog stays and says so.
+        _jobsWatching = '';
+        return;
+    }
+    const st = _JOBS_STATE[j.state] || _JOBS_STATE.running;
+    const pct = j.total > 0 ? Math.min(100, Math.round((j.done / j.total) * 100)) : 0;
+    const secs = j.started ? Math.max(0, (d.now || j.started) - j.started) : 0;
+    showHtmlModal(`${_jobsKind(j)} — ${j.label || ''}`, `
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+            <i class="bi ${st.icon} ${st.cls}${j.state === 'running' ? ' ss-spin' : ''}"></i>
+            <span>${esc(t('jobs_' + j.state) || j.state)}</span>
+            ${secs ? `<span class="text-muted ss-fs-2 ms-auto">
+                <i class="bi bi-clock me-1"></i>${esc(_jobsElapsed(secs))}</span>` : ''}
+        </div>
+        ${j.total > 0 ? `<div class="d-flex align-items-center gap-2 mb-3">
+            <div class="progress flex-grow-1" style="height:8px">
+                <div class="progress-bar ${st.bar}" style="width:${pct}%"></div></div>
+            <span class="text-muted ss-fs-2 text-nowrap">${esc(j.done)} / ${esc(j.total)}</span>
+        </div>` : ''}
+        ${j.error ? `<div class="alert alert-danger py-2 ss-fs-2">${esc(j.error)}</div>` : ''}
+        ${(j.steps || []).length
+          ? `<div class="ss-scrollbox">${j.steps.map(_jobsStepHtml).join('')}</div>`
+          : `<div class="text-muted small">${esc(j.detail || t('jobs_steps_none'))}</div>`}`,
+        'primary');
+}
+
+/** One step, in the columns the collection dialog already uses: a mark, what it is being
+ *  done TO, what is being done, and how far through.
+ *
+ *  Four columns and not one sentence, because forty steps of one module differ by exactly the
+ *  scope and the counter — run together as "erebor · Reading the metrics · 2/24 Disks" they
+ *  are the same words with the thing that makes them scannable taken away. */
+function _jobsStepHtml(s) {
+    const mark = _JOBS_STEP[s.state] || _JOBS_STEP[''];
+    const count = s.total ? `${s.n} / ${s.total}` : '';
+    return `<div class="d-flex align-items-baseline gap-2 ss-fs-2 py-1"
+                 style="padding-left:${s.sub ? '1.4rem' : '0'}">
+        <i class="bi ${mark.icon} ${mark.cls}${s.state === 'running' ? ' ss-spin' : ''}"></i>
+        ${s.scope ? `<span class="fw-semibold text-truncate"
+             style="max-width:11rem">${esc(s.scope)}</span>` : ''}
+        <span class="text-truncate">${esc(s.text)}</span>
+        ${count || s.note ? `<span class="text-muted ms-auto text-nowrap ss-fs-1">
+            ${count ? `<span class="fw-semibold">${esc(count)}</span>` : ''}
+            ${esc(s.note || '')}</span>` : ''}
+    </div>`;
+}
+
+function _jobsHtml(d) {
+    const jobs = d.jobs || [];
+    const sum = d.summary || {};
+    return `<div class="p-3">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+            <h5 class="mb-0"><i class="bi bi-hourglass-split me-2"></i>${esc(t('jobs_title'))}</h5>
+            ${_jobsCount(sum.running || 0, 'text-bg-primary', t('jobs_running'))}
+            ${_jobsCount(sum.failed || 0, 'text-bg-danger', t('jobs_failed'))}
+            <button class="btn btn-sm btn-secondary ms-auto"
+                onclick="${_jobsTab === 'past' ? '_jobsPastRefresh()' : 'renderJobs()'}">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        </div>
+        ${_jobsTabsHtml(sum)}
+        <div class="text-muted ss-fs-2 mb-3">
+            <i class="bi bi-info-circle me-1"></i>${esc(
+                _jobsTab === 'past' ? t('jobs_past_note') : t('jobs_note'))}</div>
+        ${_jobsTab === 'past' ? _jobsPastHtml() : (jobs.length
+          ? `<div class="d-flex flex-column gap-2">
+                ${jobs.map(j => _jobsRow(j, d.now)).join('')}</div>`
+          : `<div class="text-center text-muted py-5">
+                <i class="bi bi-cup-hot ss-empty-icon"></i>${esc(t('jobs_empty'))}</div>`)}
+    </div>`;
+}
+
+/** The two halves, as tabs: what is happening and what happened.
+ *
+ *  Two questions from two places — one is the packages' own memory, the other a table written
+ *  where each piece of work ENDED — so they are two lists and not one with a mixed order that
+ *  puts a finished backup between two running collections. */
+function _jobsTabsHtml(sum) {
+    // The count comes with the LIVE answer (a `COUNT(*)`, not the rows), so the badge is
+    // right before the tab has ever been opened — which is the only time it is news. The
+    // loaded list wins once there is one: it is the same number, one refresh newer.
+    const past = _jobsPast ? (_jobsPast.total || (_jobsPast.jobs || []).length)
+                           : (sum.history || 0);
+    const tab = (id, label, badge) => `<li class="nav-item">
+        <button class="nav-link${_jobsTab === id ? ' active' : ''}"
+                onclick="setJobsTab(${jsStr(id)})">${esc(label)}${badge
+            ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1"
+                >${esc(badge)}</span>` : ''}</button></li>`;
+    return `<ul class="nav nav-tabs mb-3">
+        ${tab('live', t('jobs_tab_live'), sum.running || '')}
+        ${tab('past', t('jobs_tab_past'), past || '')}
+    </ul>`;
+}
+
+/** What has finished. A TABLE and not cards: these are read down a column — when, what, how
+ *  long — and "how long does this normally take" is a question a stack of cards turns into
+ *  arithmetic. */
+function _jobsPastHtml() {
+    const d = _jobsPast || {jobs: [], kept: true};
+    if (!d.kept)
+        return `<div class="text-muted small">${esc(t('jobs_past_off'))}</div>`;
+    if (!(d.jobs || []).length)
+        return `<div class="text-center text-muted py-5">
+            <i class="bi bi-clock-history ss-empty-icon"></i>${esc(t('jobs_past_empty'))}</div>`;
+    const lim = d.limits || {};
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead class="ss-thead"><tr>
+            <th>${esc(t('col_status'))}</th>
+            <th>${esc(t('jobs_col_kind'))}</th>
+            <th>${esc(t('col_name'))}</th>
+            <th class="text-end">${esc(t('jobs_col_took'))}</th>
+            <th class="text-end">${esc(t('jobs_col_ended'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${d.jobs.map(_jobsPastRow).join('')}</tbody>
+    </table></div>
+    <div class="text-muted ss-fs-1 pt-2">
+        ${esc(tf('jobs_past_kept', d.total || d.jobs.length, lim.keep || 0, lim.days || 0))}
+    </div>`;
+}
+
+function _jobsPastRow(j) {
+    const st = _JOBS_STATE[j.state] || _JOBS_STATE.done;
+    const took = (j.ended_at && j.started_at) ? j.ended_at - j.started_at : 0;
+    return `<tr>
+        <td class="text-nowrap"><i class="bi ${st.icon} ${st.cls} me-1"></i>${
+            esc(t('jobs_' + j.state) || j.state)}</td>
+        <td class="text-nowrap">${esc(_jobsKind(j))}</td>
+        <td class="text-truncate" style="max-width:20rem">${esc(j.label || '')}
+            ${j.error ? `<span class="text-danger ss-fs-1 d-block text-truncate"
+                title="${escAttr(j.error)}">${esc(j.error)}</span>` : ''}</td>
+        <td class="text-end text-nowrap">${took ? esc(_jobsTook(took)) : '&mdash;'}</td>
+        <td class="text-end text-nowrap small text-muted">${esc(_jobsWhen(j.ended_at))}</td>
+        <td class="text-end">${j.log_lines || j.log_dropped
+            ? `<button class="btn btn-sm btn-secondary py-0 px-1"
+                    onclick="_jobsOpenLog(${jsStr(j.uid)})"
+                    title="${escAttr(t('jobs_log_open'))}">
+                    <i class="bi bi-list-ul"></i></button>` : ''}</td>
+    </tr>`;
+}
+
+/** How long it took — a duration, which is not the same word as "4 minutes ago". */
+function _jobsTook(secs) {
+    if (secs < 60) return tf('jobs_took_secs', Math.round(secs));
+    if (secs < 3600) return tf('jobs_took_mins', Math.round(secs / 60));
+    return tf('jobs_took_hours', (secs / 3600).toFixed(1));
+}
+
+/** When it ended, through the panel's own date formatter so every screen agrees. */
+function _jobsWhen(epoch) {
+    if (!epoch) return '';
+    try { return _fmtDateTime(new Date(epoch * 1000).toISOString()); }
+    catch (_) { return ''; }
+}
+
+/** Everything one job said while it was working. Fetched on demand: the list carries none of
+ *  it, because a hundred rows with a couple of hundred lines each is a megabyte of JSON to
+ *  draw a table of names and dates. */
+async function _jobsOpenLog(uid) {
+    const got = await apiGet('/api/v1/jobs/history/' + encodeURIComponent(uid));
+    if (!got) return;
+    const lines = got.log || [];
+    showHtmlModal(`${_jobsKind(got)} — ${got.label || ''}`, `
+        ${got.error ? `<div class="alert alert-danger py-2 ss-fs-2 mb-2"
+            >${esc(got.error)}</div>` : ''}
+        ${got.log_dropped ? `<div class="text-muted ss-fs-2 mb-2">
+            <i class="bi bi-scissors me-1"></i>${esc(tf('jobs_log_dropped', got.log_dropped))}
+        </div>` : ''}
+        ${lines.length
+          ? `<pre class="ss-scrollbox ss-fs-2 mb-0 p-2 rounded border bg-body-tertiary"
+                >${esc(lines.join(String.fromCharCode(10)))}</pre>`
+          : `<div class="text-muted small">${esc(t('jobs_log_empty'))}</div>`}`, 'primary');
+}
+
+function _jobsCount(n, cls, label) {
+    if (!n) return '';
+    return `<span class="badge ${cls}">${esc(n)} ${esc(label)}</span>`;
+}
+
+//: What each state looks like. One map, so a badge and a bar can never disagree about
+//: whether something is still going.
+const _JOBS_STATE = {
+    running: {icon: 'bi-arrow-repeat', cls: 'text-primary',   bar: 'bg-primary'},
+    done:    {icon: 'bi-check-circle', cls: 'text-success',   bar: 'bg-success'},
+    failed:  {icon: 'bi-x-octagon',    cls: 'text-danger',    bar: 'bg-danger'},
+    // Not a success and not a fault: the panel stopped while it was working. Amber, because
+    // "we do not know how it went" is its own answer and reads as neither of the other two.
+    interrupted: {icon: 'bi-slash-circle', cls: 'text-warning', bar: 'bg-warning'},
+};
+
+/** One job. What it is, what it is working on, how far, and for how long.
+ *
+ *  The elapsed time is worked out from the server's clock, which travelled with the answer:
+ *  doing it against the browser's would show a job that started in the future on any laptop
+ *  whose clock is a minute out. */
+function _jobsRow(j, now) {
+    const st = _JOBS_STATE[j.state] || _JOBS_STATE.running;
+    const pct = j.total > 0 ? Math.min(100, Math.round((j.done / j.total) * 100)) : 0;
+    const secs = j.started ? Math.max(0, (now || j.started) - j.started) : 0;
+    return `<div class="rounded-3 border px-3 py-2 ss-pointer"
+                onclick="_jobsOpenLive(${jsStr(j.id)})"
+                title="${escAttr(t('jobs_open_live'))}">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi ${st.icon} ${st.cls}${j.state === 'running' ? ' ss-spin' : ''}"></i>
+            <span class="fw-semibold">${esc(_jobsKind(j))}</span>
+            ${j.label ? `<span class="text-truncate" style="max-width:22rem"
+                >${esc(j.label)}</span>` : ''}
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal ss-fs-1"
+                >${esc(j.source)}</span>
+            ${secs ? `<span class="text-muted ss-fs-2 ms-auto text-nowrap">
+                <i class="bi bi-clock me-1"></i>${esc(_jobsElapsed(secs))}</span>` : ''}
+        </div>
+        ${j.detail ? `<div class="text-muted ss-fs-2 text-truncate">${esc(j.detail)}</div>` : ''}
+        ${j.total > 0 ? `<div class="d-flex align-items-center gap-2 mt-1">
+            <div class="progress flex-grow-1" style="height:6px">
+                <div class="progress-bar ${st.bar}" style="width:${pct}%"></div>
+            </div>
+            <span class="text-muted ss-fs-1 text-nowrap">${esc(j.done)} / ${esc(j.total)}</span>
+        </div>` : ''}
+        ${j.error ? `<div class="text-danger ss-fs-2 mt-1">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(j.error)}</div>` : ''}
+    </div>`;
+}
+
+/** What kind of work it is, in the reader's language — falling back to the word the package
+ *  used. A job whose kind nothing has translated yet is still a job worth listing. */
+function _jobsKind(j) {
+    return t('jobs_kind_' + j.kind) || j.kind || t('jobs_kind_other');
+}
+
+/** How long it has been going, at the size a person reads. */
+function _jobsElapsed(secs) {
+    if (secs < 60) return tf('jobs_secs', Math.round(secs));
+    if (secs < 3600) return tf('jobs_mins', Math.round(secs / 60));
+    return tf('jobs_hours', (secs / 3600).toFixed(1));
+}
