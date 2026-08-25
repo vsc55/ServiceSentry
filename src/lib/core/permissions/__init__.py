@@ -54,7 +54,7 @@ def discover_permissions() -> list[dict]:
 # ── Permission-key validators (per-instance keys) ───────────────────────────────────
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 # Per-server (host) permission key.  'add' authorizes adding host-bound checks to
-# THIS specific host (not creating a host — that is the global ``servers_add``);
+# THIS specific host (not creating a host — that is the global ``devices_add``);
 # 'edit'/'delete' act on existing host-bound checks and the host record.
 _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 # Per-cluster permission key (cluster.{uid}.{action}) — a cluster is a multi-bind

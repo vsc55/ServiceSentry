@@ -208,7 +208,7 @@ class TestApiCredentials:
         """Same gate as the per-credential route — which is also exactly what opens the
         Credentials section, so it grants nothing the view did not already reach."""
         _login(client)
-        with patch.object(admin, '_get_session_permissions', return_value={'servers_view'}):
+        with patch.object(admin, '_get_session_permissions', return_value={'devices_view'}):
             assert client.get('/api/v1/credentials/usage').status_code == 403
 
     def test_test_endpoint_uses_stored_secret(self, client, admin):

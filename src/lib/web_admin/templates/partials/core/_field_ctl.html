@@ -48,6 +48,30 @@ function _unitSelect(sch, obj, pathPrefix, target, unitKey) {
             onchange="updateField(${jsStr(target)},${sp},this.value)">${opts}</select>`;
 }
 
+// A stored secret is not a login, and `<input type="password">` is what a browser hunts for
+// both to FILL and to CAPTURE. A panel full of SNMP communities, webhook signing keys and API
+// tokens is not what that machinery is for: Firefox pairs the SNMP version select with the
+// community box and offers to save "1 / public" as a login on every reload — and then fills a
+// saved password back INTO a field whose value is about to be sent to a device.
+//
+// So where the browser can mask a plain text input from the stylesheet, that is what a secret
+// is: nothing recognises it as a credential. Where it cannot, the field stays a real password
+// input — the masking is the part that must never degrade, the doorhanger is only noise.
+const SS_TEXT_SECURITY = typeof CSS !== 'undefined' && !!CSS.supports
+    && (CSS.supports('-webkit-text-security', 'disc') || CSS.supports('text-security', 'disc'));
+
+// What every masked field carries either way. `autocomplete` is what the browser reads; the
+// `data-*` ones are what the third-party managers read, and they are the ones that would
+// otherwise paste somebody's vault entry into a community string.
+const SS_SECRET_ATTRS = ' autocomplete="off" spellcheck="false" data-1p-ignore'
+                      + ' data-lpignore="true" data-bwignore';
+
+function secretInput(attrs, cls) {
+    const _c = 'form-control' + (cls || '') + (SS_TEXT_SECURITY ? ' ss-masked' : '');
+    return `<input type="${SS_TEXT_SECURITY ? 'text' : 'password'}"
+        class="${_c}"${SS_SECRET_ATTRS}${attrs || ''}>`;
+}
+
 function fieldCtl(spec) {
     const tr = spec.trailing || '';
     const oc = spec.onChange ? ` onchange="${spec.onChange}"` : '';
@@ -67,7 +91,7 @@ function fieldCtl(spec) {
                 <input type="number" class="form-control"${at}${oi}${oc}>${tr}</div>`;
         case 'secret':
             return `<div class="input-group input-group-sm">
-                <input type="password" class="form-control"${at}${oi}${oc}>${tr}</div>`;
+                ${secretInput(`${at}${oi}${oc}`)}${tr}</div>`;
         case 'textarea':
             return `<textarea class="form-control form-control-sm" rows="${spec.rows || 4}"
                 style="font-family:var(--bs-font-monospace);font-size:.78rem;white-space:pre"
@@ -91,6 +115,11 @@ function fieldCtl(spec) {
                 ${tr}</div>`;
         }
         default:
+            // A sensitive string arrives here as inputType 'password' — same field, same rule.
+            if (spec.inputType === 'password') {
+                return `<div class="input-group input-group-sm">
+                    ${secretInput(`${at}${oi}${oc}`, spec.inputCls)}${tr}</div>`;
+            }
             return `<div class="input-group input-group-sm">
                 <input type="${spec.inputType || 'text'}" class="form-control${spec.inputCls || ''}"${at}${oi}${oc}>${tr}</div>`;
     }

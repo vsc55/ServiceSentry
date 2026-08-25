@@ -1,0 +1,154 @@
+{
+  "id": "linksys_switch",
+  "label": {
+    "en_EN": "Linksys switch (rlmgmt)",
+    "es_ES": "Switch Linksys (rlmgmt)"
+  },
+  "description": {
+    "en_EN": "What a Linksys managed switch knows about itself and nothing else does: its CPU, the temperature and uptime of each unit in the stack, every fan and power supply by name, and what the box is drawing. The ports are IF-MIB and belong to the generic profile.",
+    "es_ES": "Lo que un switch gestionable de Linksys sabe de sí mismo y no sabe nadie más: su CPU, la temperatura y el uptime de cada unidad de la pila, cada ventilador y cada fuente por su nombre, y lo que consume la caja. Los puertos son IF-MIB y son del perfil genérico."
+  },
+  "brand": {"name": "Linksys", "logo": "linksys", "color": "#000000"},
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.3955",
+    "probe": "1.3.6.1.4.1.3955.1000.201.1.8.0"
+  },
+  "metrics": [
+    {
+      "key": "lks_cpu_1m",
+      "icon": "bi-cpu",
+      "headline": true,
+      "label": {"en_EN": "CPU (last minute)", "es_ES": "CPU (último minuto)"},
+      "oid": "1.3.6.1.4.1.3955.1000.201.1.8.0",
+      "kind": "gauge",
+      "unit": "%",
+      "chart": "line"
+    },
+    {
+      "key": "lks_cpu_5m",
+      "label": {"en_EN": "CPU (last 5 minutes)", "es_ES": "CPU (últimos 5 minutos)"},
+      "oid": "1.3.6.1.4.1.3955.1000.201.1.9.0",
+      "kind": "gauge",
+      "unit": "%",
+      "chart": "line"
+    },
+    {
+      "key": "lks_power",
+      "icon": "bi-lightning-charge",
+      "headline": true,
+      "label": {"en_EN": "Power drawn", "es_ES": "Consumo"},
+      "oid": "1.3.6.1.4.1.3955.1000.201.134.3.0",
+      "kind": "gauge",
+      "unit": "W",
+      "scale": 0.001,
+      "chart": "line"
+    },
+    {
+      "key": "lks_unit_temp",
+      "icon": "bi-thermometer-half",
+      "headline": true,
+      "label": {"en_EN": "Temperature", "es_ES": "Temperatura"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.15.1.9",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.15.1.1",
+      "kind": "gauge",
+      "unit": "°C",
+      "chart": "line"
+    },
+    {
+      "key": "lks_unit_temp_status",
+      "label": {"en_EN": "Temperature sensor", "es_ES": "Sensor de temperatura"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.15.1.10",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.15.1.1",
+      "kind": "gauge",
+      "chart": "value"
+    },
+    {
+      "key": "lks_unit_uptime",
+      "label": {"en_EN": "Unit uptime", "es_ES": "Uptime de la unidad"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.15.1.11",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.15.1.1",
+      "kind": "gauge",
+      "unit": "s",
+      "scale": 0.01,
+      "chart": "line"
+    },
+    {
+      "key": "lks_model",
+      "of_device": true,
+      "label": {"en_EN": "Model", "es_ES": "Modelo"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.14.1.11",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.14.1.1",
+      "kind": "text",
+      "chart": "none",
+      "role": "model"
+    },
+    {
+      "key": "lks_serial",
+      "of_device": true,
+      "label": {"en_EN": "Serial number", "es_ES": "Número de serie"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.14.1.5",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.14.1.1",
+      "kind": "text",
+      "chart": "none",
+      "role": "serial"
+    },
+    {
+      "key": "lks_firmware",
+      "of_device": true,
+      "label": {"en_EN": "Software version", "es_ES": "Versión de software"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.14.1.2",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.14.1.1",
+      "kind": "text",
+      "chart": "none",
+      "role": "firmware"
+    },
+    {
+      "key": "lks_hardware",
+      "of_device": true,
+      "label": {"en_EN": "Hardware version", "es_ES": "Versión de hardware"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.53.14.1.4",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.53.14.1.1",
+      "kind": "text",
+      "chart": "none",
+      "role": "hardware"
+    },
+    {
+      "key": "lks_fan_state",
+      "icon": "bi-fan",
+      "headline": true,
+      "label": {"en_EN": "Fan", "es_ES": "Ventilador"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.83.1.1.1.3",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.83.1.1.1.2",
+      "kind": "gauge",
+      "chart": "value",
+      "states": {
+        "1": {"label": {"en_EN": "Normal", "es_ES": "Normal"}, "level": "ok"},
+        "2": {"label": {"en_EN": "Warning", "es_ES": "Aviso"}, "level": "warn"},
+        "3": {"label": {"en_EN": "Critical", "es_ES": "Crítico"}, "level": "bad"},
+        "4": {"label": {"en_EN": "Shut down", "es_ES": "Apagado"}, "level": "bad"},
+        "5": {"label": {"en_EN": "Not present", "es_ES": "No presente"}, "level": "info", "absent": true},
+        "6": {"label": {"en_EN": "Not working", "es_ES": "No funciona"}, "level": "bad"}
+      }
+
+    },
+    {
+      "key": "lks_psu_state",
+      "icon": "bi-plug",
+      "headline": true,
+      "label": {"en_EN": "Power supply", "es_ES": "Fuente de alimentación"},
+      "walk": "1.3.6.1.4.1.3955.1000.201.83.1.2.1.3",
+      "index_label": "1.3.6.1.4.1.3955.1000.201.83.1.2.1.2",
+      "kind": "gauge",
+      "chart": "value",
+      "states": {
+        "1": {"label": {"en_EN": "Normal", "es_ES": "Normal"}, "level": "ok"},
+        "2": {"label": {"en_EN": "Warning", "es_ES": "Aviso"}, "level": "warn"},
+        "3": {"label": {"en_EN": "Critical", "es_ES": "Crítico"}, "level": "bad"},
+        "4": {"label": {"en_EN": "Shut down", "es_ES": "Apagado"}, "level": "bad"},
+        "5": {"label": {"en_EN": "Not present", "es_ES": "No presente"}, "level": "info", "absent": true},
+        "6": {"label": {"en_EN": "Not working", "es_ES": "No funciona"}, "level": "bad"}
+      }
+
+    }
+  ]
+}

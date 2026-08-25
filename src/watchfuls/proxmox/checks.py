@@ -168,11 +168,20 @@ class ClusterChecks:
         except Exception as exc:  # pylint: disable=broad-except
             self._emit_exc(key, label, 'Ceph', exc)
             return
+        # Ceph says one of THREE things, and this read two of them. `HEALTH_WARN` is the one
+        # a cluster spends its time in — a disk being backfilled, a clock a second out, a pool
+        # over its target ratio — and every one of those came out RED, beside the failures that
+        # mean a phone call. A rack that is permanently red is a rack nobody looks at.
+        #
+        # Anything unrecognised is a warning too, and deliberately not an error: an answer this
+        # panel has no word for is not the same statement as `HEALTH_ERR`, and inventing the
+        # worse of the two is the panel deciding something Ceph did not say.
         health = str((data.get('health') or {}).get('status') or '').upper()
         ok = (health == 'HEALTH_OK')
-        icon = '🔼' if ok else '🔽'
+        bad = (health == 'HEALTH_ERR')
+        icon = '🔼' if ok else ('🔽' if bad else '⚠')
         self._emit(key, ok, self._msg('px_ceph', label, icon, health or self._msg('px_unknown')),
-                   {'health': health})
+                   {'health': health}, severity='' if (ok or bad) else 'warning')
 
     def _chk_network(self, conn: dict, name: str, label: str, nodes: list,
                      maint: set = frozenset(), node_host: dict = None) -> None:

@@ -11,11 +11,11 @@ let _hostModalReadonly = false;  // true → no edit rights: fields disabled, no
 // per-server one (server.<uid>.<action>), mirroring the backend (routes/hosts.py).
 function _canEditHost(uid) {
     const p = currentUser.permissions || [];
-    return p.includes('servers_edit') || p.includes('server.' + uid + '.edit');
+    return p.includes('devices_edit') || p.includes('server.' + uid + '.edit');
 }
 function _canDeleteHost(uid) {
     const p = currentUser.permissions || [];
-    return p.includes('servers_delete') || p.includes('server.' + uid + '.delete');
+    return p.includes('devices_delete') || p.includes('server.' + uid + '.delete');
 }
 let _hostChecks = {};         // {module: {collection, enabled, _key, fieldsMeta, fields}}
 let _hostShownMods = new Set(); // modules shown for this host (add/remove per host)
@@ -45,6 +45,7 @@ const _SRV_COLS = [
     _META_COL.uid,
     { id: 'name',        label: () => t('col_host_name'),                  sortKey: 'name',        always: true  },
     { id: 'address',     label: () => t('col_host_address'),               sortKey: 'address',     always: false, resizable: false },
+    { id: 'type',        label: () => t('col_host_type'),                  sortKey: 'type',        always: false, resizable: false },
     { id: 'kind',        label: () => t('col_host_kind'),                  sortKey: 'kind',        always: false, resizable: false },
     { id: 'os',          label: () => t('col_host_os')||t('host_os'),       sortKey: 'os',          always: false, resizable: false },
     { id: 'status',      label: () => t('col_host_status')||'Status',       sortKey: 'status',      always: false, resizable: false },
@@ -54,7 +55,7 @@ const _SRV_COLS = [
     { id: 'description', label: () => t('host_description'),               sortKey: null,          always: false },
     ..._META_TAIL,
 ];
-const _SERVERS_DEFAULT_COLS = new Set(['address', 'kind', 'status', 'modules', 'cluster', 'tags']);
+const _SERVERS_DEFAULT_COLS = new Set(['address', 'type', 'kind', 'status', 'modules', 'cluster', 'tags']);
 
 // The 'maintenance' column was renamed to 'status'; migrate any saved config.
 const _srvMigrateCols = a => (Array.isArray(a) ? a.map(c => c === 'maintenance' ? 'status' : c) : a);
@@ -80,17 +81,9 @@ function _srvStatusRank(host) {
     return { error: 0, warning: 1, maintenance: 2, ok: 3 }[_srvStatusOf(host)] ?? 4;
 }
 function _srvStatusBadge(host) {
-    // [badge class, extra inline style, icon, label].  Maintenance keeps its
-    // signature orange (distinct from the yellow "warning"/pending state).
-    const meta = {
-        maintenance: ['', 'background-color:#fd7e14;color:#fff', 'bi-cone-striped',     t('host_status_maintenance') || 'Maintenance'],
-        error:       ['text-bg-danger',  '', 'bi-x-circle-fill',    t('host_status_error')   || 'Error'],
-        warning:     ['text-bg-warning', '', 'bi-hourglass-split',  t('host_status_warning') || 'Warning'],
-        ok:          ['text-bg-success', '', 'bi-check-circle-fill', t('host_status_ok')      || 'OK'],
-    }[_srvStatusOf(host)];
-    if (!meta) return `<span class="text-muted small">—</span>`;
-    const sty = meta[1] ? ` style="${meta[1]}"` : '';
-    return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${esc(meta[3])}</span>`;
+    // The shared one (see `HOST_STATE_BADGES`). This screen carries maintenance AS the status
+    // rather than beside it, which the badge takes either way.
+    return hostStateBadge(_srvStatusOf(host));
 }
 
 // ── Filter helpers (the select choices come from the fleet, not a fixed list) ──────
@@ -118,7 +111,7 @@ createListTable({
     key: 'servers', containerId: 'servers-container', tableId: 'servers-table',
     accent: 'teal', icon: 'bi-hdd-network', title: () => esc(t('tab_servers')),
     columns: _SRV_COLS, defaultVisible: _SERVERS_DEFAULT_COLS,
-    thClass: { kind: 'text-center', status: 'text-center', modules: 'text-center' },
+    thClass: { type: 'text-center', kind: 'text-center', status: 'text-center', modules: 'text-center' },
     persist: true, clearLabelKey: 'tab_servers',
     // Filter strip (shared design — see createListTable's spec.filters). The select options are
     // derived from the fleet itself (tags, cluster memberships), so they follow the data instead
@@ -128,6 +121,10 @@ createListTable({
             { key: 'q',       label: () => t('col_host_name'), type: 'search', grow: true,
               placeholder: () => t('host_filter_ph') },
             { key: 'address', label: () => t('col_host_address'), type: 'search', minWidth: '150px' },
+            { key: 'type',    label: () => t('col_host_type'), type: 'select', minWidth: '160px',
+              options: () => [{ value: '', label: t('all') },
+                              { value: '-', label: t('host_type_unset') }].concat(
+                  HOST_TYPES.map(x => ({ value: x.id, label: hostTypeLabel(x.id) }))) },
             { key: 'kind',    label: () => t('col_kind'), type: 'select', minWidth: '140px',
               options: () => [{ value: '', label: t('all') },
                               { value: 'local',  label: t('host_kind_local') },
@@ -147,7 +144,11 @@ createListTable({
                 k => String(h[k] || '').toLowerCase().includes(q))) return false;
             if (f.address && !String(h.address || '').toLowerCase()
                                    .includes(f.address.toLowerCase())) return false;
-            if (f.kind && (h.kind || 'local') !== f.kind) return false;
+            // '-' is "unclassified", which is a real answer and not the same as "any":
+            // it is how you find the devices somebody added in a hurry.
+            if (f.type === '-' && h.device_type) return false;
+            if (f.type && f.type !== '-' && (h.device_type || '') !== f.type) return false;
+            if (f.kind && hostKind(h.kind) !== f.kind) return false;
             if (f.status && _srvStatusOf(h) !== f.status) return false;
             if (f.tag && !(h.tags || []).includes(f.tag)) return false;
             return !f.cluster || _srvClusterLabels(h.uid).includes(f.cluster);
@@ -155,7 +156,7 @@ createListTable({
     },
     rows: () => Object.values(hostsData), rowKey: host => host.uid,
     record: host => host,
-    // Four ways to read the fleet (see servers/_views.html). The two summaries are handed
+    // Five ways to read the fleet (see servers/_views.html). The summaries are handed
     // every filtered row instead of the page, and the factory drops the pagination bands for
     // them — a count of "hosts with no checks" that shrank as you paged would be worse than
     // no count at all.
@@ -167,14 +168,15 @@ createListTable({
     applyExtra: cfg => _srvApplyView(cfg && cfg.view),
     prepare: () => {
         const p = currentUser.permissions || [];
-        return { canEdit: p.includes('servers_edit'), canDelete: p.includes('servers_delete') };
+        return { canEdit: p.includes('devices_edit'), canDelete: p.includes('devices_delete') };
     },
     selectable: ctx => ctx.canDelete,
     sortValue: (host, sortKey) => {
         switch (sortKey) {
             case 'uid':          return String(host.uid || '');
             case 'address':      return String(host.address || '').toLowerCase();
-            case 'kind':         return String(host.kind || 'local');
+            case 'type':         return hostTypeLabel(host.device_type || '').toLowerCase();
+            case 'kind':         return hostKind(host.kind);
             case 'os':           return String(host.os || 'auto');
             case 'status':       return _srvStatusRank(host);
             case 'modules':      return host.modules_total || 0;
@@ -188,6 +190,9 @@ createListTable({
         switch (colId) {
             case 'name':    return `<td class="text-nowrap fw-semibold"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}${host.virtual ? ` <span class="badge text-bg-info" title="${escAttr(t('host_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</span>` : ''}</td>`;
             case 'address': return `<td class="text-nowrap"><code${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.address || '')}</code></td>`;
+            case 'type':    return `<td class="text-center">${host.device_type
+                ? `<span class="badge bg-body-secondary text-body border" title="${escAttr(hostTypeLabel(host.device_type))}"><i class="bi ${escAttr(hostTypeIcon(host.device_type))} me-1"></i>${esc(hostTypeLabel(host.device_type))}</span>`
+                : `<span class="text-muted small">—</span>`}</td>`;
             case 'kind':    return `<td class="text-center">${host.kind === 'remote'
                 ? `<span class="badge text-bg-secondary"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_kind_remote'))}</span>`
                 : `<span class="badge bg-body-secondary text-body border">${esc(t('host_kind_local'))}</span>`}</td>`;
@@ -246,7 +251,7 @@ createListTable({
     },
 });
 
-// Toolbar buttons (reload / migrate / new) — gated by servers_edit.
+// Toolbar buttons (reload / migrate / new) — gated by devices_edit.
 function _serversToolbar(canEdit) {
     return `<button class="btn btn-sm btn-secondary" onclick="reloadHosts()" title="${escAttr(t('hosts_reload_tt'))}">
             <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('reload'))}</button>

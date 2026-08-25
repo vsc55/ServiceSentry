@@ -218,9 +218,30 @@ _sbSyncSub();
 function _placeFlyout(wrap) {
     const fly = wrap.querySelector('.ss-sb-flyout');
     if (!fly) return;
-    const r = wrap.getBoundingClientRect();
-    fly.style.top = r.top + 'px';
-    fly.style.left = r.right + 'px';
+    // Measured with the menu already open (`.ss-fly-open` is added first): until then it is
+    // display:none and has no box to measure.
+    fly.style.maxHeight = '';        // clear what a previous, cramped opening left behind,
+    fly.style.overflowY = '';        // or the menu keeps a scrollbar it no longer needs
+    const gap = 8;
+    const r  = wrap.getBoundingClientRect();
+    const h  = fly.offsetHeight, w = fly.offsetWidth;
+    const vh = window.innerHeight, vw = window.innerWidth;
+    // Aligning the menu's TOP with the item's top is only right while there is room below it.
+    // A section near the foot of the rail hung its last entries off the bottom of the screen,
+    // behind the taskbar: unreachable, with no scrollbar to say so. Slide it up until it fits.
+    let top = r.top;
+    if (top + h + gap > vh) top = vh - h - gap;
+    if (top < gap) {                 // taller than the screen: pin it and let it scroll
+        top = gap;
+        fly.style.maxHeight = (vh - gap * 2) + 'px';
+        fly.style.overflowY = 'auto';
+    }
+    // The same on the other axis, for the mirrored sidebar or a narrow window: past the right
+    // edge the menu opens to the LEFT of its item instead of off-screen.
+    let left = r.right;
+    if (left + w + gap > vw) left = Math.max(gap, r.left - w);
+    fly.style.top = top + 'px';
+    fly.style.left = left + 'px';
 }
 // One mechanism only (the .ss-fly-open class), driven by JS. Hover, focus and click all go
 // through _openFlyout/_closeFlyout so at most ONE flyout is ever open — no CSS :hover racing
@@ -258,7 +279,24 @@ function _sbPaneUrl(btn, paneId) {
     // A section with views is never at its bare URL: it is always showing one of them, and
     // the address bar has to say which, or a copied link reopens somebody else's view.
     const slug = _sbPageView(paneId.replace(/^tab-/, ''));
-    return slug ? base + '/' + slug : base;
+    const path = slug ? base + '/' + slug : base;
+    // ...and it keeps the section's OWN query while it is being written.
+    //
+    // Reported from the panel: open a device in Infrastructure, press F5, and you land back
+    // on the list of forty. The section does put the open device in the address bar
+    // (`?host=<uid>`) and does read it back — but this runs on the initial activation too,
+    // and it rebuilds the URL from the section and its view alone. So the landing URL was
+    // replaced by `/infra/table` before the section ever looked at it, and the parameter was
+    // gone: not lost by the section, swept away by the navigation that was only trying to
+    // say WHICH section is open.
+    //
+    // Only while we are already on this section's path. Arriving from another one, the query
+    // in the bar belongs to the page being left — `/history?module=cpu` must not follow you
+    // into Infrastructure.
+    const here = window.location.pathname;
+    const search = window.location.search;
+    const mine = here === base || here.startsWith(base + '/');
+    return (search && mine) ? path + search : path;
 }
 document.getElementById('ss-sidebar')?.addEventListener('shown.bs.tab', e => {
     const btn = e.target;

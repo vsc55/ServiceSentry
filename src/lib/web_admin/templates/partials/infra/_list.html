@@ -1,0 +1,252 @@
+{# ================================================================
+   Infrastructure — the fleet, as a list.
+
+   Built by the shared factory like every other list in the panel, so it arrives with the
+   filter strip, the column chooser, the per-user persistence and the pagination already
+   working — and it behaves the way the rest of the panel behaves, which is the actual point.
+
+   TWO THINGS THIS LIST SAYS THAT THE REGISTRY'S DOES NOT:
+
+   * the order is the STATE. The registry lists machines; this one is opened when something is
+     wrong, so the broken ones are at the top and the ordering is the server's (infra.service
+     .fleet) — a list that answered "which machine is in trouble" by making you read forty rows
+     would only work on the days nothing is happening.
+   * "not watched" is its own state, not a blank. A machine with no enabled check has no
+     status at all, and drawing it like a healthy one is the section lying about the one thing
+     it exists to show. It gets a grey badge, its own filter value and its own number in the
+     header.
+   ================================================================ #}
+
+let _infraPage = 1;
+let _infraPageSize = null;
+let _infraSort = 'status';
+let _infraSortDir = 'asc';
+let _infraCurrentPage = [];
+
+const _INFRA_COLS = [
+    _META_COL.uid,
+    { id: 'name',    label: () => t('col_host_name'),    sortKey: 'name',    always: true  },
+    { id: 'address', label: () => t('col_host_address'), sortKey: 'address', always: false },
+    { id: 'status',  label: () => t('col_host_status'),  sortKey: 'status',  always: false, resizable: false },
+    { id: 'modules', label: () => t('col_host_modules'), sortKey: 'modules', always: false, resizable: false },
+    // Two different questions, and the column headed "Tipo" was answering the second one
+    // with the first one's name: it printed `local` / `remote`, raw and untranslated, under a
+    // heading that everywhere else on this screen means hypervisor / NAS / switch.
+    { id: 'device_type', label: () => t('col_host_type'), sortKey: 'device_type', always: false },
+    { id: 'kind',    label: () => t('col_host_kind'),    sortKey: 'kind',    always: false },
+    { id: 'os',      label: () => t('col_host_os'),      sortKey: 'os',      always: false },
+    // What the DEVICE says it is, as opposed to what the registry was told. Sorted by the
+    // maker, because "show me the switches" is the question somebody sorts this by — the model
+    // beside it is which one, not what kind.
+    { id: 'brand',   label: () => t('col_host_brand'),   sortKey: 'vendor',  always: false },
+    { id: 'tags',    label: () => t('col_host_tags'),    sortKey: null,      always: false },
+];
+const _INFRA_DEFAULT_COLS = new Set(['address', 'status', 'modules', 'tags']);
+
+let _infraVisibleCols = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_infra_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
+    return new Set(_INFRA_DEFAULT_COLS);
+})();
+let _infraColOrder = (() => {
+    try { const s = JSON.parse(localStorage.getItem('ss_infra_col_order')||'null'); if (Array.isArray(s)) return s; } catch(_){}
+    return _INFRA_COLS.map(c => c.id);
+})();
+
+/** The visible columns, in the order the chooser left them.
+ *
+ *  Read from the state the column chooser writes rather than from a list of its own, so the
+ *  grouped and rail views show what the table view is showing: switching how you look at the
+ *  fleet must not silently change WHAT you are looking at.
+ */
+function _infraOrderedCols() {
+    const known = new Set(_INFRA_COLS.map(c => c.id));
+    const order = _infraColOrder.filter(id => known.has(id));
+    _INFRA_COLS.forEach(c => { if (!order.includes(c.id)) order.push(c.id); });
+    return order.map(id => _INFRA_COLS.find(c => c.id === id))
+                .filter(c => c && (c.always || _infraVisibleCols.has(c.id)));
+}
+
+/** One cell of one machine. Defined here and not inside the table spec because three views
+ *  draw the same rows now, and a second copy of "what a device_type cell looks like" is how
+ *  one of them ends up printing a raw token under a translated heading. */
+function _infraCell(uid, colId) {
+    const h = _infraHosts.find(x => x.uid === uid) || {};
+    switch (colId) {
+        case 'uid':     return `<td class="text-nowrap"><code class="text-muted ss-fs-2">${esc(uid)}</code></td>`;
+        case 'name':    return `<td class="text-nowrap"><span class="fw-semibold">${esc(h.name || '')}</span></td>`;
+        case 'address': return `<td class="text-nowrap"><code class="text-muted ss-fs-3">${esc(h.address || '—')}</code></td>`;
+        case 'status':  return `<td class="text-nowrap">${_infraStateBadge(h.status, h.maintenance)}</td>`;
+        case 'modules': return `<td class="text-nowrap small text-muted">${h.modules_active || 0}/${h.modules_total || 0}</td>`;
+        case 'device_type': return `<td class="text-nowrap small">${h.device_type
+            ? `<i class="bi ${escAttr(hostTypeIcon(h.device_type))} me-1 text-muted"></i>${
+                esc(hostTypeLabel(h.device_type))}`
+            : `<span class="text-muted">${esc(t('host_type_unset'))}</span>`}</td>`;
+        // Translated, not the stored token: `remote` is a value in a column, not a word
+        // anybody asked to read.
+        case 'kind':    return `<td class="text-nowrap small text-muted">${
+            esc(t('host_kind_' + (h.kind || 'none')))}</td>`;
+        case 'os':      return `<td class="text-nowrap small text-muted">${_infraOsHtml(h)}</td>`;
+        // The mark WITH the name: a column has the room, and a logo alone in a table is a
+        // rebus. The model reads muted beside it — one is what the box is, the other which.
+        case 'brand':   return `<td class="text-nowrap small">${
+            hostBrandLine(h, {text: true}) || '<span class="text-muted">—</span>'}</td>`;
+        case 'tags':    return `<td class="small">${(h.tags || []).map(tg =>
+            `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${esc(tg)}</span>`).join('')}</td>`;
+        default:        return '<td></td>';
+    }
+}
+
+/** What a machine runs, and where nobody has chosen, what it SAID it runs.
+ *
+ *  "auto" on its own is the panel keeping to itself something it already knows: a device
+ *  answering SNMP has told us its platform, and until now that answer went nowhere. The
+ *  setting stays the setting — it reads `auto`, because that is what it is — with the answer
+ *  it stands for beside it. */
+function _infraOsHtml(h) {
+    const own = String((h || {}).os || '').trim();
+    const said = String((h || {}).os_auto || '').trim();
+    if (own && own !== 'auto') return esc(own);
+    return said
+        ? `${esc(own || 'auto')} <span class="opacity-75">· ${esc(said)}</span>`
+        : esc(own || '');
+}
+
+/** The row's own control. One definition, for the same reason as the cells above. */
+function _infraRowActions(uid) {
+    return `<button class="btn btn-sm btn-secondary py-0 px-2" onclick="infraOpen(${jsStr(uid)})"
+        title="${escAttr(t('infra_open_host'))}"><i class="bi bi-box-arrow-in-right"></i></button>`;
+}
+
+/** One machine as a card — the layout for a screen somebody leaves open across the room. */
+function _infraCardsBody(uids) {
+    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.7rem;margin:.75rem">`;
+    for (const uid of uids) {
+        const h = by[uid] || {};
+        const accent = hostStateColor(h.status, h.maintenance);
+        html += `<div class="rounded-3 overflow-hidden border ss-pointer" onclick="infraOpen(${jsStr(uid)})"
+                      style="background:var(--bs-tertiary-bg)">
+            <div style="height:3px;background:${accent}"></div>
+            <div class="px-3 py-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fw-semibold text-truncate">${esc(h.name || '')}</span>
+                    <span class="ms-auto">${_infraStateBadge(h.status, h.maintenance)}</span>
+                </div>
+                <div class="text-muted ss-fs-2"><i class="bi bi-geo-alt me-1"></i>${esc(h.address || '—')}</div>
+                ${hostBrandLine(h, {text: true})
+                    ? `<div class="ss-fs-2 mt-1 text-truncate">${hostBrandLine(h, {text: true})}</div>`
+                    : ''}
+                <div class="text-muted ss-fs-2 mt-1">
+                    <i class="bi bi-puzzle me-1"></i>${esc(t('infra_watched_by'))}: ${h.modules_active || 0}/${h.modules_total || 0}
+                </div>
+            </div>
+        </div>`;
+    }
+    return html + `</div>`;
+}
+
+createListTable({
+    key: 'infra', containerId: 'infra-fleet', tableId: 'infra-table',
+    accent: 'teal', icon: 'bi-hdd-network',
+    title: () => `${esc(t('tab_infra'))} (${_infraHosts.length})`,
+    columns: _INFRA_COLS, defaultVisible: _INFRA_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'tab_infra',
+    persistExtra: () => ({ view: _infraView.id() }),
+    applyExtra: cfg => _infraView.apply(cfg && cfg.view),
+    filters: {
+        fields: [
+            { key: 'q',     label: () => t('col_host_name'), type: 'search', grow: true,
+              placeholder: () => t('col_host_name') + ' / ' + t('col_host_address') },
+            { key: 'state', label: () => t('col_host_status'), type: 'select', minWidth: '150px',
+              options: () => [
+                  { value: '',          label: t('all') },
+                  { value: 'error',     label: t('status_error') },
+                  { value: 'warning',   label: t('status_warning') },
+                  { value: 'ok',        label: t('status_ok') },
+                  { value: 'unwatched', label: t('infra_unwatched') },
+              ] },
+            { key: 'tag',   label: () => t('col_host_tags'), type: 'search', minWidth: '150px',
+              placeholder: () => t('col_host_tags') },
+        ],
+        match: (h, f) => {
+            const has = (v, needle) => (v || '').toLowerCase().includes(needle.toLowerCase());
+            if (f.q && !has(h.name, f.q) && !has(h.address, f.q)) return false;
+            // 'unwatched' is a state of its own here — see the header of this file.
+            if (f.state === 'unwatched' && (h.status || '')) return false;
+            if (f.state && f.state !== 'unwatched' && h.status !== f.state) return false;
+            if (f.tag && !(h.tags || []).some(tg => has(tg, f.tag))) return false;
+            return true;
+        },
+    },
+    rows: () => _infraHosts.map(h => h.uid), rowKey: uid => uid,
+    record: uid => _infraHosts.find(h => h.uid === uid) || {},
+    bodyMode: () => _infraView.mode(),
+    // By the view and not by the mode: the grouped and rail views draw their own tables out
+    // of the same columns, so hiding the chooser for them would be taking the control away
+    // from the thing it controls.
+    showChooser: mode => mode === 'table' || !!_infraView.view().columns,
+    cardsBody: (uids, ctx, all) => _infraView.body(uids, ctx, all),
+    sortValue: (uid, sortKey) => {
+        const h = _infraHosts.find(x => x.uid === uid) || {};
+        switch (sortKey) {
+            case 'uid':     return uid;
+            case 'address': return h.address || '';
+            // Worst first, and "not watched" between a warning and an OK: it is not a failure,
+            // but it is not the good news an OK is either.
+            case 'status':  return ({error: 0, warning: 1, '': 2, ok: 3})[h.status || ''] ?? 2;
+            case 'modules': return (h.modules_active || 0) - (h.modules_total || 0);
+            case 'device_type': return hostTypeLabel(h.device_type) || '';
+            case 'kind':    return t('host_kind_' + (h.kind || 'none'));
+            case 'os':      return h.os || '';
+            // The maker, then which model of theirs: sorting by "brand" and getting the models
+            // interleaved would be a column that does not sort by the word it is headed with.
+            case 'vendor':  return `${h.vendor || ''} ${h.model || ''}`.trim().toLowerCase();
+            default:        return (h.name || '').toLowerCase();
+        }
+    },
+    cell: (uid, colId) => _infraCell(uid, colId),
+    // The whole row opens the device, like a card does — the button stayed the discoverable
+    // way in, but a table where only the last 2rem of a row is clickable teaches you to aim.
+    // Guarded on the target so the actions column keeps working: a click that lands on a
+    // control means that control, not the row under it.
+    rowAttrs: uid => ` style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"`
+        + ` onclick="if(!event.target.closest('button,a,input,select,label'))`
+        + ` infraOpen(${jsStr(uid)})"`,
+    actions: uid => _infraRowActions(uid),
+    headerLead: () => _infraView.switcher('setInfraView'),
+    // Collect from the WHOLE fleet. Behind `devices_view` as well as `infra_collect`, the
+    // same pair the route asks for: the flag says which act you may perform, and a run over
+    // every machine is only offered to somebody who sees every machine. A narrowed operator
+    // still has the per-device button, which is scoped the way they are.
+    headerButtons: () => {
+        const perms = new Set(currentUser.permissions || []);
+        if (!perms.has('infra_collect') || !perms.has('devices_view')) return '';
+        return `<span id="infraCollectAllSlot">${_infraCollectAllSlotHtml()}</span>`;
+    },
+    // The shared split button: its main side refreshes now, its caret sets the interval.
+    // Regenerated on every render on purpose — it is a pure function of the current interval,
+    // so it cannot go stale against the timer it describes.
+    refreshButton: () => _autoRefreshControl({
+        id: 'infra', interval: _infraTimer?._interval || 0,
+        setFn: 'setInfraAutoRefresh', refreshFn: 'renderInfra',
+    }),
+    emptyBody: () => `<div class="text-center py-5 text-muted">
+            <i class="bi bi-hdd-network ss-empty-icon"></i>
+            <span>${esc(t('infra_empty'))}</span>
+            <div class="small mt-2">${esc(t('infra_empty_hint'))}</div>
+        </div>`,
+    state: {
+        visible: { get: () => _infraVisibleCols, set: s => { _infraVisibleCols = s; } },
+        order:   { get: () => _infraColOrder,    set: o => { _infraColOrder = o; } },
+        page:    { get: () => _infraPage,        set: p => { _infraPage = p; } },
+        pageSize:{ get: () => _infraPageSize,    set: v => { _infraPageSize = v; } },
+        sort:    { get: () => _infraSort,        set: v => { _infraSort = v; } },
+        sortDir: { get: () => _infraSortDir,     set: v => { _infraSortDir = v; } },
+        currentPage: { get: () => _infraCurrentPage, set: a => { _infraCurrentPage = a; } },
+    },
+    globalPrefix: {
+        render: '_infraRender', goPage: '_goInfraPage', changePageSize: '_changeInfraPageSize',
+        sort: '_sortInfra', toggleCol: '_infraToggleCol', resetCols: '_resetInfraCols',
+        saveOrder: '_infraSaveColOrder', initFeatures: '_initInfraTableFeatures',
+    },
+});

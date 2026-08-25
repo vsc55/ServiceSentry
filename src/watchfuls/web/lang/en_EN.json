@@ -1,6 +1,9 @@
 {
     "pretty_name": "Websites",
     "module_description": "Monitors HTTP/HTTPS endpoints. Checks status codes, optional response content, and basic authentication. Supports GET, HEAD and POST methods.",
+    "ui": {
+        "audit_v_test_connection":          "Test the connection"
+    },
     "labels": {
         "enabled":          "Enabled",
         "label":            "Label",

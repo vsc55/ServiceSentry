@@ -256,7 +256,7 @@ async function _clSetMemberField(uid, pkey, field, value, el) {
     if (Object.keys(prof).length) profiles[pkey] = prof; else delete profiles[pkey];
     const body = {
         name: h.name, address: h.address || '',
-        kind: h.kind === 'remote' ? 'remote' : 'local', os: h.os || 'auto',
+        kind: hostKind(h.kind), os: h.os || 'auto',
         maintenance: !!h.maintenance, tags: h.tags || [], description: h.description || '',
         profiles, modules: Array.isArray(h.modules) ? h.modules : [],
     };
@@ -284,7 +284,7 @@ async function _clSetNode(uid, pkey, node, sel) {
     if (Object.keys(prof).length) profiles[pkey] = prof; else delete profiles[pkey];
     const body = {
         name: h.name, address: h.address || '',
-        kind: h.kind === 'remote' ? 'remote' : 'local', os: h.os || 'auto',
+        kind: hostKind(h.kind), os: h.os || 'auto',
         maintenance: !!h.maintenance, tags: h.tags || [], description: h.description || '',
         profiles, modules: Array.isArray(h.modules) ? h.modules : [],
     };

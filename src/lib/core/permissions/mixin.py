@@ -291,8 +291,8 @@ class _PermissionsMixin:
         on server *host_uid* — via the global ``servers_*`` permission or a
         per-server ``server.{uid}.{action}`` override."""
         perms = self._get_session_permissions()
-        _global = {'view': 'servers_view', 'add': 'servers_add',
-                   'edit': 'servers_edit', 'delete': 'servers_delete'}
+        _global = {'view': 'devices_view', 'add': 'devices_add',
+                   'edit': 'devices_edit', 'delete': 'devices_delete'}
         global_perm = _global.get(action)
         if global_perm and global_perm in perms:
             return True

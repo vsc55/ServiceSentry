@@ -21,14 +21,20 @@
 
 function _srvViewCoverage(hosts, ctx) {
     if (!hosts.length) return '';
-    const buckets = { none: [], inactive: [], ok: [] };
-    for (const h of hosts) buckets[_srvCoverage(h)].push(h);
-    const order = ['none', 'inactive', 'ok'];
-    const watched = buckets.ok.length;
+    // Built FROM the bucket list, so a coverage answer added tomorrow gets a bucket
+    // instead of `buckets[undefined].push` — which is not an empty group, it is this
+    // view throwing and the section drawing nothing.
+    const order = ['none', 'inactive', 'profiles', 'ok'];
+    const buckets = Object.fromEntries(order.map(k => [k, []]));
+    for (const h of hosts) (buckets[_srvCoverage(h)] || buckets.none).push(h);
+    // Read by its own record and read through a module are both being read.
+    const watched = buckets.ok.length + buckets.profiles.length;
     const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
         ${order.filter(k => buckets[k].length).map(k =>
+            // The colour from the same place the badge takes it, rather than a ternary
+            // per key that has to be extended every time a bucket is.
             _summaryChip(_SRV_COVERAGE[k].icon, t(_SRV_COVERAGE[k].key), buckets[k].length,
-                     k === 'none' ? 'text-bg-danger' : (k === 'inactive' ? 'text-bg-warning' : 'text-bg-success'))).join(' ')}
+                         _SRV_COVERAGE[k].cls)).join(' ')}
         <span class="text-muted small">${esc(tf('srv_cov_ratio', watched, hosts.length))}</span>`;
     return `<div>
         ${_summaryHeader(chips)}

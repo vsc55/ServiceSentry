@@ -24,8 +24,13 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **40 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **44 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
+
+> Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
+> Al pasar al core perdieron el prefijo: existe para que dos módulos no colisionen, y
+> el core ya es un espacio de nombres — `snmp_catalog` va al lado de `hosts` y
+> `history`. Se renombraron sin migración porque no había nada en producción.
 
 | Grupo | Tablas |
 | ----- | ------ |
@@ -33,10 +38,12 @@ Hay **40 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
-| Auditoría / historial / estado | `audit`, `history`, `check_state` |
+| Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
+| Infraestructura | `net_evidence` (lo que cada aparato ha *visto*: tabla de reenvío y caché ARP) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
+| SNMP | `snmp_catalog` (perfiles de dispositivo escritos en el panel), `snmp_mib_versions` (historial de ediciones de fuentes MIB) |
 | Syslog | `syslog`, `syslog_drops` |
 | Plano de control distribuido | `service_instances`, `service_leader`, `service_commands` |
 
@@ -474,10 +481,11 @@ config.json (solo lectura/arranque) → BD (editable).
 | uid | TEXT | no | — | PK |
 | name | TEXT | no | `''` | UNIQUE |
 | address | TEXT | no | `''` | |
-| kind | TEXT | no | `'local'` | local/remote |
+| kind | TEXT | no | `'none'` | Cómo ejecuta el panel comandos en el aparato: `none` (ninguno — el defecto, y la respuesta para equipo que sólo se lee por SNMP), `local` (en la máquina del panel) o `remote` (por SSH, con la conexión de `profiles['ssh']`). No es lo que el aparato **es** (`device_type`) ni los protocolos que contesta (`profiles`) |
 | os | TEXT | no | `'auto'` | |
 | maintenance | INTEGER | no | `0` | |
 | virtual | INTEGER | no | `0` | (reservada, entrecomillada) |
+| device_type | TEXT | no | `''` | qué es el dispositivo (`manifest.HOST_TYPES`); vacío = sin clasificar |
 | tags | TEXT | no | `'[]'` | lista JSON |
 | description | TEXT | no | `''` | |
 | profiles | TEXT | no | `'{}'` | JSON, perfiles por protocolo; secretos cifrados |
@@ -485,6 +493,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | created_at | TEXT | no | `''` | |
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
+| watch | TEXT | no | `'[]'` | lista JSON de `{module, row}`: las filas de esta máquina que alguien ha dicho que merecen aviso. Un puerto de switch caído puede ser un PC apagado o el enlace del servidor, y ningún MIB los distingue — se anota contra la máquina, no en un perfil, porque es conocimiento de ESTA instalación |
 
 Índices: `idx_hosts_name(name)`. Ver [explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
 
@@ -523,7 +532,7 @@ config.json (solo lectura/arranque) → BD (editable).
 El *downsampling* por buckets usa `CAST(FLOOR((ts - ?) / ?) AS <int>)` (portable multi-motor).
 
 ### `check_state` — estado vivo por check (reemplaza status.json)
-[lib/services/monitoring/check_state/store.py:50](../src/lib/services/monitoring/check_state/store.py#L50)
+[lib/services/monitoring/check_state/store.py:56](../src/lib/services/monitoring/check_state/store.py#L56)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -538,8 +547,91 @@ El *downsampling* por buckets usa `CAST(FLOOR((ts - ?) / ?) AS <int>)` (portable
 | fail_count | INTEGER | no | `0` | |
 | last_change_ts | REAL | no | `0` | |
 | severity | TEXT | no | `''` | `''` / error / warning |
+| module_state | TEXT | sí | — | JSON, estado de trabajo propio del módulo |
 
 Restricción única: `(module, key, metric)`. Sin índices secundarios.
+
+> **`module_state` no es un resultado.** Las demás columnas son la respuesta de un
+> check; esta es lo que el módulo necesita para producir la **siguiente**, y nunca se
+> muestra. El caso que la hizo falta es un contador: una tasa es la diferencia entre dos
+> lecturas, así que la lectura anterior tiene que sobrevivir al ciclo. Se escribe como
+> `status.set_conf([módulo, clave, 'module_state', …])` y va la **última** en el esquema:
+> una columna que falta solo se añade con `ADD COLUMN` mientras todas las anteriores ya
+> estén, y en cualquier otra posición la actualización reconstruiría la tabla entera.
+
+### `job_history` — qué hizo cada trabajo en segundo plano
+
+[lib/core/jobs/history.py:31](../src/lib/core/jobs/history.py#L31)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| job_id | TEXT | no | `''` | el id con el que lo sondeaba su propia pantalla, para poder volver a ella mientras el trabajo está en los dos sitios |
+| source | TEXT | no | `''` | el paquete que lo corrió (`infra`, `backup`, `snmp`) |
+| kind | TEXT | no | `''` | qué clase de trabajo (`collect`, `backup`, `mib_compile`, `snmp_test`) |
+| label | TEXT | no | `''` | sobre qué: el nombre de una máquina, de una tarea, de un MIB |
+| state | TEXT | no | `''` | `running` / `done` / `failed` / `interrupted` |
+| started_at | REAL | no | `0` | |
+| ended_at | REAL | no | `0` | |
+| done | INTEGER | no | `0` | hasta dónde llegó |
+| total | INTEGER | no | `0` | de cuánto, cuando el trabajo tiene tamaño contable |
+| error | TEXT | no | `''` | recortado a 2000 caracteres |
+| owner | TEXT | no | `''` | **quién** lo lanzó: `host:pid:rol`, la misma identidad que el heartbeat escribe en el registro de servicios (`ServiceInstancesStore`) y que enseña la pantalla de estado — un nombre que se puede buscar, no doce dígitos hex. Cambia en cada arranque, y eso es lo que permite que la barrida sólo cierre las filas cuyo dueño ya no está: dos paneles sobre la misma base de datos no se declaran el trabajo muerto el uno al otro |
+| log | TEXT | no | `'[]'` | lo que dijo mientras lo hacía, como lista JSON de líneas |
+| log_dropped | INTEGER | no | `0` | cuántas líneas se descartaron para caber en el tope |
+
+Índices: `idx_job_history_ended(ended_at)`, `idx_job_history_kind(kind)`.
+
+> **Se abre cuando el trabajo EMPIEZA y se cierra cuando termina.** Dos motivos, y el segundo
+> salió de la pantalla: archivar desde la pantalla haría que un trabajo que nadie abrió fuera
+> un trabajo que nunca pasó; y archivar **al final** pierde todo lo que nunca lo tiene.
+> Reinicia el panel con una obtención en marcha y desaparecía por completo — fuera de la
+> lista de trabajos en marcha, porque ésa vive en el proceso que murió, y nunca en el historial,
+> porque nunca terminó. Ni acabó ni pareció haber empezado.
+>
+> Por eso la fila existe desde el primer momento en estado `running` — y una fila así cuando
+> el proceso **arranca** es de un proceso que ya no está: un trabajo son hilos de un proceso
+> y muere con él. Ésas se cierran como `interrupted`, que es verdad y es justo lo que nadie
+> podía ver. Una fila `running` no sale en el historial: es el presente, y está en la otra
+> pestaña.
+>
+> **Por qué el registro es una columna JSON y no una tabla.** El log de un trabajo se lee
+> entero o no se lee; una segunda tabla sería un *join* por cada fila de una lista que no lo
+> muestra. El tope de líneas es de la instalación (`web_admin|jobs_history_lines`) y conserva
+> el **final** —que es donde está lo que falló—, dejando dicho cuántas descartó: un log que se
+> corta en silencio es uno del que nadie se fía del final.
+>
+> Se poda cada 25 escrituras, no con un hilo propio: un hilo para borrar un puñado de filas
+> sería un hilo que explicar en cada volcado, y un `DELETE` en cada escritura sería un borrado
+> para una tabla que crece de una en una. Dos límites, porque contestan preguntas distintas:
+> cuántos se guardan (`jobs_history_keep`) y hasta dónde atrás (`jobs_history_days`).
+
+### `net_evidence` — lo que un aparato ha visto (no lo que un check ha encontrado)
+
+[lib/core/infra/evidence.py:38](../src/lib/core/infra/evidence.py#L38)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | el aparato que lo VIO |
+| kind | TEXT | no | — | qué clase de avistamiento (`fdb`, `bridgeport`, `ifname`, `arp`) |
+| key | TEXT | no | — | lo visto (una MAC, una dirección) |
+| value | TEXT | sí | — | dónde se vio (un puerto, una MAC) |
+| ts | REAL | no | `0` | |
+
+Restricción única: `(uid, kind, key)`. Índice: `idx_net_evidence_kind(kind, key)`.
+
+> **Por qué no son resultados.** La tabla de reenvío de un switch y la caché ARP de una máquina
+> son lo único que dice qué equipo hay de verdad al otro lado de un cable, y no caben en
+> `check_state` por cuatro motivos a la vez: son **muchas** (una fila por MAC aprendida, miles
+> en un switch), son **volátiles** (caducan en minutos, así que se crearían y podarían cada
+> ciclo), **nadie las quiere como checks** («la MAC aa:bb ya no está en el puerto 8» no es una
+> alerta, es alguien yendo a una reunión) y sólo valen algo **cruzadas** entre aparatos. Se
+> guarda sólo la foto actual, **reemplazada entera** por aparato y clase: que una entrada
+> desaparezca es información —una MAC que caducó es una máquina que ya no está en ese puerto—
+> y fusionar dejaría el mapa dibujando un cable que se desenchufó la semana pasada.
+>
+> Quién la escribe es el **módulo**, y qué cuenta como avistamiento lo dice el **perfil**
+> (`"evidence": "<clase>"` en una métrica): el núcleo no sabe qué es una tabla de reenvío.
 
 ---
 
@@ -852,6 +944,50 @@ el latido: nada de eso puede cambiar sin reiniciar, y un reinicio es una fila nu
 propia columna y no dentro de `detail` porque `detail` se reescribe en cada latido, y son unos
 pocos KB por instancia.
 
+### `snmp_catalog` — perfiles de dispositivo escritos en el panel
+[lib/core/snmp/profile_store.py](../src/lib/core/snmp/profile_store.py)
+
+Una fila por entrada, y la entrada **es** el documento. No una columna por campo: qué es un
+perfil lo decide `profiles.normalise`, que lee un documento — un esquema aquí sería una
+segunda declaración de la misma forma, y las dos discreparían la primera vez que una ganara
+un campo.
+
+Un *grupo* es una entrada cuyos miembros son ids de otras entradas; un *perfil*, una cuyos
+miembros son OIDs. Todo lo de abajo ya los trata como una sola cosa, así que guardarlos
+aparte sería el único sitio del producto que insiste en que son distintos.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| pid | TEXT | no | — | PK — es lo que guarda un dispositivo, y dos filas con un id son dos respuestas a «qué mide» |
+| body | TEXT | no | `'{}'` | El documento del perfil, tal cual |
+| author | TEXT | no | `''` | |
+| created_at | REAL | no | `0` | |
+| updated_at | REAL | no | `0` | |
+
+En la BD y no en ficheros junto a los MIB porque un despliegue con contenedor web y
+contenedor worker **comparte la base de datos y no el disco**: un perfil escrito en el panel
+que el muestreador no pudiera leer sería un dispositivo con algo asignado que no mide nada,
+sin error en ninguna parte.
+
+### `snmp_mib_versions` — historial de ediciones de fuentes MIB
+[lib/core/snmp/mibs/versions.py](../src/lib/core/snmp/mibs/versions.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| mib | TEXT | no | `''` | El nombre del módulo MIB: por lo que compila pysmi, y lo que sobrevive a mover el fichero de carpeta |
+| relpath | TEXT | no | `''` | Dónde estaba cuando se escribió esta versión — a donde vuelve a escribir un guardado |
+| version | INTEGER | no | `1` | |
+| content | TEXT | no | `''` | |
+| size | INTEGER | no | `0` | |
+| sha | TEXT | no | `''` | |
+| parent_sha | TEXT | no | `''` | El sha de lo que esta versión **reemplazó**. Los números no contestan sobre qué base: v2 es «el arreglo», pero ¿el arreglo a qué? |
+| author | TEXT | no | `''` | |
+| note | TEXT | no | `''` | |
+| created_at | REAL | no | `0` | |
+
+Índice: `idx_snmp_mib_versions_mib` sobre `(mib, version)`.
+
 ### `service_leader` — lease de líder (alta disponibilidad)
 [lib/services/manager/leader.py:34](../src/lib/services/manager/leader.py#L34)
 
@@ -898,7 +1034,7 @@ aborta el arranque**.
 > **Estado actual:** ningún watchful del árbol declara tablas de módulo (0 coincidencias de
 > `discover_db_tables` en `src/watchfuls`). Es un mecanismo disponible sin tablas en uso.
 
-**Fuera del conector:** `watchfuls/snmp/mib_catalog.py` abre su propio archivo SQLite de
+**Fuera del conector:** `lib/core/snmp/mibs/catalog.py` abre su propio archivo SQLite de
 catálogo MIB con `sqlite3.connect` directo — **no** pasa por la capa de conectores ni se
 reconcilia.
 

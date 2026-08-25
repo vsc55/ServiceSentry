@@ -83,6 +83,10 @@ function _renderEmailSection(cfgCardOpen, cfgCardClose) {
                     <input type="text" id="emailTestTo" class="form-control"
                         placeholder="${escAttr(t('email_test_to_ph'))}"
                         autocomplete="off">
+                    <button class="btn btn-secondary" id="btnPreviewEmail"
+                        onclick="previewEmail()" title="${escAttr(t('email_preview_tt'))}">
+                        <i class="bi bi-eye me-1"></i>${esc(t('email_preview'))}
+                    </button>
                     <button class="btn btn-info" id="btnTestEmail" data-test-btn
                         onclick="testEmail()" title="${escAttr(t('email_test'))}">
                         <i class="bi bi-envelope-check me-1"></i>${esc(t('email_test'))}
@@ -128,6 +132,42 @@ function _emailProviderChanged(val) {
         const el = document.getElementById(id);
         if (el) el.style.display = provider === val ? '' : 'none';
     });
+}
+
+/** Show what the test email looks like, without sending one.
+ *
+ *  Beside the send button and not instead of it: a test email costs a real message to a real
+ *  inbox, and "does the header look right" is a question nobody should have to spend one on —
+ *  or go and find the answer to in somebody else's mailbox.
+ *
+ *  The SAME config the send would use, unsaved edits included, because the two are only
+ *  comparable if they are given the same thing. The server builds the message once for both.
+ *
+ *  Drawn in an iframe and not in the dialog: this is a whole HTML document with its own
+ *  styles, and an email that inherits the panel's stylesheet is a preview of an email that
+ *  does not exist. Reusing the template editor's modal — the same question asked of the same
+ *  thing, and two ways to look at an email is two things to learn. */
+async function previewEmail() {
+    const modalEl = document.getElementById('notifHtmlPreviewModal');
+    const titleEl = document.getElementById('notifHtmlPreviewTitle');
+    const spinner = document.getElementById('notifHtmlPreviewSpinner');
+    const frame   = document.getElementById('notifHtmlPreviewFrame');
+    if (titleEl) titleEl.textContent = t('email_preview');
+    if (spinner) { spinner.classList.remove('d-none');
+                   spinner.innerHTML = '<span class="spinner-border text-secondary"></span>'; }
+    if (frame)   { frame.classList.add('d-none'); frame.srcdoc = ''; }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    const r = await apiPost('/api/v1/notify/email/preview', configData.email || {});
+    const html = (r && r.data && r.data.html) || '';
+    if (!html.trim()) {
+        if (spinner) spinner.innerHTML =
+            `<p class="text-danger p-4">${esc((r && r.data && r.data.error) || t('connection_error'))}</p>`;
+        return;
+    }
+    if (titleEl && r.data.subject) titleEl.textContent = r.data.subject;
+    if (frame) { frame.srcdoc = html; frame.classList.remove('d-none'); }
+    if (spinner) spinner.classList.add('d-none');
 }
 
 async function testEmail() {

@@ -353,6 +353,10 @@ def register(app, wa):
                 config['__var_dir__'] = wa._var_dir or ''
                 # Shared DB connector, for modules that use their own tables. Not client-set.
                 config['__connector__'] = getattr(wa, '_db_connector', None)
+                # Who is asking. A module that keeps a history of what people did to its data
+                # has to be able to say whose change it was, and the audit log answers that
+                # question somewhere else entirely — one row per action, not per record.
+                config['__user__'] = session.get('username', '')
                 # Host-aware discovery: resolve the bound host (address + SSH, server-side) so
                 # the action can run on it (local or over SSH).
                 host_ctx = modules_actions.resolve_host_ctx(wa, config)

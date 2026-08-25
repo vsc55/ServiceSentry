@@ -21,7 +21,14 @@ widget the module contributes.  Nothing module-specific lives in the core.
 Per-widget keys:
 
 * ``view`` — ``stat`` (a Servers-like stat card: a big count + a coloured badge per
-  state; the default) or ``table`` (a dense listing).
+  state; the default), ``table`` (a dense listing) or ``chart`` (the shape of ONE of the
+  module's measurements over time).
+
+  A ``chart`` widget draws a series the module hands it: every entry may carry ``charts``,
+  a list of ``{field, label, unit, series: {module, key, field}}``, and the card fetches
+  that series from the history like every other chart in the panel. Which measurements are
+  worth a picture is the module's answer — the core draws whatever it is given and learns
+  nothing about what it means.
 * ``id`` — distinguishes a module's widgets (``''`` = the primary one, key
   ``mw_<module>``; others are ``mw_<module>_<id>``).
 * ``scope`` (stat) — which entry the card shows, by its ``id`` (from the hook's
@@ -41,11 +48,11 @@ from lib.modules.discovery.credential_schemas import _watchfuls_dir, _module_i18
 
 def _widget_spec(d: dict) -> dict:
     """Normalise one ``__overview_widget__`` declaration into a widget descriptor.
-    ``view`` = ``stat`` (a Servers-like stat card, default) or ``table`` (a dense
-    listing with a scope selector)."""
+    ``view`` = ``stat`` (a Servers-like stat card, default), ``table`` (a dense
+    listing with a scope selector) or ``chart`` (one measurement over time)."""
     return {
         'id':       str(d.get('id') or ''),          # '' = the module's primary widget
-        'view':     'table' if d.get('view') == 'table' else 'stat',
+        'view':     (d.get('view') if d.get('view') in ('table', 'chart') else 'stat'),
         'icon':     str(d.get('icon') or 'bi-grid-1x2'),
         'perm':     str(d.get('perm') or 'modules_view'),
         'cols':     int(d.get('cols') or 4),

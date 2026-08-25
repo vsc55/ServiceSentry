@@ -35,6 +35,20 @@ CONFIG_ACTIONS = [
      'icon': 'bi-file-zip', 'variant': 'warning', 'order': 2,
      'group_label_key': 'cfg_actions_group_db', 'perm': 'db_maintenance',
      'fn': '_dbCompact'},
+    # With the DELETIONS and not with the two above, which is where it belongs by what it
+    # does rather than by which package ships it: those two reclaim space and re-measure and
+    # destroy no record, this one removes readings. Grouping it with them would have put a
+    # delete under the heading that says "these never delete anything" — the exact confusion
+    # the two groups exist to prevent, and the guard for it caught this.
+    #
+    # It opens on what it FOUND rather than on a confirmation: the number is the decision,
+    # and a red button over an unknown quantity is one nobody should press.
+    {'section': 'maintenance', 'id': 'db_orphans',
+     'label_key': 'db_orphans', 'tooltip_key': 'db_orphans_tt',
+     'desc_key': 'db_orphans_desc',
+     'icon': 'bi-eraser', 'variant': 'danger', 'order': 60,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe',
+     'perm': 'db_maintenance', 'fn': '_dbOrphans'},
 ]
 
 
@@ -62,4 +76,7 @@ AUDIT_EVENTS = [
     # and then it would mean nothing.
     {'key': 'db_optimized', 'severity': 'muted'},
     {'key': 'db_compacted', 'severity': 'muted'},
+    # …and this one is NOT muted: it is the one action here that removes readings, and "why
+    # is there no history before Tuesday" is a question this line answers.
+    {'key': 'db_orphans_purged', 'severity': 'warning'},
 ]

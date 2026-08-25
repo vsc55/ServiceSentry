@@ -75,7 +75,7 @@ def register(app, wa):
             module, key, from_ts, to_ts, points, item_uid=item_uid
         )
         lang     = session.get('lang') or wa._DEFAULT_LANG or DEFAULT_LANG
-        hist_cfg = history_svc.history_meta(wa._modules_dir, module, lang)
+        hist_cfg = history_svc.history_meta(wa._modules_dir, module, lang, wa._var_dir or '')
 
         # field priority: explicit query param > module schema > auto-detect
         field = history_svc.resolve_field(hist_cfg, request.args.get('field'), data)

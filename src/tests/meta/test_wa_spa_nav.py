@@ -97,3 +97,40 @@ class TestTheOtherHalfOfTheSameProblem:
         body = _listener()
         assert ".container-fluid > .tab-content > .tab-pane.active" in body
         assert "classList.remove('show', 'active')" in body
+
+
+class TestASectionKeepsItsOwnQuery:
+    """Reported from the panel: open a device in Infrastructure, press F5, land back on the
+    list of forty.
+
+    The section does put the open device in the address bar and does read it back. What it
+    could not survive was this file: the URL is rebuilt from the section and its view on every
+    activation — the INITIAL one included — so the landing `/infra?host=<uid>` was replaced by
+    `/infra/table` before the section ever looked at it. Not lost by the section; swept away by
+    the navigation that was only trying to say which section is open.
+
+    The rule is narrow on purpose. A query is kept only while the path already belongs to the
+    section being activated, so `/history?module=cpu` does not follow you into Infrastructure.
+    """
+
+    def _fn(self) -> str:
+        src = _read(WIRING)
+        start = src.index('function _sbPaneUrl(')
+        return src[start:src.index(chr(10) + '}', start)]
+
+    def test_the_query_survives_the_rewrite(self):
+        body = self._fn()
+        assert 'window.location.search' in body, (
+            'the URL is rebuilt without the query — a section that puts state in the address '
+            'bar loses it on the initial activation')
+        assert 'search && mine' in body or 'mine && search' in body
+
+    def test_it_is_kept_only_for_the_section_it_belongs_to(self):
+        body = self._fn()
+        assert "here === base" in body and "base + '/'" in body, (
+            "another section's query would follow the user into this one")
+
+    def test_the_panel_tabs_are_untouched(self):
+        """`/admin?tab=<id>` builds its own query and returns before any of this."""
+        body = self._fn()
+        assert body.index('if (!btn.dataset.navUrl) return base;') < body.index('window.location.search')

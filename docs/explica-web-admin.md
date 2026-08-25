@@ -122,7 +122,7 @@ flowchart TD
 | Característica | Descripción |
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
-| **Servers (hosts)** | Define un servidor una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Servers (registro de hosts)](#servers-registro-de-hosts) |
+| **Dispositivos (hosts)** | Define un dispositivo una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Dispositivos (registro de hosts)](#dispositivos-registro-de-hosts) |
 | **Clusters** | Pestaña Clusters: checks **multi-bind** (una comprobación vinculada a varios hosts vía `host_uids`), p. ej. `keepalived` VRRP. Modal de creación/edición con hosts miembros; se persisten como ítems de módulo (`PUT /api/v1/modules`). Permisos `clusters_*` + `cluster.{uid}.{acción}`. Ver §[Clusters (checks multi-bind)](#clusters-checks-multi-bind) |
 | **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde hosts y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): **página propia** (`/syslog`) con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
@@ -140,7 +140,7 @@ flowchart TD
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 75 flags granulares; activar/desactivar desde el modal. Los permisos se editan por dos caminos: el modal del rol (un rol cada vez) y la sub-sección **Acceso › Permisos**, que los pone todos a la vez frente a los integrados |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 76 flags granulares; activar/desactivar desde el modal. Los permisos se editan por dos caminos: el modal del rol (un rol cada vez) y la sub-sección **Acceso › Permisos**, que los pone todos a la vez frente a los integrados |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -252,7 +252,7 @@ mientras un filtro los esconde.
 
 ![Gestión de acceso](images/access_tab.svg)
 
-El **catálogo completo** de roles integrados, roles personalizados, grupos y los **75 flags
+El **catálogo completo** de roles integrados, roles personalizados, grupos y los **76 flags
 de permiso** (más los permisos dinámicos por módulo/servidor/cluster y las estructuras
 internas `PERMISSIONS`/`PERMISSION_GROUPS`/`_perm_required`/`_get_effective_permissions`) es
 la fuente única en **[ref-permisos.md](ref-permisos.md)**. La **semántica de seguridad**
@@ -388,7 +388,7 @@ El permiso requerido se indica entre paréntesis.
 | `PUT` | `/api/v1/overview/default-layout` | `overview_set_default` | Fijar el layout actual como default global para todos los usuarios |
 | `POST` | `/api/v1/overview/reset-factory` | `overview_reset_factory` | Borrar el default global y volver al layout de fábrica |
 
-### Servers (registro de hosts)
+### Dispositivos (registro de hosts)
 
 > El **modelo host-céntrico** (perfiles por protocolo, `host_uid`, ejecución host-aware, migración): ver **[explica-hosts.md](explica-hosts.md)**.
 
@@ -398,17 +398,17 @@ se enmascaran en lectura y se restauran al guardar (igual que la configuración 
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/hosts` | `servers_view` (o view por host) | Listar hosts (secretos enmascarados) |
-| `POST` | `/api/v1/hosts` | `servers_edit` | Crear un host `{name, address, tags, description, profiles}` |
+| `GET` | `/api/v1/hosts` | `devices_view` (o view por host) | Listar hosts (secretos enmascarados) |
+| `POST` | `/api/v1/hosts` | `devices_edit` | Crear un host `{name, address, tags, description, profiles}` |
 | `PUT` | `/api/v1/hosts/<uid>` | `edit` por host | Actualizar un host (secretos omitidos se conservan) |
 | `DELETE` | `/api/v1/hosts/<uid>` | `delete` por host | Eliminar un host |
-| `POST` | `/api/v1/hosts/<uid>/clone` | `servers_edit` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
-| `GET` | `/api/v1/hosts/<uid>/status` | `servers_view` | Últimos resultados de cada check vinculado al host |
-| `POST` | `/api/v1/hosts/test_ssh` | `servers_edit` | Probar conectividad SSH a un host |
-| `POST` | `/api/v1/hosts/test_check` | `servers_edit` | Probar un check concreto contra un host |
-| `POST` | `/api/v1/hosts/test` | `servers_edit` | Test genérico de una configuración de host |
-| `GET` | `/api/v1/hosts/migrate/preview` | `servers_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
-| `POST` | `/api/v1/hosts/migrate/apply` | `servers_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
+| `POST` | `/api/v1/hosts/<uid>/clone` | `devices_edit` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
+| `GET` | `/api/v1/hosts/<uid>/status` | `devices_view` | Últimos resultados de cada check vinculado al host |
+| `POST` | `/api/v1/hosts/test_ssh` | `devices_edit` | Probar conectividad SSH a un host |
+| `POST` | `/api/v1/hosts/test_check` | `devices_edit` | Probar un check concreto contra un host |
+| `POST` | `/api/v1/hosts/test` | `devices_edit` | Test genérico de una configuración de host |
+| `GET` | `/api/v1/hosts/migrate/preview` | `devices_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
+| `POST` | `/api/v1/hosts/migrate/apply` | `devices_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
 
 Un host se guarda en la BD general (tabla `hosts`); `profiles` es un JSON
 `{protocolo: {campo: valor}}` (ssh/snmp/db/http/tls…). Los protocolos y sus
@@ -452,7 +452,7 @@ la BD y se enmascaran en lectura.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/credentials` | `credentials_view` (o `servers_view`/`modules_view`/`*_edit`) | Listar credenciales (secretos enmascarados) |
+| `GET` | `/api/v1/credentials` | `credentials_view` (o `devices_view`/`modules_view`/`*_edit`) | Listar credenciales (secretos enmascarados) |
 | `POST` | `/api/v1/credentials` | `credentials_add` | Crear una credencial |
 | `POST` | `/api/v1/credentials/<uid>/clone` | `credentials_add` | Clonar una credencial existente |
 | `GET` | `/api/v1/credentials/usage` | `credentials_view` | Dónde se usa **cada** credencial, en una sola pasada (vista «Quién las usa») |
@@ -980,14 +980,14 @@ Tarjetas de resumen (stat cards):
 | ------ | -- | ----------- |
 | Modules | `modules` | Total de módulos y cuántos están habilitados |
 | Checks | `checks` | Total de checks y resultado (OK / errores) |
-| Servers | `servers` | Total de servidores y desglose por estado |
+| Devices | `servers` | Total de dispositivos y desglose por estado |
 | Users | `users` | Total de usuarios por rol |
 | Groups | `groups` | Total de grupos y membresías |
 | Roles | `roles` | Roles integrados + personalizados |
 | Sessions | `sessions` | Sesiones activas y usuarios conectados |
 | Webhooks | `webhooks` | Total de webhooks y cuántos habilitados |
 | Credentials | `credentials` | Total de credenciales por tipo |
-| Coverage | `coverage` | % de servidores con al menos un check |
+| Coverage | `coverage` | % de dispositivos con al menos un check |
 | Syslog | `syslog_stats` | Total de mensajes y desglose por severidad |
 | Events | `events` | Reglas de evento (activas/inactivas) + notificaciones enviadas |
 | fail2ban | `fail2ban` | Estado On/Off, nº de IP baneadas (o «Sin baneos»), en vigilancia y en lista blanca |
@@ -1038,7 +1038,7 @@ El estado **viaja con el dato del propio widget**, nunca desde una lista en el c
   de incidencias activas—. Una tabla de sesiones no está en apuros por tener filas.
 
 Así, un widget aportado por un módulo consigue lo mismo diciendo la misma palabra. Lo declaran
-hoy: **comprobaciones**, **servidores** (mantenimiento **no** cuenta: ese host lo tiró alguien a
+hoy: **comprobaciones**, **dispositivos** (mantenimiento **no** cuenta: ese host lo tiró alguien a
 propósito), **servicios** (uno parado es aviso, nunca error), **syslog** (severidades RFC 5424,
 leídas del mismo desglose que pintan las insignias) y la tabla de **incidencias activas**.
 
@@ -1179,7 +1179,7 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 75 permisos |
+| `permission_labels` | Dict `{flag: etiqueta}` con los 76 permisos |
 | `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
@@ -1381,7 +1381,7 @@ Todos los eventos auditados:
 | `syslog_drops_cleared` | Vaciado del registro de descartes de syslog |
 | `syslog_started` / `syslog_stopped` | Arranque/parada del receptor syslog desde la pestaña Services |
 | `events_worker_started` / `events_worker_stopped` | Arranque/parada del procesador de eventos desde la pestaña Services |
-| `host_created` / `host_updated` / `host_deleted` | CRUD del registro de servidores |
+| `host_created` / `host_updated` / `host_deleted` | CRUD del registro de dispositivos |
 | `host_ssh_tested` / `host_test_check` / `host_tested` | Pruebas de conexión/check contra un host |
 | `hosts_migrated` | Migración de conexiones inline a hosts compartidos |
 | `credential_created` / `credential_cloned` / `credential_updated` / `credential_deleted` | CRUD de credenciales reutilizables |

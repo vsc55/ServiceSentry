@@ -32,10 +32,39 @@ from lib.core.hosts.profiles import (
     module_host_multi_bind,
     module_status_render,
 )
+from lib.core.hosts.manifest import HOST_TYPES
 from lib.modules.discovery.credential_schemas import credential_schemas
 from lib.modules.discovery.overview_widgets import overview_widgets_catalog
 from lib.core.overview.discovery import discover_overview_widgets_public as _discover_overview_widgets
 from ..constants import page_label, standalone_pages
+
+
+def _panel_tabs(wa, lang: str) -> list:
+    """Every entry of the System panel, translated and in alphabetical order.
+
+    The core's own tabs plus the pages a module declared belong here
+    (``__page__`` with ``"placement": "system"``). Merged before sorting rather than appended
+    after: a module section pinned to the end reads as an afterthought, and where a thing
+    came from is not what somebody scanning a menu is looking for.
+    """
+    from lib.web_admin.constants import (PANEL_TABS, page_label,  # noqa: PLC0415
+                                         standalone_pages, tab_sort_key)
+    out = [{'id': t['id'], 'icon': t['icon'], 'label': wa._t(t['label_key'])}
+           for t in PANEL_TABS]
+    for p in standalone_pages():
+        sa = p.get('standalone') or {}
+        if sa.get('placement') != 'system':
+            continue
+        # `url` and `views` travel with it: a module section HAS a URL of its own, and a
+        # section with several views is several destinations. Placement decides where the
+        # entry is drawn, never what it is — the flyout that lists the views of a top-level
+        # section is the same flyout here.
+        out.append({'id': p['id'], 'icon': sa.get('icon', 'bi-grid-1x2'),
+                    'label': page_label(p, lang), 'url': p['url'],
+                    'views': _view_specs(p, lang),
+                    'module': sa.get('module', ''), 'perm': sa.get('perm', '')})
+    out.sort(key=lambda t: tab_sort_key(t['label']))
+    return out
 
 
 def _view_specs(page: dict, lang: str) -> list:
@@ -90,6 +119,11 @@ def register(app, wa):
             # ships them all and the client decides — `module` travels on the spec, the
             # sidebar puts it on the entry as data-nav-module, and syncModuleSections() is
             # what hides or reveals it.
+            # The System panel's entries, resolved and sorted HERE because both are
+            # language-dependent: the label is a translation and alphabetical is a property
+            # of the translated word. Core tabs and module-contributed ones are one list —
+            # a reader looking for "SNMP" should not have to know it came from a module.
+            panel_tabs=_panel_tabs(wa, _lang),
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
                                'views': _view_specs(p, _lang),
                                'label': (wa._t(p['standalone']['nav_label_key'])
@@ -101,6 +135,8 @@ def register(app, wa):
             role=session.get('role', 'viewer'),
             item_schemas=ModuleBase.discover_schemas(wa._modules_dir),
             host_profiles=host_profiles_catalog(wa._modules_dir),
+            # What a device may declare itself to be, and the icon each wears.
+            host_types=[dict(t) for t in HOST_TYPES],
             credential_types=credential_schemas(wa._modules_dir),
             module_host_fields=module_host_fields(wa._modules_dir),
             module_host_collections=module_host_collections(wa._modules_dir),

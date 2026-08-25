@@ -697,14 +697,49 @@ en [explica-i18n.md → Resolución de etiquetas](explica-i18n.md#resolución-de
 
 ### `__host_profile__`
 
-Declara los campos de conexión que un check puede **heredar de un host vinculado**
-del registro. Dict (o lista de dicts) con `{"key": <protocolo>, "address_field":
-<campo de dirección>, "fields": [campos a heredar]}`. Lo resuelve
-`ModuleBase.resolve_host()`. Ver [explica-web-admin.md → Servers](explica-web-admin.md#servers-registro-de-hosts).
+Declara a qué **protocolo** se ata el check para heredar la conexión de un host del registro.
+Dict (o lista de dicts) con `{"key": <protocolo>, "address_field": <campo de dirección>}`. Lo
+resuelve `ModuleBase.resolve_host()`. Ver
+[explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host", "fields": ["host"]}
+"__host_profile__": {"key": "snmp", "address_field": "host"}
 ```
+
+**No lleva `fields`** si el protocolo lo declara el core (`ssh`, `snmp`): *qué campos tiene*
+un protocolo no es del módulo, y `host_profile_specs()` los completa desde la declaración del
+core. Once módulos los repetían —diez con los mismos siete de SSH— y el catálogo ya
+sobrescribía todas esas copias, así que una que se separase no cambiaba ningún formulario:
+cambiaba qué valores podía empujar un host atado sobre el check, sin decirlo.
+
+`address_field` sí lo dice el módulo: **qué campo suyo** recibe la dirección es cosa suya
+(`web` la pone en `server`, SNMP en `host`). Entra automáticamente en lo que un check atado
+deja de dibujar.
+
+Un protocolo que el core **no** declara (`http` de `web`, `db` de `datastore`) sigue diciendo
+sus propios `fields`, o `[]` para «átame, sin formulario de credencial».
+
+### `__profile_fields__`
+
+Dentro de una **colección**: toma los campos de conexión de un protocolo del core en vez de
+copiarlos.
+
+```json
+"servers": {
+    "__profile_fields__": "snmp",
+    "timeout": {"type": "int", "default": 5},
+    "checks":  {"type": "sub_collection", ...}
+}
+```
+
+`__host_profile__` dice qué hereda un check **atado**; no pinta nada en el formulario de uno
+**sin atar**, y un check contra una IP suelta tiene que poder decir comunidad, versión y claves
+v3 por sí mismo. Eso era lo que obligaba a escribir los campos una segunda vez.
+
+`discover_schemas()` los sustituye por las declaraciones reales del core, en su orden y en esa
+posición, y sus etiquetas y ayudas salen de la i18n del core por los mismos caminos de siempre
+(`label_i18n` en el campo, `hints` a través de `__i18n__`). **El navegador recibe lo mismo que
+antes.** Un campo que la colección declare ella misma gana: la expansión nunca pisa.
 
 ### `__host_multiple__`
 
@@ -738,8 +773,9 @@ Ver [explica-descubrimiento.md §6b](explica-descubrimiento.md#6b-partes-de-back
 
 ### `__page__`
 
-Declara que el módulo reclama una **sección de primer nivel propia**, al lado de Overview,
-Historial y Syslog: su URL, su entrada en la barra lateral y su panel.
+Declara que el módulo reclama una **sección propia**: su URL, su entrada en la barra lateral
+y su panel. Por defecto, de primer nivel al lado de Overview, Historial y Syslog; con
+`"placement": "system"`, dentro del panel de System al lado de Servicios y Credenciales.
 
 ```json
 "__page__": {"id": "azure", "icon": "bi-cloud-haze2", "order": 45,
@@ -754,7 +790,8 @@ Historial y Syslog: su URL, su entrada en la barra lateral y su panel.
 | `render` | `""` | Función JS que pinta la sección; el módulo la envía en su `web/_ui.html`. **Vacío = la pinta el renderizador genérico del core** a partir de `page_data`, y el módulo no necesita nada de frontend |
 | `refresh` | `""` | Acción de watchful que el botón de refresco en vivo invoca (debe estar en `WATCHFUL_ACTIONS`). Vacío = la página es solo caché |
 | `perm` | `modules_view` | Permiso que protege la ruta **y** la entrada de la barra lateral. Un watchful no posee flags propios, así que debe reutilizar uno existente |
-| `views` | `[]` | Las **vistas** de la sección. Con dos o más, la entrada de la barra lateral pasa a ser un padre con flyout y cada vista es un **sub-path** (`/module/m365/storage`): comparten panel, permiso y descriptor, y entre todas cuestan **una** ruta más. Con menos de dos se ignora — un padre con un solo hijo es un menú que gasta un clic |
+| `placement` | `section` | **Dónde** va la entrada. `section` = de primer nivel, que es lo correcto para algo que se **mira** (el estado de m365). `system` = dentro del acordeón del panel, que es donde vive lo que se **administra** (la biblioteca de MIBs, al lado de Servicios, Módulos y Credenciales). El core la coloca sin saber de quién es; todo lo demás —panel, permiso, cableado, vistas— es idéntico en las dos |
+| `views` | `[]` | Las **vistas** de la sección. Con dos o más, la entrada de la barra lateral pasa a ser un padre con flyout y cada vista es un **sub-path** (`/module/m365/storage`): comparten panel, permiso y descriptor, y entre todas cuestan **una** ruta más. Con menos de dos se ignora — un padre con un solo hijo es un menú que gasta un clic. Independiente de `placement`: las vistas son de la sección, y dónde la dibuja la barra lateral no es propiedad de nada |
 
 **Cada vista** (`views[]`): `slug` (apto para URL, obligatorio), `icon`, `label` (clave en el
 fichero de idioma **del módulo** — el core no tiene cadenas que nombren la vista de un módulo),
@@ -981,7 +1018,7 @@ módulos, auditoría, historial y los destinos de notificación por canal.
 | `roles` | `uid` | `name` (UNIQUE), `description`, `permissions` (JSON), `enabled`, auditoría | `idx_roles_name` (UNIQUE) | `core/roles/store.py` |
 | `sessions` | `token` | `uid` (id público), `user_uid`, `created`, `last_seen`, `ip`, `user_agent` | `idx_sessions_user_uid` | `core/sessions/store.py` |
 | `credentials` | `uid` | `name` (UNIQUE), `ctype`, `enabled`, `description`, `data` (JSON, secretos cifrados), auditoría | `idx_credentials_name` | `core/credentials/store.py` |
-| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
+| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `device_type`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
 | `module_config` | `uid` | `module` (UNIQUE), `data` (JSON: campos de módulo + meta `__*__`), auditoría | `idx_module_config_module` | `core/modules/store.py` |
 | `module_config_items` | `uid` | `module_uid` → `module_config.uid`, `collection`, `host_uid` → `hosts.uid`, `label`, `enabled`, `data` (JSON), auditoría | `idx_module_config_items_moduid`, `idx_module_config_items_host` | `core/modules/store.py` |
 | `config` | `uid` | `path` (UNIQUE, `section\|field`), `value` (JSON), auditoría | `idx_config_path` | `core/config/store.py` |

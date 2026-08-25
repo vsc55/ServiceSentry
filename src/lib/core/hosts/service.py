@@ -23,22 +23,67 @@ import os
 import re
 import uuid
 
+from lib.core.hosts.resolve import host_uid_from_key
 from lib.security import secret_manager
 
 
-def enrich_hosts(hosts: list, statuses: dict, bound: dict) -> list:
+def enrich_hosts(hosts: list, statuses: dict, bound: dict, reported: dict | None = None) -> list:
     """Annotate each host (in place) with ``status`` and module totals.  *statuses* is
     ``{uid: status}``; *bound* is ``{uid: {module: has_active_check}}``.  ``modules_total`` =
     the host's saved modules ∪ any with a bound check; ``modules_active`` = those with at
-    least one enabled check.  Returns *hosts*."""
+    least one enabled check.  Returns *hosts*.
+
+    *reported* is ``{uid: {os, vendor, model, brand}}`` — what each machine has SAID about
+    itself (see ``infra.service.fleet_identity``). Three of those four land as they are: who
+    made a box and which model it is are not settings, so there is nothing for them to argue
+    with.
+
+    ``os`` is the exception, and lands as ``os_auto`` ONLY where the host's own field is
+    ``auto``. It is not the setting, it is the answer the setting stands for — a screen showing
+    "auto" and nothing else is a screen keeping something it already knows to itself, and a
+    screen showing the device's word over a setting somebody chose is worse than either.
+    """
     for h in hosts:
         uid = h.get('uid')
+        said = (reported or {}).get(uid) or {}
         h['status'] = statuses.get(uid, '')
+        h['os_auto'] = (str(said.get('os') or '')
+                        if str(h.get('os') or 'auto').strip().lower() == 'auto' else '')
+        h['vendor'] = str(said.get('vendor') or '')
+        h['model'] = str(said.get('model') or '')
+        h['brand'] = dict(said.get('brand') or {})
         mods = bound.get(uid, {})
         total = set(h.get('modules') or []) | set(mods)
         h['modules_total'] = len(total)
         h['modules_active'] = sum(1 for m in total if mods.get(m))
     return hosts
+
+
+def _row_of(skey: str, data: dict) -> str:
+    """Which ROW of the item this result is about, or '' when the item is the whole answer.
+
+    One item can produce many results — an SNMP device profile samples a table and files one
+    per disk, per volume, per interface — and every one of them inherits the ITEM's label,
+    because that is the only name the configuration holds. On a page that is already about
+    that device the result is the device's name printed three hundred times, which says
+    nothing at all: what somebody needs to read is "Drive 1", "/volume1", "eth0".
+
+    Two sources, in order of how much they know:
+
+    * ``_row`` in the recorded data — the name the module gave the row, as a person writes it
+      ("Drive 1 (DX517-1)"). Underscore-prefixed like ``_attrs``: the recorders already treat
+      that prefix as "about the result" rather than "a measurement of it";
+    * the ``<item>/<detail>`` key, whose detail segment is the same thing with the spaces
+      taken out — the fallback for a module that files composite keys without naming them.
+
+    ``metrics`` is the sampler's word for "the item itself, not one of its rows", so it names
+    no row and answers ''.
+    """
+    row = str((data or {}).get('_row') or '').strip()
+    if row:
+        return row
+    detail = skey.split('/', 1)[1] if '/' in skey else ''
+    return '' if detail in ('', 'metrics') else detail
 
 
 def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
@@ -48,9 +93,27 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
     (e.g. ram_swap ``<uid>_ram``) are mapped back to their base bound item.  Sorted by
     ``(module, name)``."""
     def _matches(skey, keys):
-        """Map a (possibly derived) result key to its bound base item key."""
-        base = skey if skey in keys else skey.rsplit('_', 1)[0]
-        return base if base in keys else None
+        """Map a (possibly derived) result key to its bound base item key.
+
+        Three shapes, tried in order of how specific they are:
+
+        * the key IS the item (an inline check);
+        * <item>/<detail> — the composite convention the rest of the product already
+          speaks (history's check_label resolves it the same way): one item producing
+          several rows, which is what an SNMP device profile does when it samples a table
+          and files a row per interface, per volume, per disk;
+        * <item>_<suffix> — the older derived-key shape (ram_swap's <uid>_ram).
+
+        The middle one was missing, and its absence had no symptom worth noticing: the rows
+        were recorded, charted and named correctly, and simply never reached the screen that
+        was built to show them.
+        """
+        if skey in keys:
+            return skey
+        for base in (skey.split('/', 1)[0], skey.rsplit('_', 1)[0]):
+            if base in keys:
+                return base
+        return None
 
     results = []
     for bare, keys in bound.items():
@@ -68,10 +131,11 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
                     continue
                 data = info.get('other_data') if isinstance(info.get('other_data'), dict) else {}
                 name = str(data.get('name') or '').strip() or keys.get(base) or skey
+                row = _row_of(skey, data)
                 ok = info.get('status') is True
                 sev = (info.get('severity') or '').lower()
                 results.append({
-                    'module': bare, 'key': skey, 'name': name,
+                    'module': bare, 'key': skey, 'name': name, 'row': row,
                     'ok': ok,
                     'level': 'ok' if ok else ('warning' if sev == 'warning' else 'error'),
                     'message': info.get('message', ''),
@@ -92,6 +156,7 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
             _ok = s.get('last_status') is True
             results.append({
                 'module': bare, 'key': skey, 'name': name,
+                'row': _row_of(skey, data),
                 'ok': _ok,
                 'level': 'ok' if _ok else 'error',   # history keeps no severity
                 'message': data.get('message', '') if isinstance(data, dict) else '',
@@ -99,7 +164,9 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
                 'source': 'history',
             })
             covered.add(skey)
-    results.sort(key=lambda r: (r['module'], r['name']))
+    # By row within a module, so a table of one device's disks reads Drive 1, Drive 2…
+    # and not in whatever order the agent answered them.
+    results.sort(key=lambda r: (r['module'], r.get('row') or '', r['name']))
     return results
 
 
@@ -377,6 +444,69 @@ def _checks_for_host(wa, uid):
     return grouped
 
 
+def host_recorded_keys(series: list, uid: str) -> dict:
+    """``{bare_module: {result_key: ''}}`` for what a module RECORDED about the host itself.
+
+    The same question :func:`host_sampled_keys` asks of the live state, asked of the history —
+    and it has to be asked, because the live state is not always there. A machine in
+    maintenance has its checks skipped, so the next cycle prunes every key the module stopped
+    returning, which for a device sampled through the registry is all of them. Reported from
+    the screen: a switch put into maintenance opened onto four empty tabs with a year of
+    history sitting behind it.
+
+    The history is kept on purpose for exactly this (see ``purge_maintenance_states``); it was
+    simply unreachable from a page that worked out what a device is made of from the live
+    state alone.
+    """
+    uid = str(uid or '').strip()
+    out: dict = {}
+    if not uid:
+        return out
+    for row in series or ():
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get('key') or '')
+        if host_uid_from_key(key) != uid:
+            continue
+        # The base key, not the row: `build_host_status` maps `<base>/<row>` back to it, which
+        # is what makes one entry stand for a device's whole table.
+        out.setdefault(_bare(str(row.get('module') or '')), {})[key.split('/', 1)[0]] = ''
+    return out
+
+
+def host_sampled_keys(status_raw: dict, uid: str) -> dict:
+    """``{bare_module: {result_key: ''}}`` for what a module recorded about the HOST itself.
+
+    Some devices are read because the REGISTRY says they are devices, not because somebody
+    configured a check: an SNMP profile with device profiles assigned is enough, and what comes
+    back is filed under the host (``host.<uid>/…``) rather than under an item.
+
+    Two screens already knew that and one did not. The status column reads these keys, so a
+    switch sampled this way turned red; the device page built its rows from the configured
+    checks alone, so the same switch showed "no check points at this device" and four empty
+    tabs. One machine, two answers, and the one with the numbers in it was the one nobody
+    could see — reported exactly that way.
+
+    Read from what was RECORDED rather than from what could be: this needs no list of which
+    modules sample hosts, and cannot disagree with the column that already does it.
+    """
+    uid = str(uid or '').strip()
+    out: dict = {}
+    if not uid or not isinstance(status_raw, dict):
+        return out
+    for mod_key, mod_status in status_raw.items():
+        if not isinstance(mod_status, dict):
+            continue
+        bare = _bare(str(mod_key))
+        for res_key in mod_status:
+            if host_uid_from_key(res_key) != uid:
+                continue
+            # The base key, not the row: `build_host_status` maps `<base>/<row>` back to it,
+            # which is what makes one entry stand for a device's whole table.
+            out.setdefault(bare, {})[str(res_key).split('/', 1)[0]] = ''
+    return out
+
+
 def _host_statuses(wa):
     """Return ``{host_uid: 'ok'|'error'|'warning'}`` derived from the daemon's status file and
     the host_uid binding of each check in the module configuration.
@@ -392,6 +522,29 @@ def _host_statuses(wa):
     NOT folded in here — the UI shows it as an override."""
     status_raw = wa._read_check_status()
 
+    # Every result, indexed by the CHECK it belongs to rather than by the key it was filed
+    # under. A watchful that samples rows files `<key>/<row>` or `<key>_<metric>` and nothing
+    # at all under the bare key, so a look-up by key alone finds nothing — and "nothing" is
+    # the newly-added case, which paints as a warning.
+    #
+    # Reported from the screen: two NAS sitting in warning with everything they answer green.
+    # Each has one enabled SNMP item with no OID checks and twelve device profiles, so all 295
+    # of its readings are sub-metrics and not one of them is under the item's own key. The
+    # machine said "I have a check nobody has evaluated yet" about a check evaluated 295 times
+    # a cycle. The switches and routers were fine because they have no configured item at all
+    # and are rescued further down, by the `host.<uid>` branch.
+    #
+    # By `item_uid`, which is the same uid the configuration keys the check by, so no result
+    # key has to be taken apart to find out whose it is.
+    _by_item: dict = {}
+    for _mk, _mod_status in status_raw.items():
+        if not isinstance(_mod_status, dict):
+            continue
+        bucket = _by_item.setdefault(_bare(_mk), {})
+        for _info in _mod_status.values():
+            if isinstance(_info, dict) and _info.get('item_uid'):
+                bucket.setdefault(_info['item_uid'], []).append(_info)
+
     def _check_info(mod_key, check_key):
         """The recorded (status, severity) for a check, trying full and bare keys."""
         for mk in (mod_key, _bare(mod_key)):
@@ -401,6 +554,17 @@ def _host_statuses(wa):
                 if isinstance(info, dict):
                     return info.get('status'), (info.get('severity') or '')
                 return None, ''
+        # Nothing under its own key: the rows it produced, if it produced any. Worst first —
+        # one row in trouble is the check in trouble, and a machine with one failed disk and
+        # forty good ones is not a machine that is fine.
+        rows = _by_item.get(_bare(mod_key), {}).get(check_key) or []
+        if rows:
+            if any(r.get('status') is not True and (r.get('severity') or '') != 'warning'
+                   for r in rows):
+                return False, ''
+            if any(r.get('status') is not True for r in rows):
+                return False, 'warning'
+            return True, ''
         return '__absent__', ''
 
     modules = wa._load_modules()
@@ -429,6 +593,30 @@ def _host_statuses(wa):
                         a['has_warn'] = True
                     else:
                         a['has_error'] = True
+
+    # …and the results that belong to a host with no check behind them: a device the panel
+    # reads because the HOST says it is one (an SNMP profile with device profiles assigned).
+    # Without this a device can be sampled, found down, and still show a neutral dash — the
+    # column would be answering "how many checks did you configure" while looking like it
+    # answers "is this machine all right".
+    for mod_status in status_raw.values():
+        if not isinstance(mod_status, dict):
+            continue
+        for res_key, info in mod_status.items():
+            uid = host_uid_from_key(res_key)
+            if not uid:
+                continue
+            a = agg.setdefault(uid, {'has_error': False, 'has_warn': False,
+                                     'known': 0, 'total': 0})
+            a['total'] += 1
+            a['known'] += 1
+            st = info.get('status') if isinstance(info, dict) else None
+            sev = (info.get('severity') or '') if isinstance(info, dict) else ''
+            if st is not True:
+                if sev == 'warning':
+                    a['has_warn'] = True
+                else:
+                    a['has_error'] = True
 
     out = {}
     for uid, a in agg.items():

@@ -1,0 +1,226 @@
+{
+    "id": "synology_disks",
+    "label": {
+        "en_EN": "Synology — disks (SYNOLOGY-DISK-MIB)",
+        "es_ES": "Synology — discos (SYNOLOGY-DISK-MIB)"
+    },
+    "short_label": {"en_EN": "Disks", "es_ES": "Discos"},
+    "description": {
+        "en_EN": "One row per physical disk, named as Storage Manager names it: temperature, bad sectors, remaining life and health. A disk that is cooking or reallocating sectors is visible here weeks before the volume notices.",
+        "es_ES": "Una fila por disco físico, con el nombre que le da el Gestor de almacenamiento: temperatura, sectores defectuosos, vida restante y salud. Un disco que se está cociendo o reasignando sectores se ve aquí semanas antes de que el volumen se entere."
+    },
+    "row_split": "^(?P<row>.+?)\\s*\\((?P<group>[^)]+)\\)$",
+    "match": {
+        "sysobjectid_prefix": "1.3.6.1.4.1.6574",
+        "probe": "1.3.6.1.4.1.6574.1.5.1.0"
+    },
+    "metrics": [
+        {
+            "key": "syno_disk_temp",
+            "icon": "bi-thermometer-half",
+            "headline": true,
+            "label": {
+                "en_EN": "Temperature",
+                "es_ES": "Temperatura"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.6",
+            "kind": "gauge",
+            "unit": "°C",
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12"
+        },
+        {
+            "key": "syno_disk_status",
+            "icon": "bi-hdd",
+            "label": {
+                "en_EN": "Status",
+                "es_ES": "Estado"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.5",
+            "kind": "gauge",
+            "chart": "value",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12",
+            "states": {
+                "1": {
+                    "label": {
+                        "en_EN": "Normal",
+                        "es_ES": "Normal"
+                    },
+                    "level": "ok"
+                },
+                "2": {
+                    "label": {
+                        "en_EN": "Initialized",
+                        "es_ES": "Inicializado"
+                    },
+                    "level": "ok"
+                },
+                "3": {
+                    "label": {
+                        "en_EN": "Not initialized",
+                        "es_ES": "Sin inicializar"
+                    },
+                    "level": "info"
+                },
+                "4": {
+                    "label": {
+                        "en_EN": "System partition failed",
+                        "es_ES": "Partición de sistema con fallo"
+                    },
+                    "level": "bad"
+                },
+                "5": {
+                    "label": {
+                        "en_EN": "Crashed",
+                        "es_ES": "Averiado"
+                    },
+                    "level": "bad"
+                }
+            }
+        },
+        {
+            "key": "syno_disk_health",
+            "icon": "bi-heart-pulse",
+            "headline": true,
+            "label": {
+                "en_EN": "Health",
+                "es_ES": "Salud"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.13",
+            "kind": "gauge",
+            "chart": "value",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12",
+            "states": {
+                "1": {
+                    "label": {
+                        "en_EN": "Normal",
+                        "es_ES": "Normal"
+                    },
+                    "level": "ok"
+                },
+                "2": {
+                    "label": {
+                        "en_EN": "Warning",
+                        "es_ES": "Aviso"
+                    },
+                    "level": "warn"
+                },
+                "3": {
+                    "label": {
+                        "en_EN": "Critical",
+                        "es_ES": "Crítico"
+                    },
+                    "level": "bad"
+                },
+                "4": {
+                    "label": {
+                        "en_EN": "Failing",
+                        "es_ES": "Fallando"
+                    },
+                    "level": "bad"
+                }
+            }
+        },
+        {
+            "key": "syno_disk_life",
+            "icon": "bi-hourglass-split",
+            "label": {
+                "en_EN": "Remaining life",
+                "es_ES": "Vida restante"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.11",
+            "kind": "gauge",
+            "unit": "%",
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12",
+            "states": {
+                "-1": {
+                    "label": {
+                        "en_EN": "Not reported",
+                        "es_ES": "No lo informa"
+                    },
+                    "level": "info"
+                }
+            }
+        },
+        {
+            "key": "syno_disk_badsectors",
+            "icon": "bi-exclamation-octagon",
+            "label": {
+                "en_EN": "Bad sectors",
+                "es_ES": "Sectores defectuosos"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.9",
+            "kind": "gauge",
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12"
+        },
+        {
+            "key": "syno_disk_retries",
+            "icon": "bi-arrow-repeat",
+            "label": {
+                "en_EN": "Connection retries",
+                "es_ES": "Reintentos de conexión"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.8",
+            "kind": "gauge",
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12"
+        },
+        {
+            "key": "syno_disk_model",
+            "label": {
+                "en_EN": "Model",
+                "es_ES": "Modelo"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.3",
+            "kind": "text",
+            "role": "model",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12"
+        },
+        {
+            "key": "syno_disk_role",
+            "label": {
+                "en_EN": "Role",
+                "es_ES": "Función"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.7",
+            "kind": "text",
+            "role": "role",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12"
+        },
+        {
+            "key": "syno_disk_type",
+            "label": {
+                "en_EN": "Type",
+                "es_ES": "Tipo"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.4",
+            "kind": "text",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12",
+            "role": "kind"
+        },
+        {
+            "key": "syno_disk_serial",
+            "label": {
+                "en_EN": "Serial number",
+                "es_ES": "Número de serie"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.14",
+            "kind": "text",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12",
+            "role": "serial"
+        },
+        {
+            "key": "syno_disk_bay",
+            "label": {
+                "en_EN": "Bay",
+                "es_ES": "Bahía"
+            },
+            "walk": "1.3.6.1.4.1.6574.2.1.1.2",
+            "kind": "text",
+            "index_label": "1.3.6.1.4.1.6574.2.1.1.12",
+            "role": "bay"
+        }
+    ]
+}

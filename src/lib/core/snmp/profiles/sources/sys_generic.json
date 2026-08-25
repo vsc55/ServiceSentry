@@ -1,0 +1,118 @@
+{
+    "id": "sys_generic",
+    "rank": -1,
+    "label": {
+        "en_EN": "System (RFC 1213)",
+        "es_ES": "Sistema (RFC 1213)"
+    },
+    "short_label": {
+        "en_EN": "System",
+        "es_ES": "Sistema"
+    },
+    "description": {
+        "en_EN": "What every agent answers: the name, what it says it is, and how long it has been up. Standard MIB-II, so it works before anybody has chosen a profile for the device.",
+        "es_ES": "Lo que contesta cualquier agente: el nombre, qué dice que es y cuánto lleva encendido. MIB-II estándar, así que funciona antes de que nadie haya elegido un perfil para el dispositivo."
+    },
+    "match": {
+        "probe": "1.3.6.1.2.1.1.1.0"
+    },
+    "metrics": [
+        {
+            "key": "sys_name",
+            "oid": "1.3.6.1.2.1.1.5.0",
+            "kind": "text",
+            "role": "name",
+            "label": {
+                "en_EN": "Name",
+                "es_ES": "Nombre"
+            }
+        },
+        {
+            "key": "sys_descr",
+            "oid": "1.3.6.1.2.1.1.1.0",
+            "kind": "text",
+            "role": "description",
+            "label": {
+                "en_EN": "Description",
+                "es_ES": "Descripción"
+            }
+        },
+        {
+            "key": "sys_objectid",
+            "oid": "1.3.6.1.2.1.1.2.0",
+            "kind": "text",
+            "role": "sysobjectid",
+            "label": {
+                "en_EN": "Vendor OID",
+                "es_ES": "OID del fabricante"
+            }
+        },
+        {
+            "key": "ip_address",
+            "walk": "1.3.6.1.2.1.4.20.1.1",
+            "with": {
+                "oid": "1.3.6.1.2.1.4.20.1.3",
+                "sep": "/",
+                "as": "prefix"
+            },
+            "kind": "text",
+            "role": "ip",
+            "of_device": true,
+            "skip": "^127[.]|^0[.]0[.]0[.]0$",
+            "label": {
+                "en_EN": "IP addresses",
+                "es_ES": "Direcciones IP"
+            }
+        },
+        {
+            "key": "ip_gateway",
+            "walk": "1.3.6.1.2.1.4.21.1.7",
+            "where": {
+                "oid": "1.3.6.1.2.1.4.21.1.1",
+                "equals": "0.0.0.0"
+            },
+            "kind": "text",
+            "role": "gateway",
+            "of_device": true,
+            "skip": "^0[.]0[.]0[.]0$",
+            "label": {
+                "en_EN": "Default gateway",
+                "es_ES": "Pasarela por defecto"
+            }
+        },
+        {
+            "key": "sys_location",
+            "oid": "1.3.6.1.2.1.1.6.0",
+            "kind": "text",
+            "role": "location",
+            "label": {
+                "en_EN": "Location",
+                "es_ES": "Ubicación"
+            }
+        },
+        {
+            "key": "sys_contact",
+            "oid": "1.3.6.1.2.1.1.4.0",
+            "kind": "text",
+            "role": "contact",
+            "label": {
+                "en_EN": "Contact",
+                "es_ES": "Contacto"
+            }
+        },
+        {
+            "key": "uptime",
+            "icon": "bi-clock-history",
+            "headline": true,
+            "oid": "1.3.6.1.2.1.1.3.0",
+            "kind": "gauge",
+            "unit": "s",
+            "scale": 0.01,
+            "chart": "line",
+            "label": {
+                "en_EN": "Uptime",
+                "es_ES": "Tiempo encendido"
+            }
+        }
+    ]
+}

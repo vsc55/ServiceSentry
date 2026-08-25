@@ -391,3 +391,111 @@ class TestACardCannotAskForAnAccentThatDoesNotExist:
         assert used, 'no card asks for an accent — the scan is looking in the wrong place'
         missing = used - defined
         assert not missing, f'accents named by a card but never given a colour: {missing}'
+
+
+class TestARailReachesTheBottomOfItsCard:
+    """Reported from the screen: the rail stopped after its two items and the rest of the
+    card was empty.
+
+    `.ss-railbox` is `flex: 1 1 auto`, which means nothing unless its parent is a flex
+    COLUMN — and the list-table factory hands a view's body to a plain `.ss-vscroll`, which
+    is a flex item without being a flex container. The stylesheet already knew that and fixed
+    it for `> .ss-railbox`.
+
+    Then a view put a summary header above its rail. The wrapper that holds both is one box
+    between them, `> .ss-railbox` stopped matching, and the layout silently went back to what
+    the rule existed to prevent. Nothing in the markup or the stylesheet was wrong to read —
+    it is the shape of the tree that changed, which is why this is asked of both.
+    """
+
+    def _rule(self):
+        css = re.sub(r'/\*.*?\*/', '', _read(CSS), flags=re.S)
+        for m in re.finditer(r'\.ss-vscroll:has\(([^)]*)\)\s*\{([^}]*)\}', css):
+            if 'railbox' in m.group(1):
+                return m
+        return None
+
+    def test_the_scroll_box_around_a_rail_becomes_a_column(self):
+        m = self._rule()
+        assert m, 'nothing turns the body that holds a rail into a flex column'
+        body = m.group(2)
+        assert 'display: flex' in body and 'flex-direction: column' in body, (
+            'the rail is told to grow inside a box that is not a flex container, which is a '
+            'no-op — right in the stylesheet, wrong on the screen')
+        assert 'overflow: hidden' in body, (
+            'the box scrolls around a rail that scrolls: two scrollbars, and the rail head '
+            'scrolls away with the page')
+
+    def test_it_matches_a_rail_anywhere_below_it_and_not_only_a_child(self):
+        """The regression itself. A view is entitled to put a header above its rail, and the
+        rule has to keep holding when it does."""
+        sel = self._rule().group(1)
+        assert '>' not in sel, (
+            'back to a child selector: one wrapper between the body and the rail and the '
+            'rail draws at the height of its own items again')
+        assert '.ss-railbox' in sel
+
+    def test_nothing_between_the_body_and_the_rail_breaks_the_chain(self):
+        """The other half: the rule passes the height DOWN, and a wrapper that is not a link
+        in the fill chain keeps it. `.ss-vfill` is that link."""
+        for path in _templates():
+            src = _code(path)
+            i = src.find('ss-railbox')
+            if i < 0:
+                continue
+            j = src.rfind('return `', 0, i)
+            assert j >= 0, path
+            # The whole opening tag, not just a class attribute: a wrapper with NO class at
+            # all is the shape this is about, and a pattern that required one would have
+            # skipped exactly the case it exists to catch.
+            for attrs in re.findall(r'<(?:div|section|nav|main)(|\s[^>]*)>', src[j:i]):
+                assert 'ss-vfill' in attrs, (
+                    f'{os.path.basename(path)}: <div{attrs}> sits between the body and the '
+                    'rail without passing the height down')
+
+
+class TestARowHoverThatPaintsTheWholeTable:
+    """A hover meant for one row, applied to the container of forty.
+
+    The configuration sheet lights up the field row under the cursor, which is right for a
+    field — a label and its control on one line. The notification routing matrix is not one
+    of those: it is a whole TABLE inside a single `cfg-field-wrap`, so the rule painted the
+    wrapper and every row in it changed colour at once. Reported from the screen in exactly
+    those words: "hovering one row changes the colour of all of them".
+
+    A table brings its own row hover (`.table-hover` + `.ss-hover-rows`) and that is the one
+    that means something, so the container's must stand aside — the same `:not(:has(table))`
+    the dashboard widgets already use, for the same reason.
+    """
+
+    def _css(self):
+        return _read(CSS)
+
+    def test_the_field_hover_stands_aside_for_a_table(self):
+        rule = [ln for ln in self._css().splitlines()
+                if '.cfg-field-wrap' in ln and ':hover' in ln and 'background' in ln]
+        assert rule, 'the field hover is gone — this guard needs updating with what replaced it'
+        assert all(':not(:has(table))' in ln for ln in rule), rule
+
+    def test_the_routing_matrix_is_still_one_wrap_around_a_table(self):
+        """Which is what makes the guard necessary: change this to a wrap per ROW and the
+        rule above stops mattering — but nothing would tell you it had."""
+        src = _read(os.path.join(TPL, 'partials', 'cfg', 'notify', '_routing.html'))
+        assert 'cfg-field-wrap' in src and '<table' in src
+
+    def test_the_table_carries_its_own_row_hover(self):
+        """Because the container no longer paints anything, this IS the hover now. Without
+        it the fix would read as "the highlight disappeared".
+
+        And it is the ACCENT one: this table's group headers are filled with the same grey a
+        default hover uses, so the row under the cursor read as another heading rather than as
+        a selection — reported in those words right after the first fix landed.
+        """
+        src = _read(os.path.join(TPL, 'partials', 'cfg', 'notify', '_routing.html'))
+        assert 'table-hover' in src and 'ss-hover-accent' in src
+        css = self._css()
+        assert '.ss-hover-accent' in css, 'the class it asks for is not defined'
+        # …and the two are actually different colours, which is the whole point.
+        grey = css.split('.ss-hover-rows {')[1].split('}')[0]
+        accent = css.split('.ss-hover-accent {')[1].split('}')[0]
+        assert grey.strip() != accent.strip()

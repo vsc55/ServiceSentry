@@ -80,9 +80,25 @@ function _historyRenderStats(stats) {
 }
 
 // ── Canvas chart ──────────────────────────────────────────────────────────────
-function _historyDraw(canvas, points, field, unit, metricLabel) {
+/** One series over time — or several, when the caller says they are one picture.
+ *
+ *  *extra* is `[{field, label}]`: further columns of the SAME points, drawn on the same axis.
+ *  Traffic in and traffic out are the case, and the reason it is one axis and one request is
+ *  the same reason it is one picture — two charts side by side on two different y-scales is
+ *  the comparison made impossible, and both numbers are already in every point's data bag.
+ *
+ *  With companions the lines stop being coloured by STATUS. That colouring answers "was the
+ *  device up" one segment at a time, and with two lines on the axis the eye has to be able to
+ *  tell which line is which first; the strip under the chart already answers the other
+ *  question, for every series at once. */
+function _historyDraw(canvas, points, field, unit, metricLabel, extra) {
     unit        = unit        || '';
     metricLabel = metricLabel || field || '';
+    // Only the companions that this payload actually carries: a profile can declare a pair
+    // whose second half the device has not answered yet, and an empty line with a legend
+    // entry is a chart claiming a series that is not there.
+    const mates = (extra || []).filter(x => x && x.field
+        && points.some(p => typeof (p.data || {})[x.field] === 'number'));
     if (!canvas || !points.length) return;
     const wrap = canvas.parentElement;
     const dpr  = window.devicePixelRatio || 1;
@@ -108,12 +124,13 @@ function _historyDraw(canvas, points, field, unit, metricLabel) {
         err:  '#dc3545',
     };
 
-    const PAD = {t: 14, r: 14, b: 38, l: 58};
-    const cw = W - PAD.l - PAD.r;
-    const ch = H - PAD.t - PAD.b;
-
     const vals = field ? points.map(p => (typeof p.data[field] === 'number' ? p.data[field] : null)) : [];
     const hasNums = vals.some(v => v !== null);
+    //: The companions' colours. A fixed order and never a generated hue: which line is "out"
+    //: must not change because a device started answering a third column.
+    const MATE_COLOURS = ['#0d6efd', '#fd7e14', '#6f42c1', '#20c997'];
+    const mateVals = mates.map(x => points.map(
+        p => (typeof (p.data || {})[x.field] === 'number' ? p.data[x.field] : null)));
 
     // For single-point charts, pad the time axis so labels are meaningful.
     const tmin = points[0].ts;
@@ -124,7 +141,9 @@ function _historyDraw(canvas, points, field, unit, metricLabel) {
 
     let ymin, ymax;
     if (hasNums) {
-        const nums = vals.filter(v => v !== null);
+        // Every series on the axis, or the companion would be drawn off the top of a scale
+        // fitted to the first one — which is the same lie as two charts on two scales.
+        const nums = vals.concat(...mateVals).filter(v => v !== null);
         ymin = Math.min(...nums);
         ymax = Math.max(...nums);
         if (ymin === ymax) { ymin -= 1; ymax += 1; }
@@ -137,22 +156,50 @@ function _historyDraw(canvas, points, field, unit, metricLabel) {
         ymin = -0.05; ymax = 1.05;
     }
 
+    // ONE unit for the whole axis, taken from its top. "13420000B/s" is a number nobody
+    // reads, and scaling each label on its own would give "13.4 MB/s" above "980 kB/s" — an
+    // axis that changes unit halfway up and cannot be read at a glance. So the top decides,
+    // and every label is divided by the same thing.
+    //
+    // `_fmtMeasure` is the scaler the rest of the panel uses, and asking for it rather than
+    // assuming it is the same courtesy the infra tab pays this file: History is a section of
+    // its own and must still draw when the infrastructure bundle is not on the page.
+    const _mag = Math.max(Math.abs(ymin), Math.abs(ymax)) || 1;
+    const axis = (typeof _fmtMeasure === 'function' && hasNums) ? _fmtMeasure(_mag, unit) : null;
+    const axisDiv = axis && Number(axis.value) ? _mag / Number(axis.value) : 1;
+    const axisUnit = axis ? axis.unit : unit;
+    //: Gridlines, and therefore labels, up the side.
+    const NY = 4;
+    ctx.font = '10px system-ui, sans-serif';
+    const yLabels = [];
+    for (let i = 0; i <= NY; i++) {
+        const v = ymax - (i / NY) * (ymax - ymin);
+        yLabels.push(hasNums ? (_hFmtNum(v / axisDiv) + axisUnit)
+                             : (i === 0 ? 'OK' : i === NY ? 'ERR' : ''));
+    }
+    // The gutter is MEASURED and not guessed. 58 px was enough for "8.50W" and not for
+    // "13.39MB/s", which ran straight into the rotated axis title beside it — reported from
+    // the screen as two pieces of text on top of each other. Room for the widest label, the
+    // title if there is one, and a little air either side.
+    const PAD = {t: 14, r: 14, b: 38,
+                 l: Math.ceil(Math.max(0, ...yLabels.map(l => ctx.measureText(l).width)))
+                    + (metricLabel ? 24 : 10)};
+    const cw = W - PAD.l - PAD.r;
+    const ch = H - PAD.t - PAD.b;
+
     const sx = t  => PAD.l + (t - tDisplay0) / (tDisplay1 - tDisplay0) * cw;
     const sy = v  => PAD.t + (1 - (v - ymin) / (ymax - ymin)) * ch;
 
     // Transparent canvas — no background fill, inherits container background.
     ctx.clearRect(0, 0, W, H);
 
-    // Grid + Y labels
-    ctx.font = '10px system-ui, sans-serif';
-    const NY = 4;
+    // Grid + Y labels — the ones the gutter above was measured against.
     for (let i = 0; i <= NY; i++) {
         const y = PAD.t + (i / NY) * ch;
-        const v = ymax - (i / NY) * (ymax - ymin);
         ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + cw, y); ctx.stroke();
         ctx.fillStyle = C.text; ctx.textAlign = 'right';
-        ctx.fillText(hasNums ? (_hFmtNum(v) + unit) : (i === 0 ? 'OK' : i === NY ? 'ERR' : ''), PAD.l - 5, y + 3.5);
+        ctx.fillText(yLabels[i], PAD.l - 5, y + 3.5);
     }
 
     // X labels
@@ -168,7 +215,8 @@ function _historyDraw(canvas, points, field, unit, metricLabel) {
 
     if (hasNums) {
         // Gradient fill
-        const lineCol = points[points.length - 1]?.status ? C.ok : C.err;
+        const lineCol = mates.length ? MATE_COLOURS[0]
+                                     : (points[points.length - 1]?.status ? C.ok : C.err);
         ctx.beginPath();
         let first = true;
         for (let i = 0; i < points.length; i++) {
@@ -186,15 +234,45 @@ function _historyDraw(canvas, points, field, unit, metricLabel) {
         ctx.fillStyle = grad;
         ctx.fill();
 
-        // Line segments coloured by status
+        // Line segments coloured by status — unless there are companions, where the colour
+        // is what says which line is which and the strip below answers "was it up".
         ctx.lineWidth = 2; ctx.lineJoin = 'round';
         for (let i = 0; i < points.length - 1; i++) {
             if (vals[i] === null || vals[i + 1] === null) continue;
             ctx.beginPath();
-            ctx.strokeStyle = points[i].status ? C.ok : C.err;
+            ctx.strokeStyle = mates.length ? MATE_COLOURS[0]
+                                           : (points[i].status ? C.ok : C.err);
             ctx.moveTo(sx(points[i].ts), sy(vals[i]));
             ctx.lineTo(sx(points[i + 1].ts), sy(vals[i + 1]));
             ctx.stroke();
+        }
+        // …and the companions, as plain lines: no fill, because two filled areas on one axis
+        // hide each other and the one underneath is the one somebody was comparing.
+        mates.forEach((mate, k) => {
+            ctx.strokeStyle = MATE_COLOURS[(k + 1) % MATE_COLOURS.length];
+            ctx.beginPath();
+            let started = false;
+            mateVals[k].forEach((v, i) => {
+                if (v === null) { started = false; return; }
+                started ? ctx.lineTo(sx(points[i].ts), sy(v))
+                        : ctx.moveTo(sx(points[i].ts), sy(v));
+                started = true;
+            });
+            ctx.stroke();
+        });
+        // A legend, because with two lines the colour is the only thing that names them.
+        if (mates.length) {
+            ctx.textAlign = 'left';
+            ctx.font = '10px system-ui, sans-serif';
+            let lx = PAD.l + 6;
+            [{label: metricLabel}, ...mates].forEach((sd, k) => {
+                ctx.fillStyle = MATE_COLOURS[k % MATE_COLOURS.length];
+                ctx.fillRect(lx, PAD.t + 1, 8, 3);
+                ctx.fillStyle = C.text;
+                const text = String(sd.label || '');
+                ctx.fillText(text, lx + 12, PAD.t + 7);
+                lx += 12 + ctx.measureText(text).width + 14;
+            });
         }
     } else {
         // Status blocks
@@ -236,7 +314,8 @@ function _historyDraw(canvas, points, field, unit, metricLabel) {
     ctx.stroke();
 
     // Store for tooltip hit-test
-    canvas._histMeta = { points, vals, hasNums, field, unit, metricLabel, sx, sy, PAD, cw, ch, C };
+    canvas._histMeta = { points, vals, hasNums, field, unit, metricLabel, sx, sy, PAD, cw,
+                         ch, C, mates, mateVals };
 }
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────

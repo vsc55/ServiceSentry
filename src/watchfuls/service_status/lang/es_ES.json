@@ -35,6 +35,7 @@
         "remediation": "Inicia o detiene automáticamente el servicio para restaurar el estado esperado."
     },
     "ui": {
+        "audit_v_discover":                 "Descubrir servicios",
         "discover_title": "Descubrir Servicios del Sistema",
         "discover_error": "No se pudo cargar la lista de servicios del sistema",
         "item_added":     "Servicio \"{}\" a\u00f1adido"

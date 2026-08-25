@@ -111,11 +111,20 @@ def _page_spec(module: str, d: dict) -> dict | None:
     pid = str(d.get('id') or module).strip().lower()
     if not _ID_RE.match(pid) or pid in _RESERVED:
         return None
+    # WHERE the page belongs, declared rather than assumed. A section of its own is the
+    # right home for something an operator watches — m365's status, azure's — and the wrong
+    # one for something an operator ADMINISTERS: the MIB library is managed beside Services,
+    # Modules and Credentials, not beside the dashboards. The core places it; it still has no
+    # idea which module asked.
+    placement = str(d.get('placement') or 'section').strip().lower()
+    if placement not in ('section', 'system'):
+        placement = 'section'
     return {
         'id':     pid,
         'module': module,
         'icon':   str(d.get('icon') or 'bi-grid-1x2'),
         'order':  int(d.get('order') or 100),
+        'placement': placement,
         'render': str(d.get('render') or ''),      # '' = core renders from page_data alone
         'refresh': str(d.get('refresh') or ''),    # watchful action for the live refresh
         'perm':   str(d.get('perm') or 'modules_view'),
@@ -173,4 +182,44 @@ def module_pages_catalog(watchfuls_dir: str | None = None) -> list:
                         break
             view['label_i18n'] = texts or {'en_EN': view['slug']}
         out.append(spec)
+    out.extend(_core_pages(seen))
     return sorted(out, key=lambda p: (p['order'], p['id']))
+
+
+def _core_pages(seen: set) -> list:
+    """Sections a CORE package claims, declared as ``PAGE`` in its manifest.
+
+    Same descriptor, same sidebar, same rules — the only difference is where the words come
+    from. A module's section is titled by its ``pretty_name`` and its views named in its own
+    lang file, because the core owns no string that names a module; a core section names
+    itself, so its labels come from core i18n under the section the declaration points at.
+
+    It exists because a page can outlive the module that used to declare it: SNMP's MIB
+    library and profile catalogue are the core's, and a screen that disappeared when somebody
+    removed the watchful would be a library you can still fill and no longer look at.
+    """
+    from lib.discovery import scan                     # noqa: PLC0415
+    from lib.i18n import TRANSLATIONS                   # noqa: PLC0415
+
+    def _texts(section: str, key: str) -> dict:
+        out = {}
+        for lang, data in TRANSLATIONS.items():
+            val = ((data.get(section) or {}) if isinstance(data, dict) else {}).get(key)
+            if isinstance(val, str) and val:
+                out[lang] = val
+        return out
+
+    pages = []
+    for pkg, decl in scan('PAGE'):
+        spec = _page_spec(pkg, decl if isinstance(decl, dict) else None)
+        if spec is None or spec['id'] in seen:
+            continue
+        seen.add(spec['id'])
+        section = str((decl or {}).get('i18n') or '').strip()
+        spec['module'] = ''            # nobody's module: the sidebar already allows this
+        spec['label_i18n'] = (_texts(section, 'title') if section else {}) or {'en_EN': pkg}
+        for view in spec['views']:
+            view['label_i18n'] = (_texts(section, view['label']) if section else {}) \
+                or {'en_EN': view['slug']}
+        pages.append(spec)
+    return pages

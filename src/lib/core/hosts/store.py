@@ -39,9 +39,18 @@ _HOSTS_SCHEMA = TableSpec(
         Column('uid',         'TEXT', primary_key=True),
         Column('name',        'TEXT', nullable=False, default="''", unique=True),
         Column('address',     'TEXT', nullable=False, default="''"),
-        # 'local' (monitored directly, no SSH) or 'remote' (reachable via the
-        # SSH connection stored in profiles['ssh']).
-        Column('kind',        'TEXT', nullable=False, default="'local'"),
+        # How the panel RUNS COMMANDS on this device, which is not the same question as
+        # what the device is (`device_type`) or which protocols it answers (`profiles`):
+        #
+        #   'none'   — it does not run any. The default, and the answer for most equipment: a
+        #              switch, a router, a UPS or a NAS is read over SNMP and there is nothing
+        #              to run a shell command on. It used to default to 'local', which meant
+        #              the panel's OWN machine — so a check bound to a new switch measured the
+        #              panel's CPU and filed it under the switch's name, with nothing to say
+        #              it had. Now that is refused instead.
+        #   'local'  — commands run on the machine the panel is running on.
+        #   'remote' — over SSH, with the connection stored in profiles['ssh'].
+        Column('kind',        'TEXT', nullable=False, default="'none'"),
         # Operating system: 'auto' (local→this host's platform; remote→detected
         # over SSH) or a fixed token (linux/windows/darwin/freebsd/other).
         Column('os',          'TEXT', nullable=False, default="'auto'"),
@@ -51,6 +60,11 @@ _HOSTS_SCHEMA = TableSpec(
         # physical machine).  Purely descriptive: lets the UI and the Overview widget
         # separate physical hosts from virtual ones (keepalived VIP, proxmox cluster…).
         Column('virtual',     'INTEGER', nullable=False, default="0"),
+        # What the device IS (see manifest.HOST_TYPES): server, nas, switch, ups…
+        # Empty = unclassified, which is what every device created before this had and
+        # what one created in a hurry still has.  Named `device_type` rather than `type`
+        # because the short word is a keyword in enough dialects to be worth avoiding.
+        Column('device_type', 'TEXT', nullable=False, default="''"),
         Column('tags',        'TEXT', nullable=False, default="'[]'"),
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('profiles',    'TEXT', nullable=False, default="'{}'"),
@@ -60,14 +74,26 @@ _HOSTS_SCHEMA = TableSpec(
         Column('created_at',  'TEXT', nullable=False, default="''"),
         Column('updated_at',  'TEXT', nullable=False, default="''"),
         Column('updated_by',  'TEXT', nullable=False, default="''"),
+        # The rows of this machine somebody has said are worth an alert. A switch port that
+        # is down may be a PC switched off at seven — which is not news and made a rack of
+        # half-populated switches permanently red — or it may be the link to a server, which
+        # is a phone call. Nothing in any MIB separates those two: what is at the other end of
+        # the cable is knowledge about THIS installation, so it is recorded against the
+        # machine and not in a profile, which describes equipment in general.
+        #
+        # JSON list of `{"module": …, "row": …}`. Kept LAST because a missing column can only
+        # be added by ADD COLUMN when it is trailing, which is how an existing database gets
+        # this one without a migration.
+        Column('watch',       'TEXT', nullable=False, default="'[]'"),
     ),
     indexes=(Index('idx_hosts_name', ('name',)),),
 )
 
 _T = _HOSTS_SCHEMA.name  # table name — single source of truth
 
-_COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'tags', 'description',
-         'profiles', 'modules', 'created_at', 'updated_at', 'updated_by')
+_COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'device_type',
+         'tags', 'description',
+         'profiles', 'modules', 'created_at', 'updated_at', 'updated_by', 'watch')
 _SELECT = ', '.join(_COLS)
 
 
@@ -98,8 +124,12 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
 
     # ── Row mapping ───────────────────────────────────────────────────────────
     def _row_to_host(self, row, decrypt: bool) -> dict:
-        (uid, name, address, kind, os_, maintenance, virtual, tags, desc,
-         profiles, modules, c_at, u_at, u_by) = row
+        (uid, name, address, kind, os_, maintenance, virtual, dev_type, tags, desc,
+         profiles, modules, c_at, u_at, u_by, watch) = row
+        try:
+            watch_l = json.loads(watch) if watch else []
+        except (ValueError, TypeError):
+            watch_l = []
         try:
             tags_l = json.loads(tags) if tags else []
         except (ValueError, TypeError):
@@ -122,6 +152,7 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
             'os':          os_ or 'auto',
             'maintenance': bool(maintenance),
             'virtual':     bool(virtual),
+            'device_type': dev_type or '',
             'tags':        tags_l if isinstance(tags_l, list) else [],
             'description': desc or '',
             'profiles':    prof if isinstance(prof, dict) else {},
@@ -129,11 +160,32 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
             'created_at':  c_at or '',
             'updated_at':  u_at or '',
             'updated_by':  u_by or '',
+            # …and the rows of it somebody said are worth an alert.
+            'watch':       [w for w in (watch_l if isinstance(watch_l, list) else [])
+                            if isinstance(w, dict) and w.get('module') and w.get('row')],
         }
+
+    #: How commands are run on a device. See the `kind` column for what each means.
+    KINDS = ('none', 'local', 'remote')
 
     @staticmethod
     def _norm_kind(value) -> str:
-        return 'remote' if str(value or '').strip().lower() == 'remote' else 'local'
+        """One of :data:`KINDS`, defaulting to ``none``.
+
+        Anything unrecognised is ``none`` and not ``local``: the two differ in where a command
+        RUNS, and guessing "the panel's own machine" from a value nobody wrote is how a check
+        comes to measure the wrong box quietly. A record that says nothing gets nothing.
+        """
+        v = str(value or '').strip().lower()
+        return v if v in HostsStore.KINDS else 'none'
+
+    @staticmethod
+    def _norm_device_type(value) -> str:
+        """A declared type, or '' — an unrecognised one is not an error worth refusing a
+        save over, and storing it would put a word on screen that nothing can translate."""
+        from .manifest import host_type_ids  # noqa: PLC0415
+        v = str(value or '').strip().lower()
+        return v if v in host_type_ids() else ''
 
     @staticmethod
     def _norm_os(value) -> str:
@@ -168,17 +220,22 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
         try:
             with self._db.transaction():
                 self._db.execute(
-                    f'INSERT INTO {_T} ({self._qsel}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    f'INSERT INTO {_T} ({self._qsel}) '
+                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (uid, name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
                      1 if data.get('maintenance') else 0,
                      1 if data.get('virtual') else 0,
+                     self._norm_device_type(data.get('device_type')),
                      json.dumps(data.get('tags') or [], ensure_ascii=False),
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),
                      json.dumps(data.get('modules') or [], ensure_ascii=False),
-                     now, now, actor or ''),
+                     now, now, actor or '',
+                     # A machine is created watching nothing: what matters on it is said
+                     # later, on the screen where its rows are.
+                     json.dumps(data.get('watch') or [], ensure_ascii=False)),
                 )
             return uid
         except Exception:  # pylint: disable=broad-except
@@ -200,18 +257,58 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
             with self._db.transaction():
                 self._db.execute(
                     f'UPDATE {_T} SET name=?, address=?, kind=?, os=?, maintenance=?, {self._qvirtual}=?, '
+                    'device_type=?, '
                     'tags=?, description=?, profiles=?, modules=?, updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
                      1 if data.get('maintenance') else 0,
                      1 if data.get('virtual') else 0,
+                     self._norm_device_type(data.get('device_type')),
                      json.dumps(data.get('tags') or [], ensure_ascii=False),
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),
                      json.dumps(data.get('modules') or [], ensure_ascii=False),
                      _now(), actor or '', uid),
                 )
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    #: What one watched row is keyed by, wherever it is compared.
+    @staticmethod
+    def watch_key(module: str, row: str) -> str:
+        return f'{str(module or "").strip()}\u0000{str(row or "").strip()}'
+
+    def watch(self, uid: str) -> set:
+        """The rows of *uid* somebody has said are worth an alert, as comparison keys."""
+        host = self.get(uid, decrypt=False) or {}
+        return {self.watch_key(w.get('module'), w.get('row')) for w in host.get('watch') or ()}
+
+    def set_watch(self, uid: str, module: str, row: str, on: bool, *, actor: str = '') -> bool:
+        """Mark one row of one machine as worth an alert, or stop.
+
+        Its OWN update and not a pass through :meth:`update`, which replaces the whole record:
+        saying "tell me when this port goes down" would otherwise mean holding the machine's
+        name, address and every stored credential, and would need the permission to edit the
+        registry rather than the one to say what matters on a screen you are already reading.
+        """
+        mod, row = str(module or '').strip(), str(row or '').strip()
+        if not mod or not row:
+            return False
+        host = self.get(uid, decrypt=False)
+        if host is None:
+            return False
+        want = self.watch_key(mod, row)
+        kept = [w for w in host.get('watch') or ()
+                if self.watch_key(w.get('module'), w.get('row')) != want]
+        if on:
+            kept.append({'module': mod, 'row': row})
+        try:
+            with self._db.transaction():
+                self._db.execute(
+                    f'UPDATE {_T} SET watch=?, updated_at=?, updated_by=? WHERE uid=?',
+                    (json.dumps(kept, ensure_ascii=False), _now(), actor or '', uid))
             return True
         except Exception:  # pylint: disable=broad-except
             return False

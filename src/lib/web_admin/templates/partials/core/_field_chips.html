@@ -56,6 +56,31 @@ function _ipWarn(bad) {
             : 'Invalid IP: ' + bad.join(', ')), 'danger');
     }
 }
+/** How a chip's stored value is DISPLAYED, per kind of field.
+ *
+ *  A multi-value field stores identifiers, and identifiers are the right thing to store: they
+ *  survive a rename, they are what the API speaks and what a bug report quotes. They are not
+ *  what a person reads — a row of `hr_storage`, `if_generic`, `ucd_linux` says nothing about
+ *  what is being measured, and the screen that could say it is one click away.
+ *
+ *  Keyed by `<module>|<field>`, which both panes that draw chips arrive at: the Modules tab
+ *  path carries the item's uid and the host modal's carries its index, and neither is part of
+ *  what the field IS. The resolver returns '' while it is still finding out, and repaints when
+ *  it knows — a label that arrives late is better than an id that never changes.
+ */
+const CHIP_LABELS = {};
+
+function _chipLabelKey(key) {
+    const parts = String(key || '').split('|');
+    return parts.length > 1 ? `${parts[0]}|${parts[parts.length - 1]}` : String(key || '');
+}
+
+function _chipLabel(key, value) {
+    const fn = CHIP_LABELS[_chipLabelKey(key)];
+    if (typeof fn !== 'function') return '';
+    try { return String(fn(value, key) || ''); } catch (_) { return ''; }
+}
+
 function chipsHtml(key, value) {
     return _multiList(value).map(v => {
         // Recipient tokens render as the group/user name + an icon (they expand to
@@ -69,9 +94,15 @@ function chipsHtml(key, value) {
             inner = `<i class="bi bi-person-fill"></i>${esc(_recipUserLabel(v.slice(5)))}`;
             cls = 'text-bg-info';
         } else {
-            inner = esc(v);
+            // The name when the field's owner can supply one, the stored value otherwise —
+            // and the stored value stays in the tooltip either way, because it is the string
+            // that identifies this thing in the API, in the config and in a bug report.
+            const lbl = _chipLabel(key, v);
+            inner = esc(lbl || v);
         }
-        return `<span class="badge ${cls} d-inline-flex align-items-center gap-1 multi-chip" style="font-weight:400">
+        const _tip = _chipLabel(key, v) ? v : t('remove');
+        return `<span class="badge ${cls} d-inline-flex align-items-center gap-1 multi-chip"
+                style="font-weight:400" title="${escAttr(_tip)}">
             ${inner}<button type="button" class="btn-close btn-close-white ss-fs-1"
                 aria-label="${escAttr(t('remove'))}" title="${escAttr(t('remove'))}"
                 onclick="chipRemove(${jsStr(key)},${jsStr(v)})"></button></span>`;

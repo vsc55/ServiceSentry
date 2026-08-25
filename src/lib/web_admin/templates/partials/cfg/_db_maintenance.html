@@ -159,3 +159,63 @@ async function _dbOptimizeRun() {
         showToast(done_msg, 'success');
     }
 }
+
+
+// ── Readings nothing owns any more ────────────────────────────────────────────
+//
+// Beside the other two because it is maintenance, and apart from them in what it does: they
+// reclaim and re-measure, this one DELETES. So it opens on what it found and does not offer
+// the button until there is something to press — the number IS the decision, and a red button
+// over an unknown quantity is a button nobody should press.
+//
+// Reported from the screen: a NAS whose module was removed showed zero on every tab while
+// eighteen thousand of its samples were still in the table. A reading is filed under the key
+// of whatever produced it, and removing that leaves the rows behind under a key nothing can
+// resolve — not deleted, not reachable, and counted by nothing.
+
+async function _dbOrphans() {
+    const listEl = document.getElementById('dbOrphList');
+    const btn = document.getElementById('btnDbOrphPurge');
+    btn.disabled = true;
+    listEl.innerHTML = `<div class="text-muted small">
+        <span class="spinner-border spinner-border-sm me-1"></span>${esc(t('loading'))}</div>`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dbOrphansModal')).show();
+
+    const data = await apiGet('/api/v1/config/db/orphans');
+    if (!data) {
+        listEl.innerHTML = `<div class="text-danger small">${esc(t('db_not_available'))}</div>`;
+        return;
+    }
+    const tables = Object.entries(data).filter(([, v]) => v && v.series);
+    if (!tables.length) {
+        listEl.innerHTML = `<div class="text-success small">
+            <i class="bi bi-check2-circle me-1"></i>${esc(t('db_orphans_none'))}</div>`;
+        return;
+    }
+    listEl.innerHTML = tables.map(([table, v]) => `<div class="mb-2">
+        <div class="fw-semibold small">${esc(t('db_orphans_in_' + table) || table)}</div>
+        <div class="text-muted small mb-1">${esc(tf('db_orphans_found', v.series, v.count))}</div>
+        ${v.modules.map(m => `<div class="d-flex align-items-baseline gap-2 small ps-2">
+            <code>${esc(m.module)}</code>
+            <span class="text-muted ms-auto">${esc(tf('db_orphans_found', m.series, m.count))}</span>
+        </div>`).join('')}
+    </div>`).join('');
+    btn.disabled = false;
+}
+
+async function _dbOrphansPurge() {
+    const btn = document.getElementById('btnDbOrphPurge');
+    btn.disabled = true;
+    const res = await apiDelete('/api/v1/config/db/orphans');
+    const d = (res && res.data) || {};
+    if (!res || res.status >= 400 || !d.ok) {
+        showToast(d.error || t('db_maintenance_failed'), 'danger');
+        btn.disabled = false;
+        return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('dbOrphansModal'))?.hide();
+    showToast(tf('db_orphans_purged', d.series || 0,
+                 (d.history || 0) + (d.check_state || 0)), 'success');
+    // What was on screen counted rows that are gone; anything showing them has to ask again.
+    if (typeof renderConfig === 'function') renderConfig();
+}

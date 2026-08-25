@@ -1,6 +1,9 @@
 {
     "pretty_name": "UPS Monitor (NUT)",
     "module_description": "Monitors UPS (Uninterruptible Power Supply) status via NUT (Network UPS Tools). Alerts on power failures, low battery, and abnormal UPS states.",
+    "ui": {
+        "audit_v_test_connection":          "Test the connection to the UPS"
+    },
     "history": {
         "battery_charge": "Battery charge",
         "runtime": "Runtime",

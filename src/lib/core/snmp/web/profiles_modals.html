@@ -1,0 +1,326 @@
+{# ================================================================
+   SNMP device profiles — the OID matrix, on screen.
+
+   One modal serving two questions, because they are the same list read twice: "what does
+   this product know how to measure" (opened from the module toolbar) and "which of it
+   applies to THIS device" (opened from a server's `device_profiles` field, where the rows
+   become selectable).
+
+   Injected into the page body by the generic module_web_modals mechanism.  Labels are
+   filled at runtime by openSnmpProfilesModal() from the module's own i18n block.
+   ================================================================ #}
+
+<div class="modal fade" id="snmpProfilesModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-grid-3x3-gap"></i>
+                    <span id="snmpProfilesTitle"></span>
+                    <span id="snmpProfilesCount" class="badge bg-secondary ms-1"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+
+            <div class="px-3 py-2 border-bottom">
+                <div class="d-flex gap-2 align-items-center flex-wrap">
+                    <div class="input-group input-group-sm flex-grow-1" style="min-width:12rem">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="snmpProfilesSearch"
+                               oninput="_snmpProfRender()">
+                    </div>
+                    {# Assign mode only: ask the device what it is instead of guessing. #}
+                    <button class="btn btn-sm btn-primary flex-shrink-0" id="snmpProfilesDetectBtn"
+                            style="display:none" onclick="_snmpProfDetect(this)">
+                        <i class="bi bi-magic me-1"></i><span id="snmpProfilesDetectLabel"></span>
+                    </button>
+                </div>
+                {# What the device answered, once it has been asked. #}
+                <div id="snmpProfilesDetected" class="small mt-2" style="display:none"></div>
+            </div>
+
+            <div class="modal-body p-2">
+                <div id="snmpProfilesBody"></div>
+            </div>
+
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── One word for fifteen profiles ──────────────────────────────────────────
+   A Synology answers fifteen profiles, and assigning them one by one to every NAS in the
+   rack is fifteen chips saying what one word says. A GROUP is an entry in the same catalogue
+   whose members are other entries' ids instead of OIDs, so everything downstream — the
+   field, the chips, the detection, the sampler — goes on speaking about ids.
+
+   A form and not a file, unlike the profiles themselves: an OID matrix is written in an
+   editor by somebody who knows what a walk is; a grouping is made of things that already
+   exist, by whoever is adding the device. #}
+<div class="modal fade" id="snmpGrpModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-collection"></i><span id="snmpGrpTitle"></span>
+                    <span id="snmpGrpCount" class="badge bg-secondary ms-1"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+
+            <div class="modal-body p-3">
+                <div class="row g-2 mb-2">
+                    <div class="col-md-7">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpGrpNameLabel"
+                               for="snmpGrpName"></label>
+                        <input type="text" class="form-control form-control-sm" id="snmpGrpName"
+                               maxlength="80" oninput="_snmpGrpNameInput()">
+                    </div>
+                    {# Shown, and not derived in silence: it is the value every device stores,
+                       and it cannot be changed once anything references it. #}
+                    <div class="col-md-5">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpGrpIdLabel"
+                               for="snmpGrpId"></label>
+                        <input type="text" class="form-control form-control-sm font-monospace"
+                               id="snmpGrpId" maxlength="48"
+                               oninput="_snmpGrpIdTouched = true">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpGrpDescLabel"
+                               for="snmpGrpDesc"></label>
+                        <input type="text" class="form-control form-control-sm" id="snmpGrpDesc"
+                               maxlength="200">
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="fw-semibold ss-fs-2" id="snmpGrpMembersLabel"></span>
+                    <div class="input-group input-group-sm ms-auto" style="max-width:16rem">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="snmpGrpSearch"
+                               oninput="_snmpGrpRender()">
+                    </div>
+                </div>
+                <div id="snmpGrpBody"></div>
+            </div>
+
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button class="btn btn-sm btn-primary" type="button" onclick="_snmpGrpSave(this)">
+                    <i class="bi bi-save me-1"></i><span id="snmpGrpSaveLabel"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── The OID matrix, written in the panel ───────────────────────────────────
+   An agent answers `1.3.6.1.4.1.2021.11.9.0` with a `7` and does not say that this is the CPU
+   or that seven is a percentage. A profile is what says so, and until now writing one meant
+   putting a JSON file on the machine — which rules it out for the box in the rack that nobody
+   wrote a profile for, since the person who has that box is not always the person who has a
+   shell on the server.
+
+   The form is the same document the shipped files hold, field by field, and it is validated
+   by the same function that reads them. A metric is refused BY NAME: `normalise` drops what
+   it cannot use and keeps the rest, which is right when reading a file somebody edited at 3am
+   and wrong when answering a person looking at the row they just typed. #}
+<div class="modal fade" id="snmpPrfModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-grid-3x3-gap"></i><span id="snmpPrfTitle"></span>
+                    <span id="snmpPrfCount" class="badge bg-secondary ms-1"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+
+            <div class="modal-body p-3">
+                <div class="row g-2 mb-3">
+                    <div class="col-md-7">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpPrfNameLabel"
+                               for="snmpPrfName"></label>
+                        <input type="text" class="form-control form-control-sm" id="snmpPrfName"
+                               maxlength="80" oninput="_snmpPrfNameInput()">
+                    </div>
+                    {# Shown, and not derived in silence: it is the value every device stores,
+                       and it cannot be changed once anything references it. #}
+                    <div class="col-md-5">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpPrfIdLabel"
+                               for="snmpPrfId"></label>
+                        <input type="text" class="form-control form-control-sm font-monospace"
+                               id="snmpPrfId" maxlength="48" oninput="_snmpPrfIdTouched = true">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpPrfDescLabel"
+                               for="snmpPrfDesc"></label>
+                        <input type="text" class="form-control form-control-sm" id="snmpPrfDesc"
+                               maxlength="200">
+                    </div>
+                    {# How a device is recognised as one of these. Both optional: a profile
+                       assigned by hand needs neither, and they are what make it DETECTABLE. #}
+                    <div class="col-md-6">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpPrfPrefixLabel"
+                               for="snmpPrfPrefix"></label>
+                        <input type="text" class="form-control form-control-sm font-monospace"
+                               id="snmpPrfPrefix" placeholder="1.3.6.1.4.1.9">
+                        <div class="form-text ss-fs-1" id="snmpPrfPrefixHint"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label ss-fs-2 mb-1" id="snmpPrfProbeLabel"
+                               for="snmpPrfProbe"></label>
+                        <input type="text" class="form-control form-control-sm font-monospace"
+                               id="snmpPrfProbe" placeholder="1.3.6.1.2.1.25.2.2.0">
+                        <div class="form-text ss-fs-1" id="snmpPrfProbeHint"></div>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="fw-semibold ss-fs-2" id="snmpPrfMetricsLabel"></span>
+                    <button class="btn btn-sm btn-secondary ms-auto" type="button"
+                            onclick="_snmpPrfAddMetric()">
+                        <i class="bi bi-plus-lg me-1"></i><span id="snmpPrfAddLabel"></span>
+                    </button>
+                </div>
+                <div id="snmpPrfMetrics"></div>
+            </div>
+
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+                <button class="btn btn-sm btn-primary" type="button" onclick="_snmpPrfSave(this)">
+                    <i class="bi bi-save me-1"></i><span id="snmpPrfSaveLabel"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Choosing an OID instead of remembering one ─────────────────────────────
+   Typing `1.3.6.1.4.1.6574.2.1.1.6` from memory is how a profile ends up measuring nothing
+   and saying nothing about it: every digit is load-bearing, and none of them is checked by
+   anything until a device answers — or does not. The MIBs are compiled and their symbols are
+   already in a catalogue, so the field asks them.
+
+   What a pick adds over a paste is the SYNTAX: it says whether the value is a counter (and
+   how wide it is), a gauge, or not a number at all — the one thing about a metric nobody
+   gets right from the OID, and the one that turns a counter wrapping around into a device
+   that rebooted. #}
+<div class="modal fade" id="snmpOidPickModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-diagram-3"></i><span id="snmpOidTitle"></span>
+                    <span id="snmpOidCount" class="badge bg-secondary ms-1"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="px-3 py-2 border-bottom">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" id="snmpOidSearch"
+                           oninput="_snmpOidRender()">
+                </div>
+            </div>
+            <div class="modal-body p-2"><div id="snmpOidBody"></div></div>
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── The catalogue, as a view of the section ─────────────────────────────────
+   One list read twice: "what does this product know how to measure" is a reference and
+   belongs to the section; "which of it applies to THIS device" is a question a server's
+   field asks, and stays the dialog above — it is opened from inside another one. Same
+   renderer, two hosts, so the ids differ and `_profEl` resolves them. #}
+<template id="snmpProfilesPageTpl">
+<div class="ss-vfill">
+            <div class="ss-toolbar ss-toolbar-plain ss-toolbar-flush flex-shrink-0">
+                <h6 class="mb-0"><i class="bi bi-grid-3x3-gap me-2"></i><span id="snmpProfilesTitleView"></span>
+                    <span id="snmpProfilesCountView" class="badge bg-secondary ms-1"></span></h6>
+                <span class="ms-auto d-flex align-items-center gap-2">
+                    <div class="input-group input-group-sm mib-search">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="snmpProfilesSearchView"
+                               oninput="_snmpProfRender()">
+                    </div>
+                    {# What this screen writes. Neither is in the picker: a field of a server is
+                       where an assignment is made, not where the catalogue is decided. #}
+                    <button class="btn btn-sm btn-secondary flex-shrink-0" type="button"
+                            id="snmpGrpNewBtn" onclick="_snmpGrpOpen('')">
+                        <i class="bi bi-collection me-1"></i><span id="snmpGrpNewLabel"></span>
+                    </button>
+                    <button class="btn btn-sm btn-primary flex-shrink-0" type="button"
+                            id="snmpPrfNewBtn" onclick="_snmpPrfOpen('')">
+                        <i class="bi bi-plus-lg me-1"></i><span id="snmpPrfNewLabel"></span>
+                    </button>
+                </span>
+            </div>
+            <div class="ss-vfill p-3">
+                <div id="snmpProfilesBodyView" class="ss-vscroll"></div>
+            </div>
+</div>
+</template>
+
+
+{# ── Does the assignment match the device? ──────────────────────────────────
+   An assignment is wrong in two directions and the panel only ever showed one of them.
+   A profile naming an OID the device does not serve leaves an empty chart, and somebody
+   notices eventually. A device serving something no assigned profile names is INVISIBLE:
+   nothing is missing on any screen, because nothing ever said it could be there.
+
+   So this dialog has two halves and they are not the same question asked twice. The first
+   reads the assignment through the very function the scheduler reads with, and shows the
+   raw answer beside the value the profile turns it into. The second walks the device and
+   subtracts everything the assignment already reads — which is the only way that half can
+   be answered at all, because it is a fact about the box and not about the catalogue. #}
+<div class="modal fade" id="snmpTestModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-activity"></i>
+                    <span id="snmpTestTitle"></span>
+                    <span id="snmpTestDevice" class="badge bg-secondary"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                    title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+
+            {# What the device is, and how much of it is being read — above the fold, because
+               it is the answer and everything below it is the evidence. #}
+            <div class="px-3 py-2 border-bottom">
+                <div id="snmpTestSummary"></div>
+                <div class="d-flex gap-2 align-items-center flex-wrap mt-2">
+                    <div id="snmpTestTabs" class="btn-group btn-group-sm flex-shrink-0"></div>
+                    <div class="input-group input-group-sm flex-grow-1" style="min-width:12rem">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="snmpTestSearch"
+                               oninput="_snmpTestRender()">
+                    </div>
+                    <button class="btn btn-sm btn-primary flex-shrink-0" id="snmpTestRunBtn"
+                            onclick="_snmpTestRun(this)">
+                        <i class="bi bi-arrow-repeat me-1"></i><span id="snmpTestRunLabel"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-body p-2">
+                <div id="snmpTestBody"></div>
+            </div>
+
+            <div class="modal-footer py-1">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>

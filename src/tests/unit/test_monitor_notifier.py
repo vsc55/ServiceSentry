@@ -230,3 +230,55 @@ class TestPlainText:
         n.flush()
         _subject, body = sent['email'][0]
         assert '*NS1*' not in body and 'NS1' in body
+
+
+
+class TestAnAlertWithAKindOfItsOwn:
+    """A module can say its failure is a KIND of its own, so it gets a routing row.
+
+    An SNMP device that answers nothing is the collection not happening, not a check that
+    found something wrong — and until now the two were indistinguishable: one line among forty
+    in a digest, with nowhere to say "these are the ones I want to hear about".
+
+    ADDITIVE, and that is the whole design. A matrix cell is stored only when somebody ticks
+    it and reads FALSE until then, so routing the alert by the new kind ALONE would have
+    silently stopped every one of these that arrives today as a `down`. Not failed — stopped,
+    which is the worst shape a notification bug takes. So a channel takes the alert if EITHER
+    row is ticked.
+    """
+
+    def _alert(self, n):
+        n.add('down', 'snmp', 'pve02', 'no answer', also='snmp_unreachable')
+
+    def test_a_channel_that_takes_downs_still_gets_it(self, sent):
+        """The no-regression half: nobody has ticked the new row yet, and nobody may lose an
+        alert because a new row appeared on a screen they have not opened."""
+        n = MonitorNotifier(_FakeWA(_cfg()))          # webhook_on_down is on
+        self._alert(n)
+        n.flush()
+        assert len(sent['webhook']) == 1
+
+    def test_a_channel_that_takes_only_the_new_kind_gets_it_too(self, sent):
+        cfg = _cfg(webhook_on_down=False)
+        cfg['notifications']['webhook_on_snmp_unreachable'] = True
+        n = MonitorNotifier(_FakeWA(cfg))
+        self._alert(n)
+        n.flush()
+        assert len(sent['webhook']) == 1
+
+    def test_a_channel_that_takes_neither_gets_nothing(self, sent):
+        n = MonitorNotifier(_FakeWA(_cfg(telegram_on_down=False, telegram_on_recovery=False,
+                                         email_on_down=False, webhook_on_down=False)))
+        self._alert(n)
+        assert n.flush() == {} and not any(sent.values())
+
+    def test_it_does_not_route_anybody_elses_alert(self, sent):
+        """The second kind belongs to the alert that carries it. A cell ticked for it must not
+        start forwarding the whole cycle's downs."""
+        cfg = _cfg(webhook_on_down=False)
+        cfg['notifications']['webhook_on_snmp_unreachable'] = True
+        n = MonitorNotifier(_FakeWA(cfg))
+        n.add('down', 'ping', 'web01', 'unreachable')      # no `also`
+        self._alert(n)
+        n.flush()
+        assert len(sent['webhook']) == 1, 'a plain down rode in on the new row'

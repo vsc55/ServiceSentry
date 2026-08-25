@@ -1,0 +1,45 @@
+{
+    "id": "lm_sensors",
+    "label": {
+        "en_EN": "Temperatures, fans and voltages (LM-SENSORS-MIB)",
+        "es_ES": "Temperaturas, ventiladores y voltajes (LM-SENSORS-MIB)"
+    },
+    "description": {
+        "en_EN": "The hardware sensors net-snmp exposes from lm-sensors: one row per probe, named as the machine names it. A fan that stopped and a disk that is cooking are visible here hours before anything else notices.",
+        "es_ES": "Los sensores de hardware que net-snmp expone desde lm-sensors: una fila por sonda, con el nombre que le da la máquina. Un ventilador parado o un disco cociéndose se ven aquí horas antes de que nada más se entere."
+    },
+    "match": {
+        "probe": "1.3.6.1.4.1.2021.13.16.2.1.3.1"
+    },
+    "metrics": [
+        {
+            "key": "sensor_temp",
+            "label": {"en_EN": "Temperature", "es_ES": "Temperatura"},
+            "walk": "1.3.6.1.4.1.2021.13.16.2.1.3",
+            "kind": "gauge",
+            "unit": "°C",
+            "scale": 0.001,
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.2021.13.16.2.1.2"
+        },
+        {
+            "key": "sensor_fan",
+            "label": {"en_EN": "Fan speed", "es_ES": "Velocidad de ventilador"},
+            "walk": "1.3.6.1.4.1.2021.13.16.3.1.3",
+            "kind": "gauge",
+            "unit": "RPM",
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.2021.13.16.3.1.2"
+        },
+        {
+            "key": "sensor_volt",
+            "label": {"en_EN": "Voltage", "es_ES": "Voltaje"},
+            "walk": "1.3.6.1.4.1.2021.13.16.4.1.3",
+            "kind": "gauge",
+            "unit": "V",
+            "scale": 0.001,
+            "chart": "line",
+            "index_label": "1.3.6.1.4.1.2021.13.16.4.1.2"
+        }
+    ]
+}

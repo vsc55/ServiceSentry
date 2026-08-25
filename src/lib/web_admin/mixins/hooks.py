@@ -197,6 +197,18 @@ class _HooksMixin:
         # break the keepalive live-sync of layout changes.
         if request.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
+        # …and a static file is the opposite question. Flask leaves these to revalidate, which
+        # is a round trip per asset per load — and on a page whose stylesheets are half a
+        # megabyte that wait is the difference between a dressed page and a screenful of serif
+        # text while the browser gives up waiting (see base.html).
+        #
+        # A YEAR for anything whose URL carries a version, because such a URL cannot go stale:
+        # a new build is a new URL. A day for the rest — the fonts a stylesheet pulls in under
+        # a name of its own, which nothing versions and nobody can bust.
+        elif request.path.startswith('/static/') and response.status_code == 200:
+            response.headers['Cache-Control'] = (
+                'public, max-age=31536000, immutable' if request.args.get('v')
+                else 'public, max-age=86400')
         # Generic per-endpoint trace, for EVERY API, gated by log_level:
         # GET/static at debug, mutations at info, 4xx/5xx at warning. Logs the
         # endpoint, input KEYS (query + json body — never values, so no

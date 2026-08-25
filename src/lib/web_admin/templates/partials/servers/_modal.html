@@ -1,9 +1,10 @@
 function openNewHostModal() {
     _editingHostUid = null;
     _hostModalReadonly = false;   // reachable only with edit rights (toolbar-gated)
-    _hostDraft = { name: '', address: '', kind: 'local', os: 'auto', maintenance: false,
-                   virtual: false, tags: [], description: '', profiles: {} };
+    _hostDraft = { name: '', address: '', kind: 'none', os: 'auto', maintenance: false,
+                   virtual: false, device_type: '', tags: [], description: '', profiles: {} };
     document.getElementById('hostModalTitle').textContent = t('host_new');
+    _refreshHostTypeIcon();
     _hostChecks = _buildHostChecks(null);
     _hostCheckFilters = {};
     _hostShownMods = new Set();   // new host: start empty, add modules as needed
@@ -128,8 +129,8 @@ function openEditHostModal(uid) {
     // Deep copy so edits aren't applied until saved.
     _hostDraft = JSON.parse(JSON.stringify({
         name: host.name || '', address: host.address || '',
-        kind: host.kind || 'local', os: host.os || 'auto', maintenance: !!host.maintenance,
-        virtual: !!host.virtual,
+        kind: host.kind || 'none', os: host.os || 'auto', maintenance: !!host.maintenance,
+        virtual: !!host.virtual, device_type: host.device_type || '',
         tags: host.tags || [], description: host.description || '',
         profiles: host.profiles || {},
     }));
@@ -154,6 +155,7 @@ function openEditHostModal(uid) {
     const _hName = (_hostDraft.name || host.name || '').trim();
     document.getElementById('hostModalTitle').textContent =
         t(_hostModalReadonly ? 'host_view' : 'host_edit') + (_hName ? ': ' + _hName : '');
+    _refreshHostTypeIcon();
     _renderHostModalBody();
     const err = document.getElementById('hostModalError'); if (err) err.textContent = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
@@ -182,10 +184,19 @@ function _renderHostModalBody() {
                    placeholder="prod, db">
         </div>
         <div class="col-sm-6">
+            <label class="form-label small fw-semibold">${esc(t('host_type'))}</label>
+            <select class="form-select form-select-sm" id="hmType"
+                    onchange="_hostDraft.device_type=this.value;_refreshHostTypeIcon()">
+                <option value="" ${!d.device_type ? 'selected' : ''}>${esc(t('host_type_unset'))}</option>
+                ${HOST_TYPES.map(x => `<option value="${escAttr(x.id)}" ${d.device_type === x.id ? 'selected' : ''}>${esc(hostTypeLabel(x.id))}</option>`).join('')}
+            </select>
+            <div class="form-text small">${esc(t('host_type_hint'))}</div>
+        </div>
+        <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('host_kind'))}</label>
             <select class="form-select form-select-sm" id="hmKind" onchange="_onHostKindChange(this.value)">
-                <option value="local" ${d.kind !== 'remote' ? 'selected' : ''}>${esc(t('host_kind_local'))}</option>
-                <option value="remote" ${d.kind === 'remote' ? 'selected' : ''}>${esc(t('host_kind_remote'))}</option>
+                ${HOST_KINDS.map(k => `<option value="${k}" ${
+                    hostKind(d.kind) === k ? 'selected' : ''}>${esc(t('host_kind_' + k))}</option>`).join('')}
             </select>
             <div class="form-text small">${esc(t('host_kind_hint'))}</div>
         </div>
@@ -210,6 +221,7 @@ function _renderHostModalBody() {
         </div>
     </div>
     <div id="hmSshConnWrap" class="mt-3">${_renderSshConnection()}</div>
+    ${_renderCoreProfileCards()}
     <div class="mt-3 flex-grow-1 d-flex flex-column" style="min-height:0">
         <label class="form-label small fw-semibold">${esc(t('host_description'))}</label>
         <textarea class="form-control form-control-sm flex-grow-1" id="hmDesc" style="resize:none;min-height:0"
@@ -221,7 +233,6 @@ function _renderHostModalBody() {
     // Two tabs: General (server data) and Monitoring (per-module checks).  All
     // connection settings live on each module's check — there is no separate
     // Credentials tab; the host only provides the address (+ SSH in General).
-    const _canSyslog = (currentUser.permissions || []).includes('syslog_view');
     let h = `<ul class="nav nav-tabs mb-3" role="tablist">
         <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
             data-bs-target="#hmTabGeneral" type="button">
@@ -232,9 +243,6 @@ function _renderHostModalBody() {
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
             data-bs-target="#hmTabLatest" type="button" onclick="_loadHostLatestData()">
             <i class="bi bi-clock-history me-1"></i>${esc(t('host_tab_latest'))}</button></li>
-        ${_canSyslog ? `<li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
-            data-bs-target="#hmTabLogs" type="button" onclick="_loadHostLogs()">
-            <i class="bi bi-card-list me-1"></i>${esc(t('host_tab_logs'))}</button></li>` : ''}
     </ul>
     <div class="tab-content gm-tab-content">
         <div class="tab-pane fade show active" id="hmTabGeneral">${general}</div>
@@ -248,13 +256,6 @@ function _renderHostModalBody() {
             </div>
             <div id="hmLatestBody"></div>
         </div>
-        ${_canSyslog ? `<div class="tab-pane fade" id="hmTabLogs" data-ro-keep="1">
-            <div class="d-flex align-items-center mb-2 flex-shrink-0">
-                <span class="small text-muted">${esc(t('host_logs_hint'))}</span>
-                <!-- Refresh moved into the filter bar's split-button (unified with auto-refresh). -->
-            </div>
-            <div id="hmLogsBody" class="flex-grow-1 d-flex flex-column" style="min-height:0"></div>
-        </div>` : ''}
     </div>`;
     const body = document.getElementById('hostModalBody');
     body.innerHTML = h;
@@ -365,8 +366,72 @@ function _renderSshFields() {
     return out;
 }
 
+// ── The other connections the DEVICE has ────────────────────────────
+//
+// A profile the CORE declares is the box's own connection and belongs here beside SSH; one a
+// MODULE declares is a conversation that module holds with it and stays with the module, in
+// Monitoring. `builtin` is that distinction, and it already travels with every profile — so
+// this names no protocol and no module, and a core profile added tomorrow appears here on its
+// own.
+//
+// SNMP is why this exists. Its profile moved to the core precisely because an SNMP connection
+// is a property of the DEVICE — its port, the identity it answers to and what it declares
+// itself to be do not stop being true when no check points at it — but its editor stayed
+// filed under the module, three clicks away in another tab, while SSH (the same kind of
+// thing) sat in General. Reported from the screen as "add SNMP as a connection method": the
+// method was already there, and the form was the only place that had not been told.
+//
+// NOT a value of the Local/Remote selector, which is what it looked like it should be. Those
+// are exclusive and this is not: two of this installation's hypervisors answer SSH *and*
+// SNMP, and a third of the fleet carries four protocols at once. `profiles` has been a map
+// per protocol from the start.
+function _renderCoreProfileCards() {
+    if (typeof HOST_PROFILES === 'undefined') return '';
+    return Object.entries(HOST_PROFILES)
+        // `__host__` is the profile the Local/Remote selector already governs — SSH is not a
+        // second opinion about how this box is reached, it IS that answer — so it keeps the
+        // card the selector draws and does not get another one here.
+        .filter(([, spec]) => spec && spec.builtin && spec.module !== '__host__'
+                              && (spec.fields || []).some(f => f.name !== spec.address_field))
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([proto, spec]) => _renderCoreProfileCard(proto, spec))
+        .join('');
+}
+
+function _renderCoreProfileCard(proto, spec) {
+    const slug = proto.replace(/\W/g, '_');
+    const name = proto.toUpperCase();
+    const title = `<span class="fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>${
+        esc(tf('host_conn_named', name))}</span>`;
+    // The test goes through the profile's OWN module, which the declaration already names —
+    // the button knows what to run without anything here knowing what SNMP is.
+    const actions = spec.module ? `<button class="btn btn-sm btn-info py-0 px-2" type="button"
+            onclick="_testHostProfile(${jsStr(spec.module)})">
+            <i class="bi bi-plug me-1"></i>${esc(t('host_ssh_test'))}</button>` : '';
+    const body = `<div class="small text-muted mb-2">${esc(tf('host_conn_named_hint', name))}</div>
+        <div class="row g-2" id="hmProfFields_${slug}">${_renderProfileFields(proto, spec)}</div>`;
+    return `<div class="mt-3">${_collapsibleCard(
+        'hmProfCard_' + slug, title, actions, body, false, 'border-info')}</div>`;
+}
+
+/** Test one core profile — through its own module's checks, which is the test that already
+ *  exists and the one the module's card runs. A second endpoint saying the same thing is a
+ *  second answer free to disagree; a device with device profiles and no OID checks is already
+ *  handled there, by probing until the first metric answers. */
+function _testHostProfile(mod) {
+    if (typeof testHostModule === 'function') testHostModule(mod);
+}
+
 // ── Operating-system selector (auto / fixed) ────────────────────────
 function _osLabel(o) { return t('host_os_' + o) || o; }
+
+/** Repaint the icon beside the modal title when the type changes — the picker is the only
+ *  place the choice is visible otherwise, and a device is recognised by its icon in every
+ *  list that shows it. */
+function _refreshHostTypeIcon() {
+    const el = document.getElementById('hmTypeIcon');
+    if (el) el.className = 'bi ' + hostTypeIcon((_hostDraft || {}).device_type) + ' me-2';
+}
 
 function _renderOsField() {
     const d = _hostDraft;
@@ -393,7 +458,7 @@ function _refreshOsField() {
 
 // Toggle the SSH block when local/remote changes (no full re-render needed).
 function _onHostKindChange(kind) {
-    _hostDraft.kind = (kind === 'remote') ? 'remote' : 'local';
+    _hostDraft.kind = hostKind(kind);
     const wrap = document.getElementById('hmSshConnWrap');
     if (wrap) { wrap.innerHTML = _renderSshConnection(); initTooltips(wrap); }
     _refreshOsField();   // the 'auto' hint depends on local vs remote
@@ -432,7 +497,7 @@ function _hostDraftPayload() {
     return {
         host_uid: _editingHostUid || '',
         _host: {
-            address: _hostDraft.address || '', kind: _hostDraft.kind || 'local',
+            address: _hostDraft.address || '', kind: hostKind(_hostDraft.kind),
             os: _hostDraft.os || 'auto', profiles: _hostDraft.profiles || {},
         },
     };

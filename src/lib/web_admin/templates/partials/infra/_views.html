@@ -1,0 +1,37 @@
+{# ================================================================
+   Infrastructure — the view registry.
+
+   Cards lead, and that is a decision about where this section is READ: it is the one screen
+   somebody leaves open on a wall, and a grid of machines with a coloured edge answers "is
+   anything red" from across the room, which a table of rows does not. The table is what you
+   switch to once you are sitting in front of it and want to sort, filter and compare.
+   ================================================================ #}
+
+//: `columns: true` means the view draws the chosen columns itself, so the column chooser
+//: stays on screen for it (see showChooser in _list.html). `mode: 'summary'` hands it the
+//: whole filtered fleet instead of one page: a group split across a page boundary is a group
+//: whose count is a lie, and a rail that loses half its machines to pagination is worse.
+const INFRA_VIEWS = [
+    { id: 'card',    label_key: 'infra_view_cards',   icon: 'bi-grid-3x3-gap',  render: '_infraCardsBody',   mode: 'cards' },
+    { id: 'table',   label_key: 'infra_view_table',   icon: 'bi-table',         render: null,                mode: 'table' },
+    { id: 'grouped', label_key: 'infra_view_grouped', icon: 'bi-list-nested',   render: '_infraGroupedBody', mode: 'summary', columns: true },
+    { id: 'rail',    label_key: 'infra_view_rail',    icon: 'bi-layout-sidebar', render: '_infraRailBody',   mode: 'summary', columns: true },
+    { id: 'board',   label_key: 'infra_view_board',   icon: 'bi-kanban',        render: '_infraBoardBody',   mode: 'summary' },
+    // `map: true` says this view READS the fleet-wide join, which is fetched once and cached.
+    // It is what the loader redraws on — it used to name the view instead, so the day a second
+    // one read the same payload it sat on "loading…" for ever with the answer already in hand.
+    { id: 'map',     label_key: 'infra_view_map',     icon: 'bi-diagram-3',     render: '_infraMapBody',     mode: 'summary', map: true, arrange: true },
+    // The other map: the first is about ADDRESSES (who can reach whom), this one about
+    // CABLES (what is plugged into what). Same payload, two readings — see _links.html.
+    // `arrange: true` says its boxes can be PUT somewhere, so the account's saved
+    // arrangement is worth fetching and worth redrawing on when it lands. Declared for the
+    // same reason `map` is: the loader naming one view is how the second one that needed it
+    // sat waiting with the answer already in hand.
+    { id: 'links',   label_key: 'infra_view_links',   icon: 'bi-hdd-network',   render: '_infraLinksBody',   mode: 'summary', map: true, arrange: true },
+];
+
+const _infraView = createViewState('ss_infra_view', INFRA_VIEWS, () => {
+    _persistTableConfig();
+    _infraRender();
+});
+function setInfraView(id) { _infraView.set(id); }

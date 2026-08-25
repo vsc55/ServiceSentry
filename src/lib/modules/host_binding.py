@@ -30,12 +30,28 @@ loop that runs one. Mixed into ``ModuleBase``: every watchful calls ``self.host_
 ``self.host_cmd_for`` as its own methods, and they are — the class composes them.
 """
 
-from lib.core.hosts.resolve import host_profile_specs, resolve_os
+from lib.core.hosts.resolve import host_profile_specs, reported_os, resolve_os
 from lib.util import os_detect
 
 
 class HostBinding:
     """Resolving an item's host, its credential and how to run a command on it."""
+
+    def _reported_os(self, uid) -> str:
+        """What the fleet's recorded state says this machine runs, or ``''``.
+
+        Read from the state the monitor is already holding rather than from a store: this runs
+        once per check, and a query per check for a fact that changes when a machine is
+        reinstalled would be a query nobody needs.
+        """
+        status = getattr(getattr(self, '_monitor', None), 'status', None)
+        data = getattr(status, 'data', None)
+        if not isinstance(data, dict) or not uid:
+            return ''
+        try:
+            return reported_os(data, uid)
+        except Exception:  # pylint: disable=broad-except
+            return ''      # a platform we could not work out is the same as one nobody said
 
     def resolve_host(self, item: dict) -> dict:
         """Merge a referenced host's connection over a check item.
@@ -151,19 +167,36 @@ class HostBinding:
         # host kind; the host's ssh-profile cred_uid is the SSH identity, so it
         # only applies to a remote host.
         cred_uid = str(item.get('cred_uid') or '').strip()
-        if not cred_uid and is_remote:
-            ssh_prof = profiles.get('ssh') if isinstance(profiles.get('ssh'), dict) else {}
-            cred_uid = str(ssh_prof.get('cred_uid') or '').strip()
+        if not cred_uid:
+            # The host's own identity for the protocol, when the check names none. A device
+            # carries its credential the way it carries its address — one place, reused by
+            # every check bound to it — so this is not an SSH privilege: SSH is merely the
+            # protocol that is skipped on a LOCAL host, because a local host is not reached
+            # over it. Any other protocol (an SNMP community, an API token) applies whatever
+            # the host's kind.
+            for spec in specs:
+                key = spec.get('key') if isinstance(spec, dict) else None
+                if not key or (key == 'ssh' and not is_remote):
+                    continue
+                prof = profiles.get(key)
+                if not isinstance(prof, dict):
+                    continue
+                cred_uid = str(prof.get('cred_uid') or '').strip()
+                if cred_uid:
+                    break
         if cred_uid:
             resolved = self._apply_cred(resolved, cred_uid)
-        # Expose the host's OS so modules that run OS-specific commands can
-        # branch on it.  'auto' on a LOCAL host resolves to this process's
-        # platform; on a remote host it stays 'auto' (resolved over SSH by the
-        # consumer when needed).
-        # 'auto' on a local host resolves to this process's platform; on a remote
-        # host it stays 'auto' (resolved over SSH by the consumer when needed).
-        resolved['host_os'] = resolve_os(primary.get('os'), is_remote)
-        resolved['host_kind'] = 'remote' if is_remote else 'local'
+        # Expose the host's OS so modules that run OS-specific commands can branch on it.
+        #
+        # `auto` asks the DEVICE first, out of what a module has already recorded about it —
+        # see `reported_os`. Then the old ladder: this process's platform on a local host, and
+        # on a remote one `'auto'`, resolved over SSH by the consumer when needed.
+        resolved['host_os'] = resolve_os(
+            primary.get('os'), is_remote, reported=self._reported_os(primary.get('uid')))
+        # The kind ITSELF and not a two-way flag: `host_exec` has three answers to give
+        # now (over SSH, here, nowhere), and collapsing them to remote/local is what made a
+        # device with no connection run its commands on the panel.
+        resolved['host_kind'] = str(primary.get('kind') or 'none').strip().lower()
         if multi:
             # Cluster roster: each member's identity + its per-node datum, read from
             # THIS module's host profile (``profiles[<module>]`` — the key the UI
@@ -249,6 +282,11 @@ class HostBinding:
         """
         if not isinstance(item, dict) or not cmd:
             return '', 'invalid item or command', -1
+        # …and nowhere, for a device that runs nothing. See `hosts/runner.py::run` — the
+        # same rule, because the two are the same decision reached from two sides.
+        if str(item.get('host_kind') or '').strip().lower() == 'none':
+            from lib.core.hosts.runner import NO_EXEC   # noqa: PLC0415
+            return '', NO_EXEC, -1
         if str(item.get('host_kind') or '').strip().lower() == 'remote':
             from lib.core.hosts import ssh_client  # noqa: PLC0415
             if not ssh_client.HAS_PARAMIKO:

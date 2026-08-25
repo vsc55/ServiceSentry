@@ -1,0 +1,74 @@
+{
+  "id": "grp_synology",
+  "label": {
+    "en_EN": "Synology NAS (everything)",
+    "es_ES": "NAS Synology (todo)"
+  },
+  "description": {
+    "en_EN": "Every profile written for a Synology — system, disks, SMART, volumes and RAID, disk and volume I/O, SSD cache, Ethernet ports, expansion units, iSCSI, NFS, GPU, high availability, UPS, SMB and service users — plus what a NAS also serves as the Linux machine it is: CPU, load averages, memory and swap from net-snmp's own tree, interfaces, filesystems, and the IP, TCP/UDP and ICMP counters.",
+    "es_ES": "Todos los perfiles escritos para un Synology: sistema, discos, SMART, volumenes y RAID, E/S de discos y volumenes, cache SSD, puertos Ethernet, unidades de expansion, iSCSI, NFS, GPU, alta disponibilidad, SAI, SMB y usuarios por servicio; mas lo que un NAS sirve por ser la maquina Linux que es: CPU, medias de carga, memoria y swap del arbol de net-snmp, interfaces, sistemas de ficheros y los contadores IP, TCP/UDP e ICMP."
+  },
+  "includes": [
+    "synology_system",
+    "synology_disks",
+    "synology_smart",
+    "synology_raid",
+    "synology_storageio",
+    "synology_spaceio",
+    "synology_flashcache",
+    "synology_ethports",
+    "synology_ebox",
+    "synology_iscsi",
+    "synology_nfs",
+    "synology_gpu",
+    "synology_ha",
+    "synology_ups",
+    "synology_services",
+    "synology_smb",
+    "hr_storage",
+    "hr_system",
+    "ucd_linux",
+    "sys_generic",
+    "if_generic",
+    "ip_stats",
+    "tcp_udp_stats",
+    "icmp_stats",
+    "lldp",
+    "ip_neighbours"
+  ],
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.6574",
+    "supersedes": [
+      "synology_system",
+      "synology_disks",
+      "synology_smart",
+      "synology_raid",
+      "synology_storageio",
+      "synology_spaceio",
+      "synology_flashcache",
+      "synology_ethports",
+      "synology_ebox",
+      "synology_iscsi",
+      "synology_nfs",
+      "synology_gpu",
+      "synology_ha",
+      "synology_ups",
+      "synology_services",
+      "synology_smb",
+      "hr_storage",
+      "hr_system",
+      "ucd_linux",
+      "sys_generic",
+      "if_generic",
+      "ip_stats",
+      "tcp_udp_stats",
+      "icmp_stats",
+      "lldp",
+      "ip_neighbours"
+    ]
+  },
+  "optional": [
+    "lldp",
+    "ip_neighbours"
+  ]
+}

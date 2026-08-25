@@ -1,0 +1,30 @@
+{
+    "id": "bridge_vlans",
+    "label": {
+        "en_EN": "VLANs (Q-BRIDGE-MIB)",
+        "es_ES": "VLAN (Q-BRIDGE-MIB)"
+    },
+    "short_label": {"en_EN": "VLANs", "es_ES": "VLAN"},
+    "description": {
+        "en_EN": "The VLANs configured on the switch, by the name somebody gave them. The interface table only says a row is \"virtual\": it cannot say which VLAN it is, what it is called or that it exists at all when nothing is bridged to it yet. This is the table every other monitoring tool reads for that, and it is standard — Q-BRIDGE-MIB, which any switch that does 802.1Q answers, whoever made it.",
+        "es_ES": "Las VLAN configuradas en el switch, con el nombre que alguien les puso. La tabla de interfaces sólo dice que una fila es «virtual»: no puede decir qué VLAN es, cómo se llama, ni que existe siquiera cuando todavía no hay nada puenteado a ella. Ésta es la tabla que lee para eso cualquier otra herramienta de monitorización, y es estándar — Q-BRIDGE-MIB, que contesta todo switch que hable 802.1Q, sea de quien sea."
+    },
+    "match": {
+        "probe": "1.3.6.1.2.1.17.7.1.1.1.0"
+    },
+    "metrics": [
+        {
+            "key": "vlan_name",
+            "icon": "bi-signpost-split",
+            "walk": "1.3.6.1.2.1.17.7.1.4.3.1.1",
+            "kind": "text",
+            "role": "vlan",
+            "of_device": true,
+            "skip": "^[ ]*$",
+            "label": {
+                "en_EN": "VLANs",
+                "es_ES": "VLAN"
+            }
+        }
+    ]
+}

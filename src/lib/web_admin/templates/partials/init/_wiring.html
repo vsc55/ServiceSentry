@@ -52,10 +52,15 @@ document.getElementById('btnConfirmModalOk').addEventListener('click', () => {
             return;   // keep the modal open until a reason is given
         }
     }
+    // Checkbox mode (showConfirmModal opts.check): the callback gets whether it was ticked.
+    if (_confirmModalCheckOpts) {
+        arg = !!document.getElementById('confirmModalCheck')?.checked;
+    }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).hide();
     const cb = _confirmModalCallback;
     _confirmModalCallback = null;
     _confirmModalReasonOpts = null;
+    _confirmModalCheckOpts = null;
     if (cb) cb(arg);
 });
 document.getElementById('btnRenameItemOk').addEventListener('click', _doRenameItem);
@@ -111,11 +116,18 @@ for (const _p of (window.SS_STANDALONE_PAGES || [])) {
     // front-end code at all. Core sections always name their own function.
     const _fallback = _p.module ? () => renderModulePage(_p) : null;
     if (!_p.render && !_fallback) continue;
-    document.getElementById('btn-nav-' + _p.id)?.addEventListener('shown.bs.tab', () => {
-        const fn = _p.render ? window[_p.render] : _fallback;
-        if (typeof fn === 'function') return _bootTrack(fn)();
-        console.error(`section "${_p.id}" declares render "${_p.render}", which is not defined`);
-    });
+    // Either button, because a page declares WHERE it belongs: a section of its own is
+    // opened from `btn-nav-<id>`, one placed in the System panel from `btn-tab-<id>` like
+    // every other tab there. Same pane, same render, and the wiring still names no module.
+    for (const _btn of [document.getElementById('btn-nav-' + _p.id),
+                        document.getElementById('btn-tab-' + _p.id)]) {
+        if (!_btn) continue;
+        _btn.addEventListener('shown.bs.tab', () => {
+            const fn = _p.render ? window[_p.render] : _fallback;
+            if (typeof fn === 'function') return _bootTrack(fn)();
+            console.error(`section "${_p.id}" declares render "${_p.render}", which is not defined`);
+        });
+    }
 }
 // Account page as an SPA pane: (re)populate its fields from currentUser each time it opens.
 document.getElementById('btn-nav-account')?.addEventListener('shown.bs.tab', initAccountPage);
@@ -273,7 +285,7 @@ try {
     _savedModulesData = deepClone(modulesData);
     clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
     if ((currentUser.permissions || []).some(p =>
-        p === 'servers_view' || p === 'servers_edit' || p === 'servers_delete' || p.startsWith('server.'))) {
+        p === 'devices_view' || p === 'devices_edit' || p === 'devices_delete' || p.startsWith('server.'))) {
         await loadHosts();
     }
     // Org-wide default dashboard layout (for users who haven't customised theirs).
@@ -283,8 +295,8 @@ try {
     // Credentials are needed both for their own tab and for the host SSH picker,
     // so load them for credential managers AND server editors.
     if ((currentUser.permissions || []).some(p =>
-        p.startsWith('credentials_') || p === 'servers_view' || p === 'servers_edit'
-        || p === 'servers_delete' || p.startsWith('server.')
+        p.startsWith('credentials_') || p === 'devices_view' || p === 'devices_edit'
+        || p === 'devices_delete' || p.startsWith('server.')
         || p === 'modules_view' || p === 'modules_edit' || p.startsWith('module.'))) {
         await loadCredentials();
     }

@@ -54,6 +54,11 @@ __status__ = "Development"
 
 
 class Monitor(ObjectBase):
+    # A real run: results are recorded, notifications go out, history grows. The probe
+    # behind "test this host" says otherwise (see ProbeMonitor), and a module that does
+    # work whose ONLY purpose is to feed the history has somewhere to ask.
+    is_probe = False
+
     """ Monitor class to check the status of the system. """
 
     _DEFAULT_THREADS = 5     # Number of threads to use for parallel processing as default value.
@@ -258,12 +263,18 @@ class Monitor(ObjectBase):
             self.status.save()
 
     def _reconcile_module_tables(self):
-        """Let watchful modules create their own tables on the shared connector."""
+        """Create the declared tables on the shared connector: a watchful module's, and a
+        CORE package's.
+
+        Both, because both are built on demand. A store constructed inside the first request
+        or cycle that happens to need it creates its table there — which works, and puts a
+        schema change wherever the load happened to fall."""
         if self._db is None:
             return
         try:
-            from lib.db import reconcile_module_tables  # noqa: PLC0415
+            from lib.db import reconcile_core_tables, reconcile_module_tables  # noqa: PLC0415
             reconcile_module_tables(self._db)
+            reconcile_core_tables(self._db)
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -575,16 +586,46 @@ class Monitor(ObjectBase):
         return self._uid_name_map().get(key, key)
 
     def send_message(self, message, status=None, module: str = '', item: str = '',
-                     severity: str = '') -> None:
+                     severity: str = '', kind: str = '') -> None:
         """Ad-hoc alert from a watchful module (the ModuleBase.send_message bridge).
 
         Buffered into the current cycle's notification batch; the emoji/host formatting
         and channel routing happen at flush time in :class:`MonitorNotifier`.  ``module``
         (the watchful's name) and ``item`` (the module-supplied friendly name) fill the
         digest's Module/Item columns for ad-hoc sends.  ``severity='warning'`` routes a
-        non-OK alert as a ``warn`` (a soft threshold breach) instead of ``down``."""
+        non-OK alert as a ``warn`` (a soft threshold breach) instead of ``down``.
+
+        ``kind`` lets a module say this failure is a KIND of its own — an SNMP device that
+        answered nothing is the collection not happening, not a check that failed — so it can
+        have a row of its own in the routing matrix. Two rules make it safe:
+
+        * it has to be a REGISTERED notify event. A matrix cell is stored only when somebody
+          ticks it and reads false until then, so an unregistered kind routes to no channel at
+          all: a typo here would be an alert that silently stops arriving, which is the exact
+          failure this codebase keeps finding;
+        * and it never survives a RECOVERY. A device coming back is a recovery wherever
+          recoveries go; routing it as "unreachable" would be a green message under a red
+          heading.
+
+        The kind is carried BESIDE the ordinary one rather than replacing it — see
+        `MonitorNotifier.add`."""
         if message and self._notifier is not None:
-            self._notifier.add(self._alert_kind(status, severity), module, item or '', message)
+            base = self._alert_kind(status, severity)
+            self._notifier.add(base, module, item or '', message,
+                               also=self._notify_kind(kind, status))
+
+    @staticmethod
+    def _notify_kind(kind: str, status) -> str:
+        """The module's own kind for this alert, if it may have one."""
+        kind = str(kind or '').strip()
+        if not kind or status is True:
+            return ''
+        from lib.core.notify import events as _events      # noqa: PLC0415
+        try:
+            known = {e['key'] for e in _events.events()}
+        except Exception:                                  # pylint: disable=broad-except
+            return ''
+        return kind if kind in known else ''
 
     def send_message_end(self) -> None:
         """Flush the cycle's buffered alerts (grouped Telegram + digest email + per-event
@@ -612,8 +653,15 @@ class Monitor(ObjectBase):
             return False
         return current_status != status
 
-    def _process_module_result(self, module_name: str, result_data: ReturnModuleCheck) -> bool:
-        """Apply module result to status and notifications."""
+    def _process_module_result(self, module_name: str, result_data: ReturnModuleCheck,
+                               prune: bool = True) -> bool:
+        """Apply module result to status and notifications.
+
+        ``prune=False`` for a run that was narrowed to one machine: the pruning below deletes
+        every stored key the run did not report, which is right when the run covered
+        everything and catastrophic when it did not — a collection of one device would wipe
+        the live state of every other device that module watches.
+        """
         changed = False
 
         for key, value in result_data.items():
@@ -664,7 +712,9 @@ class Monitor(ObjectBase):
         # error next to a live result — the m365 phantom). Reached only when the
         # module ran and returned a result set (see check()'s caller), so an
         # errored/timed-out module never wipes its last-known state.
-        if self._prune_orphan_status(module_name, result_data):
+        # …but only when this run could see everything. A run narrowed to one machine did
+        # not fail to report the others, it was never asked about them.
+        if prune and self._prune_orphan_status(module_name, result_data):
             changed = True
 
         return changed
@@ -697,6 +747,39 @@ class Monitor(ObjectBase):
             del mod_status[k]
         return bool(orphans)
 
+    def report_progress(self, module_name: str, detail: str, *, step: str = '',
+                        scope: str = '', n: int = 0, total: int = 0,
+                        state: str = '') -> None:
+        """Say what *module_name* is doing right now, if anyone is listening.
+
+        A module is a black box between "started" and "returned", and for most of them that
+        is fine — they take a second. The one that is not fine is the one somebody presses a
+        button for: sampling a NAS through its device profiles is minutes of round trips
+        inside a SINGLE module, so a screen watching module boundaries sits at 0 % for five
+        minutes and is indistinguishable from a screen watching something that has hung.
+        Reported exactly that way.
+
+        The sink is installed by whoever is watching (the executor, from its ``progress_cb``)
+        and is absent the rest of the time, so a scheduler cycle pays nothing for this. The
+        detail is free text from the module — it knows what it is doing and the core does
+        not — and it is shown, never parsed. So is *step*, the phase that detail belongs to:
+        the module names its own phases and this passes them along, because a list of steps
+        written here would be one module's list wearing everybody else's name.
+        """
+        cb = getattr(self, '_progress_sink', None)
+        if cb is None:
+            return
+        try:
+            cb('running', module_name, str(detail or ''),
+               {'step': str(step or ''), 'scope': str(scope or ''),
+                'n': int(n or 0), 'total': int(total or 0),
+                # How the phase ended, when the module says. The module is still RUNNING —
+                # this is one of its phases finishing, not the module — so the state travels
+                # inside the report rather than as the report's own.
+                'state': str(state or '')})
+        except Exception:  # pylint: disable=broad-except
+            pass           # a progress display must never be able to fail a check
+
     def _import_watchful(self, module_name: str):
         """Import a watchful module by name (returns the imported module).
 
@@ -717,9 +800,14 @@ class Monitor(ObjectBase):
                 del sys.modules[_k]
         return importlib.import_module(module_name)
 
-    def check_module(self, module_name: str) -> tuple[bool, str, ReturnModuleCheck | None]:
+    def check_module(self, module_name: str,
+                     only_host: str = '') -> tuple[bool, str, ReturnModuleCheck | None]:
         """
         Execute module check and return raw result.
+
+        ``only_host`` narrows the run to the items bound to one machine — what "collect this
+        device now" means, as opposed to a cycle, which is about the installation. The module
+        applies it (``ModuleBase.get_conf``); nothing here knows which of its items are which.
 
         Returns:
             tuple[bool, str, ReturnModuleCheck | None]
@@ -729,6 +817,8 @@ class Monitor(ObjectBase):
             self.debug.print(f"> Monitor > check_module >> Module: {module_name}", DebugLevel.info)
             module_import = self._import_watchful(module_name)
             module = module_import.Watchful(self)
+            if only_host:
+                module._host_scope = only_host   # pylint: disable=protected-access
             result_data = module.check()
 
             if isinstance(result_data, ReturnModuleCheck):

@@ -21,7 +21,8 @@ class _StoresMixin:
         groups, sessions and roles stores so they never open the database
         directly nor fight over separate connections.
         """
-        from lib.db             import get_connector, reconcile_module_tables  # noqa: PLC0415
+        from lib.db             import (get_connector, reconcile_core_tables,  # noqa: PLC0415
+                                reconcile_module_tables)
         from lib.core.users.store  import UsersStore   # noqa: PLC0415
         from lib.core.groups.store import GroupsStore  # noqa: PLC0415
         from lib.core.sessions.store import SessionsStore   # noqa: PLC0415
@@ -46,6 +47,16 @@ class _StoresMixin:
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # What the panel does in the background, after it has done it. The package is handed
+        # the connector rather than going looking for one: a job finishes inside a worker
+        # thread that has no web admin, no request and no handle of its own, and threading one
+        # through four unrelated pieces of machinery to write a note is worse than this.
+        from lib.core.jobs import record as jobs_record  # noqa: PLC0415
+        jobs_record.bind(self._db_connector, {
+            'keep':  getattr(self, '_JOBS_HISTORY_KEEP', None),
+            'days':  getattr(self, '_JOBS_HISTORY_DAYS', None),
+            'lines': getattr(self, '_JOBS_HISTORY_LINES', None),
+        }, owner=self._hb_instance_id() if hasattr(self, '_hb_instance_id') else '')
         # Second factors and their recovery codes. Its own tables rather than a column on
         # `users`: that record is merged into what the users API serialises, and a TOTP seed
         # there would be one `GET /api/v1/users` away from everybody with `users_view`.
@@ -133,9 +144,12 @@ class _StoresMixin:
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
-        # Let watchful modules create their own tables on the shared connector.
+        # Create the declared tables on the shared connector — a watchful module's, and a
+        # core package's. Both are built on demand, so without this the table lands inside
+        # whatever request first needed it.
         try:
             reconcile_module_tables(self._db_connector)
+            reconcile_core_tables(self._db_connector)
         except Exception:  # pylint: disable=broad-except
             pass
 

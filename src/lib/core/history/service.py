@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 
+from lib.modules.history_fields import module_history_fields, module_history_sources
+
 
 def _pretty_name(modules_dir: str | None, module: str, lang: str) -> str:
     """Return the human-readable module name from its lang JSON, or the raw name."""
@@ -71,7 +73,8 @@ def _history_labels(modules_dir: str | None, module: str, lang: str) -> dict:
     return {}
 
 
-def history_meta(modules_dir: str | None, module: str, lang: str) -> dict:
+def history_meta(modules_dir: str | None, module: str, lang: str,
+                 var_dir: str = '') -> dict:
     """``__history__`` enriched with a resolved per-field ``fields`` map.
 
     ``fields`` is ``{name: {unit, label}}`` for every numeric field the module
@@ -79,15 +82,31 @@ def history_meta(modules_dir: str | None, module: str, lang: str) -> dict:
     Labels come from the module lang ``history`` map, falling back to the
     schema label (primary field) or a prettified field name.  Status-only
     modules (``field: null`` with no ``fields``) get an empty map.
+
+    A module may also work its fields out at RUN time — see
+    :mod:`lib.modules.history_fields`. The SNMP watchful is the case: what it records is
+    decided by the device profiles installed, so no schema written at build time could name
+    them. Those are merged in first and the static declaration wins over them, because the
+    static one is what somebody wrote down on purpose.
     """
     cfg = dict(_history_config(modules_dir, module))
     labels = _history_labels(modules_dir, module, lang)
     declared = cfg.get('fields') if isinstance(cfg.get('fields'), dict) else {}
     primary  = cfg.get('field') if isinstance(cfg.get('field'), str) else None
-    fields: dict = {}
+    fields: dict = dict(module_history_fields(module, lang, var_dir))
     for name, meta in declared.items():
         meta = meta if isinstance(meta, dict) else {}
+        # A field the schema declares keeps whatever the RUN-time discovery already knew
+        # about it — where it came from and how it is meant to be drawn. The static
+        # declaration wins on the wording, which is the half somebody wrote on purpose.
         fields[name] = {
+            **{k: v for k, v in (fields.get(name) or {}).items()
+               if k in ('source', 'source_label', 'source_short', 'source_rank', 'chart',
+                        'states', 'row_split', 'headline', 'headline_rows', 'present_when',
+                        'quiet_when',
+                        'icon',
+                        'identity', 'tally', 'tally_role', 'chart_with',
+                        'chart_label')},
             'unit':  meta.get('unit', cfg.get('unit') or ''),
             'label': labels.get(name) or meta.get('label')
                      or (cfg.get('label') if name == primary else None)
@@ -99,6 +118,10 @@ def history_meta(modules_dir: str | None, module: str, lang: str) -> dict:
             'label': labels.get(primary) or cfg.get('label') or _prettify_field(primary),
         }
     cfg['fields'] = fields
+    # …and what to CALL the things that produced them, where the module fronts several. A
+    # profile of pure identity facts records no measurement, so nothing in `fields` carries its
+    # name — and the card it fills was headed with its raw id.
+    cfg['sources'] = module_history_sources(module, lang, var_dir)
     # Translate the top-level label too (single-series Y-axis / metric label).
     if primary:
         cfg['label'] = labels.get(primary) or cfg.get('label') or _prettify_field(primary)

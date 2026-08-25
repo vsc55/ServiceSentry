@@ -24,7 +24,17 @@ OPTIONS = (OS_AUTO, 'linux', 'windows', 'darwin', 'freebsd', OS_OTHER)
 
 
 def canonical_os(value: str) -> str:
-    """Map an arbitrary platform/uname string to a canonical token."""
+    """Map an arbitrary platform/uname string to a canonical token.
+
+    Two kinds of string reach this, and the difference is why the prefixes are not enough on
+    their own. `uname -s` and `sys.platform` answer ONE word — that is the fast path below.
+    A device describing itself answers a sentence: `sysDescr` on a Synology is "Linux nas-01
+    5.10.55 …" and a `lsb_release` extend answers "Debian GNU/Linux 12", where the word that
+    matters is in the middle. Read only as a prefix, the second one was OTHER — which reads as
+    "a platform this panel has no word for" and is not what the machine said.
+
+    Prefixes first, so a one-word answer never depends on what else its name contains.
+    """
     v = str(value or '').strip().lower()
     if not v:
         return OS_OTHER
@@ -38,6 +48,12 @@ def canonical_os(value: str) -> str:
         return 'darwin'
     if 'bsd' in v:                       # freebsd / openbsd / netbsd
         return 'freebsd'
+    # …and then anywhere in the sentence. BSD is already above and Windows is caught by its
+    # own containment test, so what is left is the two that only had a prefix rule.
+    if 'linux' in v:
+        return 'linux'
+    if 'darwin' in v:
+        return 'darwin'
     return OS_OTHER
 
 

@@ -1,0 +1,409 @@
+{# ================================================================
+   Infrastructure — asking a device for fresh numbers, and watching it happen.
+
+   The section draws what the last cycle RECORDED. How old that is depends on the scheduler
+   interval, and for a device sampled by a full SNMP profile on the minutes the sampling
+   itself takes — a Synology answers about a thousand values and takes roughly five. Somebody
+   who has just replaced a disk should not have to wait for a tick, and the only way to ask
+   used to be the Status screen's "run all": every module, every machine.
+
+   FOUR THINGS THIS FILE IS ABOUT, and they are all the same complaint:
+
+   * a run that shows nothing until it ends is indistinguishable from one that has hung, so
+     there is a CHECKLIST — one line per thing being done, and under a module that counts its
+     own work, the phases it named for itself with how far along each is. The words are the
+     module's: the core has no vocabulary for "which profile of a Synology am I on" and one
+     written here would be a lie for the other twenty modules;
+   * nothing about the run depends on somebody watching it — the work is a thread on the
+     server, so the dialog closes and the collection carries on;
+   * once it is closed there is still a bar with a percentage, because "is it still going?"
+     must be answerable without reopening anything;
+   * and the run is over WHEN IT IS OVER. A module that outlives the batch deadline has not
+     finished — it is still walking the device — so the dialog does not declare an ending it
+     then has to take back. It says which of the two things is true: still waiting on it, or
+     the panel stopped waiting.
+
+   The checklist deliberately looks like the device test's (`lib/core/snmp/web/profiles_ui.html`).
+   They are the same question asked of the same machine — "what is it doing, and is it stuck" —
+   and answering it in two visual languages is two things to learn instead of one.
+
+   Its own partial, and not the section shell: the shell is the entry point, the state and the
+   machine view, and this is a self-contained story with a dialog, a poll and a bar.
+   ================================================================ #}
+
+//: The collection this browser started, while it is still going. `null` the rest of the time.
+//: One at a time is not a decision made here — the server holds the same lock the Status
+//: screen's run takes, so a second attempt is refused with a message rather than queued.
+let _infraCollectJob = null;      // {id, host, host_name, total, completed, modules[], done…}
+
+//: Whether the shared dialog is currently showing THIS. The panel has one `#infoModal` and
+//: everything borrows it, so repainting it on a poll without asking would overwrite whatever
+//: dialog somebody opened in the meantime.
+let _infraCollectShown = false;
+
+/** True while a collection is out. Read by the auto-refresh tick, which must not redraw the
+ *  page from under a run in progress. */
+function _infraCollecting() { return !!(_infraCollectJob && !_infraCollectJob.done); }
+
+/** Start one. The answer is a job id, not results — see lib/core/infra/routes.py. */
+async function _infraCollect() {
+    const uid = _infraHost;
+    if (!uid || _infraCollecting()) return;
+    const res = await apiPost(`/api/v1/infra/hosts/${encodeURIComponent(uid)}/collect`, {});
+    if (!res || res.status !== 200) {
+        showToast(res?.data?.error || t('infra_collect_failed'), 'danger');
+        return;
+    }
+    const jobId = (res.data || {}).job_id;
+    if (!jobId) { showToast(t('infra_collect_failed'), 'danger'); return; }
+    // Drawn from the modules the server accepted, before the first poll answers. Otherwise
+    // the dialog opens empty and the first second of a five-minute run looks like nothing
+    // happened, which is the exact impression this whole file exists to prevent.
+    _infraCollectJob = {
+        id: jobId, host: uid, host_name: _infraHostName(uid), done: false,
+        total: (res.data.modules || []).length, completed: 0,
+        modules: (res.data.modules || []).map(m => ({module: m, state: 'pending', detail: ''})),
+        answered: [], errors: [], error: '',
+    };
+    _infraCollectOpen();
+    _infraCollectPoll(jobId);
+}
+
+/** The other question: refresh EVERYTHING, from the list.
+ *
+ *  The per-device button narrows its run to that device, which is what makes it quick. This
+ *  is the un-narrowed run — every module with its whole configuration, which is what a
+ *  scheduler cycle is — so it costs what a cycle costs: on a fleet with SNMP, minutes.
+ *
+ *  Hence the confirmation, which the per-device button does not have. It is not a dangerous
+ *  act, it is an EXPENSIVE one that also makes every check alert on what it finds, and the
+ *  difference between the two buttons is invisible until it has already started. */
+function _infraCollectAll() {
+    if (_infraCollecting()) return;
+    showConfirmModal(t('infra_collect_all_confirm'), () => _infraCollectAllRun());
+}
+
+async function _infraCollectAllRun() {
+    const res = await apiPost('/api/v1/infra/collect', {});
+    if (!res || res.status !== 200) {
+        showToast(res?.data?.error || t('infra_collect_failed'), 'danger');
+        return;
+    }
+    const jobId = (res.data || {}).job_id;
+    if (!jobId) { showToast(t('infra_collect_failed'), 'danger'); return; }
+    // `host: ''` is what says "this one is about the fleet" — the dialog's title, its note and
+    // which header slot shows the bar all read it, and it is the same thing the server means
+    // by a job with no host.
+    _infraCollectJob = {
+        id: jobId, host: '', host_name: t('infra_collect_all_scope'), done: false,
+        total: (res.data.modules || []).length, completed: 0,
+        modules: (res.data.modules || []).map(m => ({module: m, state: 'pending', detail: ''})),
+        answered: [], errors: [], error: '',
+    };
+    _infraCollectOpen();
+    _infraCollectPoll(jobId);
+}
+
+//: Whether this page-load has already asked whether something was running. Once: the answer
+//: only matters while the page does not know, and after that `_infraCollectJob` is the answer.
+let _infraCollectAdopted = false;
+
+/** Find a collection that was already running when this page loaded, and follow it.
+ *
+ *  Reported as the obvious question: does a reload lose it? The RUN is not lost — it is a
+ *  thread on the server and nothing about it depends on a browser being open — but the job id
+ *  lived in a variable in a page that no longer exists, so the bar vanished while the device
+ *  was still being polled and the screen looked idle in the middle of a five-minute run.
+ *
+ *  Asked of the server rather than remembered in `localStorage`: the server is the one that
+ *  knows, so a second tab and a colleague's laptop get the same true answer, and nobody is
+ *  left holding an id for a run that ended somewhere else. */
+async function _infraCollectAdopt() {
+    if (_infraCollectAdopted || _infraCollecting()) return;
+    _infraCollectAdopted = true;
+    if (!new Set(currentUser.permissions || []).has('infra_collect')) return;
+    const job = await apiGet('/api/v1/infra/collect');
+    if (!job || !job.id || job.done) return;
+    _infraCollectJob = job;
+    _infraCollectPaint();
+    // No dialog: nobody asked for one on this page-load. The bar is the right amount of
+    // noise for something you did not just press a button to start.
+    _infraCollectPoll(job.id);
+}
+
+/** The name of a device we have in the fleet, for the dialog's title. */
+function _infraHostName(uid) {
+    const h = (_infraHosts || []).find(x => x.uid === uid);
+    return (h && h.name) || (_infraDetail && _infraDetail.host && _infraDetail.host.name) || '';
+}
+
+/** Ask every second until it is done.
+ *
+ *  A second, and not less: the unit of progress is a whole module, and the fastest of them
+ *  takes longer than that. Bounded rather than `while (true)` — a poll loop with no end is
+ *  one that outlives the thing it was watching when something goes wrong on the other side,
+ *  and 2 h at one per second is far past any collection this panel can produce. */
+async function _infraCollectPoll(jobId) {
+    for (let i = 0; i < 7200; i++) {
+        const job = await apiGet(`/api/v1/infra/collect/${encodeURIComponent(jobId)}`);
+        // Gone means gone: the jobs live in the panel's memory, so a null answer after a
+        // restart is not something more waiting will fix.
+        if (!job) {
+            _infraCollectJob = null;
+            _infraCollectPaint();
+            showToast(t('infra_collect_unknown_job'), 'warning');
+            return;
+        }
+        _infraCollectJob = job;
+        _infraCollectPaint();
+        if (job.done) return _infraCollectFinish(job);
+        await new Promise(r => setTimeout(r, 1000));
+    }
+}
+
+/** It ended. Say how, and put the fresh numbers on the screen.
+ *
+ *  The dialog is repainted in place rather than closed: somebody who deliberately opened it to
+ *  watch a run is reading it when it ends, and a screen that dismisses itself takes the
+ *  outcome away at the one moment it is wanted. */
+function _infraCollectFinish(job) {
+    if (job.error) showToast(job.error, 'danger');
+    else {
+        showToast(tf('infra_collect_done', (job.answered || []).length));
+        // Only when the panel actually STOPPED WAITING. A module that overruns the batch
+        // deadline no longer ends the run — the job stays open until it lands — so this
+        // used to fire on every collection of a NAS and say "some modules are still
+        // working" over a screen that had just declared itself finished. It is a true
+        // sentence in exactly one case: the run was left going and nobody is watching it.
+        const out = (job.modules || []).filter(m => m.state === 'timeout').length;
+        if (job.gave_up && out) showToast(tf('infra_collect_slow', out), 'warning');
+    }
+    // Only if it is still the device that was asked: a collection takes long enough to walk
+    // away from, and redrawing the machine somebody moved on to with another machine's
+    // payload is worse than not redrawing at all.
+    if (_infraHost === job.host) _infraReload();
+}
+
+/** Open (or re-open) the dialog on the run in flight. */
+function _infraCollectOpen() {
+    if (!_infraCollectJob) return;
+    _infraCollectShown = true;
+    showHtmlModal(tf('infra_collect_title', _infraCollectJob.host_name || ''),
+                  _infraCollectBody(_infraCollectJob), 'primary');
+    // The dialog is closed by the user, by another dialog, or by the panel navigating. All
+    // three end with `hidden`, and after it this file must stop writing into a box it no
+    // longer owns — the panel has one `#infoModal` and everybody borrows it.
+    const el = document.getElementById('infoModal');
+    if (el) el.addEventListener('hidden.bs.modal',
+                                () => { _infraCollectShown = false; _infraCollectPaint(); },
+                                {once: true});
+}
+
+/** Put the current state wherever it is being shown: the dialog if it is open, and the header
+ *  slot always. Two surfaces and ONE painter — the bar and the dialog disagreeing about how
+ *  far along a run is would be worse than having only one of them. */
+function _infraCollectPaint() {
+    const body = document.getElementById('infoModalBody');
+    if (_infraCollectShown && body && _infraCollectJob)
+        body.innerHTML = `<div class="ss-modal-primary">${_infraCollectBody(_infraCollectJob)}</div>`;
+    const slot = document.getElementById('infraCollectSlot');
+    if (slot) slot.innerHTML = _infraCollectSlotHtml(_infraHost);
+    // The fleet list has a slot of its own, and only one of the two is ever on screen — but
+    // painting only the device one is how the list's button sat there saying "collect" while
+    // a collection was running.
+    const all = document.getElementById('infraCollectAllSlot');
+    if (all) all.innerHTML = _infraCollectAllSlotHtml();
+}
+
+/** How far along, 0–100.
+ *
+ *  By MODULE, because that is the only boundary the executor can honestly report — a module
+ *  is not divided into steps and inventing some would be a bar that moves smoothly and means
+ *  nothing. It is therefore not linear in TIME: nine quick modules and one SNMP profile reach
+ *  90 % in two seconds and stay there for four minutes. Which is why nothing here shows the
+ *  percentage alone — the name of the module that is working is what makes the pause legible.
+ */
+function _infraCollectPct(job) {
+    if (!job || !job.total) return 0;
+    return Math.min(100, Math.round((job.completed / job.total) * 100));
+}
+
+/** The device header's slot: its button, or — while ITS run is out — the bar. */
+function _infraCollectSlotHtml(uid) {
+    const job = _infraCollectJob;
+    if (!job || job.done || (uid && job.host !== uid))
+        return `<button class="btn btn-sm btn-secondary" onclick="_infraCollect()"
+                        title="${escAttr(t('infra_collect_tt'))}">
+                    <i class="bi bi-broadcast me-1"></i>${esc(t('infra_collect'))}</button>`;
+    return _infraCollectBarHtml(job);
+}
+
+/** The fleet list's slot: its button, or the bar for WHATEVER is running.
+ *
+ *  Whatever, and not only its own: one collection runs at a time — the server holds the same
+ *  lock the Status screen's run takes — so while a device is being collected this button
+ *  cannot be pressed either. Showing it as a button would be offering something that answers
+ *  "already running"; showing the bar says what is actually happening and opens it. */
+function _infraCollectAllSlotHtml() {
+    const job = _infraCollectJob;
+    if (!job || job.done)
+        return `<button class="btn btn-sm btn-secondary" onclick="_infraCollectAll()"
+                        title="${escAttr(t('infra_collect_all_tt'))}">
+                    <i class="bi bi-broadcast me-1"></i>${esc(t('infra_collect_all'))}</button>`;
+    return _infraCollectBarHtml(job);
+}
+
+/** The bar that replaces either button while a run is out. */
+function _infraCollectBarHtml(job) {
+    const pct = _infraCollectPct(job);
+    const running = (job.modules || []).find(m => m.state === 'running');
+    // What the bar says it is doing: the phase a module named for itself if there is one,
+    // then its own sentence, then the bare word. The phase is the most specific thing
+    // anybody said and the only one that changes while a five-minute module runs.
+    const step = (((running || {}).steps || []).filter(x => x.state === 'run').pop() || {});
+    const phase = step.scope ? `${step.scope} · ${step.key}` : step.key;
+    const what = step.key ? (step.total ? `${phase} ${step.n || 0}/${step.total}` : phase)
+               : running ? (running.detail || _infraModuleLabel(running.module))
+               : job.awaiting ? t('infra_collect_still_out') : t('infra_collecting');
+    // Clickable, because a bar that cannot be opened is a bar that can only be stared at: the
+    // percentage says how far, and the dialog behind it says what is actually happening.
+    return `<button class="btn btn-sm btn-secondary d-flex align-items-center gap-2"
+                    style="min-width:12rem" onclick="_infraCollectOpen()"
+                    title="${escAttr(t('infra_collect_reopen'))}">
+        <span class="spinner-border spinner-border-sm"></span>
+        <span class="flex-grow-1">
+            <span class="d-flex justify-content-between ss-fs-2">
+                <span class="text-truncate">${esc(what)}</span>
+                <span class="ms-2">${pct}%</span>
+            </span>
+            <span class="progress d-block" style="height:.35rem">
+                <span class="progress-bar d-block" style="width:${pct}%"></span>
+            </span>
+        </span>
+    </button>`;
+}
+
+/** The dialog: the bar, and a checklist of what is actually being done.
+ *
+ *  "43 %" answers how far and nothing else. The list is the point — and it is a CHECKLIST now
+ *  and not a table of module ids, which is what it was: a five-minute run showed
+ *  `snmp · Ejecutando…` and nothing else, which is the same information as a spinner. Each
+ *  line is a thing being done, with the state it is in and, where the module counts them, how
+ *  many of how many.
+ *
+ *  The same shape as the device test's checklist, on purpose. They are the same question
+ *  asked of the same machine — "what is it doing, and is it stuck" — and answering it in two
+ *  visual languages is two things to learn instead of one. */
+function _infraCollectBody(job) {
+    const pct = _infraCollectPct(job);
+    const done = !!job.done;
+    const note = done ? (job.gave_up ? t('infra_collect_left_running')
+                                     : t('infra_collect_finished'))
+                      : (job.awaiting ? t('infra_collect_still_out') : t('infra_collect_hint'));
+    return `<div class="py-1">
+        <div class="d-flex justify-content-between align-items-end mb-1">
+            <span class="small text-muted">${esc(job.completed || 0)} / ${esc(job.total || 0)}</span>
+            <span class="fw-semibold">${pct}%</span>
+        </div>
+        <div class="progress mb-3" style="height:.6rem">
+            <div class="progress-bar${done ? '' : ' progress-bar-striped progress-bar-animated'}"
+                 style="width:${pct}%"></div>
+        </div>
+        <div class="text-muted ss-fs-2 mb-2">
+            <i class="bi ${job.host ? 'bi-bullseye' : 'bi-diagram-3'} me-1"></i>${
+                esc(t(job.host ? 'infra_collect_this_device' : 'infra_collect_all_note'))}</div>
+        <div class="small">${(job.modules || []).map(_infraCollectRow).join('')}</div>
+        ${job.error ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-0">${esc(job.error)}</div>` : ''}
+        <div class="small text-muted mt-3">
+            <i class="bi bi-info-circle me-1"></i>${esc(note)}</div>
+    </div>`;
+}
+
+//: How a state is drawn: a mark and a tone. ONE map for the module lines and for the phases
+//: underneath them, so the two can never disagree about what a tick means. The keys are both
+//: vocabularies — the executor's (pending/running/ok/error/timeout) and a phase's
+//: (run/done/fail) — because translating one into the other would be a third name for each.
+const _INFRA_MARKS = {
+    pending: ['bi-circle',            'text-muted'],
+    running: ['bi-arrow-repeat',      'text-primary'],
+    run:     ['bi-arrow-repeat',      'text-primary'],
+    ok:      ['bi-check-circle-fill', 'text-success'],
+    done:    ['bi-check-circle-fill', 'text-success'],
+    error:   ['bi-x-circle-fill',     'text-danger'],
+    fail:    ['bi-x-circle-fill',     'text-danger'],
+    timeout: ['bi-hourglass-split',   'text-warning'],
+};
+
+function _infraBusy(state) { return state === 'running' || state === 'run'; }
+
+/** One line of the checklist: a mark, what it is, how far along, and a note.
+ *
+ *  `n/total` and the hairline under it appear only when the thing being described actually
+ *  counts something. A bar with nothing behind it moves smoothly and means nothing, which is
+ *  the same reason the percentage above is per module and not per second. */
+function _infraChecklistLine(state, label, opts) {
+    const o = opts || {};
+    const mark = _INFRA_MARKS[state] || _INFRA_MARKS.pending;
+    const count = o.total ? `${o.n || 0}/${o.total}` : '';
+    const pct = (o.total && _infraBusy(state))
+        ? Math.min(100, Math.round(((o.n || 0) / o.total) * 100)) : 0;
+    return `<div class="d-flex align-items-center gap-2 py-1${
+                state === 'pending' ? ' opacity-50' : ''}${o.sub ? ' ps-4' : ''}">
+        <i class="bi ${mark[0]} ${mark[1]}"></i>
+        ${o.scope ? `<span class="fw-semibold text-truncate">${esc(o.scope)}</span>` : ''}
+        <span class="text-truncate${_infraBusy(state) && !o.scope ? ' fw-semibold' : ''}
+                     ${o.scope ? 'text-muted' : ''}">${esc(label)}</span>
+        <span class="text-muted ss-fs-2 ms-auto font-monospace">${esc(count)}</span>
+        ${o.note ? `<span class="text-muted ss-fs-2 text-truncate"
+                          style="max-width:18rem">${esc(o.note)}</span>` : ''}
+        ${o.state_label ? `<span class="${mark[1]} ss-fs-2">${esc(o.state_label)}</span>` : ''}
+    </div>
+    ${pct ? `<div class="progress ms-4 mb-1" style="height:2px"><div class="progress-bar"
+              style="width:${pct}%"></div></div>` : ''}`;
+}
+
+/** One module, with the phases it named for itself indented underneath.
+ *
+ *  `timeout` is deliberately NOT drawn as a failure: the module has not failed, it is still
+ *  working and writes its own state and history when it lands. A red cross there would be the
+ *  screen saying something it has to take back — and the job waits for it now, so the line
+ *  turns into a tick by itself instead of the run ending with a warning.
+ *
+ *  The phases are the MODULE's words. The core has no vocabulary for "which profile of a
+ *  Synology am I on", and inventing one would be a lie for the other twenty modules — so a
+ *  module that says nothing gets one line, which is honest, and the one that spends five
+ *  minutes inside itself gets a list that moves. */
+function _infraCollectRow(m) {
+    const STATE = {
+        pending: t('infra_collect_state_pending'), running: t('infra_collect_state_running'),
+        ok: t('infra_collect_state_ok'), error: t('infra_collect_state_error'),
+        timeout: t('infra_collect_state_timeout'),
+    };
+    const steps = m.steps || [];
+    // What a module returned, or why it did not. While it runs, what it is doing is on its
+    // own phase lines — repeating it here would be the same sentence twice — and a module
+    // that says nothing keeps its sentence, or its line would be a spinner with a name.
+    const note = m.state === 'ok' && m.detail ? tf('infra_collect_values', m.detail)
+               : m.state === 'error' ? (m.detail || '')
+               : (m.state === 'running' && !steps.length) ? (m.detail || '')
+               : '';
+    return _infraChecklistLine(m.state, _infraModuleLabel(m.module), {
+        note: note, state_label: STATE[m.state] || STATE.pending,
+    }) + steps.map(st => _infraChecklistLine(st.state, st.key, {
+        n: st.n, total: st.total, note: st.note, sub: true, scope: st.scope,
+    })).join('');
+}
+
+/** What a module is called, to somebody who did not write it.
+ *
+ *  `modulePrettyName` is the panel's one answer to that — the modules screen, the cluster
+ *  list and the audit detail all ask it — and it falls back to the id. This used to print the
+ *  id in a `<code>`, so a checklist read as a log line ("ssl_cert, ram_swap, snmp") instead of
+ *  as a list of things being done. Asked for rather than assumed: this partial loads inside
+ *  the section bundle, and a name that is not there yet must cost a nicer label, not the row. */
+function _infraModuleLabel(name) {
+    if (typeof modulePrettyName === 'function') {
+        try { return modulePrettyName(name, {}) || name || ''; } catch (_) { /* fall through */ }
+    }
+    return name || '';
+}

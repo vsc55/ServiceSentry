@@ -49,6 +49,11 @@ _FIELD_ABSENT = {'status': False, 'severity': '', 'message': '', 'name': '',
 class ProbeMonitor(Monitor):
     """Monitor subclass that skips the heavy __init__ and stubs side effects."""
 
+    # A rehearsal. Nothing it produces is kept — `_history` is None and the notifier is a
+    # stub — which is worth saying out loud rather than leaving every module to infer it
+    # from a private attribute being None.
+    is_probe = True
+
     def __init__(self, modules_config, hosts_store, db,
                  modules_dir='', notify_cfg=None):  # pylint: disable=super-init-not-called
         self.dir_base = self.dir_config = self.dir_var = ''

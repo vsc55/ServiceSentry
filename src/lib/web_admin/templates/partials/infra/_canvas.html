@@ -1,0 +1,503 @@
+{# ================================================================
+   A drawing you can move around in — the part that is not about what is drawn.
+
+   Two maps of this fleet exist and they answer different questions: one about ADDRESSES (who
+   can reach whom) and one about CABLES (what is plugged into what). Neither of them is about
+   panning, zooming, fitting, or turning a client pixel into a coordinate — and those were
+   written once, for the cables, and the address map was left as a picture squashed to whatever
+   width the pane happened to have. Reported from the screen with the whole fleet in a strip
+   of illegible boxes: "eso es inusable".
+
+   So the window lives here, keyed by the id of the `<svg>` it is over, and both maps use it.
+   Not tidiness: a second copy of "where am I looking" would agree with this one until the day
+   it did not, and the day it did not one map would zoom about the cursor and the other about
+   the centre for reasons nobody could find.
+
+   Moving the boxes is here too, for the same reason: where somebody PUT a machine is a
+   decision about a picture, both pictures take it, and neither of them is about pointer
+   capture, click-versus-drag thresholds or where an arrangement is kept.
+
+   The other thing here is the card BOTH maps show for one machine, for the same reason: a box
+   is two hundred pixels wide and the reading of a machine is not, and "which machine is that"
+   is the question either picture gets asked. What is NOT here is anything that knows what a
+   box means on ONE of them — dragging a device, opening one, what a cable says — because that
+   is about the picture and it stays with it.
+   ================================================================ #}
+
+//: Where the window is over each drawing: `{svg id: viewBox}`, and no entry at all for
+//: "drawn fitted".
+//:
+//: A viewBox and not a `transform` on a group, which is the other way to do this: with a
+//: viewBox the STROKES and the TEXT scale with the picture, so zooming in to read a port name
+//: actually makes it bigger. A transform that scales the group does the same, but then every
+//: `stroke-width` has to be divided back out by hand or the lines fatten into slabs.
+//:
+//: In memory and not in localStorage: it is where you are looking right now, and a remembered
+//: zoom over a drawing whose boxes have moved is a window onto empty space.
+const _ssVB = {};
+
+//: …and the pan in flight, which there is at most one of: a pointer is in one place.
+let _ssPan = null;
+
+function ssCanvasSvg(id) { return document.getElementById(id); }
+
+// ── Where somebody PUT the boxes ────────────────────────────────────────────
+//
+// The automatic layout of either map is a good first answer and is nobody's rack. The person
+// reading it knows which switch is in which cupboard, and a picture they can arrange the way
+// the room is arranged is a different picture from one they can only look at.
+//
+// TWO copies, and they answer different questions. The browser's is written as the hand moves
+// a box: it is what makes dragging instant, it needs no round trip, and it works for somebody
+// with no account arrangement at all. The one on the ACCOUNT is the one that follows you to
+// another machine, and it is written by a BUTTON — an arrangement persisted on every pointer
+// move would be a request per frame.
+//
+// Keyed by canvas, because two drawings are two arrangements: where a machine sits on the map
+// of cables says nothing about where it should sit on the map of addresses.
+
+const _SS_POS_KEY = 'ss_infra_pos';
+
+//: …and where it USED to be, for the one drawing that had an arrangement before there were
+//: two. A rename that loses somebody's arrangement is a rename that broke something: reported
+//: from the screen the moment this moved, as boxes back at their generated places with nothing
+//: to press to get them back. Read once and written forward under the new key; this entry can
+//: go when nobody could still be holding the old one.
+const _SS_POS_WAS = {infraLinkSvg: 'ss_infra_linkpos'};
+let _ssMoved = null;
+//: What the account holds, as JSON — `null` until it has been asked for, which is how "not
+//: fetched yet" is told apart from "asked, and there is none".
+let _ssKept = null;
+let _ssKeptBusy = false;
+//: The box being dragged, and whether the press has travelled far enough to BE a drag.
+let _ssDrag = null;
+let _ssDragged = false;
+
+function _ssMovedAll() {
+    if (_ssMoved) return _ssMoved;
+    _ssMoved = {};
+    try {
+        const raw = JSON.parse(localStorage.getItem(_SS_POS_KEY) || 'null');
+        for (const [id, boxes] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+            if (!boxes || typeof boxes !== 'object') continue;
+            for (const [uid, p] of Object.entries(boxes)) {
+                // Validated on the way IN, not trusted because it is ours: this survives
+                // upgrades, and one bad number would put a box at NaN — which draws nothing
+                // and reads as a device that vanished.
+                if (p && Number.isFinite(+p.x) && Number.isFinite(+p.y)) {
+                    (_ssMoved[id] = _ssMoved[id] || {})[uid] = {x: +p.x, y: +p.y};
+                }
+            }
+        }
+    } catch (_e) { /* no store, private window, or something else wrote there */ }
+    for (const [id, was] of Object.entries(_SS_POS_WAS)) {
+        if (_ssMoved[id]) continue;              // this browser has already been carried over
+        try {
+            const old = JSON.parse(localStorage.getItem(was) || 'null');
+            for (const [uid, p] of Object.entries(old && typeof old === 'object' ? old : {})) {
+                if (p && Number.isFinite(+p.x) && Number.isFinite(+p.y)) {
+                    (_ssMoved[id] = _ssMoved[id] || {})[uid] = {x: +p.x, y: +p.y};
+                }
+            }
+        } catch (_e) { /* nothing there, which is the normal case */ }
+    }
+    return _ssMoved;
+}
+
+/** Where the boxes of ONE drawing have been put. */
+function ssCanvasMoved(id) {
+    const all = _ssMovedAll();
+    if (!all[id]) all[id] = {};
+    return all[id];
+}
+
+function ssCanvasMovedSave() {
+    try { localStorage.setItem(_SS_POS_KEY, JSON.stringify(_ssMovedAll())); }
+    catch (_e) { /* the arrangement still holds for this session */ }
+}
+
+/** Put the boxes of one drawing back where its layout wants them — on this screen.
+ *
+ *  Local, and the save button then offers to make it permanent. Wiping the account as well
+ *  would make one button do two things, and the second one is not undoable from here.
+ */
+function ssCanvasArrange(id, after) {
+    _ssMovedAll()[id] = {};
+    ssCanvasMovedSave();
+    if (after) after();
+}
+
+/** Put back the arrangement the account holds, discarding what is on screen.
+ *
+ *  The other half of the reset. One of them says "forget where I put them", the other "give
+ *  me back the ones I saved" — and a screen with only the first is one where resetting is
+ *  unrecoverable even though the answer is sitting on the account.
+ */
+function ssCanvasRestore(id, after) {
+    const kept = _ssKeptParsed()[id];
+    if (!kept) return;
+    _ssMovedAll()[id] = JSON.parse(JSON.stringify(kept));
+    ssCanvasMovedSave();
+    if (after) after();
+}
+
+function _ssKeptParsed() {
+    try { return JSON.parse(_ssKept || '{}') || {}; } catch (_e) { return {}; }
+}
+
+/** Whether what is on screen is what the account holds, for this drawing. */
+function ssCanvasKeptDirty(id) {
+    if (_ssKept === null) return false;
+    return JSON.stringify(_ssKeptParsed()[id] || {}) !== JSON.stringify(ssCanvasMoved(id));
+}
+
+function ssCanvasHasKept(id) {
+    return Object.keys(_ssKeptParsed()[id] || {}).length > 0;
+}
+
+/** Fetch the arrangements stored on the account, once.
+ *
+ *  They WIN over the browser's copy where there is one, because that is what saving meant:
+ *  somebody put the boxes somewhere and asked for it to follow them. Where the account holds
+ *  none for a drawing, whatever this browser has is left exactly as it was.
+ */
+async function ssCanvasKeptLoad(after) {
+    if (_ssKept !== null || _ssKeptBusy) return;
+    _ssKeptBusy = true;
+    try {
+        const got = await apiGet('/api/v1/infra/map-layout');
+        const kept = (got && got.layouts) || {};
+        _ssKept = JSON.stringify(kept);
+        const all = _ssMovedAll();
+        let took = false;
+        for (const [id, boxes] of Object.entries(kept)) {
+            if (boxes && Object.keys(boxes).length) {
+                all[id] = JSON.parse(JSON.stringify(boxes));
+                took = true;
+            }
+        }
+        if (took) ssCanvasMovedSave();
+    } finally {
+        _ssKeptBusy = false;
+    }
+    if (after) after();
+}
+
+/** Put this drawing's arrangement on the account, where it survives this browser. */
+async function ssCanvasKeep(id, after) {
+    const layouts = _ssKeptParsed();
+    layouts[id] = ssCanvasMoved(id);
+    const res = await apiPut('/api/v1/infra/map-layout', {layouts});
+    if (!res || !res.ok) {
+        showToast((res && res.error) || t('save_failed'), 'danger');
+        return;
+    }
+    _ssKept = JSON.stringify(res.layouts || {});
+    showToast(t('infra_link_kept_ok'), 'success');
+    if (after) after();
+}
+
+// ── …and the gesture that moves one ─────────────────────────────────────────
+//
+// A box already HAS a gesture — clicking it opens the device — so "move this" and "open this"
+// have to come apart without a modifier key nobody discovers. The press only becomes a drag
+// once it has travelled, measured in SCREEN pixels so the threshold means the same at every
+// zoom: three units of a picture scaled to a quarter is a third of a millimetre, and every
+// click on a box would move it.
+
+//: How far the pointer has to travel before a press becomes a drag.
+const _SS_GRIP = 3;
+
+/** A press landed on a box. *at* is where that box currently is, which only the layout knows. */
+function ssCanvasDragStart(id, ev, uid, at) {
+    _ssDragged = false;
+    const p = ssCanvasPoint(id, ev);
+    if (!p || !at) return false;
+    _ssDrag = {id, uid, from: p, at: {x: at.x, y: at.y}, grip: {x: ev.clientX, y: ev.clientY}};
+    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+    return true;
+}
+
+/** …and is moving. *redraw* is called whenever a position actually changed.
+ *
+ *  Nowhere is out of bounds: a drawing's own origin moves to wherever its leftmost and topmost
+ *  box is, so a box at -40 is not outside the picture — the picture is bigger. Clamping at the
+ *  origin instead was reported from the screen: the pane is letterboxed around a fitted
+ *  drawing, and a box would not go into the visibly empty half.
+ */
+function ssCanvasDragMove(id, ev, redraw) {
+    if (!_ssDrag || _ssDrag.id !== id) return false;
+    const p = ssCanvasPoint(id, ev);
+    if (!p) return true;
+    if (!_ssDragged) {
+        const g = _ssDrag.grip;
+        if (Math.abs(ev.clientX - g.x) < _SS_GRIP && Math.abs(ev.clientY - g.y) < _SS_GRIP) {
+            return true;                 // still a click as far as anybody can tell
+        }
+        _ssDragged = true;
+    }
+    ssCanvasMoved(id)[_ssDrag.uid] = {
+        x: _ssDrag.at.x + (p.x - _ssDrag.from.x),
+        y: _ssDrag.at.y + (p.y - _ssDrag.from.y),
+    };
+    if (redraw) redraw();
+    return true;
+}
+
+/** The press ended. Returns the uid to OPEN when it never became a drag, and `''` otherwise.
+ *
+ *  The click is the caller's to fire rather than an `onclick` on the box, and either half of
+ *  the reason is enough on its own: the pointer capture retargets the click to the `<svg>`, so
+ *  a handler on the box never sees it; and a drag redraws the picture, so the element that was
+ *  pressed no longer exists to be the click's target.
+ */
+function ssCanvasDragEnd(id, onSaved) {
+    const drag = _ssDrag;
+    _ssDrag = null;
+    if (!drag || drag.id !== id) return '';
+    if (!_ssDragged) return drag.uid;
+    // Written on release and not on every move: a drag is a stream of events, and a store
+    // written sixty times a second for one box that ends in one place is sixty writes for one
+    // fact.
+    ssCanvasMovedSave();
+    if (onSaved) onSaved();
+    return '';
+}
+
+function ssCanvasDragging() { return _ssDrag !== null; }
+
+/** The positions a layout produced, with what somebody put somewhere applied over them — and
+ *  the extent recomputed, because a box dragged past the old edge would be outside the
+ *  viewBox, which is a device you moved and then could not find.
+ *
+ *  *boxes* is `[{uid, x, y}]` and is mutated in place; *size* is `{w, h}` per box.
+ */
+function ssCanvasPlace(id, boxes, size, base) {
+    const moved = ssCanvasMoved(id);
+    let farX = 0, farY = 0, nearX = Infinity, nearY = Infinity;
+    for (const b of boxes) {
+        const m = moved[b.uid];
+        if (m) { b.x = m.x; b.y = m.y; b.moved = true; }
+        farX = Math.max(farX, b.x + (b.w || size.w));
+        farY = Math.max(farY, b.y + (b.h || size.h));
+        nearX = Math.min(nearX, b.x);
+        nearY = Math.min(nearY, b.y);
+    }
+    const pad = (base && base.pad) || 16;
+    const ox = Math.min(0, nearX - pad);
+    const oy = Math.min(0, nearY - pad);
+    return {
+        x: ox, y: oy,
+        width: Math.max((base && base.width) || 0, farX + pad, 320) - ox,
+        height: Math.max((base && base.height) || 0, farY + pad, 120) - oy,
+    };
+}
+
+/** The window over one drawing, adopting the fitted one the first time anybody asks.
+ *
+ *  No entry means "drawn fitted" — the state a freshly opened map is in, and the one every
+ *  interaction starts from. Without this the first wheel and the first drag land on nothing
+ *  and do nothing at all: you scroll on a map that has just appeared and it ignores you, which
+ *  reads as a picture that is not interactive rather than one waiting to be told where it is.
+ */
+function ssCanvasWindow(id) {
+    const svg = ssCanvasSvg(id);
+    if (!svg) return null;
+    if (!_ssVB[id]) _ssVB[id] = {x: +svg.dataset.x || 0, y: +svg.dataset.y || 0,
+                                 w: +svg.dataset.w || 100, h: +svg.dataset.h || 100};
+    return _ssVB[id];
+}
+
+/** Put the current window on the element, without redrawing anything.
+ *
+ *  The attribute and not a re-render: a drag is a stream of events, and rebuilding the SVG on
+ *  each one is a picture that stutters under the hand holding it. */
+function ssCanvasApply(id) {
+    const svg = ssCanvasSvg(id);
+    const v = _ssVB[id];
+    if (!svg || !v) return;
+    svg.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
+}
+
+/** The whole drawing, centred — which is also the state it opens in.
+ *
+ *  From `data-x`/`data-y` and not from the origin: a drawing does not have to start there.
+ *  The cable map lets a box be dragged up and to the left of everything else, and its own
+ *  origin moves with it; fitting from zero would put half of it off screen. */
+function ssCanvasFit(id) {
+    const svg = ssCanvasSvg(id);
+    if (!svg) return;
+    _ssVB[id] = {x: +svg.dataset.x || 0, y: +svg.dataset.y || 0,
+                 w: +svg.dataset.w || 100, h: +svg.dataset.h || 100};
+    ssCanvasApply(id);
+}
+
+/** Forget where somebody was looking. For a redraw that changes what there IS to look at —
+ *  a payload that arrived, a fleet that grew — where a window over the old one was pointing
+ *  is not a claim about the new one. */
+function ssCanvasReset(id) { delete _ssVB[id]; }
+
+/** Zoom about a point in the drawing's own coordinates, so what is under the cursor stays
+ *  under the cursor. Zooming about the centre instead is what makes a map feel like it is
+ *  running away from you. */
+function ssCanvasZoomAt(id, factor, cx, cy) {
+    const svg = ssCanvasSvg(id);
+    const v = ssCanvasWindow(id);
+    if (!svg || !v) return;
+    const w0 = +svg.dataset.w || 100;
+    // Bounded both ways: past 8x the picture is one box and past a fifth of it the boxes are
+    // specks. Neither is a view of anything, and both are easy to reach with one wheel flick.
+    const w = Math.min(w0 * 5, Math.max(w0 / 8, v.w / factor));
+    const k = w / v.w;
+    _ssVB[id] = {x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k, w, h: v.h * k};
+    ssCanvasApply(id);
+}
+
+function ssCanvasZoom(id, factor) {
+    const v = ssCanvasWindow(id);
+    if (v) ssCanvasZoomAt(id, factor, v.x + v.w / 2, v.y + v.h / 2);
+}
+
+/** Client pixels → the drawing's coordinates. Every interaction needs this: the SVG is
+ *  scaled to whatever size the pane happens to have, so a pixel on screen is not a unit in
+ *  the picture and treating them as the same is a zoom that lands somewhere else. */
+function ssCanvasPoint(id, ev) {
+    const svg = ssCanvasSvg(id);
+    const v = ssCanvasWindow(id);
+    if (!svg || !v) return null;
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {x: v.x + (ev.clientX - r.left) / r.width * v.w,
+            y: v.y + (ev.clientY - r.top) / r.height * v.h};
+}
+
+function ssCanvasWheel(id, ev) {
+    const p = ssCanvasPoint(id, ev);
+    if (!p) return;
+    // The page must not scroll under a wheel meant for the map. Inline handlers are not
+    // passive, so this is honoured — which is why the listener is on the attribute.
+    ev.preventDefault();
+    ssCanvasZoomAt(id, ev.deltaY < 0 ? 1.18 : 1 / 1.18, p.x, p.y);
+}
+
+/** Start pushing the drawing around. The caller decides WHETHER this press is a pan — on the
+ *  cable map a press on a box moves the box instead — because that is a question about what
+ *  is drawn, and this file does not know. */
+function ssCanvasPanStart(id, ev) {
+    const p = ssCanvasPoint(id, ev);
+    if (!p) return;
+    _ssPan = {id, from: p, at: {...ssCanvasWindow(id)}};
+    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+    ev.currentTarget.style.cursor = 'grabbing';
+}
+
+function ssCanvasPanMove(id, ev) {
+    if (!_ssPan || _ssPan.id !== id) return;
+    const svg = ssCanvasSvg(id);
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    // Measured against the window the drag STARTED in: reading the live one would compound
+    // its own movement and the map would slide away under the cursor.
+    const at = _ssPan.at;
+    const dx = (ev.clientX - (r.left + (_ssPan.from.x - at.x) / at.w * r.width))
+               / r.width * at.w;
+    const dy = (ev.clientY - (r.top + (_ssPan.from.y - at.y) / at.h * r.height))
+               / r.height * at.h;
+    _ssVB[id] = {...at, x: at.x - dx, y: at.y - dy};
+    ssCanvasApply(id);
+}
+
+function ssCanvasPanEnd(ev) {
+    _ssPan = null;
+    if (ev && ev.currentTarget) ev.currentTarget.style.cursor = '';
+}
+
+function ssCanvasPanning() { return _ssPan !== null; }
+
+/** The attributes an `<svg>` needs to be one of these. The EVENTS are the caller's, because
+ *  what a press means differs between the two maps; everything here is the same either way.
+ *
+ *  `L` is a layout: `{x, y, width, height}` — where the drawing starts and how big it is.
+ */
+function ssCanvasAttrs(id, L) {
+    const v = _ssVB[id];
+    return `id="${escAttr(id)}" data-x="${L.x || 0}" data-y="${L.y || 0}"
+        data-w="${L.width}" data-h="${L.height}"
+        viewBox="${v ? `${v.x} ${v.y} ${v.w} ${v.h}`
+                     : `${L.x || 0} ${L.y || 0} ${L.width} ${L.height}`}"
+        width="100%" height="100%" role="img" style="display:block;touch-action:none"`;
+}
+
+/** One machine, as a picture can answer for it — the card both maps put under the pointer.
+ *
+ *  Built from what is ALREADY loaded — the map's own node and the row the list screen holds
+ *  for it — and never from a fetch: this runs on every pointer that crosses a box, and a
+ *  request per hover is a request per pixel of travel across a rack.
+ *
+ *  Which means it says what those two know (what it is, what state it is in, its addresses,
+ *  the networks they sit on, its way out, how much of it is watched) and does not say what
+ *  they do not. The device's own page is one click away and has the rest; the point of this is
+ *  to answer "which machine is that box" without leaving the map.
+ *
+ *  *opts*: `{hint, cables, extra}` — the gesture the picture offers, its cable count where it
+ *  has one, and one more row where a map has something of its own to add.
+ */
+function ssHostCard(node, uid, opts) {
+    const n = node || {};
+    const o = opts || {};
+    const h = (typeof _infraHosts !== 'undefined' ? _infraHosts : []).find(x => x.uid === uid)
+              || {};
+    const type = n.kind || h.device_type || '';
+    // A row per fact the device answered, and NO row for one it did not: a card of empty
+    // labels reads as a machine that answered nothing, which is a different thing from a
+    // machine with no tags.
+    const row = (icon, label, value) => (value
+        ? `<div class="d-flex align-items-baseline gap-2">
+               <i class="bi ${escAttr(icon)} text-muted ss-fs-2"></i>
+               <span class="text-muted ss-fs-3" style="min-width:6.5rem">${esc(label)}</span>
+               <span class="ss-fs-2">${value}</span>
+           </div>`
+        : '');
+    const code = v => `<code class="ss-fs-2">${esc(v)}</code>`;
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <i class="bi ${escAttr(hostTypeIcon(type))} text-muted"></i>
+            <span class="fw-semibold">${esc(n.name || h.name || uid)}</span>
+            ${typeof _infraStateBadge === 'function'
+              ? _infraStateBadge(h.status || n.status, h.maintenance) : ''}
+            ${o.hint ? `<span class="text-muted ss-fs-2 ms-auto"
+                  ><i class="bi bi-hand-index me-1"></i>${esc(t(o.hint))}</span>` : ''}
+        </div>
+        <div class="d-flex flex-column gap-1">
+            ${row('bi-tag', t('host_type'), type
+                  ? esc(hostTypeLabel(type))
+                  : `<span class="text-muted">${esc(t('host_type_unset'))}</span>`)}
+            ${row('bi-award', t('col_host_brand'), hostBrandLine(h, {text: true}))}
+            ${row('bi-cpu', t('col_host_os'),
+                  typeof _infraOsHtml === 'function' ? _infraOsHtml(h) : esc(h.os || ''))}
+            ${row('bi-hdd-network', t('infra_link_addresses'),
+                  (n.addresses || []).map(code).join(' ') || (h.address ? code(h.address) : ''))}
+            ${row('bi-diagram-2', t('infra_link_networks'),
+                  (n.networks || []).map(code).join(' '))}
+            ${row('bi-signpost-2', t('infra_link_gateway'), n.gateway ? code(n.gateway) : '')}
+            ${row('bi-plugin', t('infra_link_cables'),
+                  o.cables === undefined ? '' : String(o.cables))}
+            ${row('bi-eye', t('col_host_modules'),
+                  h.modules_total ? esc(`${h.modules_active || 0}/${h.modules_total}`) : '')}
+            ${row('bi-tags', t('col_host_tags'), (h.tags || []).map(tg =>
+                  `<span class="badge bg-body-secondary text-body-secondary border fw-normal
+                         me-1">${esc(tg)}</span>`).join(''))}
+            ${o.extra ? row('bi-box', o.extra[0], esc(o.extra[1])) : ''}
+        </div>
+    </div>`;
+}
+
+/** Zoom in, out, and back to the whole thing. Buttons as well as the wheel: a trackpad pinch
+ *  is not something every pointer can do, and "show me all of it" has no gesture. */
+function ssCanvasTools(id) {
+    const btn = (fn, icon, key) => `<button class="btn btn-sm btn-secondary"
+        onclick="${fn}" title="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
+    return `${btn(`ssCanvasZoom('${id}',1.25)`, 'bi-zoom-in', 'infra_link_zoom_in')}
+        ${btn(`ssCanvasZoom('${id}',1/1.25)`, 'bi-zoom-out', 'infra_link_zoom_out')}
+        ${btn(`ssCanvasFit('${id}')`, 'bi-aspect-ratio', 'infra_link_fit')}`;
+}

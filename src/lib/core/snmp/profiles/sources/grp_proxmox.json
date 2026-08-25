@@ -1,0 +1,16 @@
+{
+  "id": "grp_proxmox",
+  "label": {
+    "en_EN": "Proxmox VE node",
+    "es_ES": "Nodo Proxmox VE"
+  },
+  "description": {
+    "en_EN": "A Proxmox node answers no MIB of its own — PVE serves nothing over SNMP, and its sysObjectID is net-snmp's, the same as every other Debian. So this is the Linux group plus the three things a HYPERVISOR needs and a plain server does not: how much CPU is being spent inside guests and how much is being stolen from the host, how full each filesystem is by the agent's own reckoning (the pools, not the block devices), and the facts about the machine underneath that only snmpd's `extend` directives can tell you. Assigned by hand on purpose: nothing a PVE node says over SNMP identifies it as one, and a group that claimed every net-snmp Linux would be claiming most of the fleet.",
+    "es_ES": "Un nodo Proxmox no contesta ninguna MIB propia — PVE no sirve nada por SNMP, y su sysObjectID es el de net-snmp, el mismo que el de cualquier otro Debian. Así que esto es el grupo de Linux más las tres cosas que necesita un HIPERVISOR y no un servidor normal: cuánta CPU se va dentro de las máquinas invitadas y cuánta le roban al anfitrión, cuán llenos están los sistemas de ficheros según la cuenta del propio agente (los almacenes, no los dispositivos de bloque), y los datos de la máquina de debajo que solo pueden contar las directivas `extend` de snmpd. Se asigna a mano a propósito: nada de lo que dice un nodo PVE por SNMP lo identifica como tal, y un grupo que reclamara todo Linux con net-snmp estaría reclamando media flota."
+  },
+  "includes": [
+    "grp_linux",
+    "ucd_disk",
+    "ucd_extend"
+  ]
+}

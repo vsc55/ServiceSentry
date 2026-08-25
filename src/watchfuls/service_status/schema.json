@@ -7,9 +7,7 @@
         "timeout": {"type": "int",  "default": 15, "min": 0, "inherit_blank": true, "max": 600}
     },
     "__history__": {"field": null, "unit": null, "label": "Service Status"},
-    "__host_profile__": {"key": "ssh", "address_field": "ssh_host",
-        "fields": ["ssh_host", "ssh_port", "ssh_user", "ssh_password",
-                   "ssh_key", "ssh_key_string", "ssh_verify_host"]},
+    "__host_profile__": {"key": "ssh", "address_field": "ssh_host"},
     "__host_multiple__": true,
     "list": {
         "__discovery__": "discover",

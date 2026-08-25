@@ -60,16 +60,16 @@ class TestAPerServerHolderStaysOnTheirOwnHosts:
         new = _mod()
         assert authz.authorize_module_write('ping', old, new, MINE) is False
 
-    def test_a_global_servers_edit_holder_may_rebind(self):
+    def test_a_global_devices_edit_holder_may_rebind(self):
         """The global permission is not confined to a host, so moving a check between two
         of them is exactly what it authorises."""
         old = _mod(i7={'uid': 'i7', 'host_uid': 'a', 'label': 'x'})
         new = _mod(i7={'uid': 'i7', 'host_uid': 'b', 'label': 'x'})
-        assert authz.authorize_module_write('ping', old, new, {'servers_edit'}) is True
+        assert authz.authorize_module_write('ping', old, new, {'devices_edit'}) is True
 
     def test_an_unbound_check_still_needs_the_global_permission(self):
         """No host means no per-server permission can speak for it."""
         old = _mod(i8={'uid': 'i8', 'label': 'x'})
         new = _mod(i8={'uid': 'i8', 'label': 'y'})
         assert authz.authorize_module_write('ping', old, new, MINE) is False
-        assert authz.authorize_module_write('ping', old, new, {'servers_edit'}) is True
+        assert authz.authorize_module_write('ping', old, new, {'devices_edit'}) is True

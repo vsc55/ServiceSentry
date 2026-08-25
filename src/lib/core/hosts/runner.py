@@ -20,10 +20,22 @@ from __future__ import annotations
 from lib.core.hosts import ssh_client
 
 
+#: What a device with no way to run commands answers instead of running one somewhere else.
+NO_EXEC = 'this device has no connection for running commands'
+
+
 def run(host: dict | None, cmd: str, timeout: int = 15) -> tuple:
     """Run *cmd* on *host* and return ``(stdout, stderr, exit_code)``."""
     if not cmd:
         return '', 'no command', -1
+    # A device that says it runs nothing runs nothing. Falling through to the local branch is
+    # what `kind` used to do with every value that was not `remote`, and it made "no
+    # connection" mean "the panel's own machine": a check bound to a switch measured the panel
+    # and filed the answer under the switch's name. No host at all still runs locally — that
+    # is a classic inline check, which has always meant this machine and says so by having no
+    # host to disagree with.
+    if isinstance(host, dict) and str(host.get('kind') or '').strip().lower() == 'none':
+        return '', NO_EXEC, -1
     if isinstance(host, dict) and str(host.get('kind') or '').strip().lower() == 'remote':
         if not ssh_client.HAS_PARAMIKO:
             return '', 'paramiko is not installed', -1

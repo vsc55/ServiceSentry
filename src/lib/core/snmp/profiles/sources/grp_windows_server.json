@@ -1,0 +1,30 @@
+{
+  "id": "grp_windows_server",
+  "label": {
+    "en_EN": "Windows server (everything)",
+    "es_ES": "Servidor Windows (todo)"
+  },
+  "description": {
+    "en_EN": "The base, plus the server service: sessions, users, shares, print queues, the bytes going through SMB and the three kinds of refusal. A Windows says which it is in its sysObjectID, so this is what a server is detected as.",
+    "es_ES": "La base, mas el servicio de servidor: sesiones, usuarios, recursos compartidos, colas de impresion, los bytes que pasan por SMB y los tres tipos de negativa. Un Windows dice cual es en su sysObjectID, asi que esto es lo que se detecta en un servidor."
+  },
+  "includes": [
+    "grp_windows",
+    "windows_server_lm"
+  ],
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.311.1.1.3.1.2",
+    "supersedes": [
+      "grp_windows",
+      "windows_server_lm",
+      "windows_lm",
+      "hr_system",
+      "hr_storage",
+      "sys_generic",
+      "if_generic",
+      "ip_stats",
+      "tcp_udp_stats",
+      "icmp_stats"
+    ]
+  }
+}

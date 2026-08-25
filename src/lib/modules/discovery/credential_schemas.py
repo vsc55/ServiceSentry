@@ -325,7 +325,89 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
                 'actions':    action_entries,
                 'links':      link_entries,
             }
+    _core_credentials(catalog)
     return catalog
+
+
+def _core_credentials(catalog: dict) -> None:
+    """Add the credential types a CORE package declares (``CREDENTIAL`` in its manifest).
+
+    Same shape, same vocabulary, one difference: a module type is titled by the module's
+    ``pretty_name`` and worded from its lang files, because the core owns no string that
+    names a module. A core type names itself, so the declaration points at a section of core
+    i18n and the words come from there.
+
+    SNMP's is the first. What an SNMP credential IS — a version, a community, the v3 keys —
+    is a fact about the protocol, and it was declared by a watchful that may not be
+    installed: a credential type that disappears takes its stored credentials out of the
+    editor with it, while they stay in the database being referenced by hosts.
+    """
+    from lib.discovery import scan                     # noqa: PLC0415
+    from lib.i18n import TRANSLATIONS                   # noqa: PLC0415
+
+    def _texts(section: str, block: str, key: str) -> dict:
+        out = {}
+        for lang, data in TRANSLATIONS.items():
+            if not isinstance(data, dict):
+                continue
+            val = ((data.get(section) or {}).get(block) or {}).get(key)
+            if isinstance(val, str) and val:
+                out[lang] = val
+        return out
+
+    for pkg, decl in scan('CREDENTIAL'):
+        for spec in ([decl] if isinstance(decl, dict) else (decl or [])):
+            if not isinstance(spec, dict):
+                continue
+            ctype = str(spec.get('type') or '').strip()
+            if not ctype or ctype == 'ssh' or ctype in catalog:
+                continue
+            section = str(spec.get('i18n') or '').strip()
+            fields = []
+            for f in (spec.get('fields') or []):
+                if not isinstance(f, dict) or not f.get('name'):
+                    continue
+                name = f['name']
+                key = f.get('label') or name
+                fe = _field_out(
+                    f,
+                    label_i18n=(_texts(section, 'labels', key) if section else {})
+                    or {'en_EN': name},
+                    hint_i18n=(_texts(section, 'hints', key) if section else None) or None,
+                )
+                # Per-option wording, from the same section. A module type gets this and a
+                # core one did not, which is not a difference anybody chose: SNMP's security
+                # level is picked from `noAuthNoPriv`/`authNoPriv`/`authPriv` — ASN.1
+                # identifiers out of the USM MIB, not words — and an unworded picker asks the
+                # operator to know the standard to answer what the session should protect.
+                if section:
+                    _resolve_option_labels(
+                        fe, key,
+                        {lang: (data.get(section) or {})
+                         for lang, data in TRANSLATIONS.items() if isinstance(data, dict)})
+                fields.append(fe)
+            if not fields:
+                continue
+            label = {}
+            if section:
+                for lang, data in TRANSLATIONS.items():
+                    val = (data.get(section) or {}).get('type') if isinstance(data, dict) else None
+                    if isinstance(val, str) and val:
+                        label[lang] = val
+            catalog[ctype] = {
+                # No module behind it. The consumers that group by module already tolerate
+                # this (the host form reads `spec.module` to find a protocol's credential
+                # type, and a core type names its own key), so it says what is true.
+                'module':     spec.get('module') or pkg,
+                'label_i18n': label or {'en_EN': ctype},
+                'fields':     fields,
+                # Actions and links are a module-provisioning affair (device-code flows,
+                # deep links into a vendor console). Nothing core declares one yet, and an
+                # empty list is the honest shape rather than an absent key the UI has to
+                # guess about.
+                'actions':    [],
+                'links':      [],
+            }
 
 
 def credential_secret_fields(watchfuls_dir: str | None = None) -> set[str]:

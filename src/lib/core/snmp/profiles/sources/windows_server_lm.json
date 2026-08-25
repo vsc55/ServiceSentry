@@ -1,0 +1,139 @@
+{
+  "id": "windows_server_lm",
+  "label": {
+    "en_EN": "Windows server service",
+    "es_ES": "Servicio de servidor de Windows"
+  },
+  "description": {
+    "en_EN": "What a Windows serving files, printers or logons is doing: open sessions, users and shares, bytes in and out of the SMB stack, print queues, and the three kinds of error that say somebody is being refused — bad password, no permission, and system errors.",
+    "es_ES": "Lo que hace un Windows que sirve ficheros, impresoras o autenticacion: sesiones abiertas, usuarios y recursos compartidos, bytes que entran y salen de la pila SMB, colas de impresion, y los tres tipos de error que dicen que a alguien se le esta negando algo: contrasena mala, sin permiso, y errores de sistema."
+  },
+  "match": {
+    "sysobjectid_prefix": "1.3.6.1.4.1.311.1.1.3.1.2",
+    "probe": "1.3.6.1.4.1.77.1.2.19.0"
+  },
+  "metrics": [
+    {
+      "key": "win_srv_sessions",
+      "label": {
+        "en_EN": "Open sessions",
+        "es_ES": "Sesiones abiertas"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.19.0",
+      "kind": "gauge",
+      "chart": "line"
+    },
+    {
+      "key": "win_srv_users",
+      "label": {
+        "en_EN": "Users",
+        "es_ES": "Usuarios"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.16.0",
+      "kind": "gauge",
+      "chart": "line"
+    },
+    {
+      "key": "win_srv_shares",
+      "label": {
+        "en_EN": "Shares",
+        "es_ES": "Recursos compartidos"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.26.0",
+      "kind": "gauge",
+      "chart": "line"
+    },
+    {
+      "key": "win_srv_print_queues",
+      "label": {
+        "en_EN": "Print queues",
+        "es_ES": "Colas de impresion"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.28.0",
+      "kind": "gauge",
+      "chart": "line"
+    },
+    {
+      "key": "win_srv_sent",
+      "label": {
+        "en_EN": "Bytes sent",
+        "es_ES": "Bytes enviados"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.12.0",
+      "kind": "counter",
+      "unit": "B/s",
+      "chart": "area",
+      "width": 32
+    },
+    {
+      "key": "win_srv_rcvd",
+      "label": {
+        "en_EN": "Bytes received",
+        "es_ES": "Bytes recibidos"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.13.0",
+      "kind": "counter",
+      "unit": "B/s",
+      "chart": "area",
+      "width": 32
+    },
+    {
+      "key": "win_srv_opens",
+      "label": {
+        "en_EN": "Files opened",
+        "es_ES": "Ficheros abiertos"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.4.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_srv_pw_errors",
+      "label": {
+        "en_EN": "Bad password attempts",
+        "es_ES": "Intentos con contrasena incorrecta"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.9.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_srv_perm_errors",
+      "label": {
+        "en_EN": "Permission denied",
+        "es_ES": "Permiso denegado"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.10.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_srv_sys_errors",
+      "label": {
+        "en_EN": "System errors",
+        "es_ES": "Errores de sistema"
+      },
+      "oid": "1.3.6.1.4.1.77.1.2.11.0",
+      "kind": "counter",
+      "unit": "/s",
+      "chart": "line",
+      "width": 32
+    },
+    {
+      "key": "win_srv_logons",
+      "label": {
+        "en_EN": "Domain logons",
+        "es_ES": "Inicios de sesion del dominio"
+      },
+      "oid": "1.3.6.1.4.1.77.1.4.7.0",
+      "kind": "gauge",
+      "chart": "line"
+    }
+  ]
+}

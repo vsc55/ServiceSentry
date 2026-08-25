@@ -171,11 +171,52 @@ local** (`{var_dir}/snmp_mibs/mib_catalog.db`). Se aplazó en su día por decisi
 pidió *«solo el mecanismo general»*.
 
 **Antes de migrarlo hay que resolver una contradicción**, porque el código dice lo contrario que
-esta entrada: el docstring de `watchfuls/snmp/mib_catalog.py` sostiene que ese fichero es *a
+esta entrada: el docstring de `lib/core/snmp/mibs/catalog.py` sostiene que ese fichero es *a
 propósito* un caché derivado local —se reconstruye desde los MIB compilados, la BD de la
 aplicación puede ser remota y no tiene por qué cargar con un caché por instalación—. O esa
 razón sigue valiendo y esta entrada sobra, o ya no vale y el docstring miente. Decidirlo es el
 trabajo; migrar, después, es mecánico.
+
+### Una VM no tiene cable: cómo se coloca en el mapa de enlaces
+
+**Estado: decidido dejarlo como está, sin decidir qué hacer después.** Se apunta aquí para que
+no se reproponga desde cero.
+
+**El caso.** Un servidor añadido con `grp_linux` sale en el mapa de enlaces con línea de
+*deducido* y nunca de LLDP. Comprobado contra la base de datos real: el panel **sí** recorre
+`lldp` (el watchful lee todas las métricas de todos los perfiles asignados, sin filtrar por
+sonda) y la tabla vuelve vacía. Es una VM sobre Proxmox, y allí hay dos cosas distintas: dentro
+de la VM no corre agente LLDP publicando por SNMP (`lldpd -x` + `master agentx`), y el puente
+**es Open vSwitch** —no un puente Linux, así que `group_fwd_mask` no aplica; el equivalente es
+`ovs-vsctl set port <puerto> other_config:forward-bpdu=true`—.
+
+**Por qué no se ha "arreglado".** Ninguna de las dos es un fallo del panel, y la segunda
+seguramente tampoco haya que tocarla: **una VM no tiene cable**. LLDP contesta «qué hay al otro
+lado de mi cable», y el de una VM es un puerto virtual en un switch virtual; el enlace físico es
+host PVE ↔ switch, y la VM comparte ese puerto. Es el consenso del sector y no una carencia
+nuestra: **NetBox lo prohíbe en el modelo de datos** (un cable termina en la interfaz de un
+*dispositivo*, y una interfaz de VM no puede terminar un cable), **LibreNMS** cuelga las VMs del
+hipervisor en lugar de ponerlas en el mapa, y **Netdisco** las localiza en el puerto físico del
+host. Dibujar una VM enchufada a `gi11` sería más falso, no más preciso.
+
+**Lo que queda por decidir**, y por eso está aquí y no borrado:
+
+- **Colgar las VMs de su host** en el mapa, en vez de dejarlas como cajas con enlace deducido.
+  El panel ya sabe qué máquina es un hipervisor y qué nodos declara —el módulo Proxmox lo
+  recoge— así que el dato existe; lo que no está decidido es si eso es un dibujo mejor o una
+  jerarquía que estorba en un mapa de cables.
+- **Decir por qué un aparato no tiene enlace LLDP.** Es la tercera vez que la pregunta llega a
+  mano: «se le preguntó por vecinos y no contestó» es un estado que el panel conoce (perfil
+  asignado, tabla vacía) y no enseña en ninguna parte.
+- **La heurística de puerto de Netdisco.** `_port_edges` descarta un puerto si hay más de una
+  máquina **conocida** en él; Netdisco mira **cuántas MAC hay en total** y se queda con el que
+  menos tiene. La diferencia importa en un caso real: un uplink a un switch no gestionado con
+  una sola máquina conocida detrás y doscientas MAC desconocidas se dibuja hoy como cable
+  directo, y no lo es.
+- **Intención frente a observado**, al estilo NetBox: anotar el cable que *debería* existir y
+  que el mapa marque «documentado y no visto» / «visto y no documentado». Es lo único que
+  detecta que alguien movió un latiguillo.
+- **CDP**, el día que entre equipo Cisco: otra tabla, el mismo mecanismo que ya tiene `lldp`.
 
 ## Seguridad
 
@@ -260,7 +301,7 @@ De aquella ronda quedaron sin arreglar, clasificados como latentes o de borde:
 - **Frontend (severidad baja):** los recogidos como *frontend-lows* en la misma ronda.
 
 **Riesgo aceptado explícitamente:** exfiltración vía `api_test_host_ssh`. El endpoint se
-endureció parcialmente (`api_test_credential` perdió `servers_edit`), pero el riesgo de fondo
+endureció parcialmente (`api_test_credential` perdió `devices_edit`), pero el riesgo de fondo
 se asumió a conciencia — no lo "arregles" sin releer aquella decisión.
 
 ## Empaquetado

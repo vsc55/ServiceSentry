@@ -1,0 +1,29 @@
+{# Readings stored under a key nothing owns any more: what the sweep found, before it is
+   asked to sweep.
+
+   It opens on the NUMBER rather than on a confirmation. The other two maintenance actions
+   reclaim and re-measure and can be confirmed blind; this one deletes readings, and a red
+   button over an unknown quantity is a button nobody should press. The purge stays disabled
+   until there is something to purge. #}
+<div class="modal fade" id="dbOrphansModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-eraser me-1"></i>{{ i18n.db_orphans }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                aria-label="{{ i18n.close }}"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted">{{ i18n.db_orphans_desc }}</p>
+        <div id="dbOrphList"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary"
+                data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+        <button type="button" class="btn btn-danger" id="btnDbOrphPurge" disabled
+                onclick="_dbOrphansPurge()">
+          <i class="bi bi-trash me-1"></i>{{ i18n.db_orphans_purge }}</button>
+      </div>
+    </div>
+  </div>
+</div>

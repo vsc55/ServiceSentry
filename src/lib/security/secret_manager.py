@@ -44,6 +44,10 @@ ENCRYPT_KEYS: frozenset[str] = frozenset({
     'gmail_refresh_token',  # Email Gmail refresh token
     'webhook_url',          # Teams channel Incoming Webhook URL (embeds a secret token)
     'bot_app_password',     # Teams Bot Framework app password/secret
+    # GitHub personal token for MIB imports. A core secret since the setting became one:
+    # it used to be encrypted because the SNMP module declared it `secret` in its schema,
+    # and a module's declaration stops applying the moment the setting leaves the module.
+    'github_token',
 })
 
 

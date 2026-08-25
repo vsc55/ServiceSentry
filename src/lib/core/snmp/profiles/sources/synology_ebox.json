@@ -1,0 +1,39 @@
+{
+    "id": "synology_ebox",
+    "label": {
+        "en_EN": "Synology — expansion units (SYNOLOGY-EBOX-MIB)",
+        "es_ES": "Synology — unidades de expansión (SYNOLOGY-EBOX-MIB)"
+    },
+    "description": {
+        "en_EN": "Power and redundant-power state of each attached expansion unit. A shelf that lost a power supply keeps working and says nothing until the second one goes.",
+        "es_ES": "Estado de alimentación y de alimentación redundante de cada unidad de expansión conectada. Una bandeja que se ha quedado sin una fuente sigue funcionando y no dice nada hasta que se va la segunda."
+    },
+    "match": {
+        "sysobjectid_prefix": "1.3.6.1.4.1.6574",
+        "probe": "1.3.6.1.4.1.6574.105.1.1.2.0"
+    },
+    "metrics": [
+        {
+            "key": "syno_ebox_power",
+            "label": {
+                "en_EN": "Power status",
+                "es_ES": "Estado de alimentación"
+            },
+            "kind": "gauge",
+            "walk": "1.3.6.1.4.1.6574.105.1.1.3",
+            "chart": "value",
+            "index_label": "1.3.6.1.4.1.6574.105.1.1.2"
+        },
+        {
+            "key": "syno_ebox_redundant_power",
+            "label": {
+                "en_EN": "Redundant power status",
+                "es_ES": "Estado de alimentación redundante"
+            },
+            "kind": "gauge",
+            "walk": "1.3.6.1.4.1.6574.105.1.1.4",
+            "chart": "value",
+            "index_label": "1.3.6.1.4.1.6574.105.1.1.2"
+        }
+    ]
+}

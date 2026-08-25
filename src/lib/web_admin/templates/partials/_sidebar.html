@@ -8,20 +8,12 @@
    Collapsed ("mini") mode shows icons only; the ss-sb-label spans hide via CSS. State
    is persisted in localStorage by _wiring.html. #}
 
-{% set panel_tabs = [
-    {'id': 'services', 'icon': 'bi-hdd-rack',    'label': 'tab_services'},
-    {'id': 'modules',  'icon': 'bi-puzzle',      'label': 'tab_modules'},
-    {'id': 'servers',  'icon': 'bi-hdd-network', 'label': 'tab_infrastructure'},
-    {'id': 'credentials', 'icon': 'bi-key',      'label': 'tab_credentials'},
-    {'id': 'status',   'icon': 'bi-activity',    'label': 'tab_status'},
-    {'id': 'events',   'icon': 'bi-bell',        'label': 'tab_events'},
-    {'id': 'ipban',    'icon': 'bi-slash-circle','label': 'tab_ipban'},
-    {'id': 'config',   'icon': 'bi-gear',        'label': 'tab_config'},
-    {'id': 'access',   'icon': 'bi-person-lock', 'label': 'tab_access'},
-    {'id': 'audit',    'icon': 'bi-journal-text','label': 'tab_audit'},
-    {'id': 'backup',   'icon': 'bi-archive',     'label': 'tab_backup'},
-    {'id': 'diagnostic', 'icon': 'bi-clipboard-pulse', 'label': 'tab_diagnostic'},
-] %}
+{# The panel's tabs come from the context, already translated and already in the reader's
+   alphabetical order (see routes/pages.py::_panel_tabs). They used to be a literal here,
+   which worked while the order was hand-picked and could not survive "sort them by name":
+   the order is a property of the TRANSLATED label, and a template cannot sort by a string
+   it has not looked up yet. A module-contributed tab is in the same list — where an entry
+   came from is not what somebody scanning a menu is looking for. #}
 {# Two tabs have sub-tabs. To compare two UX patterns, Infrastructure uses a nested
    accordion and Access uses a hover/click flyout. Each entry maps to the pane's existing
    sub-tab target (#subtab-*), activated via _navSubtab(parentPane, subPane). #}
@@ -80,7 +72,10 @@
                present) with the URL synced via pushState; on a standalone page the other
                sections' panes don't exist, so they stay real links. The <li> carries the
                permission gate (applyRoleRestrictions reveals it). #}
-            {% for p in standalone_specs %}
+            {# …except the ones whose declaration says they belong in the System panel:
+               they are rendered inside the Settings accordion below, beside Services and
+               Credentials, because that is where a thing you ADMINISTER lives. #}
+            {% for p in standalone_specs if p.placement != 'system' %}
             {# data-nav-module: a module section is offered only while its module is
                configured and on, and that changes while the panel is open — so the entry
                ships hidden like every other and syncModuleSections() decides. Core pages
@@ -166,14 +161,26 @@
                 <ul class="collapse ss-sb-sub nav flex-column{% if not standalone %} show{% endif %}"
                     id="ss-sb-settings" role="tablist">
                     {% for t in panel_tabs %}
-                    <li class="nav-item{% if not standalone and t.id in subtabs %} ss-sb-has-sub{% endif %}"
-                        id="tab-{{ t.id }}-li" style="display:none" role="presentation">
+                    {# data-nav-module on a module's tab: it is offered only while its module
+                       is configured and on, and that changes while the panel is open, so
+                       syncModuleSections() decides.
+
+                       data-nav-perm on EVERY page-derived tab (`t.url`), with or without a
+                       module: applyRoleRestrictions() reveals by permission and already
+                       treats "no module" as active. Emitting it only alongside a module left
+                       a CORE-declared section — SNMP's, the first of them — carrying neither
+                       attribute, so nothing ever revealed it and it shipped hidden. The
+                       panel's own tabs (no `url`) stay governed by id, as before. #}
+                    <li class="nav-item{% if not standalone and (t.id in subtabs or t.views) %} ss-sb-has-sub{% endif %}"
+                        id="tab-{{ t.id }}-li" style="display:none" role="presentation"
+                        {% if t.module %}data-nav-module="{{ t.module }}"{% endif %}
+                        {% if t.url %}data-nav-perm="{{ t.perm }}"{% endif %}>
                         {% if standalone %}
                         {# On a standalone page the panes don't exist → deep-link into /admin #}
                         <a class="ss-sb-item ss-sb-subitem" href="/admin?tab={{ t.id }}"
-                           title="{{ i18n[t.label] }}">
+                           title="{{ t.label }}">
                             <i class="bi {{ t.icon }} ss-sb-icon"></i>
-                            <span class="ss-sb-label">{{ i18n[t.label] }}</span>
+                            <span class="ss-sb-label">{{ t.label }}</span>
                         </a>
                         {% elif t.id in subtabs %}
                         {# Tabs with sub-tabs (Infrastructure, Access): the item activates the
@@ -185,9 +192,9 @@
                                sub-item is chosen. #}
                             <button class="ss-sb-item ss-sb-subitem nav-link" type="button"
                                     id="btn-tab-{{ t.id }}" data-bs-target="#tab-{{ t.id }}"
-                                    title="{{ i18n[t.label] }}">
+                                    title="{{ t.label }}">
                                 <i class="bi {{ t.icon }} ss-sb-icon"></i>
-                                <span class="ss-sb-label">{{ i18n[t.label] }}</span>
+                                <span class="ss-sb-label">{{ t.label }}</span>
                                 <i class="bi bi-chevron-right ss-sb-caret"></i>
                             </button>
                             <ul class="ss-sb-flyout">
@@ -204,17 +211,53 @@
                                 {% endfor %}
                             </ul>
                         </div>
+                        {% elif t.views %}
+                        {# A module section with more than one VIEW gets the same flyout a
+                           top-level section gets — the views are a property of the section
+                           and not of where the sidebar happens to draw it. Unlike the core
+                           parents above this one DOES open its section (data-bs-toggle):
+                           its children are views of one pane, so the parent is a place. #}
+                        <div class="ss-sb-flywrap">
+                            <button class="ss-sb-item ss-sb-subitem nav-link" type="button"
+                                    id="btn-tab-{{ t.id }}" data-bs-toggle="tab"
+                                    data-bs-target="#tab-{{ t.id }}"
+                                    data-nav-url="{{ t.url }}" title="{{ t.label }}">
+                                <i class="bi {{ t.icon }} ss-sb-icon"></i>
+                                <span class="ss-sb-label">{{ t.label }}</span>
+                                <i class="bi bi-chevron-right ss-sb-caret"></i>
+                            </button>
+                            <ul class="ss-sb-flyout">
+                                {% for v in t.views %}
+                                <li>
+                                    {# `data-subtab` again: one highlight machinery, keyed the
+                                       way it is keyed everywhere else. #}
+                                    <button type="button" class="ss-sb-item ss-sb-subsub"
+                                            data-subtab="#view-{{ t.id }}-{{ v.slug }}"
+                                            onclick="_navPageView('{{ t.id }}', '{{ v.slug }}')"
+                                            title="{{ v.label }}">
+                                        <i class="bi {{ v.icon }} ss-sb-icon"></i>
+                                        <span class="ss-sb-label">{{ v.label }}</span>
+                                    </button>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
                         {% else %}
                         {# On /admin the sub-item is the Bootstrap tab toggle (SPA) #}
+                        {# data-nav-url on a module's tab: it has a URL of its own, and the
+                           address bar saying `/module/snmp` rather than `/admin?tab=snmp`
+                           is what makes the link somebody copies land where they were. #}
                         <button class="ss-sb-item ss-sb-subitem nav-link" type="button"
                                 id="btn-tab-{{ t.id }}" data-bs-toggle="tab"
-                                data-bs-target="#tab-{{ t.id }}" title="{{ i18n[t.label] }}">
+                                {% if t.url %}data-nav-url="{{ t.url }}"{% endif %}
+                                data-bs-target="#tab-{{ t.id }}" title="{{ t.label }}">
                             <i class="bi {{ t.icon }} ss-sb-icon"></i>
-                            <span class="ss-sb-label">{{ i18n[t.label] }}</span>
+                            <span class="ss-sb-label">{{ t.label }}</span>
                         </button>
                         {% endif %}
                     </li>
                     {% endfor %}
+
                 </ul>
             </li>
 

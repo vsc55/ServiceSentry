@@ -8,6 +8,3957 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.117] - 2026-08-25
+
+### Changed
+- **The address map is a window, and its boxes move.** Reported from the screen: thirty
+  networks meant thirty columns, and the whole picture was then squashed into whatever width
+  the pane happened to have, so the more the fleet had the smaller every name got. The shape —
+  a tree read downwards, what is outside, the way out, the networks, then what is on them —
+  was right; everything around it was not. It is drawn on the shared canvas now, so it zooms
+  and pans instead of being shown all at once at four pixels; the columns that were not worth
+  one are gone; and the boxes can be dragged where the room actually is, saved and restored
+  exactly like the cable map's.
+
+  Two columns disappear on their own: a network nobody is on is a route rather than a place,
+  and a network with ONE machine on it is not a place where two machines meet — that is
+  Docker's 172.17.0.0/16, which every container host has its own of. Both are folded and
+  counted in a sentence rather than dropped. Cables are no longer drawn here either: they have
+  a map of their own, and two pictures of one cable are two things to keep in agreement.
+
+- **The window, the drag and the machine card are shared by both maps.** They were written
+  once, for the cables, and the address map was left without them. A second copy of "where am
+  I looking" would agree with the first until the day it did not, and the day it did not one
+  map would zoom about the cursor and the other about the centre for reasons nobody could
+  find. They live in `_canvas.html`, keyed by the id of the drawing they are over.
+
+- **Hovering a device box reads the device.** The cables already answered theirs in a panel; a
+  box answered with a name and a link count. It now uses the same one — what it is, what it
+  runs, its addresses and the networks they sit on, its way out, how many cables, how much of
+  it is watched — built from what the screen already holds and never from a fetch, because
+  this runs on every pointer that crosses a box. A box under the pointer wins over any cable,
+  and the kept cable comes back the moment the box is left.
+
+- **The link panel follows the pointer, and a click is what keeps it.** Reported from the
+  screen with the panel circled: every hover pinned itself, so the map ended up permanently
+  wearing a reading of a cable nobody had asked about. A hover is a question and ends when the
+  pointer leaves; a click is a decision and survives it. With one kept, hovering another still
+  reads it and letting go returns to the one being worked on. An unkept panel shows the gesture
+  that would keep it instead of a close button — an × on something that disappears when the
+  pointer leaves the cable is a button that cannot be reached to be pressed.
+
+### Added
+- **The Overview has a card for every device SNMP reads.** One row per machine: its worst
+  state, and the handful of figures its own profile called worth reading first — a temperature,
+  the throughput of a switch, a UPS's battery. Pick one device from the selector and it opens
+  onto that device's own readings, with anything of its that is wrong at the top.
+
+  **It is deliberately not a chart of one measurement.** SNMP does not measure one thing: it
+  measures whatever the profiles installed say it measures, so a widget that picked a
+  measurement by name would be a widget that knows what a NAS is — and would be wrong about the
+  next device somebody racks. What every device HAS in common is a state and its `headline`,
+  which the profile declares because which figures answer "how is this machine" is a fact about
+  the equipment. Every word on the card — the labels, the units, the meaning of an enumeration
+  ("1" is Normal) — comes from the profiles, already translated, and the core renders it
+  without learning any of it.
+
+  One figure of each KIND: a RouterOS box answers four temperatures, and four temperatures on
+  one row is the same question four times while the traffic falls off the end. And a switch's
+  eleven hundred ports do not travel — this payload is rebuilt on every refresh of a dashboard
+  somebody leaves open, and a row per port is not a summary.
+
+- **…and a card that draws one of those measurements over time.** A third view for a module
+  widget, beside the stat card and the table: pick a device and one of its measurements and it
+  draws the shape of it — the traffic through a switch, a temperature, a load average — over
+  six hours, a day, a week or a month. Several of them can sit on one dashboard, because one
+  card for the traffic and another for the temperature of the same switch is why anybody adds a
+  second.
+
+  The module says WHICH measurements are worth a picture and WHERE each one is kept: every
+  entry carries `charts`, a list of `{field, label, unit, series}`, and the coordinates are the
+  ones the history already files the value under — so this is a chart of the same numbers the
+  rest of the panel reads and not of a second reading taken another way. It is drawn by the
+  same routine the History section and a device's page use; a second chart routine would be a
+  second opinion about what a gap in a series looks like.
+
+  The picture takes the whole card and is redrawn when the card is resized — a canvas is drawn
+  at the size it had when it was drawn, so a card dragged wider kept a graph the size of the
+  box it was born in. Below the size at which a chart stops being readable the card scrolls
+  both ways instead of clipping it.
+
+- **The chart offers every measurement the device has, not the handful on its card.** A
+  module's widget hands over the figures worth a card — a handful, on purpose, because that
+  payload is rebuilt on every refresh of a dashboard. But a chart is opened to look at
+  something specific, and the handful is not where a per-disk temperature or the traffic of one
+  port lives. The history index already answers exactly that question, with the labels and
+  units the module declares for each field, so the picker asks it — once, and kept — instead of
+  growing the dashboard payload. Grouped by whatever produced each one, and per-row
+  measurements named by their row.
+
+- **Picking a device or a measurement locked the tab up.** The toolbar asked for the series
+  index, the answer redrew the toolbar, and the redraw asked again — and because the second ask
+  is a promise that is ALREADY resolved, the two chased each other through the microtask queue
+  and the page stopped answering. Reported from the screen as Firefox offering to stop it. It
+  is asked once now, per widget, and only while there is no answer yet.
+
+- **…and the card no longer draws the previous measurement under the new one's title.** The
+  points held belong to the measurement they were fetched for, so a pick that changes drops
+  them: a chart headed "Tiempo encendido" drawing the load average is a chart that lies for as
+  long as the network takes.
+
+- **A proportion draws as a ring, because that is what it is.** A store answers as a SIZE and
+  an AMOUNT USED, and two numbers side by side is arithmetic left to the reader when the answer
+  is "83 %" — as a pair of parallel lines over time it is worse. Which of the two numbers is
+  which cannot be guessed from a label that says "Usado" in one profile and "In use" in the
+  next, so the profile already said (`headline: "used"` / `"total"` / `"free"`); this reads
+  that. One per row, which is where they live: a filesystem, a volume.
+
+- **The storage profile was named after the one thing it is not about.** `hr_storage` is
+  titled "Storage (HOST-RESOURCES-MIB)" and its own description says "Storage only: CPU and
+  memory belong to a system profile" — and its short name, the one every card and every rail
+  entry it fills is headed with, said "Memory".
+
+- **A device sampled through the registry has a name again.** It was drawing as
+  `host.0598ae99-8ccf-4e67-…`. The `name` a result is emitted with lives in memory for one
+  cycle — `check_state` has no column for it — so the state read back later carries the key and
+  nothing else, and every screen that shows a name rebuilds it from the CONFIGURATION. A device
+  sampled because the REGISTRY says it is one has no entry there to rebuild it from. So it is
+  asked instead: `sysName`, which every SNMP agent alive answers, recorded like any other fact
+  about the box under a role the core already names.
+
+- **What a widget instance remembers is one list, not three copies of one.** The local save,
+  the account save and the read-back each spelled out the same set of keys, so a new one added
+  to two of them was a setting that survived a reload and vanished on the next machine, with
+  nothing said. One list in the browser, one on the server, and a guard that fails when they
+  disagree.
+
+- **A module's widget is handed its own items, whatever it calls its collection.** `list` is a
+  convention and not a rule: three of the four modules with a widget use it, and the SNMP
+  watchful calls its collection `servers` — so its hook was handed an empty dict. Nothing would
+  have broken loudly; the widget would simply have had no names in it.
+
+- **A device says who made it and which model it is, and the fleet screens say so too.** The
+  facts were already being collected and were reachable in exactly one place: the identity
+  column of one device's page, several clicks in. So a rack of forty machines could be read
+  only one machine at a time for the question somebody asks first — *what IS that box?*
+
+  Marca and model now ride with the machine everywhere it is drawn: a column of the fleet list,
+  the card on the board view, the panel both maps show under the pointer, and the header of the
+  device page beside its name.
+
+  **The manufacturer comes from whatever RECOGNISED the device, and nothing in the core has
+  heard of one.** A profile that matches on `1.3.6.1.4.1.14988` is the only thing in the
+  product that knows that tree belongs to MikroTik, so it says so beside the match — the same
+  rule that keeps module names out of the core, and a guard parses `lib/core` to hold it: the
+  next manufacturer is a file, never a code change. A maker with no mark to draw is not an
+  error — the name alone is an answer, and it is the only one a plain server reporting through
+  its own agent will ever give.
+
+  **What is plugged into a machine does not answer for it.** One registry entry fronts several
+  pieces of equipment: a NAS and the UPS plugged into it both answer "model", and only the UPS
+  answers "vendor" — so taking each fact from wherever it appeared made a DS1821+ manufactured
+  by APC. Whoever declared the brand IS the box, and the model is read from that same answerer.
+  A result about a ROW is not a fact about the box either, or a NAS would be a WD40EFRX.
+
+  **A profile that speaks for nobody in particular still recognises what it READ.** A plain
+  Linux answers no vendor MIB at all — `sysDescr` gives the kernel and stops — and the only
+  thing that knows the box underneath is `dmidecode`, through the `extend` directives. So the
+  profile that reads DMI carries the table of what DMI answers: "HP", "Hewlett-Packard" and
+  "HPE ProLiant" are one rack, and a machine nobody made says "QEMU", which is the truth about
+  a virtual machine.
+
+  **Each card on the device page is headed by whoever it is about.** A card of an HP is a card
+  about an HP, and heading it "Machine" was the one word on it carrying no information. Where a
+  profile speaks for one maker it keeps its own better word — "RouterOS" says which of
+  MikroTik's two answers this is — and wears the mark beside it. And the card about the BOX now
+  leads: it used to be the standard MIB, which put a machine's contact address above the card
+  naming the machine.
+
+  Fourteen marks ship with it, from Simple Icons, under CC0 and unmodified
+  (`static/img/brands/README.md` records where they came from and how to add one). They are
+  painted as masks rather than images, so they take the colour of the text beside them and read
+  on both themes.
+
+- **Three devices that answered and were not heard.** Reported from the screen once the marks
+  were on, as the three that had none.
+
+  A **Linksys** answers its model, its serial and its firmware as columns of the unit table, so
+  every one of them was filed against a ROW — and a fact about a row is not a fact about the
+  machine, which is the rule that stops a NAS being called a WD40EFRX. So a switch that answers
+  all four showed none of them anywhere. `of_device` is exactly that case and the profile had
+  simply never said so.
+
+  A **Synology** card had no mark while a MikroTik's did, and the difference was that one of
+  them declares a value as identity: the card was then created by the loop that draws those,
+  which did not know a maker. The attributes lead now — which is also the order the server
+  sorted them into, so a source that happens to chart an identity value no longer jumps the
+  queue.
+
+  The **UPS plugged into a NAS** is read over USB and its manufacturer reported verbatim:
+  "American Power Conversion", which is APC written out in full and matches nothing. The
+  profile that reads it carries the table, like the one that reads DMI. Its card is headed by
+  the maker with what the profile calls the thing beside it — "APC · SAI": which of them made
+  it, and what it is.
+
+- **The device header no longer repeats the machine.** The maker and model were put beside the
+  name while the identity column was still headed "Machine" and the answer was three clicks
+  down. The column is headed by the maker now, with its mark, directly underneath — so the
+  line above it was the same sentence twice. Reported from the screen, underlined. The fleet
+  list, the board cards and the two maps keep it: none of them has a column to read.
+
+- **A wordmark is not a square.** Upstream draws every mark inside a 24x24 canvas, so one that
+  is a wordmark — Synology, HP — fills the width and leaves two thirds of the height empty:
+  fitted into a square box it drew at a third of the height of the text beside it. Reported
+  from the screen. Each file's viewBox is trimmed to the ink it holds, and a mark is now given
+  a HEIGHT and left to work out its own width — so a wordmark comes out wide and a round mark
+  comes out round, with no table of proportions for anybody to keep in step with the files. A
+  guard computes each path's box and fails when a file's own is bigger, because a logo drawn
+  small looks like somebody's decision rather than a bug.
+
+- **Where there is a mark there is no name.** A logo is the maker's name written by the maker:
+  "[Synology] Synology" is the same word twice, and it was on every card of a machine whose
+  mark we happen to ship. The name stays as the tooltip, and as what a reader with no images
+  gets. A card the profile has a *better* word for keeps it — "[MikroTik] RouterOS" says two
+  different things.
+
+- **A measurement nobody grouped now belongs to its module.** The measurements rail carried a
+  button with a count on it and no word: grouping by SOURCE is a device-profile idea, so a
+  ping, a certificate and a disk check declare none, and all nine landed in one family with an
+  empty heading — the one entry on an index nothing can be looked up in. Reported from the
+  screen. The module is the answer, which is the same rule the sourced ones follow: grouped by
+  whatever produced them, under its own name out of its own lang file.
+
+- **A fact only the profile can name now arrives named.** Three lines of a switch's card read
+  `attr_mt_active_fan`, `attr_mt_routerboot`, `attr_mt_upgrade_to` — the internal key with the
+  lookup prefix still on it. A fact filed under a ROLE is named by the core, in every language
+  and with the same word whoever answered it; one filed under a profile's own metric key has no
+  such word, and the profile had "Ventilador activo" written two lines from the OID with
+  nothing to carry it. Only the ones with no role: a profile does not get to rename "Model" for
+  its own devices, because that word has to be the same on the disk of a NAS and on the chassis
+  of a switch.
+
+- **A maker's name is no longer printed twice.** A machine that says "HP" and "HP EliteDesk 800
+  G5 Desktop Mini" is not saying two things. The front of the model only: "MikroTik-branded CRS"
+  is a model, and cutting the word out of the middle would be the panel editing what the device
+  said.
+
+- **You can ask a device one OID and see what it says.** The question every new profile starts
+  with — *does this box serve that table?* — and the one thing this screen could not answer:
+  everything else on it reads what the profiles say to read, so a table nobody has written a
+  profile for is a table the panel has no way to look at. "Does RouterOS answer `ifStackTable`"
+  could only be settled by somebody with a shell and `snmpwalk`, which is a strange thing to
+  need in front of a panel that is already talking to the device.
+
+  A third tab of the dialog that is already open on one server, so the address, the version,
+  the credential and the bound host are the ones a check would use. The INDEX is a column of
+  its own, because for a good many tables it IS the answer. An empty table and a silent device
+  are said differently — a list of no rows looks identical for both, and they are two different
+  facts: one about the device's configuration, one about the MIB it implements. A read that
+  records nothing, behind `snmp_view`.
+
+- **A profile can read a value that is a whole PATH.** Some agents answer a stack in one
+  string: RouterOS writes `bridgeLAN/bondingTrankSW1/ether11` where a port description goes,
+  and that single answer says which port it is AND what it is inside. On those devices it is
+  the only place the bonding is stated at all — their `ifStackTable` is served and comes back
+  empty, which the panel's own "ask an OID" settled against the box the day it shipped. The
+  separator and which component is which are declared: that a slash means "inside of" is a
+  fact about one agent's naming, and the core guessing it would be the core knowing something
+  about one vendor. So a MikroTik's LAG lists its ports now, the same as a Linksys's.
+
+- **A RouterOS or Linux bond can list its ports too.** IEEE8023-LAG-MIB is what a managed
+  switch answers, and the Linksys listed its LAG's ports while the MikroTik's showed nothing —
+  reported from the screen. The standard answer for everything else is `ifStackTable`, which
+  says which interface runs ON TOP of which: a bond over its ports, a bridge over the bond. It
+  files the same `aggregate` fact, so one join serves both and the page cannot end up with two
+  answers about one bond. Optional in every group whose devices can stack anything.
+
+- **A profile metric can say which ROW a reading is about.** `ifStackTable` is indexed by a
+  PAIR of interfaces and its only column is a row status: the whole answer is in the index, and
+  it is not about the row it sits at. Filed straight it produces one row per layering, named
+  `10.1` or `bond / ether11`, and neither is a row the device reported. `row_index` says which
+  component identifies the row, next to the `from_index` that says which one is the reading.
+
+- **An aggregate now lists the ports that are in it.** The MIB answers this one way round
+  only: a PORT states which aggregator it is attached to, and the aggregator states nothing.
+  So a switch page showed eight rows called Po1…Po8 and the only way to learn what was in one
+  was to read twenty-eight port rows looking for it. Turned round on the server, for the reason
+  every other join on this path is: a second implementation of "which ports are in that bond"
+  is free to disagree with the first, and the day it did the map and the device page would say
+  different things about one switch. Each port in the list opens that port, through the same
+  code that lands there from the map.
+
+- **A profile can say where it reads in a device's identity.** "A vendor's own MIB after the
+  standards" ties every standard profile with every other and falls back to the alphabet,
+  which put the card headed "VLANs" above the one headed "System" — the wrong first sentence
+  about a switch. Which of two standard MIBs is the identity of a box is a fact about those
+  MIBs, so the MIB says: `sys_generic` declares that it leads.
+
+### Changed
+- **`auto` on a host's OS asks the machine.** A device answering SNMP has already said what
+  it runs — `sysDescr` on every agent, and a `lsb_release` extend where somebody set one up —
+  and the panel was throwing that away and guessing. The guess was worse than it sounds:
+  `auto` on a host whose kind is neither local nor remote resolved to the PANEL's platform, so
+  a Synology came out as whatever the server happens to run.
+
+  Read by ROLE and never by module — a module that KNOWS files `os`, one that only has a
+  description string files `description`, and both are declarations the core already
+  understands, so nothing here knows what SNMP is. A setting somebody chose is never
+  overruled, and a switch describing itself perfectly well is still not an operating system:
+  none of the words this panel has fits one, so it stays `auto` rather than being written down
+  as something nobody decided. The screens show the setting with the answer it stands for
+  beside it.
+
+### Fixed
+- **A machine in maintenance lost everything it had ever recorded.** Reported from the screen:
+  a switch put into maintenance opened onto four empty tabs, and fell off the map with it. Its
+  checks are skipped, so the cycle after that prunes every key the module stopped returning —
+  and for a device sampled through the REGISTRY, with an SNMP profile on the host record and
+  no check item behind it, that is all of them. Both screens worked out what a device is made
+  of from the live state alone, so there was nothing left to build a row out of.
+
+  The history is kept for exactly this — `purge_maintenance_states` says so in as many words —
+  it was simply unreachable from there. It is asked the same question the live state is asked,
+  and only where the live state has nothing to say about the device itself, so a machine that
+  is being watched pays nothing for it.
+
+- **A machine in maintenance looked like two different states.** Orange with a cone on the
+  fleet list, grey with a spanner in the infrastructure badge — and grey again on the board
+  cards, which is how it was reported a second time after the badge was fixed. That is what
+  happens when a duplicate is fixed one copy at a time: the badge, the stripe down a card, the
+  dot beside a board column and the box on a map each worked the colour out for themselves.
+  One palette now, in the shared host vocabulary, and maintenance keeps the orange it has
+  always had — deliberately not the yellow of a warning, because "somebody switched this off
+  on purpose" and "something is wrong with it" are not the same news.
+
+- **Every reload flashed white, and then showed the page undressed.** Two halves of one
+  thing. The white is not the page's: it is the browser's own canvas in the moment before any
+  stylesheet has been fetched, which is why the answer cannot live in a stylesheet — the
+  document says which `color-scheme` it is and paints the background inline in the head, from
+  the same flag that sets the theme. The unstyled text is the browser giving up waiting: a
+  `<link>` in the head is render-blocking in theory, and in practice it paints the document
+  bare once its own paint-suppression window runs out. The body is held hidden until the last
+  stylesheet has applied, and released by a timeout as well — a stylesheet that 404s must not
+  leave a blank page, so the worst case stays the bare document.
+
+  And the wait itself is shorter: half a megabyte of stylesheets was revalidated on every
+  load, a round trip each before anything could be drawn. A URL carrying a version cannot go
+  stale — a new build is a new URL — so those are kept for a year, and the vendored ones carry
+  a version now too.
+
+- **A card was headed by a profile id instead of its name.** `bridge_vlans`, over a list of
+  translated VLAN names. The names of the things that answered were read off the FIELD map,
+  and a profile of pure identity facts charts nothing — so it contributed no field, so nothing
+  carried its name. A module hands its sources over the way it already hands over its fields,
+  and the two go through one implementation of "ask a module something at run time" rather
+  than two.
+
+- **An arrangement saved before the canvas was shared came back empty.** Moving it there
+  renamed both the browser key and the account field, so the boxes went to their generated
+  places with nothing on screen to press to get them back — reported in exactly those words.
+  A rename that loses somebody's arrangement is a rename that broke something: the old key and
+  the old field are read once and written forward, on both sides.
+
+- **Clicking a device box only moved it.** The click was on the box, and both halves of the
+  drag take it away: the pointer capture retargets it to the `<svg>`, and a drag redraws the
+  picture, so the element that was pressed is gone before the click can land. It is fired from
+  the pointerup now — a press that did not travel opens the machine, one that did does not.
+
+- **The save button only appeared after leaving the map and coming back.** Moving a box
+  redraws the drawing, which is what keeps the drag smooth, and the toolbar is not in the
+  drawing — while whether there is anything to save is a fact about the arrangement rather than
+  about the picture. It is repainted where the box lands.
+
+- **Resetting the boxes threw away the saved arrangement with no way back.** There is a
+  restore button beside it now, offered when the account holds one that differs from the
+  screen: one button says "forget where I put them", the other "give me back the ones I
+  saved", and a screen with only the first makes the reset unrecoverable while the answer sits
+  on the account.
+
+### Added
+- **…and the arrangement can be saved to the account.** The browser keeps its own copy as
+  the hand moves a box — that is what makes dragging instant, and it works with no account
+  arrangement at all — and a button writes it to the caller's own user record, where a
+  dashboard layout already lives. That copy is the one that follows somebody to another
+  machine, and it wins over the browser's when there is one, because that is what saving it
+  meant. Written by a button on purpose: an arrangement persisted on every pointer move would
+  be a request per frame.
+
+  The section now writes one key on one account, and that is the whole of it. `infra_view`
+  must not become a way around the registry's permissions, so the guard that used to ban write
+  verbs outright now enumerates every write and names the only account field this section may
+  touch: a verb ban reads as the property while only being a proxy for it, and the day a write
+  is genuinely wanted the proxy is what gets edited.
+
+- **The boxes on the link map can be dragged where they belong.** The automatic layout is
+  tiers outwards from the most connected device: a good first answer, and nobody's rack. The
+  person reading the map knows which switch is in which cupboard, and a picture they can
+  arrange the way the room is arranged is a different picture from one they can only look at.
+  The arrangement is kept per browser and survives leaving the screen, and a button appears to
+  put everything back where the layout had it.
+
+  A box already had a gesture — clicking it opens the device — so the press only becomes a
+  drag once it has travelled, measured in screen pixels so the threshold means the same at
+  every zoom, and a drop does not open the machine that was being moved. Positions are applied
+  in the layout rather than at draw time, so the cables follow the boxes instead of ending in
+  the air.
+
+  Nowhere is out of bounds: the drawing's own origin moves to wherever its leftmost and
+  topmost box is, and "fit" starts there rather than at zero. Clamping at the origin instead
+  was reported from the screen — the pane is letterboxed around a fitted drawing, so there is
+  visibly empty room beside the picture and a box would not go into it. The answer is not a
+  wider clamp; it is that the empty room was never part of the drawing, and now it can be. The
+  zoom is still deliberately not remembered: where somebody put a box is a decision, where they
+  happened to be zoomed is a moment.
+
+- **The link banner says WHICH end reported the cable.** "One end says so" is a claim about
+  the evidence, and the first thing anybody asks of it is which one — reported from the screen,
+  where the banner said a cable was one-sided and nothing on it said whether that was the
+  router or the server. The end that reported it now carries a badge, and the silent one
+  carries what its silence means: either nothing on it runs an LLDP agent, or the agent runs
+  and does not publish LLDP-MIB over SNMP, which on Debian is `lldpd` without its AgentX
+  subagent. `by` had been in the payload since the map was built; it just never reached the
+  screen.
+
+- **A neighbour report now names BOTH ends of the cable.** Reported from the rack with the
+  router's own neighbour list open beside the panel: a MikroTik that plainly knows its Proxmox
+  host is on `ether8` drew a cable whose own end read "port not identified". Not a gap in what
+  the device answered — a gap in what was asked. LLDP says "I see that one, and this is the
+  port IT answered on", never "and I answered on mine", so the reporter's own port is in no
+  column of `lldpRemTable`: it is the second component of the row's index, and nothing had
+  gone looking for it there. It is read from there now and named through the local-port table,
+  so one talkative device is enough to identify a whole cable.
+
+  A device's own name for its own port wins over what its neighbour called it. They are
+  usually the same string and occasionally are not, and merging the two would list one port
+  twice and count one cable as two.
+
+- **A profile metric can be read out of the row's INDEX.** A composite index is a fact per
+  component, and SNMP keeps real answers in there — `lldpRemTable` is indexed by (time mark,
+  my port, neighbour). `from_index` says which component the reading is, one-based, the way a
+  MIB writes an INDEX clause, and it composes with `value_label`: pull the port number out of
+  the index, then let the local-port table say what the device calls it. A port number is not
+  a port.
+
+- **The panel can say which LAG a switch's ports belong to.** The link banner showed a
+  MikroTik naming its bond in every port path — `bridge1 > bond1 > ether11-14` —
+  beside four bare `gigabitethernet` chips on the Linksys, which names nothing. That is not a
+  gap in the reading: no neighbour table has the answer, because from outside four separate
+  cables and a four-port aggregate produce the same four rows. It is a configuration fact,
+  and the device states it in IEEE8023-LAG-MIB — a port answers the identifier of the
+  aggregator it is attached to. The new `lag` profile reads it, the network groups carry it as
+  an optional member, and the aggregate is named once in front of its ports, exactly where the
+  path already went on the side that has one.
+
+  Shown only where the device said it of EVERY port of that cable, and only for the ports of
+  THAT cable: three of four naming a LAG is not four in one, and a switch's stack aggregate is
+  not this uplink's. Counting four cables is still not reading that they are one — `bundle`
+  says how many, and only this says whether.
+
+- **A profile metric can be a POINTER at another table.** Half of SNMP answers with a
+  reference: a value whose meaning is "row N of that other table". A port in an aggregate
+  answers `141`, and `141` is the interface index of the LAG — so the fact it carries is
+  "member of Po1" and what would have been recorded is a number. `value_label` says which
+  table the value indexes, the same way `index_label` already says which column names the
+  rows, and for the same reason: an index is not a name, and a screen full of them is one
+  nobody can act on. Declared rather than inferred — nothing in the core can work out what a
+  number points at — and allowed only on a text reading, because a gauge whose value was
+  quietly replaced by a string is a series that stops being a number halfway down.
+
+- **A NAS and a hypervisor can say who they see.** `lldp` is not a switch profile: it answers
+  "who is on the other end of my cable", which anything running an agent can say — and the
+  endpoint's answer is the half of the link a switch cannot give. The switch reports the port
+  MAC it learned; the endpoint reports its own identity, and both ends speaking is what makes
+  a cable confirmed rather than claimed. The Synology group now asks for it (Proxmox already
+  did, through the Linux group). A forwarding table stays with the network groups: a bridge
+  has one and an endpoint has nothing to answer.
+
+- **A group can declare which of its members are optional.** A family is not uniform — every
+  Synology answers its disks, and whether it answers LLDP depends on the DSM version and on
+  somebody switching it on. The day those profiles went into the groups, every device that
+  does NOT answer them stopped collapsing: a plain Synology went from one row to twenty-four
+  chips, and a switch with LLDP off from one to six, neither because anything was wrong with
+  it. A group's cover is now its REQUIRED members, and what it stands for is what the device
+  actually answered. A missing required member still stops it, which is the rule this must not
+  weaken: a partial cover assigns profiles the device never answered, and a wrong profile does
+  not fail — it measures numbers that look fine.
+
+### Fixed
+- **A four-cable trunk was drawn as one cable with one port name.** Reported from both
+  devices' own neighbour tables: the router saw the switch on ether11-14 and the switch saw
+  the router on GE25-28 — eight reports, of which seven were dropped. The link between a pair
+  of machines now keeps EVERY port each side named, sorted the way somebody reads the front of
+  a switch (12 after 3, which an alphabetical sort does not do), and says how many cables that
+  is.
+
+  It is still one line per pair of machines, and that is not laziness: a report only ever
+  names the FAR port — LLDP says "I see that one, and this is the port IT answered on", never
+  "…and I answered on mine" — so the two reports of one cable name two different ports, and
+  there is no key that both tells four cables apart and recognises the two halves of one.
+  Keyed by the far port, an ordinary point-to-point link with an agent at each end becomes two
+  lines, which is the worse lie. Pairing them needs each report to name the reporter's own
+  port (`lldpLocPortDesc`, indexed by the local port number inside the row's own index), which
+  the profile does not yet ask for.
+
+  A port reported as a MAC is now resolved to the interface it belongs to. A switch with no
+  port description answers its portId, which on most of them is that port's hardware address —
+  so one end of every link in that trunk read `00:00:5E:00:53:01` where a port name goes. It
+  is an interface of a machine the panel already reads, and the MAC index says which.
+
+  What is NOT claimed is that several cables are a LAG. That lives in IEEE8023-LAG-MIB, which
+  nothing here collects, and calling four cables an aggregate because there are four of them
+  would be the picture saying more than the data does.
+
+### Changed
+- **The link map fills the work area, and one cable at a time is read in a panel.** Three
+  things reported from three screenshots, and the last one is the interesting one.
+
+  The canvas took `62vh` — a guess about somebody else's window, which left a band of empty
+  page below it. It takes what is left after the note and the legend now.
+
+  The port names came off the drawing entirely. They were captions at the midpoint, then
+  captions at each end, then chips, and every version collided for the same reason: every
+  cable out of a box leaves from the same point, so four labels land in one place beside the
+  switch — and staggering them along their curves only spreads them as far as the curves have
+  diverged, which near the box is not far. Hovering a cable now opens a panel with the whole
+  reading: both machines, both ports, how it is known, and a way into each. It does not clear
+  on pointer-leave, because a panel with four controls that vanishes when you reach for it is
+  one nobody can click.
+
+  And a port PATH is drawn as the things it names. A MikroTik answers
+  `bridge1/bond1/ether11`: the physical port that carried the frame, the bond it
+  is a member of, and the bridge that bond is in. As one string it reads as a port with a long
+  name, and the fact that matters — this is one member of a four-port LAG — is buried in the
+  middle. Each segment is now its own control, because the device wrote the path and each part
+  of it is something it named. A port MAC (what a switch with no port description reports) is
+  shown as what it is and offers no jump: there is no interface by that name to open.
+
+  Each box also carries the icon of what the device IS, through the same helper the list and
+  the cards use — a rack drawn as eight identical boxes makes you read every name to find the
+  switch.
+
+- **The link map can be zoomed, panned and re-fitted.** Reported with a screenshot: eight
+  devices squeezed to the pane's width with the port names on top of each other — two problems
+  in one picture. It is a window onto the drawing now: the wheel zooms about the cursor,
+  dragging the background moves it, and a button brings the whole thing back. A drag that
+  starts on a device does not pan, or opening a machine and moving the map would share a
+  gesture.
+
+  Zoom is the viewBox rather than a scaled group, so the strokes and the labels grow with the
+  picture — zooming in to read a port name actually makes it bigger. And each port label now
+  sits at its OWN end of the cable: every link between the same two tiers crosses the same
+  centre, so a midpoint label was three names written into one ten-pixel channel.
+
+### Fixed
+- **The Links view sat on "loading…" for ever.** The fleet-wide join is fetched once and
+  cached, and whoever is on screen when it lands has to be redrawn — but the redraw named ONE
+  view, written when that was the only one reading the payload. So the request landed, the
+  cache filled, and the answer sat in memory while the screen kept spinning.
+
+  A view now DECLARES that it reads the map (`map: true` in the registry) and the loader asks
+  that. A third reader needs no edit there — which is the actual fix, because the bug was not
+  the condition being wrong, it was living somewhere a second reader had no reason to look.
+
+- **The switch groups did not collect the two things only a switch can answer.** LLDP names the
+  box on the far end of a cable and the port it answered on; the forwarding table places a
+  machine on a port by the MAC it learned there. `grp_network` carried both and `grp_linksys` /
+  `grp_mikrotik` — the groups an actual Linksys and an actual MikroTik get — carried neither,
+  so on a real fleet `net_evidence` held fourteen ARP rows from one hypervisor and nothing
+  else. The link map was correct and empty, which is the worst way for a screen to be right.
+
+  Both groups now include the network set (`lldp`, `ip_neighbours`, `bridge_fdb`,
+  `bridge_vlans`) and supersede it, so an auto-detected device does not end up carrying the
+  same walk twice. A NAS group deliberately does not: a NAS is the far END of a cable, not the
+  thing that can say what is on the other one.
+
+### Added
+- **A second map: what is plugged into what.** The existing one is about ADDRESSES — who can
+  reach whom, the networks they sit on, the way out of each — because that is the layer the
+  panel can always see. It cannot answer which cable goes where, and the equipment can: a
+  switch's neighbour table names the box on the far end and the port it answered on, and its
+  forwarding table places a machine on a port by the MAC it learned there.
+
+  The server already built that adjacency alongside the networks, so this is a second READING
+  of one payload rather than a second endpoint: two joins over the same evidence would be two
+  answers to whether a cable is there. Devices are tiered outwards from whatever is most
+  connected — on a real network, the switch — with the port named at each end.
+
+  It keeps saying HOW it knows, in three strokes: a neighbour both ends agree on, one end
+  saying it alone, and a machine placed by a forwarding table (which says it is *reachable*
+  through that port, not plugged into it). Flattening those into "connected" would be the
+  picture claiming more than the data does. A fleet with no cables says where they would come
+  from rather than shrugging: "no links found" and "nothing here serves LLDP" are the same
+  screen and very different problems.
+
+- **Three more ways to read the fleet in Infrastructure.** The list answers "which machine is
+  in trouble" and the cards answer it from across the room; none of them answered the question
+  a fleet raises once it stops fitting in your head — **which KIND of thing is in trouble**.
+
+  **Grouped** is the table with a heading every time the group changes, folding, with a count
+  and a state chip per group. **By type** puts the kinds down a rail and one kind on screen at
+  a time. Both, because which is better depends on how many kinds there are: with four the
+  grouped view is the better read, with twenty it is a scroll where a rail is a menu — so the
+  fleet decides and the switcher is one click.
+
+  **Board** is a different reading rather than a third grouping: a lane per state, worst on the
+  left, machines as cards. "What needs attention" is a different question from "what is this
+  fleet made of", and answering it by sorting a list makes you count. Maintenance gets its own
+  lane — somebody chose that state, and a box in the "error" column that nobody has to act on
+  is the noise a triage screen exists to remove.
+
+  What it groups BY is a declared list, not something written into the render: device type,
+  tag, operating system, connection or state. A machine appears under each of its tags, groups
+  are ordered worst-first like the list they came from, and all three draw the columns the
+  column chooser is showing — switching how you look at the fleet must not silently change
+  what you are looking at.
+
+### Fixed
+- **A Ceph cluster says one of three things and the panel read two of them.** `HEALTH_WARN` is
+  the state a cluster spends its life in — a disk backfilling, a clock a second out, a pool over
+  its target ratio — and every one of those came out RED, beside the failures that mean a phone
+  call. Reported from the screen. It is an aviso now: amber, still not OK, which is the whole
+  distinction. `HEALTH_ERR` is untouched.
+
+  An answer the panel has no word for — or none at all — is an aviso too, and deliberately not
+  a failure: it is not the same statement as `HEALTH_ERR`, and picking the worse of the two
+  would be the panel deciding something Ceph did not say.
+
+- **The OS column showed the setting and kept the answer to itself.** `auto` learned to ask the
+  machine in this same build, and the fleet list — the screen the column is on — was the one
+  route that never passed the answer through. It read `auto` and stopped there.
+
+## [0.0.1+build.116] - 2026-08-24
+
+### Added
+- **The device's SNMP connection is edited where its SSH one is.** Reported from the screen
+  as "add SNMP as a connection method": it already was one — the profile moved to the core
+  precisely because an SNMP connection is a property of the DEVICE, its port, the identity it
+  answers to and the profiles it declares itself to serve not stopping being true when no
+  check points at it — and the form was the only place that had not been told. Its editor
+  went on being drawn under the module, in another tab, while SSH (the same kind of thing)
+  sat in General. Now General draws a collapsible card per connection **the core declares**,
+  with that protocol's credential picker, its device profiles and a test that runs through
+  the profile's own module. The rule is `builtin`, which already travels with every profile,
+  so nothing on either side names a protocol: the module form draws what a MODULE declared,
+  General draws what the CORE declared, and a core profile added tomorrow appears there on
+  its own. The old rule read `proto !== 'ssh'` — the same rule with one protocol's name
+  written into it, which is what silently stopped being true the day SNMP moved.
+- **…and NOT as a third value of Local / Remote (SSH).** That is what it looked like it
+  should be, and it would have cost data: those two are exclusive and connections are not.
+  Two of this fleet's hypervisors answer SSH *and* SNMP, six carry `keepalived` and `proxmox`
+  as well, and `hosts.profiles` has been a map per protocol from the start. A device forced
+  to pick one would have lost the other.
+
+### Added
+- **The Logs tab counts its messages, like every other tab.** It could not before: the others
+  count what is already in the device's payload, and logs are not in it — they are rows of the
+  syslog table. So the badge is asked for AFTER the section paints (one count, ~60 ms with the
+  index behind it on a 60.000-row table) and patched in place when the answer lands; rendering
+  the device again would throw away whatever tab somebody had just opened. Asked once per
+  machine rather than per render, since a tab switch redraws the tabs and the figure changed
+  by three. And a count nobody knows yet draws NO badge rather than a zero — "0 logs" about a
+  machine with forty thousand is worse than saying nothing while the answer is on its way.
+- **The Logs table sorts and its columns resize.** Both already existed and this was the one
+  table not using them: `_thSortInner` for the header, `_attachColFeatures` for resize,
+  double-click auto-fit and drag-to-reorder — the same controls the audit, event-log and list
+  tables have. The sort is the SERVER's (`sort` / `order`, already whitelisted in
+  `SyslogStore._SORTABLE`), because this table is paged there too: sorting the page in the
+  browser would sort the fifty rows somebody happens to be looking at and call it the order of
+  forty thousand. Widths and column order are remembered per reader, under one key for both
+  screens that draw this table — it is one table, and a width dragged on one of them is a
+  width somebody set for these columns.
+
+### Fixed
+- **Flagging a port as worth an alert showed nothing until F5.** Reported from the screen: the
+  bell did not appear on the rail and the button kept its old colour — and after a refresh the
+  flag WAS there, so the write had worked all along. `apiPost` answers `{status, data}` and
+  the payload is one level down; read as `r.watch` it was always `undefined`, so `r.watch ||
+  []` replaced the machine's list with an EMPTY one on every click. The new flag never showed,
+  and a flag already set on another row disappeared with it. Two more things nothing was
+  reading: the status — `infra_watch` is a permission of its own, so a refusal is a real
+  answer here, and a 403 toasted "watched" over a screen where nothing had happened — and
+  whether the reply carried a list at all, since `x || []` turns "I could not read it" into a
+  statement about the device.
+- **…and flagging one reloaded every chart on the device.** It repainted through the function
+  that rewrites the machine's whole markup. A chart is a request to the history API and a
+  canvas drawn from the answer, so moving one bell threw away a week of traffic per picture
+  and blinked them back in as they arrived. Only two things on screen depend on the flag — the
+  bell on the rail and the button in the body — and those are what get repainted now; the rest
+  of what it decides is the SAMPLER's business on the next collection, not this payload's.
+
+### Fixed
+- **An SNMP failure notification named a metric by its internal key.** Reported from a
+  message: `SNMP: PVE02 💥 no data (sys_name: No SNMP response received before timeout)`.
+  `sys_name` is the id a profile files a value under — what the value is STORED as — and it
+  reads as a word that failed to be replaced by anything.
+
+  The deeper half is that it should not have been there at all: when a device answers NOTHING,
+  every metric fails the same way, so whichever one happened to be asked first is not a fact
+  about the device. A silent device is now reported as a device — the error and nothing else —
+  which also makes the recorded reason stable, and the re-alert gate compares against that
+  reason. Where a metric genuinely is worth naming (a device that answered but does not serve
+  one column) it is named the way its profile names it, per language.
+
+- **Hovering one row of the notification routing table lit up all of them.** The configuration
+  sheet highlights the field row under the cursor, which is right for a field — a label and
+  its control on one line. The routing matrix is a whole TABLE inside a single
+  `cfg-field-wrap`, so the rule painted the wrapper and every row in it changed colour at
+  once. The container's hover now stands aside for a wrap that holds a table (the same
+  `:not(:has(table))` the dashboard widgets already use); the table's own row hover, which is
+  the one that means something, is what shows.
+
+- **A device that answers nothing is now given up on instead of asked three hundred times.**
+  Reported from the screen: a Proxmox node refusing SNMP sat on "reading the metrics 1/14" for
+  a whole collection — fourteen profiles of a dozen metrics each, every one a five-second
+  timeout with a retry. Half an hour of waiting on a machine that had said nothing in the
+  first ten seconds, holding up a collection somebody was watching and, on the scheduler, the
+  module's entire cycle.
+
+  Nothing could tell the two kinds of failure apart, and they are different facts:
+  `noSuchName` is an ANSWER — this device does not serve that OID, it is on the network, and
+  the next profile may be one it does — while a timeout is not. The client now marks the
+  second (`NoAnswer`, a `str` subclass, so every caller that logs it or shows it is unchanged)
+  and the sampler stops after three in a row **while nothing has answered yet**: one value
+  proves the device is there, and everything after that is its answer rather than its silence.
+  What gets recorded for it is unchanged — the debounce is a separate decision, and giving up
+  early must not become a different verdict.
+
+- **A phase on the collection checklist could never say it had ENDED.** It ended only when the
+  same device started another one, so the last phase of anything spun for ever: a NAS sitting
+  at "reading the metrics 24/24" with a spinner beside it, minutes after it had finished, until
+  the whole module landed. On a fleet that is the slowest device deciding when every other one
+  looks done. And a phase that FAILED had no way to say so at all, so a device refusing
+  connections drew a line indistinguishable from one still being read. Reported from the screen
+  as both, in one sentence.
+
+  A module can now say how a phase ended (`report_progress(state='done'|'fail')`), and those
+  two words are the only part of a phase the core owns — because they are the only part it
+  DRAWS (a tick or a cross) rather than prints. The SNMP sampler says it per device, which is
+  what it knows: answered, or answered nothing. A partial answer is a device that answered — a
+  profile assigned to a device that serves half of it costs those metrics and is the normal
+  case. What gets RECORDED for a silent device is a separate question and unchanged: it is
+  debounced on purpose, because one lost datagram is not an outage.
+
+### Added
+- **A button to LOOK at the test email instead of spending one.** Beside the send, opening the
+  same preview dialog the template editor uses. A test email costs a real message to a real
+  inbox, and "does the header look right" is a question nobody should have to answer by going
+  to find it in somebody else's mailbox.
+
+  The preview and the send now build the message in one place, with the same config the form
+  currently holds — unsaved edits included. Two copies of "what the test email is" is a preview
+  of an email nobody sends, and a customised HTML template that breaks it is exactly the case
+  somebody most wants to see before pressing send.
+
+- **Notification emails carry the logo.** In the header, beside the name — the mark and not
+  the full lockup, because the header already says "ServiceSentry" in text and the wordmark
+  would be the same name twice.
+
+  It travels WITH the message and the HTML points at it by content id. The two obvious
+  alternatives both fail somewhere that matters: a remote `https://` src needs the panel to be
+  reachable from wherever the mail was opened (it usually is not, and Gmail and Outlook block
+  remote images by default anyway), and a `data:` URI is stripped outright by Gmail.
+
+  The sender attaches it only when the body it was handed actually references the id — a part
+  nothing points at is a paperclip on a notification, and that rule is also what lets a
+  hand-edited HTML template get the logo by writing `cid:ss-logo` and nothing else. Missing or
+  unreadable, the header is the name alone: an email that goes out without its logo is a small
+  thing, one that does not go out because a PNG was missing is not. The template previews swap
+  the id for the panel's own copy, since a browser resolves a `cid:` to nothing.
+
+- **An SNMP device that answers nothing has a row of its own in the notification routing.**
+  It was indistinguishable from any other check going down: one line among forty in a digest,
+  with nowhere to say "these are the ones I want to hear about". A device that answers nothing
+  is the collection not happening, not a check that found something wrong.
+
+  A module can now name the KIND of one alert (`send_message(kind=…)`), declared as a notify
+  event in its own manifest so it appears in the routing matrix like every other. Two rules
+  keep it safe: the kind has to be REGISTERED — a matrix cell is stored only when ticked and
+  reads false until then, so an unknown kind would route to no channel at all and the alert
+  would silently stop arriving — and it never survives a recovery.
+
+  The new row is ADDITIVE: a channel takes the alert if either row is ticked. Routing it by
+  the new kind alone would have quietly stopped every one of these that arrives today as a
+  `down`, on every installation, until somebody opened a screen they had no reason to open.
+
+- **The device list has a "collect from all" button.** The per-device one narrows its run to
+  that device; this is the other question — refresh the whole list — and it is the un-narrowed
+  run, so the orphan prune stays on because this run really did cover everything.
+
+  What it runs is the union of what each machine IN THE LIST would run, which is narrower than
+  "everything enabled": written the other way it swept up the modules that watch no device at
+  all — a Microsoft 365 tenant, an Azure subscription — and opened on seventeen lines for a
+  fleet of seventeen machines. A cluster check counts through `host_uids`, the core's own
+  multi-host binding, or a module watching eight machines on that very screen is left out of
+  the button that says it collects them.
+
+  It asks first, which the per-device button does not: that one is quick and is about the
+  machine in front of you, while this costs what a scheduler cycle costs and makes every check
+  alert on what it finds. It is behind `devices_view` as well as `infra_collect` — the flag
+  says which act you may perform, and a run over every machine is only offered to somebody who
+  sees every machine.
+
+### Changed
+- **The Telegram test message is a Telegram notification.** It was a hand-written Markdown
+  one-liner while every real notification goes out as HTML through one formatter — so the test
+  was the only message this panel sends that looks like nothing else it sends, and it could
+  not answer the question somebody presses it for. It broke differently too: Markdown chokes
+  on the underscores and asterisks that module names are full of, which is precisely why the
+  real path moved to HTML.
+
+  It now goes through that formatter: icon and bold title, the machine as inline code, the
+  body as a quote block, a dimmed timestamp. Its kind is presentation only — nothing
+  dispatches it, so it gets no row in the routing matrix.
+
+- **"Collect now" collects THAT device, and not the whole fleet.** Each module ran with its
+  whole configuration, so asking a NAS for fresh numbers walked every other device that module
+  watches — on an SNMP fleet, minutes of somebody else's equipment for a number the operator
+  asked about one of theirs, and, when one of those others is not answering, a collection that
+  never lands. Reported from the screen as a dialog stuck on "still working" listing six
+  devices, five of which nobody had asked about.
+
+  It ran wide for a real reason: the monitor prunes from the state it just wrote every key the
+  run did not report, so a narrowed run would have deleted the other machines' live state. The
+  prune is now off for a narrowed run — "this run did not find that key" and "this run was
+  never asked about it" are different statements, and only the first is a reason to delete.
+
+  The narrowing is applied in one place, `ModuleBase.get_conf`, because all twenty modules
+  enumerate their items the same way; no module knows what a scope is. The collection it
+  narrows is the one the module's own schema declares (`list`, `servers`), and a module's own
+  settings are not items. SNMP's registry-only devices — the ones with no item to narrow — are
+  narrowed by the same uid in `devices_to_sample`.
+
+### Fixed
+- **A MIB that cannot compile was retried on every single run — 66 seconds of it.** "Pending
+  compilation" is decided by timestamps: no compiled module, or one older than its source. A
+  file that cannot compile has neither, for ever, so it is pending for ever — and because the
+  automatic compile is called from the watchful's constructor rather than once at startup,
+  "every run" means every scheduler cycle and every "collect now".
+
+  Measured on a real library: four raw MIBs that can never compile (deliberately broken test
+  fixtures somebody had imported) cost **66 seconds before the first OID was asked** — pysmi
+  parsing them and then reaching for the HTTP mirrors after the dependencies they name. Four
+  is under `AUTO_COMPILE_LIMIT`, so even the brake that exists for large libraries never
+  engaged. Reported from the screen as "why does it take so long to start collecting SNMP".
+
+  The automatic compile now consults the failure store the MIB manager already writes and
+  shows, using its rule for whether a recorded failure is still true: not compiled since,
+  source still there, same bytes as when it failed. It also records its own failures, which
+  only the manual job did — without that the skip could never engage for a MIB nobody compiles
+  by hand. Replacing a broken MIB with a fixed one changes its size and mtime, so the retry
+  comes back by itself. 66 s → 0.15 s.
+
+- **"Collect now" left out the collection on a device the registry alone makes a device.**
+  A switch, a router or a NAS read over SNMP has no check and no module item: the device
+  profiles on its own record ARE its monitoring, and the module samples it every cycle without
+  anything else existing. What the button offered was worked out from what had been RECORDED
+  about the machine — which, for a device that has never been sampled, is nothing. So a NAS
+  whose module item had just been removed offered to collect its ping and left out the SNMP,
+  and the button that exists to take the FIRST sample was the one thing that could not take
+  it. Reported from the screen a minute after the item was removed.
+
+  The rule is now DECLARED rather than inferred: a host profile may name the field that turns
+  a connection into a collection (`samples_when`, `device_profiles` for SNMP), so the core
+  answers before the first cycle and still names no module. A community with nothing assigned
+  to it is unchanged — SNMP reachable is not SNMP sampled, and the sampler skips it too.
+
+### Added
+- **Maintenance can find and delete readings nothing owns any more.** A reading is filed under
+  the key of whatever produced it — a module item's key while an item exists, `host.<uid>` for
+  a device read from its own record — and neither is deleted when its owner is. Reported from
+  the screen: a NAS whose module item had been removed showed zero on every tab while
+  **18.881 of its samples** were still in the table, under a key nothing could resolve. Not
+  deleted, not reachable, and counted by nothing.
+
+  The new action reports what it found — series and rows, per table and per module — and only
+  then offers the sweep: "the item is gone" and "the data is worthless" are different
+  statements, and the second is the operator's to make. It sits with the DELETIONS and not
+  with optimize/compact, which reclaim and re-measure and destroy no record; grouping it with
+  those would have put a delete under the heading that says otherwise.
+
+  What it must not touch is the careful half: the rows of a table an item samples
+  (`<item>/<row>`), derived keys (`<item>_<suffix>`), a device read from its own record, an
+  item keyed by its own name rather than a uid, and every module the configuration no longer
+  mentions — absent means "not added", which is also what a module whose folder was moved
+  looks like, and deleting its history for that would be the sweep doing the very thing it
+  exists to prevent. The purge finds them again itself rather than trusting the list the
+  browser was shown, because a cycle in between may have recorded a reading under a key that
+  now has an owner.
+
+### Changed
+- **A device can now say it runs no commands at all** (`none`, and it is the default). `kind`
+  answers "how does the panel run commands on this box", which is not what the box IS
+  (`device_type`) nor which protocols it answers (`profiles`) — and it offered only `local`
+  and `remote`. Most of a fleet is neither: a switch, a router, a UPS or a NAS read over SNMP
+  has nothing to run a shell command on. It defaulted to `local`, which is not "nothing" — it
+  is the panel's OWN machine — so a check bound to a newly added switch measured the panel and
+  filed the answer under the switch's name, with no error and no warning. Both places that run
+  a command now REFUSE for `none` instead of falling through to the local branch, which is
+  what makes the option mean something: an unrecognised value normalises to `none` and not to
+  `local`, for the same reason. Nothing stored moves — a machine somebody set to `local` is
+  one whose checks are meant to run here — but a host created without saying will no longer
+  run them on the panel by default. A check with no host at all still runs locally: that is
+  the classic inline check, and it says so by having no device to disagree with.
+- **The host dialog no longer carries a Logs tab.** The dialog is where a device is
+  configured; the Infrastructure section is where it is looked at, and a machine misbehaving
+  is looked at there. Two copies of one syslog table, with two filter bars and two pagers, is
+  two places for them to stop agreeing — and the second is always the one nobody updates.
+  Removing it needed one thing fixing first: the auto-refresh tick looked up the DIALOG's tab
+  pane and stopped when it was missing, so the first tick on the section that does carry the
+  logs would have switched itself off, with nothing to say so beyond rows that stop being new.
+  It is keyed on the table now, and skips a fetch while the table is on a hidden tab
+  whichever screen that is.
+- **A device read by its own profiles was labelled "monitored by nothing".** Reported from
+  the screen: every switch in the rack wore a red badge saying so while the panel was
+  collecting from it every cycle. Coverage counted MODULES, and a device polled over SNMP has
+  no module item at all — the profiles assigned to its record ARE its monitoring, and that is
+  exactly what the collection samples. It now has a bucket of its own rather than being folded
+  into "everything is fine": what is worth saying about those machines is that nothing was
+  added to them and their own record is what the panel works from. Decided by the declared
+  FIELD (`device_profiles`) and not by naming a protocol, so a second one that declares it is
+  covered the day it arrives.
+- **…and a coverage answer with no bucket did not draw an empty group — it threw.** The
+  buckets were written out by hand beside the order they are drawn in, so the fourth would
+  have taken the whole section down. They are built from that order now, and an answer nobody
+  recognises lands in the one for gaps instead of nowhere.
+- **The fleet list had a column headed "Tipo" that was the CONNECTION type.** It printed
+  `local` / `remote` — raw, untranslated — under a heading that everywhere else on that screen
+  means hypervisor / NAS / switch. Now there are two: the device type, with its icon, and how
+  it is reached, in words.
+- **The device's identity column no longer repeats the header above it.** It led with the
+  registry's own record — address, type, how it is reached, OS, description — and every one of
+  those is already on the page or one click from it: the header carries the name, the address,
+  the state and the tags, and the rest is the registry's, behind the button that opens it. A
+  card that restates the line above it costs a screenful and answers nothing new. What stays
+  is what the DEVICE says about itself, which is the half nothing else on the page shows.
+
+### Fixed
+- **The interfaces rail stopped short of the bottom of the window.** Reported from the screen
+  on a device with sixty of them: the rail ended with a band of empty page under it, and the
+  list carried on scrolling inside a box smaller than the room it had. Its ceiling was
+  `calc(100vh - 13rem)` — a guess at everything above and below it (the app header, the
+  breadcrumb, the section's own header), and on that page 208 px too many. A rail that STICKS
+  can use exactly the height of the box it sticks inside, and that is a number only the layout
+  knows: `capToScrollBox` measures it once the page is laid out and again when the window
+  changes. On the reported layout, 727 px of ceiling became 868. The box's height and not the
+  rail's distance to the bottom of the window, because the rail moves — it starts under the
+  section header and slides up until it sticks, so an answer taken from where it happens to be
+  is wrong at every other scroll position. The stylesheet's constant stays as the floor for
+  the lists that do not stick inside anything (the jobs dialog, where a fraction of the
+  viewport is exactly right).
+
+### Performance
+- **Opening a device in Infrastructure took seconds, and the URL changed before anything
+  else did.** Reported from the screen, and the URL was the clue: it is rewritten
+  synchronously and everything after it waits on the network. About **700 ms** of that wait
+  was one call — the page asking for the WHOLE fleet's history index and reading four fields
+  of it. `get_index` also counts each series' samples, dates the first and works out the
+  uptime, and pays for that twice over: the aggregate is a second pass across the table, and
+  its grouping key `COALESCE(item_uid, module || ':' || key)` is an expression no index can
+  serve, so both passes sort the lot in a temporary B-tree. The page reads none of it — the
+  index is a FALLBACK there, for a check with no live state. A new `latest_by_series` asks
+  only for the last sample of each series, grouped on `(module, key)`, which is how the rest
+  of the product addresses a series and exactly what `idx_history_mkts` is ordered by: the
+  grouping streams off the index instead of sorting. Against a real 54.000-row history,
+  **777 ms → 67 ms**, the same series with the same values — and narrowed to the modules
+  actually bound to that machine, since the fallback can only ever contribute one of its own.
+- **…and the one navigation with somebody waiting was the one with no feedback.** The device
+  view paints its spinner only into an empty pane — the guard that stops a refresh blinking a
+  device already on screen — and arriving from the fleet list the pane is not empty, it holds
+  the table. So a click did nothing visible until the payload landed. The click path says so
+  before going to ask; the other callers, which re-render what is already open, are unchanged.
+
+### Fixed
+- **A machine with nothing to collect answered "Modules directory not configured".** 500 and
+  not 409, which reads as a broken server and is neither the truth nor actionable. The
+  precondition of RUNNING — the executor loads the modules' code from that directory — was
+  checked before working out whether anything was going to run at all. What a machine with no
+  checks bound to it has to say is "there is nothing to collect", and that answer does not
+  depend on where the module code lives: the configuration this reads comes from the database.
+  Caught by the integration suite, which had never been run against this route: three of its
+  tests asked for 409 and had been getting 500 since the route was written.
+- **A MIB compile's thread could die on the entry it was writing into.** A job is collected
+  by the first status poll that sees it done, so its registry entry can be gone while the
+  thread that owns it is still writing — and indexed directly that is a `KeyError` raised on a
+  daemon thread: the traceback goes to stderr, the thread stops where it stood, and the
+  compile it was recording is never recorded. A job that ran, finished, and left no trace of
+  either. Every write the worker makes now goes through one helper that tolerates the entry
+  being gone. Surfaced by CI as eight `PytestUnhandledThreadExceptionWarning`s — nothing
+  failed and nothing went red, which is the same shape as the bug itself.
+- **Two fields in the device form were both labelled "Tipo".** One is WHAT the box is
+  (hypervisor, NAS, switch) and the other is HOW the panel reaches it (local, or over SSH);
+  with the same word on both there is nothing to tell them apart, and the hint under each was
+  doing the whole job. Now "Tipo de dispositivo" and "Cómo se le llega". Nothing failed here
+  either — the form was simply unreadable.
+
+## [0.0.1+build.115] - 2026-08-24
+
+### Added
+- **A switch's VLANs, from the table every other tool reads them in** (`bridge_vlans`,
+  Q-BRIDGE-MIB — standard, so any switch that does 802.1Q answers it whoever made it). The
+  interface table only says a row is "virtual": it cannot say which VLAN it is, what it is
+  called, or that it exists at all when nothing is bridged to it yet.
+- **…and a profile can say the whole PIECE is not there** (`present_when`). An agent answers
+  a table whether or not the hardware behind it exists: SYNOLOGY-GPUINFO-MIB is answered by
+  every NAS, GPU or no GPU — utilisation 0 %, memory 0 B — so the summary of every one of them
+  grew a GPU card saying nothing. Zero is a reading and cannot say "there is nothing here" on
+  its own, and the panel may not decide it either: the profile names the column that is the
+  evidence, because a GPU with no memory at all is not a GPU that is idle. A reading that is
+  MISSING is not a reading of zero — the piece stays present, or one lost datagram would empty
+  a summary.
+- **A state can say the thing IS NOT THERE** (`"absent": true`). A passive switch answers
+  "fan: not present", which is true and is not news — the summary answers "how is this box",
+  and a component the box says it does not have has no condition to report. It stays in
+  Measures, where the question is what it said rather than how it is.
+- **A switch's overall traffic, as a graph** (`"aggregate": "sum"`). Every other monitoring
+  tool draws it and no agent serves it: it is the sum of the ports, and only something holding
+  all the ports at once can add them up. Unlike the tally on the screen this is a MEASUREMENT —
+  summed where the reading happens, so it lands in the series like any other, which is the
+  difference between a number on a card and a graph with a week behind it. Each row keeps its
+  own baseline: summing raw counters and differentiating THAT would spike every time a port is
+  added. Only the Ethernet ports are summed, because a switch's VLAN interfaces carry the
+  traffic that already crossed a physical port and the total would be about twice the truth.
+- **Details draws the figures that are a SHAPE.** `chart: "area"` is already the profile's word
+  for "this is a shape over time and not a level" — the CPU it is busy with, the power it is
+  drawing, the traffic crossing it — and those are what somebody opens that tab to see the
+  shape of. Capped at four, and the cap is the reason the tab drew none before: the history API
+  answers one series per call, so eighty sparklines is eighty requests. Everything else keeps a
+  button, which costs nothing until it is pressed.
+- **A profile can say a column is worth COUNTING** (`"tally"`), and the summary draws how many
+  of its rows are in each state. Twenty-four ports each with a badge answers "what is each port
+  doing" and not "how is this switch", where the number wanted is "six up, eighteen down". The
+  core cannot decide that on its own — it would have to know that an interface's state is worth
+  adding up and a disk's serial is not, which is knowledge about a MIB.
+- **…over the rows the table says its summary is about.** IF-MIB counts everything a switch has
+  an ifIndex for — the VLANs, the aggregates, the loopback, the CPU port — so a 24-port switch
+  first reported "60 in total", which is true of the MIB and wrong about the box. Filtered by
+  what the DEVICE says each row is (`ifType`), the same rule and the same predicate the row
+  summaries already use.
+- **…and `"all"` for the one summary whose subject is the rows the other leaves out**: how many
+  of each KIND of interface there are, which answers "how many VLANs" and "how many LAGs". Its
+  own metric over the same column, because `ifType` is a FACT (what the port filter matches on)
+  and a count needs a number: one reading of the device answering two questions about it.
+- **A count is a question, so every count opens — onto a screen of its own.** "21 Virtual
+  (VLAN)" is the summary and "which 21" is the next sentence, and the answer is not a row of a
+  table: a port is a thing with a state, a speed, an address and four counters worth a graph
+  each. So the count opens onto the interfaces on a rail, with the one you pick beside it —
+  what it is, what it is doing, and its counters drawing themselves. The rail marks the ports
+  that are down, so which one to open is readable without opening any: the worst of whatever
+  that row's own columns declare a level for, so the core names no column. WHICH rows are
+  behind a count travels WITH the count, from the side that did the counting — the rule that
+  decides what a count is about lives there, and a screen re-deriving it would be a second
+  implementation free to disagree, and the day it did a switch would say "28 Ethernet" over a
+  list of thirty.
+- **A chart can be given the whole work area.** A week of two series in a 380 px card is a
+  shape you can see and not one you can read. The card grows to fill everything the panel gives
+  a section — the screen minus the sidebar — with the rest of the page underneath it, and comes
+  back with the same button (now pointing inwards) or with Escape. Not the browser's own full
+  screen, which answers the same question by taking the panel away with the picture: no
+  sidebar, no breadcrumb, nothing around the chart, a way out that is a browser gesture rather
+  than something on the page, and an offer a policy or an iframe can refuse outright. It
+  animates between the two rectangles by their four edges rather than by a transform, because
+  a scaled card stretches its own text on the way there and back, and it leaves a gap the size
+  of itself behind — without one the cards beside it close over the hole the moment one is
+  expanded, and it is given back to a family that has rearranged itself.
+- **…and the control is only there while there is a chart.** Reported from the screen: a card
+  showing one number — a processor temperature — carried an expand button next to the one that
+  draws the chart. Expanding a picture that is not there is not an offer; it is a second icon
+  on every card that has a series, which is how a pair of controls stops reading as controls
+  and starts reading as texture. It follows the chart at all three of its ends, including the
+  one that is easy to miss: a device with nothing recorded yet leaves the box open with a line
+  of text in it, and there is nothing to enlarge about that either. The control still sits
+  WITH the one that draws the chart rather than on top of the picture, where the one thing it
+  covered was the picture.
+- **A screen for what the panel is doing when nobody is looking at it** (`/jobs`, permission
+  `jobs_view`). A collection polling forty machines, a copy of the database, a MIB tree
+  compiling, a profile being tested: four pieces of work in four background threads, each with
+  its own dict of jobs in its own module, each visible ONLY from the page that started it —
+  navigate away and it carried on with nowhere to look at it. "Why is the panel slow" and "did
+  my backup finish" had no answer anybody could reach. The core names nobody: a package that
+  runs work in the background declares it in its own manifest (`BACKGROUND_JOBS`) and the
+  screen collects whatever is declared, the same way permissions, overview widgets and notify
+  events already work. It STARTS nothing and STOPS nothing — every row is work another
+  permission already let somebody begin, and a control here would be a second way into four
+  pieces of machinery from one place that understands none of them. Granted to `viewer`
+  deliberately, for the same reason.
+- **A job interrupted by a restart vanished completely.** Reported from the screen, and it is
+  the worst shape a gap can have: it did not end and it did not appear to have started. Gone
+  from the live list, because that lives in the process that died; never in the history,
+  because the row was only written when a job FINISHED. The row is now opened when the work
+  starts, in state `running` — and a row still in that state when the process comes back up
+  belongs to a run that is gone (a job is threads in one process and dies with it), so those
+  are closed as **interrupted**. Amber, not red and not green: "we do not know how it went" is
+  its own answer. A row still open stays out of the history and on the live list, because it
+  is the present.
+- **A finished backup showed a printed Python dict.** `{'part': 'core', 'ok': True, 'tables':
+  42, 'rows': 20723, 'error': ''}` — a step of a copy is a dict that package composes, and
+  only that package knows what its fields mean. It translates its own words now; a count of
+  zero is not a count, because a part with no tables is not a part with "0 tables".
+- **The history tab's badge stayed blank until the tab was opened**, which is the one moment
+  the number is no longer news. It came from the loaded list; it comes from the live answer
+  now, as a `COUNT(*)` on a capped table rather than the hundred rows.
+- **A module that overran its deadline was drawn as FAILED.** Reported from the screen with
+  both windows open at once: the collection dialog said "still working" and the jobs list, at
+  that same moment, showed the SNMP module in red — and the collection dialog was right.
+  `timeout` means the batch's deadline passed; the module did not stop, and nothing can stop
+  it. It also counted as finished, so the bar sat at 1/1 under the word "running". Two screens
+  contradicting each other about one module at one moment, which is worse than either being
+  wrong on its own.
+- **…and the dialog it opens now draws the columns the collection dialog draws** — which
+  device, what is being done to it, how far through. A step travels as `{state, text, scope,
+  n, total, note}` instead of one flattened sentence: "erebor · Reading the metrics · 2/24
+  Disks" is the same words with the thing that makes forty of them scannable taken away.
+- **A dialog closed with the X reopened itself on the next visit to the section.** It was
+  checked against a variable rather than against the dialog, and closing one tells this file
+  nothing — so the variable outlived the dialog, and coming back repainted, saw it set, and
+  opened a dialog nobody had asked for.
+- **…and a running job opens onto its own checklist.** A list row gets one line, which
+  answers "is it going" and not "what is it doing" — and on a collection that has been running
+  four minutes those are different questions. The steps come from the package doing the work;
+  this screen colours four words (`pending`, `running`, `ok`, `failed`) and knows nothing else,
+  so a package reporting a fifth gets a line with no mark rather than a wrong one. The dialog
+  keeps up with the job, and a job that ENDS while it is open does not close it: that would be
+  the screen taking the answer away at the moment it arrived.
+- **…and a history of what each one DID** (`job_history`). The live list answers "what is
+  happening"; nothing answered "what happened". Every job lived in a dict in the process that
+  ran it — the collections were forgotten half an hour after they ended and the rest went with
+  the next restart — so "did last night's collection finish", "why did Tuesday's backup fail"
+  and "how long does this normally take" had no answer at all. Written where the work ENDS and
+  not where somebody looks: archiving from the screen would make a job nobody happened to open
+  a job that never happened. Each row carries what it was, what it was working on, how far it
+  got, how long it took and everything it said while doing it. The log is capped, keeps the
+  END of itself — that is where whatever went wrong is — and says how many lines it dropped,
+  because a log that silently stops is one nobody can trust the end of. Two limits, because
+  they answer different questions: how many are kept and how far back
+  (`web_admin|jobs_history_keep` / `_days` / `_lines`, 500 / 30 days / 200 lines).
+- **…and the server's clock travels with the answer.** "Running for 4 minutes" is arithmetic
+  on two clocks otherwise, and a laptop a minute out would show a job that started in the
+  future.
+- **Two machines cannot hold the same address on one network**, so the map stops drawing them
+  as neighbours. Reported from the screen: two NAS both showed as living in 172.17.0.0/16 and
+  cannot reach each other — it is `docker0`, every machine running containers has one, every
+  one of them is 172.17.0.1, and they are as many separate networks as there are machines.
+  Detected from something universally true rather than from knowing what Docker is: if both
+  claim one address, either it is not the same network or one of them is unreachable, and
+  drawing them together is a lie in both cases. Each gets its own plate, saying so.
+- **The network map is a tree now, read downwards.** Reported from the screen as "you cannot
+  see any of it", and the picture explained why: a lane per network and a line per membership,
+  which on a router that declares twenty-nine routes came out as twenty-nine lanes — twenty-five
+  of them with nobody in them — 3744 px tall, with every line crossing the same ten-pixel
+  channel to place five machines. Two rules replaced it. **A network with nobody in it is not on
+  the map**: it is a route the router declares, and it belongs in a sentence under the picture
+  rather than as a lane the eye has to skip. **Membership is not a line**: a machine hangs off
+  the network it is in, one short elbow, and the second network it is also on gets a thin dashed
+  one — because that IS the rare case and drawing it faintly is what says so. What is outside
+  goes on top, then the ways out, then the networks, then what is on them. Same fleet: 342 px
+  instead of 3744. A machine is still drawn exactly ONCE, and the four kinds of line are still
+  told apart, because each is a different claim.
+- **…and a cloud is drawn only when something reported a route off the fleet.** An "internet"
+  above a set of machines that never mentioned one would be the map inventing the one thing it
+  is there to show.
+- **A card that draws a shape takes the line it is on.** Four across left the traffic chart
+  about 380 px wide, with a week of two series in it. A number is a card; a shape is a figure,
+  and one sharing a row with three numbers is one nobody reads. The plain figures group above
+  them, because a full-width card in the middle of the run strands the ones before it on a
+  line of their own.
+- **Two columns can be ONE picture** (`chart_with`, `chart_label`). Traffic in and traffic out
+  are not two questions — nobody looks at what a link received without looking at what it sent
+  — and two charts side by side, on two y-scales fitted separately, is that comparison made
+  impossible. One card with both figures, one chart with both lines on one axis, one request:
+  they are columns of the same result, so every point already carries both numbers. Which
+  columns are a pair is the profile's word, because the core would have to know that in and
+  out belong together and that CPU and temperature do not. A declared companion the device
+  never answered is dropped rather than drawn as an empty line with a name on the legend.
+- **One card per counted value.** All of it in one box came out as "28 Ethernet 1 22 1
+  Loopback 21 Virtual (VLAN)": a run of numbers and words with nothing between one pair and
+  the next, where the eye has to work out which figure goes with which word. A mark is drawn
+  only where the level SAYS something — every interface type is `info`, and a grey dot in
+  front of all six of them is six pixels of nothing repeated; up and down are not, and they
+  keep their tick and their octagon.
+- **The types a real switch actually answers.** IANA's list runs past 300 and a profile writes
+  down what a person meets: a console port (22), a serial line, Fast and Gigabit Ethernet, a
+  tunnel, an aggregate. A value with no declared word now reads as its code rather than as a
+  bare number — "1 22" under a heading that says "Interface type" looks like a label the panel
+  lost, not like a value nobody has named yet.
+- **`.ss-widebody` / `.ss-scrollbox`**: content that asks the dialog around it for room, and a
+  table that scrolls inside a box owning both of its bars.
+
+- **The counts get a section of their own, and it reads last.** "44 up, 10 down, 6 not present"
+  beside "CPU 7 %" is two kinds of answer in one row, and the eye has to work out which number
+  belongs to which sentence. By shape and not by name — a section with nothing to open in it —
+  so a profile that gains rows moves back up on its own.
+
+- **…and one row of one machine can turn the verdict back on** (`infra_watch`). Two levels of
+  decision, and they belong to different people: the profile knows what `ifOperStatus` means
+  on every switch ever made, and only whoever ran the cable knows that gi3 goes to the server.
+  So the row is marked where the row is — in the interfaces view, with a bell on the rail so a
+  watched port is findable without opening every one — and it is recorded against the MACHINE
+  rather than in a profile, which describes equipment in general. The one thing this section
+  writes, and it deliberately writes no name, no address and no credential: the registry stays
+  behind its own permission, this one is its own flag, and the audit log says who decided what
+  the panel would report.
+- **`ifAlias` is read** — the one column of IF-MIB a person fills in, and the label that says
+  whether the cable goes to a desk or to a server. Empty is the normal answer and is skipped:
+  a blank description filed on sixty ports is a column of nothing.
+- **A column can COLOUR without JUDGING** (`"verdict": false`). `level` was doing two jobs:
+  it paints the badge and it decides whether the machine is in trouble. For a fan or a power
+  supply those are the same answer; for a switch port they are not.
+### Performance
+- **A collection rewrote the whole `check_state` table once per module.** Reported from the
+  panel as "it takes ages and the pages go slow while it runs", and the second half was the
+  measurable one: a run saves after every module it finishes, and saving replaced the ENTIRE
+  table — read it all back, `DELETE FROM check_state`, insert it all again — so eleven
+  modules' rows were read and rewritten to record the twelfth. Measured on a fleet-sized table
+  (1400 rows, twelve modules): ~60 ms a time, **three quarters of a second per run**, with a
+  page load waiting 3.3x longer for every read while it happened. A module now writes back its
+  own rows and reads back only its own: the same run costs **77 ms instead of 782** — ten
+  times less — and a reader waits 2.6x instead of 3.3x. The rules are unchanged: a row keeps
+  its `uid` and its `last_change_ts` while its status holds, and a row the module stopped
+  reporting is still gone.
+- **...and a monitor with no database would have failed every module it saved.** Its status is
+  then a plain `ConfigControl`, which has no per-module write — and the `AttributeError` is
+  swallowed by the executor's own `except`, so the module would have been recorded as having
+  FAILED for the sole reason that it was saved. Asked for rather than assumed, and the
+  whole-table write is the fallback.
+- **...and the other half of that report was an SNMP engine built once per OID.** Rebuilding
+  it is what the client did on every GET and every walk, and it costs about **a second** —
+  measured on loopback against a local agent answering instantly, so none of it is the network
+  or the device. Two things happen inside `SnmpEngine()` and pysnmp does both once per engine:
+  it recompiles thirteen MIB modules from their Python source (`runpy.run_path` compiles the
+  file each time, so the `.pyc` beside it is never what gets used), and the first OID resolved
+  builds a **full LALR parser for the SMI grammar** — an ASN.1 compiler, constructed to look
+  up an OID the caller already holds in numbers. Neither is a cost of asking anything; both
+  are costs of *being* an engine. A device carrying the whole shipped catalogue is 348 reads,
+  so a sampling cycle was **365 seconds of which about six were the device** — and that second
+  per read is CPU, spent by a sampling thread pool inside a process that is also serving
+  pages, which is the "goes slow while it runs" half. The engine, its transports and its
+  credentials are now built once and kept, on one event loop of the module's own: the same 348
+  reads against the same agent take **5.9 seconds**. Safe to keep, and pysnmp is written for
+  it — its local configuration datastore configures per target, so one engine serves many
+  devices, and v3 time sync is discovered per device and expires after 300 s, so a device that
+  reboots is re-discovered rather than locked out. Verified against two local agents answering
+  deliberately different values, forty walks concurrently: no answer arrived from the wrong
+  one.
+- **The panel no longer needs a loop of its own to ask anything.** `asyncio.run` refuses on a
+  thread that already has one running, so the module used to hand that case to a thread it
+  spawned per call. Everything now runs on the SNMP loop, so no caller is asked for one and a
+  wedged device holds up only its own caller.
+
+### Fixed
+- **Two machines sat in warning with every reading they answer green.** Reported from the
+  panel about two NAS, and nothing on the screen said why: no failed check, no severity, no
+  message. A host is `warning` when it has enabled checks and none of them has been evaluated
+  yet — the newly-added case — and that is what it was saying. Each NAS has one enabled SNMP
+  item with **no OID checks and twelve device profiles**, so all 295 of its readings are filed
+  as `<key>/<row>` or `<key>_<metric>` and not one of them under the item's own key. Looked up
+  by key alone the check was absent, so the machine reported "I have a check nobody has
+  evaluated" about a check evaluated 295 times a cycle. The switches and routers were fine
+  throughout, which is what made it hard to see: they have no configured item at all and are
+  rescued by the `host.<uid>` branch further down. Results are now indexed by the `item_uid`
+  they name — the same uid the configuration keys the check by, so no result key has to be
+  taken apart — and a check that answered only sub-metrics has been evaluated. One bad row
+  among forty still makes the check bad, a check with no results at all is still pending, and
+  a result under the check's own key still wins.
+- **A port that is switched off was counted and painted as a port that is down**
+  (`quiet_when`, plus a state that carries its own mark). One column says what something is
+  DOING and another says what somebody ASKED it to do: down while it was asked to be up is a
+  fault, down while it was asked to be **down** is a switch in the off position, and reporting
+  that as a fault is reporting the administrator's own decision back at them. Reported from
+  the panel about `ovs-system`, `sit0` and three VLAN interfaces — all `ifAdminStatus = 2`,
+  Open vSwitch's datapath device and the IPv6-in-IPv4 tunnel device being down by design and
+  always will be. The profile names the column that excuses this one, by FIELD rather than by
+  OID, so the rule is written in the same words as the rest of the profile and everything
+  downstream applies it without walking anything. It is a state of its own — "Switched off",
+  with its own mark — and not a `Down` with the colour taken out: relabelling still says the
+  wrong thing on the card. Row by row and never column-wide, so `docker0` on the same box,
+  admin-UP and genuinely down, goes on saying so; and a row whose evidence is missing is not
+  excused, because treating silence as permission would quietly stop reporting the faults this
+  exists to keep reporting.
+- **…and the mark a state declared never reached the screen.** `states_of` REBUILDS each state
+  rather than copying it — the right shape for something that ends on a screen, and also how a
+  declaration goes missing. The profile said `icon`, the normaliser kept it, the projection
+  dropped it: the state arrived with nothing to draw, the interface rail went from a wrong mark
+  to no mark at all, and nothing anywhere said why.
+- **The Infrastructure list stopped short of the bottom of the work area.** The flex chain that
+  gives a section the height of the pane runs pane → container → card, and every other list
+  puts its table straight into the pane's own child, which `createListTable` makes `ss-vfill`
+  itself. Infrastructure is the one hand-written pane whose table lives a level deeper
+  (`#infra-fleet` inside `#infra-container`), so the chain broke at the container: the table
+  ended under its last row with the rest of the screen empty below it, and the device view did
+  not fill either. One class, the same one the generated sections' containers already carry.
+- **Half the columns of a wide table were off the edge of the dialog, unreachably.**
+  `.modal-dialog-scrollable` scrolls the body vertically, which left the `.table-responsive`
+  as tall as its table and put its horizontal scrollbar at the bottom of forty rows — below
+  the fold, so the way to the columns you could not see was past everything you wanted to
+  read. Answered by not having a table: seventeen columns is not what a port is, and the
+  interfaces view above is what replaced it.
+- **A 28-port switch with nine empty ports was permanently in error.** An access port with
+  nothing plugged into it is `down`, IF-MIB says so, and the profile said `down` is bad — so
+  the switch was red because nine of its ports had no cable. That is the state that stops
+  meaning anything the first time it is right. Which ports matter is a decision about the
+  installation and the panel has not been given one; a switch's own condition is its CPU, its
+  temperature, its fans and its power supplies, and those still report. The red mark beside a
+  port that is down is unchanged — what stopped is it becoming a finding.
+- **A switch's power draw opened a chart nobody asked for.** It is a level, not a shape: 7 W
+  that has been 7 W all week is a number, and `chart: "area"` is the profile's word for the
+  figures somebody opens the tab to see the SHAPE of. It keeps its button, and the traffic
+  chart gets the line it was sharing.
+- **…and the y labels ran into the axis title beside them.** The left gutter was 58 px,
+  which is enough for "8.50W" and not for "13.39MB/s" — two pieces of text on top of each
+  other. The labels are composed before the padding that has to hold them, and the padding is
+  measured from them, with room kept for the rotated title drawn in the same gutter.
+- **A chart's y-axis printed its base unit**: "13420000B/s", five times up the side, running
+  into the axis title on anything narrower than the full width. Scaled through the same
+  formatter as every other value on the screen, and in ONE unit for the whole axis — taken from
+  its top, because scaling each label on its own gives "13.4 MB/s" above "980 kB/s", an axis
+  that changes unit halfway up.
+- **A link's speed read as 1000000000 bit/s.** A rate climbs in THOUSANDS: a gigabit is 10^9
+  bits per second by definition — it is what is printed on the port, the cable and the invoice
+  — and scaling it in 1024s would answer 0.93 to a question everybody already knows the answer
+  to. Bytes still climb in 1024s, because an agent reporting memory and disk means that.
+  Matched on the shape of the unit, so anything recorded "per second" reads properly.
+- **An MTU read as 1.46 KiB.** It is a count of bytes and not a quantity of storage; 1500 is
+  the number every network tool prints and the one somebody is comparing against.
+- **A MAC address was recorded as `0x94103e692443`.** That is what an OctetString with nothing
+  printable in it prints as, and it is the same six bytes that are on the sticker, in the
+  switch's own CLI and in every other tool — written the way nobody writes them. Spelled once,
+  where it is recorded, on the ROLE the profile declared: a serial that happens to look like
+  twelve hex digits is left exactly as it came.
+- **A coded fact had no word beside the count that names it.** An interface's type arrives as
+  "6"; the profile already says 6 is Ethernet, in the states of the column that counts it. The
+  table reads that map rather than carrying a second copy — which would be a second thing to
+  keep up to date, and the panel naming a MIB's values on its own authority.
+- **The interface breakdown counts a FACT instead of reading the column twice.** It was a
+  second, numeric copy of `ifType` — a series per interface of a value that never changes, and
+  one that needed a fresh collection before it showed anything. What a row IS was already
+  recorded as an attribute, so the count reads that: no extra walk, no dead series, and it
+  works on data already on disk.
+- **`_states` was dropping `absent` in silence**, which is what a whitelist does: every state
+  is rebuilt rather than copied — a profile is data an administrator writes — so a key added
+  to the format and not added there disappears in the one place that would not raise.
+- **…and so was a router's, and a UPS's, and a GPU's.** The same omission in five more vendor
+  profiles: MikroTik reads twelve scalars — temperatures, input voltage, power, fans, both
+  power supplies — and flagged none, so a RouterOS device showed its uptime and its memory and
+  nothing of itself. An APC UPS flagged none of nineteen, on the one device in a rack whose
+  whole reason for being monitored is a number that falls. Flagged now, with the enumerations
+  PowerNet-MIB fixes so a power supply reads as a word instead of a 2 — and only those, because
+  a wrong word is worse than a number. SYNOLOGY-SHA-MIB's cluster states are deliberately left
+  as numbers: those are not something to guess at.
+- **A guard for the omission itself.** It shipped three times before anybody named it: a vendor
+  profile that reads scalars and flags none of them gives its device an empty Details tab, and
+  nothing failed — every test passed, every value was collected, and the screen said nothing.
+  The three profiles that legitimately flag nothing (LAN Manager's activity counters) are named
+  with the reason rather than tolerated, and a headline figure with no icon now fails too.
+- **`hrProcessorLoad` is a headline** — how hard a machine is working, on every device that
+  answers HOST-RESOURCES-MIB rather than only on the ones with a UCD agent.
+- **A switch's Details tab was blank**, which reads as a machine that answered nothing. None
+  of the profiles it carries flagged a single summary figure: a switch's condition is its CPU,
+  its temperature, its fans and its power supplies, and those live in the vendor profile
+  (`linksys_switch`), which had them all and said none of them were headline. Flagging the
+  interface counters instead would have put fifty ports on the summary of every NAS and
+  hypervisor in the fleet, which is the reason it belongs there and not in `if_generic`.
+- **…and its fans and power supplies read as words.** They were integers on a summary whose
+  whole job is to be glanceable. The enumeration is the EnvMon convention rlmgmt reuses, and
+  only the values that convention fixes are declared — anything else keeps its number, because
+  not knowing is a fine thing to say and a wrong word is not.
+- **No device has a blank Details tab now**: uptime is flagged in `sys_generic`, which is the
+  one figure every agent answers and belongs to "how is this box" — a machine that rebooted an
+  hour ago is news. It appears on every device, which is a change to every Details tab.
+- **A device the registry alone makes a device showed four empty tabs and a red badge.** Some
+  machines are watched because somebody configured a check; some because the REGISTRY says
+  what they are — an SNMP profile with device profiles assigned is enough — and what comes
+  back is filed under the host (`host.<uid>/…`) rather than under any item. The fleet column
+  already counted those, so such a switch turned red; the device page built its rows from the
+  configured checks alone, so opening it said "no check points at this device" over four empty
+  tabs. Two answers about one machine, and the one with the numbers in it was the invisible
+  one. Worked out in one place now, from what was actually recorded rather than from a list of
+  which modules sample hosts — a list would be a third thing to keep in step.
+- **…and "collect now" works on one.** It has no item to be enabled, and the button was
+  answering "nothing to run" about a machine whose readings are on the screen behind it.
+- **The checklist froze mid-read under the words "still working".** Both halves were nearly
+  right: the job waits for a module that overran the deadline, and the module keeps working
+  and keeps reporting — but the executor took the progress channel off the moment the batch
+  returned, which was correct when a run ENDED at its deadline and is wrong now that it does
+  not. The channel stays installed until the last straggler lands, and never longer, or the
+  scheduler's own cycles would report into a job that ended hours ago.
+- **…and a straggler saying something no longer ends the run.** Its row is in `timeout`, which
+  is the state that means "still out"; an ordinary progress report was taking it back out of
+  that, so the first word from the module it was waiting for closed the job.
+- **A finished job takes no more reports.** A module can outlive the panel's patience, and
+  once the run is closed its rows are the record of what happened.
+- **A device could be claimed by an item that sampled nothing, and so be collected by
+  nobody.** Reported from the panel: a switch whose own SNMP connection test kept returning
+  OIDs was simply absent from the collection list, with no error, no log line and no row on
+  any screen. The SNMP module treats a host as "covered" when an item is bound to it — but an
+  item carrying OID checks and no device profiles binds without sampling, so it took the host
+  out of the registry fallback and then read nothing from it. Covered now means the item would
+  SAMPLE it, which leaves the deliberate "a disabled item still speaks for its host" intact: a
+  switched-off item is a decision somebody made, an item with no profiles is the absence of
+  one.
+- **…and the module says which devices it is not going to sample**, by name, in the checklist.
+  From the outside the bug looked like a button that does nothing, and the silence was most of
+  what made it unreadable.
+
+### Added
+- **A machine that speaks no LLDP can still be placed on a port** — which is the case the map
+  most needed, because a NAS cannot be given an LLDP agent: DSM has no apt, and a container
+  would not help either, since the panel reads LLDP out of the device's OWN snmpd. What can
+  answer is the switch. Its forwarding table has learned that MAC on one of its ports, and the
+  fleet already records every machine's interface MACs (`bridge_fdb` profile: the MAC's port,
+  the port's interface, the interface's name — three tables the switch answers and joins none
+  of).
+- **A port is only claimed when exactly one machine the panel knows is on it.** Reachable
+  through a port is not the same as plugged into it: everything behind another switch is
+  reachable through the port that switch is on. Counting KNOWN machines rather than MACs is
+  what makes that rule work — a threshold on the number of addresses would throw away the
+  hypervisor whose guests each have one, which is exactly the machine somebody is looking for.
+- **A MAC written four ways is one MAC.** SNMP answers them as raw octets, as `0x…`, colon-
+  separated, dot-separated and with leading zeros dropped — the same address, from four
+  agents, on one network. A comparison that is not normalised is a map with no links on it and
+  nothing saying why.
+- **`net_evidence`: what a device SAW, which is not what a check found.** A forwarding table
+  and an ARP cache are many (one row per MAC), volatile (they age out in minutes), wanted by
+  nobody as alerts, and worth something only joined across the fleet. As results they would be
+  thousands of `check_state` rows and history series churning every cycle. Their own table
+  instead, holding only the current picture, replaced wholesale per device and kind — because
+  an entry HAVING GONE is information, and merging would leave the map drawing a cable
+  somebody unplugged last week.
+- **A profile can say a table is a sighting** (`"evidence": "<kind>"`). The core does not know
+  what a forwarding table is, and a vocabulary written there would be the one device in front
+  of whoever wrote it — so the module declares it and the core files it, the same rule as
+  everywhere else in this domain. `ip_neighbours` (ARP) rides on the same mechanism.
+- **The map draws cables where anything reports one** (`lldp` profile, LLDP-MIB). It is the
+  only thing in SNMP that answers the topology question exactly: everything else on that
+  picture says who can REACH whom, and a device reporting an LLDP neighbour is saying it sees
+  that machine down one of its own cables, on that machine's port 3. One row per neighbour AND
+  port, because a device with two cables to the same switch is two links; probe-gated and in
+  the generic groups, so a machine without an agent costs one walk that answers nothing.
+- **A cable is one line however many ends reported it.** With an agent at both ends the link
+  arrives twice, once from each side, and two lines between two boxes would say there are two
+  cables. Merged — and the merge is worth more than the tidiness: each end names the OTHER's
+  port, so the pair of reports is what fills in both, and an adjacency both ends agree on is
+  drawn as the stronger statement it is.
+- **A neighbour nobody registered is not acquired as inventory.** It is real, and the map is
+  the wrong place to add machines to the fleet.
+- **"erebor" and "erebor.cerebelum.lan" are one machine.** LLDP reports a hostname and the
+  registry holds whatever somebody typed; refusing to join them would draw every link missing
+  on precisely the fleets that have a search domain.
+
+---
+
+## [0.0.1+build.114] - 2026-08-23
+
+### Changed
+- **The disk dialog's identity strip is one line of content-sized facts.** It was a bare flex
+  row with no gap of its own, so the spacing was whatever the text left over — "Tipo SATA" sat
+  inches from "Modelo ST14000NM000J-2TX103" and it read as ragged. Equal-width columns fixed
+  that and broke something else: four tracks of 13rem need 56rem and the dialog offers 46, so
+  the fourth fact dropped to a line of its own while three quarters of the row sat empty. A
+  fact is as wide as the fact, with an even gap, bounded at both ends.
+- **…and the facts read in an order somebody chose.** Alphabetical by KEY put "Bahía" first and
+  "Modelo" third for no reason a reader could see — the keys are internal and their alphabet is
+  not a fact about equipment. It is what it is, which one it is, where it sits, what it does;
+  a role the core has no word for goes last rather than disappearing.
+- **A part number is not broken in half.** "ST12000NM000J-2TY103" came out as "…-2TY10" and "3"
+  on the next line, which reads as two things. Truncated with the whole of it on the hover,
+  which is what the rest of the panel does with a value that will not fit.
+- **A measurement can carry an icon, declared by the profile** (`"icon": "bi-…"`). A number has
+  no picture: only whatever produced it knows that this one is a temperature and that one a
+  count of bad sectors. Validated against `^bi-[a-z0-9-]+$`, because a profile is data an
+  administrator writes and this value ends up in a `class` attribute. Declared so far on the
+  Synology disk, system and volume profiles, on HOST-RESOURCES storage and on net-snmp CPU.
+- **The readings no longer span the whole dialog.** A single full-width row made the eye travel
+  the entire modal to join "Temperatura" to "40 °C"; two columns keep each pair together.
+- **The information dialog is only as tall as it needs to be** (`.ss-modal-fit`).
+  `.modal-dialog-scrollable` sets a full height unconditionally — which is what makes a long
+  body scroll inside instead of pushing the page, and also what left six readings sitting in
+  four hundred pixels of empty box — and `.modal-dialog-centered` sets a `min-height` to the
+  same value, which beats a `height: auto` and is why the first attempt changed nothing at all.
+  The dialog still spans (that span is what centring measures against; removing it gave a
+  compact box glued to the top of the screen) and the CONTENT is the half told not to stretch
+  into it. Not applied to the pickers, which ask for a fixed height on purpose.
+- **…and it no longer offers to be resized.** A resize handle and a maximise button on a box
+  that is already exactly as tall as its six lines is offering to make the empty part bigger.
+  One function decides, so the stylesheet and the header controls cannot disagree about which
+  dialogs are resizable.
+
+- **"Is there an update" moved out of the summary and beside the firmware version it is
+  about.** It is not a measurement anybody charts — it is a property of the box, and on the
+  Details tab it sat among the temperatures answering a question nobody was asking there. A
+  metric can now say it belongs in the identity card (`"identity": true`) or, with a role name
+  (`"identity": "firmware"`), beside that particular fact — a second entry reading
+  "Actualización disponible: Disponible" is the same word twice and pushes the version a line
+  away from the thing that qualifies it. Which fact it annotates is the profile's to know; the
+  core names roles and has never heard of DSM.
+- **…and its words read on their own now.** "Firmware / DSM 7.3-86009 · No disponible" was
+  right for a field called "Update available" — unavailable meaning no update — and beside a
+  version number it says the firmware is unavailable. The states are sentences about the
+  version ("Actualizado", "Hay actualización"), and a guard fails on a bare yes/no in any state
+  that annotates a fact: the question it would be answering is not on screen.
+- **A disk's card carries its temperature beside its health.** `diskHealthStatus` says "Normal"
+  until the day it does not; heat is the half of a drive's condition that moves, and a disk
+  climbing through the fifties is the one that will read "Warning" in a month. Flagged in the
+  profile like every other summary value — the core still names no field of any device.
+- **A summary card is as wide as what it holds, and grows sideways.** It was pinned at a 14rem
+  basis — a width chosen before anyone knew what was going in it — so a disk with two readings
+  stacked them and a shelf of eight came out as eight tall boxes with an empty right half each.
+  The card follows its content and the whole card wraps when the pane runs out of room, which
+  is the thing that should wrap.
+- **A condition on a card is a mark, not a word.** "Normal" was the widest thing in the box and
+  the one that changes with the language, so the cards were sized by a translation. A tick, a
+  triangle or an octagon says it in every language and in no room at all; the word stays on the
+  hover, on the screen reader and in the row's own dialog, where "Initialized" and "Not
+  initialized" are two pieces of news no symbol separates. The shape is picked by the LEVEL the
+  profile declared — the same value the colour comes from, so the two cannot disagree — and a
+  guard fails if a level ever has a colour without a shape of its own: the worst news on the
+  device would draw as the mildest, with no error anywhere.
+
+### Added
+- **A map of how the fleet is wired together** (Infraestructura → Mapa, `GET /api/v1/infra/map`).
+  Built entirely out of what the ordinary cycle already recorded — the addresses each machine
+  claims, the network each one sits on, and the next hop it uses for what it cannot deliver
+  itself. Nothing asks a device anything: a map that cost a fresh conversation with forty
+  machines is a map somebody turns off.
+  It is careful about what it claims, because a picture of a network is read as a picture of
+  cables and this one is about addresses. A machine sitting in a network's lane is an
+  arrangement of addresses; an arrow to a gateway is a statement the device itself made; and
+  "which port is plugged into which port" is not on it at all — that is LLDP, which nothing in
+  this fleet serves yet. Two kinds of line, drawn differently, with the legend saying which is
+  which. Hand-written SVG: the page is self-contained, so there is no layout library — and a
+  lane per network cannot produce the hairball a force layout produces on a flat /24.
+- **A column can carry another one with it** (`"with": {"oid": …, "sep": "/", "as": "prefix"}`).
+  An address and its netmask are two columns of one table and one fact: as separate lines they
+  are arithmetic left to the reader, and as separate LISTS the pairing is gone altogether. So
+  `ipAdEntAddr` now reads "192.168.250.21/24", which is also what makes the map's arithmetic
+  possible. `as: "prefix"` is the only rendering the core knows, and it is IP arithmetic rather
+  than knowledge about any device — a mask that is not contiguous keeps its own text, because
+  a wrong number is worse than an ugly one.
+- **A profile can say WHICH ROWS of a table it means** (`"where": {"oid": …, "equals": …}`).
+  A routing table has one row per destination and the default gateway is the next hop OF ONE
+  of them — every other row's next hop answers a different question — so "the column" was the
+  wrong unit and there was no way to write "the column, filtered". An exact match and not a
+  pattern: what this selects on are protocol constants, and a regular expression would be a
+  way to write a filter that half-matches by accident.
+- **…and with it, the default gateway** (`sys_generic`): which way a machine gets off its own
+  network. A fact worth having on its own, and the first edge of the network map.
+- **A profile group for a Proxmox VE node** (`grp_proxmox`). A PVE node answers no MIB of its
+  own — Proxmox serves nothing over SNMP and its sysObjectID is net-snmp's, the same as every
+  other Debian — so this is `grp_linux` plus the three things a HYPERVISOR needs and a plain
+  server does not, and it is assigned BY HAND: a group claiming that prefix would claim most of
+  a fleet. Nothing about the detection changed; there is nothing to detect.
+- **The CPU counters that only mean something on a hypervisor** (in `ucd_linux`, so every Linux
+  gets them): time spent inside guests, time stolen from the host, time waiting on I/O and time
+  in soft interrupts, plus swap in/out and MemAvailable. None of them exists as one of the
+  percentage scalars net-snmp serves, so they come off the raw jiffy counters — as a rate in
+  cores, not as a percentage, because "250 %" of a twelve-core box is a bar the panel would
+  clamp to full and a number nobody can read.
+- **`ucd_disk`: how full each filesystem is, by the agent's own reckoning** — percentage, inode
+  percentage, and net-snmp's own "past the limit you set" flag. Percentages and not byte
+  counts on purpose: `dskTotal` is a 32-bit count of kibibytes and wraps in silence at 2 TiB,
+  which on a hypervisor is the storage pool. The bytes stay with HOST-RESOURCES, where every
+  row declares its own allocation unit.
+- **`ucd_extend`: what machine is underneath.** A plain Linux answers no vendor MIB at all —
+  sysDescr gives the kernel and nothing else — so the model, the manufacturer and the serial
+  come from the `extend` directives in snmpd.conf, the convention Observium and LibreNMS ask
+  for. Each subtree is read as a COLUMN rather than as one known row, because the row is
+  indexed by the name somebody chose, and a permission error is skipped rather than recorded
+  as the answer.
+- **"Obtener datos ahora" is a checklist, not a spinner with a name on it.** A five-minute run
+  showed one line reading `snmp · Ejecutando…` and nothing else, which is exactly as much as a
+  spinner says. Each line is now a thing being done, with its mark and its state, and under a
+  module that counts its own work the phases IT named, each with how far along it is
+  ("Leyendo las métricas 7/24, erebor — Synology discos"). Same visual language as the device
+  test's checklist: it is the same question asked of the same machine, and answering it two
+  ways is two things to learn instead of one. Modules read by their name now, not their id in
+  a `<code>` — a list of "ssl_cert, ram_swap, snmp" reads as a log line.
+- **A module's progress line is written in the language of whoever is WATCHING.** Its
+  sentences are resolved in the installation's notification language, which is right for a
+  message sent to a channel and wrong for a line on the screen of the person who just pressed
+  the button — reported as a Spanish dialog with "Reading the metrics" in it. The executor
+  installs the watcher's language beside the progress sink, for exactly as long as somebody is
+  watching, and the route reads it while there is still a request to read it from.
+- **A module can name its own phases** (`report_progress(detail, step=…, n=…, total=…)`).
+  Repeating a phase keeps its line and moves its counter, so twenty-four profiles are one line
+  reading 7/24 rather than twenty-four lines scrolling past. The words stay the module's: a
+  vocabulary of steps written in the core would fit whichever module was in front of whoever
+  wrote it and be a lie for the other twenty, so the panel draws what arrives and names none
+  of it. The SNMP module declares two — resolving the device's profiles, then reading them.
+- **A device records its own IP addresses.** `ipAddrTable` is RFC 1213 — every agent answers
+  it — and nothing asked for it, so the panel showed the address somebody typed into the
+  registry and never what the machine says it is reachable on. Declared in `sys_generic`,
+  beside the name and the location, which is where "what is this box" already lives.
+- **A profile can say that a table describes the BOX, not the things inside it**
+  (`"of_device": true`). Almost every walk is a list of parts — disks, interfaces, volumes —
+  and a fact belongs to its row. The address table is not that shape: its rows are the
+  addresses of ONE machine, and one row each files the answer to "what is this box on the
+  network" in five rows that nothing opens, collected every cycle and visible nowhere. Such a
+  table folds into one fact about the device, in the order the agent walked it, without
+  repeats.
+- **…and which readings are not answers** (`"skip": "<regex>"`). A column answers for every
+  row it has, including the ones that tell nobody anything: `ipAddrTable` lists the loopback
+  beside the address the machine is actually reachable on, and "127.0.0.1, 192.168.1.10"
+  leads with the one nobody asked about. The pattern is the profile's — the core has no
+  opinion about what 127 means, and the next profile will want to drop "N/A" instead. One
+  that does not compile is NO filter rather than a filter that drops everything.
+
+### Fixed
+- **Four machines were writing their progress into one line.** This module samples its devices
+  in a thread pool — they have always run in parallel — and a phase was identified by its words
+  alone, so every device in flight overwrote the same counter: it jumped backwards while the
+  run went on and froze at whatever the last thread left, so a finished collection showed a
+  green tick beside "3/24" of a device nobody had asked about. A report now says WHICH THING it
+  is about (`report_progress(..., scope=…)`) and each gets a line of its own. The list is
+  bounded the way it has to be for a fleet of forty: over the cap, a line that has ENDED makes
+  way, oldest first.
+- **…and a finished phase drops its counter.** It measured progress and progress is over; a
+  number left behind beside a tick means nothing and reads as a run that lost its place.
+- **The bar no longer says 100 % over the words "one module is still working".** A module that
+  overran had not said how it ended, and was counted as finished anyway so the bar would not
+  stop short. It stopping short is not a problem now that the run waits for the straggler and
+  the line turns into a tick by itself — and when the panel does give up, a bar that never
+  reached the end is the honest picture.
+- **The dialog says what a collection actually runs.** A module runs with its whole
+  configuration, so pressing "collect now" on one NAS walks every device that module watches.
+  The title named the machine that was asked for while the checklist named a different one,
+  which reads as the panel having lost track of which device it is on. It now says so in a
+  line, and the profile name in the phase note is the short one — "Synology — SMART attributes
+  (SYNOLOGY-SMART-MIB)" is a MIB filename in a space that has room for a few words.
+- **A collection no longer announces an ending it has to take back.** A module that overran
+  the batch deadline has NOT finished — it is still walking the device and writes its own
+  state and history when it lands — and the run declared itself done at that moment anyway,
+  with a warning saying some modules were still working. On the fleet this was written for
+  that was every collection of a NAS. The job now stays open until the straggler reports (the
+  executor tells it, which nothing did before: it landed, wrote its data and said nothing to
+  the screen), and only if it is still out after the grace period does the panel stop waiting
+  — which is the one case where "it carries on in the background" is a true thing to say.
+  The check lock is released the moment the batch returns, so the wait is the screen's and
+  never the panel's.
+- **No SNMP counter had ever produced a value.** A NAS with twenty-four profiles answered a
+  thousand readings and not one figure of traffic: no interface octets, packets, errors or
+  discards, no IP/TCP/UDP/ICMP counters, no disk or volume I/O. It reads as an incomplete
+  profile, and the profiles declared every one of them. The tell was the cut — across five
+  unrelated MIBs every `gauge` arrived and every `counter` was missing.
+  A rate is the difference between two readings, so the sampler kept the previous reading
+  under the check's key, in `self.status` — which LOOKS free-form (`set_conf` takes any path
+  and returns True) and is not: what survives a cycle is what the `check_state` table has a
+  column for, because `status.read()` rebuilds every entry from those columns at the top of
+  each cycle. `snmp_prev` was not one of them, so every sample was the first sample. No error
+  at either end.
+  The table gains a `module_state` column (JSON) — a module's own working state, not a result
+  and never shown — declared LAST so an existing install gains it with `ADD COLUMN` rather
+  than a rebuild, and `set()` carries it forward so a seed cannot erase a baseline. The test
+  that would have caught this is not the one proving the column works: it is the one that runs
+  two cycles and demands a rate from the second.
+- **...and a run launched from the panel starts from what is stored.** Saving is
+  `persist_status(status.data)`, which REPLACES the table — so a forced collection wrote back
+  whatever snapshot that process happened to hold, which in a split deployment is the web
+  process and not the one that has been writing. It is also where a counter's baseline is: a
+  run that never read it starts from nothing every time.
+- **Documented, not fixed in code: Nginx Proxy Manager's *Cache Assets* must be off.** With it
+  on, every static request carrying the panel's version stamp (`?v=<mtime>`) comes back 502
+  while the same URL without the query appears to work — which is the proxy's own cache serving
+  an old copy, so the only requests that actually reach the application are the ones that fail.
+  It reads as a broken panel: the stylesheet and the images fail together, and nothing inside
+  the application connects those two. The option buys nothing here, because the panel already
+  versions its own assets. `docs/caso-despliegue.md` says so in the NPM steps now, with
+  `/api/v1/health` as the way to tell a dead application from a proxy that is in the way.
+
+---
+
+## [0.0.1+build.113] - 2026-08-23
+
+### Changed
+- **The two SNMP tables lose the module prefix**: `mod_snmp_catalog` → `snmp_catalog`,
+  `mod_snmp_mib_versions` → `snmp_mib_versions`. The prefix exists so two MODULES can never
+  collide over a name; the core is one namespace already, and these sit beside `hosts` and
+  `history` because that is what they are now. Renamed outright — nothing is in production
+  yet, so there is no data to carry and a rename is a rename.
+- **A core package declares its tables in its manifest** (`DB_TABLES`), reconciled at startup
+  by `reconcile_core_tables` beside the module one. Both stores also reconcile when they are
+  constructed, but they are constructed ON DEMAND — the first save of a MIB, the first cycle
+  that reads the catalogue — so without a declaration the schema change lands inside whatever
+  request or cycle happened to reach it first.
+- The watchful no longer declares `discover_db_tables`. It could not have kept them anyway:
+  the module collector rejects a table that is not namespaced `mod_<module>_`, so leaving the
+  declaration there would have skipped both with a warning and nothing else.
+- **`profiles` is a package, and its data lives inside it.** It was a `profiles.py` with a
+  `profiles/` directory of JSON sitting BESIDE it — which is not untidiness but a trap: a
+  module and a same-named directory in one package resolve by a rule nobody should have to
+  know, and the day somebody drops an `__init__.py` in there the imports change meaning in
+  silence. Now `profiles/__init__.py` (what a profile IS), `profiles/store.py` (the catalogue
+  written in the panel) and `profiles/sources/` (the 41 shipped files).
+- The clash was inherited from `watchfuls/snmp/`, where the same pair existed. It came across
+  in one `mv` and nobody looked at the shape that produced.
+- `mibs/mib_sources/` → `mibs/sources/`: inside a package called `mibs` the prefix repeats
+  the folder above it, and its sibling in `profiles/` is called the same thing.
+- `profiles/` keeps its code in `__init__.py` while `mibs/` splits into submodules, and that
+  asymmetry is deliberate: `mibs` is four jobs — lint, resolve, index, administer — and
+  `profiles` is one, plus its store and its data.
+- **What an SNMP credential IS moves to the core** (`CREDENTIAL` in the manifest): a version,
+  a community, and the seven fields v3 needs are facts about the PROTOCOL. Declared by a
+  watchful, a credential type disappears when the watchful does — taking its stored
+  credentials out of the editor while they stay in the database, still referenced by the
+  hosts that use them.
+- A credential type can now be declared by a core package at all: `credential_schemas()`
+  reads core manifests beside module schemas, wording the fields from core i18n. It reuses
+  the section the host profile reads, because the credential editor asks the same questions a
+  check does and one protocol does not need two vocabularies.
+
+- **A protocol the core owns says what its fields are, in one place.** Eleven watchfuls
+  restated that list in their `__host_profile__` — ten repeating the same seven SSH names,
+  SNMP the ten of its own, eighty names for lists they do not own. The catalogue already
+  overrode every copy for the form it draws, so a copy that drifted changed nothing anybody
+  could see. It changed which values a bound host was allowed to push onto the check, and
+  what a bound check stopped drawing.
+- They HAD drifted: all ten listed `ssh_host` and none listed `ssh_auth_method`, so a host
+  storing its authentication method without a named credential never handed it over and the
+  check authenticated the default way. A named credential still wins, as before.
+- `host_profile_specs()` fills the fields in from the core declaration, so normalising a spec
+  is also completing it, and the four readers that used to read the copy — the runtime merge,
+  the hide-when-bound list, the assisted migration, the host-capable collections — get one
+  answer. What a module still declares is `address_field`: which field of ITS item receives
+  the address is its own business (`web` puts it in `server`), and it joins the hidden list
+  because it is the field the host fills.
+- **A collection can take its connection fields from that same declaration** rather than
+  copying them: `"__profile_fields__": "snmp"` in `servers`, expanded by `discover_schemas()`
+  into the real declarations, in the core's order, at that position. It exists because
+  `__host_profile__` only says what a check inherits when BOUND — it puts nothing on the form
+  of an unbound one, and a check against a bare IP has to be able to state its own community
+  and v3 keys. That was the whole reason the ten fields were written twice.
+- Their words come from core i18n by the roads the panel already uses — the label on the
+  field, the hint through the module's `__i18n__` — so the browser receives exactly what it
+  received before and never learns there was an expansion. A field the collection declares
+  itself always wins; the expansion never overwrites.
+- The SNMP watchful's `schema.json` is down to what a CHECK is: an OID, an operator, a value
+  and how long to wait. Its lang files lose twenty entries for fields it no longer describes.
+- `group` (which section of a form a field falls under) moves onto the core declaration —
+  it is a fact about the field, not about one screen; a community is the identity wherever it
+  is asked for.
+
+- **"Servers" is "Devices".** The registry holds a NAS, a switch and a UPS, and the SNMP
+  catalogue that moved to the core in this same build ships profiles for Mikrotik, Linksys
+  and two makes of UPS — the section was named when the only thing you could register was a
+  machine with SSH on it. The code had already decided: the table is `hosts`, and so are
+  `host_uid`, `HostsStore`, `__host_profile__`, `resolve_host()` and the `host.<uid>` result
+  key. "Server" survived in the one place it is read.
+- A clean cut, permissions included: `servers_view/add/edit/delete` → `devices_*` and
+  `perm_group_servers` → `perm_group_devices`. **A custom role granting any of the four keeps
+  its other flags and loses these**, because those words are on the Permissions screen too and
+  renaming the label while the flag still said `servers_` would have put the mismatch exactly
+  where somebody is deciding who may delete what.
+- The prose went with it — 168 strings across both languages. A section called "Devices" whose
+  every tooltip says "server" is the half-measure, not the fix. What did NOT change is the
+  word where it means something else: "internal server error", the SMTP host, an NTP server, a
+  host key.
+- Infrastructure says "device" too: it still called them machines — the section title, the
+  empty state, "no check points at this machine", and the permission's own description.
+- Internal ids stay as they are (the `servers` pane, `partials/servers/`, `subtab-srv-hosts`):
+  nobody reads them, and moving them would break saved deep links and column layouts for a
+  rename that would not show.
+
+### Fixed
+- **A profile that names itself per language is read, not printed.** `label_of` was skipped in
+  the new progress line, so it said "erebor — {'en_EN': 'Synology — SMART attributes…'} (3/24)".
+- **And `label_of` no longer raises on a plain-string label**, which the format explicitly
+  allows. It is called on normalised profiles and on raw ones — a probe builds its catalogue
+  straight from the files — and on the second kind it threw an `AttributeError` that the
+  sampler caught, recorded as "the device answered nothing", and the screen reported as a
+  machine that was not responding. A crash that reads as an outage is worse than a crash.
+- **Refreshing a device no longer blinks the whole page.** The button went through the
+  section's entry point, which re-asks for the fleet, blanks the pane for a spinner and then
+  asks for the device — two round trips and an empty screen to redraw one machine, and with the
+  auto-refresh on, that every interval. It now asks for the one thing being looked at and swaps
+  the markup once the answer is in hand; a refresh that fails keeps the screen it had.
+- **That button stops calling a device a server.** `refresh_tt` ("Reload data from server") is
+  right everywhere else in the panel and ambiguous beside a machine, where it reads as the
+  machine. It has its own wording here, which says the thing that actually matters in that
+  header: this button does not poll the equipment, and the one next to it does.
+- **A section keeps its own query, so F5 on a device stays on that device.** Opening a machine
+  in Infrastructure put it in the address bar and read it back on load — but the sidebar
+  rebuilds the URL from the section and its view on EVERY activation, the initial one included,
+  so `/infra?host=<uid>` was replaced by `/infra/table` before the section ever looked at it.
+  Reported as "F5 takes me back to the list of forty". The query now survives, and only while
+  the path already belongs to the section being activated: `/history?module=cpu` must not
+  follow you into Infrastructure.
+- **The Services tab answered 500 on every poll**, from a `@property` that ended up on the
+  wrong function: a method inserted between the decorator and `_monitoring_interval` stole it,
+  so the interval became a bound method and `interval * _WORKER_FRESH_INTERVALS` was "method
+  times int". Nothing about the change read wrong — the decorator was simply attached to
+  something else. Both accessors are properties again and a guard says so, from both sides:
+  they must be properties, and nothing may call them.
+- **Every measurement on a device's page was labelled with the device's own name.** It is the
+  ITEM's label, and one SNMP item files a result per disk, per volume, per share — so
+  "erebor" was printed a thousand times on erebor's page, in the one place a name cannot tell
+  you anything. The ROW is what identifies a measurement there ("Drive 1", "/volume1"), taken
+  from what the module recorded (`_row`) or from the `<item>/<detail>` key the product already
+  speaks; nothing is inferred from a message or a field name. With no row the measurement is
+  of the device itself and the line stays empty — putting the module there would be the same
+  repetition wearing a different word.
+- **Sizes are shown at the size they are.** `34528771842048 B` is a number nobody reads, and
+  printing it beside `40289542017024 B` invites the arithmetic somebody will get wrong. Bytes
+  climb in binary steps (an agent reporting memory and disk means 1024), seconds become the
+  largest unit that leaves something worth reading. Only the display is scaled — the chart
+  keeps the base unit, or the axis and the number above it would disagree.
+- **A module that finished after the cycle's deadline lost its history — silently, and
+  forever.** Reported from a real fleet: SNMP showed current values on screen and the History
+  table had not one row of it since the day it was installed. The cycle gives each module a
+  deadline and moves on; what it cannot do is kill the thread, so the module comes back and
+  writes its live status the way it always did — but its history rows went into a buffer whose
+  writer had run minutes earlier, and were dropped without a word. The shape that leaves is a
+  panel in green with an empty chart, which reads as two unrelated problems.
+- Sampling one NAS with a full SNMP device profile is hundreds of round trips: about five
+  minutes against a 120-second deadline, so it missed the flush on every single cycle.
+- A straggler now writes its own rows, under the same lock the flush holds — so the module
+  that finishes exactly at the boundary is recorded by one of the two and never by neither.
+- **The type rail stopped at the height of its own items and left the rest of the card
+  empty.** Reported from the screen. `.ss-railbox` is `flex: 1 1 auto`, which means nothing
+  unless its parent is a flex COLUMN, and the stylesheet already fixed that — for
+  `> .ss-railbox`. Putting a summary header above the rail added one box between them, the
+  child selector stopped matching, and the layout went back to what the rule existed to
+  prevent. Nothing in the markup or the stylesheet reads wrong; the shape of the tree changed.
+  The rule names a DESCENDANT now, and the wrapper carries `.ss-vfill` to pass the height on.
+- **The SNMPv3 security level lost its wording when the credential moved to the core.** The
+  picker offers `noAuthNoPriv` / `authNoPriv` / `authPriv` — ASN.1 identifiers out of the USM
+  MIB, not words — and their translations lived in the module's lang file, which the core
+  declaration does not read. Nothing failed: the form simply started asking what should
+  protect the session in a vocabulary only the standard knows. The wording is core i18n now
+  (`snmp_profile.option_labels`), and a core credential resolves per-option labels the way a
+  module one always has.
+- A doc anchor pointed at a line that had moved (`explica-rendimiento.md` →
+  `monitor.py#L811`, now 822). Line links go stale silently; the guard that reads them is why
+  this one did not.
+
+### Removed
+- The watchful's lang files lose the words for things that are no longer its own:
+  `mib_dirs` and `github_token` (settings that now live in `spec.py`), `snmpv3_level`,
+  `snmpv3_context`, `snmpv3_engine_id` and their `option_labels` (the credential's), and
+  `server` — a field that stopped existing when checks were nested inside each server. A dead
+  translation fails nothing; it just tells the next reader the module still owns something.
+
+### Added
+- **"Collect now" on a device page** (`POST /api/v1/infra/hosts/<uid>/collect`). The section
+  draws what the last cycle recorded, so the newest thing on it can be an hour old — and for a
+  device sampled by a full SNMP profile, several minutes older still. Somebody who has just
+  replaced a disk should not have to wait for a scheduler tick, and the only way to ask used to
+  be the Status screen's "run all": every module, every machine, from the screen this section
+  exists so you do not have to open.
+- It runs through the **same executor the scheduler cycle uses**, so the check state and the
+  history rows it produces come from the one path that knows how to produce them. A second
+  implementation of "run a check and record it" would be a second answer to what a result
+  means, and this section already refuses to hold one of those for anything else it shows.
+- Whole MODULES, not this host's items alone, and the reason is written where somebody would
+  narrow it: the monitor prunes from the state it has just written every key the run did not
+  report (`_prune_orphan_status`), so a run scoped to one machine would refresh that one and
+  delete the other thirty-nine's.
+- **It answers with a job id and the work carries on without you.** A collection runs for as
+  long as the devices take, and a request held open that long is one a browser or a reverse
+  proxy gives up on — the same reason the backup copies and the MIB compile are already shaped
+  this way. A dialog shows which module is working, closes without cancelling anything, and
+  leaves a bar with a percentage behind it; the percentage alone would be a hang, because
+  progress is per module and nine fast ones plus an SNMP profile reach 90 % in two seconds.
+- **A reload no longer loses sight of it** (`GET /api/v1/infra/collect`). F5 never stopped the
+  run — it is a thread on the server — but the job id lived in a page that no longer existed,
+  so the bar vanished while the device was still being polled. The panel asks the server what
+  is running instead of remembering it in `localStorage`: a second tab, a colleague's laptop
+  and somebody coming back after lunch all get the same true answer.
+- A module that overruns is reported as **still working**, not as a failure: it keeps running
+  and writes its own state and history when it lands, so a red cross would be something the
+  screen has to take back.
+- How long a module is given is the operator's setting (`monitoring|module_timeout`), not the
+  45 s the Status button uses — that number is a browser's patience, and nothing is waiting on
+  a request here.
+- The shared executor can now say where it is (`progress_cb`), called as each module starts and
+  lands. A callback that raises is swallowed: a progress display must never be in a position to
+  kill the work it is describing.
+- **And a module can say it from INSIDE** (`monitor.report_progress` → `ModuleBase
+  .report_progress`). The module boundary is not enough for the one that matters: sampling a
+  NAS through its device profiles is minutes of round trips inside a single module, so a dialog
+  watching start/finish reads "snmp — running, 0 %" for five minutes and is indistinguishable
+  from a hang. Reported from the panel in exactly those words.
+- The SNMP sampler now names the device and which of its profiles it is on ("erebor — Synology
+  disks (3/24)"), and every module's shared item loop reports "3/40 — <item>" for free. The
+  text is the MODULE's: a core vocabulary of steps would fit whichever module was in front of
+  whoever wrote it and be a lie for the other twenty.
+- The sink is installed only while a batch that is being watched runs, and taken off after —
+  the scheduler shares the monitor, and a sink left behind would have its cycles reporting into
+  a job that ended hours ago.
+- **SMART attributes read by disk.** `index_label` names two columns and the sampler joins
+  them, so every SMART row is "<disk> / <attribute>" — and eighty of them sorted by attribute
+  name across every bay is a table in which one disk's story is never together. The profile now
+  says which half is the disk (`row_split`), and the grouping the expansion-bay disks already
+  had does the rest.
+- **A row's own facts are shown beside it again** — a disk's model and serial, a SMART
+  attribute's status. They were being recorded and drawn nowhere: the identity column shows the
+  DEVICE's facts (it has to, or a NAS and the UPS plugged into it read as one machine with
+  contradictory serials), and the row-level ones went with the change that fixed that. A serial
+  nobody can read from the panel is a serial somebody reads off the machine with a torch.
+- They are matched on the row name BEFORE the profile's split (`row_key`), because that is the
+  name the device composed and the one the attributes were recorded against; matching the split
+  half finds nothing, silently.
+- **A pile of unattributed facts is no longer headed "Identity".** A sample written before the
+  source was recorded holds a NAS's facts and those of the UPS plugged into it in one dict,
+  with no way left to tell which said what — which is exactly how a UPS's model came to be read
+  as the NAS's. The nested shape fixed the RECORDING; it cannot fix a sample already on disk,
+  and presenting that one under "Identity" is the panel asserting the one thing it
+  demonstrably does not know. It says "Unsourced (older sample)" instead.
+- **And beside sourced cards it is dropped altogether.** Reported from the screen: the pile sat
+  above the three correct ones, and every fact in it was already in one of them, attributed. A
+  device that has answered once with sources has answered with all of them, so there the pile
+  is not a fallback — it is a stale duplicate that contradicts them, "Modelo: Linux erebor…"
+  directly above "Modelo: DS916+". It still shows when it is all there is: a module that records
+  attributes without naming what answered is not stale, it is a module with one answerer.
+- **The identity cards are named, not filed.** The headings were raw source ids
+  (`synology_ups`) beside values that were translated — the panel showing its own filing
+  system to somebody who asked what the machine is. They carry the name the source gives
+  itself, per language, read from the declaration the measurements already use.
+- **And they read in the order a person reads them**: what EVERY device is (RFC 1213), then
+  what this one is (the vendor's MIB), then what is plugged into it (the UPS). Alphabetically
+  the standard came last, which is the wrong end. The rank is the profile's own claim — it
+  names a vendor's tree or it does not — so the panel holds no list of profile ids.
+- **A profile can name the THING it describes** (`short_label`), separately from what the
+  profile is called. The catalogue entry has to say "Synology — system (SYNOLOGY-SYSTEM-MIB)"
+  so somebody choosing among forty profiles knows which MIB they are picking; the card on a
+  device page is naming a box in a rack — "Synology", and the UPS beside it is "UPS". Trimming
+  the long title gets the first right and the second wrong. Optional: a profile that says
+  nothing keeps the trimmed title, and the family rail keeps the full one, because there you
+  ARE choosing a profile.
+- **A "Details" tab, and it is where a device now opens.** A device with a full set of profiles
+  answers around a thousand measurements; "is this box all right, how hard is it working, is it
+  running out of room" is four or five of them, and the Measures tab is the wrong screen for
+  that question. Which four or five is declared by the profile (`"headline": true`) — a NAS
+  answers with its system status and its temperature, a switch's headline is throughput, a
+  UPS's is its battery. A core that picked them by field name would know what a NAS is and have
+  nothing to say about the next kind of device somebody plugs in.
+- Flagged so far: the Synology system status, chassis temperature, power and pending update;
+  CPU idle and load average from net-snmp; and every HOST-RESOURCES store. A device whose
+  profiles flag nothing is told so, rather than shown an empty box.
+- **A store is drawn as a proportion, not as two byte counts.** HOST-RESOURCES-MIB reports every
+  store the same way — physical memory, cached, buffers, shared, swap, virtual, and every
+  mounted volume — as a capacity and an amount used, and side by side those are arithmetic left
+  to the reader when the answer they want is "83 %". Which half is which is the profile's word
+  (`"headline": "used"` / `"total"`), because a label saying "Usado" in one profile and "In use"
+  in the next is not something to pattern-match on, and getting it backwards draws a full disk
+  as an empty one. A capacity of zero keeps its figures: an unmounted store and a full one are
+  different things, and dividing by it says the second.
+- Nothing on that ring is coloured by a threshold. What counts as "too full" is a decision about
+  the installation and the panel has not been given one — the same reason the percentage bar
+  beside it is grey.
+- net-snmp's memory total/available lost its headline flag: `hr_storage` already answers that,
+  with a used AND a total per store. Both on one summary is two answers to "how much memory is
+  there", and they can disagree.
+- **A table says which of its rows the summary is about** (`headline_rows`). Reported from the
+  screen, and it is the difference between a summary and a dump: HOST-RESOURCES-MIB reports
+  every store a host has, so a NAS running containers gave five useful rings followed by
+  thirty-nine that all said 67 % of the same 31 TiB — one per bind mount of the same volume.
+  The rule matches what the DEVICE said (`hrStorageType` — "this row is RAM", "this row is a
+  fixed disk"), never a path: a volume is `/volume1` on one machine and `C:` on the next.
+- For a table with no such column it can match row NAMES instead — SYNOLOGY-RAID-MIB lists a
+  storage pool and the volumes carved out of it together and answers nothing that tells them
+  apart. The pattern lives in the vendor's profile, next to the OIDs it is about; the core
+  applies it and knows nothing about pools.
+- **The real volumes come from the profile that knows them**, with the space free and the space
+  total — a table that reports FREE is still a proportion, worked out from the two numbers it
+  gave rather than by guessing what a value means.
+- **Memory, volumes and disks are not one list.** Each section is headed with the name of what
+  answered it, so a device that adds a fourth kind of store gets a fourth section without the
+  panel learning about it.
+- **The disks report their health, and clicking one shows its SMART.** A disk is a row of
+  SYNOLOGY-DISK-MIB and the group that eighty rows of SYNOLOGY-SMART-MIB belong to; no summary
+  can hold that, and "click the disk" is where a person looks. The dialog leads with the model
+  and the serial — the half somebody opened it for when the question is which disk to pull.
+- Fixed on the way: `t` — the panel's translator — was shadowed by a local inside the ring
+  renderer, a TypeError on the one branch that has a word in it.
+- **The disk dialog has two panes**: what the disk says now, and the whole SMART table. Eighty
+  attributes in one list buries the six readings that matter, and a SMART attribute is read
+  ACROSS — a name and four numbers, where "is the current value near the threshold" is the
+  entire question and cannot be asked of four separate lines. The columns are whatever fields
+  came back, so a table with three works the same as one with six.
+- **"Remaining life −1 %" is not a percentage.** A mechanical disk has no wear counter and the
+  agent answers −1; drawing that on a percentage scale is the panel asserting that a disk has
+  minus one per cent of its life left. The profile now says what −1 means and it reads "not
+  reported", using the same value→word map that already turns a status integer into a word.
+- **A row's identity is the name the DEVICE composed**, not the half left after the profile's
+  split. Reported from the screen as a disk's dialog showing every reading twice at two
+  different temperatures: a Synology with an expansion unit has a "Drive 3" in the box and a
+  "Drive 3 (DX517-1)" in the shelf, and the split exists precisely so those are not one row —
+  so looking them up by the split name put them straight back together.
+- **A "Raw data" tab**, last and never the default. Every other tab is an opinion about the
+  same payload — Details picks a handful, Measures groups and truncates, the dialog gathers one
+  disk — and opinions are also what makes "is the panel even receiving that OID" unanswerable.
+  This one shows the number and not its rendering, names the coordinates of every reading
+  (profile, row, field, check), and filters without repainting: a repaint per keystroke on a
+  thousand-row table is the panel freezing while somebody types.
+- **The SMART table reports which disk each row belongs to** (`diskSMARTSerialNumber`,
+  …5.1.1.11), and that is what joins it to the disk table — the same physical object with the
+  same number in both, nothing assumed. The letters look like a rule (sda is the first disk,
+  sdb the second) and they are not: they are discovery order, so one empty bay shifts every
+  letter after it and the panel would show the wrong disk's SMART on exactly the day somebody
+  is reading SMART. A guard now fails if letter arithmetic appears.
+- **Two tables of one device may name it differently, and now they still meet.** Reported from
+  the screen: clicking a disk showed its six readings and none of its eighty SMART attributes.
+  SYNOLOGY-DISK-MIB names a disk by `diskName` ("Drive 1") and files its `diskID` ("Disk 1")
+  beside it; SYNOLOGY-SMART-MIB names its rows by a column of its own, and nothing says the two
+  agree. The aliases are what the device SAID — the identity facts it reported, and only the
+  ones that name a row, since a model or a kind is shared by every disk in the box — never a
+  rule about how names look. An ambiguous one is dropped: with an expansion unit the shelf
+  disk's split name is "Drive 3", which is the internal disk's whole name.
+- **"Test against the device" answered "no host" from the host modal.** The picker's hooks were
+  declared as arrows naming three parameters; the Modules tab calls them with three, and the
+  host modal with a FOURTH — a function that reads the draft on screen, because on that pane
+  the device may never have been saved and its address lives in the form. The arrow dropped it
+  without a word, so every button in there that speaks to the device had nothing to speak to.
+  Both hooks now forward everything, and a guard fails on a hook that names its parameters.
+- **No source file carries an invisible control character any more**, and a guard says so. A
+  regex written `r'…'` reaches the file as a literal backspace when the escape is eaten one
+  level too early: the pattern then matches nothing and the guard built on it passes for ever
+  without looking at anything. That is the worst failure a test can have — a green one
+  certifying a rule nobody is enforcing — and it has now happened twice, both times found by
+  accident.
+- The literal NUL bytes the panel used as a separator inside JS strings went with it, replaced
+  by their escape: the same byte at runtime, but the files stop being "binary" to grep, which
+  is why searching half this section returned nothing useful all day.
+- **`escAttr(jsStr(…))` is now a test failure.** `jsStr` already calls `escAttr`, so wrapping it
+  turned the `&quot;` it produced into `&amp;quot;`, the attribute decoded that back to a
+  literal `&quot;`, and the browser handed the JS engine an ampersand where a string belonged —
+  reported from the console as `SyntaxError: expected expression, got '&'`, which says nothing
+  about escaping and points at a generated line nobody wrote. The markup still LOOKS right, so
+  it survives reading; it only fails when clicked.
+- **A profile's declared state levels are now the check's verdict.** A profile that has gone to
+  the trouble of saying which of a value's meanings are BAD has said everything needed to check
+  the device — and it was being thrown away: a NAS could answer "system status: Failed" and
+  "update available" on every cycle and the row was recorded as fine, because a sample was
+  treated as something that either arrived or did not. `bad` fails the row, `warn` reports a
+  warning (a pending DSM update must not paint a NAS red), `ok`/`info` and values the map does
+  not cover are not findings, and one row in trouble sends one message and not four.
+- `history_fields` carries `source_rank`, `source_short` and `headline`, and both whitelists on
+  the way to the browser learned them. **A guard now fails when either does not** (`test_history_field_meta_survives.py`): a
+  whitelist that does not grow drops the new key in silence — no error, no warning, no log
+  line — and the screen simply draws the value the old way. That has now happened three times
+  in this section, each found by somebody looking at a screen.
+- **Its own permission, `infra_collect`** (editor, not viewer — the same split `checks_run`
+  already has). Reading the fleet is granted to viewer so a wall screen can show it; a button
+  that puts forty devices under poll must not come with the ability to look at them. The
+  registry's own narrowing (`devices_view` / `server.<uid>.view`) applies on top, so holding
+  the flag never becomes a way to reach a machine you cannot see.
+- **How long a cycle waits for one module is configuration now** (`monitoring|module_timeout`,
+  `SS_MODULE_TIMEOUT`, 120 s). It was a literal in the scheduler, which is the wrong place for
+  a number that depends on the fleet: the device answering in eight seconds today answers in
+  four minutes when it is busy. Overrunning no longer costs the module its history, so this is
+  about how long the ROUND is willing to wait, not about who gets recorded.
+- **A state is a word, not an integer.** A device page read "System status 1 · Power supply
+  status 1 · Update available 2" — on the screen whose whole job is to say whether the machine
+  is all right. The agent answers 1 and only the MIB it came from says that 1 means Normal, so
+  the panel had nothing to print but the number.
+- A profile declares `states` now (`{"1": {"label": …, "level": "ok"}}`) and the value is drawn
+  as a badge. The level is declared and not read off the word: "Degraded" is bad and
+  "Repairing" is not, and no rule about the text can tell those apart.
+- **A value the map does not cover keeps its number.** The profiles are filled in one MIB at a
+  time and not knowing is a fine thing to say — inventing a word for an unmapped value would
+  be worse than the integer it replaces.
+- Filled in for the enumerations that are not in doubt: IF-MIB's operational and administrative
+  state, and Synology's system, power, fans, update, disk status, disk health and array state.
+  Erebor's 50 enumerated measurements all resolve. The rest keep their numbers on purpose —
+  `chart: "value"` is not a state (a link speed and an MTU are drawn that way too), so nothing
+  is inferred from it.
+- **A measurement remembers which part of the device it is of.** A NAS answers sixty-four
+  kinds of measurement, which is not a list somebody reads — but they are not sixty-four
+  unrelated things either: the module already groups them, because a device carries PROFILES
+  (the system, the disks, the RAID, the shares, the UPS plugged into it). That grouping
+  existed at the only point it could be known and the union that flattens every profile's
+  fields into one map threw it away.
+- It travels per field now (`source` / `source_label`), and so does `chart` — a profile says
+  whether a value is a line or a state, which is the difference between drawing a graph and
+  drawing a badge and cannot be guessed from a number that has no unit. The whitelist in
+  `module_history_fields` grew to carry both: a module still cannot put arbitrary keys into a
+  core structure, but a whitelist that never grew is how the answer was lost at the last step.
+- The Measurements tab draws a rail of families: erebor's 1014 measurements are 18 of them.
+  Alphabetical and not by size — a rail is an index, and an index you can use is one whose
+  order does not change because a device grew a disk. It does not open on the 704-attribute
+  SMART block, which is the family somebody was least likely to have come for. A device whose
+  modules declare no family has exactly one and draws no rail at all.
+- **Rows that belong to different parts of a device are separated.** Eight disks in two
+  enclosures sorted into each other and read as one shelf of eight: a Synology names them
+  "Drive 1" and "Drive 1 (DX517-1)", so alphabetically they interleave. SYNOLOGY-DISK-MIB has
+  no column for the enclosure — fifteen objects and not one says which shelf a disk is in — so
+  the only place that fact exists is inside the name the device itself composed.
+- Splitting it is an assumption about how ONE vendor names things, so the vendor's profile
+  declares it (`row_split`, two named groups required — a positional pattern would silently
+  swap them the day somebody reordered it) and the core stays ignorant of parentheses. Applied
+  server-side, once per measurement instead of on every repaint, so what reaches the screen is
+  data rather than a rule. A pattern that does not compile is dropped rather than stored, and
+  a row name past 200 characters is not run through it at all: `re` has no timeout, so a
+  pattern somebody wrote badly is a worker that stops answering.
+- **A panel now fills what is actually left below it.** Reported twice: the log table first
+  drew at the height of its own header, then — with a `min-height` in the stylesheet — stopped
+  short of the bottom. Two sides of one thing: the fill chain works when there IS a height to
+  hand down and a tab inside a scrolling document has none, while a fixed viewport fraction is
+  right for one screen and a hole in the next, because a stylesheet cannot know where on the
+  page a panel starts. `fitToViewportBottom` measures it — where the element is against where
+  the viewport ends — keeps it a floor and never a cap, and removes its own resize listener
+  when the element goes, because a section re-rendered on a timer would otherwise collect one
+  listener per render.
+- **Three misalignments from one screenshot, all the same flexbox rule**: a flex child's
+  automatic minimum size is its CONTENT, so anything wider than its space pushes instead of
+  shrinking. A row of measurement cards wrapped the family rail onto the line above; a long
+  profile name pushed the rail wider than the column it was given, and the selected item then
+  drew to a different edge than the rest. And the record block was titled with the gear
+  button's tooltip — "Open in the registry" over a list of facts reads as an instruction.
+- **F5 inside a device went back to the list of forty.** A section that answers "which
+  machine is in trouble" is one somebody keeps open, refreshes and sends to a colleague, and
+  the device it was showing lived only in a variable. It is in the URL now (`?host=`), the
+  same shape History already uses for a series. Replacing and not stacking: an entry per
+  device would make Back walk the machines you looked at instead of leaving the section. Read
+  once per page-load — the auto-refresh re-renders on a timer, and re-reading would reopen a
+  device somebody had just closed — and a uid that no longer exists falls back to the fleet
+  rather than to a spinner that never resolves.
+- **Three things reported from the screen, all of them mine from this same batch.** The
+  identity column ran for pages: one SNMP item files a result per disk, per volume and per
+  share, each carrying a model, a serial and a bay, so "the identity of this machine" became
+  two hundred blocks — an inventory, not an identity. It shows the DEVICE's own facts now;
+  a row's belong beside that row.
+- The family rail sent the tab strip to the bottom of the document when certain families were
+  opened. `.ss-railbox` is a rail with its own scroll and the stylesheet turns the body around
+  one into a flex column with the overflow hidden — right when the rail IS the page, wrong the
+  moment the device page scrolls behind a sticky column. It is the same sticky column now, and
+  the buttons drop the MIB name from the title (the hover keeps it) instead of spending two
+  thirds of a 17rem column on the half nobody chooses by.
+- The log table showed its column titles and nothing else. `.ss-vfill` works when there IS a
+  height to hand down and a tab inside a scrolling document has none, so a panel that asked to
+  fill drew at the height of its own header. `.ss-pane-tall` is a floor and not a cap: four
+  hundred lines of syslog must not scroll inside a box inside a page that also scrolls.
+- **A device's identity is a column, not a tab.** A tab is read once and then unreachable,
+  which is the opposite of what a serial number, a firmware version and a rack location are
+  for: they are the CONTEXT of everything else on the page, read while looking at the
+  measurements to answer "is this the box with the problem". Compared against a mature panel
+  that keeps them down the side, and it is right about this one.
+- `.ss-sticky-aside` is generic, so the next panel wanting a column of context is markup and
+  no new rule. Deliberately not its own scroll region — a scrollbar inside a page that already
+  scrolls is how a column ends up with its head off the screen — and it stops sticking below
+  the breakpoint, because a 17rem fixed column on a phone is the page.
+- The tabs left are the ones about what the device DOES: measurements, latest data, logs.
+- **How a value is drawn is one decision now.** A percentage, a state and a byte count are
+  not the same kind of answer, and drawing all three as "a number with a word after it" is
+  part of what made a device page a wall. One function chooses, in order of how much is known
+  about the value: an enumeration the profile explained, then a percentage — whose scale needs
+  no explaining — then a number with whatever unit it came with. It was three conditions
+  across two renderers, which is how a card and a row of the same value start to differ.
+- A percentage is drawn as a length. It is the only measurement here whose scale is known
+  without asking, so 13 and 97 read as what they are instead of as two numbers of similar
+  length; 39 °C means something only against what the disk is rated for, and the profile does
+  not say. The bar is **uncoloured on purpose**: half of these are "CPU idle" and "battery
+  capacity", where full is the good news. What a number MEANS is a threshold, and a threshold
+  is a check's job — this is a reading.
+- The small graph beside a temperature is **not** in this step, and the reason is written
+  where somebody would add it: eighty of them is eighty requests, because the history API
+  answers one series per call. A batched endpoint comes first.
+- **A device's logs move to where a device is looked at.** They were only reachable from the
+  modal where a device is CONFIGURED — the wrong place: the Infrastructure page is where
+  somebody goes when a machine is misbehaving, and the modal is where somebody changes its
+  community string. Read here, configure there.
+- It is the same panel, told where to draw and which address to draw, instead of reading the
+  modal's draft and a fixed element id. Two syslog tables with two filter bars and two pagers
+  would be two places for them to stop agreeing, and the second is always the one nobody
+  updates.
+- **A device page is four tabs**: what the machine IS, what it MEASURES, and what its checks
+  last SAID. Stacked they read fine for a machine with a dozen values; with a full SNMP
+  profile the first is buried under a thousand of the second and the third is below the fold.
+  They are not sections of one answer, they are four answers — the fourth being what it has
+  been SAYING, which arrived with the logs above.
+- **`sysDescr` was declared as the device's MODEL.** It is free text — "Linux erebor 3.10.108
+  #86009 SMP Wed Nov 26…" — and on a Synology it beat the actual model (DS916+) on screen,
+  because MIB-II is sampled after the vendor profile. On anything else it put a kernel build
+  line under the heading "Model". It has its own role now (`description`), which also takes
+  one of the three profiles out of the collision below.
+- A guard lists the roles that two profiles of one device still share — `model` and `serial`,
+  a NAS and the UPS plugged into it, both worth showing and no longer colliding. A NEW
+  collision now has to be a deliberate edit rather than something nobody noticed.
+- **A device's identity was mixing two different machines — and losing one of them.**
+  Reported from the screen: erebor's vendor, model and version were its UPS's, not its own.
+  One registry entry fronts several pieces of equipment and several of them answer the same
+  questions, so filed flat the second profile sampled overwrote the first. Which survived
+  depended on the order the profiles happened to be read in. Nothing was reported wrong; a
+  fact was simply gone. Attributes are filed under the profile that answered them now, and
+  the identity tab groups by it.
+- **What a device IS was being recorded and shown nowhere.** Every result carries `_attrs`
+  beside its numbers — the facts that identify the thing measured: a disk's model, serial and
+  bay, an interface's MAC, the chassis' firmware, where it is racked, who to call. The
+  underscore is the recorders' existing convention for "about this result rather than a
+  measurement of it", so the identity tab reads what every module already writes instead of
+  asking modules for something new. A serial nobody can read from the panel is a serial
+  somebody reads off the machine with a torch.
+- Those facts are recorded under a ROLE (`serial`, `firmware`, `mac`, `bay`…) and the core
+  names them: they are facts about a piece of equipment, not about the protocol that fetched
+  them. An unrecognised role falls back to its own key — a word somebody has to guess at
+  beats a fact that is not shown.
+- `partials/infra/_render.html` splits into `_tabs.html` and `_metrics.html`; the shell is a
+  shell again.
+- **A device's measurements are grouped, and their charts are drawn where the numbers are.**
+  Reported from the screen: the strip of cards was written for a machine with a dozen values,
+  each a different kind of thing, and a NAS with a full SNMP profile files 1014 — sixty-four
+  kinds measured across many rows, four SMART attributes across 176 of them being 704 cards
+  that all say nearly the same thing. Everything rendered, nothing was missing, and the page
+  was a wall to scroll past.
+- The split is by how a field is measured, and the machine that worked keeps working: a
+  handful of rows still reads as cards side by side (NS1 resolves three DNS records and those
+  three cards are exactly right), and past that they become one collapsed group. 1014 cards
+  became 51 cards and 22 groups; ten stayed ten.
+- The chart for a measurement is drawn **under it**, with History's own renderer and its own
+  API. It used to be a link INTO the History section, which answered the question by leaving
+  the page: you lost the device you were looking at to see one of its numbers over time. One
+  range picker for the page, not one per chart — two numbers of the same device over different
+  windows is a comparison that invites itself and cannot be supported.
+- The results table is capped and says how many it is holding back, worst rows first: erebor's
+  is 295 rows, and a cap over an arbitrary order would hide news instead of the quiet tail.
+- The whole row opens a device in the Infrastructure table, the way a card does — a table
+  where only the last 2rem of a row is clickable teaches you to aim. Guarded on the target, so
+  the actions column keeps meaning the control you pressed.
+- **A device says what it is** (`device_type`): server, workstation, NAS, hypervisor, switch,
+  router, firewall, UPS, printer, camera, other — declared in `lib/core/hosts/manifest.py`
+  with the icon each wears, offered in the host form, drawn as a column and filterable, with
+  "unclassified" a filter value of its own because it is how you find the ones somebody added
+  in a hurry.
+- It is a **property and deliberately not a section**. Everything the panel does with an entry
+  — address, credential, profiles, maintenance, tags, its bound checks — is the same whichever
+  it is, and splitting the registry by type would force a decision at creation time that is
+  often wrong: a NAS *is* a server, a hypervisor is both. A property can also be left blank,
+  and a fleet nobody has classified yet still works.
+- An undeclared type is dropped rather than stored: it arrives in a request body, and keeping
+  it would put a word on screen that no lang file can translate.
+- **A fifth view of the fleet: "By type"** — a rail of what the registry is MADE OF, with a
+  count per kind and the devices of the one you pick beside it. The other four answer
+  questions about state; this one answers composition, and "show me the switches" stops being
+  a sort you page through.
+- It draws only the types that are PRESENT: eight empty rows for the kinds of box a site does
+  not have would be eight rows to read past, and an absent printer is not news. "Unclassified"
+  is the exception and the reason it earns a colour — those are the devices somebody added in
+  a hurry, and this is where they become findable.
+- The catalogue's order, never the count: a rail that reshuffled as devices came and went
+  would move the thing you were about to click. It reuses `.ss-railbox`, which was built to
+  make exactly this markup and no new CSS rule.
+- `tests/meta/test_host_types.py` — the catalogue is declared in Python and drawn by
+  JavaScript, and every step between fails without raising: no context entry and the picker
+  offers one option, no translation and it offers a raw id, a misspelt icon and the badge
+  simply has no glyph (an unknown `bi-*` class styles nothing). Including that the SAVE
+  carries it — a picker without the payload is the failure that looks like it worked.
+- `tests/meta/test_host_profiles_single_source.py` — that no module writes down a core-owned
+  protocol's fields again, that deleting the copies still leaves every one of them inheriting
+  something (they would otherwise bind to a host and inherit nothing, silently falling back to
+  their own blank connection), and that the address field stays in the hide list — `datastore`
+  has a real `ssh_host` box, and leaving it out puts that box back on a check already bound.
+- The guards that pinned the SNMP copies now pin the EXPANSION, which is what can fail quietly
+  instead: if it stopped delivering, the loose-IP form would lose its community box and its v3
+  keys and nothing would raise — the form would just be shorter. Each comes with a positive
+  control that the fields are NOT in `schema.json`, so pasting them back does not turn the
+  guard green again.
+- `watchfuls/snmp/defaults.py` takes the connection defaults from the core explicitly: it
+  parses `schema.json` off disk with no expansion, so port 161 and "public" would simply have
+  gone missing.
+- The guard that pins the host profile against the module schema now pins the CREDENTIAL
+  against both: three descriptions of one connection, and every way they can drift is silent
+  — a `show_when` that hides a v3 key on one form only, an `options` list offering an auth
+  protocol the other cannot store, a label missing on the one screen where somebody is typing
+  a secret and needs to know into what.
+- The four guards on the SNMP credential type move out of the watchful's own test file, where
+  they were guarding a declaration the watchful no longer makes — a guard on core behaviour
+  that would have been deleted along with the module. They read the CATALOGUE now, which is
+  what the editor is handed, and a fifth pins the security level's wording.
+
+## [0.0.1+build.112] - 2026-08-22
+
+### Fixed
+- **The SNMP section disappeared from the System panel.** Reported from the browser, and
+  invisible to every test: nothing failed, the entry simply never appeared. Two places
+  decided "is this a section somebody declared?" by asking whether a MODULE was behind it,
+  which stopped being the same question when a core package claimed one.
+  - the sidebar emitted `data-nav-perm` only alongside `data-nav-module`, so a core section
+    carried neither — and the entry ships hidden, revealed by `applyRoleRestrictions` for
+    anything with a permission and by `syncModuleSections` for anything with a module. With
+    neither attribute, nobody revealed it, ever;
+  - `dashboard.html` generated a pane for `standalone_specs if p.module`, so the section had
+    no pane to open either. The filter is `generated` now — a flag the spec carries — because
+    the core sections that predate this (Overview, Infra, History, Syslog) also have no
+    module and DO have bespoke markup, so dropping the filter would have emitted their panes
+    twice.
+- The guard that should have caught it asserted `data-nav-module="snmp"` and
+  `data-nav-perm="modules_view"` with `in html` — against the whole page, where both strings
+  appear in somebody else's markup. It reads the entry's own tag now: an attribute asserted
+  against a whole document is an attribute that can belong to anything on it.
+
+## [0.0.1+build.111] - 2026-08-22
+
+### Changed
+- **The MIB library's settings are configuration, not module config.** `mib_dirs`,
+  `mib_repos` and `github_token` describe the LIBRARY — where it looks and who it asks — and
+  the library is the core's. They are `snmp|*` in `lib/config/spec.py` now, on their own card
+  under Monitoring, with `SS_SNMP_MIB_DIRS` and `SS_SNMP_GITHUB_TOKEN` documented in
+  `docker/env.example`. Behind a module card, "where do I keep my vendor MIBs" was a question
+  filed under something that could be uninstalled.
+- **The route reads them server-side.** They used to arrive in the module config the browser
+  posted, which meant a client could name the directories the server scans off its own disk,
+  and meant the token had to travel to the browser at all — if only as a mask.
+- `github_token` is a CORE secret now (`secret_manager.ENCRYPT_KEYS`). It was encrypted
+  because the SNMP module declared it `secret` in its schema, and a module's declaration
+  stops applying the moment the setting leaves the module — without naming it in the core key
+  set, the move would have quietly written a token in plaintext.
+- The GitHub source list writes to the config surface instead of the module's, so the
+  checkbox that adds a repository still saves where its value now lives.
+- No migration: an installation that set one of these re-enters it in Configuration → SNMP
+  library. They are three strings, and inventing a migration for them would be more code
+  than the setting.
+
+### Fixed
+- The route called the config reader with the wrong argument count, and the `except` around
+  it swallowed the `TypeError` — so the library settings silently never applied. Found by a
+  test that asserted the values ARRIVE rather than only that the wrong ones do not.
+
+## [0.0.1+build.110] - 2026-08-22
+
+### Changed
+- **The screens' words moved with the screens.** The 347 strings of the MIB library, the
+  symbol browser and the profile catalogue are core i18n now (`snmp_ui`), read through one
+  helper. A section whose vocabulary lived in a watchful would go mute the day somebody
+  removed it — every label reading as its own key, which is a failure that only shows up on
+  the page.
+- The 34 audit words went to core i18n as plain `audit_v_*` / `audit_f_*` keys, which is
+  where `_auditWord` looks FIRST — so the audit renderer needed no change at all.
+- What stays in the module's lang file is what belongs to a check: the labels and hints of
+  its fields, its messages, its pretty name.
+- **A backup part the core declares.** The SNMP MIB library is offered to a backup by
+  `lib/core/snmp/manifest.py` rather than by the watchful's schema. A backup part lives
+  exactly as long as the file declaring it, so removing the watchful used to take the library
+  out of every backup **and say nothing** — the archive is simply smaller, and you find out
+  when you need it.
+
+### Fixed
+- Three headings would have fallen back to English in Spanish. The view names are declared
+  once in `snmp_page` for the sidebar, and the screens ask for the same keys to title
+  themselves; the helper read only `snmp_ui`, so "Import" appeared over a pane the rail
+  beside it calls "Importar". Found by checking every key the JS asks for against what the
+  lang files hold — a guard does that now.
+
+### Notes
+- `mib_dirs`, `mib_repos` and `github_token` stay in the module's `__module__` config. They
+  reach the core actions correctly (the browser posts them; the route restores the masked
+  token from storage), and moving them to `lib/config/spec.py` is a relocation of settings
+  with a migration for anyone who set one — worth doing on its own terms, not as the tail of
+  this. `threads` belongs to the check loop and stays regardless.
+
+## [0.0.1+build.109] - 2026-08-22
+
+### Changed
+- **The SNMP section is claimed by the core**, not by a module. Its five views — the MIB
+  library, import, compile, the symbol browser and the profile catalogue — are declared as
+  `PAGE` in `lib/core/snmp/manifest.py`, and its UI moved with it to `lib/core/snmp/web/`.
+  A screen that vanished when somebody removed the SNMP watchful would be a library you can
+  still fill and no longer look at, and a catalogue the sampler still reads with nowhere to
+  edit it.
+- No new mechanism, twice over. The UI scanner already walked `<pkg>/web/*.html` for two
+  roots (watchfuls and providers) — core is a third, one line. And the page catalogue picks
+  the descriptor up through `lib/discovery.py`, the same scanner that finds permissions,
+  Overview widgets and host profiles.
+- A core section **names itself**: its title and its view labels come from core i18n
+  (`snmp_page`). A module's page is titled by its `pretty_name` because the core owns no
+  string that names a module; that reason does not apply to a section the core declares.
+- The sidebar needed nothing: it has always emitted `data-nav-module` conditionally, so a
+  page with no module behind it was already legal — nobody had ever declared one.
+
+### Added
+- A guard that a CORE section's renderer exists, mirroring the one that has always checked a
+  module's. It is what caught this change half-done: the UI had moved to the core while the
+  page was still declared by the watchful, so the module named a renderer it no longer
+  shipped — and nothing else noticed, because the module-side guard had stopped looking and
+  no core-side guard existed yet.
+
+### Notes
+- The screens' own vocabulary (347 strings) still lives in the module's lang file and is read
+  through `_modUiStr`. It works because the watchful is still installed; moving it is the
+  last of this, and it is a move of words, not of behaviour. The audit vocabulary is not
+  affected either way — `_auditWord` reads core i18n first and falls back to the module.
+
+## [0.0.1+build.108] - 2026-08-22
+
+### Changed
+- **SNMP answers for itself: `/api/v1/snmp/<action>`.** The MIB library, the device-profile
+  catalogue and asking a device what it serves were reachable only at
+  `/api/v1/modules/watchfuls/snmp/<action>` — a path describing where the code lived rather
+  than what the endpoint is about. 42 operations moved; `discover` did not, because it finds
+  OIDs for the field of a check and that is a check's business. The split is by what an
+  operation is ABOUT, not by where the code ended up.
+- **Its own permissions, `snmp_view` and `snmp_manage`.** Everything SNMP offered was gated by
+  "can this person see modules", which was never a decision — a watchful owns no permission
+  flags. That meant the MIB library could not be granted to somebody without granting them
+  every module in the panel, and could not be withheld from somebody who needed the rest.
+- **BREAKING, deliberately: `modules_view` no longer opens any of it.** A CUSTOM role that
+  relied on it needs `snmp_view` (and `snmp_manage` to change anything) — the built-in roles
+  get both from the manifest. No compatibility bridge: a flag that never bites is a flag that
+  cannot restrict, which is half of what it is for.
+- The section's page follows the same gate. `__page__` already accepted a `perm` of its own
+  and defaulted to `modules_view` only because watchful modules had no flags to name.
+- The route's pipeline is deliberately the one a watchful action already went through —
+  masked secrets restored, bound host resolved server-side, named credential over inline
+  values. The operations are the same functions, and an operation that behaved differently
+  depending on which URL reached it would be worse than either behaviour.
+
+### Fixed
+- The audit row for an SNMP operation reads its verb from a module's vocabulary, and the new
+  route was not saying whose. It would have printed the raw identifier (`clean_library`)
+  where a sentence belongs. The words have not moved yet, so neither has the attribution.
+- The guard that every state-changing action has a word in both languages only scanned
+  watchful modules, so 42 actions would have left its sight in silence. It reads core
+  package manifests too now.
+
+## [0.0.1+build.107] - 2026-08-22
+
+### Changed
+- **A device is a host that carries an SNMP profile, not a module entry about one.** Giving a
+  host a community and a set of device profiles used to buy nothing until a SECOND thing
+  existed: an entry in the SNMP module pointing back at that host. The device held the
+  configuration and the module decided whether anybody read it. The host registry answers it
+  now — a host with an `snmp` profile and at least one device profile assigned is sampled,
+  with nothing else present.
+- Three things it deliberately does not do. It does not resume a device somebody switched
+  off: a module item bound to a host covers that host **even when disabled**, because
+  disabling it is somebody saying "not this one" and quietly resuming because the
+  configuration now lives elsewhere would be an upgrade undoing a decision. It does not take
+  the maintenance decision — the synthetic item goes through the same `resolve_host` a check
+  does, so there is one place that gate lives. And it returns an ITEM, not a connection:
+  building one here would be a second implementation of a merge that already exists.
+- **A result whose key begins `host.` belongs to a host rather than to a check**, and the
+  Servers tab reads it. Without that a device could be sampled, found down, and still show a
+  neutral dash — the column would be answering "how many checks did you configure" while
+  looking like it answers "is this machine all right". The convention lives with the host
+  registry and names no module: any module may file a result that way.
+
+## [0.0.1+build.106] - 2026-08-22
+
+### Changed
+- **The SNMP host profile is declared by the core**, the way SSH already was and for the same
+  reason: it describes the DEVICE — its address, its port, the identity it answers to, what it
+  declares itself to be — none of which stops being true when no check exists. Until now the
+  watchful declared it, which had a consequence past tidiness: the host form could only offer
+  a protocol whose module happened to be installed, and core code that needed to know what an
+  SNMP connection looks like had to go and read a module's `schema.json`.
+- No new mechanism for it. `lib/discovery.py` already scans each core package's `manifest.py`
+  for a named constant — the same scanner that finds permissions and Overview widgets — so
+  the profile is a `HOST_PROFILE` declaration in `lib/core/snmp/manifest.py` and the catalogue
+  picks it up without naming anybody. The next core protocol needs no edit in `hosts`.
+- Its labels come from core i18n (`snmp_profile.labels`), like the SSH profile's.
+- The module keeps its own `__host_profile__` and its inline fields: the first is how a CHECK
+  bound to a host inherits these, the second is what keeps a check against a bare IP possible
+  without registering the device first.
+
+### Added
+- A guard that the two descriptions of an SNMP connection do not drift
+  (`test_snmp_host_profile_agrees.py`). Neither can be derived from the other — one is Python
+  read before any module loads, the other is data the browser renders — and every way they can
+  disagree is silent: a `show_when` that drifts hides a field on one screen only, an `options`
+  list offers an auth protocol the check cannot use, and a `secret` flag that drifts stops
+  encrypting a password.
+
+## [0.0.1+build.105] - 2026-08-22
+
+### Changed
+- **The SNMP engine is core; the watchful is a check again.** `mib_admin` (the operations the
+  panel invokes on the library), `actions` (the panel's profile and test operations), the two
+  stores, the MIB source list and the reading half of the sampler all move to
+  `lib/core/snmp/`. What is left in `watchfuls/snmp/` is **685 lines** of the 8,647 it held:
+  the check loop, the schema that describes a check, its UI and its translations.
+- Neither of the two big classes was a mixin, which is what made this a move rather than a
+  rewrite. `MibAdmin` has 72 methods and `SnmpActions` 34, and between them there was exactly
+  **one** instance method — `_startup_compile_mibs`, which reached into the object for two
+  facts every caller already has: where `var_dir` is, and where to log. It is a function
+  taking a directory now, and both classes are what they had quietly become: namespaces the
+  watchful inherits so the panel can dispatch to them by name.
+- The sampler is split along a real seam. Reading a metric off a device is core — the
+  scheduler, the test screen and (next) the host walk must get identical answers or the
+  screen becomes a second opinion. Turning a reading into a SERIES needs state that outlives
+  the process, and stays with the watchful that emits the verdict.
+- **The connection defaults are the protocol's**: port 161, community `public`, version 2c,
+  one retry. They are in `lib/core/snmp/defaults.py`, read by everything that opens a
+  conversation. The schema still declares the same values because a form is data the browser
+  reads and cannot call a Python constant — a duplication with a real reason, pinned by
+  `test_snmp_defaults_agree.py` rather than trusted.
+- The two tables keep their `mod_snmp_` names on purpose. A table name is a fact about DATA,
+  and every installation already has rows under those; renaming one because the code moved
+  would spend a migration on tidiness. If it is ever changed it should be for a reason of its
+  own, with the migration written and tested on all three engines.
+- Eight more test files follow their subject into `tests/unit/`.
+
+### Fixed
+- A fourth path anchored on where a test file happens to sit
+  (`split(os.sep + 'watchfuls' + os.sep)`), which silently resolved to the test's own path
+  once it moved — not an error until an `open()` fails, and not an error at all if a
+  same-named file had existed under it.
+- Two structural guards read sources by hand-spelled paths that no longer point anywhere.
+  Both now name each source once.
+
+## [0.0.1+build.104] - 2026-08-22
+
+### Changed
+- **Speaking SNMP, and understanding a MIB, move to the core.** `client` (the protocol
+  conversation: get, walk, the three versions and their credentials) is now
+  `lib/core/snmp/client.py`, and the MIB layer is `lib/core/snmp/mibs/` — `lint` (reading a
+  source without compiling it), `resolver` (compiling, and name↔OID) and `catalog` (the
+  persisted symbol index). A MIB is not a check's private business: it is how an
+  installation understands its devices at all, and the same library answers the browser, the
+  profile catalogue, discovery, and whatever asks next.
+- They lose the `mib_` prefix on the way in — `mibs.resolver`, not `mibs.mib_resolver` —
+  while the import ALIASES stay (`_mib_resolver`), so not one call site changed. The diff is
+  import lines and nothing else.
+- What stays a watchful: `mib_admin` (the operations the panel invokes on the library) and
+  `mib_versions` (a store on a module-namespaced table). Both are surfaces, and surfaces move
+  in the step that deals with routes, permissions and the tables — not smuggled in with a
+  file move.
+- Three test files follow their subject into `tests/unit/`: the MIB linter, the MIB tree and
+  the walk. What they test stopped being a module.
+
+### Fixed
+- A structural guard read two sources by a path spelled relative to the test file. The two
+  no longer live in the same tree, so it read a file that was not there — and would have gone
+  on doing that after every future move. It asks each module where it is now.
+- The MIB-manager screen guard spelled `watchfuls/snmp/mib_resolver.py` out at nine call
+  sites, the admin at fourteen and the module at six. One constant each: the next move is one
+  line, not twenty-nine, and a path left behind does not fail loudly — it reads nothing, or
+  worse, something else.
+
+## [0.0.1+build.103] - 2026-08-22
+
+### Changed
+- **What a device IS moves to the core.** `profiles` (what a device profile declares — its
+  metrics, their kind, their scale, how a table's rows are named), the shipped catalogue of
+  41 profile files, and `metrics` (the counter maths that turns a running total into a rate)
+  now live in `lib/core/snmp/`. They answer a question no check owns: a host carries its SNMP
+  profiles the way it carries its address, and the code that says what one MEANS cannot sit
+  inside one of the things that reads it.
+- Neither file imported anything from the module — between them, zero references to
+  `ModuleBase` — so this is a move, not a rewrite. The watchful imports them from the core
+  now, which is the direction the dependency was always meant to point.
+- The catalogue travels with the code that reads it (`lib/core/snmp/profiles/`), and the
+  packaging needed no change: the staged tree is a copy of `src/`.
+- `test_metrics.py` and `test_profiles.py` follow the code they test into `tests/unit/`.
+  Their subject stopped being a module, so co-locating them with one would have been filing
+  by history rather than by what they touch.
+
+### Added
+- **A guard that the core never imports a watchful** (`test_core_does_not_import_modules.py`).
+  The rule was true and unwritten, and a half-finished move is exactly when somebody reaches
+  for `from watchfuls.snmp import …` to make an import resolve — after which `lib` depends on
+  a module that depends on `lib`, and nothing fails until something does. Reading a module's
+  `schema.json` off disk stays fine: that is what discovery is.
+
+### Fixed
+- A moved test derived the catalogue's path from its own location on disk
+  (`dirname(dirname(__file__))`), so it broke the moment either of them moved. It asks the
+  module where its catalogue is now — the anchor rule the repo already documents, applied to
+  data instead of to source roots.
+
+## [0.0.1+build.102] - 2026-08-22
+
+### Changed
+- **An SNMP device is configured where the device is, not once per check.** The host's SNMP
+  profile carried its address and nothing else, so the community, the version and the v3 keys
+  were re-entered on every server entry that pointed at the same box — and the field that says
+  what the device IS (`device_profiles`) lived there too, which made a property of the machine
+  a property of one entry about it. The profile now carries all of it, and a check bound to a
+  host inherits the lot: `resolve_host` already merged whatever the module declared as
+  host-owned, so widening the declaration was the change.
+- Deliberately NOT host-owned: `timeout` and `retries`. They are how long we wait before
+  giving up, not who the machine is — and moving them has a concrete cost, since two entries
+  for one address differing only in their timeout would stop being one host to the migration
+  planner and become two.
+- **A reusable credential can supply any protocol's identity, not just SSH's.** SSH had a
+  credential picker on the host form and no other protocol did; that read as a rule and was
+  only ever the consequence of being the only profile with an identity to store. Any protocol
+  whose module declares a `__credential__` now offers the same choice, and picking one clears
+  the inline copy from the host — two places holding one secret means the stale one wins the
+  day somebody rotates the other.
+- The SNMP profile picker and its "test against the device" button work from the host form as
+  well as from the Modules tab. Both reach the device through one resolver, which is set by
+  both entry points: the Modules tab has the server's saved config at a path, the host form
+  has a draft that may never have been saved, and a stale provider between them would have
+  quietly asked the last host somebody looked at.
+
+### Fixed
+- **A form that rendered perfectly into a page that never asked for it.** The per-protocol
+  profile section had been removed from the host modal when the profiles were narrowed to an
+  address — there was nothing left to put in it — and `_renderProfileFields` stayed behind,
+  correct and uncalled: the element it repaints was looked up in one place and created in
+  none. Widening the profile would have been a form nobody draws. It is back, inside the
+  module's own card and above the checks that use it, which is where its meaning is: SSH is
+  the machine's own connection and belongs in General; SNMP is a conversation one module
+  holds with it. A guard now requires the block to be drawn by both card shapes and by the
+  repaint — dead code that reads as live code puts nothing red.
+- **A web action bound to a host was handed the address and nothing else.** `resolve_host_ctx`
+  carried only the host's `ssh` profile, and `merge_host_conn` filled every protocol's fields
+  from it — survivable only while ssh was the one profile with fields to give. The moment
+  another protocol carries credentials, Discover and Test reach the device with no community
+  at all, and fail as "the device did not answer" rather than "nobody told me who to be",
+  which is the harder of the two to read. Every profile travels now, and each spec draws from
+  its own — which is what `resolve_host` does for a scheduled check.
+- A masked secret in a host draft is restored from the stored host **for every protocol**, by
+  the same field-name rule the host store itself uses — so a module's own secret field is
+  restored without core naming it. Only `ssh_password` and `ssh_key_string` were, by name.
+- The host-profile catalogue dropped a field's `multi` flag, so a list of values rendered on
+  the host form as a text box holding a comma-separated string: editable-looking, and the one
+  thing nobody should type by hand when the values are ids.
+
+## [0.0.1+build.101] - 2026-08-22
+
+### Fixed
+- **A MIB set that does not compile, and three messages that each point away from the
+  cause.** The MIBs that ship with Windows 10 Pro 22H2 fail on four of their seventeen files,
+  and not one of the failures is in the compiler. `Bad grammar near offset 21268` in a file
+  of 20760 characters: the offset is past the end, because byte 21268 of 21271 is a `0x1A` —
+  the DOS end-of-file marker — sitting three bytes after a perfectly good `END`. `no symbol
+  "software" in module "WINS-MIB"`: INTERNETSERVER-MIB imports it from WINS-MIB, which does
+  not define it but imports it itself, and an imported symbol is not re-exported — with
+  FTPSERVER-MIB failing as collateral, since it only ever imported from INTERNETSERVER-MIB.
+  `Unknown parent symbol: mib_2`: HOST-RESOURCES-MIB hangs its tree off `{ mib-2 25 }` with
+  no `mib-2` in its IMPORTS, and the name pysmi reports appears nowhere in the file because
+  what is missing is the line that would bring it in.
+- **The DOS end-of-file byte is removed wherever a MIB is written**, and swept once from what
+  is already in the library. It can never be part of a MIB, and the alternative is every
+  reader of a thirty-year-old vendor archive diagnosing the same non-error. Kept separate
+  from the line-ending repair beside it, which MUST run exactly once — run twice, it takes a
+  second `` off every file that legitimately has CRLF; removing a byte that cannot belong
+  is safe to repeat, and the two now say so with a marker each.
+- **The linter names the parent nobody imported** (`unknown-oid-parent`), in the line, before
+  the compiler gets a chance to say it badly. Values are checked there and nowhere else in
+  the linter, and the difference is what the mistake costs: an unknown type is resolved late
+  and reported clearly, while an unknown parent stops the module dead.
+- Writing that rule turned up a second bug in the linter itself: the expression that
+  recognises `name OBJECT IDENTIFIER ::=` required both halves **on one line**, and a great
+  many MIBs — the RFCs among them — put the name on a line of its own and the assignment on
+  the next. Read as one line only, every definition written that way was invisible, and
+  everything hanging off it looked like an orphan: **24 false positives across 162 real
+  files**, each with its definition three lines above. With the line break allowed, zero.
+
+- **A MIB the library holds and the compiler skipped.** pysnmp ships twenty-seven modules
+  ready-made, and they are handed to pysmi as stubs — "you already have this, do not compile
+  it". The rule is that a copy the user placed in their library wins, and the rule was asked
+  of the wrong name: what somebody places is a FILE, and `rfc2571.mib` is not called
+  SNMP-FRAMEWORK-MIB. So the imported copy was stubbed away — never compiled, no module
+  written, and pending for ever while every run recompiled it and answered "untouched". Two
+  files in one real library, both from the MIB set that ships with Windows. The same identity
+  split pysmi has everywhere (it locates by file name and writes the module's), and the last
+  place that was still asking the file a question only the module can answer.
+
+- **A latency chart wrong by a factor of a thousand.** `synology_spaceio` declared its read
+  and write latency in milliseconds; SYNOLOGY-SPACEIO-MIB says microseconds, in the
+  DESCRIPTION of both columns. Two milliseconds of volume latency was drawn as two seconds.
+  The same columns arriving in `synology_storageio` ship scaled from the start.
+
+### Added
+- **Windows, as a base group and two roles that contain it.** A group can hold another
+  group, and this is what that is for: `grp_windows` is what any Windows answers — MIB-II,
+  HOST-RESOURCES and the LAN Manager MIB — and `grp_windows_workstation` and
+  `grp_windows_server` hold it whole and add what only they have. `grp_windows_dc` holds the
+  server group and nothing else, because a domain controller **is** a server and the only
+  thing different about it is the number it introduces itself with.
+- And it introduces itself: Windows says which role it has **in its own sysObjectID** —
+  Microsoft numbers workstation, server and dc as 1, 2 and 3 under `{ windowsNT }` — so each
+  group claims its number, the most specific wins on prefix length, and the base picks up
+  anything that is none of the three. Measured against the real catalogue across nine
+  devices: each of the three Windows roles, a Synology, a MikroTik, a Linksys, a Linux, an
+  APC UPS and a switch from nobody in particular, every one of them proposed as one row.
+- **What the two sides of SMB each say about themselves.** `windows_server_lm` is a Windows
+  serving files, printers or logons: sessions, users, shares, print queues, the bytes through
+  the stack, and the three kinds of refusal — bad password, no permission, system error.
+  `windows_workstation_lm` is the other side: what this machine asks of others, what was
+  refused, and the reconnections the redirector had to make on its own, which is the number
+  that says a share is dropping.
+- **`hr_system`, the generic profile that was missing**: load per processor, processes and
+  users logged in, from the MIB every general-purpose operating system serves. The companion
+  to `hr_storage`, which measures what a host holds rather than what it is doing — and the
+  reason a Windows, a Linux and a RouterOS can all be asked for their CPU without anybody
+  writing a vendor profile for it.
+- **A group that says "everything" now holds everything the device serves.** `grp_synology`
+  carried the vendor's fifteen and nothing else, so a NAS read as three chips under a label
+  that promised one; it holds the standard MIBs too. `grp_linux` and `grp_mikrotik` gained
+  `hr_system` for the same reason.
+- **A profile for an APC UPS**, read off PowerNet-MIB rather than off a memory of it: what it
+  is running on and how long it would last (charge, runtime remaining, time on battery,
+  internal temperature, battery bus voltage), the line on both sides of it (input and output
+  voltage, frequency, current, active power, load, and the highest and lowest input voltage
+  the unit has seen), and the five things that are a state rather than a measurement — output
+  state, battery state, "needs replacing", the last self-test and the alarm level. The two
+  values the MIB reports in TimeTicks carry the factor that turns them into seconds, which is
+  the difference between "60 minutes of runtime" and "an hour of hundredths".
+- It claims `1.3.6.1.4.1.318` — every APC device — and **probes the battery capacity**, so a
+  PDU or a rack monitor from the same vendor tree is not offered a profile about batteries it
+  does not have. Every one of its twenty-two OIDs was checked against the compiled MIB before
+  it shipped: an OID nothing declares is a metric that reads empty for ever and says nothing
+  about why.
+- **A profile for a Linksys managed switch**, holding what the switch knows about itself and
+  nothing else does: its CPU over the last minute and the last five, the temperature, uptime,
+  model, serial and versions of **each unit in the stack**, every fan and every power supply
+  under the name the switch gives it, and what the box is drawing. The ports are IF-MIB and
+  stay with the generic profile — a vendor profile that also charted the ports would chart
+  every one of them twice, under two sets of names that disagree.
+- Its rows are named by the switch and not by an SNMP index: the fan table is walked beside
+  the column that describes each fan, and the per-unit tables beside the stack unit they
+  belong to, so a stack of three reads as three units rather than as rows 1, 2 and 3 of
+  something. The two values the MIBs report in hundredths and in milliwatts carry the factor
+  that turns them into seconds and watts.
+- **A profile for MikroTik RouterOS**: the board, serial, RouterOS and RouterBOOT it runs and
+  the RouterBOOT waiting for it; four temperature sensors, because which one a model reports
+  varies and a profile that names only the other is one that shows no temperature at all;
+  input voltage, power, current and processor frequency; both power supplies and both fans;
+  every SFP module's received and transmitted power and temperature; and PoE power and state
+  per port. The scaling comes from the MIB's own DISPLAY-HINTs rather than from a memory of
+  them — `Voltage`, `Temperature` and `Power` are tenths, optical power is thousandths of a
+  dBm — which is the difference between 24.1 V and 241 V.
+- Interfaces, filesystems and **memory** stay with the generic profiles: RouterOS serves
+  HOST-RESOURCES-MIB, where main memory is a row of the storage table `hr_storage` already
+  walks. A vendor profile that measured it again would chart it twice under two names.
+- **A group for each of them** — `grp_mikrotik` and `grp_linksys` — holding the vendor profile
+  *and* the standard MIBs that device actually serves, which is what makes "everything" true:
+  a vendor profile alone leaves the ports, the counters and the filesystems unassigned. Both
+  claim their vendor tree and displace what they hold, so a recognised device is proposed as
+  one row. Measured against the real catalogue: a Linksys comes back as `grp_linksys`, a
+  MikroTik as `grp_mikrotik`, a Synology still as `grp_synology` + `grp_network`, and a switch
+  from anybody else still as `grp_network`.
+- `grp_linksys` leaves `hr_storage` out on purpose: that firmware does not serve
+  HOST-RESOURCES-MIB, and a group that named it would be claiming to cover something it does
+  not. A model that turns out to answer it is still offered the profile beside the group —
+  what a group covers is what is certain, not everything that might be there.
+
+- **A Test button on the device profiles, and it answers the question nobody could ask.** An
+  assignment is wrong in two directions and the panel only ever showed one of them. A profile
+  naming an OID the device does not serve leaves an empty chart, and somebody notices
+  eventually. A device serving something no assigned profile names is **invisible**: nothing
+  is missing on any screen, because nothing ever said it could be there. So the button reads
+  both — every metric of every assigned profile, against the device, and then a sweep of the
+  device with everything the assignment already reads subtracted from it.
+- The first half reads through `sampler.read_metric`, the very function the scheduler samples
+  with, extracted for this and shared. What the screen shows is therefore what will be
+  recorded, and it cannot drift into being a different reading — a second implementation of
+  "read this metric" is right until the day it is not, and that day the test says the profile
+  works and the graph stays empty.
+- Each reading carries **the raw answer beside the value the profile turns it into**: 405 is
+  what the agent said, 40.5 °C is what the profile says it means, and a scale wrong by ten
+  shows a plausible temperature that only the digits give away. A counter shows its total and
+  no rate, because a counter means the difference between two readings and there is one.
+- The second half lists what the device sends **under the object it belongs to**, named
+  through the compiled MIB library: forty-eight lines saying `…2.2.1.16.<n>` is one sentence
+  repeated forty-eight times, so the instances collapse into `ifOutOctets (IF-MIB) × 48` with
+  a sample value. Only something the device ANSWERS can be that object: the library names the
+  nodes of the tree as well, so walking up to the nearest name of any kind files every vendor
+  OID nobody has a MIB for under `enterprises` — collapsing the half of the report somebody
+  opened the screen to read into a single row. What a profile reads as a COLUMN is matched by
+  containment and never by equality — as equality, every interface on the switch would read as uncaptured — and the
+  columns that name and scale a table's rows count as captured, because they are values the
+  assignment is already using.
+- Assigned nothing, it is the list of everything the device could be measured on: the screen
+  earns its place hardest on the box in the rack nobody has written a profile for.
+- The sweep is bounded and **says when it stopped early** rather than reporting a shorter
+  device, and the reading half has a clock: a metric the device does not answer costs the
+  timeout times the retries, and "Synology NAS (everything)" declares a hundred and thirty of
+  them — assigned to a model that serves half, that is ten minutes of a button that looks
+  stuck. What is past the clock is listed as **not read**, which is a different sentence from
+  "did not answer" and looks identical as an empty row. The whole thing is one read-only action — the same rights that already let
+  somebody discover a device's OIDs.
+- **The first real report answered a question about the report itself**, run against a
+  Synology: the whole sweep was spent inside mib-2 — a routing table, an ARP table and one row
+  per open TCP connection — and `enterprises` was never walked at all. Which is where the
+  vendor's own subjects live, and where the answer somebody opens that screen for actually is.
+  The budget is a SHARE per root now, as a floor rather than a quota: what the standard tree
+  does not use is inherited by the vendor tree, so a switch with two hundred OIDs of mib-2
+  does not waste half the sweep either. The default went from three thousand OIDs to six.
+- **Rows nothing can name are one missing MIB, and the screen says so.** Without TCP-MIB
+  compiled, every open connection on the device comes back as a row of its own — there is no
+  column for them to be instances of — and forty identical-looking mysteries read as forty
+  problems. The count of unnamed objects is now stated with what to do about it, which is one
+  import that nothing else on the screen would have suggested.
+
+- **Eleven measurements the generic profiles were leaving on the device**, every one of them
+  read off a real NAS's own report and checked against the compiled MIBs before it shipped.
+  Three of them are asymmetries — the kind of gap that is invisible precisely because the
+  chart beside it looks complete:
+- `if_generic` charted **input** errors and not output ones. It now reads errors and discards
+  in BOTH directions (`ifOutErrors`, `ifInDiscards`, `ifOutDiscards`): a link drops packets on
+  one side at a time, and the half that is not charted is the half nobody sees. Packets in and
+  out join the octets — a flood of small packets fills a queue while the byte counters stay
+  flat — and `ifSpeed` and `ifAdminStatus` are what say whether a quiet interface is idle,
+  negotiated down, or switched off on purpose. Six metrics per interface became thirteen.
+- `icmp_stats` counted this device ANSWERING pings (echo requests received, replies sent) and
+  not making them. With `icmpOutEchos` and `icmpInEchoReps` both sides of the exchange are
+  there, and "we stopped getting answers" stops looking like "nobody is asking".
+- `tcp_udp_stats` gained `tcpEstabResets` — connections killed from ESTABLISHED, which is not
+  the same counter as the resets this machine sends and is the one that says a peer is
+  dropping sessions.
+- `sys_generic` records `sysObjectID`. It is the string the whole detection mechanism turns
+  on, and until now it was read on every detection and stored nowhere.
+
+- **The test reads a device in parallel**, in two passes. Sequentially a NAS carrying
+  "Synology NAS (everything)" could not finish inside its own clock: a hundred and fifty-seven
+  metrics, of which every one the model does not serve costs the full timeout times the
+  retries — so most of the report came back as *not read*, which is true and useless. The
+  naming and scaling columns are fetched first, once each (seven metrics against one `ifDescr`
+  is one walk, not seven), and pre-filling them is also what makes the metric pass safe to run
+  wide: nothing writes to the shared cache any more. Order is preserved, so two runs of the
+  same button can be compared.
+- **The test says what it is doing while it does it.** It runs in the background now and the
+  dialog polls it, drawing a six-line checklist: reaching the device, resolving the
+  assignment, asking which profiles it serves, reading their metrics, walking the whole SNMP
+  tree, subtracting what is already captured — each with its own counter and a note. A minute
+  of work behind a spinner is indistinguishable from a hung screen, and the thing worth
+  knowing about a slow test is WHICH step is slow, which the server knew and was throwing
+  away. Same job-and-poll shape the MIB compiler already uses.
+- The steps also name what they are asking. "Walking the device" is not something anybody can
+  picture; the step now carries the two roots it sweeps — the standard tree and the vendor's —
+  because asking those whole is the only way to learn what a device serves that nobody thought
+  to ask it for.
+- **And it leaves a trail in both consoles.** Every step transition is a line in the server
+  log, and the browser console gets the same story plus the finished answer as two sortable
+  tables: every metric with its value, its raw reading and its state, and every uncaptured
+  object with its MIB and a sample. It is a diagnostic screen; being able to read it from
+  either end is the point.
+- The synchronous action is unchanged underneath — the tests drive it, anything without a UI
+  would call it, and it is now the same code path with nobody listening to the steps.
+- **The check loop moved to `checks.py`**, joining the four files that were already split out
+  of the package's front door. A check is an OID, an operator and a value somebody expects —
+  a verdict, and a different job from the sampler's series; the file that declares the module
+  should say what the module IS, not carry a hundred and ninety lines of comparison logic.
+
+- **The test asks whether the device serves a profile before reading it.** Measured on a real
+  NAS: a group called "everything a Synology answers", assigned to a model with no GPU, no
+  expansion unit, no SSD cache and no iSCSI, spent FORTY metrics waiting out the timeout times
+  the retries — around fifty seconds of the wall clock on hardware that does not exist. Every
+  one of those profiles already declares `match.probe`, which is the device saying whether it
+  applies; seven GETs at once replace the forty waits.
+- And the screen reads better for it. A profile the device does not serve is now ONE line
+  saying so, not a dozen red "no answer" rows that look like something is broken, and its
+  metrics are counted apart from the answered ones — holding them against the total made every
+  device carrying a family group look half broken.
+
+- **A group can be cloned.** The shipped ones cannot be edited — a release would take the
+  change back — so cloning is how an installation gets one of its own, and the case is the
+  common one: "everything a Synology answers, minus the two profiles this model has not got"
+  is two clicks instead of twenty-three ticks with no way to notice one left unticked. The
+  membership travels and the identity does not, exactly as it already worked for profiles.
+
+- **Fourteen measurements a Synology declares and no profile was reading**, found by asking
+  the compiled MIBs rather than the device — the same subtraction the test screen does, run
+  against the library instead of the box:
+- **IP counted at 64 bits, and for both address families.** The RFC 1213 scalars `ip_stats`
+  was built on are IPv4 only and 32 bits wide, and the same NAS reported both in one sweep:
+  `ipSystemStatsOutOctets` 15 523 189 against `ipSystemStatsHCOutOctets` 721 570 028 917 —
+  the 32-bit one had wrapped a hundred and sixty-seven times, and there is no octet counter at
+  all in the old group, so the traffic an IP stack has actually moved was not on any chart.
+  IP-MIB's own table reports per address family, so twelve metrics join the eleven: bytes,
+  datagrams and discards, in and out, for IPv4 and IPv6.
+- Both widths in ONE profile rather than a second one that replaces it, which is exactly what
+  `if_generic` does with the interface octets and for the same reason: a device that serves
+  only the old scalars does not answer the new columns, and a profile that superseded
+  `ip_stats` would take the IP layer away from every switch that has not moved on. Every group
+  already carrying `ip_stats` gets this with nothing to reassign.
+
+- **A Synology is a Linux machine, and nothing was reading it as one.** It answers the whole
+  net-snmp UCD tree — CPU split into user, system and idle, the three load averages, memory
+  and swap — and `ucd_linux` has read exactly that for as long as it has existed. It simply
+  was not in the group, so on every NAS in every rack those numbers went past uncollected.
+  They are the ones that say a NAS is thrashing, and no vendor MIB has them. `grp_synology`
+  holds it now.
+- Which also settled where the CPU comes from: `synology_system` gains the thermal status and
+  NOT the two utilisation figures DSM reports. They are the same fact told with less in it —
+  one number against a user/system/idle split with load averages beside it — and two profiles
+  reporting one value chart it twice.
+- `synology_disks` gains the disk **type and serial number** — which drive to pull out of the
+  bay is not a question the model name answers when four of them are the same model.
+- `synology_raid` gains `raidSummary`, `synology_storageio` the per-device **read and write
+  latency**, and `synology_flashcache` the read and write totals the hit rates are a fraction
+  of.
+- **Identity is worth capturing, and it costs no chart.** A `text` metric is filed as an
+  ATTRIBUTE beside a row's numbers, never as a series — so the rule about not measuring one
+  value twice does not apply to it, and the thing being measured should say what it is. The
+  interfaces now record their **MAC address, type and MTU**; the filesystems record what kind
+  of storage each row is, which is what tells a volume from RAM from swap in a list where they
+  all look like bytes; a Synology disk records its **bay** ("Disk 1"), which is the one thing
+  the model name cannot tell you when four drives are the same model.
+- **"Aparato" became "dispositivo" throughout the Spanish UI.** The field has always been
+  called *Perfiles de dispositivo*, and a screen that says both makes them read as two things.
+- `synology_ups` gains the UPS's serial, firmware and **manufacturing date** — and both of the
+  model and manufacturer strings the MIB carries, the one the driver reports and the one the
+  unit itself does, because them disagreeing is occasionally the answer. The date is not
+  identity at all: the NAS this came from answers `2013/11/10`, and a battery that old is the
+  explanation for a runtime figure that has been quietly falling for years.
+- **The memory reading everybody gets wrong.** `ucd_linux` reported total and available and
+  stopped there — and on the NAS that means 131 MB "available" out of 8 GB, which reads as a
+  machine about to die. The 6.3 GB in `memCached` is what makes that number harmless, and it
+  was not on any chart. Cached and buffers now are, with the interrupt and context-switch
+  rates and the processor count beside them.
+
+- **`synology_smb` is new**: commands per second and latency per SMB command, read/write
+  packets and their latency, and what each smbd process costs in CPU. It is what a NAS is
+  FOR, and it had no profile at all — the interface counters can be flat and the volume idle
+  while every client waits on every open, and nothing on any screen would have said so.
+
+- **A picker can now hang further buttons off its field** (`FIELD_PICKERS[…].actions`), which
+  is where the Test button lives: which profiles this device carries and what the device makes
+  of them are one subject, and anywhere else on the form it would be a button whose subject
+  the reader has to work out. The renderer still knows nothing about profiles.
+
+## [0.0.1+build.100] - 2026-08-21
+
+### Added
+- **One word instead of fifteen profiles.** A Synology answers fifteen SNMP profiles — its
+  system, its disks, its SMART attributes, its volumes, its UPS — and every one of them is
+  correctly a separate profile, because they are separate subjects. Assigning them one by one
+  to every NAS in the rack was fifteen chips in a field saying what the word "Synology" says,
+  and fifteen things to remember when the family grows a sixteenth. A **group** is an entry in
+  the same catalogue whose members are other entries' ids instead of OIDs, and that is the
+  whole design: assigning, detecting, charting, backing up and the sampler all go on speaking
+  about ids, and exactly one function knows a group is not a profile — so a group can be
+  renamed, gain a profile or be deleted without anything else finding out. Three ship
+  (`grp_synology`, `grp_linux` for anything running net-snmp, `grp_network` for a managed
+  network device nobody wrote a vendor profile for), and an installation writes its own in the
+  panel: a name, an id and the profiles it holds.
+- **Detection proposes the grouping, not the pile.** A Synology used to come back as fifteen
+  ticks and five generic ones; it comes back as two rows now. Two mechanisms, both already in
+  the product: a shipped group may claim a vendor tree like any profile and displace what it
+  holds, and any group — including one somebody wrote this morning — stands for a set of
+  proposals it covers **entirely**. Only entirely: a partial cover would quietly assign
+  profiles the device did not answer, and a wrong profile does not fail, it measures numbers
+  that look fine.
+- **A profile is written in the panel too, not only a file on the machine.** The OID matrix
+  — what says that `1.3.6.1.4.1.2021.11.9.0` is the CPU and that seven is a percentage — was
+  only ever a JSON file you put on the server, which rules it out for the box in the rack
+  nobody wrote a profile for: the person who has that box is not always the person with a
+  shell on the machine. The form is that same document field by field, and it is checked by
+  **the same function that reads the shipped files** — a second validator in the form would
+  be a second declaration of the same rules, and the two would disagree the first time one of
+  them gained a field. What the form adds is the reason: a metric is refused **by name and
+  with a reason**, because `normalise` drops what it cannot use and keeps the rest, which is
+  right when reading a file somebody edited at 3am and wrong when answering a person looking
+  at the row they just typed. Any profile can be **duplicated**, which is how one actually
+  gets written: an OID matrix from a blank form is an afternoon, the same matrix with three
+  OIDs changed is five minutes.
+- **An OID is chosen, not remembered.** Typing `1.3.6.1.4.1.6574.2.1.1.6` from memory is
+  how a profile ends up measuring nothing and saying nothing about it: every digit is
+  load-bearing and none of them is checked by anything until a device answers, or does not.
+  All three OID fields of the metric form now open the compiled MIBs. What a pick adds over a
+  paste is the **SYNTAX**: `Counter64` fills in "counter, 64 bits", `Gauge32` fills in gauge,
+  `DisplayString` fills in text-and-not-charted, and an enum fills in the value display the
+  shipped profiles use for a state — the one thing about a metric nobody gets right from the
+  OID, and the one that turns a counter wrapping around into a device that rebooted. A
+  **scalar is asked for its instance** (`sysDescr` becomes `1.3.6.1.2.1.1.1.0`), which is the
+  most common way a hand-written profile is silently empty; a table column becomes a walk;
+  and the column that names a table's rows is looked for among that table's own columns
+  rather than among nine thousand symbols.
+- **A group is written in the panel and lives in the database**, unlike the installation's own
+  profiles, which are files. The asymmetry is deliberate: an OID matrix is written in an
+  editor by somebody who knows what a walk is, and a grouping is made of things that already
+  exist, in three clicks, by whoever is adding the device. And what is written in the panel has
+  to be somewhere the panel is not the only reader of — a deployment with a web container and
+  a worker container shares the database and not the disk, so a grouping the sampler could not
+  read would be a device assigned nothing at all. It rides the database backup for the same
+  reason. One table holds both: a group is an entry whose members are other entries' ids and a
+  profile is one whose members are OIDs, and everything downstream already treats them as one
+  kind — storing them apart would be the only place in the product insisting they are
+  different. The **id cannot be edited**, and neither can the KIND behind it: it is the value
+  every device stores, so renaming one would not rename anything, it would leave every device
+  that referenced it pointing at nothing — and a device assigned `mis_linux` when it was a
+  group would go on sampling whatever a profile of that name measured afterwards. Deleting
+  does not rewrite anybody's configuration either: the devices keep the id, which stops
+  resolving, exactly as a deleted shipped profile does.
+
+### Changed
+- **The MIB manager takes the shape of the rest of the panel.** Three screens of one section
+  had each invented their own top edge: the library opened with nine controls in a row that
+  wrapped, importing was three cramped rows of fields, and compiling was a button, a folded
+  `<details>` and a progress bar stacked over the list — two rows of the library spent on it
+  whether anything was compiling or not. They are one section with three views now, each
+  wearing the bar Configuration and Backups wear: what you are looking at on the left, what
+  you can do to it on the right.
+- **The filters are a rail, and the folders are a tree.** Eleven state chips shared a wrapping
+  row with the search box, the folder picker and the selection buttons, so which of them you
+  could see depended on how wide the window happened to be — and the folder picker was a
+  `<select>` of four hundred vendor folders in alphabetical order, which is a control you can
+  only use if you already know the answer. Both moved into the panel's own navigation rail
+  (`ssRailShell`, the one Configuration and Backups are built on): the states down a column
+  with their counts, and the folders as a tree that splits `librenms/nokia/aos6` into the
+  three folders it is. Picking one shows everything under it; the counts follow the state and
+  the search, because "where is the work" is what a tree beside a filter is asked.
+- **Compiling is a place.** Its own view, with how much there is to do, the sources that
+  resolve an `IMPORTS` (a heading now, not a fold), and what failed with pysmi's own reason
+  and line beside it — and the two things anybody does next: open the source at that line, or
+  try it again. It draws no rows of its own: the library is where rows live.
+- **Each way in says what it is.** A URL, a folder of a repository and a vendor's whole
+  archive are three different things, and stacked as three rows of controls they read as one
+  form with too many boxes. Each is a card with a name and a sentence now — including
+  uploading a file, which had been sitting in the library's toolbar, where you look at MIBs
+  rather than add them.
+- **The views are in the menu, so the toolbars stopped repeating them.** The sidebar's flyout
+  lists all three; a button beside a menu entry is a second door onto the same room, and it
+  was the first thing to wrap when the window narrowed. What is left in the library's bar is
+  about the library: whether pysmi is there, where the files are, re-read, tidy up.
+- **The bar over the list narrows the list.** It said "13 of 144" and offered All/None, and
+  nothing else — every filter was in the rail. But the rail answers "which of them": the
+  states partition the library and you pick one. The other kind of question is the properties
+  that cut ACROSS the states, and there were two of them in the wrong place. "Duplicated" was
+  a state, so it stole its rows from the one the module is actually in — "Pending 130" and
+  "Duplicated 40" over the same files, with no way to ask for the forty that are both. And
+  "edited here", the first thing worth knowing about a MIB that started misbehaving after
+  somebody fixed it, could only be read one row at a time as a `v3` badge. Both are lines of
+  the rail now, LAST, after the ones that do partition it — a column where eight lines are a
+  choice and two are switches is a column that behaves in two ways without saying so. What
+  the bar got instead is the order of the list: by name, largest first, newest first — after
+  the filtering, because sorting does not decide what belongs in a list. And it has a side
+  each: what you are looking at on the left, what you do with what you ticked on the right,
+  with the buttons that come and go with a selection to the LEFT of the two that are always
+  there — drawn after them, every tick slid "All" and "None" sideways under the cursor that
+  was clicking them.
+- **The module's card stops being a launcher, and the two screens it launched are views.**
+  A card in the Modules list is where you configure a module — the MIB library, the symbol
+  browser and the profile catalogue were three buttons on it, each throwing a dialog over
+  whatever was on screen. They are the SNMP section now: five views under one sidebar entry.
+  The profile PICKER is still a dialog, because it is opened from inside another one (a
+  server's `device_profiles` field) and answers to it — so the catalogue and the picker are
+  the same renderer with two hosts, and the view suffixes its ids because both can be in the
+  document at once.
+- **A button for what a compile does at the end.** The OID index every check resolves through
+  and the symbol catalogue the browser opens on are rebuilt when a compile finishes — but
+  they are derived from `compiled/`, not from the run that happened to change it, so they can
+  be out of step with it: a tidy-up discards the catalogue instead of paying to rebuild it,
+  and a `.py` copied in by hand never went through a compile at all. Doing it by hand had no
+  button; it is one now, beside the two that produce what it indexes.
+- **The audit log says WHAT it was done to.** The row printed the verb and stopped exactly
+  where the reader's question starts — "Delete a MIB file", and never which one. The module's
+  own summary goes on the row beside the verb, and the actions that did not name their
+  subject now do: deleting a MIB says which file, the tidy-up says how much went, and
+  rebuilding the index says how many OIDs it indexed.
+- **The audit log stopped printing identifiers where a module had words for them.** An
+  entry for a module action is `{module, action, …}` and the action is an identifier —
+  `restore_orphan`, `clean_library`. The core ships no string that names a module's action on
+  purpose, so the panel asks the module, under `audit_v_<action>` in its own `ui` block. Both
+  halves of that were broken: the ROW of the log printed the name the route composes for it
+  (`snmp / delete_mib`) and never looked the action up, while the modal three clicks away read
+  it correctly — and eight modules had at least one action with no word in either language.
+  The row translates through the module now, with the module's name beside the verb, and a
+  guard checks every state-changing action of every module in both languages.
+- **The section's three views line up.** A bar is as tall as its tallest child, so a head with
+  buttons in it was 47px and one with only a title was 40 — three views of one section, none
+  of them meeting the next. The shared flush toolbar states the height once.
+- **A running job reports in one place.** The progress bar was painted wherever each view had
+  room — under the library's toolbar, below the compile buttons, beneath the import cards — so
+  walking between views while a compile ran moved it around the screen, and a thing that moves
+  when you navigate reads as three things rather than one. It is a strip directly under the
+  head in all three, shaped like the head, there while something is running and gone when it
+  is not; and Stop is inside it, because Stop belongs to the job and not to a toolbar.
+- **The tidy-up moved to where compiling happens.** What it sweeps is compiled OUTPUT — a
+  module whose source was deleted, and the folder that source lived in — and it was a button
+  in the library's head: an action on the library about something the library does not do. It
+  is in the compile view now, beside the two buttons that produce what it removes, and it
+  only appears when there is something to sweep. The library still says so, the way a library
+  should: a "no source" line in its rail, with the count and the rows behind it.
+- **Searching looks at the file names too.** A row is titled by the MODULE, which is not
+  what anybody types: `rfc` found nothing in a library holding eight files called `rfc*.mib`,
+  because each of them declares a module named after what it describes — `rfc2011.mib` is
+  IP-MIB, `rfc2737.mib` is ENTITY-MIB. The file names are searched now, and a second word
+  narrows instead of widening, which is what typing one is for. The box moved out of the rail
+  and sits over the list it narrows, beside the count of what is on screen: the rail is where
+  the things you PICK live.
+- **A MIB whose file was deleted is not in the root folder.** It has no folder at all — it
+  has no file — and it was landing among the ones that really do sit directly under `raw/`.
+  It gets a group of its own beside "dependencies" and "source deleted", the other two rows
+  that are not in any folder.
+- **"History only" is called "recoverable".** It named what was LEFT rather than what the
+  row is: a MIB whose file has been deleted and whose saved versions are still there. What
+  matters about it is that it can be brought back — which is what the row's own buttons do —
+  so that is what it says now.
+- **Picking the root folder no longer picks every folder.** Both were the empty string —
+  the files directly under `raw/` carry no folder, and neither does "show me everything" — so
+  the root line selected all 144 MIBs and lit up beside "All folders". It is a folder like
+  any other now, with a key of its own.
+- **The head's right-hand end is on the right.** The shared toolbar pushes its second child
+  over, and the second child was the pysmi badge, which is hidden whenever pysmi is
+  installed: the margin doing the pushing sat on an element with no width, and the path and
+  the buttons stayed huddled against the title.
+- **A sidebar menu opens where there is room for it.** The flyout of a section with several
+  views was placed at its parent item's top, which is only right while there is room below
+  it: SNMP sits near the foot of the rail and carries five views, so its last entries were
+  drawn past the bottom of the screen, behind the taskbar — unreachable, and with no
+  scrollbar anywhere to say there was more menu, because a `position: fixed` layer scrolls
+  with nothing. The parent's rectangle is a preference now and the viewport is the
+  constraint: the menu slides up until it fits, and when it is taller than the screen at all
+  it pins to the top and scrolls itself. The same on the other axis, so a narrow window opens
+  a menu to the left of its item rather than off the edge.
+
+## [0.0.1+build.99] - 2026-08-21
+
+### Added
+- **A tidy-up for what deleting MIBs leaves behind.** `compiled/` is flat and every file in
+  it is named after the MODULE, so deleting a folder of sources cannot take its compilations
+  with it — nothing in the library's shape says which `.py` came from where. On a library
+  that had LibreNMS imported and then removed, 374 compiled modules stayed: loadable,
+  impossible to rebuild, and counted as "dependencies pysmi pulled in" beside the three real
+  ones. The one record of where a `.py` came from is the header pysmi writes into it, and it
+  is what tells the two apart: a path under `raw/` that is not there any more is a leftover
+  and nothing needs it; no path under `raw/` at all means pysmi resolved it from its own
+  bundled MIBs or over HTTP, which cannot be rebuilt either and whose importers stop loading
+  the day it goes. Leftovers are a state of their own now — their own chip, their own group,
+  and a broom in the toolbar that reports what it would remove (compiled modules with no
+  source, and the folders emptied of their files, parents included) before removing any of
+  it.
+
+### Changed
+- **The MIB manager is a section of the System panel, not a modal.** It sat beside Services,
+  Modules and Credentials in everything but location: a library you administer, opened from a
+  button on a module card and thrown over whatever you were doing. The modal was also the
+  constraint the last three builds kept fighting — a list that had to reach the bottom of a
+  dialog somebody can drag, a source viewer three levels deep, a diff inside a tab inside it.
+  It fills the screen now, and its fill chain comes from the shell rather than from
+  `modal-dialog-scrollable`, so the list reaches the actual bottom of the viewport.
+- **Importing MIBs is a view of the section, not a panel over the list.** The three ways in —
+  a URL, a repository folder, a vendor archive — lived in a folded `<details>` at the top of
+  the MIB list, which is the compromise you make when there is nowhere else to put them.
+  What settled where they belong is what "Compare" answers: one row per file in the vendor's
+  archive, which against LibreNMS is four thousand of them. A folded panel showed nine of
+  them and a dialog thirty — that is a page. The section declares two views now (`MIBs` and
+  `Import`), the sidebar lists them in its flyout, and each has a sub-path somebody can send
+  (`/module/snmp/import`). The comparison report fills the page and scrolls itself; a
+  download started on the import view keeps counting after switching back to the list.
+- **A vendor archive says what it is doing while it does it.** Comparing against LibreNMS is
+  an 86 MB download followed by one disk read per file in the archive, and all of it sat
+  behind a single request: the button did nothing visible for a minute or two, which from
+  outside is a button that is stuck. It is a background job now, like the GitHub folder
+  import — started, polled and collected — and it reports the two things it can report
+  honestly: megabytes while it downloads, files while it compares. There is no percentage
+  for the download of a GitHub repository and there cannot be — codeload zips it on the fly
+  and answers `Transfer-Encoding: chunked`, so the server does not know the size either — but
+  the megabytes go up, which is the whole difference between "working" and "hung"; a vendor
+  archive that is a file on a server does send a length and gets its percentage. Stop stops
+  the watching; the job finishes server-side, as it always did.
+- **Opening the import view stopped paying for the MIB library.** It asked `list_mibs` —
+  every file in the raw tree, a header read out of each one, the colliding ones hashed and
+  the pending set worked out — to fill two dropdowns of repositories and archives. On a
+  library with LibreNMS in it that is seconds of waiting for a list that was already in
+  memory: `list_mib_sources` answers the same two keys and touches nothing. Two other costs
+  went with it — opening a section fires its render more than once, so the expensive read now
+  collapses to one call instead of racing itself, and an import no longer re-reads the whole
+  library from the view that does not show it.
+- **A module section can declare views wherever it is placed.** `__page__.views` gave a
+  top-level section a flyout and left a System-panel one without: same declaration, same
+  mechanism, different sidebar branch — so a section that moved into the panel silently lost
+  its views. The panel's entries carry their views and their URL now, and a section that
+  ships its own renderer draws its own views too (switching view called the core's generic
+  renderer, which painted the core's layout over a page that had declared it draws itself).
+- **A module page declares WHERE it belongs.** `__page__` has always let a module contribute a
+  section; every one of them landed in the same place — a top-level entry beside Overview —
+  which is right for something you watch and wrong for something you administer. The
+  declaration takes a `placement` now (`section`, the default, or `system`), and the core
+  places it without learning which module asked: the sidebar renders it inside the System
+  accordion with the permission the module declared, the pane is generated like any other
+  module page, and the wiring calls the module's render whichever button opened it.
+- **The System panel's entries are in alphabetical order, in the reader's language.** Thirteen
+  of them in a hand-picked order is thirteen positions to learn; sorted there is nothing to
+  learn. It had to be the TRANSLATED label — the order is different in Spanish and English —
+  so the list stopped being a literal in the sidebar template and became a registry the
+  renderer sorts, folding accents and case out of the comparison (a reader looking for
+  "Índice" looks under I, not after Z). Module-contributed tabs are merged in before the sort
+  rather than appended after it: where an entry came from is not what somebody scanning a menu
+  is looking for.
+- **Leaving the manager no longer offers to cancel a compile.** The modal asked "cancel the
+  ongoing compilation and close?" because closing it stopped the poll loop and a compile with
+  nobody watching looked stopped. A compile has never been something the browser was doing —
+  it runs server-side under a job id — so walking away is now walking away, and coming back to
+  the section picks the progress up where it is. Stopping is the Stop button, which says so.
+- **"All" and "None" wrap together or not at all.** The two selection buttons were separate
+  items of the toolbar's wrapping row, so a narrow window broke the pair in half and left
+  "None" alone on a line of its own. They are one group now: a choice of two reads as two,
+  and when the row runs out of width both go down together.
+
+### Fixed
+- **Opening the MIB section took four minutes; it takes three and a half seconds.** Measured
+  on a library with LibreNMS in it (4970 files): 257 s, of which 248 s were one thing — for
+  every duplicated module with nothing compiled from it yet, the listing asked pysmi which
+  file it WOULD read, and that reader tries every name variant in every directory it was
+  given. 151 lookups over 408 folders came to 1.19 million filesystem checks, paid on every
+  load, to fill duplicate panels nobody had opened. The listing now answers what it already
+  knows — which modules collide is a grouping of facts in hand — and everything that has to
+  read a file (the hashes, whether the copies are the same content, whether they are versions
+  of each other at all, and that prediction) is a separate action asked when a group is
+  opened, for that group. Around it: masking comments and strings jumps from token to token
+  instead of walking character by character, only the head of a file is looked at until it
+  answers, what was read out of each file survives a restart, and the tree is walked once
+  instead of twice. A section that never came back also stopped saying just "Error": a
+  request that dies now says that it did.
+- **A MIB compared against its own version no longer reads as an update.** The vendor-archive
+  report labelled `201505011057Z → 201505011057Z` as "updates", and importing never settled
+  it. Two defects held each other up: every raw-MIB writer opened its destination in text
+  mode, which on Windows turns each `\n` on the way out into `\r\n` — so a file that arrives
+  with CRLF was stored with `\r\r\n` — and the archive comparison compared BYTES, so two
+  copies of one MIB differing only in how their lines end came back "newer than installed",
+  forever, because importing damaged them again. Writers keep what they were handed
+  (`newline=''`), comparisons go through the one definition of "the same content" the diff
+  and the duplicate detector already used, and the library damaged by the old writer is
+  repaired once in place — as the exact inverse of what the writer did, one `\r` off each
+  line terminator, and keeping each file's modification time, because staleness is decided by
+  comparing mtimes and touching two thousand of them would have queued a rebuild of the whole
+  library. The inverse and not "collapse `\r\r\n`": a few dozen MIBs really do ship that
+  way, and collapsing theirs deletes a blank line the vendor wrote — which the comparison
+  then reports as a difference, forever.
+- **The two ceilings the MIB importer put on a vendor archive are gone.** It looked at the
+  first 2000 files of an archive — LibreNMS ships 4830 — so the comparison answered about
+  less than half of it and said so in a footnote; and it refused any file over 4 MiB, which
+  is how ALAXALA's AX-SMC-MIB (11.2 MiB, and a perfectly real MIB) came back as "rejected".
+  A ceiling that turns the main use of a feature into a footnote is protecting nobody: the
+  download is bounded by its own size limit, and the work runs in the background with
+  progress and a Stop. What remains in place of the per-file limit is not a policy about MIBs
+  but a memory guard — nothing is read into memory that is bigger than the archive it arrived
+  in.
+- **Real MIBs were being refused as "not a MIB", and two separate reasons were doing it.**
+  The importer had its own regex for "does this define a MIB module", applied to the raw
+  text, so a file whose name and `DEFINITIONS ::= BEGIN` have a comment between them did not
+  match — ASN.1 does not care where a comment falls between two tokens, and LibreNMS ships
+  several written that way. It now asks the parser that already answers that question. That
+  parser had a defect of its own: it blanked strings before comments, so a stray `"` inside a
+  comment opened a string that ran to the next quote hundreds of lines later and swallowed
+  the module declaration. Comments and strings are found by one left-to-right scan now —
+  whichever opens first wins, which is what a lexer does — so a `--` inside a DESCRIPTION is
+  prose and a quote inside a comment is a quote.
+- **A refused file says why, and can be looked at.** "Rejected" on its own is a word, not an
+  answer: over the per-file size limit is a decision somebody can take, a name that cannot be
+  made into a safe path is not, and they read the same on screen. The row now carries the
+  reason, the size against the limit, and the file itself — the head of it read without
+  reading the whole thing, which is what was refused in the first place. That is how the two
+  wrongly-refused MIBs above were found.
+- **A vendor archive is downloaded once, not once per button.** Comparing and then importing
+  was the same 86 MB twice, and pressing Compare first is exactly what the panel asks you to
+  do. The download is kept beside the library with the ETag the server gave it and
+  revalidated on every use: a 304 costs one request and no megabytes, a server that does not
+  do conditional requests just sends it again, and the report says when nothing had to be
+  downloaded. The cache keeps the last two archives and nothing older than a week.
+
+  The download is written INSIDE the cache directory, which is not a detail: `os.replace`
+  cannot move a file across volumes on Windows, and the system temp is on C: while a data
+  directory is on D:. Written to the temp and renamed, every rename failed, the failure read
+  as "then keep the temp file" — so nothing was ever cached, every use downloaded again, and
+  each one left its 86 MB behind (93 of them, 7.4 GB, before anybody looked). The descriptor
+  is also adopted before the request rather than after, so a 304 — an exception, in urllib —
+  cannot leave an open handle on a file Windows will then refuse to delete.
+
+  Which of the two the buttons offer is a decision, and it went this way round: "Compare"
+  means go and look, so it fetches the archive, and reusing what was downloaded before is the
+  shortcut in the dropdown beside it. The import that usually follows a comparison takes the
+  copy that comparison just left, so the pair still costs one download. A kept copy that will
+  not open is thrown away and fetched once more by itself, rather than answering "Not a ZIP
+  archive" for ever with nothing to press.
+- **The comparison report is written in the reader's language.** Its headline came from the
+  server, in English, under a Spanish panel — and it now says the same things from the same
+  numbers: how many are newer, how many carry the same version, how many are unchanged, where
+  it stopped and whether it had to download anything at all.
+- **A row that says the content differs can show what differs.** The comparison against a
+  vendor archive claimed a difference and gave no way to look at it: same module, same
+  `LAST-UPDATED`, no diff. Each differing row now carries one — computed where both texts
+  were already open, so it costs nothing — capped in number, and only for a comparison: an
+  import has already decided.
+- **"Same version" is now a state of its own.** Content that differs while the author's
+  `LAST-UPDATED` is identical is not an update and not "unchanged" — it is imported like any
+  other difference (a vendor does re-cut a MIB without touching the stamp), the row says what
+  it is, and the summary does not count it among the ones that are newer.
+
+## [0.0.1+build.98] - 2026-08-21
+
+### Added
+- **An import brings in MIBs, and puts them where they came from.** Three things went
+  wrong on the way in, and every one of them was silent.
+  - **A name is not evidence.** Net-SNMP's `mibs/` folder ships `nodemap`, `rfclist`,
+    `ianalist`, `mibfetch` and `smistrip` — lists and shell scripts — and a `Makefile.mib`,
+    which is a Makefile wearing the one extension the filter trusted most. All of them landed
+    in the list as MIBs that would never compile. What decides now is the file itself: it has
+    to declare a module. Names still matter as an optimisation — a request not made against an
+    anonymous rate limit of sixty an hour — but **which** names belongs to the SOURCE, in its
+    own JSON: this module has no business knowing what net-snmp keeps beside its MIBs, and the
+    next source somebody adds will keep something else. Only the furniture every repository
+    has (readme, licence, makefile) stays in the code, because that is knowledge about git.
+    The same check now guards a single-URL import, a manual upload and an archive member,
+    because the answer does not depend on how the bytes arrived.
+  - **Everything landed in the root.** Ninety files from one source with no vendor beside
+    them, and the next source shipping an ENTITY-MIB of its own silently overwriting this
+    one's. A source declares its folder; anything else is named after its repository.
+  - **And files were refused as "rejected", a different handful every run.** `_confined_path`
+    resolved both sides with `pathlib.Path.resolve()`, which on Windows returns an
+    extended-length path for one it can open and a plain one for one it cannot — so with
+    sixteen threads importing into a folder they are also creating, a security check answered
+    according to what happened to exist at that instant. Three to six of seventy-nine, with
+    nothing in the message to say the path was fine and the comparison was not.
+- **A MIB can be corrected, and taken back.** Vendors ship broken MIBs — SYNOLOGY-SMB-MIB
+  has never compiled anywhere, because every descriptor in it starts with an uppercase letter,
+  which in SMI is a type reference and not a value — and there was nothing to do about that
+  from here but say so. The source viewer edits now, with every version kept: a correction
+  nobody can undo is one nobody dares make, so the history is the feature and the pencil is
+  only the button. Restoring writes the old content out as a NEW version rather than winding
+  the history back, because going back is a thing that happened and it happened at a time.
+  - **The file on disk stays the working copy.** pysmi is handed directories and compiles
+    what it finds in them, so an edit that lived only in the database would be an edit nothing
+    ever compiled — indistinguishable, from the outside, from the save not having worked. A
+    save writes both; if only one can happen, the version goes in first, because an edit
+    recorded and not written is recoverable and the other way round is not.
+  - **The first edit keeps what the vendor shipped**, as version 1, and pruning never touches
+    it: it is the one version that cannot be reconstructed from anywhere, since the file it
+    came from has been overwritten by every save since. That is what "no stored version means
+    the original" amounts to — until somebody edits there is nothing stored, and the moment
+    they do, the original is kept.
+  - **A version can say what it was for**, and two of them can be compared. The note is
+    asked for beside Save rather than in a dialog afterwards, because what a change is for is
+    known while it is being made. The diff is computed server-side — the version list is
+    deliberately shipped without content, so diffing in the page would mean fetching two whole
+    files to throw most of them away — and the second side defaults to the file as it is now,
+    which is the comparison anybody actually wants. It is coloured by a third CodeMirror mode,
+    three rules long and the one that earns the most: a wall of monospace where the +/- at
+    column zero is the whole message is exactly what an eye cannot scan.
+  - **"Compile all" said neither of the two things it could have meant.** It walked every
+    MIB and let pysmi skip the up-to-date ones, so it did not recompile everything and it did
+    not compile only what needed it: with twenty files nobody notices, with two thousand the
+    progress bar reads 0/2000 while the real work is three files. And there was no way at all
+    to force a rebuild for the case pysmi's timestamp check cannot see — pysmi itself
+    upgraded, or a dependency changed. It is a split button now: **compile pending** walks
+    what has no compiled module or one older than its source, and **rebuild everything** walks
+    the lot and forces it, behind the dropdown and behind a confirmation because it is slow
+    and almost never what you want. Finding nothing to do is said out loud rather than ending
+    instantly and silently, which is how a working button reads as a broken one.
+  - The job now compiles **exactly what it counted**. The scope narrowed the number and not
+    the work: the compiler was only told which MIBs to walk when the caller had asked for
+    specific files, so with a scope it re-derived its own list from the directory — everything
+    — while the job reported the narrowed total. On screen, 'Compiling 28 / 3' and a progress
+    bar at 933%. Two derivations of what to compile that can disagree is one too many.
+  - **A module compiled from bytes that are gone is its own state now.** Editing a MIB
+    produces exactly that every time: the row read "compiled" and meant "compiled from
+    something else", which sends somebody looking for a bug in the sampler instead of pressing
+    compile. As a flag on "compiled" it also sat inside that count, so the chips could read
+    "Pending 0, Compiled 97" while the compile button set off to do three files — the list and
+    the button disagreeing about the same question, in the same modal. The chips partition the
+    list now (pending, outdated, errors, compiled, dependencies), their sum is the total, and
+    pending + outdated + errors is exactly what the button walks — which it says on its face,
+    before it is pressed. Editing a MIB produces exactly
+    that every time: the row read "compiled" and meant "compiled from something else", which
+    sends somebody looking for a bug in the sampler instead of pressing compile.
+  - **The list groups by folder once it stops fitting.** Twenty MIBs are a list; a
+    repository import brings two thousand, and a flat list of two thousand is unreadable
+    however fast it draws. The folders the import already keeps are the structure that was
+    there all along, so the list uses them: a folder selector with counts, and collapsible
+    group headers when there is more than a screenful. Below sixty rows nothing changes —
+    grouping twenty files is pure overhead, and the headers exist for the case that does not
+    fit, not to tax the case that does. A search opens the folders it matched in, because
+    typing something that exists and being shown nothing reads as a broken search.
+    Dependencies get a group of their own: pysmi pulled them in resolving an IMPORTS, they
+    came from nowhere in the tree, and filing them under the top level puts files nobody
+    chose among the ones somebody did.
+  - **A folder header counts what is left, not what is there.** `78` says nothing about a
+    folder of seventy-eight; `60/78` says where the work is and which vendor to open, and
+    the badge turns green when a folder is finished, so fifteen of them can be read at a
+    glance. A stale module does not count as done — it was compiled from bytes that are no
+    longer there, which is the whole reason that state exists.
+  - **A folder header selects its folder.** Compiling or deleting a vendor's worth of
+    MIBs is one of the few things anybody does in bulk here, and doing it by ticking six
+    hundred boxes is not doing it. It ticks what is VISIBLE in that folder — with a state
+    chip or a search active, a tick beside four rows must not quietly select the six
+    hundred behind them — and a half-selected folder shows as half-selected rather than
+    as untouched.
+  - **The list says which MIBs are no longer the vendor's.** A row reading "compiled, 6.0 KB"
+    cannot tell an untouched file from one somebody fixed three weeks ago, which is the first
+    thing worth knowing when it misbehaves. An edited MIB wears its version; an untouched one
+    wears nothing, because a number on every row would make the one that matters invisible.
+  - The history lives in the **shared database**, through the module-table mechanism the DB
+    manager already exposed and nothing had used yet (`mod_snmp_mib_versions`). A file beside
+    the MIBs would be per-container, and a deployment with a web container and a worker
+    container shares the database, not the disk. Each version records who wrote it, which
+    needed the actor to reach a module action at all — the audit log answers "who" one row
+    per action, not per record.
+- **A device profile stops being a declaration.** The previous build could assign profiles to a
+  machine and show what they contained; nothing read them. This one asks the device and records
+  the numbers, which is what turns the catalogue into charts.
+  - **A server with profiles and no OID checks is now work.** Checks and sampling are
+    independent: a check says whether something is TRUE of a device, sampling says what it is
+    DOING, and plenty of hardware deserves the second without anybody having written the first.
+    Both share the module's thread pool — it is the same conversation with the same devices, and
+    a second pool would double the sockets against a network sized for one.
+  - **Walking one column.** The discovery walk sweeps two fixed subtrees, truncates values at
+    120 characters and swallows errors, because what it produces is a list somebody picks from.
+    A sampled metric needs the opposite of all three: the column its profile named, the value
+    whole (a truncated counter is a wrong number, not a shortened one), and to know when the
+    device did not answer — an empty table and an unreachable device look identical otherwise,
+    and one means "assign a different profile" while the other means "check the cable". Bounded
+    at 512 rows, which fits real hardware and keeps a chassis switch from owning the cycle.
+  - **A row keeps the name the device gave it.** Tables are walked per SNMP index, which is not
+    the port on the front of the switch and does not survive a device renumbering. The
+    profile's `index_label` column is walked beside the data — once, however many metrics share
+    it — and each row is filed under what the device calls it, with its metrics together: in,
+    out and errors of one interface are one result, not three charts of a third of a port.
+  - **The previous sample outlives the process.** A counter only means something as a
+    difference, and the monitor builds a fresh Watchful every cycle — a fresh PROCESS under
+    systemd one-shot. The last reading is kept in the status store, next to `fail_streak` and
+    for the same reason; on the instance, every cycle would look like the first and no counter
+    would ever be chartable.
+  - **Partial answers cost only themselves.** A profile assigned to a device that serves half of
+    it is normal — a switch with no UCD agent still has interfaces worth charting. A device that
+    answers *nothing* is reported once for the device rather than once per metric (forty alerts
+    about one unplugged cable is how somebody learns to ignore alerts), after two cycles of
+    grace, because a lost UDP datagram is not an outage.
+- **Six more shipped profiles — nine in total, all from standard MIBs.** `hr_storage`
+  (HOST-RESOURCES-MIB: usage and capacity per volume), `ip_stats` (IP-MIB: what the IP layer
+  did with the packets — delivered, forwarded, discarded, fragmented), `icmp_stats` (ICMP-MIB:
+  echoes, unreachables and time exceededs), `tcp_udp_stats` (TCP/UDP-MIB: established
+  connections, retransmissions, resets, datagrams to closed ports), `disk_io` (UCD-SNMP-MIB:
+  bytes and operations per second per block device) and `lm_sensors` (LM-SENSORS-MIB:
+  temperatures, fans and voltages, one row per probe). The interface counters say how much
+  traffic there was; `ip_stats` says what happened to it, and the retransmissions in
+  `tcp_udp_stats` are the number that says a link is bad long before it is down.
+  - **They are disjoint on purpose.** Profiles are assigned several at a time, so two of them
+    reporting the same value is not redundancy — it is one measurement charted twice under two
+    names, and the day they disagree nothing says which is right. `hr_storage` is storage and
+    nothing else; CPU and memory stay with `ucd_linux`, which a NAS running net-snmp gets
+    anyway. A test fails if any two shipped profiles ever share a metric key.
+  - **A probe has to be something a GET can answer.** A probe against a table COLUMN answers
+    nothing — the column has no instance, only its rows do — so a table-only profile probes one
+    of its rows, which is the condition worth testing anyway: a machine with no disks should
+    not be offered a disk profile. A profile whose probe was a bare column would validate,
+    load, sit in the catalogue and never be detected, while measuring perfectly when assigned
+    by hand.
+  - Writing the storage one forced two additions to the profile format, both of which any
+    storage profile needs:
+  - **`scale_by`: the factor comes from another column, per row.** A filesystem table reports
+    its size in *allocation units* and puts the size of a unit in a column beside it — 4096 on
+    most agents, 512 or 65536 on plenty. A profile that guessed would report a NAS as sixteen
+    times smaller than it is, with nothing on screen saying so. A missing factor leaves the
+    reading alone (it is a detail ABOUT the value; a device that answered the value but not the
+    unit has still answered it) and a zero is refused, because multiplying by it would chart
+    every volume as empty, which looks like data rather than like a bad reading.
+  - **`group`: two nameless tables are not one table.** A row is identified by its name, and a
+    table whose rows have none falls back to the SNMP index — where storage row 3 and processor
+    row 3 are not the same row and were silently merging into one. Named tables do not need it;
+    the name is the identity.
+- **A module may work out its history fields at run time** — `discover_history_fields()`, the
+  mirror of `discover_db_tables()`. What a module charts is declared in its schema, which is
+  right until the answer depends on data the installation supplies: SNMP records whatever its
+  profiles declare, and one of those was written for the box in somebody's rack after this
+  release shipped. A schema cannot name a field that did not exist when it was written. The
+  static declaration still wins over the discovered one — it is the one somebody wrote down on
+  purpose — and a hook that fails costs its own labels, never the History page.
+
+- **Fifteen Synology profiles, written from the OIDs in the vendor's own MIB archive.**
+  System (chassis temperature, power, fans, model, serial, DSM), disks (temperature, bad
+  sectors, remaining life, health), volumes and RAID, disk and volume I/O, UPS, service users,
+  SMART, SSD cache, iSCSI LUNs, expansion units, high availability, NFS, GPU and Ethernet
+  ports. The generic profiles measure what any device does; these measure what only a Synology
+  reports about itself — a fan that stopped, a disk reallocating sectors, a UPS with eleven
+  minutes left.
+  - **A vendor profile displaces the generic one it duplicates** (`match.supersedes`). A
+    Synology runs net-snmp underneath, so it answers the UCD disk-I/O probe AND its own, and
+    both measure the same disks: proposing the pair would chart every disk twice under two sets
+    of names that disagree by whatever the two MIBs count differently.
+  - **A declared probe governs over the vendor's claim.** A profile naming an OID has made the
+    more specific statement about itself, so a model of the right make that does not answer it
+    is not offered the profile — which also stops it displacing the generic profile that does
+    work on that model. Found by a test written for an older DiskStation.
+  - **A row can need two columns to have a name** (`index_label` accepts a list). A SMART table
+    has one row per (disk, attribute), and either column alone names several rows —
+    "Reallocated_Sector_Ct" exists on every disk in the box, and merging them would chart one
+    disk's sectors as all of them.
+  - The RAID sizes are read as gauges although the MIB declares them `Counter64`: they are
+    sizes, and differentiated they would chart the growth of the disk rather than its capacity.
+  - Synology joins the known MIB sources, so its MIBs can be imported and compiled for the MIB
+    browser. The profiles do not need them — they carry numeric OIDs on purpose, and work on an
+    installation with no MIBs compiled at all.
+
+- **A vendor's MIB archive is a source, and importing it compares first.** Projects that host
+  MIBs publish a directory; vendors publish one ZIP, and the catalogue only knew how to read the
+  first. A source can now declare an `archive` alongside (or instead of) its `folder` — Synology
+  declares both, its own archive plus the LibreNMS mirror as a dependency source for compiling.
+  - **Comparison, not overwrite.** Every MIB carries the `LAST-UPDATED` its author wrote, which
+    is the only thing that says whether an archive is ahead of what is installed; the file's own
+    timestamp says when it was downloaded. Each member comes back `new`, `updated`, `unchanged`
+    or `older`, **Compare** reports all of it and writes nothing — "is it worth updating" should
+    not cost the update — and an `older` member is skipped unless forced. Re-importing last
+    year's archive over a MIB somebody fixed by hand is a downgrade whose symptom turns up much
+    later, as an OID that stopped resolving.
+  - A MIB with no stamp cannot be compared, so a difference is simply a difference: refusing it
+    would make those files un-updatable forever.
+  - Synology is declared as an archive and nothing else. Dependency templates resolve a module
+    a MIB IMPORTS and does not have, and not one of the twenty Synology MIBs imports another
+    SYNOLOGY-* module — everything they import is standard SNMPv2-*, which the default mirror
+    already serves. Templates pointing at a partial mirror could never resolve anything and
+    would 404 on every try; a folder entry for that mirror was worse still, offering three of
+    the twenty MIBs from the place that looks like the main way in.
+
+### Fixed
+- **Leaving the editor stopped rebuilding the modal around you.** Cancelling an edit re-fetched
+  the file and re-rendered everything, which threw away the tab you were on, where you had
+  scrolled to and the editor itself — to put back a value already sitting in memory. On screen
+  that is the whole modal flashing to show you what you were already looking at, and it landed
+  you back on the Declarations tab, which is neither where you were nor what you were doing.
+  Cancelling now restores the content it was handed, and saving or restoring redraws the one
+  pane that actually went stale.
+- **The Declarations tab could come up blank.** With no objects the pane rendered nothing at
+  all, which reads as a screen that failed to load — and a MIB whose syntax breaks mid-file
+  really does declare nothing the parser can see. It says so now, which also points at the
+  source tab next door, where the answer is.
+- **A version records the base it was written on.** The history was a flat list of
+  contents: v2 is "the fix", and nothing said the fix to WHAT. That is the question the day a
+  vendor ships a new release — what is worth having then is not v2's content but the CHANGE
+  v1 → v2, and that is only a change if you know where it started. Each version now stores the
+  sha of what it replaced, resolved to a version number when read, so the list says "v2 ← v1"
+  and its diff button shows what that version changed rather than how it compares to whatever
+  is on disk today. An import records what it wrote over, which is how "your fix was replaced"
+  stops being an inference.
+- **A history belongs to the module, not to the file name.** It was keyed on the file's
+  stem, so renaming a MIB — or moving it to another vendor folder — lost everything recorded
+  about it, and renaming a file is not editing it. The key now comes from inside the file
+  (`X-MIB DEFINITIONS ::= BEGIN`), which is the identity everything else already uses: pysmi
+  compiles by module name, writes `<NAME>.py`, and resolves every IMPORTS by name. In the
+  normal case the two coincide, so nothing moves; when they do not, the linter now says so —
+  a file not named after its module is one that everything importing it fails to find, and the
+  failure lands on THEM, naming symbols they cannot resolve, with nothing pointing here.
+- **A stored secret is no longer written as a password input.** Reported from the panel:
+  Firefox offered to save a login on every reload — user `1`, password `public`, which are an
+  SNMP version and a device's community string. The password manager had found an
+  `<input type="password">`, taken the field beside it for a username and decided the page was
+  a sign-in form. The prompt was the harmless half: the same machinery FILLS those fields, and
+  a saved password pasted into a community box is a value on its way to a device and then into
+  the configuration. None of this panel's secrets — community strings, webhook signing keys,
+  API tokens, the password used to test an LDAP bind — are this site's credentials. They are
+  masked from the stylesheet now, on a plain text input nothing recognises as one, and the
+  browser's own field type is kept only as the fallback where that masking is unsupported:
+  losing the masking would be far worse than the prompt it avoids. The panel's actual logins —
+  signing in, changing a password, creating a user — are untouched, because that is exactly
+  where a password manager should work.
+- **A MIB is found by one name and compiled into another, and the panel now knows it.**
+  `trunk.mib` in a switch vendor's archive declares IEEE8023-LAG-MIB. pysmi LOCATES a source by
+  the file's name and WRITES the module's, which is also what it resolves every `IMPORTS` by —
+  so "is this compiled?" asked with the file name asks about a `.py` nothing will ever write.
+  The MIB compiled perfectly, the compiler answered "already up to date", and the row said
+  pending for ever, every run doing the work again. On a real library that was **132 pending of
+  which 117 were an illusion**, 97 modules labelled as dependencies pysmi had supposedly fetched
+  when the user had shipped them, and 6 duplicates where there were 30. The module is read from
+  inside the file now (cached on mtime and size), pending is settled against `<MODULE>.py` while
+  still answering the file name the compiler needs, and a row is keyed by module with the file
+  name beside it when the two differ. The compile button counts the list the server will walk
+  rather than its own rows — a row is a module and the job walks files, which in a vendor
+  archive is rarely the same number.
+- **A delete can take one half of a row.** A row is a module and stands for two files: the
+  source somebody wrote and the `.py` pysmi made from it. Together is right almost always, and
+  the two cases where it is not are the ones that matter — a compiled module is an OUTPUT, so
+  dropping it is how you ask for it to be built again from a source that changed underneath
+  it, and a source can go while the `.py` stays loaded. The trash is a split button now
+  (everything / only the compilation / only the source) on rows that really hold both, and the
+  same menu sits on the selection. Each question says what SURVIVES, which is the half people
+  get wrong: delete the source and the compiled module stays in use, looking like nothing
+  happened until the next compile. The stored history is offered only when the source is what
+  goes — it is the history of the source, and nobody ever edited a `.py`.
+- **A test proves the device answers; it no longer harvests everything it has.** Reported:
+  "test server" on a NAS with only SNMP and profiles sat on «testing…» and never came back. It
+  was not hung. Metric sampling reads every metric of every profile assigned to a device —
+  fifteen Synology profiles is 135 walks, each hundreds of round trips on a real NAS — and a
+  probe records none of it: `ProbeMonitor` has no history to write to, so the whole harvest was
+  thrown away. The monitor now says which kind of run this is (`is_probe`), and sampling stops
+  at the first metric that answers when it is a test: 135 walks became 2, and 6.9s became 0.1s
+  on the bench. It still answers — a host with only profiles and no checks has to produce
+  something in the test, which was a decision made earlier and is still guarded — and a
+  scheduled cycle still reads everything, because that is what fills the graphs.
+- **The repository ZIP is used when the walk is the wrong tool, not only when GitHub refuses.**
+  Reported: LibreNMS still fetched files one by one and failed. The fallback was wired to a
+  REFUSAL, and with allowance left the walk does not fail — it truncates at its own ceiling,
+  comes back with the first forty folders and looks like it worked. A recursive import of the
+  folder a source publishes now goes straight to the archive it declares (0 API requests, 23s,
+  1997 files for LibreNMS); a vendor sub-folder still walks, because one request lists it and
+  86 MB to fetch ten files would be trading one waste for a bigger one; and any walk that did
+  not finish — refused or truncated — is finished from the same archive.
+- **Which ZIP, and which folder of it, is the source's to declare.** `librenms.json` now names
+  the codeload archive and the `archive_only` path its MIBs live under, beside the folder URL it
+  already had — both routes stay, because the API one is cheaper for anything it can do. The
+  module knows how to use an archive; it does not know that LibreNMS keeps its MIBs in `mibs/`,
+  and it should not: the next source will publish a release tarball, or another branch, or a
+  mirror, and a URL assembled here would find none of them. Asked for a sub-folder of a declared
+  source the fallback keeps the sub-folder, so `mibs/synology` imports ten files and not four
+  thousand.
+- **A GitHub import no longer needs a token at all: it can finish from the repository's ZIP.**
+  `codeload` serves a repository as one file and is not the API — no allowance to spend — which
+  is the way past a limit that a folder-per-request walk cannot get past. So when GitHub
+  refuses, the same import finishes from the ZIP and is reported as one import, which is what
+  it was. It is not what happens first: the ZIP costs a whole-repository download to pick one
+  folder out of (86 MB for LibreNMS), and for anything the API can do one request lists a
+  folder while the files themselves never touch the allowance. The archive importer took the
+  changes that made this possible — a folder filter, so only what was asked for comes out of a
+  zip holding sixteen thousand files; streaming to a temporary file rather than reading tens of
+  megabytes into memory; and a file ceiling that counts what is imported instead of what the
+  zip contains, and says how many were left out. LibreNMS ships 4830 MIBs and 396 MB of them,
+  which is a decision somebody should get to make rather than discover.
+- **A GitHub import can carry a token, and stops the moment GitHub says no.** Importing
+  LibreNMS' `mibs/` gave 389 files and 25 failed folders, every one of them
+  `HTTP Error 403: rate limit exceeded`. GitHub allows sixty requests an hour without a token
+  and the walk spends one per folder; LibreNMS has some four hundred. Once the allowance is
+  gone every remaining call fails identically, so walking the queue to prove it turned one
+  condition into twenty-five rows that read like twenty-five broken vendors. The walk stops at
+  the first refusal now — recognised by the header GitHub sends with it, not by the 403, which
+  a private repository also answers — and says when the allowance comes back and what to do
+  about it. The module takes an optional **GitHub token**: a read-only one raises the
+  allowance to five thousand an hour, and the folder cap moves with it (40 → 500). It is a
+  declared secret, encrypted at rest and masked in the API.
+- **A module's own secrets now reach its actions.** The browser holds `null` for every secret
+  it was sent, and an action given the configuration from the page received nothing — so a
+  module-level secret was, in effect, unusable. Item-level secrets were already restored from
+  the store before an action ran; module-level ones are too now. A token that silently does
+  not apply looks exactly like a rate limit nobody can explain.
+- **The words a module wrote in an audit entry are translated by that module.** `action:
+  compile_mibs_status` and `failed_detail` were reaching the audit screen as identifiers. The
+  core ships no string that names a module, so it asks the module — its own `ui` block, under
+  the same `audit_f_`/`audit_v_` names, core first so nobody can rename `error` or `user` for
+  everybody. `<field>_truncated` is read back generically, because the core is what adds it
+  when it caps a list.
+- **Seven MIBs that stayed pending, compiled without error, and stayed pending.** Both
+  halves were the file-name/module-name split again, on the two sides of the same conversation
+  with pysmi. It resolves an `IMPORTS` by trying the module name as a FILE name, which in a
+  vendor archive finds nothing — `DIFFSERV-DSCP-TC` lives in `diffserv-dscp-tc-rfc3289.mib`,
+  `DNS-SERVER-MIB` in `rfc1611.mib`, every Linksys module in an `ls*.mib` — so each import came
+  back "missing" and took the MIB that needed it down with it. There is an index of module to
+  file now, offered to pysmi as a source and asked before the directories, which makes a vendor
+  archive self-sufficient: 204 modules from 204 files. And the failure itself was invisible,
+  because pysmi answers with EITHER name depending on how it went — what it compiled under the
+  module's name, what it could not parse under the name it was handed, never having read the
+  module out of the file. The verdict was looked up under the file name only: no error, no
+  compiled module, pending for ever. It is looked up under both now and reported under the
+  module's, which is what the rows and the stored reasons are keyed by — and `attempted`, the
+  list that clears those stored reasons, was always empty for the same reason, so a MIB that
+  had since compiled kept its old red row.
+- **A MIB that is only macros is never compiled, whoever ships a copy of it.** Reported from
+  the panel: `Bad grammar near offset 285 at MIB RFC-1212`, on every run, with nothing anybody
+  could do about it. RFC-1212 and RFC-1215 define grammar for other MIBs to use and nothing
+  else — pysmi cannot compile them into anything, and pysnmp has them built in, which is why
+  they were stubbed. But the stub list was filtered by "not present in raw_dir": right for the
+  ordinary built-ins, where dropping SNMPv2-MIB.txt in means you want it compiled, and wrong
+  for these two, where no copy of them compiles at all. A vendor archive shipping MG-Soft's
+  variant — whose entire body is `SMI OBJECT-TYPE`, an SMIC directive pysmi has never heard of
+  — cancelled its own stub and earned a permanent error. They are now left out of the work
+  list rather than only stubbed (asked for by name, pysmi parses the source before it consults
+  any searcher, so a stub cannot get in front of it), recognised by their module name rather
+  than their file's, and drawn as a state of their own: no `.py` is produced for them and none
+  is missing.
+- **Two files sharing a module name are two different problems, and the screen no longer
+  gives them one answer.** They are either copies of one MIB or different MIBs whose first line
+  was copy-pasted — a vendor archive produces the second by itself: three LINKSYS files with
+  10, 60 and 122 objects, not one name in common, all of them declaring `rlBrgMulticast`. Told
+  to "pick the one that stays", somebody deletes two real MIBs. The listing now measures what
+  the copies actually declare: copies of one module share their descriptors whatever changed
+  between vintages (an IF-MIB against an older IF-MIB comes out at 98%), and files that only
+  share a header share none. At zero the screen says so, says why, and points at the fix — the
+  module name on line 1 — instead of offering a diff of two unrelated files, which is a full
+  rewrite and reads as a comparison gone wrong.
+- **A duplicated module shows the date each copy declares for itself.** `LAST-UPDATED` is
+  what actually decides which of two copies of a standard MIB stays — 2002 against 1999 in the
+  pair that prompted this — and it was only visible twenty lines into the diff. It sits in the
+  comparison table now, beside the size and the hash, with the newest marked when the dates
+  differ and nothing claimed when they do not. A quarter of a real library declares no date at
+  all, so the column appears only when something fills it, and a copy that does not say is
+  shown as not saying rather than as older. It costs no extra read: the date and the module
+  name come out of the same header, in the same cached pass.
+- **A compiled module can outlive the file it was made from, and now says so.** Deleting one
+  copy of a module that arrived twice leaves the `.py` behind — deliberately: it is what pysnmp
+  loads, and dropping it would take the module out of service over a tidy-up. But nothing is
+  newer than anything afterwards, so no timestamp can notice, and the row read "compiled" while
+  what was loaded came from a file nobody could open any more. pysmi records the source path in
+  the header of everything it writes, which makes it the one fact available: a module whose
+  recorded source is no longer there is outdated, with a badge that says which kind of outdated
+  it is, and the server counts it as pending so the chips and the compile button cannot
+  disagree about it.
+- **`×3` says how many files, and now also whether it matters.** pysmi resolves an imported
+  module BY NAME: of several files called `SNMPv2-TC` it reads exactly one, compiles that, and
+  never mentions the rest. Vendor archives ship their own copy of the standard MIBs, so this
+  arrives by itself — and a stripped copy winning over the real one breaks not that MIB but
+  every module importing it, three steps from where anybody looks. What decided it was the
+  order of a directory walk, which is to say the alphabet. The badge now says whether the
+  copies differ at all, and opens onto the comparison: every copy with its size and a hash of
+  its content, which one pysmi actually reads, a unified diff between any two of them, and a
+  delete for the ones that lose. Identical copies say so and are left alone — they are
+  clutter, not a decision. The listing hashes only the colliding names, so the cost is the
+  size of the ambiguity and not the size of the library, and the eye on a duplicated row now
+  opens the copy in use rather than the first one alphabetically.
+- **A history with no file behind it is a row of its own.** Deleting a MIB keeps its
+  versions, which is right — losing an edit because somebody removed a file to re-import it
+  clean is the opposite of what a history is for — but kept and never drawn is a thing that
+  exists, cannot be seen, cannot be brought back and cannot be cleared out. It has a state and
+  a chip now, and the row offers the only two things that apply to it: put the file back where
+  it lived (a version knows its path, the only record of it left) or let the history go. And
+  the delete confirmation offers to take the history along, never ticked by default, asked at
+  the moment of deciding rather than in a dialog once the moment has passed. That needed one
+  opt-in checkbox on the shared confirm modal — the same shape its reason field already had.
+- **Deleting a MIB keeps its history**, and single versions can be deleted by hand. Deleting a
+  MIB to re-import it clean is the ordinary way out of a mess, and exactly when the edit that
+  came before is worth still having — but a version somebody knows is junk should not have to
+  stay for ever either. Deleting v1 says what it is: the only copy of the file as the vendor
+  shipped it, since the file it came from has been overwritten by every save since.
+- **The same bytes are not filed twice.** Every version has carried a sha256 since the first
+  row and nothing ever read it. Unread, the ordinary cycle — fix a MIB, the vendor file comes
+  back, restore the fix, it comes back again — files two distinct documents as four, then six;
+  and at the cap it is the versions that mean something that get pushed out to make room for
+  copies of ones already there. An import whose content the history already holds now files
+  nothing and still reports the replacement, because not storing it twice is a storage decision
+  and an edit was still overwritten. The file on disk was already compared in full before being
+  rewritten — that one is not a hash but the whole content, and it is deliberate: not rewriting
+  keeps the mtime, and the mtime is what decides whether the MIB needs compiling again.
+- **An import that writes over an edit says so, and keeps what it replaced.** Re-downloading
+  a source put the vendor's file back over a MIB somebody had corrected, silently: the fix was
+  still in the history, but the file on disk was the broken one again, the row read "outdated",
+  and the next compile failed with the error the fix had removed. The import still wins — a
+  newer vendor MIB is usually the point of asking for one — but what it replaces now becomes
+  the next version, with a note saying an import did it, and the run reports which edited MIBs
+  it wrote over. Going back to the fix is one restore. Only MIBs with a history are recorded:
+  filing every file of every import would bury the versions that mean something under vendor
+  copies nobody asked to keep.
+- **A MIB says why it will not compile, before the compiler says it badly.** Two vendor MIBs
+  broke here within a day and both broke the same two ways: a type used and never imported, and
+  a descriptor starting with a capital (in SMI the case of the first letter IS the meaning —
+  uppercase names a type, lowercase a value). What pysmi answers lands one step away from the
+  cause: `Bad grammar near offset 558` says where it gave up, and `Unknown parents for symbols:
+  …` names the symbols it could not place rather than the import that is missing. A linter now
+  reads the file the same way and says the thing itself, with the line and the name it should
+  have had. It runs from the editor before a save, and fills in the failure modal beside the
+  compiler's own message — read at that moment rather than stored with the error, because an
+  error kept from last week beside hints from last week is two stale things agreeing.
+
+  The bar for it was silence, not findings: a first draft flagged 74 of 98 real MIBs and was
+  worth less than nothing. It flags one — the one that does not compile, for the two reasons
+  it does not compile.
+- **On Windows, a compiled MIB could not be compiled again.** pysmi writes a module to a
+  temporary file and moves it into place with `os.rename`, which overwrites on POSIX and
+  **raises** on Windows when the destination exists. So it could never replace a module it had
+  already written: an edited MIB stayed outdated for ever and "rebuild everything" could not
+  rebuild anything. It surfaced as two MIBs stuck on "outdated" with no other clue — and the
+  reason was sitting, verbatim, in the failure store added the same day for something else.
+  pysmi's writer now gets an `os` proxy whose rename is `os.replace`, for the length of a
+  compilation only.
+- **A MIB that will not compile is its own state now, and the reason outlives the modal.**
+  It read as "pending", which is also what a MIB nobody has compiled yet says — two states
+  that need opposite things done to them, painted the same. A failure has its own state, its
+  own chip (so "what failed" is one click after a run of two hundred, not a scroll) and its
+  own badge, which opens the compiler's message verbatim. The reason is written down beside
+  the MIBs rather than held in the page, because a compile of two hundred is not watched to
+  the end and the failures are exactly what you come back for — after the modal closed, after
+  a reload, tomorrow. An entry stops being true in three ways and is dropped on read for each
+  of them: the MIB compiled since, its source was replaced (a fixed MIB is a different file
+  under the same name), or the source is gone. Pruning on read rather than on write means a
+  file dropped into the folder by hand counts too.
+- **The MIB source is an editor now, not a wall of text.** The compiler reports a failure BY
+  LINE — "Bad grammar near offset 558 … line 21" — and a `<pre>` has no lines to count, so
+  the one number that made the message actionable was the one thing the viewer could not
+  show. Both viewers (the raw ASN.1 and the Python module pysmi writes) use CodeMirror, which
+  the panel already carried for the notification-template editor; its loader moves to core,
+  since a watchful reaching into a config tab for a function is a dependency nobody would
+  look for. Arriving from a failure the viewer opens ON the failing line, highlighted.
+  CodeMirror 5 ships no mode for ASN.1/SMI or for Python here, so this module defines both —
+  lexers rather than parsers, deliberately: they have to colour a file that DOES NOT PARSE,
+  which is precisely when somebody is reading it. In SMI the case of an identifier's first
+  letter IS its meaning, so the two are coloured apart — which is the very thing the broken
+  vendor MIB gets wrong, visible at a glance.
+- **The detail modal is two tabs**: what the file declares, and what it says. It was a stack
+  of collapsibles — imports, objects and the source each opening over the others — where a
+  four-thousand-line MIB got a box of a fixed height. Each half now gets the whole modal.
+- **A MIB that will not compile now says why, instead of reading as "pending" forever.** pysmi
+  hangs the cause off its status object as `.error` and the status itself only ever says
+  *that* it failed; that field was dropped on the floor, so a malformed vendor file looked
+  exactly like a MIB nobody had compiled yet — and the difference is everything: one needs a
+  click, the other will never compile until the file changes. The reason now travels the three
+  hops from the compiler to the row (classify, job, poll) and the row wears it as an error
+  badge with the message in its tooltip. Found through SYNOLOGY-SMB-MIB, which Synology ships
+  malformed — every descriptor in it starts with an uppercase letter, which in SMI is a type
+  reference and not a value, so the parser stops at the first table definition. A job's verdict
+  replaces the reasons for the modules it covered and no others, so compiling one row does not
+  clear what is known about the rest.
+- **"Compiling 0/20" forever: a mirror stopped answering and nothing was in a hurry.** Every
+  vendor MIB imports the standard SNMPv2-SMI/-TC/-CONF, and the single default source for them
+  had gone unresponsive — so on an installation with no local copy, nothing compiled at all. The
+  per-request timeout did not save it either: pysmi asks each source for several name variants
+  of every missing module and swallows the error between tries, so an unreachable host is paid
+  for once per variant, per module. The defaults are now a list with Net-SNMP's own repository
+  first (the one that answers) and the old mirror behind it in case it returns, and a source
+  that will not talk is written off after two consecutive failures — one answer, a 404 included,
+  resets it, because a mirror that does not host one MIB may host the next. A timeout bounds one
+  request, not the work: when the caller retries in a loop and swallows the errors, it is the
+  size of the step and not of the journey.
+- **Once the MIBs were in folders, nothing could see them.** The count reported zero, the
+  compile job found no work and finished instantly, and "select all → Compile" read as a button
+  that does nothing — because three separate scans still listed the raw directory flat, and an
+  installation whose MIBs all arrived inside a vendor archive has nothing at the top level. None
+  of the three failed loudly: empty is a legitimate answer everywhere they are used. They now go
+  through one shared walker, and a test refuses a direct scan of that directory anywhere in the
+  module. The compile filter also drops the folder before matching: the panel selects FILES,
+  which carry their path, and pysmi compiles module NAMES, which never do.
+- **The lists did not refresh after an import**, because the refresh was called by a name no
+  function had.
+- **An imported repository lost its folders, and two vendors' MIBs became one.** Everything
+  landed flat in `raw/`, so importing LibreNMS — which publishes one directory per vendor — put
+  every `ENTITY-MIB` in the same place, where one silently overwrote the others and the panel
+  showed a single entry that was not the one you thought it was. Files now keep the path they
+  came from: the import carries it, the listing shows it, deletion and reading accept it, and
+  the compiler gets one file source per directory (pysmi resolves an imported module by name
+  against the directories it was given and knows nothing about a tree, so a vendor MIB in a
+  sub-folder could not import the standard one sitting beside it). Every segment is validated on
+  its own and still passes through the confinement check, and an archive's own packaging wrapper
+  is dropped when all its members share it — Synology's is called "MIB files", and keeping it
+  would bury every MIB a level deeper and, the day the vendor renames it, land the next import
+  beside the old one instead of updating it.
+- **Everything was measured, stored and named correctly, and the screen was empty.** A host with
+  device profiles showed no metrics at all in Infrastructure, and its "Latest data" was just as
+  empty — no error, no failed request, nothing in the log. What joins a module's results to the
+  items bound to a host knew two key shapes: the key that IS the item, and the older
+  `<item>_<suffix>` derived form. Sampling emits the COMPOSITE shape — `<item>/metrics`,
+  `<item>/eth0` — which is the convention the rest of the product already speaks (history's
+  `check_label` resolves it exactly that way), and every sampled row was dropped on the way to
+  the screen built to show it. The join now tries all three, most specific first, and has the
+  tests it never had — including that only the FIRST segment is the item (proxmox emits
+  `<uid>/node/pve04`) and that `srv-uid2` is not `srv-uid`, which a `startswith` would have made
+  it. A convention two parts of the product each interpret on their own is not a convention yet.
+- **Detection carried a list of profile names, and the profile added beside it was invisible.**
+  *Detect* proposed "the generic ones" from a hardcoded list in the action, so `hr_storage`
+  measured a NAS perfectly when assigned by hand and did not exist when detected — reported
+  against a Synology, which is exactly the device it was written for. Which profiles are
+  candidates is now declared by the profiles: `match.sysobjectid_prefix` says who made the
+  device and the new `match.probe` names an OID it must answer, and detection asks the
+  catalogue rather than itself. Only a probe can settle "does this implement
+  HOST-RESOURCES-MIB" — a Synology, a Linux box and a Windows server all do, and their
+  sysObjectIDs have nothing in common. Answering at all is the signal, because a threshold
+  here would be the action deciding something about a profile it should know nothing about;
+  the probe count is capped so a large catalogue cannot turn one button into a minute of round
+  trips; and the screen now says WHY each profile was ticked, so a suggestion can be argued
+  with instead of only trusted. Every shipped profile declares how to recognise it, and a test
+  fails if one does not — a profile the catalogue cannot detect is one an admin has to already
+  know exists, which is the failure this replaced.
+
+
+### Changed
+- **The MIB manager lists modules, not files — and the list reaches the bottom of the modal.**
+  Two columns, raw on the left and compiled on the right, are the same MIB seen twice:
+  `SYNOLOGY-DISK-MIB.txt` beside `SYNOLOGY-DISK-MIB.py`, so "is this one compiled?" was
+  answered by reading both lists and comparing by eye. There is one list now, keyed the way
+  pysmi is keyed — by module name — with the file pair as a state on the row and chips that
+  carry the counts, so what is still pending is on screen before anything is typed. Two raw
+  files that share a module name (two vendors each shipping SNMPv2-SMI) are one row, because
+  they are one thing to compile.
+  - **The height.** The lists were pinned at `max-height: 35vh` and the modal BODY was what
+    scrolled — right at exactly one dialog size and wrong at every other, and this dialog can
+    be dragged to a new size and maximized to 95vh, where the list used a third of the height
+    and the rest sat empty. It now uses the fill chain the rest of the panel uses
+    (`.ss-vfill` down to one `.ss-vscroll`), so the list is as tall as the dialog turns out to
+    be. That retired the per-id CSS that sized this modal, and added the one generic rule the
+    chain needs inside a modal: a body that is the top of a chain must not be what scrolls.
+  - **Importing is folded away.** Four always-open import rows (upload, URL, GitHub folder,
+    vendor archive) took half the modal for a step taken once in a while. They are one
+    collapsed panel; the progress bar stays outside it, so a job started from the panel still
+    reports while it is closed.
+- **Chips show what a thing is called, not the id it is stored under.** A multi-value field
+  stores identifiers, which is the right thing to store: they survive a rename, they are what
+  the API speaks and what a bug report quotes. They are not what a person reads — a row of
+  `hr_storage`, `if_generic`, `ucd_linux` on a host form says nothing about what is being
+  measured, to somebody deciding whether the assignment is right. The chips renderer now asks a
+  registry (`CHIP_LABELS`, keyed by `<module>|<field>` so both panes that draw chips reach it)
+  and the id stays in the tooltip. A catalogue that cannot be read leaves the ids on screen,
+  which is the old behaviour and a working screen.
+
+## [0.0.1+build.97] - 2026-08-20
+
+### Added
+- **SNMP device profiles — the OID matrix.** An agent answers `1.3.6.1.4.1.2021.11.9.0` with a
+  `7`. It does not say that this is the CPU, that seven is a percentage, or that the number
+  beside it is a byte counter which means nothing until it is differentiated. A profile carries
+  exactly that: a named list of metrics mapping each OID to a key, a label, a unit, a kind and
+  how it should be drawn. This build adds the engine — the catalogue and the maths — and the
+  screen that makes it reachable: the catalogue can be read, and a device can be told which of
+  it applies. The sampling that turns those declarations into charted values comes next.
+  - Profiles are **data, not code**: JSON files in `watchfuls/snmp/profiles/`. Three ship, all
+    from standard MIBs so they work on anything — `sys_generic` (MIB-II: name, description,
+    uptime), `if_generic` (IF-MIB: per-interface traffic, with the 64-bit columns) and
+    `ucd_linux` (UCD-SNMP-MIB: CPU, load and memory, which is what most Linux, BSD and a good
+    number of NAS boxes serve). An installation can add its own or **override a shipped one by
+    reusing its id** — what somebody does when a firmware release moved an OID and the fix
+    cannot wait for the next version of this product.
+  - **Nothing a profile can contain stops the monitor.** A malformed metric costs its own line,
+    a malformed profile costs that profile, a broken file costs only itself. A device that goes
+    unmeasured is visible on its own screen; a check cycle that does not run is not.
+  - **Counters are turned into rates**, because charted raw they are a line that only ever goes
+    up, on which an outage is a flat spot nobody notices. The hard case is a value smaller than
+    the last one, which means either a wrap or a reboot and looks identical: the rule is the
+    declared width — 32-bit counters wrap constantly (~34 seconds on a gigabit link) so a
+    backwards step is assumed to be one, and 64-bit counters do not wrap in any practical sense
+    (~4.6 years at a terabit) so a backwards step is a reboot and the sample is dropped. An
+    optional `max_rate` settles the one case the width cannot. Either way the new baseline is
+    stored: losing a point costs a point, inventing one costs the chart.
+  - A table metric declares the column that **names its rows**, so eight interfaces are not
+    eight SNMP indices — which are not the ports on the front of the switch, and are the first
+    thing somebody assumes they are.
+  - A profile's fields come out in the shape the history metadata already speaks, so a value
+    that arrives without a name becomes chartable and nameable through the same path a module's
+    static `__history__` declaration uses.
+  - **Where a profile is associated: on the device.** SNMP servers carry a `device_profiles`
+    field, because what a machine IS does not change when somebody adds a fourth OID check to
+    it. It holds **several** profiles and not one — a NAS is the generic MIB-II profile, plus
+    the interfaces, plus its own disks — which is also why the shipped profiles are small and
+    composable instead of one monolith per model. It is the profile set that says "this is a
+    switch"; no new taxonomy of device types was needed, and one would have had to be kept
+    correct forever.
+  - **The catalogue is browsable, and the same screen is the picker.** A toolbar entry beside
+    the MIB browser opens the whole matrix: every profile, where it came from, and the metrics
+    it carries with their type, unit, OID and — for a table — the column that names its rows.
+    Opened from the field instead, the rows are ticked rather than typed: a profile id typed
+    from memory is a device that measures nothing until somebody notices the spelling. Both
+    panes that draw the field get it — the Modules tab and, more to the point, the host modal,
+    which is where somebody actually says "this box is a NAS".
+  - **Every row says whether it shipped or was written here.** An installation's own profiles
+    live under the data directory (`snmp_profiles/`, beside its own MIBs) so a package upgrade
+    cannot take them, and reusing a shipped id overrides it. That override is the reason the
+    source is on screen at all: when a device measures wrong, which of the two profiles with
+    that id is actually in use is the first question, and the id alone cannot answer it.
+  - **A device can be asked what it is.** *Detect* reads sysObjectID, sysDescr and ifNumber —
+    all MIB-II, so it works against hardware the catalogue has never heard of — and ticks what
+    fits. It proposes and never assigns: a wrong profile does not fail, it measures numbers
+    that look fine, which is exactly the failure that has to pass through somebody. A device
+    that answers nothing is reported as unreachable rather than as a device no profile claims;
+    those read the same on screen and call for opposite actions.
+
+### Changed
+- **A picker belongs to a KIND of field, not to one item, and a multi-value field may have
+  one.** `FIELD_PICKERS` was keyed by exact path, which works for a config option
+  (`web_admin|backup_dir`) and never for an item's field: the path carries the item's uid, so
+  every server has a different one and no registration could match. Lookups now fall back to
+  the schema key, which is what the registration always meant. And the multi-value branch
+  returned before a picker was ever looked up, so several values meant typing them by hand.
+- **The host modal draws multi-value fields as fields and not as text boxes.** It renders the
+  same schema through its own renderer, which knew nothing about `multi` — so a list declared
+  by a module was a bare input on the one screen where a host is actually bound to it. It now
+  draws the chips and offers the picker from the same registry, opened with a callback because
+  what it is editing is a draft that has not been saved: a picker writing straight into
+  `modulesData` would leave the value somewhere this pane never reads.
+
+## [0.0.1+build.96] - 2026-08-20
+
+### Added
+- **Infrastructure is a section of its own** (`/infra`), beside Overview / History / Syslog.
+  System › Infrastructure answers "what have I declared" — machines, clusters, which module
+  watches what, with which credential. What it could never answer is the other half: **what
+  those machines are doing**, because the panel arranged that by CHECK (Status) and by SERIES
+  (History) and never by machine. This is that arrangement, and it is the first slice of a
+  larger plan (SNMP device profiles — an OID matrix — come next).
+  - **Read-only by construction**: the domain has no write route at all, so the section can be
+    left open on a screen and handed to whoever watches it without handing over the registry.
+    Its own flag, `infra_view`, for the same reason — reading the live state and editing the
+    registry that defines it are different acts wanted by different people.
+  - The fleet lists **worst first**: this screen is opened when something is wrong, and a list
+    that answers "which machine is in trouble" by making you read forty rows only works on the
+    days nothing is happening. A machine **nobody watches** is its own state and its own
+    number, not a blank that reads as healthy.
+  - A machine's view shows what every check bound to it last returned, and the **numbers**
+    among them — each with the label and unit the producing module declares in `__history__`,
+    the same declaration that makes the value chartable, so the section names nothing itself
+    and a module that starts recording a field appears here without a line of core code.
+  - The payload is a **whitelist projection**: `profiles` — the bound credential of every
+    protocol that reaches a machine — is not in it at all, rather than masked on the way out.
+  - It **refreshes**: opening the section always asks the server (nothing on this screen is
+    edited here, so "I already have a fleet" is never a reason to believe it is the current
+    one), and it carries the same auto-refresh control as the other five live sections — how
+    stale a wall screen may be is a decision about the room, not a number in a file.
+  - No store of its own: hosts owns the machines, the check state owns what a check last said,
+    history owns the series. A fourth copy would be a fourth thing to keep in step, and the
+    first to drift would be the one people are watching.
+
 ## [0.0.1+build.95] - 2026-08-20
 
 ### Changed

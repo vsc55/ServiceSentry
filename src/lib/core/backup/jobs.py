@@ -18,6 +18,7 @@ Nothing here is scheduled: it all starts because somebody pressed a button. The 
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 
 from lib import __version__
@@ -73,6 +74,10 @@ class _JobsMixin:
         """
         job_id = uuid.uuid4().hex[:12]
         job = _JOBS[job_id] = {
+            # When it began. Private (a leading underscore) like every other working
+            # key here: it is for the jobs screen to say "running for 4 min", not part
+            # of what this job's own poller answers.
+            '_started': time.time(),
             'done': False, 'task': label, 'manual': bool(manual), 'kind': kind,
             'table': '', 'step': 0, 'total': 0, 'created': '', 'error': '',
             # Per-part outcome, filled in as the copy goes. The bar says how far;
@@ -95,6 +100,18 @@ class _JobsMixin:
                 # Last, and always: `done` is what stops the browser polling, so a job that
                 # raised before setting it is one the screen waits on for an hour.
                 job['done'] = True
+                # …and the note about it, for the history. In the `finally` with `done`, so
+                # a copy that raised is filed exactly like one that did not: the row saying
+                # it failed is the one somebody comes looking for.
+                from lib.core.jobs import record as _record       # noqa: PLC0415
+                _record.record({
+                    'id': job_id, 'kind': str(job.get('kind') or 'backup'),
+                    'source': 'backup', 'label': str(job.get('task') or ''),
+                    'state': 'failed' if job.get('error') else 'done',
+                    'started': float(job.get('_started') or 0), 'ended': time.time(),
+                    'done': int(job.get('step') or 0), 'total': int(job.get('total') or 0),
+                    'error': str(job.get('error') or ''),
+                }, [_step_line(s) for s in (job.get('steps') or ())])
 
         threading.Thread(target=_work, daemon=True, name='ss-backup-run').start()
         return job_id
@@ -209,3 +226,59 @@ class _JobsMixin:
                 after()
 
         return self._start_job(name, _work, manual=True, kind='restore')
+
+def live(_wa) -> list:
+    """What this package is running now, for the background-jobs screen."""
+    out = []
+    for jid, job in list(_JOBS.items()):
+        out.append({
+            'id': jid,
+            'kind': str(job.get('kind') or 'backup'),
+            'label': str(job.get('task') or ''),
+            'detail': str(job.get('table') or job.get('status') or ''),
+            'state': ('failed' if job.get('error') else 'done') if job.get('done')
+                     else 'running',
+            'started': float(job.get('_started') or 0),
+            'done': int(job.get('step') or 0), 'total': int(job.get('total') or 0),
+            'error': str(job.get('error') or ''),
+            # Per-part outcome, which is what this job already keeps: the bar says how far,
+            # this says what actually made it — the question afterwards.
+            'steps': [_step_row(x) for x in (job.get('steps') or ())],
+        })
+    return out
+
+
+#: What one part of a copy came out as, for the screens that show it. A step is a dict this
+#: package composes (`{'part', 'ok', 'tables', 'rows', 'error'}`) and only this package knows
+#: what those fields mean — handed over raw it reached the jobs screen as a printed Python
+#: dict, which is what the reader actually saw. Reported exactly that way.
+def _step_row(step) -> dict:
+    """One part, in the columns the jobs screen draws."""
+    if not isinstance(step, dict):
+        return {'state': '', 'text': str(step or '')}
+    return {'state': 'ok' if step.get('ok') else 'failed',
+            'text': str(step.get('part') or ''),
+            'note': _step_note(step),
+            'sub': True}
+
+
+def _step_line(step) -> str:
+    """…and the same thing as one line, for the history, which keeps text."""
+    if not isinstance(step, dict):
+        return str(step or '')
+    mark = 'ok' if step.get('ok') else 'ERROR'
+    note = _step_note(step)
+    return f"{step.get('part') or ''} — {mark}" + (f' · {note}' if note else '')
+
+
+def _step_note(step: dict) -> str:
+    """The counts, and the reason where there is one. Nothing that is zero: a part with no
+    tables is not a part with "0 tables", it is a part that is not made of tables."""
+    bits = []
+    if step.get('tables'):
+        bits.append(f"{step['tables']} tables")
+    if step.get('rows'):
+        bits.append(f"{step['rows']} rows")
+    if step.get('error'):
+        bits.append(str(step['error'])[:200])
+    return ' · '.join(bits)

@@ -247,8 +247,7 @@ function showWebhookModal(id) {
         <div class="row mb-2 align-items-start">
           <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_secret'))}${hi('secret').icon}</label>
           <div class="col-sm-9">
-            <input type="password" id="whSecret" class="form-control form-control-sm"
-              placeholder="${escAttr(wh?.secret === null ? t('webhook_secret_keep') : '')}">
+            ${secretInput(` id="whSecret" placeholder="${escAttr(wh?.secret === null ? t('webhook_secret_keep') : '')}"`, ' form-control-sm')}
             ${hi('secret').panel}
           </div>
         </div>

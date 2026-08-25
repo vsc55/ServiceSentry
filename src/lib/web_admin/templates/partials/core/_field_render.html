@@ -57,10 +57,27 @@ function _fieldTermFor(key, meta, pathStr, target) {
  *  not know that one of them is a folder. The section that owns the field registers its own
  *  button (see partials/backup/_render.html) and this file only asks whether there is one.
  *
- *  `{icon, title, open}` — `open(pathStr, currentValue)` does whatever it likes and calls
- *  `updateField` when the user picks something.
+ *  `{icon, title, open}` — `open(pathStr, currentValue, onPick?)` does whatever it likes and
+ *  calls `updateField` when the user picks something. A caller that is not editing
+ *  `modulesData` — the host modal edits an unsaved draft — passes `onPick(value)` instead and
+ *  does the writing itself, which is what lets ONE picker serve both panes.
+ *
+ *  An optional `actions: [{icon, title, run}]` hangs further buttons off the same field, for
+ *  things done TO its value rather than to choose it — `run(pathStr, currentValue, buttonEl)`.
  */
 const FIELD_PICKERS = {};
+
+/** The picker registered for this field, by exact path or by the kind of field it is.
+ *
+ *  A config option lives at a fixed path (`web_admin|backup_dir`) and can be registered by
+ *  it. An item's field cannot: its path carries the item's uid, so `snmp|servers|<uid>|x`
+ *  is a different string for every server and no registration would ever match. The schema
+ *  key drops the uids and leaves what the registration actually means — THIS field of THIS
+ *  collection, whichever item it is drawn for. */
+function _fieldPickerFor(pathStr) {
+    if (!pathStr) return null;
+    return FIELD_PICKERS[pathStr] || FIELD_PICKERS[_schemaKeyOf(pathStr)] || null;
+}
 
 /** A picker may also supply the placeholder for its field.
  *
@@ -69,8 +86,35 @@ const FIELD_PICKERS = {};
  *  was installed. The registry says "empty means the default"; this is what lets the box SHOW
  *  which path that turns out to be, instead of leaving the operator to guess it. */
 function _fieldPickerPlaceholder(pathStr) {
-    const fp = FIELD_PICKERS[pathStr];
+    const fp = _fieldPickerFor(pathStr);
     return fp && fp.placeholder ? ` placeholder="${escAttr(fp.placeholder)}"` : '';
+}
+
+/** A picker's tooltip. A module-owned picker passes a FUNCTION: its i18n block is not
+ *  loaded when the registration line runs, so the string cannot be resolved until it is
+ *  drawn. A core one passes a translation key, as everything else does. */
+function _fieldPickerTitle(fp) {
+    if (typeof fp.title === 'function') return fp.title() || '';
+    return t(fp.title) || fp.title || '';
+}
+
+/** The button that opens a field's picker — and whatever else it hangs off the same field.
+ *
+ *  A picker answers "which ones". Some fields have a second question that only makes sense
+ *  once they are answered: the SNMP device profiles are assigned on this field, and the only
+ *  place worth asking whether the device agrees with the assignment is beside it. Registered
+ *  the same way and for the same reason — the renderer draws two hundred fields and must not
+ *  learn that one of them is a list of profiles. */
+function _fieldPickerBtn(fp, pathStr, value, locked) {
+    if (!fp || locked) return '';
+    const cur = jsStr(String(value == null ? '' : value));
+    const own = `<button class="btn btn-secondary" type="button"
+                onclick="_fieldPickerFor(${jsStr(pathStr)}).open(${jsStr(pathStr)},${cur})"
+                title="${escAttr(_fieldPickerTitle(fp))}"><i class="bi ${escAttr(fp.icon)}"></i></button>`;
+    const extra = (fp.actions || []).map((a, i) => `<button class="btn btn-secondary" type="button"
+                onclick="_fieldPickerFor(${jsStr(pathStr)}).actions[${i}].run(${jsStr(pathStr)},${cur},this)"
+                title="${escAttr(_fieldPickerTitle(a))}"><i class="bi ${escAttr(a.icon)}"></i></button>`).join('');
+    return own + extra;
 }
 
 function renderField(key, value, pathStr, target = 'modules') {
@@ -552,9 +596,13 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 v => updateField(target, pathStr, v));
             // Empty box shows the registry default as a hint (e.g. bind_host → 0.0.0.0, ::).
             const _mph = (meta.placeholder != null) ? meta.placeholder : cfgDefaultFor(pathStr);
+            // A picker, when the section that owns the field registered one: several
+            // values are not a reason to go back to typing them (the SNMP device profiles
+            // are a list, and their names are what makes the list mean anything).
+            const _mFp = _fieldPickerBtn(_fieldPickerFor(pathStr), pathStr, _norm(value), _isLocked);
             return _fieldRow(lblHtml, fieldCtl({kind: 'multi', key: pathStr, value: _norm(value),
                 placeholder: (_mph != null && _mph !== '') ? String(_mph) : '',
-                validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _unitSel + _actionBtn}), _hintHtml);
+                validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _mFp + _unitSel + _actionBtn}), _hintHtml);
         }
         // Single IP / bind-address field (e.g. web_admin|host) — validate on
         // change, revert + toast on invalid. Placeholder shows the registry default.
@@ -717,13 +765,9 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,
                 trailing: `${_pickerBtn}${_actionBtn}`}), _hintHtml);
         }
-        const _fp = FIELD_PICKERS[pathStr];
+        const _fp = _fieldPickerFor(pathStr);
         const _fpPh = (value == null || value === '') ? _fieldPickerPlaceholder(pathStr) : '';
-        const _fpBtn = _fp && !_isLocked
-            ? `<button class="btn btn-secondary" type="button"
-                   onclick="FIELD_PICKERS[${jsStr(pathStr)}].open(${jsStr(pathStr)},${jsStr(String(value == null ? '' : value))})"
-                   title="${escAttr(t(_fp.title) || _fp.title)}"><i class="bi ${escAttr(_fp.icon)}"></i></button>`
-            : '';
+        const _fpBtn = _fieldPickerBtn(_fp, pathStr, value, _isLocked);
         return _fieldRow(lblHtml, fieldCtl({kind: 'text', inputType: tp, inputCls: _strPhCls,
             inputAttrs: ` data-field-path="${escAttr(pathStr)}" value="${escAttr(value)}"${_numKbd}${_strPh}${_fpPh}`,
             onInput: `markDirty(${tg})`, onChange: `updateField(${tg},${sp},this.value.trim())`,

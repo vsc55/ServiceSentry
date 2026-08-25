@@ -9,6 +9,9 @@
 {% include "partials/core/_constants.html" %}
 {% include "partials/core/_utils.html" %}
 {% include "partials/core/_toast.html" %}
+{# The CodeMirror lazy-loader. Core because two unrelated screens want it — the notification
+   template editor and the MIB source viewer — and neither should reach into the other. #}
+{% include "partials/core/_codemirror.html" %}
 {% include "partials/core/_polling.html" %}
 {% include "partials/core/_api.html" %}
 {% include "partials/core/_field_render.html" %}
@@ -143,10 +146,33 @@
 {% include "partials/servers/_view_cards.html" %}
 {% include "partials/servers/_view_status.html" %}
 {% include "partials/servers/_view_coverage.html" %}
+{% include "partials/servers/_view_types.html" %}
 {% include "partials/servers/_modal.html" %}
 {% include "partials/servers/_monitoring.html" %}
 {% include "partials/servers/_checks.html" %}
 {% include "partials/servers/_save.html" %}
+{# ================================================================
+   Infrastructure section (root, /infra) — the fleet as it IS right now.
+   System owns the registry; this owns what those machines are doing.
+   Thin orchestrator: includes sub-partials in order.
+   ================================================================ #}
+{% include "partials/jobs/_render.html" %}
+{% include "partials/infra/_views.html" %}
+{% include "partials/infra/_render.html" %}
+{% include "partials/infra/_tabs.html" %}
+{% include "partials/infra/_metrics.html" %}
+{% include "partials/infra/_details.html" %}
+{% include "partials/infra/_raw.html" %}
+{% include "partials/infra/_collect.html" %}
+{# The window over a drawing — pan, zoom, fit. Before both maps, because both are
+   drawn on it. #}
+{% include "partials/infra/_canvas.html" %}
+{% include "partials/infra/_map.html" %}
+{# After _map.html: the link map reads its loader, its cache and its drawing helpers. #}
+{% include "partials/infra/_links.html" %}
+{% include "partials/infra/_list.html" %}
+{# After _list.html: the grouping views read its cell renderer and column state. #}
+{% include "partials/infra/_group_views.html" %}
 {# ================================================================
    Cluster tab — multi-bind checks (table + edit modal).
    Thin orchestrator: includes sub-partials in order.

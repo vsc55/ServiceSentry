@@ -1,3 +1,17 @@
+/* The page is dressed: reveal it.
+
+   `ss-nocss` is put on <html> by the document itself and hides the body until this file —
+   the LAST stylesheet — has applied. A <link> in the head is render-blocking in theory; in
+   practice a browser paints the document bare once its own paint-suppression window runs
+   out, which on a slow link is a screenful of serif text and bullet lists. Reported from the
+   screen, with a picture of it — and what it was showing was the boot splash below,
+   undressed.
+
+   There is a timeout in the head that takes the class off again, so a stylesheet that never
+   arrives cannot leave a blank page: the worst case is the bare document, which is what
+   happens today. */
+html.ss-nocss body { visibility: visible; }
+
 /* ================================================================
    ServiceSentry — web admin stylesheet
    Loaded after bootstrap.min.css; overrides Bootstrap defaults
@@ -271,6 +285,20 @@
 }
 /* Already inside a sticky wrapper — sticking twice buys nothing. */
 .ss-toolbar.ss-toolbar-plain { position: static; }
+/* …and the variant for a pane that is already full-bleed. `.ss-bleed-top` is how a bar is
+   pinned to the top EDGE of a section, and it spends negative margins doing it — a module's
+   pane is `.ss-fullbleed` and has spent them already, so applying it there moves the bar off
+   the edge by exactly the amount it was meant to reach. What is left to do is the other half
+   of that class: drop the frame a floating bar draws for itself. */
+.ss-toolbar.ss-toolbar-flush {
+    margin-bottom: 0; border-top: 0; border-left: 0; border-right: 0; border-radius: 0;
+    /* One height whatever it holds. A bar is as tall as its tallest child, so a section with
+       buttons in its head got 47px and one with only a title got 40 — three views of the
+       same section, none of them lining up with the next. The height of a `btn-sm` in this
+       bar's padding, stated once, so a head is a head whether or not it has anything in it
+       besides its name. */
+    min-height: 3rem;
+}
 
 /* Card header zone — title + action buttons */
 .ss-card-header {
@@ -388,6 +416,23 @@
    table body wants none of it, which is why this is a separate class and not part of
    .ss-vscroll. */
 .ss-scroll-pad { padding: .75rem .5rem 1rem 0; }
+/* .ss-scroll-box : a result panel that reports a LIST whose length is not the caller's to
+   choose — an import of twenty files, a check of forty rows. Left to grow it pushes everything
+   below it out of the dialog and the buttons that acted on it end up off screen, which is the
+   one moment somebody needs them. Caps itself and scrolls its own overflow instead.
+   Generic on purpose: nothing here knows what the list is of. */
+.ss-scroll-box { max-height: 14rem; overflow-y: auto; }
+/* .ss-vfill on a MODAL BODY: the body becomes the top of the fill chain, so it must not be
+   what scrolls — the .ss-vscroll inside it is. Bootstrap's .modal-dialog-scrollable puts
+   `overflow-y: auto` here, which is exactly the opposite: the body grows with its content
+   and the list inside it never learns how tall it is allowed to be. Pair it with
+   .modal-dialog-scrollable, which is what gives the dialog a height to hand down. */
+.modal-body.ss-vfill { overflow: hidden; }
+/* .ss-vfill on a TAB PANE: Bootstrap's `.tab-content > .active { display: block }` outranks a
+   class-only `display: flex`, so a pane meant to be the middle of a chain silently becomes a
+   block and the chain stops there — the class is in the markup, the layout ignores it, and
+   nothing says so. Naming the active pane wins the specificity back. */
+.tab-content > .tab-pane.active.ss-vfill { display: flex; flex-direction: column; }
 /* .ss-qr : a QR code drawn to be READ OFF A SCREEN, not to fill one.
    The SVG is deliberately shipped with a viewBox and no width or height — a square sized by
    the server is one that does not fit somebody's phone at arm's length — which means it
@@ -1106,6 +1151,168 @@
 .ss-fs-8 { font-size: 2rem; }
 .ss-fs-9 { font-size: 2.5rem; }
 .ss-pointer { cursor: pointer; }
+/* A thing you can pick up and put down. Generic on purpose: the link map's boxes are the
+   first, and "what does a draggable element look like" is not a fact about that map. */
+.ss-grab { cursor: grab; }
+.ss-grab:active { cursor: grabbing; }
+/* .ss-factgrid : the facts that identify a thing — a disk's bay, model and serial — above
+   whatever is being measured about it.
+   A GRID and not a flex row, which is what it was: with flex, each pair takes the width of its
+   own text, so "Tipo SATA" sits inches from "Modelo ST14000NM000J-2TX103" and the eye has no
+   column to run down. Reported as the top of the disk dialog looking unfinished. Columns of a
+   minimum width instead: they line up, they wrap whole, and a long model breaks inside its own
+   cell rather than pushing the next fact off the row. */
+.ss-factgrid {
+    /* Columns of EQUAL width was the second version, and it wrapped for a reason that has
+       nothing to do with the content: four tracks of 13rem need 56rem and the dialog offers
+       46, so "Función" dropped to a line of its own while three quarters of the row sat
+       empty. A fact is as wide as the fact — "SATA" does not need the room a part number
+       does — so the items size themselves and wrap only when they genuinely do not fit.
+       The even gap is what the FIRST version was missing: with flex and no gap of its own,
+       the spacing was whatever the text left over, which is what read as ragged. */
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem 2.5rem;
+}
+.ss-factgrid > div {
+    flex: 0 1 auto;
+    min-width: 6rem;    /* a short value still gets a column, not a sliver */
+    max-width: 26rem;   /* …and a long one is elided rather than pushing the rest off the row */
+}
+.ss-factgrid .ss-fact-v { margin: 0; }
+/* The same grid for label/value READINGS, which need more room than a fact: the pair stays on
+   one line ("Temperatura … 40 °C") and two of them fit side by side on a wide dialog. A single
+   full-width column made the eye travel the whole modal to join a label to its number. */
+/* The readings are the other shape: label and value on ONE line, in columns of equal width so
+   the values line up down the dialog. Declared in full rather than inheriting, now that the
+   base above is a flex row — two rules that disagreed about `display` is a layout that depends
+   on which one loaded last. */
+.ss-factgrid-lg {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+    gap: 0 1.5rem;
+}
+/* .ss-modal-fit : a dialog whose size follows its CONTENT, and is therefore not the reader's
+   to set — no full height, no resize handle, no maximise button (see init/_behaviors.html).
+
+   Three rules have to be undone, and missing any one of them leaves the box tall:
+     * `.modal-dialog-scrollable` sets `height: calc(100% - margin*2)`, which is what makes a
+       long body scroll inside instead of pushing the page;
+     * `.modal-dialog-centered` sets `min-height` to the same value — and a min-height beats a
+       `height: auto`, which is why the first attempt at this changed nothing at all;
+     * `.modal-lg > .modal-content` sets `resize: both` and a `min-height`, because the big
+       dialogs in this panel ARE meant to be dragged bigger. This one is not.
+   The cap stays: short content gets a short dialog, long content is capped and still scrolls
+   inside. Reported from the screen as six readings in four hundred pixels of empty box. */
+.ss-modal-fit.modal-dialog-scrollable,
+.ss-modal-fit.modal-dialog-centered.modal-dialog-scrollable {
+    /* The dialog still SPANS the viewport — that span is what `.modal-dialog-centered` centres
+       against, and taking it away (min-height: 0, the first fix) produced a compact box glued
+       to the top of the screen. It is a flex column, so it can span and still centre a child
+       that does not fill it. */
+    height: auto;
+    min-height: calc(100% - var(--bs-modal-margin) * 2);
+    max-height: none;
+    justify-content: center;
+}
+.ss-modal-fit > .modal-content {
+    resize: none;
+    min-height: 0;
+    /* …and the content is the part that must NOT stretch to that span: `flex: 0 1 auto` lets
+       it shrink when it is too tall for the screen and never grow past what it holds. This is
+       the line that empties the four hundred pixels, not the height above it. */
+    flex: 0 1 auto;
+    max-height: calc(100vh - var(--bs-modal-margin) * 2);
+}
+
+/* .ss-scrollbox : a box that scrolls its own overflow, capped to what is on screen.
+
+   For a list that is long by construction — a switch's sixty interfaces on a rail. The
+   `.ss-sticky-aside` beside it is deliberately NOT a scroll region, and says why: a second
+   scrollbar inside a page that already scrolls is how a rail ends up with its head off the
+   screen, and that column is short by construction. This one is not, and the alternative is
+   worse: a rail sixty items tall pushes the thing it selects off the bottom of the document,
+   so picking the last port means scrolling past every other one to see what you picked. */
+   The constant is a FLOOR, not the answer: it guesses at everything above and below — the
+   app header, the breadcrumb, the section's own header — and on the interfaces rail it
+   guessed 208 px too many, so the rail stopped that far short of the bottom of the window.
+   A list that sticks inside a scroll box asks `capToScrollBox` for the real number once it
+   is laid out; this stays for the ones that do not (the jobs dialog, where a viewport
+   fraction is exactly right) and as the value before that runs. */
+.ss-scrollbox { overflow: auto; max-height: calc(100vh - 13rem); }
+
+/* .ss-chartbox : a drawn chart, and the room it can be given.
+
+   A canvas is drawn at a pixel size and does not reflow, so the height lives in a class the
+   full-screen rule can override rather than in a style attribute it would have to fight. The
+   background is painted here because a full-screen element has none of the page behind it —
+   a transparent canvas over the browser's default black is a chart drawn in the dark. */
+.ss-chartbox { position: relative; }
+.ss-charth { height: 170px; }
+/* .ss-zoom : a card lifted out of the flow to fill the work area, with the rest of the page
+   underneath it. `position: fixed` and four animated edges rather than a transform, because a
+   scaled card stretches its own text on the way there and back.
+
+   z-index sits ABOVE everything the panel puts on screen by itself and BELOW a dialog
+   (Bootstrap's modal, 1055). "Everything" is more than it looks: the sticky header is 1020,
+   the SIDEBAR is 1040, a content dropdown 1045 and the sidebar's flyout menu 1050 — reported
+   from the screen with the sidebar sitting on top of the veil, undimmed, with an open submenu
+   over the chart. A number chosen to clear the header alone clears none of those.
+
+   .ss-zoom-hold is the gap it left — hidden, not removed, or the cards beside it close over
+   the hole the moment one of them is expanded. */
+.ss-zoom {
+    position: fixed;
+    z-index: 1052;
+    margin: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--bs-body-bg);
+    border-radius: var(--bs-border-radius-lg, .5rem);
+    /* Lifted off the page rather than laid on it: a long soft shadow plus a tight dark one,
+       which is what reads as height instead of as a grey border. */
+    box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, .45), 0 .25rem .75rem rgba(0, 0, 0, .3);
+    transition: top .22s ease, left .22s ease, width .22s ease, height .22s ease;
+}
+
+/* .ss-zoom-back : the veil under an expanded card. Darkens and blurs the page so the chart is
+   what the eye lands on, and catches the click outside — the gesture anybody tries before
+   they look for a button. Under the card, over everything else.
+
+   Blur is progressive: a browser without `backdrop-filter` still gets the dark sheet, which is
+   the half that carries the effect. */
+.ss-zoom-back {
+    position: fixed;
+    inset: 0;
+    z-index: 1051;
+    background: rgba(0, 0, 0, .45);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    transition: opacity .22s ease;
+}
+.ss-zoom-back.show { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .ss-zoom-back { transition: none; } }
+.ss-zoom > .ss-chartbox { flex: 1 1 auto; min-height: 0; }
+.ss-zoom .ss-charth { height: 100%; }
+.ss-zoom-hold { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .ss-zoom { transition: none; } }
+
+/* A button group rounds its ends by POSITION IN THE DOM, so a button whose only neighbour is
+   hidden keeps the square edge it had for a neighbour nobody can see — half a rounded control.
+   Generic rather than aimed at the chart controls: any group that hides its trailing buttons
+   has the same corner. */
+.btn-group > .btn:not(:has(~ .btn:not(.d-none))) {
+    border-top-right-radius: var(--bs-btn-border-radius, .375rem);
+    border-bottom-right-radius: var(--bs-btn-border-radius, .375rem);
+}
+
+.ss-factgrid-lg > div {
+    display: flex; align-items: baseline; gap: .75rem;
+    min-width: 0; max-width: none;
+    padding: .35rem 0; border-bottom: 1px solid var(--bs-border-color);
+}
 .ss-empty-icon { font-size: 2.5rem; opacity: .3; display: block; margin-bottom: .75rem; }
 
 /* Services tab: static styling in CSS — only the colours stay dynamic in the
@@ -1175,6 +1382,69 @@
    theme-agnostic tint so the row under the cursor stands out. Reusable on any table. */
 .ss-hover-rows { --bs-table-hover-bg: rgba(128,128,128,.18); }
 .ss-hover-rows > tbody > tr > * { transition: background-color .12s; }
+
+/* The same thing tinted with the ACCENT, for a table whose ordinary rows already carry a grey
+   fill — group headers, a tinted band, striping. A grey hover there lands on the same shade
+   as those and the row under the cursor reads as another heading rather than as a selection:
+   reported from the routing matrix in exactly those words. Two classes and not one option,
+   because which of the two is right is a fact about the TABLE, not a preference. */
+.ss-hover-accent { --bs-table-hover-bg: rgba(var(--bs-primary-rgb), .22); }
+
+/* ── Infrastructure: the grouping views ─────────────────────────────── */
+/* A group heading inside a table. Not a row of data and it must not read as one: the fill
+   marks it as furniture, and it is the same one the notification routing matrix uses for the
+   same job — which is exactly why the tables that carry these pair it with `.ss-hover-accent`
+   rather than the grey hover, or the row under the cursor looks like another heading. */
+.ss-group-row {
+    padding: .3rem .5rem;
+    font-weight: 600;
+    background: var(--bs-tertiary-bg);
+}
+/* The rail of groups. A fixed column so the table beside it does not reflow every time a
+   group name is longer than the last, and its own scroll so twenty device types do not push
+   the machines off the bottom of the page. */
+.ss-infra-rail {
+    flex: 0 0 15rem;
+    max-width: 15rem;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+/* The triage board scrolls sideways rather than squeezing: five lanes of cards inside a
+   narrow pane is five columns of one word each. */
+.ss-infra-board { overflow-x: auto; }
+.ss-infra-board > div { min-width: 12rem; }
+
+/* The link map is a WINDOW onto a drawing, not a picture stretched to the pane: it has zoom
+   and pan, and both need a viewport to be anything. It takes the WORK AREA — everything left
+   after the note above it and the legend below — rather than a slice of the viewport: `62vh`
+   was a number that left a band of empty page under the map on a tall screen and cut it off
+   on a short one, which is what a fixed height always is. Reported from the screen with the
+   wasted band circled.
+
+   The chain is the one the rail boxes already use: the scroll container becomes a flex column
+   that does NOT scroll, and the fill inside it takes what is left. `grab` because it moves;
+   an SVG shows a text caret otherwise. */
+.ss-vscroll:has(.ss-mapfill) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ss-mapfill { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.ss-infra-canvas {
+    flex: 1 1 auto;
+    min-height: 240px;
+    background: var(--bs-body-bg);
+    cursor: grab;
+}
+
+/* The panel that describes one cable. Opaque and over the drawing: it carries four controls
+   — both machines and both ports — and a translucent one sitting on a diagram is a set of
+   buttons you cannot read the labels of. */
+.ss-infra-linkinfo {
+    background: var(--bs-body-bg);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+.ss-hover-accent > tbody > tr > * { transition: background-color .12s; }
 
 /* ── Notifications sub-tab nav-pills ───────────────────────────────── */
 /* Wrap the pill bar with the same visual language as cfg-card headers  */
@@ -1674,7 +1944,7 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
 /* Logo inside a ring: a faint full track (the border) with a bright arc sweeping around it —
    a conic gradient masked to the ring's width, which reads better than a plain spinner. */
 .ss-boot-logo {
-    position: relative; width: 96px; height: 96px;
+    position: relative; width: 116px; height: 116px;
     display: grid; place-items: center;
     border-radius: 50%;
     border: 3px solid rgba(255, 255, 255, .15);
@@ -1687,10 +1957,11 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     animation: ss-boot-spin 1.1s linear infinite;
 }
 /* The mark sits INSIDE the ring track rather than filling the circle: the artwork is a badge
-   with glitch lines running past its edge, and sized to the full 96px those lines cross the
-   ring that is supposed to frame them. */
+   with glitch lines running past its edge, and sized to the full circle those lines cross the
+   ring that is supposed to frame them. Both grew together — 96/72 was a legible ring around an
+   emblem too small to make out — so the clearance is the same and the badge is what changed. */
 .ss-boot-logo img {
-    width: 72px; height: 72px; object-fit: contain;
+    width: 92px; height: 92px; object-fit: contain;
 }
 .ss-boot-name { font-size: 1.35rem; font-weight: 600; letter-spacing: .04em; }
 /* Indeterminate progress: boot has no measurable percentage, so it sweeps rather than fills. */
@@ -2031,6 +2302,11 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .ss-shell { display: flex; flex: 1 1 auto; min-height: 0; align-items: stretch;
              margin: -.75rem calc(var(--bs-gutter-x, 1.5rem) * -.5) -1rem; }
 .ss-shell-main > .ss-bleed-top { margin: 0; }
+/* …and NOT when the pane already bled. A module's section is `.ss-fullbleed` (plus
+   `-top`), which cancels exactly the same paddings: a shell inside one would cancel them a
+   second time and hang a gutter past both edges of the window. The pane spent them; the
+   shell has nothing left to spend. */
+.ss-fullbleed > .ss-shell { margin: 0; }
 /* The gutter the shell cancelled comes back INSIDE the detail, where it is the gap between
    the index's border and the first card rather than a strip of page background. */
 .ss-shell-main > .ss-scroll-pad { padding-left: .75rem; padding-right: .75rem; }
@@ -2151,7 +2427,13 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     border-radius: .25rem;
     transition: background-color .15s ease-in-out;
 }
-.cfg-sheet .cfg-fields .cfg-field-wrap:hover { background: var(--bs-tertiary-bg); }
+/* The field row under the cursor lights up — unless the "field" is a whole TABLE.
+   The routing matrix is one `cfg-field-wrap` holding a grid of rows, so this painted the
+   wrapper and every row in it changed colour at once: reported from the screen as "hovering
+   one row changes the colour of all of them". A table has row hover of its own
+   (`.table-hover` + `.ss-hover-rows`) and that is the one that means something. Same
+   `:not(:has(table))` the dashboard widgets already use for the same reason. */
+.cfg-sheet .cfg-fields .cfg-field-wrap:not(:has(table)):hover { background: var(--bs-tertiary-bg); }
 .cfg-sheet .cfg-fields .cfg-field-wrap .row { margin-bottom: 0; }
 .cfg-sheet .cfg-fields > hr { margin: .9rem 0 .5rem; opacity: .25; }
 
@@ -2249,16 +2531,51 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
                  padding: .25rem .5rem; display: flex; align-items: center; gap: .25rem; }
 .ss-rail-head .badge { margin-left: auto; }
 .ss-rail-item { display: flex; align-items: center; gap: .35rem; width: 100%;
+                 min-width: 0;
                  border: 0; background: transparent; text-align: left;
                  font-size: .82rem; color: var(--bs-body-color);
                  padding: .3rem .5rem; border-radius: .375rem; }
+/* …and its label has to be allowed to shrink for `.text-truncate` to mean anything: a flex
+   child's automatic minimum size is its CONTENT, so a long name does not ellipsise — it
+   pushes the column wider than the width the column was given, and the selected item then
+   draws to a different edge than the rest. Reported from the screen as one row of a rail
+   sticking out past its neighbours. */
+.ss-rail-item > .text-truncate { min-width: 0; }
 .ss-rail-item:hover { background: var(--bs-secondary-bg); }
 .ss-rail-item.active { background: var(--bs-primary); color: #fff; }
 .ss-rail-item.active .badge { background: rgba(255,255,255,.25) !important; color: #fff; }
+/* A rail whose items are a TREE: the twist that opens a node, and the same width where there
+   is nothing to twist — a leaf whose name starts where its siblings' names start is a tree;
+   one that starts a notch to the left is a list. Its own control, so opening a branch and
+   choosing it stay two answers. */
+.ss-rail-twist { width: .85rem; flex-shrink: 0; font-size: .6rem; opacity: .7;
+                  display: inline-flex; align-items: center; justify-content: center; }
+.ss-rail-twist:hover { opacity: 1; }
 @media (max-width: 991.98px) {
     .ss-shell { flex-direction: column; }
     .ss-rail { flex: 0 0 auto; max-width: none; max-height: 13rem;
                 border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
+}
+/* .ss-pane-tall : a body that needs room to be useful, inside a page that already scrolls.
+   The fill chain (.ss-vfill) is the right mechanism when there IS a height to hand down; a
+   tab inside a scrolling document has none, so a panel that asked to fill drew at the height
+   of its own header — reported from the screen as a log table showing its column titles and
+   nothing else. A viewport fraction is a floor and not a cap: the content still grows past
+   it, and a short answer no longer collapses to a caption. */
+.ss-pane-tall { min-height: 60vh; }
+/* .ss-sticky-aside : a column that stays put while its sibling scrolls past it.
+   For the panel beside a long body whose content is the CONTEXT of that body rather than one
+   more section of it — a device's serial, firmware and location while you scroll its
+   measurements. As a tab it was read once and then unreachable, which is the opposite of
+   context.
+   Deliberately NOT its own scroll region: a second scrollbar inside a page that already
+   scrolls is how a rail ends up with its head off the screen, and this column is short by
+   construction. Below the breakpoint it stops sticking and stacks above, because a sticky
+   column 17rem wide on a phone is the page. */
+.ss-sticky-aside { flex: 0 0 17rem; max-width: 17rem; min-width: 0;
+                    position: sticky; top: 0; align-self: flex-start; }
+@media (max-width: 991.98px) {
+    .ss-sticky-aside { flex: 0 0 auto; max-width: none; position: static; }
 }
 /* .ss-railbox : the same rail + detail, INSIDE a body rather than as a pane's own frame.
    `.ss-shell` is the page-level version and carries the negative margins that make a section
@@ -2271,8 +2588,14 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    being a flex CONTAINER — so the rail grew to the height of its own items and left the rest of
    the card empty, exactly as the account pane did before it. Same trap, same fix, and the
    overflow moves too: the rail and its detail scroll on their own, so a scrollbar out here
-   would be a second one around them. */
-.ss-vscroll:has(> .ss-railbox) {
+   would be a second one around them.
+
+   A DESCENDANT and not a child: a view that puts a summary header above its rail wraps both,
+   and `> .ss-railbox` stopped matching the moment there was anything between them — the rail
+   went back to the height of its own items with the rest of the card empty, and no rule said
+   why. What matters is that this box holds a rail at all; the wrapper between them carries
+   .ss-vfill to pass the height down. */
+.ss-vscroll:has(.ss-railbox) {
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -2331,3 +2654,50 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .db-opt-icon { flex: 0 0 1rem; font-size: .85rem; text-align: center; }
 .db-opt-spin { animation: db-opt-spin 1s linear infinite; }
 @keyframes db-opt-spin { to { transform: rotate(360deg); } }
+
+/* .ss-masked : a secret shown masked WITHOUT being a password input. Browsers hunt for
+   `input[type=password]` to autofill and to offer "save this login", which is wrong for every
+   secret in this panel — none of them is a login here, and a manager filling one writes a
+   saved password into a value that is about to be sent to a device. Applied only where the
+   browser supports it: `fieldCtl()` feature-detects and falls back to a real password input,
+   because losing the masking would be far worse than the prompt it avoids. */
+.ss-masked {
+    -webkit-text-security: disc;
+    text-security: disc;
+}
+
+/* A manufacturer's mark. An <img> given a HEIGHT and left to work out its own width: each
+   file's viewBox is trimmed to the ink it holds (see static/img/brands/README.md), so a
+   wordmark comes out wide and a round mark comes out round. Fitted into a square instead,
+   Synology's wordmark drew a third of the height of the text beside it.
+
+   The files are black silhouettes with no colour of their own, which is right on a light
+   panel and invisible on a dark one — so on dark they are inverted, which turns black into
+   white and leaves the shape alone. The file is named by the PROFILE that recognised the
+   device; the core never holds a list of manufacturers. */
+.ss-brand {
+    display: inline-block;
+    width: auto;
+    max-width: 7em;
+    vertical-align: -0.15em;
+    flex: 0 0 auto;
+}
+
+[data-bs-theme="dark"] .ss-brand { filter: invert(1); }
+
+/* …and the maker nobody has a mark for: the initial on their own colour. White on it
+   unconditionally, because these are brand colours and a brand chooses a dark one far more
+   often than not. */
+.ss-brand-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15em;
+    height: 1.15em;
+    border-radius: .2em;
+    color: #fff;
+    font-size: .8em;
+    font-weight: 600;
+    line-height: 1;
+    flex: 0 0 auto;
+}

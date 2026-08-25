@@ -119,6 +119,168 @@ const ITEM_SCHEMAS = Object.fromEntries([
 // Host registry: per-protocol connection-profile catalog + the connection
 // fields each module contributes (hidden on a check once it is bound to a host).
 const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
+// What a device may declare itself to be (lib/core/hosts/manifest.py::HOST_TYPES):
+// [{id, icon}] in the order the picker offers them. The label is t('host_type_<id>').
+const HOST_TYPES = {{ host_types | default([]) | tojson }};
+const HOST_TYPE_ICONS = Object.fromEntries(HOST_TYPES.map(x => [x.id, x.icon]));
+/** The icon a device wears: its type's, or the generic one when it has none. */
+function hostTypeIcon(type) { return HOST_TYPE_ICONS[type] || 'bi-hdd-network'; }
+
+//: What a machine's state LOOKS like: `[badge class, inline style, icon, label key]`.
+//:
+//: One definition, because a state is one thing. It was two — the fleet list painting
+//: maintenance in its signature orange with a cone, the infrastructure section painting it
+//: grey with a spanner — so the same host in maintenance looked like two different states on
+//: two screens about the same host. Reported from the screen, and the answer to "which is
+//: right" is "whichever, but only one".
+//:
+//: Maintenance keeps the orange it has had everywhere else, deliberately distinct from the
+//: yellow of a warning: "somebody switched this off on purpose" and "something is wrong with
+//: it" are not the same news and must not be the same colour.
+const HOST_STATE_BADGES = {
+    maintenance: ['', 'background-color:#fd7e14;color:#fff', 'bi-cone-striped',
+                  'host_status_maintenance'],
+    error:       ['text-bg-danger',  '', 'bi-x-circle-fill',     'host_status_error'],
+    warning:     ['text-bg-warning', '', 'bi-hourglass-split',   'host_status_warning'],
+    ok:          ['text-bg-success', '', 'bi-check-circle-fill', 'host_status_ok'],
+};
+
+//: …and what that state looks like where there is no room for a badge: the stripe down a
+//: card, the dot beside a column heading. Same four states, same orange for maintenance,
+//: because a card and its own badge disagreeing about a colour is the same host looking like
+//: two things in one glance — which is exactly what was reported.
+const HOST_STATE_COLORS = {
+    maintenance: '#fd7e14',
+    error:   'var(--bs-danger)',
+    warning: 'var(--bs-warning)',
+    ok:      'var(--bs-success)',
+    // A machine nobody is watching has no state, and no state has no colour — the muted
+    // surface says "nothing to read here", which is the truth about it.
+    '':      'var(--bs-secondary-bg)',
+};
+
+function hostStateColor(status, maintenance) {
+    return HOST_STATE_COLORS[maintenance ? 'maintenance' : String(status || '')]
+        || HOST_STATE_COLORS[''];
+}
+
+/** One machine's state, as a badge.
+ *
+ *  *maintenance* is the flag where a screen carries it beside the status; where it carries it
+ *  AS the status ("maintenance"), passing the status alone is enough.
+ *
+ *  *none* is what a screen shows for a machine with NO state, which is a real answer and not
+ *  a missing one: a host with no enabled check is not fine, it is unwatched, and painting it
+ *  green would be the panel telling you something nobody is checking. What that reads like is
+ *  the screen's own business — a dash in a table, a word on a card — so it is passed in.
+ */
+function hostStateBadge(status, maintenance, none) {
+    const meta = HOST_STATE_BADGES[maintenance ? 'maintenance' : String(status || '')];
+    if (!meta) return none === undefined ? '<span class="text-muted small">—</span>' : none;
+    const sty = meta[1] ? ` style="${meta[1]}"` : '';
+    return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${
+        esc(t(meta[3]))}</span>`;
+}
+/** Its translated name, or a dash when unclassified. */
+function hostTypeLabel(type) { return type ? (t('host_type_' + type) || type) : ''; }
+
+//: The build, for the URL of anything this file points a browser at. Same version the
+//: stylesheets carry, so a mark that changes with a release is fetched again with it and one
+//: that does not is cached for a year (see mixins/hooks.py).
+const ASSET_V = '{{ asset_v }}';
+
+/** WHO MADE a machine, as a mark — or '' when nobody has said.
+ *
+ *  The device says. A profile that recognises `1.3.6.1.4.1.14988` declares the brand beside
+ *  the match, so the manufacturer arrives with the sample and nothing here holds a list of
+ *  them — this function has never heard of MikroTik.
+ *
+ *  Three ways to draw one, in order of what is available:
+ *
+ *    * a mark we ship (`logo`) — a silhouette painted as a MASK, so it takes the colour of the
+ *      text around it and reads on both themes. A brand colour would be a navy logo on a navy
+ *      panel half the time;
+ *    * a glyph from the icon set the panel already carries (`icon`);
+ *    * the name alone. Which is the answer for a maker nobody has a redistributable mark for,
+ *      and for the ones a server reports through its own agent — there is no catalogue of
+ *      those and there should not be.
+ *
+ *  *opts.text* draws the name beside the mark; without it the mark stands alone with the name
+ *  as its tooltip, which is what a column 17rem wide can afford.
+ */
+function hostBrandMarkHtml(brand, size) {
+    const b = brand || {};
+    const name = String(b.name || '').trim();
+    if (!name) return '';
+    const tall = size || '1.15em';
+    if (b.logo) {
+        // An `img` and not a background: the file's viewBox is trimmed to the ink it holds
+        // (see static/img/brands/README.md), so an image given a HEIGHT works out its own
+        // width — a wordmark comes out wide and a round mark comes out round, with no table of
+        // proportions anywhere for somebody to keep in step with the files. Drawn as a
+        // background it was fitted into a square, which made Synology's wordmark a third of
+        // the height of the text beside it. Reported from the screen.
+        //
+        // `alt` and not an empty one: a mark that does not load leaves the maker's name where
+        // the mark would have been, which is the fact it was standing for.
+        return `<img class="ss-brand" style="height:${escAttr(tall)}"
+            src="/static/img/brands/${escAttr(b.logo)}.svg?v=${escAttr(ASSET_V)}"
+            alt="${escAttr(name)}" title="${escAttr(name)}">`;
+    }
+    if (b.icon) {
+        return `<i class="bi ${escAttr(b.icon)}" role="img" title="${escAttr(name)}"
+            aria-label="${escAttr(name)}" style="font-size:${escAttr(tall)}"></i>`;
+    }
+    return '';
+}
+
+function hostBrandHtml(brand, opts) {
+    const b = brand || {}, o = opts || {};
+    const name = String(b.name || '').trim();
+    if (!name) return '';
+    // WHERE THERE IS A MARK THERE IS NO NAME. A logo is the maker's name written by the maker —
+    // "[Synology] Synology" is the same word twice, and it was on every card of a machine whose
+    // mark we happen to ship. Reported from the screen. The name is still on the element, as
+    // its tooltip and as what a reader with no images gets.
+    const mark = hostBrandMarkHtml(b, o.size);
+    if (mark) return mark;
+    if (o.text) return `<span>${esc(name)}</span>`;
+    // No mark and no room for the name: the initial on the maker's own colour, which is still
+    // an answer somebody can tell apart at a glance. Never the only place the name appears —
+    // the tooltip carries it, and so does the identity column.
+    return `<span class="ss-brand-chip" title="${escAttr(name)}"
+        style="background:${escAttr(b.color || 'var(--bs-secondary-bg)')}">${
+        esc(name.slice(0, 1).toUpperCase())}</span>`;
+}
+
+/** A model with the maker's name taken off the front of it.
+ *
+ *  A machine that says "HP" and "HP EliteDesk 800 G5 Desktop Mini" is not saying two things,
+ *  and printing both gives "HP HP EliteDesk 800 G5 Desktop Mini" — reported from the screen.
+ *  The FRONT only: "Precision 5820 Dell" is not a string anybody writes, while a model with the
+ *  maker's word inside it ("MikroTik-branded CRS") is a model, and cutting it would be the
+ *  panel editing what the device said.
+ */
+function hostModelWithout(model, maker) {
+    const text = String(model || '').trim();
+    const name = String(maker || '').trim();
+    if (!name || text.toLowerCase().indexOf(name.toLowerCase()) !== 0) return text;
+    const rest = text.slice(name.length).replace(/^[\s,\-–—:]+/, '').trim();
+    // Only when something is LEFT: a machine whose model is exactly its maker's name has said
+    // one thing, and it is better read as the model than as nothing at all.
+    return rest || text;
+}
+
+/** What a machine IS, in one line: who made it and which model. Either half may be missing —
+ *  a switch that names its maker and not its model still says something worth reading. */
+function hostBrandLine(host, opts) {
+    const h = host || {};
+    const mark = hostBrandHtml(h.brand, opts);
+    const model = hostModelWithout(h.model, (h.brand || {}).name || h.vendor);
+    if (!mark && !model) return '';
+    return `<span class="d-inline-flex align-items-center gap-1 text-truncate">${mark}${
+        model ? `<span class="text-muted">${esc(model)}</span>` : ''}</span>`;
+}
 const CREDENTIAL_TYPES = {{ credential_types | default({}) | tojson }};
 const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
 // Which collection(s) of each host-centric module may bind to a host (show the

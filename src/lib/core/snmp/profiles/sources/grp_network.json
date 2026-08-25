@@ -1,0 +1,32 @@
+{
+  "id": "grp_network",
+  "label": {
+    "en_EN": "Switch / router (generic)",
+    "es_ES": "Switch / router (genérico)"
+  },
+  "description": {
+    "en_EN": "The standard questions any managed network device answers, whoever made it: system, per-port traffic and errors, and the IP, TCP/UDP and ICMP counters. The starting point for a device with no vendor profile.",
+    "es_ES": "Las preguntas estándar que responde cualquier equipo de red gestionable, sea de quien sea: sistema, tráfico y errores por puerto, y los contadores IP, TCP/UDP e ICMP. El punto de partida para un equipo sin perfil de fabricante."
+  },
+  "includes": [
+    "sys_generic",
+    "if_generic",
+    "ip_stats",
+    "tcp_udp_stats",
+    "icmp_stats",
+    "lldp",
+    "ip_neighbours",
+    "bridge_fdb",
+    "bridge_vlans",
+    "lag",
+    "if_stack"
+  ],
+  "optional": [
+    "lldp",
+    "ip_neighbours",
+    "bridge_fdb",
+    "bridge_vlans",
+    "lag",
+    "if_stack"
+  ]
+}

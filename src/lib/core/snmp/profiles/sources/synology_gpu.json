@@ -1,0 +1,82 @@
+{
+    "id": "synology_gpu",
+    "label": {
+        "en_EN": "Synology — GPU (SYNOLOGY-GPUINFO-MIB)",
+        "es_ES": "Synology — GPU (SYNOLOGY-GPUINFO-MIB)"
+    },
+    "description": {
+        "en_EN": "Utilisation and memory of the GPU, on the models that have one. Surveillance Station and Photos transcoding live here, and a GPU pinned at 100% is why everything else waits.",
+        "es_ES": "Utilización y memoria de la GPU, en los modelos que la llevan. La transcodificación de Surveillance Station y Photos vive aquí, y una GPU clavada al 100% es la razón de que todo lo demás espere."
+    },
+    "present_when": {"field": "syno_gpu_mem_total", "above": 0},
+    "match": {
+        "sysobjectid_prefix": "1.3.6.1.4.1.6574",
+        "probe": "1.3.6.1.4.1.6574.108.1.0"
+    },
+    "metrics": [
+        {
+            "key": "syno_gpu_util",
+            "icon": "bi-gpu-card",
+            "headline": true,
+            "label": {
+                "en_EN": "GPU utilisation",
+                "es_ES": "Utilización de GPU"
+            },
+            "kind": "gauge",
+            "oid": "1.3.6.1.4.1.6574.108.2.0",
+            "unit": "%",
+            "chart": "line"
+        },
+        {
+            "key": "syno_gpu_mem_util",
+            "label": {
+                "en_EN": "GPU memory utilisation",
+                "es_ES": "Utilización de memoria de GPU"
+            },
+            "kind": "gauge",
+            "oid": "1.3.6.1.4.1.6574.108.3.0",
+            "unit": "%",
+            "chart": "line"
+        },
+        {
+            "key": "syno_gpu_mem_used",
+            "icon": "bi-memory",
+            "headline": "used",
+            "label": {
+                "en_EN": "GPU memory used",
+                "es_ES": "Memoria de GPU usada"
+            },
+            "kind": "gauge",
+            "oid": "1.3.6.1.4.1.6574.108.5.0",
+            "unit": "B",
+            "chart": "area",
+            "scale": 1048576
+        },
+        {
+            "key": "syno_gpu_mem_free",
+            "label": {
+                "en_EN": "GPU memory free",
+                "es_ES": "Memoria de GPU libre"
+            },
+            "kind": "gauge",
+            "oid": "1.3.6.1.4.1.6574.108.4.0",
+            "unit": "B",
+            "chart": "line",
+            "scale": 1048576
+        },
+        {
+            "key": "syno_gpu_mem_total",
+            "icon": "bi-memory",
+            "headline": "total",
+            "label": {
+                "en_EN": "GPU memory total",
+                "es_ES": "Memoria de GPU total"
+            },
+            "kind": "gauge",
+            "oid": "1.3.6.1.4.1.6574.108.6.0",
+            "unit": "B",
+            "chart": "value",
+            "scale": 1048576
+        }
+    ]
+}

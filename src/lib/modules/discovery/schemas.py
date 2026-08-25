@@ -234,6 +234,12 @@ class SchemaDiscovery:
                 continue
             info = cls._load_module_info(mod_dir)
             lang_data = cls._load_module_langs(mod_dir)
+            # A collection that takes its connection fields from a core-owned protocol takes
+            # their WORDS from the same place. Folded into the module's lang data rather than
+            # attached to each field, so every path that already reads it — the per-field
+            # `label_i18n` below, the `hints` the panel looks up through `__i18n__` — works
+            # unchanged and the browser never learns there was an expansion.
+            cls._merge_profile_words(item_schema, lang_data)
 
             supported_platforms = getattr(watchful_cls, 'SUPPORTED_PLATFORMS', None)
             platform_unsupported = (
@@ -255,7 +261,7 @@ class SchemaDiscovery:
                     # module_status_render() — none of these are renderable
                     # collections, so keep them out of ITEM_SCHEMAS.
                     continue
-                col_fields = dict(fields)
+                col_fields = cls._expand_profile_fields(dict(fields))
                 # Stamp each ModuleBase field's section `group` (e.g. threads/
                 # timeout → 'execution') so schemas don't repeat it and the UI
                 # stays generic. A field's own explicit `group` always wins.
@@ -395,6 +401,95 @@ class SchemaDiscovery:
                     schemas[f'{mod_name}|__i18n__'] = i18n
 
         return schemas
+
+    # ── Connection fields a collection does not have to restate ──────────────────────
+    #
+    # A check against a bare address has to stay possible — somebody wants to watch one OID
+    # on a box without registering it as a device first — so the item needs the whole
+    # connection on it: address, port, version, community, the v3 keys. Those are the same
+    # fields the HOST carries, and the module was writing them out a second time because the
+    # host profile only says what a check inherits when BOUND; it puts nothing on the form of
+    # an unbound one.
+    #
+    # So the collection names the protocol instead::
+    #
+    #     "servers": {"__profile_fields__": "snmp", "timeout": {...}, "checks": {...}}
+    #
+    # and the fields arrive from the core declaration, in its order, at that position. What
+    # the browser receives is what it received before; what disappears is the copy, and with
+    # it the guard that existed only to pin the copy to the original.
+    #
+    # A field the collection declares ITSELF wins — the expansion never overwrites. That is
+    # not a courtesy: a module may need a narrower default or an extra `show_when`, and
+    # discovering that the shared declaration silently replaced it would be worse than the
+    # duplication this removes.
+    _PROFILE_FIELDS_KEY = '__profile_fields__'
+
+    @classmethod
+    def _profile_expansions(cls, item_schema: dict) -> list:
+        """``[(protocol, collection_fields)]`` for every collection asking for one."""
+        out = []
+        for collection, fields in (item_schema or {}).items():
+            if not isinstance(fields, dict):
+                continue
+            proto = fields.get(cls._PROFILE_FIELDS_KEY)
+            if isinstance(proto, str) and proto.strip():
+                out.append((proto.strip(), fields))
+        return out
+
+    @classmethod
+    def _expand_profile_fields(cls, col_fields: dict) -> dict:
+        """Replace ``__profile_fields__`` with the core profile's field declarations."""
+        proto = col_fields.get(cls._PROFILE_FIELDS_KEY)
+        if not (isinstance(proto, str) and proto.strip()):
+            return col_fields
+        try:
+            from lib.core.hosts.profiles import core_profile_fields   # noqa: PLC0415
+            declared = core_profile_fields(proto.strip())
+        except Exception:  # pylint: disable=broad-except
+            declared = []
+        out: dict = {}
+        for key, meta in col_fields.items():
+            if key != cls._PROFILE_FIELDS_KEY:
+                out[key] = meta
+                continue
+            for spec in declared:
+                spec = dict(spec)
+                name = spec.pop('name', '')
+                # The words arrive through the module's lang data (see
+                # _merge_profile_words), the same channel every other field uses.
+                spec.pop('label_i18n', None)
+                spec.pop('hint_i18n', None)
+                if name and name not in col_fields:
+                    out[name] = spec
+        return out
+
+    @classmethod
+    def _merge_profile_words(cls, item_schema: dict, lang_data: dict) -> None:
+        """Fold a core profile's labels and hints into *lang_data*, in place.
+
+        Only where the module says nothing: a module that words one of these fields its own
+        way keeps its wording.
+        """
+        pairs = cls._profile_expansions(item_schema)
+        if not pairs or not lang_data:
+            return
+        try:
+            from lib.core.hosts.profiles import core_profile_fields   # noqa: PLC0415
+        except Exception:  # pylint: disable=broad-except
+            return
+        for proto, _fields in pairs:
+            for spec in core_profile_fields(proto):
+                name = spec.get('name')
+                if not name:
+                    continue
+                for block, words in (('labels', spec.get('label_i18n')),
+                                     ('hints', spec.get('hint_i18n'))):
+                    for lang, text in (words or {}).items():
+                        ld = lang_data.get(lang)
+                        if not isinstance(ld, dict):
+                            continue
+                        ld.setdefault(block, {}).setdefault(name, text)
 
     @staticmethod
     def _load_module_info(module_dir: str) -> dict:

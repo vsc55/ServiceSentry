@@ -80,3 +80,8 @@ NOTIFY_EVENTS = [
     {'key': 'backup_budget_exceeded', 'source': 'backup',
      'label_key': 'notif_event_backup_budget', 'matrix': True, 'order': 80},
 ]
+
+# What this package runs in the background, for the screen that lists all of it
+# (lib/core/jobs). Declared rather than reached into: a core that imported four job
+# registries by name would have to be edited to learn about a fifth.
+from .jobs import live as BACKGROUND_JOBS      # noqa: E402,F401  (a descriptor)

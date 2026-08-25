@@ -1,0 +1,72 @@
+{
+    "id": "lag",
+    "label": {
+        "en_EN": "Link aggregation (IEEE8023-LAG-MIB)",
+        "es_ES": "Agregación de enlaces (IEEE8023-LAG-MIB)"
+    },
+    "short_label": {
+        "en_EN": "Aggregation",
+        "es_ES": "Agregación"
+    },
+    "description": {
+        "en_EN": "Which of this device's ports are members of the same aggregate, and which aggregate. Four cables between a router and a switch look identical to four separate links from the outside — the neighbour tables count four of them either way — and the difference is a configuration fact that lives only here: a port answers the identifier of the aggregator it is attached to, and that identifier IS the interface index of the LAG, so the port's own row can name it. Without this the panel can say how many cables there are and must not say they are a bundle. Recognised by the one scalar this MIB serves, which a device answers whether or not it has anything aggregated — so the network groups carry it as an OPTIONAL member: most switches aggregate nothing, and a profile that stops a whole family grouping the day it joined it would be a worse bug than the one it fixes.",
+        "es_ES": "Cuáles de los puertos de este aparato son miembros del mismo agregado, y de cuál. Cuatro cables entre un router y un switch se ven idénticos a cuatro enlaces sueltos desde fuera —las tablas de vecinos cuentan cuatro en ambos casos— y la diferencia es un dato de configuración que sólo vive aquí: cada puerto contesta el identificador del agregador al que está unido, y ese identificador ES el índice de interfaz del LAG, así que la propia fila del puerto puede nombrarlo. Sin esto el panel puede decir cuántos cables hay y no debe decir que son un haz. Se reconoce por el único escalar que sirve esta MIB, que un aparato contesta tenga o no algo agregado — y los grupos de red lo llevan como miembro OPCIONAL: casi ningún switch agrega nada, y un perfil que impidiera agrupar a toda una familia el día que entró en ella sería peor fallo que el que arregla."
+    },
+    "match": {
+        "probe": "1.2.840.10006.300.43.1.3.0"
+    },
+    "metrics": [
+        {
+            "key": "lag_member_of",
+            "label": {
+                "en_EN": "Member of",
+                "es_ES": "Miembro de"
+            },
+            "walk": "1.2.840.10006.300.43.1.2.1.1.13",
+            "kind": "text",
+            "role": "aggregate",
+            "index_label": "1.3.6.1.2.1.2.2.1.2",
+            "value_label": "1.3.6.1.2.1.2.2.1.2",
+            "skip": "^[ ]*$"
+        },
+        {
+            "key": "lag_kind",
+            "label": {
+                "en_EN": "Aggregate or individual",
+                "es_ES": "Agregado o individual"
+            },
+            "walk": "1.2.840.10006.300.43.1.1.1.1.5",
+            "kind": "gauge",
+            "unit": "",
+            "chart": "value",
+            "index_label": "1.3.6.1.2.1.2.2.1.2",
+            "states": {
+                "1": {
+                    "label": {
+                        "en_EN": "Aggregate",
+                        "es_ES": "Agregado"
+                    },
+                    "level": "ok"
+                },
+                "2": {
+                    "label": {
+                        "en_EN": "Individual link",
+                        "es_ES": "Enlace individual"
+                    },
+                    "level": "info"
+                }
+            }
+        },
+        {
+            "key": "lag_partner",
+            "label": {
+                "en_EN": "Partner system",
+                "es_ES": "Sistema al otro lado"
+            },
+            "walk": "1.2.840.10006.300.43.1.1.1.1.8",
+            "kind": "text",
+            "index_label": "1.3.6.1.2.1.2.2.1.2",
+            "skip": "^(0x)?[0:.-]*$"
+        }
+    ]
+}
