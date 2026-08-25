@@ -139,10 +139,15 @@ class TestTwoNamelessTablesAreNotOneTable:
         An `of_device` table is exempt because it has no rows to collide: its readings fold
         into one fact about the machine before anything is filed under an index. So is an
         `evidence` one, which never becomes a row at all — it goes to its own store — and so
-        is an `aggregate` one, which is recorded as a single total under the device."""
+        is an `aggregate` one, which is recorded as a single total under the device.
+
+        …and so is one whose rows are named by the VALUE's own path (`path.row`): those rows
+        have a name, it simply does not come from a second table. The point of the rule is
+        that a nameless row falls back to an index, and that one does not."""
         for prof in profiles.catalog().values():
             for m in prof['metrics']:
-                if ('walk' in m and not m.get('index_label') and not m.get('of_device')
+                named = m.get('index_label') or 'row' in (m.get('path') or {})
+                if ('walk' in m and not named and not m.get('of_device')
                         and not m.get('evidence') and not m.get('aggregate')):
                     assert m.get('group'), f"{prof['id']}.{m['key']} can collide"
 
@@ -583,16 +588,51 @@ class TestHowADevicesIdentityReads:
     one is, then what is attached" is how a person reads them — and alphabetically the standard
     came last, which is the wrong end. The profile already declares which it is, by claiming a
     vendor tree or not claiming one, so nothing here is a list of ids in the panel.
+
+    A profile may also say where it reads OUTRIGHT, and one does. "Vendor or not" ties every
+    standard profile with every other and falls back to the alphabet, which put the card headed
+    "VLANs" above the one headed "System" — the wrong first sentence about a switch. Which of
+    two standard MIBs is the identity of a box is a fact about those MIBs, so the MIB says.
     """
 
     def test_a_standard_ranks_before_a_vendors_own_mib(self):
         cat = profiles.catalog()
         rank = {}
-        for pid in ('sys_generic', 'synology_system', 'synology_ups'):
-            fields = profiles.history_fields(cat[pid], 'es_ES')
-            rank[pid] = next(iter(fields.values()))['source_rank']
-        assert rank['sys_generic'] == 0, 'RFC 1213 is not marked as a standard'
+        for pid in ('sys_generic', 'bridge_vlans', 'synology_system', 'synology_ups'):
+            rank[pid] = profiles.source_rank_of(cat[pid])
+        assert rank['sys_generic'] < rank['bridge_vlans'], 'the VLAN card leads again'
+        assert rank['bridge_vlans'] == 0, 'Q-BRIDGE-MIB is not marked as a standard'
         assert rank['synology_system'] == 1 and rank['synology_ups'] == 1
+
+    def test_and_a_profile_may_say_outright_where_it_reads(self):
+        """Bounded, because it is an ordering and not an escape hatch: a profile cannot put
+        itself a thousand places before everything."""
+        assert profiles.normalise(_profile(rank=-1))['rank'] == -1
+        assert profiles.normalise(_profile(rank=99))['rank'] == 9
+        assert profiles.normalise(_profile(rank=-99))['rank'] == -9
+        for bad in ('1', 1.5, True, None, [1]):
+            assert 'rank' not in profiles.normalise(_profile(rank=bad)), bad
+
+    def test_a_profile_that_charts_nothing_still_says_what_it_is_called(self):
+        """Read off the profile and not off its fields. `bridge_vlans` answers one TEXT column
+        and nothing else, so it contributed no field, so nothing carried its name — and the
+        card it fills was headed `bridge_vlans` above a list of translated VLAN names.
+        Reported from the screen."""
+        cat = profiles.catalog()
+        assert profiles.history_fields(cat['bridge_vlans'], 'es_ES') == {}, (
+            'it charts something now, and this test is about the case where it does not')
+        got = profiles.history_source(cat['bridge_vlans'], 'es_ES')
+        assert got['label'] and got['label'] != 'bridge_vlans'
+        assert got['short'] and got['rank'] == 0
+
+    def test_and_the_module_hands_them_over_the_way_it_hands_over_its_fields(self):
+        """The whole chain, because a declaration nobody reads is the shape of bug this
+        repository keeps finding."""
+        from lib.core.history import service as _hist            # noqa: PLC0415
+        meta = _hist.history_meta(None, 'snmp', 'es_ES', '')
+        src = (meta or {}).get('sources') or {}
+        assert src.get('bridge_vlans', {}).get('short'), 'the card is headed by an id again'
+        assert src.get('sys_generic', {}).get('rank') == -1
 
     def test_the_rank_comes_from_the_profiles_own_claim(self):
         """Not from its id, its label or a list: a profile that claims a vendor's tree is a
@@ -1562,3 +1602,425 @@ class TestAReadingThatAnotherColumnExcuses:
         assert body.count('_quiet_key(meta, data, _state_key(value))') == 2, (
             'the tally and the payload no longer agree about which state a row is in')
         assert "'state_key'" in body, 'the screen is left to work it out again'
+
+
+class TestASwitchGroupCollectsWhatOnlyASwitchKnows:
+    """A group for network equipment that does not ask for neighbours is missing the point.
+
+    The map that answers "what is plugged into what" is built from two things, and only a
+    switch or a router can answer either: LLDP names the box on the far end of a cable and the
+    port it answered on, and the forwarding table places a machine on a port by the MAC it
+    learned there. Everything else on the panel is an address, and addresses cannot tell you
+    which cable goes where.
+
+    Reported by looking at a real fleet: `net_evidence` held fourteen ARP rows from one
+    hypervisor and nothing else, because `grp_linksys` and `grp_mikrotik` — the two groups the
+    switches in that rack were assigned — carried neither profile. The link map was correct and
+    empty, which is the worst way for a screen to be right.
+
+    A closed list on purpose: a fourth network group has to be argued with here rather than
+    quietly shipping without the two profiles that make it one.
+    """
+
+    LINK = ('lldp', 'bridge_fdb', 'ip_neighbours')
+
+    def _expanded(self, gid):
+        from lib.core.snmp import profiles as P          # noqa: PLC0415
+        cat = P.catalog()
+        assert gid in cat, gid
+        return P.expand(cat, [gid])
+
+    def test_every_network_group_asks_for_neighbours(self):
+        for gid in ('grp_network', 'grp_linksys', 'grp_mikrotik'):
+            got = self._expanded(gid)
+            for prof in self.LINK:
+                assert prof in got, f'{gid} does not collect {prof}'
+
+    def test_and_the_group_that_supersedes_them_says_so(self):
+        """`supersedes` is what an auto-detected group replaces. A profile the group now covers
+        and does not supersede is one a device ends up carrying twice — the same walk, run and
+        stored under two names."""
+        import io as _io, json as _json, os as _os      # noqa: PLC0415
+        root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
+        src = _os.path.join(root, 'lib', 'core', 'snmp', 'profiles', 'sources')
+        for gid in ('grp_linksys', 'grp_mikrotik'):
+            with _io.open(_os.path.join(src, gid + '.json'), encoding='utf-8') as fh:
+                d = _json.load(fh)
+            sup = set((d.get('match') or {}).get('supersedes') or ())
+            for prof in d['includes']:
+                assert prof in sup, f'{gid} includes {prof} and does not supersede it'
+
+    def test_an_endpoint_asks_who_it_can_SEE(self):
+        """`lldp` is not a switch profile. It answers "who is on the other end of my cable",
+        which anything running an agent can say — and a NAS or a hypervisor saying it is the
+        half of the link the switch cannot name: the switch reports the port MAC it learned,
+        the endpoint reports its own identity. Both ends speaking is what makes a cable
+        confirmed rather than claimed."""
+        for gid in ('grp_linux', 'grp_proxmox', 'grp_synology'):
+            got = self._expanded(gid)
+            assert 'lldp' in got, f'{gid} cannot say who it sees'
+            assert 'ip_neighbours' in got, gid
+
+    def test_but_it_does_not_ask_for_a_forwarding_table(self):
+        """That one IS a switch profile: a bridge has a table of what it learned on each port,
+        and an endpoint has nothing to answer. Walking it on every NAS in the rack is a walk
+        that returns empty on every cycle for ever."""
+        for gid in ('grp_linux', 'grp_proxmox', 'grp_synology'):
+            got = self._expanded(gid)
+            assert 'bridge_fdb' not in got, f'{gid} walks a table it does not have'
+            assert 'bridge_vlans' not in got, gid
+
+
+class TestAReadingThatIsAPointerAtAnotherRow:
+    """Half of SNMP answers with a REFERENCE: a value whose meaning is "row N of that table".
+
+    `dot3adAggPortAttachedAggID` is the case that forced it. A port in a link aggregation
+    answers the identifier of the aggregator it is attached to, and that identifier is the
+    aggregator's interface index — so the reading is `141`, and the fact it carries is
+    "member of Po1". Recorded as it arrives, the panel would show a port whose aggregate is a
+    number, which is the same shape of unreadable as the row named by its SNMP index that
+    `index_label` exists to fix.
+
+    Declared (`value_label`), not inferred: which table a number points at is a fact about
+    that MIB, and nothing in the core can work it out from the number.
+    """
+
+    def _read(self, metric, walked):
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        return snmp_sampler.read_metric(
+            metric, {}, None, lambda oid, **_kw: (walked.get(oid, {}), None), {})
+
+    IF_NAME = '1.3.6.1.2.1.2.2.1.2'
+    ATTACHED = '1.2.840.10006.300.43.1.2.1.1.13'
+
+    def test_the_number_is_read_as_the_row_it_names(self):
+        walked = {self.ATTACHED: {'25': '141', '26': '141'},
+                  self.IF_NAME: {'25': 'gi25', '26': 'gi26', '141': 'Po1'}}
+        rows, err = self._read(
+            {'key': 'lag_member_of', 'kind': 'text', 'walk': self.ATTACHED,
+             'index_label': self.IF_NAME, 'value_label': self.IF_NAME}, walked)
+        assert not err
+        assert [(r['name'], r['raw']) for r in rows] == [('gi25', 'Po1'), ('gi26', 'Po1')]
+
+    def test_an_index_that_names_nothing_is_not_a_number(self):
+        """Zero is what this table answers for "attached to nothing", and a port whose row
+        reads "member of 0" is a statement the device never made. Emptied, so the profile's
+        own `skip` drops the row — which is what "it did not say" looks like everywhere else
+        on the panel."""
+        walked = {self.ATTACHED: {'25': '0'}, self.IF_NAME: {'25': 'gi25'}}
+        rows, _err = self._read(
+            {'key': 'lag_member_of', 'kind': 'text', 'walk': self.ATTACHED,
+             'index_label': self.IF_NAME, 'value_label': self.IF_NAME}, walked)
+        assert [r['raw'] for r in rows] == ['']
+
+    def test_naming_the_rows_and_resolving_them_is_one_walk(self):
+        """They are usually the SAME column — the table that names an interface is the table
+        an interface index points into — and the cache the caller owns is what keeps a
+        four-metric profile from walking it four times."""
+        seen = []
+
+        def walk(oid, **_kw):
+            seen.append(oid)
+            return ({'25': '141', '141': 'Po1'} if oid else {}), None
+
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        snmp_sampler.read_metric(
+            {'key': 'lag_member_of', 'kind': 'text', 'walk': self.ATTACHED,
+             'index_label': self.IF_NAME, 'value_label': self.IF_NAME}, {}, None, walk, {})
+        assert seen.count(self.IF_NAME) == 1, seen
+
+    def test_only_a_text_reading_may_be_a_pointer(self):
+        """What comes out is a NAME. A gauge whose value was quietly replaced by a string is
+        a series that stops being a number halfway down, and nothing downstream would say
+        so — it would divide by it."""
+        keep = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'value_label': '1.2.4'}]))['metrics']
+        assert keep[0]['value_label'] == '1.2.4'
+        for bad in ({'kind': 'gauge'}, {'kind': 'counter'}):
+            m = dict({'key': 'a', 'walk': '1.2.3', 'value_label': '1.2.4'}, **bad)
+            got = profiles.normalise(_profile(metrics=[m]))['metrics']
+            assert 'value_label' not in got[0], bad
+
+    def test_and_it_has_to_be_an_oid(self):
+        for bad in ('nonsense', '', '1.2.3.x', None):
+            got = profiles.normalise(_profile(metrics=[
+                {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'value_label': bad}]))['metrics']
+            assert 'value_label' not in got[0], bad
+
+
+class TestWhichCablesAreOneCable:
+    """Four cables between a router and a switch, and whether they are ONE link.
+
+    From outside they are indistinguishable: each neighbour table reports four rows either
+    way, which is why the map may say `4 cables` and may not say `LAG`. The difference is a
+    configuration fact, and the device states it in IEEE8023-LAG-MIB — a port answers which
+    aggregator it is attached to. That is the only place the answer exists.
+    """
+
+    def _cat(self):
+        from lib.core.snmp import profiles as P          # noqa: PLC0415
+        return P.catalog()
+
+    def test_the_network_groups_ask(self):
+        from lib.core.snmp import profiles as P          # noqa: PLC0415
+        cat = self._cat()
+        for gid in ('grp_network', 'grp_linksys', 'grp_mikrotik'):
+            assert 'lag' in P.expand(cat, [gid]), f'{gid} cannot tell a trunk from four cables'
+
+    def test_but_a_device_with_nothing_aggregated_still_groups(self):
+        """Most switches aggregate nothing, and the ones that do only started when somebody
+        configured it. A member that stops a whole family collapsing the day the group learns
+        it is the regression `optional` exists for."""
+        from lib.core.snmp import profiles as P          # noqa: PLC0415
+        assert 'lag' in P.optional_of(self._cat()['grp_linksys'])
+        assert 'lag' in P.optional_of(self._cat()['grp_mikrotik'])
+        assert 'lag' in P.optional_of(self._cat()['grp_network'])
+
+    def test_it_reads_the_port_table_and_names_the_aggregate(self):
+        m = {x['key']: x for x in self._cat()['lag']['metrics']}
+        member = m['lag_member_of']
+        assert member['walk'] == '1.2.840.10006.300.43.1.2.1.1.13'
+        # Indexed by the PORT's interface index, and pointing at the AGGREGATE's — the same
+        # table both times, which is what makes it one extra walk and not three.
+        assert member['index_label'] == '1.3.6.1.2.1.2.2.1.2'
+        assert member['value_label'] == '1.3.6.1.2.1.2.2.1.2'
+        assert member['role'] == 'aggregate', 'the map reads this by its role'
+
+    def test_and_it_says_how_it_is_recognised(self):
+        """`dot3adTablesLastChanged` — the one scalar in this MIB, and answered by a device
+        whether or not it has anything aggregated. Without it the profile would be one an
+        admin has to already know exists, which is the failure the whole detect mechanism
+        replaced."""
+        assert (self._cat()['lag'].get('match') or {}).get('probe') == \
+            '1.2.840.10006.300.43.1.3.0'
+
+
+class TestAReadingThatIsInTheIndex:
+    """A composite index is a fact per component, and SNMP puts real answers in there.
+
+    `lldpRemTable` is indexed by (time mark, MY port, neighbour). Which of the reporter's own
+    ports saw that neighbour is therefore knowable — and is in none of the table's columns. The
+    map drew a cable whose own end read "port not identified" for a router that plainly knew it
+    was ether8, because nothing had gone looking in the only place the answer was kept.
+
+    One-based, because that is how a MIB writes an INDEX clause.
+    """
+
+    def _read(self, metric, walked):
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        return snmp_sampler.read_metric(
+            metric, {}, None, lambda oid, **_kw: (walked.get(oid, {}), None), {})
+
+    REM = '1.0.8802.1.1.2.1.4.1.1.7'
+    LOC = '1.0.8802.1.1.2.1.3.7.1.4'
+
+    def test_the_component_is_the_reading(self):
+        walked = {self.REM: {'0.8.1': 'enx00005e005301', '0.11.1': 'aa'}}
+        rows, err = self._read(
+            {'key': 'mine', 'kind': 'text', 'walk': self.REM, 'from_index': 2}, walked)
+        assert not err
+        assert [r['raw'] for r in rows] == ['8', '11']
+
+    def test_and_it_composes_with_the_table_that_names_it(self):
+        """A port NUMBER is not a port. The two mechanisms meet on exactly this metric: dig
+        the number out of the index, then let the local-port table say what the device calls
+        it."""
+        walked = {self.REM: {'0.8.1': 'enx00005e005301'},
+                  self.LOC: {'8': 'ether8', '11': 'ether11'}}
+        rows, _err = self._read(
+            {'key': 'mine', 'kind': 'text', 'walk': self.REM, 'from_index': 2,
+             'value_label': self.LOC}, walked)
+        assert [r['raw'] for r in rows] == ['ether8']
+
+    def test_a_component_that_is_not_there_is_empty(self):
+        """A table whose index is shorter than the profile thinks. Empty, so `skip` drops the
+        row — the same "it did not say" every other reading has."""
+        walked = {self.REM: {'3': 'x'}}
+        rows, _err = self._read(
+            {'key': 'mine', 'kind': 'text', 'walk': self.REM, 'from_index': 2}, walked)
+        assert [r['raw'] for r in rows] == ['']
+
+    def test_only_a_text_reading_may_be_one(self):
+        """What comes out is an index or a name, never a measurement."""
+        keep = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'from_index': 2}]))['metrics']
+        assert keep[0]['from_index'] == 2
+        got = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'gauge', 'from_index': 2}]))['metrics']
+        assert 'from_index' not in got[0]
+
+    def test_and_it_has_to_be_a_position(self):
+        """Zero-based would be a different mechanism written the same way, and `True` is an
+        int in Python — which would quietly mean "component 1"."""
+        for bad in (0, -1, '2', 2.0, True, None, [2]):
+            got = profiles.normalise(_profile(metrics=[
+                {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'from_index': bad}]))['metrics']
+            assert 'from_index' not in got[0], bad
+
+    def test_the_neighbour_profile_asks_for_its_own_port(self):
+        m = {x['key']: x for x in profiles.catalog()['lldp']['metrics']}
+        mine = m['lldp_localport']
+        assert mine['from_index'] == 2, 'lldpRemLocalPortNum is the second index component'
+        assert mine['value_label'] == '1.0.8802.1.1.2.1.3.7.1.4', 'lldpLocPortDesc names it'
+        assert mine['role'] == 'local_port', 'the map reads this by its role'
+        # …and it is filed on the same rows as the rest of the report, or it would be a fact
+        # about a neighbour nobody could match to that neighbour.
+        assert mine['index_label'] == m['lldp_sysname']['index_label']
+
+
+class TestATableIndexedByAPairOfRows:
+    """`ifStackTable` is about two interfaces at once, and its one column says nothing.
+
+    It is keyed by (the interface on top, the interface underneath) and its only value is a row
+    status. The whole answer — "this port is in that bond" — is in the INDEX, and it is not
+    about the row it sits at: filed straight it produces one row per LAYERING, named `10.1` or
+    `bond / ether11`, and neither of those is a row the device reported.
+
+    It matters because it is the standard answer to "what is in that aggregate" for everything
+    that does not serve IEEE8023-LAG-MIB — a RouterOS bond, a Linux `bond0` — which was
+    reported from the screen: the Linksys listed its LAG's ports and the MikroTik's LAG showed
+    nothing.
+    """
+
+    STACK = '1.3.6.1.2.1.31.1.2.1.3'
+    NAME = '1.3.6.1.2.1.2.2.1.2'
+    METRIC = {'key': 'stack_under', 'kind': 'text', 'walk': STACK, 'row_index': 2,
+              'index_label': NAME, 'from_index': 1, 'value_label': NAME}
+
+    def _read(self, walked):
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        walked = dict(walked)
+        walked[self.NAME] = {'1': 'ether11', '2': 'ether12',
+                             '10': 'bond1', '20': 'bridge1'}
+        return snmp_sampler.read_metric(
+            self.METRIC, {}, None, lambda oid, **_kw: (walked.get(oid, {}), None), {})[0]
+
+    def test_the_row_is_the_interface_underneath(self):
+        rows = self._read({self.STACK: {'10.1': '1', '10.2': '1'}})
+        assert [(r['name'], r['raw']) for r in rows] == [('ether11', 'bond1'),
+                                                         ('ether12', 'bond1')]
+
+    def test_and_a_stack_of_three_reads_as_two_facts(self):
+        """A bond over its ports and a bridge over the bond are two true statements, and the
+        bond is the row of one and the value of the other."""
+        rows = self._read({self.STACK: {'10.1': '1', '20.10': '1'}})
+        assert [(r['name'], r['raw']) for r in rows] == [('ether11', 'bond1'),
+                                                         ('bond1', 'bridge1')]
+
+    def test_the_ends_of_the_table_are_not_rows(self):
+        """It carries `X.0` for "nothing underneath" and `0.Y` for "nothing on top". Neither
+        names a pair, and one of them names no row at all."""
+        rows = self._read({self.STACK: {'10.0': '1', '0.1': '1'}})
+        assert [r['name'] for r in rows] == ['ether11'], 'a row at index 0 was invented'
+        assert rows[0]['raw'] == '', 'the profile skip has nothing to drop'
+
+    def test_a_row_the_device_never_named_is_dropped(self):
+        """Only where the profile pointed at one. Everywhere else a nameless row is filed by
+        its index, which is what a table of anonymous rows needs and must not change."""
+        rows = self._read({self.STACK: {'10.99': '1'}})
+        assert rows == []
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        plain, _e = snmp_sampler.read_metric(
+            {'key': 'x', 'kind': 'text', 'walk': '1.1', 'index_label': '1.2', 'group': 'g'},
+            {}, None, lambda oid, **_kw: ({'1.1': {'7': 'v'}}.get(oid, {}), None), {})
+        assert [r['name'] for r in plain] == ['g.7'], 'an anonymous row stopped being filed'
+
+    def test_the_position_has_to_be_one(self):
+        for bad in (0, -1, '2', 2.0, True, None):
+            got = profiles.normalise(_profile(metrics=[
+                {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'row_index': bad}]))['metrics']
+            assert 'row_index' not in got[0], bad
+
+    def test_the_shipped_profile_asks_for_it_the_way_round_that_answers(self):
+        m = {x['key']: x for x in profiles.catalog()['if_stack']['metrics']}['stack_under']
+        assert m['walk'] == '1.3.6.1.2.1.31.1.2.1.3'
+        assert m['row_index'] == 2 and m['from_index'] == 1, (
+            'the bond would be the row and the port the value, which is backwards')
+        assert m['role'] == 'aggregate', 'the aggregate join reads this by its role'
+
+    def test_and_every_group_that_can_stack_asks_for_it(self):
+        """A RouterOS bond, a Linux bond0, a switch with a LAG. Optional in all of them: most
+        devices stack nothing, and a member that stops a family collapsing the day the group
+        learns it is the regression `optional` exists for."""
+        from lib.core.snmp import profiles as P                  # noqa: PLC0415
+        cat = P.catalog()
+        for gid in ('grp_network', 'grp_linksys', 'grp_mikrotik', 'grp_linux'):
+            assert 'if_stack' in P.expand(cat, [gid]), gid
+            assert 'if_stack' in P.optional_of(cat[gid]), gid
+
+
+class TestAValueThatIsAWholePath:
+    """Some agents answer a whole stack in one string.
+
+    RouterOS writes `bridgeLAN/bondingTrankSW1/ether11` where a port description goes, and that
+    single answer says which port it is AND what it is inside. On those devices it is the only
+    place the bonding is stated at all: `ifStackTable` is served and comes back **empty** —
+    checked against the box, through the panel's own "ask an OID", which is what that exists
+    for.
+
+    Declared, with the separator and which component is which. That a slash means "inside of"
+    is a fact about one agent's naming, and the core guessing it would be the core knowing
+    something about one vendor.
+    """
+
+    OID = '1.0.8802.1.1.2.1.3.7.1.4'
+    METRIC = {'key': 'stack', 'kind': 'text', 'walk': OID,
+              'path': {'sep': '/', 'row': -1, 'value': -2}}
+
+    def _read(self, table, metric=None):
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        rows, _err = snmp_sampler.read_metric(
+            metric or self.METRIC, {}, None,
+            lambda oid, **_kw: ({self.OID: table}.get(oid, {}), None), {})
+        return [(r['name'], r['raw']) for r in rows]
+
+    def test_one_string_names_the_row_and_the_reading(self):
+        assert self._read({'11': 'bridgeLAN/bondingTrankSW1/ether11'}) == [
+            ('ether11', 'bondingTrankSW1')]
+
+    def test_counted_from_the_END_because_that_is_the_stable_half(self):
+        """A port may be two deep or four, and it is always the last thing in its own path."""
+        assert self._read({'5': 'bridgeLAN/ether5'}) == [('ether5', 'bridgeLAN')]
+        assert self._read({'7': 'a/b/c/ether7'}) == [('ether7', 'c')]
+
+    def test_a_port_inside_nothing_reads_as_inside_nothing(self):
+        """A standalone port is its whole path. The profile's own `skip` drops the empty
+        reading; what must not happen is it claiming to be inside itself."""
+        assert self._read({'9': 'sfp-sfpplus1'}) == [('sfp-sfpplus1', '')]
+
+    def test_and_a_row_it_does_not_name_is_not_a_row(self):
+        assert self._read({'3': ''}) == []
+        assert self._read({'3': '/'}) == []
+
+    def test_the_path_beats_the_naming_column(self):
+        """It is the device's word for this row in the same breath as the reading, and it does
+        not depend on two tables using the same index — which is what fails on the agents this
+        exists for: `lldpLocPortNum` is not `ifIndex` everywhere."""
+        from lib.core.snmp import sampler as snmp_sampler        # noqa: PLC0415
+        table = {self.OID: {'11': 'bridgeLAN/bond1/ether11'},
+                 '1.3.6.1.2.1.2.2.1.2': {'11': 'WRONG'}}
+        rows, _e = snmp_sampler.read_metric(
+            dict(self.METRIC, index_label='1.3.6.1.2.1.2.2.1.2'), {}, None,
+            lambda oid, **_kw: (table.get(oid, {}), None), {})
+        assert rows[0]['name'] == 'ether11'
+
+    def test_a_declaration_that_says_nothing_is_dropped(self):
+        for bad in ({'sep': '/'}, {'row': -1}, {'sep': '', 'row': -1},
+                    {'sep': '/////', 'row': -1}, {'sep': '/', 'row': '1'},
+                    {'sep': '/', 'row': True}, {'sep': '/', 'row': 99}, 'nonsense', None):
+            got = profiles.normalise(_profile(metrics=[
+                {'key': 'a', 'walk': '1.2.3', 'kind': 'text', 'path': bad}]))['metrics']
+            assert 'path' not in got[0], bad
+
+    def test_and_only_a_text_reading_may_be_one(self):
+        got = profiles.normalise(_profile(metrics=[
+            {'key': 'a', 'walk': '1.2.3', 'kind': 'gauge',
+             'path': {'sep': '/', 'value': -1}}]))['metrics']
+        assert 'path' not in got[0]
+
+    def test_the_shipped_profile_asks_its_own_ports_what_they_are_inside(self):
+        m = {x['key']: x for x in profiles.catalog()['lldp']['metrics']}
+        stack = m['lldp_local_stack']
+        assert stack['walk'] == '1.0.8802.1.1.2.1.3.7.1.4', 'not the local port table'
+        assert stack['path'] == {'sep': '/', 'row': -1, 'value': -2}
+        assert stack['role'] == 'aggregate', 'the aggregate join reads this by its role'

@@ -9,6 +9,79 @@
         "en_EN": "The UPS attached to the DiskStation: charge, runtime left, load, voltage and temperature. Runtime is the one number that says how long there is to act, and it is the one nobody looks at until the lights go out.",
         "es_ES": "El SAI conectado al DiskStation: carga, autonomía restante, consumo, voltaje y temperatura. La autonomía es el único número que dice cuánto tiempo hay para reaccionar, y es el que nadie mira hasta que se va la luz."
     },
+    "brands": [
+        {
+                "any": [
+                        "american power conversion",
+                        "apc"
+                ],
+                "name": "APC",
+                "logo": "schneiderelectric",
+                "color": "#3dcd58"
+        },
+        {
+                "any": [
+                        "schneider"
+                ],
+                "name": "Schneider Electric",
+                "logo": "schneiderelectric",
+                "color": "#3dcd58"
+        },
+        {
+                "any": [
+                        "eaton",
+                        "mge"
+                ],
+                "name": "Eaton",
+                "color": "#005eb8"
+        },
+        {
+                "any": [
+                        "cyberpower"
+                ],
+                "name": "CyberPower",
+                "color": "#00833e"
+        },
+        {
+                "any": [
+                        "riello"
+                ],
+                "name": "Riello",
+                "color": "#e30613"
+        },
+        {
+                "any": [
+                        "salicru"
+                ],
+                "name": "Salicru",
+                "color": "#004b93"
+        },
+        {
+                "any": [
+                        "vertiv",
+                        "liebert"
+                ],
+                "name": "Vertiv",
+                "color": "#00539f"
+        },
+        {
+                "any": [
+                        "tripp"
+                ],
+                "name": "Tripp Lite",
+                "color": "#0072ce"
+        },
+        {
+                "any": [
+                        "phasak",
+                        "nobreak",
+                        "ippon",
+                        "powerwalker"
+                ],
+                "name": "PowerWalker",
+                "color": "#e2001a"
+        }
+    ],
     "match": {
         "sysobjectid_prefix": "1.3.6.1.4.1.6574",
         "probe": "1.3.6.1.4.1.6574.4.2.1.0"

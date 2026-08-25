@@ -11,12 +11,17 @@ Routes registered by this file:
     GET    /api/v1/infra/collect              the collection in flight, if any
     GET    /api/v1/infra/collect/<job_id>      how that collection is going
     GET    /api/v1/infra/map              how the fleet is wired, out of what it answered
+    GET    /api/v1/infra/map-layout       where the caller put the boxes, on either map
+    PUT    /api/v1/infra/map-layout       …and where they want them kept
 
-**Nothing here edits.** The section shows what the fleet is doing; what the fleet IS lives in
-the registry, behind the permissions the registry already has. An edit route here would make
-``infra_view`` a way around them — so the one non-GET endpoint changes no record of its own,
-and still does not ride on ``infra_view``: it holds ``infra_collect``, because starting minutes
-of polling is not the same act as looking at the result (see manifest).
+**Nothing here edits the FLEET.** The section shows what the fleet is doing; what the fleet IS
+lives in the registry, behind the permissions the registry already has. An edit route here
+would make ``infra_view`` a way around them — so no endpoint here creates, changes or deletes
+a machine. The collect route does not even ride on ``infra_view``: it holds ``infra_collect``,
+because starting minutes of polling is not the same act as looking at the result (see
+manifest). The map arrangement writes one key on the CALLER's own account, which is where a
+dashboard layout already lives: it is a preference about a picture, and it can name no machine
+it was not already allowed to see.
 
 **Where the data comes from — and where it does not.** Every fact is read through the domain
 that owns it: the hosts store owns the machines, ``hosts.service`` owns "what state is this
@@ -60,6 +65,22 @@ def register(app, wa):
             return hosts
         return [h for h in hosts if _may_see(h.get('uid'), perms)]
 
+    def _said_sources(bound_by_host):
+        """``sources_of`` for whichever modules the fleet has a check bound to.
+
+        The names — and the BRANDS — of the things that answer come from the modules, and
+        asking one costs a pass over everything it has installed: 30 ms for the SNMP watchful,
+        which loads its whole profile catalogue to answer. So it is asked once for the whole
+        fleet rather than once per machine, and only for the modules something is actually
+        bound to: an installation with no SNMP pays nothing, which is most of them.
+        """
+        mods = {m for mods in (bound_by_host or {}).values() for m in mods}
+        lang = session.get('lang') or wa._DEFAULT_LANG
+        named = {mod: (history_svc.history_meta(wa._modules_dir, mod, lang,
+                                                wa._var_dir or '') or {}).get('sources') or {}
+                 for mod in sorted(mods)}
+        return infra_svc.sources_of({}, named)
+
     @app.route('/api/v1/infra/hosts', methods=['GET'])
     @infra_view_req
     def api_infra_hosts():
@@ -76,8 +97,10 @@ def register(app, wa):
         # `decrypt=False`: this route never reads a profile, so there is nothing to decrypt
         # and no plaintext to mask — the projection drops the whole field either way.
         hosts = store.list(decrypt=False)
-        hosts_svc.enrich_hosts(hosts, hosts_svc._host_statuses(wa),
-                               hosts_svc._host_bound_modules(wa))
+        bound = hosts_svc._host_bound_modules(wa)
+        hosts_svc.enrich_hosts(
+            hosts, hosts_svc._host_statuses(wa), bound,
+            infra_svc.fleet_identity(wa._read_check_status(), hosts, _said_sources(bound)))
         rows = infra_svc.fleet(_visible(hosts, set(wa._get_session_permissions() or [])))
         return jsonify({'hosts': rows, 'summary': infra_svc.summary(rows)})
 
@@ -99,8 +122,8 @@ def register(app, wa):
         perms = set(wa._get_session_permissions() or [])
         if not _may_see(uid, perms):
             return jsonify({'error': wa._t('access_denied')}), 403
-        hosts_svc.enrich_hosts([record], hosts_svc._host_statuses(wa),
-                               hosts_svc._host_bound_modules(wa))
+        statuses, bound_mods = hosts_svc._host_statuses(wa), hosts_svc._host_bound_modules(wa)
+        hosts_svc.enrich_hosts([record], statuses, bound_mods)
 
         # What is bound to this host, per bare module: {bare: {item_key: label}}.
         bound: dict = {}
@@ -113,7 +136,26 @@ def register(app, wa):
         # and this page did not, so a switch sampled that way went red in the fleet and showed
         # four empty tabs when opened — the machine with the numbers being the one nobody could
         # see. One source for both, so they cannot disagree again.
-        for bare, keys in hosts_svc.host_sampled_keys(status_raw, uid).items():
+        sampled = hosts_svc.host_sampled_keys(status_raw, uid)
+        # …and, where the live state says nothing about the device ITSELF, what the history
+        # remembers. A machine in maintenance has its checks skipped, so the cycle after that
+        # prunes every key the module stopped returning — which for a device sampled through
+        # the registry is all of them, leaving this page nothing to build a row out of.
+        # Reported from the screen: a switch put into maintenance opened onto four empty tabs,
+        # with a year of history sitting behind it and `purge_maintenance_states` keeping it
+        # for exactly this.
+        #
+        # Only then: this is the unfiltered read of the history index, and a machine whose
+        # live state is there does not need it.
+        every_series = None
+        hist_store = getattr(wa, '_history', None)
+        if not sampled and hist_store is not None:
+            try:
+                every_series = hist_store.latest_by_series() or []
+            except Exception:                       # pylint: disable=broad-except
+                every_series = []
+            sampled = hosts_svc.host_recorded_keys(every_series, uid)
+        for bare, keys in sampled.items():
             for key in keys:
                 bound.setdefault(bare, {}).setdefault(key, '')
         # The last sample of each series, as the fallback for a check with no live state —
@@ -130,24 +172,40 @@ def register(app, wa):
         # a series that maps to one of its own checks, so the rest of the fleet's is fetched
         # and discarded.
         hist_by_mod: dict = {}
-        hist_store = getattr(wa, '_history', None)
         if hist_store is not None and bound:
             try:
-                for series in hist_store.latest_by_series(list(bound)):
+                # Reused where the block above already had to read the lot: two passes over
+                # the history for one click is one more than anybody needs.
+                rows = (every_series if every_series is not None
+                        else hist_store.latest_by_series(list(bound)))
+                for series in rows:
                     hist_by_mod.setdefault(series.get('module'), []).append(series)
             except Exception:                       # pylint: disable=broad-except
                 pass                                # a chart is not worth failing the page for
         results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
 
         lang = session.get('lang') or wa._DEFAULT_LANG
-        fields = {mod: (history_svc.history_meta(wa._modules_dir, mod, lang,
-                                                 wa._var_dir or '').get('fields') or {})
-                  for mod in bound}
+        meta = {mod: history_svc.history_meta(wa._modules_dir, mod, lang, wa._var_dir or '')
+                for mod in bound}
+        fields = {mod: (m or {}).get('fields') or {} for mod, m in meta.items()}
+        # …and what to CALL each thing that answered. A profile of pure identity facts charts
+        # nothing, so it is in no field map and its card was headed with its raw id.
+        named = {mod: (m or {}).get('sources') or {} for mod, m in meta.items()}
+        said = infra_svc.sources_of(fields, named)
+        # …and who made this one, off the scan the page has already taken. Through
+        # `enrich_hosts` and not by hand: it is the one place that knows the device's word is
+        # allowed to answer `auto` and never to overrule a setting somebody chose, and a second
+        # copy of that rule here is the copy that would drift. The two reads it needs are the
+        # ones taken above, so this pass is dict work.
+        hosts_svc.enrich_hosts([record], statuses, bound_mods,
+                               infra_svc.fleet_identity(status_raw, [record], said))
+        # What to call a module that groups nothing — its own name, out of its own lang
+        # file, so the core still holds no string naming one.
+        names = {mod: history_svc._pretty_name(wa._modules_dir, mod, lang) for mod in bound}
         return jsonify({'host':       infra_svc.fleet_row(record),
                         'results':    results,
-                        'metrics':    infra_svc.metrics(results, fields),
-                        'attributes': infra_svc.attributes(
-                            results, infra_svc.sources_of(fields))})
+                        'metrics':    infra_svc.metrics(results, fields, names),
+                        'attributes': infra_svc.attributes(results, said)})
 
     @app.route('/api/v1/infra/hosts/<uid>/watch', methods=['POST'])
     @infra_watch_req
@@ -196,31 +254,39 @@ def register(app, wa):
         machines would be a map somebody turns off.
 
         What it is NOT is a cable diagram. "These two have an address on one network" is a
-        statement about reachability, not about a port on a switch — that is LLDP, and nothing
-        in this fleet serves it yet. Every edge says how it was arrived at so the screen can
-        draw the difference instead of flattening it.
+        statement about reachability, not about a port on a switch — that is LLDP, which only
+        the machines running an agent for it answer. Every edge says how it was arrived at so
+        the screen can draw the difference instead of flattening it.
         """
         store = getattr(wa, '_hosts_store', None)
         if store is None:
             return jsonify({'networks': [], 'nodes': [], 'edges': [], 'unplaced': []})
         hosts = store.list(decrypt=False)
-        hosts_svc.enrich_hosts(hosts, hosts_svc._host_statuses(wa),
-                               hosts_svc._host_bound_modules(wa))
+        status_seed = wa._read_check_status()
+        bound_mods = hosts_svc._host_bound_modules(wa)
+        hosts_svc.enrich_hosts(
+            hosts, hosts_svc._host_statuses(wa), bound_mods,
+            infra_svc.fleet_identity(status_seed, hosts, _said_sources(bound_mods)))
         hosts = _visible(hosts, set(wa._get_session_permissions() or []))
         # Read ONCE for the whole fleet and not once per machine: the state table and the
         # history index are the two expensive reads on this path, and a map of forty machines
         # would be forty of each.
         status_raw = wa._read_check_status()
         hist_by_mod: dict = {}
+        # …and flat, for the other question this same read answers: WHICH machines the history
+        # remembers at all. A machine in maintenance has its live keys pruned, so without this
+        # it falls off the map entirely — the same disappearance the device page had.
+        every_series: list = []
         hist_store = getattr(wa, '_history', None)
         if hist_store is not None:
             try:
-                for series in hist_store.get_index():
+                every_series = list(hist_store.get_index())
+                for series in every_series:
                     hist_by_mod.setdefault(series.get('module'), []).append(series)
             except Exception:                       # pylint: disable=broad-except
                 pass                                # a map is not worth failing the page for
         lang = session.get('lang') or wa._DEFAULT_LANG
-        fields_cache: dict = {}
+        meta_cache: dict = {}
         attrs_by_host: dict = {}
         for host in hosts:
             uid = str(host.get('uid') or '')
@@ -230,16 +296,22 @@ def register(app, wa):
                     bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
             # A device sampled through the registry has no item to be bound BY, and its
             # addresses are exactly what places it on the map.
-            for bare, keys in hosts_svc.host_sampled_keys(status_raw, uid).items():
+            sampled = (hosts_svc.host_sampled_keys(status_raw, uid)
+                       or hosts_svc.host_recorded_keys(every_series, uid))
+            for bare, keys in sampled.items():
                 for key in keys:
                     bound.setdefault(bare, {}).setdefault(key, '')
             for mod in bound:
-                if mod not in fields_cache:
-                    fields_cache[mod] = (history_svc.history_meta(
-                        wa._modules_dir, mod, lang, wa._var_dir or '').get('fields') or {})
+                if mod not in meta_cache:
+                    meta_cache[mod] = history_svc.history_meta(
+                        wa._modules_dir, mod, lang, wa._var_dir or '')
             results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
-            fields = {mod: fields_cache.get(mod) or {} for mod in bound}
-            attrs_by_host[uid] = infra_svc.attributes(results, infra_svc.sources_of(fields))
+            fields = {mod: (meta_cache.get(mod) or {}).get('fields') or {} for mod in bound}
+            # …and what to CALL each thing that answered, which a profile of pure identity
+            # facts can only say here: it charts nothing, so it is in no field map.
+            named = {mod: (meta_cache.get(mod) or {}).get('sources') or {} for mod in bound}
+            attrs_by_host[uid] = infra_svc.attributes(
+                results, infra_svc.sources_of(fields, named))
         # What devices SAW, which is what places a machine on a switch port when it speaks
         # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
         # are not checks (see lib/core/infra/evidence.py); read here in one go for every kind.
@@ -253,6 +325,43 @@ def register(app, wa):
             except Exception:                       # pylint: disable=broad-except
                 evidence = {}                       # a map without the ports beats no map
         return jsonify(infra_topology.build(hosts, attrs_by_host, evidence))
+
+    @app.route('/api/v1/infra/map-layout', methods=['GET', 'PUT'])
+    @infra_view_req
+    def api_infra_map_layout():
+        """Where the caller has PUT the boxes, on each of the two maps.
+
+        The browser keeps its own copy as the hand moves them, which is what makes dragging
+        instant and what makes it work with no account at all. THIS is the copy that follows
+        somebody to another machine — and it is written by a button, on purpose: an
+        arrangement persisted on every pointer move would be a round trip per frame.
+
+        Gated by `devices_view` and nothing more: you can only arrange a map you can see, and
+        where a box sits is a fact about a picture rather than about the fleet.
+        """
+        user = wa._users.get(session.get('username', ''))
+        if user is None:
+            return jsonify({'layouts': {}})
+        if request.method == 'GET':
+            return jsonify({'layouts': infra_svc.map_layouts_of(user)})
+        data, err = wa._require_json()
+        if err:
+            return err
+        layouts = infra_svc.normalise_map_layouts(data.get('layouts'))
+        # An empty arrangement is not one to keep: it is "put it back the way the map had it",
+        # and storing `{}` would leave the account holding a decision nobody made.
+        if layouts:
+            user['infra_map_layouts'] = layouts
+        else:
+            user.pop('infra_map_layouts', None)
+        # …and the field this replaced goes with the first save that carries it forward, so
+        # the two cannot drift into disagreeing about where somebody put a box.
+        for was in infra_svc.LINK_LAYOUT_WAS.values():
+            user.pop(was, None)
+        wa._persist_users()
+        wa._audit('infra_link_layout',
+                  detail={'boxes': sum(len(v) for v in layouts.values())})
+        return jsonify({'ok': True, 'layouts': layouts})
 
     def _modules_to_collect(uid, record=None):
         """The enabled modules with at least one enabled check bound to this machine.

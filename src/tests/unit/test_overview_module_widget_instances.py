@@ -43,10 +43,34 @@ def _strip_comments(js: str) -> str:
 
 class TestEachInstanceKeepsItsOwnSettings:
 
-    def test_the_three_settings_are_saved_per_instance(self):
+    def test_every_setting_is_saved_per_instance(self):
+        """One list, read by every place that writes a layout.
+
+        It was three copies of the same spread — the local save, the account save and the one
+        that reads a layout back — so a fourth key added to two of them was a setting that
+        survived a reload and vanished on the next machine, with nothing said.
+        """
         src = _strip_comments(_read(os.path.join(OV, '_layout.html')))
-        for key in ('mws', 'mwlvl', 'mwchart'):
-            assert f'el.dataset.{key} ?' in src, f'{key} is not persisted with the layout'
+        listed = re.search(r'_DW_INSTANCE_KEYS\s*=\s*\[([^\]]*)\]', src)
+        assert listed, 'the browser has no list of what an instance remembers'
+        keys = set(re.findall(r"'([a-z]+)'", listed.group(1)))
+        for key in ('mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh'):
+            assert key in keys, f'{key} is not persisted with the layout'
+        # …and every place that writes one reads THAT list rather than spelling it again.
+        assert src.count('..._dwInstanceState(el),') == 3, 'a copy of the spread came back'
+        assert 'el.dataset.mws ?' not in src
+
+    def test_and_the_two_halves_of_that_list_agree(self):
+        """The browser's and the server's. A key in one and not the other is a setting that
+        works until you sign in somewhere else."""
+        from lib.core.overview.service import INSTANCE_KEYS
+        src = _strip_comments(_read(os.path.join(OV, '_layout.html')))
+        listed = re.search(r'_DW_INSTANCE_KEYS\s*=\s*\[([^\]]*)\]', src).group(1)
+        browser = set(re.findall(r"'([a-z]+)'", listed))
+        # The browser also carries settings of the CORE's own widgets (a severity filter, a
+        # table's own filters), which never reach a module widget's layout entry — so the
+        # server's list is the subset that does, and nothing in it may be missing here.
+        assert set(INSTANCE_KEYS) <= browser, set(INSTANCE_KEYS) - browser
 
     def test_a_saved_default_layout_keeps_them(self):
         """An admin publishing a default hands everyone the arrangement AND the
@@ -54,11 +78,15 @@ class TestEachInstanceKeepsItsOwnSettings:
         things — and it used to."""
         from lib.core.overview.service import normalize_layout, INSTANCE_KEYS
         out = normalize_layout([{'id': 'mw_m365_table:1', 'cols': 4, 'h': 340,
-                                 'mws': 'licenses', 'mwlvl': 'warn', 'mwchart': '1'}])
+                                 'mws': 'licenses', 'mwlvl': 'warn', 'mwchart': '1',
+                                 'mwfig': 'if_total_in', 'mwh': '168'}])
         assert out[0]['mws'] == 'licenses'
         assert out[0]['mwlvl'] == 'warn'
         assert out[0]['mwchart'] == '1'
-        assert set(INSTANCE_KEYS) == {'mws', 'mwlvl', 'mwchart'}
+        # …and a chart widget's own two: which measurement, over how long.
+        assert out[0]['mwfig'] == 'if_total_in'
+        assert out[0]['mwh'] == '168'
+        assert set(INSTANCE_KEYS) == {'mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh'}
 
     def test_absent_settings_are_not_invented(self):
         """A widget with no scope must not come back carrying an empty one — '' and absent

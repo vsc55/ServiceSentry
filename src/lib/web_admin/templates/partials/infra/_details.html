@@ -265,6 +265,80 @@ function _infraOpenTally(source, field, value) {
 function _infraRowsBack() { _infraRowsOf = null; _infraRowPick = ''; _infraPaint(); }
 function _infraRowsPick(key) { _infraRowPick = String(key || ''); _infraPaint(); }
 
+//: A port the LINK MAP asked for, waiting for the machine's payload to arrive.
+//:
+//: The map names a port the way the far end reported it — `bridge1/sfp-sfpplus1`, `Po1`,
+//: `gigabitethernet4` — and the rows of this device are named the way IT names them. The two
+//: are usually the same string and sometimes are not, which is why the match below is a
+//: ladder and not an equality.
+let _infraPortWanted = '';
+
+/** Open a device AT one of its ports. Called from the link map's port chips.
+ *
+ *  "Which port of which device" is the question somebody opened that map to answer, and having
+ *  answered it the screen should be able to take you there rather than leave you to find the
+ *  same port again in a list of forty-eight.
+ *
+ *  The machine may not be loaded yet, so the port is REMEMBERED and applied when its payload
+ *  lands (`_infraFocusPort`, called from the view). Doing it the other way — waiting here for
+ *  the fetch — would mean two code paths for opening a device, and the one used less is the
+ *  one that rots.
+ */
+function infraOpenPort(uid, port) {
+    _infraPortWanted = String(port || '');
+    if (uid && uid === _infraHost && _infraDetail) return _infraFocusPort();
+    infraOpen(uid);
+}
+
+/** Put the screen on the port somebody asked for, if it can be found.
+ *
+ *  Found through the TALLIES, which are what the device page drills into: a count knows which
+ *  rows it is about (`rows: {value: [keys]}`), so the port's row key is looked up in those
+ *  rather than re-derived — the same reason `_infraRowsPane` does not re-derive them either.
+ *
+ *  Not finding it opens the device and nothing more. A machine whose port names simply do not
+ *  match what its neighbour reported is a normal thing on a mixed rack, and a toast about it
+ *  would be an error message for a click that did exactly what it looked like it would.
+ */
+/** Open one row of the device already on screen.
+ *
+ *  The same landing as arriving from the map, and deliberately the same code: "find the row
+ *  called this and show it" is one behaviour, and a second implementation of it would be free
+ *  to disagree about which row `ether11` is.
+ */
+function infraGoRow(name) {
+    _infraPortWanted = String(name || '');
+    _infraFocusPort();
+}
+
+function _infraFocusPort() {
+    const want = _infraPortWanted;
+    _infraPortWanted = '';
+    if (!want || !_infraDetail) return;
+    const all = _infraDetail.metrics || [];
+    const norm = s => String(s || '').trim().toLowerCase();
+    // The ladder, most specific first. A neighbour reports `bridge1/sfp-sfpplus1` for what
+    // the device itself calls `sfp-sfpplus1`: the bridge in front is the far end saying where
+    // the port sits, not part of the port's name. So the last path segment is tried too, and
+    // then a plain containment — which is the one that can be wrong, so it is last.
+    const tail = want.includes('/') ? want.slice(want.lastIndexOf('/') + 1) : want;
+    const rows = all.filter(m => m.row_key);
+    const hit = rows.find(m => norm(m.row) === norm(want))
+             || rows.find(m => norm(m.row) === norm(tail))
+             || rows.find(m => norm(m.row_key) === norm(tail))
+             || rows.find(m => norm(m.row) && norm(want).includes(norm(m.row)));
+    if (!hit) return;
+    for (const m of all) {
+        if (m.headline !== 'tally') continue;
+        for (const [value, keys] of Object.entries(m.rows || {})) {
+            if (!(keys || []).includes(hit.row_key)) continue;
+            _infraRowsOf = {source: m.source, field: m.field, value: String(value)};
+            _infraRowPick = hit.row_key;
+            return _infraPaint();
+        }
+    }
+}
+
 /** The rows behind one count: a rail of them, and the one that is picked beside it.
  *
  *  WHICH rows those are came WITH the count, from the side that did the counting. Re-deriving
@@ -896,10 +970,21 @@ function _infraRowFactsHtml(key) {
     return `<div class="ss-factgrid rounded-3 border bg-body-tertiary px-3 py-3 mb-3">
         ${uniq.map(a => {
             const text = _infraFactWord(words, a.key, a.value);
+            // A fact the server said IS a list of rows becomes a way into each of them. It
+            // carries the row names beside the words rather than the screen splitting the
+            // words: a row name may contain the separator, and "which rows is this" is
+            // something the side that built the list already knows.
+            const body = (a.rows || []).length
+                ? `<div class="d-flex flex-wrap gap-1">${a.rows.map(r =>
+                    `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+                             onclick="infraGoRow(${jsStr(r)})"
+                             title="${escAttr(tf('infra_link_goto_port', r))}"
+                        >${esc(r)}</button>`).join('')}</div>`
+                : `<div class="ss-fact-v fw-semibold text-truncate"
+                        title="${escAttr(text)}">${esc(text)}</div>`;
             return `<div>
             <div class="text-muted ss-fs-1 text-uppercase">${esc(_attrLabel(a.key))}</div>
-            <div class="ss-fact-v fw-semibold text-truncate"
-                 title="${escAttr(text)}">${esc(text)}</div>
+            ${body}
         </div>`;
         }).join('')}
     </div>`;

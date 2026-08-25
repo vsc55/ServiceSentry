@@ -1,20 +1,37 @@
 {# ================================================================
-   Infrastructure — how the fleet is wired together, drawn.
+   Infrastructure — who can reach whom, drawn.
 
    Every line here is INFERRED, and the drawing has to keep saying so. What the panel knows is
    which addresses each machine claims, which network each of those sits on, and where each
    machine sends what it cannot deliver itself. From that: two machines on one network can
-   reach each other, and a machine points at its way out. What it does NOT know is which port
-   is plugged into which port — that is LLDP, and nothing in this fleet serves it yet.
+   reach each other, and a machine points at its way out. Which port is plugged into which
+   port is a different question with a map of its own — see `_links.html` — and it is not
+   duplicated here: two pictures of the same cable are two things to keep in agreement.
 
-   So there are two kinds of line and they are drawn differently on purpose. A machine sitting
-   in a network's lane is a fact about addresses. An arrow to a gateway is a statement the
-   device itself made. Flattening them into "connected" would be the picture claiming more
-   than the data does, which is the one thing a map must not do.
+   IT IS A TREE, READ DOWNWARDS: what is outside, the way out, the networks, then what is on
+   them. That is how everybody reads a network diagram and it was right the first time — what
+   was wrong was everything around it. Thirty networks meant thirty columns, and the whole
+   picture was then squashed into whatever width the pane happened to have, so the more the
+   fleet had the smaller every name got. Reported from the screen: *"eso es inusable"*.
 
-   Hand-written SVG because the page is self-contained: no CDN, no layout library. The layout
-   is therefore deliberately dumb — a lane per network, boxes wrapped inside it — which has
-   the advantage that it cannot produce the hairball a force layout produces on a flat /24.
+   Three things fixed that, and none of them is the shape:
+
+   * it is drawn on the shared canvas (`_canvas.html`), so it is a WINDOW — wide is fine now,
+     because you can zoom and push it around instead of being shown all of it at four pixels;
+   * the columns that were not worth one are gone (below);
+   * and the boxes can be dragged where the room actually is, which is the only thing that
+     makes a generated layout somebody else's rack.
+
+   Two rules do most of the work:
+
+   * **A network with one machine on it is not a place where two machines meet.** Docker gives
+     every host a 172.17.0.0/16; a router declares a route per VLAN. Those were half the lanes
+     on the old picture and none of them answered the question it exists to answer. They are
+     folded onto the machine that holds them, counted and named on the hover.
+   * **A network nobody is on is not on the map at all** — it is a route, and it belongs in a
+     sentence under the picture rather than as a lane the eye has to skip.
+
+   Hand-written SVG because the page is self-contained: no CDN, no layout library.
    ================================================================ #}
 
 //: The last map the server sent, and whether we are asking for one. Cached because the view
@@ -23,7 +40,14 @@
 let _infraMap = null;
 let _infraMapBusy = false;
 
-/** Ask for it, once, and redraw when it lands. */
+/** Ask for it, once, and redraw when it lands.
+ *
+ *  The redraw asks the VIEW whether it reads this payload (`map: true` in the registry) and
+ *  does not name one. It named `'map'`, written when that was the only view there was — and
+ *  the day a second one read the same payload, the fetch landed, the cache filled, and nothing
+ *  redrew: the Links view sat on "loading…" for ever with the answer already in memory.
+ *  Reported from the screen in exactly those words.
+ */
 async function _infraMapLoad(force) {
     if (_infraMapBusy || (_infraMap && !force)) return;
     _infraMapBusy = true;
@@ -33,39 +57,34 @@ async function _infraMapLoad(force) {
     } finally {
         _infraMapBusy = false;
     }
-    if (_infraView.is('map')) _infraRender();
+    if (_infraView.view().map) _infraRender();
 }
 
-function _infraMapRefresh() { _infraMapLoad(true); }
+function _infraMapRefresh() {
+    // A fresh fleet is a different drawing, so where somebody was looking at the old one is
+    // not a claim about this one.
+    ssCanvasReset(_NET_SVG);
+    _infraMapLoad(true);
+}
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 //
 // One place, because a box that is 168 wide in the layout and 160 in the drawing is a picture
 // whose lines do not land on anything.
+const _NET_SVG = 'infraNetSvg';
 const _MAP = {
-    COL: 190, BOX_W: 168, BOX_H: 44, NET_H: 32, ROUTER_H: 48,
-    Y_CLOUD: 26, Y_ROUTER: 54, Y_NET: 152, Y_HOST: 214, HOST_GAP: 12, PAD: 12,
+    COL: 200, BOX_W: 178, BOX_H: 50, NET_H: 34, ROUTER_H: 52,
+    Y_CLOUD: 24, Y_ROUTER: 48, Y_NET: 152, Y_HOST: 222, HOST_GAP: 12, PAD: 16,
 };
 
 /** The tree, before anything is drawn.
  *
- *  Read downwards, which is how everybody reads a network diagram: what is outside, then the
- *  way out, then the networks, then what is on them. The first version drew a lane per network
- *  down the page and a line per membership across it — and with a router that declares
- *  twenty-nine routes that came out as twenty-nine lanes, twenty-five of them empty, four
- *  thousand pixels tall, with every line crossing the same ten-pixel channel. Reported from
- *  the screen as "you cannot see any of it".
+ *  Read downwards: what is outside, then the way out, then the networks, then what is on them.
  *
- *  Two rules do most of the work:
- *
- *  * A NETWORK WITH NOBODY IN IT IS NOT ON THE MAP. It is a route the router declares, and it
- *    belongs in a sentence under the picture — not as a lane the eye has to skip.
- *  * MEMBERSHIP IS NOT A LINE. A machine hangs off the network it is in, one short link, and
- *    the second network it is also in gets a thin one — because that IS the rare case and
- *    drawing it thin is what says so.
- *
- *  A machine is placed ONCE. Drawing it under each of its networks would be four boxes with
- *  one name, and "which of these is the machine" is not a question a map should raise.
+ *  A machine is placed ONCE, under the first network it shares with anybody. Drawing it under
+ *  each of its networks would be four boxes with one name, and "which of these is the machine"
+ *  is not a question a map should raise — the others get a thin dashed line instead, because
+ *  that IS the uncommon case and drawing it faintly is what says so.
  */
 function _infraMapLayout(map) {
     const byUid = new Map((map.nodes || []).map(n => [n.uid, n]));
@@ -78,64 +97,92 @@ function _infraMapLayout(map) {
         if (e.kind === 'exit') routers.add(e.from);
     }
     const exits = (map.edges || []).filter(e => e.kind === 'exit');
-    // Networks worth a branch: the ones with somebody in them who is not already drawn as a
-    // way out. A router's own network is written on the router, not hung underneath it.
-    const nets = (map.networks || []).filter(
-        n => (n.members || []).some(uid => !routers.has(uid)));
-    const drawn = new Set();
-    const home = new Map();
-    for (const net of nets)
-        for (const uid of net.members || [])
-            if (!routers.has(uid) && !home.has(uid)) home.set(uid, net.net);
 
-    const cols = [];
-    let x = _MAP.PAD;
-    for (const net of nets) {
-        const mine = (net.members || []).filter(uid => home.get(uid) === net.net);
-        // A network the server says is not ONE network gets a plate per machine. Two NAS both
-        // holding 172.17.0.1 are not neighbours — it is `docker0`, every machine running
-        // containers has one, and they are as many separate networks as there are machines.
-        // Drawn side by side with the same name, which is what they are.
-        const groups = net.private ? mine.map(uid => [uid]) : [mine];
-        for (const group of groups) {
-            const boxes = group.map((uid, k) => {
-                drawn.add(uid);
-                return {uid: uid, node: byUid.get(uid) || {uid: uid, name: uid},
-                        x: x + (_MAP.COL - _MAP.BOX_W) / 2,
-                        y: _MAP.Y_HOST + k * (_MAP.BOX_H + _MAP.HOST_GAP)};
-            });
-            cols.push({net: net.net, x: x, cx: x + _MAP.COL / 2, boxes: boxes,
-                       private: !!net.private,
-                       total: net.private ? group.length : (net.members || []).length});
-            x += _MAP.COL;
+    // Which networks are worth a column, and which are folded onto one machine. A `private`
+    // one is not a network at all — two NAS both holding 172.17.0.1 cannot be neighbours — so
+    // every member of one holds it alone.
+    const shared = [];
+    const solo = new Map();
+    for (const net of map.networks || []) {
+        const members = (net.members || []).filter(uid => byUid.has(uid));
+        if (!members.length) continue;
+        const meeting = members.filter(uid => !routers.has(uid));
+        if (members.length > 1 && !net.private && meeting.length) {
+            shared.push({net: net.net, members, meeting, private: false});
+        } else {
+            for (const uid of members) {
+                if (!solo.has(uid)) solo.set(uid, []);
+                solo.get(uid).push(net.net);
+            }
         }
+    }
+
+    // Where each machine hangs from: the first column that holds it. The rest of its networks
+    // are dashed lines, and a machine with no column of its own gets the last one.
+    const home = new Map();
+    for (const s of shared)
+        for (const uid of s.meeting)
+            if (!home.has(uid)) home.set(uid, s.net);
+    const orphans = (map.nodes || []).filter(
+        n => !routers.has(n.uid) && !home.has(n.uid)).map(n => n.uid);
+
+    // `members` is who HANGS from this plate; `all` is everybody with an address on that
+    // network, which is a different list — a router is on it and is drawn at the top instead,
+    // and a machine that hangs from another plate is still on this one.
+    const cols = shared.map(s => ({net: s.net, all: s.members, total: s.members.length,
+                                   members: s.meeting.filter(uid => home.get(uid) === s.net)}));
+    if (orphans.length)
+        cols.push({net: '', all: orphans, members: orphans, total: orphans.length});
+
+    const boxes = [];
+    let x = _MAP.PAD;
+    for (const c of cols) {
+        c.x = x;
+        c.cx = x + _MAP.COL / 2;
+        c.boxes = c.members.map((uid, k) => {
+            const b = {uid, node: byUid.get(uid) || {uid, name: uid},
+                       x: x + (_MAP.COL - _MAP.BOX_W) / 2,
+                       y: _MAP.Y_HOST + k * (_MAP.BOX_H + _MAP.HOST_GAP),
+                       solo: solo.get(uid) || [], kind: 'host'};
+            boxes.push(b);
+            return b;
+        });
+        x += _MAP.COL;
     }
 
     // The ways out, side by side above them.
     const heads = [...routers].filter(uid => byUid.has(uid));
-    const width = Math.max(x + _MAP.PAD, heads.length * _MAP.COL + _MAP.PAD * 2, 520);
-    const mid = width / 2;
-    const spread = heads.length > 1 ? Math.min(_MAP.COL, (width - _MAP.PAD * 2) / heads.length)
+    const wide = Math.max(x + _MAP.PAD, heads.length * _MAP.COL + _MAP.PAD * 2, 520);
+    const mid = wide / 2;
+    const spread = heads.length > 1 ? Math.min(_MAP.COL, (wide - _MAP.PAD * 2) / heads.length)
                                     : 0;
-    const gws = heads.map((uid, k) => ({
-        uid: uid, node: byUid.get(uid),
-        x: mid + (k - (heads.length - 1) / 2) * spread - _MAP.BOX_W / 2,
-        y: _MAP.Y_ROUTER,
-    }));
-    for (const g of gws) drawn.add(g.uid);
+    const gws = heads.map((uid, k) => {
+        const b = {uid, node: byUid.get(uid), kind: 'gateway', h: _MAP.ROUTER_H,
+                   x: mid + (k - (heads.length - 1) / 2) * spread - _MAP.BOX_W / 2,
+                   y: _MAP.Y_ROUTER, solo: solo.get(uid) || []};
+        boxes.push(b);
+        return b;
+    });
 
-    const at = new Map();
-    for (const c of cols) for (const b of c.boxes) at.set(b.uid, b);
-    for (const g of gws) at.set(g.uid, g);
-    const deepest = Math.max(0, ...cols.map(c => c.boxes.length));
+    // …and where somebody PUT them, which beats where the tree would. Applied here and not at
+    // draw time, so the lines are computed from the same positions the boxes are drawn at.
+    const ext = ssCanvasPlace(_NET_SVG, boxes, {w: _MAP.BOX_W, h: _MAP.BOX_H},
+                              {pad: _MAP.PAD, width: wide,
+                               height: _MAP.Y_HOST + Math.max(1, ...cols.map(
+                                   c => c.boxes.length)) * (_MAP.BOX_H + _MAP.HOST_GAP) + 16});
+
+    const at = new Map(boxes.map(b => [b.uid, b]));
+    // The ways out a machine states for itself, which is the one thing on this picture a
+    // device SAID rather than something derived from its addresses.
+    const ways = (map.edges || [])
+        .filter(e => e.kind === 'gateway' && at.has(e.from) && e.to && at.has(e.to))
+        .map(e => ({from: e.from, to: e.to, address: e.address || ''}));
     return {
-        cols: cols, gws: gws, exits: exits, at: at, home: home, mid: mid, width: width,
-        // Networks the router talks about and nobody lives in — counted, not drawn. The
-        // ones with NO members, and not "every network without a branch": a router's own
-        // network has a member, it is just drawn on the router. Counting it here would put a
-        // number under the picture that says something untrue about the fleet.
+        cols, gws, exits, at, home, boxes, mid, ways,
+        // Networks the fleet declares and nobody lives in — counted, not drawn.
         folded: (map.networks || []).filter(n => !(n.members || []).length).length,
-        height: _MAP.Y_HOST + Math.max(1, deepest) * (_MAP.BOX_H + _MAP.HOST_GAP) + 16,
+        soloCount: [...solo.values()].reduce((a, v) => a + v.length, 0),
+        x: ext.x, y: ext.y, width: ext.width, height: ext.height,
     };
 }
 
@@ -143,23 +190,29 @@ function _infraMapLayout(map) {
  *  the map is a join the SERVER does, and re-deriving it from the list rows in the browser
  *  would be a second answer to the same question. */
 function _infraMapBody() {
+    if (_ssKept === null) ssCanvasKeptLoad(() => {
+        if (_infraView.view().arrange) renderInfra();
+    });
     if (!_infraMap) { _infraMapLoad(false); return _infraMapWait(); }
     const map = _infraMap;
     if (!(map.networks || []).length && !(map.nodes || []).length)
         return `<div class="text-muted small p-3">${esc(t('infra_map_empty'))}</div>`;
     const L = _infraMapLayout(map);
-    return `<div class="px-1 pb-2">
-        ${_infraMapNote(map)}
-        <div style="overflow-x:auto">
-            <svg viewBox="0 0 ${L.width} ${L.height}" width="100%" role="img"
-                 style="min-width:${Math.min(L.width, 520)}px;max-width:${L.width}px"
+    return `<div class="px-1 pb-2 ss-mapfill">
+        ${_infraMapNote(map, L)}
+        <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+            <div id="infraNetPanel" class="position-absolute" style="left:.5rem;bottom:.5rem;
+                 right:.5rem;z-index:2;pointer-events:auto">${_infraMapPanelHtml()}</div>
+            <svg ${ssCanvasAttrs(_NET_SVG, L)}
+                 onwheel="ssCanvasWheel(${jsStr(_NET_SVG)},event)"
+                 onpointerdown="_infraMapDown(event)"
+                 onpointermove="_infraMapMove(event)"
+                 onpointerup="_infraMapUp(event)"
+                 onpointercancel="_infraMapUp(event)"
+                 onpointerleave="_infraMapUp(event)"
                  aria-label="${escAttr(t('infra_view_map'))}">
                 ${_infraMapDefs()}
-                ${_infraMapLinks(map, L)}
-                ${_infraMapCloud(L)}
-                ${L.cols.map(_infraMapNet).join('')}
-                ${L.gws.map(g => _infraMapBox(g, true)).join('')}
-                ${L.cols.map(c => c.boxes.map(b => _infraMapBox(b, false)).join('')).join('')}
+                ${_infraMapContent(L)}
             </svg>
         </div>
         ${_infraMapFolded(L)}
@@ -167,26 +220,237 @@ function _infraMapBody() {
     </div>`;
 }
 
+/** The lines and the boxes. One function, so the first draw and every redraw during a drag
+ *  agree — two of them would be free to disagree, and the day they did the wires would end
+ *  where a box used to be. */
+function _infraMapContent(L) {
+    return _infraMapWires(L)
+        + _infraMapCloud(L)
+        + L.cols.map(_infraMapNet).join('')
+        + L.boxes.map(_infraMapBox).join('');
+}
+
+/** Redraw what is INSIDE the picture, leaving the picture itself alone.
+ *
+ *  The `<svg>` stays: it is what holds the pointer capture the drag is running on, and
+ *  replacing it mid-gesture drops the hand off the box being moved. */
+function _infraMapRedraw() {
+    const svg = ssCanvasSvg(_NET_SVG);
+    if (!svg || !_infraMap) return;
+    const L = _infraMapLayout(_infraMap);
+    svg.dataset.x = L.x;
+    svg.dataset.y = L.y;
+    svg.dataset.w = L.width;
+    svg.dataset.h = L.height;
+    svg.innerHTML = _infraMapDefs() + _infraMapContent(L);
+}
+
+function _infraMapToolsPaint() {
+    const box = document.getElementById('infraNetTools');
+    if (box) box.innerHTML = _infraMapTools();
+}
+
 function _infraMapWait() {
     return `<div class="text-muted small p-3">
         <span class="spinner-border spinner-border-sm me-2"></span>${esc(t('loading'))}</div>`;
 }
 
-/** What the picture is and is not, above the picture. Not a footnote: somebody reading a
- *  network diagram assumes cables, and this one is about addresses. */
-function _infraMapNote(map) {
-    const n = (map.networks || []).length;
-    // What the picture is made of, and the count of the ONE kind of line that is not an
-    // inference. Zero of them is worth saying too: it is the difference between "nobody here
-    // runs an LLDP agent" and "the map is not finding the links".
+/** A press on a box moves that box; a press on the background moves the picture.
+ *
+ *  Same three handlers for both, because they are the same gesture on a different target —
+ *  and the travel threshold inside the canvas is what keeps "open this machine" and "move
+ *  this box" from being the same click.
+ */
+function _infraMapDown(ev) {
+    const box = ev.target.closest('g[data-open]');
+    if (box) {
+        const at = (_infraMapLayout(_infraMap || {}).at || new Map()).get(box.dataset.open);
+        if (ssCanvasDragStart(_NET_SVG, ev, box.dataset.open, at)) return;
+    }
+    ssCanvasPanStart(_NET_SVG, ev);
+}
+
+function _infraMapMove(ev) {
+    if (ssCanvasDragMove(_NET_SVG, ev, _infraMapRedraw)) return;
+    ssCanvasPanMove(_NET_SVG, ev);
+}
+
+function _infraMapUp(ev) {
+    const open = ssCanvasDragEnd(_NET_SVG, _infraMapToolsPaint);
+    ssCanvasPanEnd(ev);
+    if (open) infraOpen(open);
+}
+
+function _infraMapNote(map, L) {
     const wired = (map.edges || []).filter(
         e => e.kind === 'lldp' || e.kind === 'port').length;
     return `<div class="text-muted ss-fs-2 mb-2 d-flex align-items-center gap-2">
         <i class="bi bi-info-circle"></i>
-        <span>${esc(wired ? tf('infra_map_note_lldp', wired, n) : tf('infra_map_note', n))}</span>
-        <button class="btn btn-sm btn-secondary ms-auto" onclick="_infraMapRefresh()">
+        <span>${esc(tf('infra_map_note2', L.cols.filter(c => c.net).length,
+                       L.boxes.length))}</span>
+        ${wired ? `<button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="setInfraView('links')" title="${escAttr(t('infra_map_to_links_tt'))}"
+                ><i class="bi bi-hdd-network me-1"></i>${esc(tf('infra_map_to_links', wired))}
+            </button>` : ''}
+        <span id="infraNetTools" class="ms-auto">${_infraMapTools()}</span>
+        <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
             <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
     </div>`;
+}
+
+/** The window's three buttons, and the three about the ARRANGEMENT — which only appear once
+ *  there is something to act on. A button that undoes nothing is one somebody has to read
+ *  before ignoring, on every visit. */
+function _infraMapTools() {
+    const btn = (fn, icon, key) => `<button class="btn btn-sm btn-secondary"
+        onclick="${fn}" title="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
+    const arranged = Object.keys(ssCanvasMoved(_NET_SVG)).length > 0;
+    const dirty = ssCanvasKeptDirty(_NET_SVG);
+    return `<span class="btn-group btn-group-sm">
+        ${ssCanvasTools(_NET_SVG)}
+        ${dirty ? `<button class="btn btn-sm btn-primary" onclick="infraMapKeep()"
+                     title="${escAttr(t('infra_link_keep'))}"
+                     ><i class="bi bi-save"></i></button>` : ''}
+        ${dirty && ssCanvasHasKept(_NET_SVG)
+          ? btn('infraMapRestore()', 'bi-arrow-counterclockwise', 'infra_link_restore') : ''}
+        ${arranged || dirty ? btn('infraMapArrange()', 'bi-x-circle', 'infra_link_arrange') : ''}
+    </span>`;
+}
+
+function infraMapArrange() { ssCanvasArrange(_NET_SVG, renderInfra); }
+function infraMapRestore() { ssCanvasRestore(_NET_SVG, renderInfra); }
+function infraMapKeep() { ssCanvasKeep(_NET_SVG, _infraMapToolsPaint); }
+
+/** One network: a plate its machines hang from. The last column may have no name — it holds
+ *  the machines that share no network with anybody, and they are still on the fleet. */
+function _infraMapNet(c) {
+    const extra = c.total - c.boxes.length;
+    if (!c.net) {
+        return `<g><title>${escAttr(t('infra_map_no_shared'))}</title>
+            <rect x="${c.x + 8}" y="${_MAP.Y_NET}" width="${_MAP.COL - 16}"
+                  height="${_MAP.NET_H}" rx="8" fill="none" stroke="var(--bs-border-color)"
+                  stroke-dasharray="4 3"></rect>
+            <text x="${c.cx}" y="${_MAP.Y_NET + 21}" font-size="10.5" text-anchor="middle"
+                  fill="var(--bs-secondary-color)">${esc(t('infra_map_no_shared'))}</text>
+        </g>`;
+    }
+    return `<g class="ss-pointer" onpointerenter="_infraMapHover('net',${jsStr(c.net)})"
+             onpointerleave="_infraMapHover('','')">
+        <rect x="${c.x + 8}" y="${_MAP.Y_NET}" width="${_MAP.COL - 16}" height="${_MAP.NET_H}"
+              rx="8" fill="var(--bs-tertiary-bg)" stroke="var(--bs-border-color)"></rect>
+        <text x="${c.cx}" y="${_MAP.Y_NET + 21}" font-size="11.5" text-anchor="middle"
+              font-weight="600" fill="currentColor">${esc(_infraMapClip(c.net, 22))}</text>
+        ${extra > 0 ? `<text x="${c.cx}" y="${_MAP.Y_NET + 46}" font-size="10"
+              text-anchor="middle" fill="var(--bs-secondary-color)"
+              >${esc(tf('infra_map_also', extra))}</text>` : ''}
+    </g>`;
+}
+
+/** One machine. The colour is the status the fleet list already gives it, so a map and a card
+ *  never disagree about whether something is down. */
+function _infraMapBox(p) {
+    const n = p.node || {};
+    const tone = hostStateColor(n.status);
+    const gw = p.kind === 'gateway';
+    const h = p.h || _MAP.BOX_H;
+    const addr = (n.addresses || [])[0] || '';
+    return `<g class="ss-grab" data-open="${escAttr(p.uid)}"
+             onpointerenter="_infraMapHover('host',${jsStr(p.uid)})"
+             onpointerleave="_infraMapHover('','')">
+        <rect x="${p.x}" y="${p.y}" width="${_MAP.BOX_W}" height="${h}" rx="7"
+              fill="${gw ? 'var(--bs-tertiary-bg)' : 'var(--bs-body-bg)'}"
+              stroke="${gw ? 'var(--bs-primary)' : tone}"
+              stroke-width="${gw ? 2 : 1.5}"></rect>
+        <rect x="${p.x}" y="${p.y}" width="4" height="${h}" rx="2" fill="${tone}"></rect>
+        <foreignObject x="${p.x + 12}" y="${p.y + 8}" width="18" height="18">
+            <div xmlns="http://www.w3.org/1999/xhtml"
+                 style="font-size:14px;line-height:1;color:var(--bs-secondary-color)">
+                <i class="bi ${escAttr(hostTypeIcon(n.kind || ''))}"></i></div>
+        </foreignObject>
+        <text x="${p.x + 36}" y="${p.y + 21}" font-size="12" font-weight="600"
+              fill="currentColor">${esc(_infraMapClip(n.name || p.uid, 19))}</text>
+        <text x="${p.x + 12}" y="${p.y + 38}" font-size="10"
+              fill="var(--bs-secondary-color)">${esc(_infraMapClip(addr, 24))}</text>
+        ${p.solo.length ? `<text x="${p.x + _MAP.BOX_W - 12}" y="${p.y + 38}" font-size="9.5"
+              text-anchor="end" fill="var(--bs-secondary-color)"
+              >${esc(tf('infra_map_solo', p.solo.length))}</text>` : ''}
+    </g>`;
+}
+
+//: SVG has no ellipsis. A name that overruns its box would be drawn straight over the next
+//: one, so it is cut here — with the whole of it on the hover, like everywhere else.
+function _infraMapClip(text, max) {
+    const s = String(text || '');
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+/** The lines. Each kind is a different CLAIM, and they are drawn differently on purpose —
+ *  flattening them into "connected" would be the picture saying more than the data does.
+ *
+ *  * From the cloud into a way out: SOLID. The device said it sends traffic off this fleet.
+ *  * From a way out down to each network plate, and from a plate to the machines on it:
+ *    PLAIN. Structure, not a claim about any one machine.
+ *  * To a SECOND network a machine is also on: THIN and dashed. The uncommon case, drawn
+ *    faintly because that is what says so.
+ *  * A machine pointing at its own way out, when it is not the one above it: ARROWED.
+ *
+ *  Cables are not here. They have a map of their own, and two pictures of one cable are two
+ *  things to keep in agreement.
+ */
+function _infraMapWires(L) {
+    const out = [];
+    const bottom = _MAP.Y_NET + _MAP.NET_H;
+    // Curves and not elbows, now that a box may have been dragged anywhere: an orthogonal
+    // elbow assumes the thing below is below.
+    const wire = (x1, y1, x2, y2, style) => {
+        const d = Math.max(24, Math.abs(y2 - y1) / 2);
+        return `<path d="M ${x1} ${y1} C ${x1} ${y1 + d}, ${x2} ${y2 - d}, ${x2} ${y2}"
+                      fill="none" ${style}></path>`;
+    };
+    const plain = 'stroke="var(--bs-border-color)" stroke-width="1.5"';
+
+    for (const g of L.gws) {
+        if (L.exits.some(e => e.from === g.uid))
+            out.push(`<line x1="${L.mid}" y1="${_MAP.Y_CLOUD + 8}"
+                            x2="${g.x + _MAP.BOX_W / 2}" y2="${g.y}"
+                            stroke="var(--bs-primary)" stroke-width="2"></line>`);
+    }
+    const src = L.gws.length ? L.gws[0] : null;
+    for (const c of L.cols) {
+        const y1 = src ? src.y + (src.h || _MAP.BOX_H) : _MAP.Y_CLOUD + 10;
+        const x1 = src ? src.x + _MAP.BOX_W / 2 : L.mid;
+        out.push(wire(x1, y1, c.cx, _MAP.Y_NET, plain));
+        for (const b of c.boxes)
+            out.push(wire(c.cx, bottom, b.x + _MAP.BOX_W / 2, b.y, plain));
+    }
+
+    // A machine that is ALSO on another network, and only to plates that are on the picture:
+    // a line to a network nobody lives in would be a line to nothing.
+    for (const b of L.boxes) {
+        const also = (b.node.networks || []).filter(
+            net => net !== L.home.get(b.uid) && L.cols.some(c => c.net === net));
+        for (const net of also) {
+            const c = L.cols.find(x => x.net === net);
+            out.push(`<path d="M ${b.x} ${b.y + _MAP.BOX_H / 2}
+                              C ${b.x - 40} ${b.y + _MAP.BOX_H / 2},
+                                ${c.cx} ${bottom + 40}, ${c.cx} ${bottom}"
+                            fill="none" stroke="var(--bs-secondary)" stroke-width="1"
+                            stroke-dasharray="3 3" opacity=".7"></path>`);
+        }
+    }
+
+    // …and a machine pointing at its OWN way out, when there is more than one to point at.
+    for (const w of L.ways || []) {
+        const a = L.at.get(w.from), b = w.to ? L.at.get(w.to) : null;
+        if (!a || !b || L.gws.length <= 1) continue;
+        out.push(`<path d="M ${a.x + _MAP.BOX_W / 2} ${a.y}
+                          C ${a.x + _MAP.BOX_W / 2} ${a.y - 40},
+                            ${b.x + _MAP.BOX_W / 2} ${b.y + 80},
+                            ${b.x + _MAP.BOX_W / 2} ${b.y + (b.h || _MAP.BOX_H)}"
+                        fill="none" stroke="var(--bs-primary)" stroke-width="1.5"
+                        marker-end="url(#ss-map-arrow)" opacity=".7"></path>`);
+    }
+    return out.join('');
 }
 
 /** What is outside. Drawn only when something actually said it sends traffic there — a fleet
@@ -200,143 +464,6 @@ function _infraMapCloud(L) {
     </g>`;
 }
 
-/** One network: a plate its machines hang from. */
-function _infraMapNet(c) {
-    const extra = c.total - c.boxes.length;
-    return `<g><title>${escAttr(c.net + ' · ' + (c.private ? t('infra_map_private')
-                                : tf('infra_map_members', c.total)))}</title>
-        <rect x="${c.x + 8}" y="${_MAP.Y_NET}" width="${_MAP.COL - 16}" height="${_MAP.NET_H}"
-              rx="8" fill="var(--bs-tertiary-bg)" stroke="var(--bs-border-color)"></rect>
-        <text x="${c.cx}" y="${_MAP.Y_NET + 20}" font-size="11.5" text-anchor="middle"
-              font-weight="600" fill="currentColor">${esc(_infraMapClip(c.net, 22))}</text>
-        ${c.private ? `<text x="${c.cx}" y="${_MAP.Y_NET - 6}" font-size="9.5"
-              text-anchor="middle" fill="var(--bs-secondary-color)"
-              >${esc(t('infra_map_private'))}</text>` : ''}
-        ${extra > 0 ? `<text x="${c.cx}" y="${_MAP.Y_NET + 44}" font-size="10"
-              text-anchor="middle" fill="var(--bs-secondary-color)"
-              >${esc(tf('infra_map_also', extra))}</text>` : ''}
-    </g>`;
-}
-
-/** One machine. The colour is the status the fleet list already gives it, so a map and a card
- *  never disagree about whether something is down. */
-function _infraMapBox(b, isGateway) {
-    const tone = {down: 'var(--bs-danger)', warn: 'var(--bs-warning)',
-                  up: 'var(--bs-success)'}[b.node.status] || 'var(--bs-secondary)';
-    const addr = (b.node.addresses || [])[0] || '';
-    const h = isGateway ? _MAP.ROUTER_H : _MAP.BOX_H;
-    return `<g class="ss-pointer" onclick="infraOpen(${jsStr(b.uid)})">
-        <title>${escAttr((b.node.name || b.uid) + ' · ' + (b.node.addresses || []).join(', '))}</title>
-        <rect x="${b.x}" y="${b.y}" width="${_MAP.BOX_W}" height="${h}" rx="7"
-              fill="${isGateway ? 'var(--bs-tertiary-bg)' : 'var(--bs-body-bg)'}"
-              stroke="${isGateway ? 'var(--bs-primary)' : tone}"
-              stroke-width="${isGateway ? 2 : 1.5}"></rect>
-        <rect x="${b.x}" y="${b.y}" width="4" height="${h}" rx="2" fill="${tone}"></rect>
-        <text x="${b.x + 12}" y="${b.y + 18}" font-size="12" font-weight="600"
-              fill="currentColor">${esc(_infraMapClip(b.node.name || b.uid, 21))}</text>
-        <text x="${b.x + 12}" y="${b.y + 33}" font-size="10"
-              fill="var(--bs-secondary-color)">${esc(_infraMapClip(addr, 25))}</text>
-    </g>`;
-}
-
-//: SVG has no ellipsis. A name that overruns its box would be drawn straight over the next
-//: one, so it is cut here — with the whole of it on the hover, like everywhere else.
-function _infraMapClip(text, max) {
-    const s = String(text || '');
-    return s.length > max ? s.slice(0, max - 1) + '…' : s;
-}
-
-/** An elbow: down, across, down. Short, orthogonal and never crossing the whole picture —
- *  which is the difference between a diagram and the hairball this replaced. */
-function _infraMapElbow(x1, y1, x2, y2, style) {
-    const midY = y1 + (y2 - y1) / 2;
-    return `<path d="M ${x1} ${y1} V ${midY} H ${x2} V ${y2}" fill="none" ${style}></path>`;
-}
-
-/** The lines. Each kind is a different CLAIM, and they are drawn differently on purpose —
- *  flattening them into "connected" would be the picture saying more than the data does.
- *
- *  * From the cloud to a way out, and from a machine to its way out: SOLID with an arrow.
- *    The device itself said this, and it is the strongest thing on the picture.
- *  * From a network plate to a machine: PLAIN. The machine has an address there.
- *  * To a SECOND network it is also on: THIN and dashed. It is the uncommon case, and drawing
- *    it faintly is what says so.
- *  * A cable seen by LLDP: THICKEST, no arrowhead — being plugged together has no direction.
- */
-function _infraMapLinks(map, L) {
-    const out = [];
-    const NET_BOTTOM = _MAP.Y_NET + _MAP.NET_H;
-
-    // Down from the cloud into every way out, and on to whatever each of those points at.
-    for (const g of L.gws) {
-        if (L.exits.some(e => e.from === g.uid))
-            out.push(`<line x1="${L.mid}" y1="${_MAP.Y_CLOUD + 8}" x2="${g.x + _MAP.BOX_W / 2}"
-                            y2="${g.y}" stroke="var(--bs-primary)" stroke-width="2"></line>`);
-    }
-    // …and from each way out down to the networks under it.
-    for (const c of L.cols) {
-        const src = L.gws.length ? L.gws[0] : null;
-        const y1 = src ? src.y + _MAP.ROUTER_H : _MAP.Y_CLOUD + 10;
-        const x1 = src ? src.x + _MAP.BOX_W / 2 : L.mid;
-        out.push(_infraMapElbow(x1, y1, c.cx, _MAP.Y_NET,
-            'stroke="var(--bs-border-color)" stroke-width="1.5"'));
-    }
-    // …and from each network plate to the machines on it.
-    for (const c of L.cols)
-        for (const b of c.boxes)
-            out.push(_infraMapElbow(c.cx, NET_BOTTOM, b.x + _MAP.BOX_W / 2, b.y,
-                'stroke="var(--bs-border-color)" stroke-width="1.5"'));
-
-    // A machine that is ALSO on another network. Thin, dashed, and only to plates that are on
-    // the picture: a line to a network nobody lives in would be a line to nothing.
-    for (const n of map.nodes || []) {
-        const from = L.at.get(n.uid);
-        if (!from || !L.home.has(n.uid)) continue;
-        for (const net of n.networks || []) {
-            if (net === L.home.get(n.uid)) continue;
-            const c = L.cols.find(x => x.net === net);
-            if (!c) continue;
-            out.push(`<path d="M ${from.x} ${from.y + _MAP.BOX_H / 2}
-                              C ${from.x - 40} ${from.y + _MAP.BOX_H / 2},
-                                ${c.cx} ${NET_BOTTOM + 30}, ${c.cx} ${NET_BOTTOM}"
-                            fill="none" stroke="var(--bs-secondary)" stroke-width="1"
-                            stroke-dasharray="3 3" opacity=".7"></path>`);
-        }
-    }
-    // The cables, where anything reported one. Drawn STRONGEST because they are the only
-    // lines here that are not an inference: a device reporting an LLDP neighbour is saying it
-    // sees that machine down one of its own cables. Thinner when only one end said so, which
-    // is what it looks like when the far end runs no LLDP agent.
-    for (const e of (map.edges || []).filter(x => x.kind === 'lldp' || x.kind === 'port')) {
-        const a = L.at.get(e.from), b = L.at.get(e.to);
-        if (!a || !b) continue;
-        const ports = [e.ports && e.ports[e.from], e.ports && e.ports[e.to]].filter(Boolean);
-        // A switch saying "that MAC is on port 8, alone" is a weaker statement than a
-        // neighbour identifying itself: what is on the port could be behind an unmanaged
-        // switch nobody added. Dotted, and the legend says which is which.
-        const dots = e.kind === 'port' ? ' stroke-dasharray="1 4"' : '';
-        out.push(`<g><title>${escAttr(ports.join(' ↔ ') || t(
-                e.kind === 'port' ? 'infra_map_legend_port' : 'infra_map_legend_lldp'))}</title>
-            <line x1="${a.x + _MAP.BOX_W / 2}" y1="${a.y + _MAP.BOX_H / 2}"
-                  x2="${b.x + _MAP.BOX_W / 2}" y2="${b.y + _MAP.BOX_H / 2}"${dots}
-                  stroke="var(--bs-body-color)" stroke-linecap="round"
-                  stroke-width="${e.confirmed ? 2.5 : 1.5}"
-                  opacity="${e.confirmed ? '.85' : '.5'}"></line></g>`);
-    }
-    // A machine pointing at its way out, when the way out is not the one above it already.
-    for (const e of (map.edges || []).filter(x => x.kind === 'gateway')) {
-        const from = L.at.get(e.from), to = e.to ? L.at.get(e.to) : null;
-        if (!from || !to || L.gws.length === 1) continue;
-        out.push(`<path d="M ${from.x + _MAP.BOX_W / 2} ${from.y}
-                          C ${from.x + _MAP.BOX_W / 2} ${from.y - 40},
-                            ${to.x + _MAP.BOX_W / 2} ${to.y + 80},
-                            ${to.x + _MAP.BOX_W / 2} ${to.y + _MAP.ROUTER_H}"
-                        fill="none" stroke="var(--bs-primary)" stroke-width="1.5"
-                        marker-end="url(#ss-map-arrow)" opacity=".7"></path>`);
-    }
-    return out.join('');
-}
-
 function _infraMapDefs() {
     return `<defs><marker id="ss-map-arrow" viewBox="0 0 10 10" refX="9" refY="5"
                 markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -344,33 +471,77 @@ function _infraMapDefs() {
         </marker></defs>`;
 }
 
+// ── What the pointer is on ──────────────────────────────────────────────────
+//
+// The same idea as the cable map's panel and for the same reason: a box is 214 pixels wide and
+// the reading of one machine is not. Hover only — there is nothing here to click INTO, so
+// there is nothing to keep open.
+let _netHover = ['', ''];
+
+function _infraMapHover(kind, id) {
+    _netHover = [String(kind || ''), String(id || '')];
+    const box = document.getElementById('infraNetPanel');
+    if (box) box.innerHTML = _infraMapPanelHtml();
+}
+
+function _infraMapPanelHtml() {
+    const [kind, id] = _netHover;
+    if (!kind || !_infraMap) return '';
+    const L = _infraMapLayout(_infraMap);
+    if (kind === 'host') {
+        const p = L.at.get(id);
+        return p ? ssHostCard(p.node, id, {
+            hint: 'infra_map_node_hint',
+            extra: p.solo.length ? [t('infra_map_solo_of'), p.solo.join(', ')] : null,
+        }) : '';
+    }
+    const s = L.cols.find(x => x.net === id);
+    if (!s) return '';
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <i class="bi bi-diagram-2 text-muted"></i>
+            <span class="fw-semibold">${esc(s.net)}</span>
+            <span class="text-muted">${esc(tf('infra_map_members', s.total))}</span>
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+            ${(s.all || s.members).map(uid => {
+                const p = L.at.get(uid);
+                const n = (p || {}).node || {};
+                return `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+                    onclick="infraOpen(${jsStr(uid)})"><i class="bi ${
+                    escAttr(hostTypeIcon(n.kind || ''))} me-1"></i>${esc(n.name || uid)}</button>`;
+            }).join('')}
+        </div>
+    </div>`;
+}
+
 /** The networks that are not on the picture, said out loud.
  *
  *  A router declares every route it has, and most of them lead somewhere with nothing the
- *  panel knows about. Twenty-nine lanes with twenty-five empty is not a map — but silently
- *  dropping them would be a map that knows something and does not say it. */
+ *  panel knows about; and a network with one machine on it is not a place two machines meet.
+ *  Neither is worth a row — but silently dropping them would be a map that knows something and
+ *  does not say it. */
 function _infraMapFolded(L) {
-    if (!L.folded) return '';
+    const bits = [];
+    if (L.soloCount) bits.push(tf('infra_map_folded_solo', L.soloCount));
+    if (L.folded) bits.push(tf('infra_map_folded', L.folded));
+    if (!bits.length) return '';
     return `<div class="text-muted ss-fs-2 pt-1">
-        <i class="bi bi-signpost-split me-1"></i>${esc(tf('infra_map_folded', L.folded))}</div>`;
+        <i class="bi bi-signpost-split me-1"></i>${esc(bits.join(' · '))}</div>`;
 }
 
 function _infraMapLegend(map) {
     const lost = (map.unplaced || []).length;
     return `<div class="d-flex flex-wrap align-items-center gap-3 ss-fs-2 text-muted pt-2">
         <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
-            stroke="var(--bs-secondary)" stroke-width="1.5" stroke-dasharray="4 3"/></svg>
+            stroke="var(--bs-secondary)" stroke-width="1.2" stroke-dasharray="4 3"/></svg>
             ${esc(t('infra_map_legend_net'))}</span>
         <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
             stroke="var(--bs-primary)" stroke-width="1.5"/></svg>
             ${esc(t('infra_map_legend_gw'))}</span>
         <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
-            stroke="var(--bs-body-color)" stroke-width="2.5" opacity=".85"/></svg>
-            ${esc(t('infra_map_legend_lldp'))}</span>
-        <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
-            stroke="var(--bs-body-color)" stroke-width="1.5" stroke-dasharray="1 4"
-            opacity=".5"/></svg>
-            ${esc(t('infra_map_legend_port'))}</span>
+            stroke="var(--bs-primary)" stroke-width="1.5" stroke-dasharray="5 4"/></svg>
+            ${esc(t('infra_map_legend_exit'))}</span>
         ${lost ? `<span class="ms-auto"><i class="bi bi-question-circle me-1"></i>${
             esc(tf('infra_map_unplaced', lost))}</span>` : ''}
     </div>`;

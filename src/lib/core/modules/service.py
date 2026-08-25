@@ -92,6 +92,27 @@ def build_module_page(modules_dir: str, module: str, status_raw: dict,
         return {}
 
 
+def _widget_items(cfg: dict) -> dict:
+    """A module's own items, for its widget hook — whatever it calls its collection.
+
+    `list` is a convention and not a rule: three of the four modules with a widget use it and
+    the SNMP watchful calls its collection `servers`, so a hook that took the items was handed
+    an empty dict. Nothing broke loudly — the widget simply had no names in it, which is the
+    quiet kind of wrong this codebase keeps finding.
+
+    `list` still wins where it exists, so nothing that works today changes; the rest are merged
+    in the order the module declares them, which for every module that has one is a single
+    collection.
+    """
+    if isinstance((cfg or {}).get('list'), dict):
+        return cfg['list']
+    out: dict = {}
+    for name, coll in (cfg or {}).items():
+        if not str(name).startswith('__') and isinstance(coll, dict):
+            out.update({k: v for k, v in coll.items() if isinstance(v, dict)})
+    return out
+
+
 def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, lang: str) -> dict:
     """Generic Overview-widget data: for every module declaring ``__overview_widget__``,
     call its ``Watchful.overview_widget(items, status, lang)`` hook and collect the result.
@@ -113,7 +134,7 @@ def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, 
                            if isinstance(status_raw.get(k), dict)), {})
             cfg = next((modules_raw[k] for k in (f'watchfuls.{mod_name}', mod_name)
                         if isinstance(modules_raw.get(k), dict)), {})
-            items = cfg.get('list') if isinstance(cfg.get('list'), dict) else {}
+            items = _widget_items(cfg)
             cls = getattr(importlib.import_module(f'watchfuls.{mod_name}'), 'Watchful', None)
             fn = getattr(cls, 'overview_widget', None)
             if callable(fn):

@@ -1,0 +1,330 @@
+{# ================================================================
+   Infrastructure — three more ways to read the same fleet.
+
+   The list answers "which machine is in trouble" and the cards answer it from across the
+   room. What none of them answered is the question you ask when the fleet stops being small
+   enough to hold in your head: **which KIND of thing is in trouble** — the switches, the NAS,
+   the hypervisors — and, once you know, which of those.
+
+   Three, because they are three different readings and not three skins:
+
+   * **grouped** is the table with a heading every time the group changes. It keeps the
+     columns you chose and the order the list is sorted in, so it reads as the list you
+     already know with the boundaries drawn in;
+   * **rail** puts the kinds down the side and one kind on screen at a time. The grouped view
+     shows you everything and asks you to scroll; this one shows you one thing and asks you to
+     choose. Which of the two is better depends on how many kinds you have, which is why both
+     exist rather than one of them being the answer;
+   * **board** does not group by kind at all. It is the triage reading: a column per state,
+     worst on the left, and what is in each. "What needs attention" is a different question
+     from "what is this fleet made of", and answering it by sorting a list makes you count.
+
+   WHAT IT GROUPS BY IS A CHOICE, not a fact about this file. Kind of device is the default
+   because that is what was asked for, but a fleet tagged by rack or by customer is grouped by
+   tag, and one being migrated is grouped by operating system. The groupers are a declared
+   list: one entry, one reading, and none of them is written into the render.
+   ================================================================ #}
+
+//: How to split the fleet. `of(host)` returns the groups a machine belongs to — a LIST,
+//: because a machine has one device type and any number of tags, and a tagged fleet where a
+//: box appears under both `prod` and `nas` is the point rather than a problem.
+//:
+//: `label` is what the heading says; `icon` what it wears. Both per group VALUE, so the type
+//: groups keep the icons the rest of the panel gives them and the tag groups do not pretend
+//: to have any.
+const _INFRA_GROUPERS = [
+    { key: 'device_type', label_key: 'col_host_type',
+      of: h => [h.device_type || ''],
+      label: v => v ? hostTypeLabel(v) : t('host_type_unset'),
+      icon:  v => v ? hostTypeIcon(v) : 'bi-question-circle' },
+    { key: 'tags', label_key: 'col_host_tags',
+      of: h => (h.tags || []).length ? h.tags.slice() : [''],
+      label: v => v || t('infra_group_untagged'),
+      icon:  () => 'bi-tag' },
+    { key: 'os', label_key: 'col_host_os',
+      of: h => [h.os || ''],
+      label: v => v || t('infra_group_unknown'),
+      icon:  () => 'bi-cpu' },
+    { key: 'kind', label_key: 'col_host_kind',
+      of: h => [hostKind(h.kind)],
+      label: v => t('host_kind_' + v),
+      icon:  () => 'bi-plug' },
+    { key: 'status', label_key: 'col_host_status',
+      of: h => [h.maintenance ? 'maintenance' : (h.status || '')],
+      label: v => _INFRA_STATE_LABEL[v] ? _INFRA_STATE_LABEL[v]() : v,
+      icon:  () => 'bi-activity' },
+];
+
+//: The state vocabulary, in the order a triage board reads: worst first, and "nobody is
+//: looking at this" between a warning and an OK — it is not a failure, and it is not the good
+//: news an OK is either. The same four the list's filter offers, named once.
+const _INFRA_STATES = ['error', 'warning', '', 'ok'];
+const _INFRA_STATE_LABEL = {
+    error:        () => t('status_error'),
+    warning:      () => t('status_warning'),
+    '':           () => t('infra_unwatched'),
+    ok:           () => t('status_ok'),
+    maintenance:  () => t('infra_maintenance'),
+};
+
+/** Which grouper is in use. Remembered per browser like the view itself: it is a way of
+ *  looking, not a setting of the installation. */
+let _infraGroupBy = (() => {
+    try {
+        const s = localStorage.getItem('ss_infra_group_by');
+        return _INFRA_GROUPERS.some(g => g.key === s) ? s : _INFRA_GROUPERS[0].key;
+    } catch (_) { return _INFRA_GROUPERS[0].key; }
+})();
+function setInfraGroupBy(key) {
+    if (!_INFRA_GROUPERS.some(g => g.key === key)) return;
+    _infraGroupBy = key;
+    try { localStorage.setItem('ss_infra_group_by', key); } catch (_) {}
+    _infraRender();
+}
+function _infraGrouper() {
+    return _INFRA_GROUPERS.find(g => g.key === _infraGroupBy) || _INFRA_GROUPERS[0];
+}
+
+/** Which rail entry is open, and which groups are folded away. Both per browser, both
+ *  forgiving of a value that no longer exists — a fleet loses a device type the day its last
+ *  switch is deleted, and a rail pinned to it would show an empty screen for ever. */
+//: `null` is "nothing picked yet" and `''` is "the group of machines with no type" — two
+//: different things that collapse into one the moment either is written as a falsy string.
+//: They did: an unset rail opened on the untyped group, because a fleet HAS one and the
+//: emptiness of the stored value looked exactly like the emptiness of that group's name.
+let _infraRailPick = (() => {
+    try { return localStorage.getItem('ss_infra_rail_pick'); } catch (_) { return null; }
+})();
+let _infraFolded = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ss_infra_folded') || '[]')); }
+    catch (_) { return new Set(); }
+})();
+function _infraFoldSave() {
+    try { localStorage.setItem('ss_infra_folded', JSON.stringify([..._infraFolded])); }
+    catch (_) {}
+}
+function toggleInfraGroup(key) {
+    if (_infraFolded.has(key)) _infraFolded.delete(key); else _infraFolded.add(key);
+    _infraFoldSave();
+    _infraRender();
+}
+function setInfraRailPick(key) {
+    _infraRailPick = key;
+    try { localStorage.setItem('ss_infra_rail_pick', key); } catch (_) {}
+    _infraRender();
+}
+
+/** `[{value, label, icon, uids, worst, counts}]` for the current grouper.
+ *
+ *  Ordered WORST FIRST, like the list underneath it, and by name within a state. The whole
+ *  reason this section sorts by state is that it is opened when something is wrong; a
+ *  grouping that then put the switches first because "s" comes early would be answering a
+ *  question nobody asked with the answer to one they did.
+ */
+function _infraGroups(uids) {
+    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    const g = _infraGrouper();
+    const out = new Map();
+    for (const uid of uids) {
+        const h = by[uid];
+        if (!h) continue;
+        for (const value of g.of(h)) {
+            const v = String(value ?? '');
+            if (!out.has(v)) {
+                out.set(v, { value: v, label: g.label(v), icon: g.icon(v), uids: [],
+                             counts: { error: 0, warning: 0, '': 0, ok: 0 } });
+            }
+            const row = out.get(v);
+            row.uids.push(uid);
+            // Maintenance counts as itself nowhere: a machine somebody is working on is not a
+            // machine in trouble, and counting it as an error would put a group at the top of
+            // the screen for a state its owner chose.
+            if (!h.maintenance) row.counts[h.status || ''] += 1;
+        }
+    }
+    const rank = v => v.counts.error ? 0 : v.counts.warning ? 1 : v.counts[''] ? 2 : 3;
+    return [...out.values()].sort(
+        (a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
+}
+
+/** The chips beside a group's name: how many of each state, and none of the zeros.
+ *  A row of "0 · 0 · 0 · 12" is four numbers to read the one that matters out of. */
+function _infraGroupChips(counts) {
+    const cls = { error: 'text-bg-danger', warning: 'text-bg-warning',
+                  '': 'text-bg-secondary', ok: 'text-bg-success' };
+    return _INFRA_STATES.filter(s => counts[s])
+        .map(s => `<span class="badge ${cls[s]} fw-normal ss-fs-2"
+                         title="${escAttr(_INFRA_STATE_LABEL[s]())}">${counts[s]}</span>`)
+        .join(' ');
+}
+
+/** The "group by" selector, drawn wherever a grouping view needs it. */
+function _infraGroupPicker() {
+    const cur = _infraGroupBy;
+    return `<div class="d-flex align-items-center gap-2 px-3 pt-2 ss-fs-2 text-muted">
+        <i class="bi bi-diagram-2"></i><span>${esc(t('infra_group_by'))}</span>
+        <select class="form-select form-select-sm w-auto" onchange="setInfraGroupBy(this.value)">
+            ${_INFRA_GROUPERS.map(g => `<option value="${escAttr(g.key)}"${
+                g.key === cur ? ' selected' : ''}>${esc(t(g.label_key))}</option>`).join('')}
+        </select>
+    </div>`;
+}
+
+// ── The grouped table ────────────────────────────────────────────────────────
+
+/** The list, with a heading every time the group changes.
+ *
+ *  The SAME columns the table view is showing and in the same order — read from the state the
+ *  column chooser writes, not from a list of its own, so switching view does not silently
+ *  change what you are looking at. It draws its own header because a table cannot have two,
+ *  and it is not sortable by clicking: the rows arrive in the order the list sorted them, and
+ *  a second sort control that disagreed with the first would be two answers to one question.
+ */
+function _infraGroupedBody(uids) {
+    const groups = _infraGroups(uids);
+    if (!groups.length) return _infraGroupPicker();
+    const cols = _infraOrderedCols();
+    const span = cols.length + 1;
+    let h = _infraGroupPicker() + `<div class="px-3 pb-3 pt-2">
+        <table class="table table-sm table-hover align-middle mb-0 ss-table ss-hover-accent">
+        <thead class="ss-thead"><tr>
+            ${cols.map(c => `<th class="ss-th">${esc(c.label())}</th>`).join('')}
+            <th class="ss-th ss-th-actions">${esc(t('col_actions'))}</th>
+        </tr></thead><tbody>`;
+    for (const g of groups) {
+        const folded = _infraFolded.has(g.value);
+        h += `<tr class="ss-pointer" onclick="toggleInfraGroup(${jsStr(g.value)})">
+            <td colspan="${span}" class="ss-group-row">
+                <i class="bi ${folded ? 'bi-chevron-right' : 'bi-chevron-down'} me-2"></i>
+                <i class="bi ${escAttr(g.icon)} me-2"></i>
+                <span class="fw-semibold">${esc(g.label)}</span>
+                <span class="text-muted ms-2">${g.uids.length}</span>
+                <span class="ms-2">${_infraGroupChips(g.counts)}</span>
+            </td></tr>`;
+        if (folded) continue;
+        for (const uid of g.uids) {
+            h += `<tr style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"
+                      onclick="if(!event.target.closest('button,a,input,select,label')) infraOpen(${jsStr(uid)})">
+                ${cols.map(c => _infraCell(uid, c.id)).join('')}
+                <td class="ss-td-actions">${_infraRowActions(uid)}</td>
+            </tr>`;
+        }
+    }
+    return h + `</tbody></table></div>`;
+}
+
+// ── The rail ─────────────────────────────────────────────────────────────────
+
+/** The kinds down the side, one kind on screen.
+ *
+ *  The other half of the same question, and the reason both are here: with four device types
+ *  the grouped table is the better read — everything at once, no clicking — and with twenty
+ *  it is a scroll, where a rail is a menu. Neither is right in the abstract, so the fleet
+ *  decides and the switcher is one click.
+ */
+function _infraRailBody(uids) {
+    const groups = _infraGroups(uids);
+    if (!groups.length) return _infraGroupPicker();
+    // A pick that no longer exists falls back to the first group rather than to nothing: a
+    // rail remembering a device type whose last machine was deleted would open on an empty
+    // screen and look broken.
+    const picked = _infraRailPick !== null && groups.some(g => g.value === _infraRailPick);
+    const pick = picked ? _infraRailPick : groups[0].value;
+    const cur = groups.find(g => g.value === pick);
+    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    const cols = _infraOrderedCols();
+
+    const rail = groups.map(g => `
+        <button class="list-group-item list-group-item-action d-flex align-items-center gap-2
+                       ${g.value === pick ? 'active' : ''}"
+                onclick="setInfraRailPick(${jsStr(g.value)})">
+            <i class="bi ${escAttr(g.icon)}"></i>
+            <span class="text-truncate flex-grow-1 text-start">${esc(g.label)}</span>
+            <span class="ms-auto d-flex align-items-center gap-1">
+                ${_infraGroupChips(g.counts)}
+                <span class="badge bg-body-secondary text-body-secondary fw-normal">${g.uids.length}</span>
+            </span>
+        </button>`).join('');
+
+    const rows = cur.uids.map(uid => `
+        <tr style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"
+            onclick="if(!event.target.closest('button,a,input,select,label')) infraOpen(${jsStr(uid)})">
+            ${cols.map(c => _infraCell(uid, c.id)).join('')}
+            <td class="ss-td-actions">${_infraRowActions(uid)}</td>
+        </tr>`).join('');
+
+    return _infraGroupPicker() + `<div class="d-flex gap-3 px-3 pb-3 pt-2 align-items-start">
+        <div class="list-group ss-infra-rail">${rail}</div>
+        <div class="flex-grow-1" style="min-width:0">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi ${escAttr(cur.icon)}"></i>
+                <span class="fw-semibold">${esc(cur.label)}</span>
+                <span class="text-muted ss-fs-2">${cur.uids.length}</span>
+            </div>
+            <table class="table table-sm table-hover align-middle mb-0 ss-table ss-hover-accent">
+            <thead class="ss-thead"><tr>
+                ${cols.map(c => `<th class="ss-th">${esc(c.label())}</th>`).join('')}
+                <th class="ss-th ss-th-actions">${esc(t('col_actions'))}</th>
+            </tr></thead><tbody>${rows}</tbody></table>
+        </div>
+    </div>`;
+}
+
+// ── The board ────────────────────────────────────────────────────────────────
+
+/** A column per state, worst on the left.
+ *
+ *  Not a grouping of the fleet but a reading of it: "what needs attention" is a different
+ *  question from "what is this fleet made of", and the list answers it by sorting — which
+ *  works until you want to know HOW MANY, and then you are counting rows.
+ *
+ *  Machines in maintenance are their own column and not folded into one of the four: somebody
+ *  chose that state, and a box in the "error" column that nobody has to act on is exactly the
+ *  noise a triage screen exists to remove.
+ */
+function _infraBoardBody(uids) {
+    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    const lanes = [..._INFRA_STATES, 'maintenance'];
+    // The shared colours (see `HOST_STATE_COLORS`). It kept its own, and maintenance came out
+    // grey here and orange on the fleet list — reported from the screen, twice, for the badge
+    // and then for these cards.
+    const tone = s => hostStateColor(s, s === 'maintenance');
+    const held = Object.fromEntries(lanes.map(s => [s, []]));
+    for (const uid of uids) {
+        const h = by[uid];
+        if (!h) continue;
+        held[h.maintenance ? 'maintenance' : (h.status || '')].push(h);
+    }
+    // A lane with nothing in it is still drawn — for the four real states. "No machine is
+    // down" is the answer somebody came for, and an empty column says it where a missing
+    // column says nothing at all. Maintenance is the exception: it is a state a fleet
+    // usually is not in, and an empty lane for it is a column of furniture.
+    const shown = lanes.filter(s => s !== 'maintenance' || held[s].length);
+    return `<div class="d-flex gap-3 px-3 py-3 align-items-start ss-infra-board">
+        ${shown.map(s => `
+        <div class="flex-grow-1" style="min-width:0;flex-basis:0">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="d-inline-block rounded-circle"
+                      style="width:.6rem;height:.6rem;background:${tone(s)}"></span>
+                <span class="fw-semibold ss-fs-3">${esc(_INFRA_STATE_LABEL[s]())}</span>
+                <span class="badge bg-body-secondary text-body-secondary fw-normal ms-auto">${held[s].length}</span>
+            </div>
+            ${held[s].length ? held[s].map(h => `
+                <div class="rounded-3 border mb-2 ss-pointer overflow-hidden"
+                     onclick="infraOpen(${jsStr(h.uid)})" style="background:var(--bs-tertiary-bg)">
+                    <div style="height:3px;background:${tone(s)}"></div>
+                    <div class="px-2 py-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi ${escAttr(hostTypeIcon(h.device_type))} text-muted"></i>
+                            <span class="fw-semibold text-truncate">${esc(h.name || '')}</span>
+                        </div>
+                        <div class="text-muted ss-fs-2 text-truncate">
+                            <i class="bi bi-geo-alt me-1"></i>${esc(h.address || '—')}</div>
+                        <div class="text-muted ss-fs-2">
+                            <i class="bi bi-puzzle me-1"></i>${h.modules_active || 0}/${h.modules_total || 0}</div>
+                    </div>
+                </div>`).join('')
+            : `<div class="text-muted ss-fs-2 border rounded-3 text-center py-3">${esc(t('infra_board_empty'))}</div>`}
+        </div>`).join('')}
+    </div>`;
+}

@@ -556,7 +556,13 @@ function _dwStatCard(accent, avBg, avColor, icon, count, labelKey, subtitle) {
     </div>`;
 }
 
-function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
+/** The shell every dense widget wears: an accent, an icon, a title and a body.
+ *
+ *  *bodyStyle* is what the body DOES with content that does not fit. A table scrolls
+ *  vertically and wraps; a chart is a picture with a size of its own, so it scrolls both ways
+ *  once the box is smaller than the smallest picture worth reading.
+ */
+function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml, bodyStyle) {
     return `<div class="rounded-3 overflow-hidden border h-100 d-flex flex-column" style="background:var(--ss-surface-bg,var(--bs-body-bg));box-shadow:0 1px 6px rgba(0,0,0,.06)">
         <div style="height:3px;background:${accent};flex-shrink:0"></div>
         <div class="d-flex align-items-center gap-2 px-3 py-2 flex-shrink-0" style="background:var(--bs-secondary-bg);border-bottom:1px solid var(--bs-border-color)">
@@ -565,7 +571,7 @@ function _dwTableCard(accent, avBg, avColor, icon, title, tableHtml) {
                 <i class="bi ${icon}"></i></span>
             <span class="fw-semibold ss-fs-4">${title}</span>
         </div>
-        <div style="overflow-y:auto;flex:1;font-size:.875rem">${tableHtml}</div>
+        <div style="${bodyStyle || 'overflow-y:auto;flex:1;font-size:.875rem'}">${tableHtml}</div>
     </div>`;
 }
 
@@ -629,6 +635,8 @@ function _dwModuleWidgetContent(id, data, item) {
         return _dwTableCard(acc, bg, fg, icon, title, body);
     }
 
+    if (def.view === 'chart') return _dwMwChart(id, wd, item, acc, bg, fg, icon);
+
     // stat view: the module declares which check kind the card shows (`scope`, by entry
     // id, e.g. m365 → "health" = Service health); no scope defaults to the aggregate.
     if (def.scope) {
@@ -638,6 +646,274 @@ function _dwModuleWidgetContent(id, data, item) {
     }
     const c = (wd.aggregate || {}).counts;
     return _dwMwStatCard(c ? c.total : entries.length, title, c, acc, bg, fg, icon);
+}
+
+// ── The shape of one measurement over time ──
+//
+// The module says WHICH measurements are worth a picture and where each one is kept: every
+// entry may carry `charts`, a list of {field, label, unit, series:{module,key,field}}. The
+// coordinates are the ones the history already files the value under, so this is a chart of
+// the same numbers the rest of the panel reads and not of a second reading taken another way.
+// Nothing here learns what any of them mean.
+//
+// Drawn with `_historyDraw` — the one the History section and a device's page use. A second
+// chart routine would be a second opinion about what a gap in a series looks like.
+const _dwChartBusy = {};
+//: The points behind each chart, kept so a RESIZE is a redraw and not a second request. A
+//: canvas is drawn at the pixel size it had when it was drawn: made bigger, the picture stayed
+//: the size of the box it was born in with the rest of the card empty around it. Reported from
+//: the screen.
+const _dwChartPts = {};
+const _DW_CHART_HOURS = [[6, '6 h'], [24, '24 h'], [168, '7 d'], [720, '30 d']];
+
+//: Every series the history holds, fetched ONCE and kept.
+//:
+//: A module's widget hands over the figures worth a card — a handful, on purpose, because that
+//: payload is rebuilt on every refresh of a dashboard. But a chart is opened to look at
+//: something specific, and "the handful" is not where a per-disk temperature or the traffic of
+//: one port lives. Reported from the screen: "faltarían muchas gráficas".
+//:
+//: The history index already answers exactly that question — every series recorded, with the
+//: labels and units the module declares for each field — so this asks it instead of growing
+//: the dashboard payload. Once: it is a scan of the whole table, and the set of series changes
+//: when somebody racks a machine, not between two refreshes of a page.
+let _dwSeriesPromise = null;
+let _dwSeriesIndex = null;
+
+//: Which widgets are already waiting for it. Without this the toolbar asked for the index,
+//: the answer redrew the toolbar, and the redraw asked again — and because the second ask is a
+//: promise that is ALREADY resolved, the two of them chased each other through the microtask
+//: queue and the tab stopped answering. Reported from the screen as Firefox offering to stop
+//: the page.
+const _dwSeriesAsked = new Set();
+
+/** Ask for the index, once, and redraw this toolbar when it lands. */
+function _dwSeriesReady(id) {
+    if (_dwSeriesIndex !== null || _dwSeriesAsked.has(id)) return;
+    _dwSeriesAsked.add(id);
+    _dwSeriesLoad().then(() => _dwToolbarRefresh(id));
+}
+
+function _dwSeriesLoad() {
+    if (_dwSeriesPromise) return _dwSeriesPromise;
+    _dwSeriesPromise = apiGet('/api/v1/history/index').then(rows => {
+        _dwSeriesIndex = Array.isArray(rows) ? rows : [];
+        return _dwSeriesIndex;
+    }).catch(() => { _dwSeriesIndex = []; return _dwSeriesIndex; });
+    return _dwSeriesPromise;
+}
+
+/** Every measurement of one device, as options for the picker.
+ *
+ *  The module's own list leads — those are the ones it called worth reading, and they include
+ *  the proportions it draws as a ring — and then everything else the history has for that
+ *  device, grouped by whatever produced it and named by that module's own field labels.
+ */
+function _dwSeriesFor(module, devId, charts) {
+    const out = (charts || []).map(c => ({
+        value: c.field, label: c.label, group: '', kind: c.kind || 'line',
+    }));
+    // Marked by their COORDINATES as well as by their own id: the card's list names a
+    // measurement by its field alone, the index names the same one by key and field, and
+    // matching only the first offered "CPU inactiva" twice in one dropdown.
+    const seen = new Set(out.map(o => o.value));
+    for (const c of (charts || []))
+        if (c.series) seen.add(`${c.series.key}|${c.series.field}`);
+    for (const row of (_dwSeriesIndex || [])) {
+        if (row.module !== module) continue;
+        const key = String(row.key || '');
+        if (key !== devId && !key.startsWith(devId + '/')) continue;
+        const fields = ((row.history_cfg || {}).fields) || {};
+        const data = row.last_data || {};
+        // The row's own name, which for a table is the only thing telling one from the next.
+        const rowName = String(data._row || row.label || '').trim();
+        for (const [field, value] of Object.entries(data)) {
+            if (typeof value !== 'number' || !fields[field]) continue;
+            const id = `${key}|${field}`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const meta = fields[field];
+            out.push({
+                value: id,
+                label: rowName ? `${meta.label || field} — ${rowName}` : (meta.label || field),
+                group: meta.source_short || meta.source_label || row.pretty_name || '',
+                kind: 'line',
+            });
+        }
+    }
+    return out;
+}
+
+/** One picked option, resolved back to something drawable. */
+function _dwSeriesPick(value, devId, module, charts) {
+    const own = (charts || []).find(c => c.field === value);
+    if (own) return own;
+    const [key, field] = String(value || '').split('|');
+    if (!key || !field) return null;
+    const row = (_dwSeriesIndex || []).find(r => r.module === module && r.key === key);
+    const meta = ((row || {}).history_cfg || {}).fields?.[field] || {};
+    const rowName = String((row?.last_data || {})._row || '').trim();
+    return {
+        field: value, kind: 'line',
+        label: rowName ? `${meta.label || field} — ${rowName}` : (meta.label || field),
+        unit: meta.unit || '', series: {module, key, field},
+    };
+}
+
+/** Which device and which of its measurements this instance is showing.
+ *
+ *  Falls back to the FIRST of each rather than to nothing: a card somebody has just dropped
+ *  on the dashboard has chosen neither, and an empty box with two selectors is a widget that
+ *  looks broken until you work out it is asking you something. */
+function _dwMwPick(id, wd, item) {
+    const entries = (wd || {}).entries || [];
+    const inst = _dwInst(id, item);
+    const entry = entries.find(e => e.id === inst.mws) || entries[0] || null;
+    const charts = (entry || {}).charts || [];
+    const module = (_dwModuleDef(id) || {}).module || '';
+    // A pick may name a measurement the module put on the card, or any other series the
+    // history holds for that device (`<key>|<field>`). Falling back to the first of the card's
+    // rather than to nothing: a card somebody has just dropped has chosen neither, and an
+    // empty box with two selectors is a widget that looks broken until you work out that it is
+    // asking you something.
+    const picked = inst.mwfig
+        ? _dwSeriesPick(inst.mwfig, (entry || {}).id || '', module, charts)
+        : null;
+    return {
+        entry,
+        chart: picked || charts[0] || null,
+        hours: parseInt(inst.mwh, 10) || 24,
+    };
+}
+
+/** One instance's own settings, from the layout item or from the element on the page. */
+function _dwInst(id, item) {
+    if (item) return item;
+    const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    return document.querySelector(`.dw[data-wid="${sel}"]`)?.dataset || {};
+}
+
+function _dwMwChart(id, wd, item, acc, bg, fg, icon) {
+    const pick = _dwMwPick(id, wd, item);
+    if (!pick.chart) {
+        return _dwTableCard(acc, bg, fg, icon, t('dw_mw_chart_view'),
+            `<div class="text-center text-muted small py-4">${esc(t('overview_no_status'))}</div>`);
+    }
+    if (pick.chart.kind === 'ring') {
+        // Two numbers side by side is arithmetic left to the reader when the answer is "83 %",
+        // and as a pair of parallel lines over time it is worse. Asked for from the screen:
+        // "uso de disco… eso igual es mejor queso".
+        const c = pick.chart.chart || {};
+        return _dwTableCard(acc, bg, fg, icon,
+            `${esc(pick.entry.name)} · ${esc(pick.chart.label)}`,
+            `<div class="d-flex flex-column align-items-center justify-content-center h-100 gap-2">
+                ${_dwMwDonut(c, _dwRingState(c.pct), 140)}
+                <div class="text-muted small">${esc(_dwBytes(c.used, pick.chart.unit))} / ${
+                    esc(_dwBytes(c.total, pick.chart.unit))}</div>
+            </div>`,
+            'overflow:auto;flex:1;min-height:0;padding:.5rem');
+    }
+    // The canvas is measured to draw, so it cannot be filled until it is on the page.
+    setTimeout(() => _dwMwChartFetch(id), 0);
+    const title = `${esc(pick.entry.name)} · ${esc(pick.chart.label)}`;
+    // The picture takes the whole box — and the box scrolls BOTH ways below the size at which
+    // a chart stops being readable. Reported from the screen twice: once as a graph that
+    // stayed the size of the card it was born in when the card was dragged wider, and once as
+    // one clipped at the edges with no way to reach the rest. A picture squeezed into two
+    // hundred pixels is not a smaller answer, it is no answer; a floor plus a scrollbar says
+    // "there is more here" instead of quietly cutting it off.
+    //
+    // The padding is on the BODY and not on this box, because `_historyDraw` measures the
+    // canvas's parent with `clientWidth` — which counts padding — so a padded parent was drawn
+    // sixteen pixels wider than it is and put a scrollbar on a chart that fitted.
+    return _dwTableCard(acc, bg, fg, icon, title,
+        `<div class="position-relative" data-dwchart="1"
+              style="min-width:20rem;min-height:10rem;width:100%;height:100%">
+            <canvas></canvas>
+            <div class="dw-chart-note position-absolute top-50 start-50 translate-middle
+                 text-muted small">${esc(t('loading') || '…')}</div>
+        </div>`,
+        'overflow:auto;flex:1;min-height:0;padding:.5rem');
+}
+
+/** Draw what is already fetched, at the size the box is NOW.
+ *
+ *  Split from the fetch so a resize costs a repaint and not a round trip: a widget dragged
+ *  wider fires this many times a second, and a history query per frame is a query per frame.
+ */
+function _dwChartDraw(id, box) {
+    const held = _dwChartPts[id];
+    const canvas = box && box.querySelector('canvas');
+    if (!held || !canvas) return;
+    _historyDraw(canvas, held.pts, held.chart.series.field, held.chart.unit, held.chart.label);
+}
+
+/** Watch a chart's box and redraw it when it changes size.
+ *
+ *  One observer per widget, kept, because the card is rebuilt on every refresh of the
+ *  dashboard and a new observer each time would be an observer per refresh on a page somebody
+ *  leaves open all day.
+ */
+const _dwChartObs = {};
+function _dwChartWatch(id, box) {
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    if (_dwChartObs[id]) _dwChartObs[id].disconnect();
+    const obs = new ResizeObserver(() => _dwChartDraw(id, box));
+    obs.observe(box);
+    _dwChartObs[id] = obs;
+}
+
+async function _dwMwChartFetch(id) {
+    const def = _dwModuleDef(id) || {};
+    if (def.view !== 'chart' || _dwChartBusy[id]) return;
+    const sel = `.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`;
+    const dw = document.querySelector(sel);
+    if (!dw || dw.style.display === 'none') return;
+    const box = dw.querySelector('[data-dwchart]');
+    if (!box) return;
+    _dwChartWatch(id, box);
+    const pick = _dwMwPick(id, (_lastOverviewData?.module_widgets || {})[def.module] || {}, null);
+    if (!pick.chart) return;
+    _dwChartBusy[id] = true;
+    try {
+        const q = new URLSearchParams({
+            module: pick.chart.series.module, key: pick.chart.series.key,
+            field:  pick.chart.series.field, hours: String(pick.hours), points: '400',
+        });
+        const r = await apiGet('/api/v1/history?' + q.toString());
+        const pts = (r && r.points) || [];
+        const note = box.querySelector('.dw-chart-note');
+        if (!pts.length) {
+            if (note) note.textContent = t('infra_chart_empty');
+            return;
+        }
+        if (note) note.remove();
+        _dwChartPts[id] = {pts, chart: pick.chart};
+        _dwChartDraw(id, box);
+    } catch (e) {
+        const note = box.querySelector('.dw-chart-note');
+        if (note) note.textContent = t('infra_chart_empty');
+    } finally { _dwChartBusy[id] = false; }
+}
+
+/** How full is too full. The same three words the rest of the panel paints a state in, and
+ *  deliberately generous: a store at 80 % is a store, not an incident. */
+function _dwRingState(pct) {
+    const n = Number(pct);
+    if (!Number.isFinite(n)) return 'none';
+    return n >= 95 ? 'error' : (n >= 85 ? 'warn' : 'ok');
+}
+
+/** A size, in the words a person reads. Only where the unit says bytes — a percentage or a
+ *  count is already readable and dividing it would be inventing a unit. */
+function _dwBytes(value, unit) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '';
+    if (!/^(B|bytes?)$/i.test(String(unit || ''))) return `${n} ${unit || ''}`.trim();
+    const steps = [[1024 ** 4, 'TB'], [1024 ** 3, 'GB'], [1024 ** 2, 'MB'], [1024, 'kB']];
+    for (const [step, name] of steps)
+        if (Math.abs(n) >= step) return `${(n / step).toFixed(2)} ${name}`;
+    return `${n} B`;
 }
 
 // ── Usage ring ──

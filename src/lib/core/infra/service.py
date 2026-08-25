@@ -58,6 +58,13 @@ def split_row(name: str, pattern: str) -> tuple:
 # one field away from shipping those the day somebody adds a key.
 _HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual',
                 'maintenance',
+                # What the machine SAID it runs, where nobody has chosen. Not the setting —
+                # the answer the setting stands for; see `enrich_hosts`.
+                'os_auto',
+                # …and who made it, which one it is, and the mark to draw for the maker. The
+                # registry holds none of these: they are the device's own word, and until now
+                # the only screen that showed them was the identity column of one device page.
+                'vendor', 'model', 'brand',
                 'tags', 'description', 'status', 'modules_total', 'modules_active',
                 # …and which of its rows somebody said are worth an alert, so the screen can
                 # show the mark it set. A list of names it already displays: no secret in it,
@@ -69,6 +76,9 @@ def fleet_row(host: dict) -> dict:
     """One host, projected to what the live section shows."""
     out = {k: host.get(k) for k in _HOST_FIELDS}
     out['tags'] = list(host.get('tags') or [])
+    # A dict either way: the row is JSON, and a screen that has to test for null before it can
+    # ask for a name is a screen with two shapes to draw.
+    out['brand'] = dict(host.get('brand') or {})
     out['virtual'] = bool(host.get('virtual'))
     out['maintenance'] = bool(host.get('maintenance'))
     # A host with no enabled checks has no status at all (see hosts.service._host_statuses),
@@ -110,17 +120,38 @@ def summary(rows: list) -> dict:
     return out
 
 
-def sources_of(fields_by_module: dict) -> dict:
-    """``{source_id: {'label', 'rank'}}`` — how to NAME and ORDER the things that answered.
+def sources_of(fields_by_module: dict, declared: dict | None = None) -> dict:
+    """``{source_id: {'label', 'short', 'rank'}}`` — how to NAME and ORDER what answered.
 
     A module records an attribute under the id of whatever produced it (``synology_ups``), and
     an id is not a name: the identity column was printing them raw beside values that were
-    translated. The module already declares the name, per language, beside every measurement
-    that came from the same source — so this reads that declaration instead of asking modules
-    for a second one, and a source that only ever answers TEXT (a profile of pure identity
-    facts) keeps its id, which is a word somebody can act on rather than a blank heading.
+    translated. The module declares the name per language beside every measurement that came
+    from the same source, so this reads that declaration rather than asking for a second one.
+
+    *declared* is the module's own ``sources`` map, and it is read FIRST. A source that only
+    ever answers TEXT contributes no measurement at all, so nothing in the field map carries
+    its name — the VLAN table's card was headed `bridge_vlans` under a list of translated VLAN
+    names. Reported from the screen. Falling back to the id stays: a word somebody can act on
+    beats a blank heading, and a module that declares neither is unchanged.
     """
     out: dict = {}
+    for mod in (declared or {}).values():
+        for src, spec in (mod or {}).items():
+            if str(src or '').strip():
+                brand = (spec or {}).get('brand')
+                out[str(src)] = {'label': str((spec or {}).get('label') or '') or str(src),
+                                 'short': str((spec or {}).get('short') or ''),
+                                 'rank':  int((spec or {}).get('rank') or 0),
+                                 # What this source calls the facts it files under its own
+                                 # keys — the ones the core has no word for. See `attributes`.
+                                 'attrs': dict((spec or {}).get('attrs') or {}),
+                                 # Who MADE the thing that answered — see `identity_of`. Only
+                                 # the module's own declaration carries it: a field map is
+                                 # built from measurements, and a manufacturer is not one.
+                                 'brand': dict(brand) if isinstance(brand, dict) else {},
+                                 # …and how it recognises a maker in what it REPORTS, for the
+                                 # profiles that speak for nobody in particular.
+                                 'brands': list((spec or {}).get('brands') or [])}
     for meta in (fields_by_module or {}).values():
         for spec in (meta or {}).values():
             src = str((spec or {}).get('source') or '').strip()
@@ -133,6 +164,104 @@ def sources_of(fields_by_module: dict) -> dict:
                         'short': str((spec or {}).get('source_short') or '').strip(),
                         'rank': int((spec or {}).get('source_rank') or 0)}
     return out
+
+
+def fleet_identity(status_raw: dict, hosts: list, sources: dict | None = None) -> dict:
+    """``{uid: {os, vendor, model, brand}}`` for a whole fleet, one pass per machine.
+
+    What the screens want out of the recorded state, worked out where the recorded state is
+    already open. Every machine, not only the ones still on ``auto``: the OS is the one fact
+    with a setting to lose to, and skipping the rest of the fleet would mean a switch whose OS
+    somebody pinned also lost its manufacturer.
+    """
+    from lib.core.hosts.resolve import os_from_facts, reported_facts        # noqa: PLC0415
+    out: dict = {}
+    for host in hosts or ():
+        uid = str((host or {}).get('uid') or '')
+        if not uid:
+            continue
+        facts = reported_facts(status_raw, uid)
+        if not facts:
+            continue
+        said = identity_of(facts, sources)
+        said['os'] = os_from_facts(facts)
+        if any(said.values()):
+            out[uid] = said
+    return out
+
+
+def brand_said(vendor: str, sources: dict | None = None) -> dict:
+    """The maker a reported vendor string stands for — ``{}`` when nobody recognises it.
+
+    A server with no vendor MIB still knows what it is: `dmidecode` answers "HP", "Dell Inc.",
+    "QEMU", and the profile that reads DMI is the thing that knows what DMI answers, so the
+    table lives THERE (``brands``, see `lib.core.snmp.profiles`) and this only matches against
+    it. A name nobody recognises is not an error and not a blank — it stays the brand's name,
+    with no mark to draw.
+
+    Matched as a substring on purpose: one machine says "HP", the next "Hewlett-Packard", and
+    the third "HPE ProLiant". They are the same rack.
+    """
+    said = str(vendor or '').strip().lower()
+    if not said:
+        return {}
+    for spec in (sources or {}).values():
+        for entry in (spec or {}).get('brands') or ():
+            if any(w and w in said for w in (entry.get('any') or ())):
+                return {k: v for k, v in entry.items() if k != 'any'}
+    return {}
+
+
+def identity_of(facts: dict, sources: dict | None = None) -> dict:
+    """``{'brand', 'vendor', 'model'}`` — who made this box and which one it is.
+
+    *facts* is :func:`lib.core.hosts.resolve.reported_facts`; *sources* is :func:`sources_of`.
+
+    **The brand comes from whatever RECOGNISED the device, not from a list here.** A profile
+    that matches on `1.3.6.1.4.1.14988` is the only thing in the product that knows a device
+    under that tree was made by MikroTik, and it says so beside the match. The core carries the
+    answer and never learns a manufacturer's name — the same rule that keeps module names out
+    of it.
+
+    **The model comes from the same answerer as the brand.** One registry entry fronts several
+    pieces of equipment: a NAS and the UPS plugged into it both answer "model", and picking the
+    two facts independently is how a Synology came to be listed as a Smart-UPS. Where the brand
+    is not declared by anybody, the lowest-ranked source wins — standards before a vendor's own
+    MIB before what is plugged in, which is the order the identity column already reads in.
+
+    A device whose profile declares no brand but which SAYS who made it (a server with the
+    `extend` directives set up) keeps its word: the vendor it reported is the brand's name, with
+    no mark to draw beside it.
+    """
+    sources = sources or {}
+    rank = lambda src: int((sources.get(src) or {}).get('rank') or 0)          # noqa: E731
+    said = lambda role: sorted((facts or {}).get(role) or (),                  # noqa: E731
+                               key=lambda s: rank(s.get('source')))
+    brand, of_source = {}, ''
+    for cand in sorted({s['source'] for vals in (facts or {}).values() for s in vals},
+                       key=rank):
+        found = (sources.get(cand) or {}).get('brand')
+        if isinstance(found, dict) and found.get('name'):
+            brand, of_source = dict(found), cand
+            break
+    # Whoever declared the brand IS the box, so nothing else gets to answer for it. A NAS with
+    # a UPS plugged into it answers "model" twice and "vendor" once — and the once is the UPS's
+    # — so a fact taken from wherever it happened to appear made a DS1821+ manufactured by APC.
+    # Where nobody declared a brand there is no box to be wrong about: the lowest-ranked source
+    # leads, which is the order the identity column already reads in.
+    def pick(vals):
+        if of_source:
+            return next((v['value'] for v in vals if v['source'] == of_source), '')
+        return vals[0]['value'] if vals else ''
+
+    vendor = pick(said('vendor'))
+    if not brand and vendor:
+        # Nobody's MIB recognised it, but it told us who made it — and one of the profiles may
+        # know that word: the one that READ it does. Failing that the name alone, which is
+        # still an answer and is the only one some machines will ever give.
+        brand = brand_said(vendor, sources) or {'name': vendor}
+    return {'brand': brand, 'vendor': vendor or str(brand.get('name') or ''),
+            'model': pick(said('model'))}
 
 
 def attributes(results: list, sources: dict | None = None) -> list:
@@ -170,26 +299,196 @@ def attributes(results: list, sources: dict | None = None) -> list:
             if not isinstance(facts, dict):
                 facts, source = {source: facts}, ''
             spec = (sources or {}).get(str(source or '')) or {}
+            # Who this card is about. Declared by the source where the source IS a maker's
+            # (`mikrotik_routeros`), and otherwise whatever it reported — the `extend` card of
+            # an HP is a card about an HP, and heading it "Machine" is the one word on it that
+            # carries no information.
+            card = spec.get('brand') if isinstance(spec.get('brand'), dict) else {}
+            if not card:
+                card = brand_said(facts.get('vendor') or '', sources)
             for key, value in facts.items():
                 text = str(value if value is not None else '').strip()
                 if not text:
                     continue      # an empty attribute is one the device did not answer
+                # …and what to CALL it, when only the source knows. A fact filed under a
+                # ROLE is named by the core in every language; one filed under the profile's
+                # own metric key has no such word, and the screen was printing the key with
+                # the lookup prefix still on it: `attr_mt_active_fan`. Empty for a role, which
+                # is what leaves the core's word in charge.
+                named = str((spec.get('attrs') or {}).get(str(key)) or '')
                 out.append({'module': row.get('module') or '', 'row': row.get('row') or '',
+                            'label': named,
                             'item': row.get('name') or '', 'source': str(source or ''),
                             # The name the source gives itself, in the reader's language. Falls
                             # back to the id: a word somebody can act on beats a blank heading.
                             'source_label': str(spec.get('label') or '') or str(source or ''),
                             # …and the name of the thing itself, when it has one.
                             'source_short': str(spec.get('short') or ''),
+                            # …and the mark of whoever made it. `said` when the maker was read
+                            # off the device rather than declared by the profile: a profile
+                            # that speaks for one maker has a better word for its card
+                            # ("RouterOS") than the maker's name, and one that speaks for
+                            # nobody has none — so the screen knows which to head it with.
+                            'source_brand': dict(card),
+                            'source_brand_said': bool(card) and not spec.get('brand'),
                             'key': str(key), 'value': text})
-    # Standards before a vendor's own MIB, and that is the order a person reads these in:
-    # what EVERY device is (RFC 1213), then what this one is (the vendor's MIB), then what is
-    # plugged into it. Alphabetically the standard came last, which is the wrong end.
+    _aggregate_members(out)
+    # WHAT THE BOX IS first, then what every device is, then what is plugged into it.
+    #
+    # It used to be the middle one leading — the standard MIB, on the grounds that "VLANs above
+    # System is the wrong first sentence about a switch". Which was right about the VLANs and
+    # wrong about the order: the first sentence about a switch is that it is a MikroTik
+    # CRS310. Reported from the screen, as three device pages where the card naming the
+    # equipment sat under the one naming its contact address.
+    #
+    # A card with a MAKER is the one about the box, and that is a fact the card carries rather
+    # than a list here of which sources are identities.
     def _rank(a):
-        return int(((sources or {}).get(a['source']) or {}).get('rank') or 0)
+        rank = int(((sources or {}).get(a['source']) or {}).get('rank') or 0)
+        return (0, rank) if a.get('source_brand') else (1, rank)
     out.sort(key=lambda a: (a['row'] != '', a['row'], a['module'], _rank(a), a['source'],
                             a['key']))
     return out
+
+
+#: Beyond this many boxes it stops being an arrangement of a map and starts being somebody
+#: using their account as a key-value store. A fleet that big is not read as a picture anyway.
+LINK_LAYOUT_MAX = 500
+
+#: Far outside any drawing anyone will make, and small enough that no arithmetic on it
+#: overflows into a viewBox nobody can zoom back out of.
+_LINK_LAYOUT_FAR = 1_000_000
+
+
+#: How many drawings one account may hold an arrangement for. Two exist; the cap is here so
+#: the field cannot become somewhere to put anything else.
+LINK_LAYOUT_CANVASES = 8
+
+
+#: Where a drawing's arrangement USED to be kept, for the one that had somewhere of its own
+#: before there were two. A rename that loses an arrangement is a rename that broke something,
+#: and this is read once and written forward under the new field.
+LINK_LAYOUT_WAS = {'infraLinkSvg': 'infra_link_layout'}
+
+
+def map_layouts_of(user) -> dict:
+    """The arrangements an account holds, including one written before the field was keyed.
+
+    Read through here and not off the record, so the day the old field goes there is one place
+    that stops mentioning it.
+    """
+    out = normalise_map_layouts((user or {}).get('infra_map_layouts'))
+    for name, was in LINK_LAYOUT_WAS.items():
+        if not out.get(name):
+            got = normalise_link_layout((user or {}).get(was))
+            if got:
+                out[name] = got
+    return out
+
+
+def normalise_map_layouts(raw) -> dict:
+    """``{drawing: {uid: {'x', 'y'}}}`` — the arrangements one account holds.
+
+    Two drawings take one: the map of addresses and the map of cables. Keyed by the drawing,
+    because where a machine sits on one says nothing about where it should sit on the other.
+    """
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, layout in list(raw.items())[:LINK_LAYOUT_CANVASES]:
+        key = str(name or '').strip()
+        if not key or len(key) > 64 or not key.isidentifier():
+            continue
+        got = normalise_link_layout(layout)
+        if got:
+            out[key] = got
+    return out
+
+
+def normalise_link_layout(raw) -> dict:
+    """``{uid: {'x': float, 'y': float}}`` — with everything that is not that dropped.
+
+    Where somebody has PUT each box on one drawing. Checked here and not at either end,
+    because both ends are the same browser: it is written by one and drawn by another, and a
+    coordinate that is not a number puts a box at NaN — which draws nothing at all and reads as
+    a device that has vanished. The same reason the browser validates its own copy on the way
+    out of local storage.
+
+    Not config. It is a preference about a PICTURE, which is the same thing a dashboard layout
+    is, and it is filed the same way: on the account. Two people looking at one rack are
+    entitled to two arrangements of it.
+    """
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for uid, at in list(raw.items())[:LINK_LAYOUT_MAX]:
+        key = str(uid or '').strip()
+        if not key or len(key) > 64 or not isinstance(at, dict):
+            continue
+        try:
+            x, y = float(at.get('x')), float(at.get('y'))
+        except (TypeError, ValueError):
+            continue
+        if not (-_LINK_LAYOUT_FAR < x < _LINK_LAYOUT_FAR):
+            continue                      # NaN and the infinities fail this too, on purpose
+        if not (-_LINK_LAYOUT_FAR < y < _LINK_LAYOUT_FAR):
+            continue
+        out[key] = {'x': x, 'y': y}
+    return out
+
+
+#: What separates one port from the next where an aggregate lists its members.
+_MEMBER_JOIN = ', '
+
+
+def _member_sort(name: str) -> list:
+    """Numeric-aware, so a list reads the way the front of a switch does: 12 after 3, which an
+    alphabetical sort does not do."""
+    return [int(t) if t.isdigit() else t.lower()
+            for t in re.split(r'(\d+)', str(name or ''))]
+
+
+def _aggregate_members(attrs: list) -> None:
+    """Give every aggregate the list of ports that are IN it.
+
+    The MIB answers this one way round only: a PORT says which aggregator it is attached to,
+    and the aggregator says nothing at all. So the panel showed eight rows called Po1…Po8 and
+    the only way to learn what was in one was to read twenty-eight port rows looking for it.
+
+    Turned round HERE and not in the browser, for the reason every other join on this path is:
+    a second implementation of "which ports are in that bond" is free to disagree with this
+    one, and the day it did the map and the device page would say different things about the
+    same switch.
+    """
+    members: dict = {}
+    spec: dict = {}
+    for a in attrs:
+        if a.get('key') != 'aggregate' or not a.get('row') or not a.get('value'):
+            continue
+        members.setdefault(str(a['value']), []).append(str(a['row']))
+        spec.setdefault(str(a['value']), a)
+    if not members:
+        return
+    # Only where the aggregate is a row this device actually reported. A name that matches no
+    # row is an interface the panel is not reading, and inventing a row for it would put a
+    # heading on the screen with nothing under it.
+    rows = {str(a.get('row') or '') for a in attrs}
+    for name, ports in members.items():
+        if name not in rows:
+            continue
+        src = spec[name]
+        listed = sorted(set(ports), key=_member_sort)
+        attrs.append({'module': src.get('module') or '', 'row': name,
+                      'item': src.get('item') or '', 'source': src.get('source') or '',
+                      'source_label': src.get('source_label') or '',
+                      'source_short': src.get('source_short') or '',
+                      'key': 'aggregate_members',
+                      'value': _MEMBER_JOIN.join(listed),
+                      # The rows this list IS, beside the words it reads as. A fact whose
+                      # value happens to be several row names is a fact somebody wants to
+                      # open one of — and the screen must not learn to split a string on a
+                      # comma to find out which, because a row name may contain one.
+                      'rows': listed})
 
 
 def _tally_fact(tallies: dict, mod: str, field: str, meta: dict, row: dict,
@@ -408,13 +707,22 @@ def _headline_of(meta: dict, row: dict, data: dict, value=None):
     return flag
 
 
-def metrics(results: list, fields_by_module: dict) -> list:
+def metrics(results: list, fields_by_module: dict, names: dict | None = None) -> list:
     """The numbers behind a host's results.
 
     *results* is what :func:`lib.core.hosts.service.build_host_status` returns; each row
     carries its module and its ``data`` bag. *fields_by_module* is
     ``{module: {field: {label, unit}}}`` — the module's own ``__history__`` declaration,
     already translated.
+
+    *names* is ``{module: its name}`` — what to call a measurement's family when the module
+    did not group it. Most do not: grouping by SOURCE is a device-profile idea, so a ping, a
+    certificate and a disk check all arrived with no source at all and landed in one pile with
+    an EMPTY heading. Reported from the screen as a button with a count and no word on it.
+
+    The module is the answer, and it is the same rule the sourced ones follow — grouped by
+    whatever produced them. Its own name, from its own lang file, so the core still ships no
+    string naming a module.
 
     A value is emitted only when the module declared that field AND the value is a number.
     Both halves matter: the first keeps the section from naming things the module did not
@@ -487,8 +795,11 @@ def metrics(results: list, fields_by_module: dict) -> list:
                 'unit':   (meta or {}).get('unit') or '',
                 # Which part of the device this measures, as the module groups it — the
                 # heading a person reads instead of an alphabet of sixty-four field names.
-                'source':       (meta or {}).get('source') or '',
-                'source_label': (meta or {}).get('source_label') or '',
+                # …and where it did not group them, the module itself. An empty heading
+                # is the one word on a rail that carries no information — see `names`.
+                'source':       (meta or {}).get('source') or mod,
+                'source_label': ((meta or {}).get('source_label')
+                                 or (names or {}).get(mod) or mod),
                 # …and what the thing itself is called, when the profile says. The identity
                 # cards and the summary tiles both want this one; the family rail, where you
                 # are choosing among profiles, wants the title.

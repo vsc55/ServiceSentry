@@ -16,7 +16,13 @@
     "hr_system",
     "ip_stats",
     "tcp_udp_stats",
-    "icmp_stats"
+    "icmp_stats",
+    "lldp",
+    "ip_neighbours",
+    "bridge_fdb",
+    "bridge_vlans",
+    "lag",
+    "if_stack"
   ],
   "match": {
     "sysobjectid_prefix": "1.3.6.1.4.1.14988",
@@ -28,7 +34,21 @@
       "hr_system",
       "ip_stats",
       "tcp_udp_stats",
-      "icmp_stats"
+      "icmp_stats",
+      "lldp",
+      "ip_neighbours",
+      "bridge_fdb",
+      "bridge_vlans",
+      "lag",
+      "if_stack"
     ]
-  }
+  },
+  "optional": [
+    "lldp",
+    "ip_neighbours",
+    "bridge_fdb",
+    "bridge_vlans",
+    "lag",
+    "if_stack"
+  ]
 }

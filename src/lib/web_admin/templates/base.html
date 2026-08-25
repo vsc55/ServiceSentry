@@ -1,9 +1,31 @@
 <!DOCTYPE html>
-<html lang="{{ lang }}" data-bs-theme="{{ 'dark' if dark_mode else 'light' }}">
+{# `ss-nocss` is worn until the LAST stylesheet has applied — see the rule below and its
+   counterpart at the top of web_admin.css. A `<link>` in the head is render-blocking, so in
+   theory none of this is needed; in practice a browser gives up waiting after its own
+   paint-suppression window and paints the document bare, which on a slow link is a screenful
+   of serif text and bullet lists. Reported from the screen, with a picture of it. #}
+<html lang="{{ lang }}" class="ss-nocss"
+      data-bs-theme="{{ 'dark' if dark_mode else 'light' }}">
 
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {# The white flash on every reload, and it is not the page's: it is the browser painting
+       its own default canvas in the moment BEFORE a stylesheet has arrived. Two things fix
+       it, and they are both here rather than in the CSS because anything in a stylesheet is
+       by definition too late.
+
+       `color-scheme` tells the browser which canvas to start from — it is what makes the
+       default background, the scrollbars and the form controls dark before any rule of ours
+       is parsed. The inline rule beside it is the same answer said explicitly, for the
+       browsers that take the property late, and it is the ONE colour duplicated out of
+       web_admin.css: `--bs-body-bg` in dark, Bootstrap's own in light.
+
+       Server-rendered from the same flag as `data-bs-theme`, so there is no moment where the
+       document knows the theme and the paint does not. #}
+    <meta name="color-scheme" content="{{ 'dark' if dark_mode else 'light' }}">
+    <style>html{background:{{ '#181818' if dark_mode else '#f5f6fa' }}}
+           html.ss-nocss body{visibility:hidden}</style>
     <title>{% block title %}{{ app_name }}{% endblock %}</title>
     {# Both, deliberately: the SVG is what a modern browser picks and stays crisp at any
        density, the .ico covers the ones that only take a bitmap — and it is the file the
@@ -12,16 +34,24 @@
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg?v={{ asset_v }}">
     <link rel="alternate icon" href="/static/img/favicon.ico?v={{ asset_v }}" sizes="16x16 32x32 48x48">
     <link rel="apple-touch-icon" href="/static/img/favicon.svg?v={{ asset_v }}">
-    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
-    <link href="/static/css/bootstrap-icons.min.css" rel="stylesheet">
+    {# Versioned like our own, so they can be cached for a year instead of revalidated on
+       every load: half a megabyte of CSS costs a round trip each before anything is drawn,
+       and that wait is the whole reason a browser gives up and paints the page bare. #}
+    <link href="/static/css/bootstrap.min.css?v={{ asset_v }}" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.min.css?v={{ asset_v }}" rel="stylesheet">
     <link href="/static/css/web_admin.css?v={{ asset_v }}" rel="stylesheet">
     {% if module_web_styles is defined %}{% for _inc in module_web_styles %}{% include _inc %}{% endfor %}{% endif %}
     {% block extra_head %}{% endblock %}
+    {# The safety net, and it is why the rule above may be written at all: a stylesheet that
+       404s or never arrives would otherwise leave a blank page for ever. After this it is the
+       bare document again — which is what happens today, so the worst case is unchanged and
+       every other case is better. #}
+    <script>setTimeout(function(){document.documentElement.classList.remove('ss-nocss')},4000)</script>
 </head>
 
 <body class="{% block body_class %}{% endblock %}">
     {% block body %}{% endblock %}
-    <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/bootstrap.bundle.min.js?v={{ asset_v }}"></script>
     {# A form that NAVIGATES has nothing to say while it waits. The browser's own progress is
        up in the tab, where nobody looking at a code field is looking, and the button that was
        pressed sits there exactly as it did — so a slow answer and a dead button are the same

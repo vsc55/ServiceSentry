@@ -8,6 +8,624 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.117] - 2026-08-25
+
+### Changed
+- **The address map is a window, and its boxes move.** Reported from the screen: thirty
+  networks meant thirty columns, and the whole picture was then squashed into whatever width
+  the pane happened to have, so the more the fleet had the smaller every name got. The shape —
+  a tree read downwards, what is outside, the way out, the networks, then what is on them —
+  was right; everything around it was not. It is drawn on the shared canvas now, so it zooms
+  and pans instead of being shown all at once at four pixels; the columns that were not worth
+  one are gone; and the boxes can be dragged where the room actually is, saved and restored
+  exactly like the cable map's.
+
+  Two columns disappear on their own: a network nobody is on is a route rather than a place,
+  and a network with ONE machine on it is not a place where two machines meet — that is
+  Docker's 172.17.0.0/16, which every container host has its own of. Both are folded and
+  counted in a sentence rather than dropped. Cables are no longer drawn here either: they have
+  a map of their own, and two pictures of one cable are two things to keep in agreement.
+
+- **The window, the drag and the machine card are shared by both maps.** They were written
+  once, for the cables, and the address map was left without them. A second copy of "where am
+  I looking" would agree with the first until the day it did not, and the day it did not one
+  map would zoom about the cursor and the other about the centre for reasons nobody could
+  find. They live in `_canvas.html`, keyed by the id of the drawing they are over.
+
+- **Hovering a device box reads the device.** The cables already answered theirs in a panel; a
+  box answered with a name and a link count. It now uses the same one — what it is, what it
+  runs, its addresses and the networks they sit on, its way out, how many cables, how much of
+  it is watched — built from what the screen already holds and never from a fetch, because
+  this runs on every pointer that crosses a box. A box under the pointer wins over any cable,
+  and the kept cable comes back the moment the box is left.
+
+- **The link panel follows the pointer, and a click is what keeps it.** Reported from the
+  screen with the panel circled: every hover pinned itself, so the map ended up permanently
+  wearing a reading of a cable nobody had asked about. A hover is a question and ends when the
+  pointer leaves; a click is a decision and survives it. With one kept, hovering another still
+  reads it and letting go returns to the one being worked on. An unkept panel shows the gesture
+  that would keep it instead of a close button — an × on something that disappears when the
+  pointer leaves the cable is a button that cannot be reached to be pressed.
+
+### Added
+- **The Overview has a card for every device SNMP reads.** One row per machine: its worst
+  state, and the handful of figures its own profile called worth reading first — a temperature,
+  the throughput of a switch, a UPS's battery. Pick one device from the selector and it opens
+  onto that device's own readings, with anything of its that is wrong at the top.
+
+  **It is deliberately not a chart of one measurement.** SNMP does not measure one thing: it
+  measures whatever the profiles installed say it measures, so a widget that picked a
+  measurement by name would be a widget that knows what a NAS is — and would be wrong about the
+  next device somebody racks. What every device HAS in common is a state and its `headline`,
+  which the profile declares because which figures answer "how is this machine" is a fact about
+  the equipment. Every word on the card — the labels, the units, the meaning of an enumeration
+  ("1" is Normal) — comes from the profiles, already translated, and the core renders it
+  without learning any of it.
+
+  One figure of each KIND: a RouterOS box answers four temperatures, and four temperatures on
+  one row is the same question four times while the traffic falls off the end. And a switch's
+  eleven hundred ports do not travel — this payload is rebuilt on every refresh of a dashboard
+  somebody leaves open, and a row per port is not a summary.
+
+- **…and a card that draws one of those measurements over time.** A third view for a module
+  widget, beside the stat card and the table: pick a device and one of its measurements and it
+  draws the shape of it — the traffic through a switch, a temperature, a load average — over
+  six hours, a day, a week or a month. Several of them can sit on one dashboard, because one
+  card for the traffic and another for the temperature of the same switch is why anybody adds a
+  second.
+
+  The module says WHICH measurements are worth a picture and WHERE each one is kept: every
+  entry carries `charts`, a list of `{field, label, unit, series}`, and the coordinates are the
+  ones the history already files the value under — so this is a chart of the same numbers the
+  rest of the panel reads and not of a second reading taken another way. It is drawn by the
+  same routine the History section and a device's page use; a second chart routine would be a
+  second opinion about what a gap in a series looks like.
+
+  The picture takes the whole card and is redrawn when the card is resized — a canvas is drawn
+  at the size it had when it was drawn, so a card dragged wider kept a graph the size of the
+  box it was born in. Below the size at which a chart stops being readable the card scrolls
+  both ways instead of clipping it.
+
+- **The chart offers every measurement the device has, not the handful on its card.** A
+  module's widget hands over the figures worth a card — a handful, on purpose, because that
+  payload is rebuilt on every refresh of a dashboard. But a chart is opened to look at
+  something specific, and the handful is not where a per-disk temperature or the traffic of one
+  port lives. The history index already answers exactly that question, with the labels and
+  units the module declares for each field, so the picker asks it — once, and kept — instead of
+  growing the dashboard payload. Grouped by whatever produced each one, and per-row
+  measurements named by their row.
+
+- **Picking a device or a measurement locked the tab up.** The toolbar asked for the series
+  index, the answer redrew the toolbar, and the redraw asked again — and because the second ask
+  is a promise that is ALREADY resolved, the two chased each other through the microtask queue
+  and the page stopped answering. Reported from the screen as Firefox offering to stop it. It
+  is asked once now, per widget, and only while there is no answer yet.
+
+- **…and the card no longer draws the previous measurement under the new one's title.** The
+  points held belong to the measurement they were fetched for, so a pick that changes drops
+  them: a chart headed "Tiempo encendido" drawing the load average is a chart that lies for as
+  long as the network takes.
+
+- **A proportion draws as a ring, because that is what it is.** A store answers as a SIZE and
+  an AMOUNT USED, and two numbers side by side is arithmetic left to the reader when the answer
+  is "83 %" — as a pair of parallel lines over time it is worse. Which of the two numbers is
+  which cannot be guessed from a label that says "Usado" in one profile and "In use" in the
+  next, so the profile already said (`headline: "used"` / `"total"` / `"free"`); this reads
+  that. One per row, which is where they live: a filesystem, a volume.
+
+- **The storage profile was named after the one thing it is not about.** `hr_storage` is
+  titled "Storage (HOST-RESOURCES-MIB)" and its own description says "Storage only: CPU and
+  memory belong to a system profile" — and its short name, the one every card and every rail
+  entry it fills is headed with, said "Memory".
+
+- **A device sampled through the registry has a name again.** It was drawing as
+  `host.0598ae99-8ccf-4e67-…`. The `name` a result is emitted with lives in memory for one
+  cycle — `check_state` has no column for it — so the state read back later carries the key and
+  nothing else, and every screen that shows a name rebuilds it from the CONFIGURATION. A device
+  sampled because the REGISTRY says it is one has no entry there to rebuild it from. So it is
+  asked instead: `sysName`, which every SNMP agent alive answers, recorded like any other fact
+  about the box under a role the core already names.
+
+- **What a widget instance remembers is one list, not three copies of one.** The local save,
+  the account save and the read-back each spelled out the same set of keys, so a new one added
+  to two of them was a setting that survived a reload and vanished on the next machine, with
+  nothing said. One list in the browser, one on the server, and a guard that fails when they
+  disagree.
+
+- **A module's widget is handed its own items, whatever it calls its collection.** `list` is a
+  convention and not a rule: three of the four modules with a widget use it, and the SNMP
+  watchful calls its collection `servers` — so its hook was handed an empty dict. Nothing would
+  have broken loudly; the widget would simply have had no names in it.
+
+- **A device says who made it and which model it is, and the fleet screens say so too.** The
+  facts were already being collected and were reachable in exactly one place: the identity
+  column of one device's page, several clicks in. So a rack of forty machines could be read
+  only one machine at a time for the question somebody asks first — *what IS that box?*
+
+  Marca and model now ride with the machine everywhere it is drawn: a column of the fleet list,
+  the card on the board view, the panel both maps show under the pointer, and the header of the
+  device page beside its name.
+
+  **The manufacturer comes from whatever RECOGNISED the device, and nothing in the core has
+  heard of one.** A profile that matches on `1.3.6.1.4.1.14988` is the only thing in the
+  product that knows that tree belongs to MikroTik, so it says so beside the match — the same
+  rule that keeps module names out of the core, and a guard parses `lib/core` to hold it: the
+  next manufacturer is a file, never a code change. A maker with no mark to draw is not an
+  error — the name alone is an answer, and it is the only one a plain server reporting through
+  its own agent will ever give.
+
+  **What is plugged into a machine does not answer for it.** One registry entry fronts several
+  pieces of equipment: a NAS and the UPS plugged into it both answer "model", and only the UPS
+  answers "vendor" — so taking each fact from wherever it appeared made a DS1821+ manufactured
+  by APC. Whoever declared the brand IS the box, and the model is read from that same answerer.
+  A result about a ROW is not a fact about the box either, or a NAS would be a WD40EFRX.
+
+  **A profile that speaks for nobody in particular still recognises what it READ.** A plain
+  Linux answers no vendor MIB at all — `sysDescr` gives the kernel and stops — and the only
+  thing that knows the box underneath is `dmidecode`, through the `extend` directives. So the
+  profile that reads DMI carries the table of what DMI answers: "HP", "Hewlett-Packard" and
+  "HPE ProLiant" are one rack, and a machine nobody made says "QEMU", which is the truth about
+  a virtual machine.
+
+  **Each card on the device page is headed by whoever it is about.** A card of an HP is a card
+  about an HP, and heading it "Machine" was the one word on it carrying no information. Where a
+  profile speaks for one maker it keeps its own better word — "RouterOS" says which of
+  MikroTik's two answers this is — and wears the mark beside it. And the card about the BOX now
+  leads: it used to be the standard MIB, which put a machine's contact address above the card
+  naming the machine.
+
+  Fourteen marks ship with it, from Simple Icons, under CC0 and unmodified
+  (`static/img/brands/README.md` records where they came from and how to add one). They are
+  painted as masks rather than images, so they take the colour of the text beside them and read
+  on both themes.
+
+- **Three devices that answered and were not heard.** Reported from the screen once the marks
+  were on, as the three that had none.
+
+  A **Linksys** answers its model, its serial and its firmware as columns of the unit table, so
+  every one of them was filed against a ROW — and a fact about a row is not a fact about the
+  machine, which is the rule that stops a NAS being called a WD40EFRX. So a switch that answers
+  all four showed none of them anywhere. `of_device` is exactly that case and the profile had
+  simply never said so.
+
+  A **Synology** card had no mark while a MikroTik's did, and the difference was that one of
+  them declares a value as identity: the card was then created by the loop that draws those,
+  which did not know a maker. The attributes lead now — which is also the order the server
+  sorted them into, so a source that happens to chart an identity value no longer jumps the
+  queue.
+
+  The **UPS plugged into a NAS** is read over USB and its manufacturer reported verbatim:
+  "American Power Conversion", which is APC written out in full and matches nothing. The
+  profile that reads it carries the table, like the one that reads DMI. Its card is headed by
+  the maker with what the profile calls the thing beside it — "APC · SAI": which of them made
+  it, and what it is.
+
+- **The device header no longer repeats the machine.** The maker and model were put beside the
+  name while the identity column was still headed "Machine" and the answer was three clicks
+  down. The column is headed by the maker now, with its mark, directly underneath — so the
+  line above it was the same sentence twice. Reported from the screen, underlined. The fleet
+  list, the board cards and the two maps keep it: none of them has a column to read.
+
+- **A wordmark is not a square.** Upstream draws every mark inside a 24x24 canvas, so one that
+  is a wordmark — Synology, HP — fills the width and leaves two thirds of the height empty:
+  fitted into a square box it drew at a third of the height of the text beside it. Reported
+  from the screen. Each file's viewBox is trimmed to the ink it holds, and a mark is now given
+  a HEIGHT and left to work out its own width — so a wordmark comes out wide and a round mark
+  comes out round, with no table of proportions for anybody to keep in step with the files. A
+  guard computes each path's box and fails when a file's own is bigger, because a logo drawn
+  small looks like somebody's decision rather than a bug.
+
+- **Where there is a mark there is no name.** A logo is the maker's name written by the maker:
+  "[Synology] Synology" is the same word twice, and it was on every card of a machine whose
+  mark we happen to ship. The name stays as the tooltip, and as what a reader with no images
+  gets. A card the profile has a *better* word for keeps it — "[MikroTik] RouterOS" says two
+  different things.
+
+- **A measurement nobody grouped now belongs to its module.** The measurements rail carried a
+  button with a count on it and no word: grouping by SOURCE is a device-profile idea, so a
+  ping, a certificate and a disk check declare none, and all nine landed in one family with an
+  empty heading — the one entry on an index nothing can be looked up in. Reported from the
+  screen. The module is the answer, which is the same rule the sourced ones follow: grouped by
+  whatever produced them, under its own name out of its own lang file.
+
+- **A fact only the profile can name now arrives named.** Three lines of a switch's card read
+  `attr_mt_active_fan`, `attr_mt_routerboot`, `attr_mt_upgrade_to` — the internal key with the
+  lookup prefix still on it. A fact filed under a ROLE is named by the core, in every language
+  and with the same word whoever answered it; one filed under a profile's own metric key has no
+  such word, and the profile had "Ventilador activo" written two lines from the OID with
+  nothing to carry it. Only the ones with no role: a profile does not get to rename "Model" for
+  its own devices, because that word has to be the same on the disk of a NAS and on the chassis
+  of a switch.
+
+- **A maker's name is no longer printed twice.** A machine that says "HP" and "HP EliteDesk 800
+  G5 Desktop Mini" is not saying two things. The front of the model only: "MikroTik-branded CRS"
+  is a model, and cutting the word out of the middle would be the panel editing what the device
+  said.
+
+- **You can ask a device one OID and see what it says.** The question every new profile starts
+  with — *does this box serve that table?* — and the one thing this screen could not answer:
+  everything else on it reads what the profiles say to read, so a table nobody has written a
+  profile for is a table the panel has no way to look at. "Does RouterOS answer `ifStackTable`"
+  could only be settled by somebody with a shell and `snmpwalk`, which is a strange thing to
+  need in front of a panel that is already talking to the device.
+
+  A third tab of the dialog that is already open on one server, so the address, the version,
+  the credential and the bound host are the ones a check would use. The INDEX is a column of
+  its own, because for a good many tables it IS the answer. An empty table and a silent device
+  are said differently — a list of no rows looks identical for both, and they are two different
+  facts: one about the device's configuration, one about the MIB it implements. A read that
+  records nothing, behind `snmp_view`.
+
+- **A profile can read a value that is a whole PATH.** Some agents answer a stack in one
+  string: RouterOS writes `bridgeLAN/bondingTrankSW1/ether11` where a port description goes,
+  and that single answer says which port it is AND what it is inside. On those devices it is
+  the only place the bonding is stated at all — their `ifStackTable` is served and comes back
+  empty, which the panel's own "ask an OID" settled against the box the day it shipped. The
+  separator and which component is which are declared: that a slash means "inside of" is a
+  fact about one agent's naming, and the core guessing it would be the core knowing something
+  about one vendor. So a MikroTik's LAG lists its ports now, the same as a Linksys's.
+
+- **A RouterOS or Linux bond can list its ports too.** IEEE8023-LAG-MIB is what a managed
+  switch answers, and the Linksys listed its LAG's ports while the MikroTik's showed nothing —
+  reported from the screen. The standard answer for everything else is `ifStackTable`, which
+  says which interface runs ON TOP of which: a bond over its ports, a bridge over the bond. It
+  files the same `aggregate` fact, so one join serves both and the page cannot end up with two
+  answers about one bond. Optional in every group whose devices can stack anything.
+
+- **A profile metric can say which ROW a reading is about.** `ifStackTable` is indexed by a
+  PAIR of interfaces and its only column is a row status: the whole answer is in the index, and
+  it is not about the row it sits at. Filed straight it produces one row per layering, named
+  `10.1` or `bond / ether11`, and neither is a row the device reported. `row_index` says which
+  component identifies the row, next to the `from_index` that says which one is the reading.
+
+- **An aggregate now lists the ports that are in it.** The MIB answers this one way round
+  only: a PORT states which aggregator it is attached to, and the aggregator states nothing.
+  So a switch page showed eight rows called Po1…Po8 and the only way to learn what was in one
+  was to read twenty-eight port rows looking for it. Turned round on the server, for the reason
+  every other join on this path is: a second implementation of "which ports are in that bond"
+  is free to disagree with the first, and the day it did the map and the device page would say
+  different things about one switch. Each port in the list opens that port, through the same
+  code that lands there from the map.
+
+- **A profile can say where it reads in a device's identity.** "A vendor's own MIB after the
+  standards" ties every standard profile with every other and falls back to the alphabet,
+  which put the card headed "VLANs" above the one headed "System" — the wrong first sentence
+  about a switch. Which of two standard MIBs is the identity of a box is a fact about those
+  MIBs, so the MIB says: `sys_generic` declares that it leads.
+
+### Changed
+- **`auto` on a host's OS asks the machine.** A device answering SNMP has already said what
+  it runs — `sysDescr` on every agent, and a `lsb_release` extend where somebody set one up —
+  and the panel was throwing that away and guessing. The guess was worse than it sounds:
+  `auto` on a host whose kind is neither local nor remote resolved to the PANEL's platform, so
+  a Synology came out as whatever the server happens to run.
+
+  Read by ROLE and never by module — a module that KNOWS files `os`, one that only has a
+  description string files `description`, and both are declarations the core already
+  understands, so nothing here knows what SNMP is. A setting somebody chose is never
+  overruled, and a switch describing itself perfectly well is still not an operating system:
+  none of the words this panel has fits one, so it stays `auto` rather than being written down
+  as something nobody decided. The screens show the setting with the answer it stands for
+  beside it.
+
+### Fixed
+- **A machine in maintenance lost everything it had ever recorded.** Reported from the screen:
+  a switch put into maintenance opened onto four empty tabs, and fell off the map with it. Its
+  checks are skipped, so the cycle after that prunes every key the module stopped returning —
+  and for a device sampled through the REGISTRY, with an SNMP profile on the host record and
+  no check item behind it, that is all of them. Both screens worked out what a device is made
+  of from the live state alone, so there was nothing left to build a row out of.
+
+  The history is kept for exactly this — `purge_maintenance_states` says so in as many words —
+  it was simply unreachable from there. It is asked the same question the live state is asked,
+  and only where the live state has nothing to say about the device itself, so a machine that
+  is being watched pays nothing for it.
+
+- **A machine in maintenance looked like two different states.** Orange with a cone on the
+  fleet list, grey with a spanner in the infrastructure badge — and grey again on the board
+  cards, which is how it was reported a second time after the badge was fixed. That is what
+  happens when a duplicate is fixed one copy at a time: the badge, the stripe down a card, the
+  dot beside a board column and the box on a map each worked the colour out for themselves.
+  One palette now, in the shared host vocabulary, and maintenance keeps the orange it has
+  always had — deliberately not the yellow of a warning, because "somebody switched this off
+  on purpose" and "something is wrong with it" are not the same news.
+
+- **Every reload flashed white, and then showed the page undressed.** Two halves of one
+  thing. The white is not the page's: it is the browser's own canvas in the moment before any
+  stylesheet has been fetched, which is why the answer cannot live in a stylesheet — the
+  document says which `color-scheme` it is and paints the background inline in the head, from
+  the same flag that sets the theme. The unstyled text is the browser giving up waiting: a
+  `<link>` in the head is render-blocking in theory, and in practice it paints the document
+  bare once its own paint-suppression window runs out. The body is held hidden until the last
+  stylesheet has applied, and released by a timeout as well — a stylesheet that 404s must not
+  leave a blank page, so the worst case stays the bare document.
+
+  And the wait itself is shorter: half a megabyte of stylesheets was revalidated on every
+  load, a round trip each before anything could be drawn. A URL carrying a version cannot go
+  stale — a new build is a new URL — so those are kept for a year, and the vendored ones carry
+  a version now too.
+
+- **A card was headed by a profile id instead of its name.** `bridge_vlans`, over a list of
+  translated VLAN names. The names of the things that answered were read off the FIELD map,
+  and a profile of pure identity facts charts nothing — so it contributed no field, so nothing
+  carried its name. A module hands its sources over the way it already hands over its fields,
+  and the two go through one implementation of "ask a module something at run time" rather
+  than two.
+
+- **An arrangement saved before the canvas was shared came back empty.** Moving it there
+  renamed both the browser key and the account field, so the boxes went to their generated
+  places with nothing on screen to press to get them back — reported in exactly those words.
+  A rename that loses somebody's arrangement is a rename that broke something: the old key and
+  the old field are read once and written forward, on both sides.
+
+- **Clicking a device box only moved it.** The click was on the box, and both halves of the
+  drag take it away: the pointer capture retargets it to the `<svg>`, and a drag redraws the
+  picture, so the element that was pressed is gone before the click can land. It is fired from
+  the pointerup now — a press that did not travel opens the machine, one that did does not.
+
+- **The save button only appeared after leaving the map and coming back.** Moving a box
+  redraws the drawing, which is what keeps the drag smooth, and the toolbar is not in the
+  drawing — while whether there is anything to save is a fact about the arrangement rather than
+  about the picture. It is repainted where the box lands.
+
+- **Resetting the boxes threw away the saved arrangement with no way back.** There is a
+  restore button beside it now, offered when the account holds one that differs from the
+  screen: one button says "forget where I put them", the other "give me back the ones I
+  saved", and a screen with only the first makes the reset unrecoverable while the answer sits
+  on the account.
+
+### Added
+- **…and the arrangement can be saved to the account.** The browser keeps its own copy as
+  the hand moves a box — that is what makes dragging instant, and it works with no account
+  arrangement at all — and a button writes it to the caller's own user record, where a
+  dashboard layout already lives. That copy is the one that follows somebody to another
+  machine, and it wins over the browser's when there is one, because that is what saving it
+  meant. Written by a button on purpose: an arrangement persisted on every pointer move would
+  be a request per frame.
+
+  The section now writes one key on one account, and that is the whole of it. `infra_view`
+  must not become a way around the registry's permissions, so the guard that used to ban write
+  verbs outright now enumerates every write and names the only account field this section may
+  touch: a verb ban reads as the property while only being a proxy for it, and the day a write
+  is genuinely wanted the proxy is what gets edited.
+
+- **The boxes on the link map can be dragged where they belong.** The automatic layout is
+  tiers outwards from the most connected device: a good first answer, and nobody's rack. The
+  person reading the map knows which switch is in which cupboard, and a picture they can
+  arrange the way the room is arranged is a different picture from one they can only look at.
+  The arrangement is kept per browser and survives leaving the screen, and a button appears to
+  put everything back where the layout had it.
+
+  A box already had a gesture — clicking it opens the device — so the press only becomes a
+  drag once it has travelled, measured in screen pixels so the threshold means the same at
+  every zoom, and a drop does not open the machine that was being moved. Positions are applied
+  in the layout rather than at draw time, so the cables follow the boxes instead of ending in
+  the air.
+
+  Nowhere is out of bounds: the drawing's own origin moves to wherever its leftmost and
+  topmost box is, and "fit" starts there rather than at zero. Clamping at the origin instead
+  was reported from the screen — the pane is letterboxed around a fitted drawing, so there is
+  visibly empty room beside the picture and a box would not go into it. The answer is not a
+  wider clamp; it is that the empty room was never part of the drawing, and now it can be. The
+  zoom is still deliberately not remembered: where somebody put a box is a decision, where they
+  happened to be zoomed is a moment.
+
+- **The link banner says WHICH end reported the cable.** "One end says so" is a claim about
+  the evidence, and the first thing anybody asks of it is which one — reported from the screen,
+  where the banner said a cable was one-sided and nothing on it said whether that was the
+  router or the server. The end that reported it now carries a badge, and the silent one
+  carries what its silence means: either nothing on it runs an LLDP agent, or the agent runs
+  and does not publish LLDP-MIB over SNMP, which on Debian is `lldpd` without its AgentX
+  subagent. `by` had been in the payload since the map was built; it just never reached the
+  screen.
+
+- **A neighbour report now names BOTH ends of the cable.** Reported from the rack with the
+  router's own neighbour list open beside the panel: a MikroTik that plainly knows its Proxmox
+  host is on `ether8` drew a cable whose own end read "port not identified". Not a gap in what
+  the device answered — a gap in what was asked. LLDP says "I see that one, and this is the
+  port IT answered on", never "and I answered on mine", so the reporter's own port is in no
+  column of `lldpRemTable`: it is the second component of the row's index, and nothing had
+  gone looking for it there. It is read from there now and named through the local-port table,
+  so one talkative device is enough to identify a whole cable.
+
+  A device's own name for its own port wins over what its neighbour called it. They are
+  usually the same string and occasionally are not, and merging the two would list one port
+  twice and count one cable as two.
+
+- **A profile metric can be read out of the row's INDEX.** A composite index is a fact per
+  component, and SNMP keeps real answers in there — `lldpRemTable` is indexed by (time mark,
+  my port, neighbour). `from_index` says which component the reading is, one-based, the way a
+  MIB writes an INDEX clause, and it composes with `value_label`: pull the port number out of
+  the index, then let the local-port table say what the device calls it. A port number is not
+  a port.
+
+- **The panel can say which LAG a switch's ports belong to.** The link banner showed a
+  MikroTik naming its bond in every port path — `bridge1 > bond1 > ether11-14` —
+  beside four bare `gigabitethernet` chips on the Linksys, which names nothing. That is not a
+  gap in the reading: no neighbour table has the answer, because from outside four separate
+  cables and a four-port aggregate produce the same four rows. It is a configuration fact,
+  and the device states it in IEEE8023-LAG-MIB — a port answers the identifier of the
+  aggregator it is attached to. The new `lag` profile reads it, the network groups carry it as
+  an optional member, and the aggregate is named once in front of its ports, exactly where the
+  path already went on the side that has one.
+
+  Shown only where the device said it of EVERY port of that cable, and only for the ports of
+  THAT cable: three of four naming a LAG is not four in one, and a switch's stack aggregate is
+  not this uplink's. Counting four cables is still not reading that they are one — `bundle`
+  says how many, and only this says whether.
+
+- **A profile metric can be a POINTER at another table.** Half of SNMP answers with a
+  reference: a value whose meaning is "row N of that other table". A port in an aggregate
+  answers `141`, and `141` is the interface index of the LAG — so the fact it carries is
+  "member of Po1" and what would have been recorded is a number. `value_label` says which
+  table the value indexes, the same way `index_label` already says which column names the
+  rows, and for the same reason: an index is not a name, and a screen full of them is one
+  nobody can act on. Declared rather than inferred — nothing in the core can work out what a
+  number points at — and allowed only on a text reading, because a gauge whose value was
+  quietly replaced by a string is a series that stops being a number halfway down.
+
+- **A NAS and a hypervisor can say who they see.** `lldp` is not a switch profile: it answers
+  "who is on the other end of my cable", which anything running an agent can say — and the
+  endpoint's answer is the half of the link a switch cannot give. The switch reports the port
+  MAC it learned; the endpoint reports its own identity, and both ends speaking is what makes
+  a cable confirmed rather than claimed. The Synology group now asks for it (Proxmox already
+  did, through the Linux group). A forwarding table stays with the network groups: a bridge
+  has one and an endpoint has nothing to answer.
+
+- **A group can declare which of its members are optional.** A family is not uniform — every
+  Synology answers its disks, and whether it answers LLDP depends on the DSM version and on
+  somebody switching it on. The day those profiles went into the groups, every device that
+  does NOT answer them stopped collapsing: a plain Synology went from one row to twenty-four
+  chips, and a switch with LLDP off from one to six, neither because anything was wrong with
+  it. A group's cover is now its REQUIRED members, and what it stands for is what the device
+  actually answered. A missing required member still stops it, which is the rule this must not
+  weaken: a partial cover assigns profiles the device never answered, and a wrong profile does
+  not fail — it measures numbers that look fine.
+
+### Fixed
+- **A four-cable trunk was drawn as one cable with one port name.** Reported from both
+  devices' own neighbour tables: the router saw the switch on ether11-14 and the switch saw
+  the router on GE25-28 — eight reports, of which seven were dropped. The link between a pair
+  of machines now keeps EVERY port each side named, sorted the way somebody reads the front of
+  a switch (12 after 3, which an alphabetical sort does not do), and says how many cables that
+  is.
+
+  It is still one line per pair of machines, and that is not laziness: a report only ever
+  names the FAR port — LLDP says "I see that one, and this is the port IT answered on", never
+  "…and I answered on mine" — so the two reports of one cable name two different ports, and
+  there is no key that both tells four cables apart and recognises the two halves of one.
+  Keyed by the far port, an ordinary point-to-point link with an agent at each end becomes two
+  lines, which is the worse lie. Pairing them needs each report to name the reporter's own
+  port (`lldpLocPortDesc`, indexed by the local port number inside the row's own index), which
+  the profile does not yet ask for.
+
+  A port reported as a MAC is now resolved to the interface it belongs to. A switch with no
+  port description answers its portId, which on most of them is that port's hardware address —
+  so one end of every link in that trunk read `00:00:5E:00:53:01` where a port name goes. It
+  is an interface of a machine the panel already reads, and the MAC index says which.
+
+  What is NOT claimed is that several cables are a LAG. That lives in IEEE8023-LAG-MIB, which
+  nothing here collects, and calling four cables an aggregate because there are four of them
+  would be the picture saying more than the data does.
+
+### Changed
+- **The link map fills the work area, and one cable at a time is read in a panel.** Three
+  things reported from three screenshots, and the last one is the interesting one.
+
+  The canvas took `62vh` — a guess about somebody else's window, which left a band of empty
+  page below it. It takes what is left after the note and the legend now.
+
+  The port names came off the drawing entirely. They were captions at the midpoint, then
+  captions at each end, then chips, and every version collided for the same reason: every
+  cable out of a box leaves from the same point, so four labels land in one place beside the
+  switch — and staggering them along their curves only spreads them as far as the curves have
+  diverged, which near the box is not far. Hovering a cable now opens a panel with the whole
+  reading: both machines, both ports, how it is known, and a way into each. It does not clear
+  on pointer-leave, because a panel with four controls that vanishes when you reach for it is
+  one nobody can click.
+
+  And a port PATH is drawn as the things it names. A MikroTik answers
+  `bridge1/bond1/ether11`: the physical port that carried the frame, the bond it
+  is a member of, and the bridge that bond is in. As one string it reads as a port with a long
+  name, and the fact that matters — this is one member of a four-port LAG — is buried in the
+  middle. Each segment is now its own control, because the device wrote the path and each part
+  of it is something it named. A port MAC (what a switch with no port description reports) is
+  shown as what it is and offers no jump: there is no interface by that name to open.
+
+  Each box also carries the icon of what the device IS, through the same helper the list and
+  the cards use — a rack drawn as eight identical boxes makes you read every name to find the
+  switch.
+
+- **The link map can be zoomed, panned and re-fitted.** Reported with a screenshot: eight
+  devices squeezed to the pane's width with the port names on top of each other — two problems
+  in one picture. It is a window onto the drawing now: the wheel zooms about the cursor,
+  dragging the background moves it, and a button brings the whole thing back. A drag that
+  starts on a device does not pan, or opening a machine and moving the map would share a
+  gesture.
+
+  Zoom is the viewBox rather than a scaled group, so the strokes and the labels grow with the
+  picture — zooming in to read a port name actually makes it bigger. And each port label now
+  sits at its OWN end of the cable: every link between the same two tiers crosses the same
+  centre, so a midpoint label was three names written into one ten-pixel channel.
+
+### Fixed
+- **The Links view sat on "loading…" for ever.** The fleet-wide join is fetched once and
+  cached, and whoever is on screen when it lands has to be redrawn — but the redraw named ONE
+  view, written when that was the only one reading the payload. So the request landed, the
+  cache filled, and the answer sat in memory while the screen kept spinning.
+
+  A view now DECLARES that it reads the map (`map: true` in the registry) and the loader asks
+  that. A third reader needs no edit there — which is the actual fix, because the bug was not
+  the condition being wrong, it was living somewhere a second reader had no reason to look.
+
+- **The switch groups did not collect the two things only a switch can answer.** LLDP names the
+  box on the far end of a cable and the port it answered on; the forwarding table places a
+  machine on a port by the MAC it learned there. `grp_network` carried both and `grp_linksys` /
+  `grp_mikrotik` — the groups an actual Linksys and an actual MikroTik get — carried neither,
+  so on a real fleet `net_evidence` held fourteen ARP rows from one hypervisor and nothing
+  else. The link map was correct and empty, which is the worst way for a screen to be right.
+
+  Both groups now include the network set (`lldp`, `ip_neighbours`, `bridge_fdb`,
+  `bridge_vlans`) and supersede it, so an auto-detected device does not end up carrying the
+  same walk twice. A NAS group deliberately does not: a NAS is the far END of a cable, not the
+  thing that can say what is on the other one.
+
+### Added
+- **A second map: what is plugged into what.** The existing one is about ADDRESSES — who can
+  reach whom, the networks they sit on, the way out of each — because that is the layer the
+  panel can always see. It cannot answer which cable goes where, and the equipment can: a
+  switch's neighbour table names the box on the far end and the port it answered on, and its
+  forwarding table places a machine on a port by the MAC it learned there.
+
+  The server already built that adjacency alongside the networks, so this is a second READING
+  of one payload rather than a second endpoint: two joins over the same evidence would be two
+  answers to whether a cable is there. Devices are tiered outwards from whatever is most
+  connected — on a real network, the switch — with the port named at each end.
+
+  It keeps saying HOW it knows, in three strokes: a neighbour both ends agree on, one end
+  saying it alone, and a machine placed by a forwarding table (which says it is *reachable*
+  through that port, not plugged into it). Flattening those into "connected" would be the
+  picture claiming more than the data does. A fleet with no cables says where they would come
+  from rather than shrugging: "no links found" and "nothing here serves LLDP" are the same
+  screen and very different problems.
+
+- **Three more ways to read the fleet in Infrastructure.** The list answers "which machine is
+  in trouble" and the cards answer it from across the room; none of them answered the question
+  a fleet raises once it stops fitting in your head — **which KIND of thing is in trouble**.
+
+  **Grouped** is the table with a heading every time the group changes, folding, with a count
+  and a state chip per group. **By type** puts the kinds down a rail and one kind on screen at
+  a time. Both, because which is better depends on how many kinds there are: with four the
+  grouped view is the better read, with twenty it is a scroll where a rail is a menu — so the
+  fleet decides and the switcher is one click.
+
+  **Board** is a different reading rather than a third grouping: a lane per state, worst on the
+  left, machines as cards. "What needs attention" is a different question from "what is this
+  fleet made of", and answering it by sorting a list makes you count. Maintenance gets its own
+  lane — somebody chose that state, and a box in the "error" column that nobody has to act on
+  is the noise a triage screen exists to remove.
+
+  What it groups BY is a declared list, not something written into the render: device type,
+  tag, operating system, connection or state. A machine appears under each of its tags, groups
+  are ordered worst-first like the list they came from, and all three draw the columns the
+  column chooser is showing — switching how you look at the fleet must not silently change
+  what you are looking at.
+
+### Fixed
+- **A Ceph cluster says one of three things and the panel read two of them.** `HEALTH_WARN` is
+  the state a cluster spends its life in — a disk backfilling, a clock a second out, a pool over
+  its target ratio — and every one of those came out RED, beside the failures that mean a phone
+  call. Reported from the screen. It is an aviso now: amber, still not OK, which is the whole
+  distinction. `HEALTH_ERR` is untouched.
+
+  An answer the panel has no word for — or none at all — is an aviso too, and deliberately not
+  a failure: it is not the same statement as `HEALTH_ERR`, and picking the worse of the two
+  would be the panel deciding something Ceph did not say.
+
+- **The OS column showed the setting and kept the answer to itself.** `auto` learned to ask the
+  machine in this same build, and the fleet list — the screen the column is on — was the one
+  route that never passed the answer through. It read `auto` and stopped there.
+
 ## [0.0.1+build.116] - 2026-08-24
 
 ### Added

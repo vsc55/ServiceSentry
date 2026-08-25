@@ -1,5 +1,9 @@
 {
     "__icon__": "bi-hdd-stack",
+    "__overview_widget__": [
+        {"view": "table", "icon": "bi-hdd-stack", "selector": true, "multi": true, "perm": "modules_view", "cols": 4, "h": 340},
+        {"id": "chart", "view": "chart", "icon": "bi-graph-up", "selector": true, "multi": true, "perm": "modules_view", "cols": 4, "h": 300}
+    ],
     "__module__": {
         "api_ver": "v1",
         "enabled":  {"type": "bool", "default": true},

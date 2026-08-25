@@ -139,6 +139,24 @@ def mac_key(text) -> str:
     return ''.join(hexes) if len(hexes) == 12 else ''
 
 
+def _port_named(port, owner_uid: str, by_mac: dict) -> str:
+    """One port of *owner_uid*, as a name — resolving the MAC form when that is what arrived.
+
+    A switch with no port description answers its portId, which on most of them is that port's
+    hardware address. Reported from a real rack, where one end of every link in a trunk read
+    `00:00:5E:00:53:01` where a port name goes. It is an interface of a machine this panel
+    already reads, and `by_mac` says which — but only when the MAC belongs to the machine the
+    port is supposed to be ON, or the map would put a neighbour's interface on this device.
+    """
+    text = str(port or '').strip()
+    if not text:
+        return ''
+    owner = by_mac.get(mac_key(text))
+    if owner and owner[0] == owner_uid and owner[1]:
+        return owner[1]
+    return text
+
+
 def _split_private(networks: dict) -> None:
     """Mark the networks whose members are not on ONE network at all.
 
@@ -170,13 +188,25 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
     ``{uid: [attribute, …]}`` — whatever ``infra.service.attributes`` produced for each.
     *evidence* is ``{kind: {uid: {key: value}}}`` from ``infra.evidence`` — what devices SAW,
     which is what places a machine on a switch port when it speaks no LLDP.
+
+    An ``lldp`` edge carries ``bundle``: how many cables run between that pair. Four cables
+    between a router and a switch is a trunk, and the map has to draw four lines — the count
+    is what a reader wants and it is what the two devices actually said.
+
+    …and ``lag`` — ``{uid: {port: the aggregate it belongs to}}`` — for the ends that said so.
+    Which of a device's ports are one aggregate is not in any neighbour table: from outside,
+    four cables and a four-port LAG answer identically. It is a configuration fact, and the
+    device states it in IEEE8023-LAG-MIB (the `lag` profile). Present only for the ends that
+    serve it, because the alternative is the map calling four cables a bundle for having
+    counted four of them.
     """
     nodes: list = []
     networks: dict = {}
     edges: list = []
     by_address: dict = {}                # every address the fleet claims → the uid holding it
     by_name: dict = {}                   # …and every name it goes by, for the LLDP join
-    by_mac: dict = {}                    # …and every MAC, for the switch-port one
+    by_mac: dict = {}                    # …and every MAC → (uid, the interface it is on)
+    aggs: dict = {}                      # …and, per uid, which aggregate each port is in
     seen: dict = {}                      # uid → the neighbours it reported
     unplaced: list = []
 
@@ -188,12 +218,26 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
         facts = _facts_of(attrs)
         rows = _rows_of(attrs)
         seen[uid] = [r for r in rows if r.get('neighbour')]
-        # Every MAC this machine owns, for the switch-port join below. Row-bound on purpose:
-        # a MAC belongs to an interface, and a machine has as many as it has interfaces.
+        # Every MAC this machine owns, AND which of its interfaces has it. Row-bound on
+        # purpose: a MAC belongs to an interface, and a machine has as many as it has
+        # interfaces.
+        #
+        # The interface NAME is what turns half a cable into a whole one. A switch with no port
+        # description reports its portId, which on most of them is that port's hardware
+        # address — so the neighbour says "I see 00:00:5E:00:53:01" and the map had a MAC where
+        # a port name goes. That MAC is an interface of a machine this panel already reads, and
+        # this is the index that says which.
         for row in rows:
             key = mac_key(row.get('mac'))
             if key:
-                by_mac.setdefault(key, uid)
+                by_mac.setdefault(key, (uid, str(row.get('row') or '')))
+            # …and which aggregate this port is a member of, where the device said. Row-bound
+            # for the same reason: it is a fact about a PORT. The name is the aggregate's own
+            # interface name, resolved on the way in — the MIB answers an interface index, and
+            # "member of 141" is the same fact nobody can read.
+            agg = str(row.get('aggregate') or '').strip()
+            if agg and row.get('row'):
+                aggs.setdefault(uid, {})[str(row['row'])] = agg
         # What this machine answers to. LLDP names a neighbour by its OWN hostname, which is
         # what `sysName` says and is usually — but not always — what the registry calls it.
         # Both are indexed, because a machine registered as "nas" and calling itself
@@ -237,11 +281,29 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
     # cables. Only where the far end is a machine the panel knows — a neighbour nobody has
     # registered is real, and the map is the wrong place to acquire inventory.
     #
-    # ONE edge per pair, not one per report. A cable with LLDP at both ends is reported
-    # twice, once from each side, and drawing two lines between two boxes would say there are
-    # two cables. Merged instead — and the merge is worth more than the tidiness: an
-    # adjacency both ends agree on is a stronger statement than one only one end made, and
-    # each end names the OTHER's port, so the pair of reports is what fills in both.
+    # ONE line per pair of machines, and ALL the ports each side named.
+    #
+    # The line is per pair because a cable is a pair of PORTS and a report only ever names the
+    # far one: LLDP says "I see that one, and this is the port IT answered on", never "…and I
+    # answered on mine". So two reports of one cable name two different ports, and there is no
+    # key that both tells four cables apart AND recognises the two halves of one. Keyed by the
+    # far port, an ordinary point-to-point link with an agent at each end becomes two lines —
+    # which is a worse lie than the one below.
+    #
+    # What IS knowable is every port each side put on the wire. A four-cable trunk shows up as
+    # four rows in each device's own neighbour table — the router saw the switch on ether11-14,
+    # the switch saw the router on GE25-28 — and every one of those is kept.
+    #
+    # A report ALSO says which of the reporter's own ports it came in on, and that is the half
+    # that used to go missing: it is not in any column, it is the second component of the row's
+    # index (`lldpRemLocalPortNum`), and the profile now reads it from there and names it
+    # through the local-port table. Reported from the rack: a router that knows perfectly well
+    # its neighbour is on ether8 drew a cable whose own end read "port not identified", because
+    # nothing had asked the only place the answer was kept.
+    #
+    # A device's own name for its own port WINS over what its neighbour called it. Not
+    # tidiness: they are usually the same string and occasionally are not, and merging the two
+    # would list one port twice and count one cable as two.
     links: dict = {}
     for uid, neighbours in seen.items():
         for rem in neighbours:
@@ -252,20 +314,61 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
                     break
             if not target or target == uid:
                 continue                 # unknown, or a machine seeing itself down a loop
-            # Sorted, so the same cable keys the same whichever end reported it first.
-            # `from`/`to` are therefore the two ENDS and not a direction: being plugged
-            # together is symmetric, and the drawing has no arrowhead on it.
+            port = _port_named(rem.get('port_desc') or rem.get('port'), target, by_mac)
+            mine = _port_named(rem.get('local_port'), uid, by_mac)
+            # Sorted, so the same cable keys the same whichever end reported it first, and
+            # `from`/`to` are the two ENDS and not a direction: being plugged together is
+            # symmetric and the drawing has no arrowhead on it.
             pair = tuple(sorted((uid, target)))
             link = links.setdefault(pair, {'from': pair[0], 'to': pair[1], 'kind': 'lldp',
-                                           'ports': {}, 'by': [], 'confirmed': False})
-            # The port a report names is the NEIGHBOUR's, not the reporter's: LLDP says
-            # "I see that one, and this is the port IT answered on".
-            port = str(rem.get('port_desc') or rem.get('port') or '').strip()
+                                           'ports': {}, 'by': [], 'confirmed': False,
+                                           # Kept apart until every report is in: which of
+                                           # the two a side ends up showing is decided once,
+                                           # and not by whichever device answered first.
+                                           '_own': {}, '_said': {}})
             if port:
-                link['ports'].setdefault(target, port)
+                link['_said'].setdefault(target, [])
+                if port not in link['_said'][target]:
+                    link['_said'][target].append(port)
+            if mine:
+                link['_own'].setdefault(uid, [])
+                if mine not in link['_own'][uid]:
+                    link['_own'][uid].append(mine)
             if uid not in link['by']:
                 link['by'].append(uid)
             link['confirmed'] = len(link['by']) > 1
+    for link in links.values():
+        own, said = link.pop('_own'), link.pop('_said')
+        for side in set(own) | set(said):
+            got = own.get(side) or said.get(side) or []
+            if got:
+                link['ports'][side] = got
+        for uid in link['ports']:
+            # Numeric-aware: a trunk is ether11, ether12, ether13, ether14 and a list that
+            # reads ether11, ether12, ether13, ether14 is the only one anybody can check
+            # against the front of the switch.
+            link['ports'][uid].sort(key=lambda p: [int(t) if t.isdigit() else t.lower()
+                                                   for t in re.split(r'(\d+)', p)])
+        # How many cables this pair has, as far as either end could tell. Four rows on one
+        # side is four cables — that is what a neighbour table counts — and the larger of the
+        # two sides is the honest answer when they disagree, because a side that reported
+        # fewer is a side that saw fewer, not a rack with fewer wires in it.
+        #
+        # `bundle` says how many, NOT that they are an aggregate. Whether cables are a LAG is
+        # a configuration fact that lives in IEEE8023-LAG-MIB — read by the `lag` profile and
+        # carried below — and calling four cables a bundle for having counted four of them
+        # would be the picture claiming more than the data does.
+        link['bundle'] = max([len(v) for v in link['ports'].values()] or [1], default=1)
+        # …and, for each end that serves IEEE8023-LAG-MIB, which aggregate each of those
+        # ports belongs to. This is the half `bundle` cannot state: the count says four
+        # cables, and only the device itself can say the four are one link. Ports with no
+        # answer are simply absent — a port missing from here is a port whose device did not
+        # say, which is not the same as one that said no.
+        for uid, ports in link['ports'].items():
+            mine = {p: aggs.get(uid, {}).get(p) for p in ports}
+            mine = {p: a for p, a in mine.items() if a}
+            if mine:
+                link.setdefault('lag', {})[uid] = mine
     edges.extend(links[k] for k in sorted(links))
     # …and the machines a switch has placed on a port, for everything that speaks no LLDP.
     # Never over the top of a cable already established: a pair with both is one link, and the
@@ -320,7 +423,8 @@ def _port_edges(evidence: dict, by_mac: dict, known: set, already: set) -> list:
         # …grouped by the port, because the decision is about the port and not about the MAC.
         on_port: dict = {}
         for mac, port in (learned or {}).items():
-            uid = by_mac.get(mac_key(mac))
+            owner = by_mac.get(mac_key(mac))
+            uid = owner[0] if owner else None
             if uid and uid != sw_uid:
                 on_port.setdefault(str(port), set()).add(uid)
         for port, uids in sorted(on_port.items()):

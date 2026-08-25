@@ -107,6 +107,14 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
     idx = metric.get('index_label') or ''
     idx_oids = list(idx) if isinstance(idx, (list, tuple)) else ([idx] if idx else [])
     by_oid = metric.get('scale_by') or ''
+    # The table this reading points AT, when it is a reference and not a measurement.
+    v_oid = metric.get('value_label') or ''
+    # …and which component of the row's own index the reading IS, when it is in there.
+    part = int(metric.get('from_index') or 0)
+    # …and which component says which ROW it is about, for a table indexed by a pair of them.
+    row_at = int(metric.get('row_index') or 0)
+    # …and how to read a value that is a whole PATH rather than one name.
+    path = metric.get('path') or {}
     # The column that says which rows this metric is about, when the profile named one.
     where = metric.get('where') or {}
     w_oid = str(where.get('oid') or '')
@@ -114,7 +122,7 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
     pair = metric.get('with') or {}
     p_oid = str(pair.get('oid') or '')
     for extra in (idx_oids + ([by_oid] if by_oid else []) + ([w_oid] if w_oid else [])
-                  + ([p_oid] if p_oid else [])):
+                  + ([p_oid] if p_oid else []) + ([v_oid] if v_oid else [])):
         if extra not in columns:
             found, _e = walk(oid=extra, **conn)
             columns[extra] = found or {}
@@ -127,13 +135,56 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
         # next hop under the word "gateway".
         if w_oid and str((columns.get(w_oid) or {}).get(index, '')).strip() != where['equals']:
             continue
+        # A reading that is a component of the row's own INDEX. Taken before the lookup
+        # below, so the two compose: a port number out of the index, then the name that
+        # number stands for.
+        bits = str(index).split('.')
+        if part:
+            raw = bits[part - 1] if part - 1 < len(bits) else ''
+        # A reading that REFERS to a row of another table, resolved to that row's name. An
+        # index that does not resolve becomes empty rather than staying a number: zero is what
+        # this table answers for "attached to nothing", and a row that reads "member of 0" is
+        # a statement the device did not make. The profile's own `skip` then drops it.
+        if v_oid:
+            raw = (columns.get(v_oid) or {}).get(str(raw).strip(), '')
         # The device's own name for the row, and the index only when it has none: an SNMP
         # index is not the port on the front of the switch, and a chart legend that says
         # "3" is one nobody can act on. Where there is no name, the table's own id goes in
         # front of the index — storage row 3 and processor row 3 are not the same row.
-        parts = [str((columns.get(o) or {}).get(index, '') or '').strip()
+        # A value that is a path: which part of it names the row, and which part is the
+        # reading. `bridgeLAN/bondingTrankSW1/ether11` is one string saying both — which port
+        # this is, and what it is inside — and it is the only place some agents say either.
+        named = None
+        if path:
+            bits = [b for b in str(raw).split(path['sep']) if b]
+
+            def _at(pos):
+                return bits[pos] if -len(bits) <= pos < len(bits) else ''
+
+            if 'row' in path:
+                named = _at(path['row'])
+                if not named:
+                    continue            # it named no row, so it is about nothing here
+            if 'value' in path:
+                raw = _at(path['value'])
+        # WHICH row: this one, or the one a component of the index names. A table indexed
+        # by a pair is about a row it does not sit at.
+        at = index
+        if row_at:
+            at = bits[row_at - 1] if row_at - 1 < len(bits) else ''
+            if not at:
+                continue
+        parts = [str((columns.get(o) or {}).get(at, '') or '').strip()
                  for o in idx_oids]
-        name = ' / '.join(p for p in parts if p)
+        # The value's own path wins over the naming column: it is the device's word for this
+        # row in the same breath as the reading, and it does not depend on two tables using
+        # the same index — which is exactly what fails on the agents this exists for.
+        name = named if named is not None else ' / '.join(p for p in parts if p)
+        # …and a row the naming table says nothing about is not a row of this device. Only
+        # where the profile pointed at one: everywhere else a nameless row is filed by its
+        # index, which is the existing behaviour and is what a table of anonymous rows needs.
+        if row_at and not name:
+            continue
         if name:
             row_key, row_name = _safe_key(name, index), name
         else:

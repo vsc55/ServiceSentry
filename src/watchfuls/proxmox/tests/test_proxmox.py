@@ -176,10 +176,38 @@ class TestProxmoxCheck:
         res = _run(_item(check_ceph=True), api)
         assert res['pve/ceph']['status'] is True
 
-    def test_ceph_warn(self):
+    def test_ceph_warn_is_an_AVISO_and_not_a_failure(self):
+        """Ceph says one of three things and this read two of them.
+
+        `HEALTH_WARN` is the state a cluster spends its life in — a disk backfilling, a clock a
+        second out, a pool over its target ratio — and every one of those came out red beside
+        the failures that mean a phone call. Reported from the screen. Still not OK: an aviso
+        is amber, which is the point.
+        """
         api = {'/cluster/ceph/status': {'health': {'status': 'HEALTH_WARN'}}}
         res = _run(_item(check_ceph=True), api)
         assert res['pve/ceph']['status'] is False
+        assert res['pve/ceph']['severity'] == 'warning'
+
+    def test_ceph_err_still_is_one(self):
+        api = {'/cluster/ceph/status': {'health': {'status': 'HEALTH_ERR'}}}
+        res = _run(_item(check_ceph=True), api)
+        assert res['pve/ceph']['status'] is False
+        assert res['pve/ceph']['severity'] == 'error'
+
+    def test_and_a_word_nobody_knows_is_not_promoted_to_a_failure(self):
+        """An answer this panel has no word for is not the same statement as `HEALTH_ERR`, and
+        picking the worse of the two would be the panel deciding something Ceph did not say."""
+        for said in ({'health': {'status': 'HEALTH_MAINTENANCE'}}, {}, {'health': {}}):
+            res = _run(_item(check_ceph=True), {'/cluster/ceph/status': said})
+            assert res['pve/ceph']['status'] is False
+            assert res['pve/ceph']['severity'] == 'warning', said
+
+    def test_ceph_ok_carries_no_severity_at_all(self):
+        api = {'/cluster/ceph/status': {'health': {'status': 'HEALTH_OK'}}}
+        res = _run(_item(check_ceph=True), api)
+        assert res['pve/ceph']['status'] is True
+        assert res['pve/ceph']['severity'] == ''
 
     def test_ceph_not_configured(self):
         from watchfuls.proxmox.client import PveError

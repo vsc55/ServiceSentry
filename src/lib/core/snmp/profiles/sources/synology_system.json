@@ -12,6 +12,7 @@
         "en_EN": "Chassis temperature and thermal status, power and fans, plus the model, serial and DSM version. The generic profiles measure what any device does; this measures what only a Synology reports about itself. CPU and memory are deliberately NOT here: a Synology runs net-snmp and serves the whole UCD tree, where the same numbers come with the user/system/idle split, the load averages and swap — `ucd_linux` reads them, and two profiles reporting one value would chart it twice.",
         "es_ES": "Temperatura del chasis y estado térmico, alimentación y ventiladores, más el modelo, número de serie y versión de DSM. Los perfiles genéricos miden lo que hace cualquier dispositivo; éste mide lo que sólo un Synology cuenta de sí mismo. La CPU y la memoria NO están aquí a propósito: un Synology corre net-snmp y sirve el árbol UCD entero, donde los mismos números vienen con el reparto usuario/sistema/inactivo, las medias de carga y el swap — los lee `ucd_linux`, y dos perfiles dando un mismo valor lo graficarían dos veces."
     },
+    "brand": {"name": "Synology", "logo": "synology", "color": "#b5b5b6"},
     "match": {
         "sysobjectid_prefix": "1.3.6.1.4.1.6574",
         "probe": "1.3.6.1.4.1.6574.1.5.1.0"

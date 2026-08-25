@@ -27,14 +27,31 @@ from lib.core.hosts.resolve import host_uid_from_key
 from lib.security import secret_manager
 
 
-def enrich_hosts(hosts: list, statuses: dict, bound: dict) -> list:
+def enrich_hosts(hosts: list, statuses: dict, bound: dict, reported: dict | None = None) -> list:
     """Annotate each host (in place) with ``status`` and module totals.  *statuses* is
     ``{uid: status}``; *bound* is ``{uid: {module: has_active_check}}``.  ``modules_total`` =
     the host's saved modules ∪ any with a bound check; ``modules_active`` = those with at
-    least one enabled check.  Returns *hosts*."""
+    least one enabled check.  Returns *hosts*.
+
+    *reported* is ``{uid: {os, vendor, model, brand}}`` — what each machine has SAID about
+    itself (see ``infra.service.fleet_identity``). Three of those four land as they are: who
+    made a box and which model it is are not settings, so there is nothing for them to argue
+    with.
+
+    ``os`` is the exception, and lands as ``os_auto`` ONLY where the host's own field is
+    ``auto``. It is not the setting, it is the answer the setting stands for — a screen showing
+    "auto" and nothing else is a screen keeping something it already knows to itself, and a
+    screen showing the device's word over a setting somebody chose is worse than either.
+    """
     for h in hosts:
         uid = h.get('uid')
+        said = (reported or {}).get(uid) or {}
         h['status'] = statuses.get(uid, '')
+        h['os_auto'] = (str(said.get('os') or '')
+                        if str(h.get('os') or 'auto').strip().lower() == 'auto' else '')
+        h['vendor'] = str(said.get('vendor') or '')
+        h['model'] = str(said.get('model') or '')
+        h['brand'] = dict(said.get('brand') or {})
         mods = bound.get(uid, {})
         total = set(h.get('modules') or []) | set(mods)
         h['modules_total'] = len(total)
@@ -425,6 +442,36 @@ def _checks_for_host(wa, uid):
                 if isinstance(item, dict) and item.get('host_uid') == uid:
                     grouped.setdefault((bare, coll), {})[key] = item
     return grouped
+
+
+def host_recorded_keys(series: list, uid: str) -> dict:
+    """``{bare_module: {result_key: ''}}`` for what a module RECORDED about the host itself.
+
+    The same question :func:`host_sampled_keys` asks of the live state, asked of the history —
+    and it has to be asked, because the live state is not always there. A machine in
+    maintenance has its checks skipped, so the next cycle prunes every key the module stopped
+    returning, which for a device sampled through the registry is all of them. Reported from
+    the screen: a switch put into maintenance opened onto four empty tabs with a year of
+    history sitting behind it.
+
+    The history is kept on purpose for exactly this (see ``purge_maintenance_states``); it was
+    simply unreachable from a page that worked out what a device is made of from the live
+    state alone.
+    """
+    uid = str(uid or '').strip()
+    out: dict = {}
+    if not uid:
+        return out
+    for row in series or ():
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get('key') or '')
+        if host_uid_from_key(key) != uid:
+            continue
+        # The base key, not the row: `build_host_status` maps `<base>/<row>` back to it, which
+        # is what makes one entry stand for a device's whole table.
+        out.setdefault(_bare(str(row.get('module') or '')), {})[key.split('/', 1)[0]] = ''
+    return out
 
 
 def host_sampled_keys(status_raw: dict, uid: str) -> dict:

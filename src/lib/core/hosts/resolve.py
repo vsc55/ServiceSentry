@@ -96,18 +96,105 @@ def _from_core(spec: dict) -> dict:
     return {**spec, 'fields': fields}
 
 
-def resolve_os(os_value, is_remote: bool, remote_auto: str = 'auto') -> str:
+#: The roles a module files a platform under, most precise first.
+#:
+#: `os` is a module that KNOWS — a net-snmp `extend` running `lsb_release`, which answers
+#: "Debian GNU/Linux 12" and nothing else. `description` is the one every SNMP agent has:
+#: `sysDescr`, which is a sentence with the platform somewhere in it ("Linux nas-01 5.10…",
+#: "Hardware: Intel64 … Windows Version 10.0"). Both are declarations the core already
+#: understands, so this reads a ROLE and never a module — nothing here knows what SNMP is.
+_OS_ROLES = ('os', 'description')
+
+
+def reported_facts(status_raw: dict, uid: str) -> dict:
+    """``{role: [{'value', 'source'}, …]}`` — what a device has SAID about ITSELF.
+
+    One pass over the recorded state for every role at once. Three screens want three
+    different facts out of the same scan (what it runs, who made it, which model it is), and
+    three passes over the whole fleet's state to answer them would be two too many.
+
+    **The device and not its rows.** A result carrying ``_row`` is about one disk, one port,
+    one volume — a Synology files a model per disk, so a scan that took them would answer "this
+    machine is a WD40EFRX". Which is the same rule the identity column already draws by, and it
+    is why a fact here can be trusted as a fact about the box.
+
+    The *source* travels with the value because a registry entry can front several pieces of
+    equipment: a NAS and the UPS plugged into it both answer "model", and the two answers are
+    only telling apart by which of them said it.
+    """
+    out: dict = {}
+    uid = str(uid or '').strip()
+    if not uid or not isinstance(status_raw, dict):
+        return out
+    seen = set()
+    for mod_status in status_raw.values():
+        if not isinstance(mod_status, dict):
+            continue
+        for res_key, info in mod_status.items():
+            if host_uid_from_key(res_key) != uid or not isinstance(info, dict):
+                continue
+            data = info.get('other_data')
+            if not isinstance(data, dict) or str(data.get('_row') or '').strip():
+                continue                    # a row's facts belong to that row
+            for source, facts in (data.get('_attrs') or {}).items():
+                if not isinstance(facts, dict):
+                    continue
+                for role, value in facts.items():
+                    role, value = str(role or '').strip(), str(value or '').strip()
+                    if not role or not value or (role, source) in seen:
+                        continue
+                    seen.add((role, source))
+                    out.setdefault(role, []).append({'value': value,
+                                                     'source': str(source or '')})
+    return out
+
+
+def reported_os(status_raw: dict, uid: str) -> str:
+    """The platform a device has SAID it runs, out of what a module recorded about it.
+
+    ``''`` when nothing said anything, or when what it said maps to no platform this panel
+    has a word for — a switch describes itself perfectly well and the answer is still not an
+    operating system, and writing one down would be deciding something nobody decided.
+    """
+    return os_from_facts(reported_facts(status_raw, uid))
+
+
+def os_from_facts(facts: dict) -> str:
+    """The platform out of an already-taken scan (:func:`reported_facts`).
+
+    Split from the scan so the fleet screen, which wants three facts, pays for one pass.
+    """
+    from lib.util.os_detect import OS_AUTO, OS_OTHER, canonical_os  # noqa: PLC0415
+    for role in _OS_ROLES:
+        for said in (facts or {}).get(role) or ():
+            got = canonical_os(str((said or {}).get('value') or ''))
+            if got and got not in (OS_AUTO, OS_OTHER):
+                return got
+    return ''
+
+
+def resolve_os(os_value, is_remote: bool, remote_auto: str = 'auto', reported: str = '') -> str:
     """Resolve a host OS token.
 
-    A concrete value is returned as-is (lower-cased).  ``'auto'`` resolves to
-    this process's platform on a **local** host; on a **remote** host it cannot
-    be probed here, so *remote_auto* is returned — the monitor keeps ``'auto'``
-    (resolved later over SSH), while the web discovery flow assumes ``'linux'``.
+    A concrete value is returned as-is (lower-cased) — it is what somebody chose, and nothing
+    the device says overrules a decision.
+
+    ``'auto'`` means work it out, and the first place to look is what the machine SAID: a
+    device answering SNMP has told us its platform, and the panel was throwing that away and
+    guessing instead. `auto` on a host whose kind is neither local nor remote resolved to the
+    PANEL's platform, which is how a Synology came out as whatever the server runs.
+
+    Failing that, the old answer: this process's platform on a **local** host, and on a remote
+    one *remote_auto* — the monitor keeps ``'auto'`` (resolved later over SSH), while the web
+    discovery flow assumes ``'linux'``.
     """
+    from lib.util.os_detect import OS_AUTO, OS_OTHER, canonical_os, local_os  # noqa: PLC0415
     os_ = str(os_value or 'auto').strip().lower()
     if os_ != 'auto':
         return os_
+    said = canonical_os(reported) if str(reported or '').strip() else ''
+    if said and said not in (OS_AUTO, OS_OTHER):
+        return said
     if is_remote:
         return remote_auto
-    from lib.util.os_detect import local_os  # noqa: PLC0415
     return local_os()

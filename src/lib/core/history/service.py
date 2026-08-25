@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 
-from lib.modules.history_fields import module_history_fields
+from lib.modules.history_fields import module_history_fields, module_history_sources
 
 
 def _pretty_name(modules_dir: str | None, module: str, lang: str) -> str:
@@ -118,6 +118,10 @@ def history_meta(modules_dir: str | None, module: str, lang: str,
             'label': labels.get(primary) or cfg.get('label') or _prettify_field(primary),
         }
     cfg['fields'] = fields
+    # …and what to CALL the things that produced them, where the module fronts several. A
+    # profile of pure identity facts records no measurement, so nothing in `fields` carries its
+    # name — and the card it fills was headed with its raw id.
+    cfg['sources'] = module_history_sources(module, lang, var_dir)
     # Translate the top-level label too (single-series Y-axis / metric label).
     if primary:
         cfg['label'] = labels.get(primary) or cfg.get('label') or _prettify_field(primary)

@@ -1,3 +1,17 @@
+/* The page is dressed: reveal it.
+
+   `ss-nocss` is put on <html> by the document itself and hides the body until this file —
+   the LAST stylesheet — has applied. A <link> in the head is render-blocking in theory; in
+   practice a browser paints the document bare once its own paint-suppression window runs
+   out, which on a slow link is a screenful of serif text and bullet lists. Reported from the
+   screen, with a picture of it — and what it was showing was the boot splash below,
+   undressed.
+
+   There is a timeout in the head that takes the class off again, so a stylesheet that never
+   arrives cannot leave a blank page: the worst case is the bare document, which is what
+   happens today. */
+html.ss-nocss body { visibility: visible; }
+
 /* ================================================================
    ServiceSentry — web admin stylesheet
    Loaded after bootstrap.min.css; overrides Bootstrap defaults
@@ -1137,6 +1151,10 @@
 .ss-fs-8 { font-size: 2rem; }
 .ss-fs-9 { font-size: 2.5rem; }
 .ss-pointer { cursor: pointer; }
+/* A thing you can pick up and put down. Generic on purpose: the link map's boxes are the
+   first, and "what does a draggable element look like" is not a fact about that map. */
+.ss-grab { cursor: grab; }
+.ss-grab:active { cursor: grabbing; }
 /* .ss-factgrid : the facts that identify a thing — a disk's bay, model and serial — above
    whatever is being measured about it.
    A GRID and not a flex row, which is what it was: with flex, each pair takes the width of its
@@ -1371,6 +1389,61 @@
    reported from the routing matrix in exactly those words. Two classes and not one option,
    because which of the two is right is a fact about the TABLE, not a preference. */
 .ss-hover-accent { --bs-table-hover-bg: rgba(var(--bs-primary-rgb), .22); }
+
+/* ── Infrastructure: the grouping views ─────────────────────────────── */
+/* A group heading inside a table. Not a row of data and it must not read as one: the fill
+   marks it as furniture, and it is the same one the notification routing matrix uses for the
+   same job — which is exactly why the tables that carry these pair it with `.ss-hover-accent`
+   rather than the grey hover, or the row under the cursor looks like another heading. */
+.ss-group-row {
+    padding: .3rem .5rem;
+    font-weight: 600;
+    background: var(--bs-tertiary-bg);
+}
+/* The rail of groups. A fixed column so the table beside it does not reflow every time a
+   group name is longer than the last, and its own scroll so twenty device types do not push
+   the machines off the bottom of the page. */
+.ss-infra-rail {
+    flex: 0 0 15rem;
+    max-width: 15rem;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+/* The triage board scrolls sideways rather than squeezing: five lanes of cards inside a
+   narrow pane is five columns of one word each. */
+.ss-infra-board { overflow-x: auto; }
+.ss-infra-board > div { min-width: 12rem; }
+
+/* The link map is a WINDOW onto a drawing, not a picture stretched to the pane: it has zoom
+   and pan, and both need a viewport to be anything. It takes the WORK AREA — everything left
+   after the note above it and the legend below — rather than a slice of the viewport: `62vh`
+   was a number that left a band of empty page under the map on a tall screen and cut it off
+   on a short one, which is what a fixed height always is. Reported from the screen with the
+   wasted band circled.
+
+   The chain is the one the rail boxes already use: the scroll container becomes a flex column
+   that does NOT scroll, and the fill inside it takes what is left. `grab` because it moves;
+   an SVG shows a text caret otherwise. */
+.ss-vscroll:has(.ss-mapfill) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ss-mapfill { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.ss-infra-canvas {
+    flex: 1 1 auto;
+    min-height: 240px;
+    background: var(--bs-body-bg);
+    cursor: grab;
+}
+
+/* The panel that describes one cable. Opaque and over the drawing: it carries four controls
+   — both machines and both ports — and a translucent one sitting on a diagram is a set of
+   buttons you cannot read the labels of. */
+.ss-infra-linkinfo {
+    background: var(--bs-body-bg);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
 .ss-hover-accent > tbody > tr > * { transition: background-color .12s; }
 
 /* ── Notifications sub-tab nav-pills ───────────────────────────────── */
@@ -2591,4 +2664,40 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .ss-masked {
     -webkit-text-security: disc;
     text-security: disc;
+}
+
+/* A manufacturer's mark. An <img> given a HEIGHT and left to work out its own width: each
+   file's viewBox is trimmed to the ink it holds (see static/img/brands/README.md), so a
+   wordmark comes out wide and a round mark comes out round. Fitted into a square instead,
+   Synology's wordmark drew a third of the height of the text beside it.
+
+   The files are black silhouettes with no colour of their own, which is right on a light
+   panel and invisible on a dark one — so on dark they are inverted, which turns black into
+   white and leaves the shape alone. The file is named by the PROFILE that recognised the
+   device; the core never holds a list of manufacturers. */
+.ss-brand {
+    display: inline-block;
+    width: auto;
+    max-width: 7em;
+    vertical-align: -0.15em;
+    flex: 0 0 auto;
+}
+
+[data-bs-theme="dark"] .ss-brand { filter: invert(1); }
+
+/* …and the maker nobody has a mark for: the initial on their own colour. White on it
+   unconditionally, because these are brand colours and a brand chooses a dark one far more
+   often than not. */
+.ss-brand-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15em;
+    height: 1.15em;
+    border-radius: .2em;
+    color: #fff;
+    font-size: .8em;
+    font-weight: 600;
+    line-height: 1;
+    flex: 0 0 auto;
 }

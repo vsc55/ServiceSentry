@@ -20,6 +20,12 @@
     "tcp_udp_stats",
     "icmp_stats",
     "lldp",
-    "ip_neighbours"
+    "ip_neighbours",
+    "if_stack"
+  ],
+  "optional": [
+    "lldp",
+    "ip_neighbours",
+    "if_stack"
   ]
 }

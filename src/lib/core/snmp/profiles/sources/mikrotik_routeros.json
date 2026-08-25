@@ -9,6 +9,7 @@
     "es_ES": "Lo que un equipo con RouterOS sabe de su propio hardware: temperaturas, tensión de entrada, potencia y corriente, ventiladores y fuentes, el RouterOS y el RouterBOOT que corre, sus módulos SFP y sus puertos PoE. Interfaces, sistemas de ficheros y memoria son MIBs estándar y son de los perfiles genéricos."
   },
   "short_label": {"en_EN": "RouterOS", "es_ES": "RouterOS"},
+  "brand": {"name": "MikroTik", "logo": "mikrotik", "color": "#293239"},
   "match": {
     "sysobjectid_prefix": "1.3.6.1.4.1.14988",
     "probe": "1.3.6.1.4.1.14988.1.1.7.3.0"

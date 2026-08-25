@@ -508,6 +508,34 @@ class TestATableThatDescribesTheBox:
         res, _m = env.run(_server(), dev)
         assert res['srv/eth0']['other_data']['_attrs']['p1']['mac'] == 'aa:bb'
 
+    def test_a_switch_chassis_table_is_the_switch(self, env):
+        """The SHIPPED Linksys profile, run.
+
+        Reported from the screen twice: a switch with no maker and no model anywhere, and then
+        —once the profile said `of_device`— the same facts still filed under row "1". The
+        second report is the interesting one and it is not a bug: what a device already
+        RECORDED is what the screen reads, and this changes what the next sample looks like.
+        The stored one is rewritten on the next collection.
+
+        A stack of two units folds to "LGS528, LGS528", which is what the box is made of. One
+        unit — the case in every rack this was written for — is the model.
+        """
+        from lib.core.snmp import profiles as _p                  # noqa: PLC0415
+        lks = _p.catalog()['linksys_switch']
+        chassis = [m for m in lks['metrics']
+                   if m['key'] in ('lks_model', 'lks_serial', 'lks_firmware')]
+        assert len(chassis) == 3
+        env.profile('p1', chassis)
+        dev = _Dev(walks={m['walk']: ({'1': v}, None) for m, v in zip(
+            sorted(chassis, key=lambda m: m['key']),
+            ['1.1.0.29', 'LGS528', '14D10C98700389'])})
+        res, _m = env.run(_server(), dev)
+        assert list(res) == ['srv/metrics'], f'a switch is not a row of itself: {list(res)}'
+        facts = res['srv/metrics']['other_data']['_attrs']['p1']
+        assert facts['model'] == 'LGS528'
+        assert facts['serial'] == '14D10C98700389'
+        assert facts['firmware'] == '1.1.0.29'
+
     def test_the_shipped_profile_asks_for_the_address_table(self):
         """RFC 1213, so it is answered by anything with an agent — and it belongs in the
         profile that already answers "what is this box"."""

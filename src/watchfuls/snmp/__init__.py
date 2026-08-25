@@ -23,6 +23,7 @@ from lib.core.snmp.client import SnmpClient, _HAS_PYSNMP
 from .defaults import _SCHEMA, _CHECK_DEFAULTS, _SERVER_DEFAULTS
 from lib.core.snmp.mibs.admin import MibAdmin, startup_compile_mibs as _startup_compile_mibs, _HAS_PYSMI
 from .sampler import SnmpSampler
+from .widget import SnmpWidget
 
 # What is left here is the module itself: the class, what it declares and what it offers the
 # panel. Everything that answered a different question has its own file — speaking SNMP to a
@@ -32,7 +33,7 @@ from .sampler import SnmpSampler
 
 
 class Watchful(MibAdmin, SnmpChecks, SnmpClient, SnmpActions, SnmpSampler,
-               ModuleBase):
+               SnmpWidget, ModuleBase):
     """Multi-server SNMP OID monitoring."""
 
     ITEM_SCHEMA = _SCHEMA
@@ -69,6 +70,19 @@ class Watchful(MibAdmin, SnmpChecks, SnmpClient, SnmpActions, SnmpSampler,
         # Told where the library is and how to log, rather than reaching into this object for
         # both: it was the one thing in the core's MIB administration that needed an instance.
         _startup_compile_mibs(str(getattr(monitor, 'dir_var', '') or '').strip(), self._debug)
+
+def discover_history_sources(lang: str = 'en_EN', var_dir: str = '') -> dict:
+    """``{profile id: {label, short, rank}}`` — what to call the things that answered.
+
+    Separate from the fields on purpose. A screen groups a device's facts by whatever produced
+    them, and a profile of pure identity facts (the VLAN table, the neighbour table) records no
+    measurement at all — so reading the names off the field map left exactly those cards headed
+    with a raw id.
+    """
+    cdir = _profiles.custom_dir(var_dir)
+    catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+    return {pid: _profiles.history_source(prof, lang) for pid, prof in catalog.items()}
+
 
 def discover_history_fields(lang: str = 'en_EN', var_dir: str = '') -> dict:
     """Every value a device profile can record, named — see lib.modules.history_fields.

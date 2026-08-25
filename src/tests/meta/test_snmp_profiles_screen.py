@@ -854,3 +854,47 @@ class TestWhereAConnectionProfileIsDrawn:
                 words[key] = line.split(':', 1)[1].strip().rstrip(',')
             assert words['host_type'] != words['host_kind'], (
                 f'{lang}: both fields are labelled {words["host_type"]}')
+
+
+class TestAskingTheDeviceOneThingIsOnTheScreen:
+    """The panel is already talking to the device; needing a shell and `snmpwalk` to find out
+    whether it serves a table is a strange thing to need in front of it.
+
+    It is a third tab of the dialog that is already open on one server, and not a screen of its
+    own: the connection, the credential and the bound host are all resolved there already, and
+    a second place to pick a device is a second answer to "which device".
+    """
+
+    def _ui(self):
+        return _read(os.path.join(WEB, 'profiles_ui.html'))
+
+    def test_it_is_a_tab_of_the_dialog_that_is_already_on_a_device(self):
+        ui = self._ui()
+        assert "'walk', 'bi-terminal'" in ui
+        assert "_snmpTestView === 'walk'" in ui
+
+    def test_and_it_asks_through_the_same_server_the_dialog_is_about(self):
+        """The whole server travels, for the same reason it does everywhere else here: the
+        answer depends on the address, the version and the identity."""
+        body = self._ui().split('async function _snmpTestWalk(')[1].split(chr(10) + '}')[0]
+        assert '_snmpCfgFor(_snmpTestPath)' in body
+        assert "'walk_oid'" in body
+
+    def test_the_index_is_a_column_of_its_own(self):
+        """For a good many tables it IS the answer: `ifStackTable` is keyed by a pair of
+        interfaces and its only column is a row status."""
+        body = self._ui().split('function _snmpTestWalkHtml(')[1].split(chr(10) + '}')[0]
+        assert 'test_walk_index' in body and 'test_walk_value' in body
+        assert 'r.index' in body
+
+    def test_an_empty_table_does_not_read_as_a_silent_device(self):
+        body = self._ui().split('function _snmpTestWalkHtml(')[1].split(chr(10) + '}')[0]
+        assert 'd.answered' in body
+        assert 'test_walk_empty' in body and 'test_walk_none' in body
+
+    def test_and_the_tables_worth_one_press_are_there_to_press(self):
+        """Typing an OID from memory is the barrier this exists to remove."""
+        ui = self._ui()
+        assert '_SNMP_WALK_PRESETS' in ui
+        for oid in ('1.3.6.1.2.1.31.1.2.1.3', '1.2.840.10006.300.43.1.2.1.1.13'):
+            assert oid in ui, oid

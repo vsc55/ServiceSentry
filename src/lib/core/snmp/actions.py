@@ -413,7 +413,8 @@ class SnmpActions:
                        'kind': m.get('kind', 'gauge'), 'unit': m.get('unit', ''),
                        'chart': m.get('chart', 'line'),
                        'oid': m.get('oid', ''), 'walk': m.get('walk', '')}
-                for opt in ('index_label', 'width', 'scale', 'max_rate', 'role'):
+                for opt in ('index_label', 'value_label', 'from_index', 'row_index',
+                            'path', 'width', 'scale', 'max_rate', 'role'):
                     if m.get(opt) not in (None, ''):
                         row[opt] = m[opt]
                 metrics.append(row)
@@ -762,7 +763,7 @@ class SnmpActions:
                     roots.add(str(m['walk']).strip('.'))
                 idx = m.get('index_label') or ''
                 for extra in (list(idx) if isinstance(idx, (list, tuple)) else [idx]) \
-                        + [m.get('scale_by') or '']:
+                        + [m.get('scale_by') or '', m.get('value_label') or '']:
                     if extra:
                         roots.add(str(extra).strip('.'))
         if not todo:
@@ -781,7 +782,7 @@ class SnmpActions:
                     continue
                 idx = m.get('index_label') or ''
                 for extra in (list(idx) if isinstance(idx, (list, tuple)) else [idx]) \
-                        + [m.get('scale_by') or '']:
+                        + [m.get('scale_by') or '', m.get('value_label') or '']:
                     if extra and extra not in extras:
                         extras.append(extra)
             wanted = sum(1 for t in todo if served.get(t[0], True))
@@ -1090,6 +1091,81 @@ class SnmpActions:
             },
             'seconds': round(time.time() - started, 1),
         }
+
+    #: How many rows one look at a table brings back. A walk of `mib-2` is not what this is
+    #: for — it is for reading ONE table, and a table nobody can read on a screen is a table
+    #: whose shape is already clear from its first few hundred rows.
+    _WALK_MAX = 500
+
+    @classmethod
+    def walk_oid(cls, config: dict | None = None) -> dict:
+        """Walk one OID against one device and hand back what it said, index by index.
+
+        The question every new profile starts with and nothing here could answer: **does this
+        box serve that table?** Everything else on this screen reads what the profiles say to
+        read — a table nobody has written a profile for is a table the panel has no way to
+        look at, so "does RouterOS answer `ifStackTable`" could only be settled by somebody
+        with a shell and `snmpwalk`. Which is a strange thing to need, in front of a panel
+        that is already talking to the device.
+
+        The INDEX is kept and shown separately, because for a good many tables it is the
+        answer: `ifStackTable` is keyed by a pair of interfaces and its only column is a row
+        status — read as values it says nothing at all.
+
+        Reads and records nothing: `snmp_view`, unaudited, like everything else on this
+        screen that only asks.
+        """
+        cfg = config or {}
+        if not _HAS_PYSNMP:
+            return {'ok': False, 'message': 'pysnmp is not installed'}
+        host = str(cfg.get('host', '') or '').strip()
+        if not host:
+            return {'ok': False, 'message': 'no host'}
+        oid = str(cfg.get('oid', '') or '').strip().strip('.')
+        if not oid or not _profiles._OID_RE.match(oid):
+            return {'ok': False, 'message': 'no oid'}
+
+        conn = cls._conn_of(cfg)
+        limit = max(1, min(cls._WALK_MAX, int(cfg.get('max_rows') or cls._WALK_MAX)))
+        started = time.time()
+        got, err = cls._snmp_walk_oid(oid=oid, max_rows=limit, **conn)
+        rows = [{'index': idx, 'value': str(val)[:_TEST_CHARS]}
+                for idx, val in (got or {}).items()]
+        return {
+            'ok': not err or bool(rows),
+            'host': host, 'oid': oid,
+            # What the library calls it, where it knows. An unnamed object still carries its
+            # OID and its values — the name is what makes the answer readable, not what makes
+            # it an answer.
+            'object': cls._oid_name(oid, str(cfg.get('__var_dir__') or '')),
+            'rows': rows,
+            # An empty table and a device that did not answer look identical in a list of no
+            # rows, and they are the two different answers this exists to tell apart.
+            'answered': not err,
+            'message': str(err or ''),
+            'truncated': len(rows) >= limit,
+            'elapsed_ms': int((time.time() - started) * 1000),
+        }
+
+    @classmethod
+    def _oid_name(cls, oid: str, var_dir: str) -> dict:
+        """``{name, module, type}`` for an OID, from the compiled library. Empty when it is
+        not in there, which is not an error: the walk is about the device, not the library."""
+        if not var_dir:
+            return {}
+        try:
+            index = _mib_resolver.get_oid_index(var_dir) or {}
+        except Exception:  # pylint: disable=broad-except
+            return {}
+        parts = str(oid).split('.')
+        for i in range(len(parts), 2, -1):
+            found = index.get('.'.join(parts[:i]))
+            if found:
+                return {'oid': '.'.join(parts[:i]),
+                        'name': found.get('mib_name', ''),
+                        'module': found.get('mib_module', ''),
+                        'type': found.get('mib_type', '')}
+        return {}
 
     @classmethod
     def test_profiles_start(cls, config: dict | None = None) -> dict:

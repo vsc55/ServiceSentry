@@ -218,6 +218,52 @@ class TestCollapse:
         cat = {'a': _prof('a', 'x'), 'b': _prof('b', 'y'), 'g': _grp('g', 'a', 'b')}
         assert P.collapse(cat, ['a']) == ['a']
 
+    def test_a_family_member_the_device_does_not_answer_does_not_break_the_group(self):
+        """A family is not uniform. Every Synology answers its disks; whether it answers LLDP
+        depends on the DSM version and on somebody switching it on — and the same is true of a
+        switch's neighbour table.
+
+        The day those went into the groups, every device that does NOT answer them stopped
+        collapsing: a plain Synology went from one row to twenty-four chips, and a switch with
+        LLDP off from one to six. Not because anything was wrong with it — because the group
+        had learned a profile it does not have. So a group declares which of its members are
+        optional, and a cover is what the device actually answered."""
+        cat = P.catalog()
+        base = [p for p in cat if p.startswith('synology_')] + [
+            'hr_storage', 'hr_system', 'ucd_linux', 'sys_generic', 'if_generic', 'ip_stats',
+            'tcp_udp_stats', 'icmp_stats']
+        assert P.collapse(cat, base) == ['grp_synology'], 'a NAS without LLDP'
+        assert P.collapse(cat, base + ['lldp', 'ip_neighbours']) == ['grp_synology'], (
+            'and one with it')
+
+    def test_an_optional_member_is_still_sampled_when_it_is_there(self):
+        """Optional is about what may STAND for a device, not about what is collected: a NAS
+        assigned the group is walked for LLDP, and whether it answers is the device's business
+        and not the assignment's."""
+        cat = P.catalog()
+        got = P.expand(cat, ['grp_synology'])
+        assert 'lldp' in got and 'ip_neighbours' in got
+
+    def test_a_required_member_that_is_missing_still_stops_the_group(self):
+        """The rule the optional list must not weaken. A partial cover would assign profiles
+        the device never answered, and a wrong profile does not fail — it measures numbers
+        that look fine."""
+        cat = P.catalog()
+        base = [p for p in cat if p.startswith('synology_')] + [
+            'hr_storage', 'hr_system', 'ucd_linux', 'sys_generic', 'if_generic', 'ip_stats',
+            'tcp_udp_stats']                      # icmp_stats missing: not optional
+        assert P.collapse(cat, base) != ['grp_synology']
+
+    def test_the_declaration_survives_the_catalogue(self):
+        """It is read off the normalised profile, and normalisation drops what it does not
+        know about. Written in five group files and read by nobody is exactly how this
+        shipped the first time."""
+        cat = P.catalog()
+        assert P.optional_of(cat['grp_synology']) == {'lldp', 'ip_neighbours'}
+        assert 'bridge_fdb' in P.optional_of(cat['grp_linksys'])
+        # …and something a group does not include cannot be optional in it.
+        assert 'bridge_fdb' not in P.optional_of(cat['grp_synology'])
+
     def test_a_real_synology_collapses_to_one_row(self):
         """The shipped catalogue, not a fixture: the vendor profiles and the standard ones a
         NAS also answers become "Synology NAS", and nothing else.

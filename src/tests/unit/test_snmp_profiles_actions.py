@@ -48,6 +48,11 @@ class _Acts(SnmpActions):
         cls._got.append(kw['oid'])
         return cls._answers.get(kw['oid'], (None, 'no such name'))
 
+    #: A whole table at a time — `{root: {index: value}}` — for the tests that are about one.
+    _walked: dict = {}
+    #: …and what the device said instead of answering, when it said nothing.
+    _walk_error: str = ''
+
     @classmethod
     def _snmp_walk_oid(cls, **kw):
         """The device as a set of subtrees. Keys are the suffix under the walked root, which
@@ -55,6 +60,11 @@ class _Acts(SnmpActions):
         cls._got.append(kw['oid'])
         root = str(kw['oid']).strip('.')
         cap = int(kw.get('max_rows') or 0) or 512
+        if cls._walk_error:
+            return {}, cls._walk_error
+        if cls._walked or cls._walk_error:
+            table = dict(list((cls._walked.get(root) or {}).items())[:cap])
+            return table, None
         rows = {}
         for oid, value in sorted(cls._walks.items()):
             if oid == root:
@@ -72,6 +82,8 @@ def acts():
         _got = []
         _answers = {}
         _walks = {}
+        _walked = {}
+        _walk_error = ''
     return _A
 
 
@@ -752,3 +764,57 @@ class TestWhatTheAssignmentActuallyReads:
         from watchfuls.snmp import sampler as _s
         assert _a._read_metric is _s.read_metric
         assert 'read_metric(' in inspect.getsource(_s.SnmpSampler._sample_metric)
+
+
+class TestAskingTheDeviceOneThing:
+    """The question every new profile starts with, and the one this screen could not answer.
+
+    Everything else here reads what the profiles say to read, so a table nobody has written a
+    profile for is a table the panel has no way to look at — and "does RouterOS answer
+    `ifStackTable`" could only be settled by somebody with a shell and `snmpwalk`, which is a
+    strange thing to need in front of a panel that is already talking to the device. Reported
+    from the screen in exactly those terms.
+
+    The INDEX is kept apart from the value because for a good many tables it IS the answer:
+    `ifStackTable` is keyed by a pair of interfaces and its only column is a row status.
+    """
+
+    def test_it_needs_a_device_and_an_oid(self, acts):
+        for cfg in ({}, {'host': ''}, {'host': 'x'}, {'host': 'x', 'oid': ''},
+                    {'host': 'x', 'oid': 'nonsense'}, {'oid': '1.3.6'}):
+            got = acts.walk_oid(cfg)
+            assert got['ok'] is False, cfg
+
+    def test_what_came_back_keeps_its_index(self, acts):
+        acts._walked = {'1.3.6.1.2.1.31.1.2.1.3': {'10.1': '1', '10.2': '1'}}
+        got = acts.walk_oid({'host': '10.0.0.1', 'oid': '1.3.6.1.2.1.31.1.2.1.3'})
+        assert got['ok'] is True
+        assert [r['index'] for r in got['rows']] == ['10.1', '10.2']
+        assert [r['value'] for r in got['rows']] == ['1', '1']
+
+    def test_an_empty_table_and_a_silent_device_are_told_apart(self, acts):
+        """A list of no rows looks identical for both, and they are the two different answers
+        this exists to distinguish: "it serves that and has nothing in it" is a fact about the
+        device's configuration, "it did not answer" is a fact about the MIB it implements."""
+        acts._walked = {}
+        empty = acts.walk_oid({'host': '10.0.0.1', 'oid': '1.3.6.1.2.1.31.1.2.1.3'})
+        assert empty['answered'] is True and empty['rows'] == []
+        acts._walk_error = 'No SNMP response received before timeout'
+        quiet = acts.walk_oid({'host': '10.0.0.1', 'oid': '1.3.6.1.2.1.31.1.2.1.3'})
+        assert quiet['answered'] is False and quiet['message']
+
+    def test_it_says_when_there_is_more_than_it_brought(self, acts):
+        """A table cut off at the limit and one that ends there look the same, and the whole
+        point of the screen is not having to guess."""
+        acts._walked = {'1.1': {str(i): 'v' for i in range(20)}}
+        got = acts.walk_oid({'host': '10.0.0.1', 'oid': '1.1', 'max_rows': 20})
+        assert got['truncated'] is True
+        got = acts.walk_oid({'host': '10.0.0.1', 'oid': '1.1', 'max_rows': 50})
+        assert got['truncated'] is False
+
+    def test_and_it_is_a_read_that_records_nothing(self, acts):
+        """`snmp_view`, unaudited, like everything else here that only asks. An audit log that
+        records every read is one nobody reads."""
+        from lib.core.snmp import manifest as _m                 # noqa: PLC0415
+        assert 'walk_oid' in _m.ACTIONS
+        assert 'walk_oid' in _m.READ_ONLY

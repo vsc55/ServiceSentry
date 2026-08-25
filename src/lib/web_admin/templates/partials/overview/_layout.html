@@ -135,17 +135,21 @@ function _dwOnGridHover(e) {
 // suffix.  The core knows NOTHING about any specific module — icon/title/view/perm
 // come from MODULE_WIDGETS and the data from the module's overview_widget() hook.
 // view 'stat' = a stat card (auto height, not resizable); 'table' = a dense listing
-// (fixed/resizable height) with an optional scope selector.
+// (fixed/resizable height) with an optional scope selector; 'chart' = the shape of ONE of
+// the module's measurements over time (fixed/resizable height, like a table).
 const _DW_MODULE = {};
 for (const [mod, def] of Object.entries((typeof MODULE_WIDGETS !== 'undefined' ? MODULE_WIDGETS : {}) || {})) {
     const widgets = (def.widgets && def.widgets.length) ? def.widgets : [def];
     for (const w of widgets) {
         const isTable = w.view === 'table';
+        // A chart is a box with a height like a table's, not a figure that sizes to its
+        // content like a stat card: a graph two lines tall is a graph nobody can read.
+        const isChart = w.view === 'chart';
         const perm = w.perm || def.perm || 'modules_view';
         _DW_MODULE['mw_' + mod + (w.id ? '_' + w.id : '')] = {
-            module: mod, view: isTable ? 'table' : 'stat',
+            module: mod, view: isTable ? 'table' : (isChart ? 'chart' : 'stat'),
             icon: w.icon || def.icon || 'bi-grid-1x2', dCols: w.cols || def.cols || 4,
-            dH: isTable ? (w.h || 340) : 'auto', hasH: isTable,
+            dH: (isTable || isChart) ? (w.h || 340) : 'auto', hasH: isTable || isChart,
             multi: !!w.multi, perm, scope: w.scope || '', link: w.link || '',
             selector: !!w.selector, label_i18n: def.label_i18n || {},
             canShow: (p) => !perm || p.has(perm),
@@ -162,6 +166,7 @@ function _dwIsMulti(id) { const d = _dwModuleDef(id); return !!(d && d.multi); }
 function _dwWidgetIsStat(id, scope) {
     const d = _dwModuleDef(id);
     if (!d) return false;
+    if (d.view === 'chart') return false;     // a chart is never a figure that sizes to itself
     return d.view !== 'table' || scope === 'sum';
 }
 // Effective height config for an instance (a table widget collapses to auto height
@@ -178,7 +183,9 @@ function _dwLabel(def) {
     if (def.lkey) return t(def.lkey);
     const li = def.label_i18n || {};
     const base = li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG] || def.module || '';
-    return def.view === 'table' ? `${base} · ${t('dw_mw_table')}` : base;
+    if (def.view === 'table') return `${base} · ${t('dw_mw_table')}`;
+    if (def.view === 'chart') return `${base} · ${t('dw_mw_chart_view')}`;
+    return base;
 }
 function _dwIsSpacer(id) { return String(id).startsWith('spacer:'); }
 function _dwDef(id) {
@@ -313,6 +320,22 @@ function _syncRemoteDashboard(me) {
     if (c && c.offsetParent !== null && typeof renderOverview === 'function') renderOverview();
 }
 
+//: What a widget INSTANCE remembers beyond its size and place — the choices somebody made
+//: on THAT card. Two cards of the same kind side by side, one showing the traffic and the
+//: other the temperature, is a legitimate thing to want, and a single global preference
+//: would forbid it.
+//:
+//: ONE list, because it was three copies of the same spread — the local save, the account
+//: save and the one that reads a layout back — and a fourth key added to two of them is a
+//: setting that survives a reload and is lost on the next machine, with nothing said.
+const _DW_INSTANCE_KEYS = ['sev', 'srvf', 'modf', 'mws', 'mwchart', 'mwlvl', 'mwfig', 'mwh'];
+
+function _dwInstanceState(el) {
+    const out = {};
+    for (const k of _DW_INSTANCE_KEYS) if (el.dataset[k]) out[k] = el.dataset[k];
+    return out;
+}
+
 function _dwSave() {
     const grid = document.getElementById('dashboardGrid');
     if (!grid) return;
@@ -321,12 +344,7 @@ function _dwSave() {
         cols:   parseInt(el.dataset.cols) || 2,
         h:      el.dataset.h  || 'auto',
         hidden: el.style.display === 'none',
-        ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
-        ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
-        ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
-        ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
-        ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
-        ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
+        ..._dwInstanceState(el),
     }));
     const json = JSON.stringify(layout);
     localStorage.setItem(_dwKey(), json);
@@ -479,6 +497,7 @@ function _dwSetModuleScope(sel) {
     const dw = sel.closest('.dw[data-wid]');
     if (!dw) return;
     if (sel.value === '') delete dw.dataset.mws; else dw.dataset.mws = sel.value;
+    delete _dwChartPts[dw.dataset.wid];      // a different device is different points
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwRefreshState(dw);                  // a different kind can be in a different state
@@ -505,6 +524,38 @@ function _dwSetModuleChart(cb) {
     const dw = cb.closest('.dw[data-wid]');
     if (!dw) return;
     if (cb.checked) dw.dataset.mwchart = '1'; else delete dw.dataset.mwchart;
+    const content = dw.querySelector('.dw-content');
+    if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
+    _dwSave();
+}
+
+// Which of a device's measurements a chart widget draws, and over how long. Per instance,
+// like the scope: two cards side by side, one showing the traffic and the other the
+// temperature of the same switch, is the reason anybody puts two of them on a dashboard.
+function _dwSetModuleFigure(sel) { _dwSetChartOpt(sel, 'mwfig'); }
+function _dwSetModuleHours(sel)  { _dwSetChartOpt(sel, 'mwh'); }
+
+/** Redraw one widget's toolbar in place — for a control whose options arrive late.
+ *
+ *  Only while the toolbar is on screen, which is edit mode: rebuilding a bar nobody is looking
+ *  at is work for nothing, and the next time it IS drawn the answer will have arrived.
+ */
+function _dwToolbarRefresh(id) {
+    const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    const dw = document.querySelector(`.dw[data-wid="${sel}"]`);
+    const bar = dw && dw.querySelector('.dw-toolbar');
+    if (!bar || !_dwEditing) return;
+    bar.outerHTML = _dwToolbar(id, parseInt(dw.dataset.cols) || 2, dw.dataset.h || 'auto');
+}
+
+function _dwSetChartOpt(sel, key) {
+    const dw = sel.closest('.dw[data-wid]');
+    if (!dw) return;
+    if (sel.value === '') delete dw.dataset[key]; else dw.dataset[key] = sel.value;
+    // The points held are the OLD measurement's. Kept, the card redrew the previous series
+    // under the new one's title until the fetch came back — a chart headed "Tiempo encendido"
+    // drawing the load average, which is a chart that lies for as long as the network takes.
+    delete _dwChartPts[dw.dataset.wid];
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwSave();
@@ -741,12 +792,7 @@ async function _dwSaveDb() {
         cols:   parseInt(el.dataset.cols) || 2,
         h:      el.dataset.h || 'auto',
         hidden: el.style.display === 'none',
-        ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
-        ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
-        ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
-        ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
-        ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
-        ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
+        ..._dwInstanceState(el),
     }));
     localStorage.setItem(_dwKey(), JSON.stringify(layout));
     _dwSavePending = true;
@@ -774,12 +820,7 @@ async function _dwSetDefault() {
         cols:   parseInt(el.dataset.cols) || 2,
         h:      el.dataset.h || 'auto',
         hidden: el.style.display === 'none',
-        ...(el.dataset.sev ? { sev: el.dataset.sev } : {}),
-        ...(el.dataset.srvf ? { srvf: el.dataset.srvf } : {}),
-        ...(el.dataset.modf ? { modf: el.dataset.modf } : {}),
-        ...(el.dataset.mws ? { mws: el.dataset.mws } : {}),
-        ...(el.dataset.mwchart ? { mwchart: el.dataset.mwchart } : {}),
-        ...(el.dataset.mwlvl ? { mwlvl: el.dataset.mwlvl } : {}),
+        ..._dwInstanceState(el),
     }));
     const r = await apiPut('/api/v1/overview/default-layout', { layout });
     if (r && r.ok) {
@@ -873,6 +914,40 @@ function _dwToolbar(id, cols, h, item) {
             title="${escAttr(t('dw_mw_chart'))}">
             <input type="checkbox" class="form-check-input mt-0 dw-mwchart"${ch === '1' ? ' checked' : ''}
                 onchange="_dwSetModuleChart(this)"><i class="bi bi-pie-chart"></i></label>`;
+    }
+    // Chart widget: which device, which of its measurements, and over how long. The same
+    // three questions a chart on any other screen of this panel asks.
+    if (def?.view === 'chart') {
+        const wd = ((_lastOverviewData || {}).module_widgets || {})[def.module] || {};
+        const entries = wd.entries || [];
+        const cur = _dwMwPick(id, wd, item);
+        const dev = (cur.entry || {}).id || '';
+        tb += `<select class="form-select form-select-sm dw-mws py-0" style="width:auto;min-width:7em;font-size:.72rem"
+            onchange="_dwSetModuleScope(this)">${entries.map(e =>
+                `<option value="${escAttr(e.id)}"${e.id === dev ? ' selected' : ''}>${esc(e.name)}</option>`
+            ).join('')}</select>`;
+        // Every measurement the device has, not the handful on its card — the history index
+        // answers that and is fetched once. Until it lands the card's own list is offered, so
+        // the control works from the first paint instead of being empty for a moment.
+        _dwSeriesReady(id);
+        const figs = _dwSeriesFor(def.module, dev, (cur.entry || {}).charts || []);
+        const now = (cur.chart || {}).field || '';
+        const groups = [];
+        for (const f of figs) {
+            const last = groups[groups.length - 1];
+            if (last && last.name === f.group) last.items.push(f);
+            else groups.push({name: f.group, items: [f]});
+        }
+        const opt = f => `<option value="${escAttr(f.value)}"${
+            f.value === now ? ' selected' : ''}>${esc(f.label)}</option>`;
+        tb += `<select class="form-select form-select-sm py-0" style="width:auto;min-width:8em;max-width:16em;font-size:.72rem"
+            onchange="_dwSetModuleFigure(this)">${groups.map(g => g.name
+                ? `<optgroup label="${escAttr(g.name)}">${g.items.map(opt).join('')}</optgroup>`
+                : g.items.map(opt).join('')).join('')}</select>`;
+        tb += `<select class="form-select form-select-sm py-0" style="width:auto;font-size:.72rem"
+            onchange="_dwSetModuleHours(this)">${_DW_CHART_HOURS.map(([h, lbl]) =>
+                `<option value="${h}"${h === cur.hours ? ' selected' : ''}>${esc(lbl)}</option>`
+            ).join('')}</select>`;
     }
     // Width
     tb += `<button class="btn btn-dw btn-secondary" onclick="_dwCycleW(this,-1)" title="${escAttr(t('widget_shrink_w'))}"><i class="bi bi-chevron-left"></i></button>`;

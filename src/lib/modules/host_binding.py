@@ -30,12 +30,28 @@ loop that runs one. Mixed into ``ModuleBase``: every watchful calls ``self.host_
 ``self.host_cmd_for`` as its own methods, and they are — the class composes them.
 """
 
-from lib.core.hosts.resolve import host_profile_specs, resolve_os
+from lib.core.hosts.resolve import host_profile_specs, reported_os, resolve_os
 from lib.util import os_detect
 
 
 class HostBinding:
     """Resolving an item's host, its credential and how to run a command on it."""
+
+    def _reported_os(self, uid) -> str:
+        """What the fleet's recorded state says this machine runs, or ``''``.
+
+        Read from the state the monitor is already holding rather than from a store: this runs
+        once per check, and a query per check for a fact that changes when a machine is
+        reinstalled would be a query nobody needs.
+        """
+        status = getattr(getattr(self, '_monitor', None), 'status', None)
+        data = getattr(status, 'data', None)
+        if not isinstance(data, dict) or not uid:
+            return ''
+        try:
+            return reported_os(data, uid)
+        except Exception:  # pylint: disable=broad-except
+            return ''      # a platform we could not work out is the same as one nobody said
 
     def resolve_host(self, item: dict) -> dict:
         """Merge a referenced host's connection over a check item.
@@ -170,13 +186,13 @@ class HostBinding:
                     break
         if cred_uid:
             resolved = self._apply_cred(resolved, cred_uid)
-        # Expose the host's OS so modules that run OS-specific commands can
-        # branch on it.  'auto' on a LOCAL host resolves to this process's
-        # platform; on a remote host it stays 'auto' (resolved over SSH by the
-        # consumer when needed).
-        # 'auto' on a local host resolves to this process's platform; on a remote
-        # host it stays 'auto' (resolved over SSH by the consumer when needed).
-        resolved['host_os'] = resolve_os(primary.get('os'), is_remote)
+        # Expose the host's OS so modules that run OS-specific commands can branch on it.
+        #
+        # `auto` asks the DEVICE first, out of what a module has already recorded about it —
+        # see `reported_os`. Then the old ladder: this process's platform on a local host, and
+        # on a remote one `'auto'`, resolved over SSH by the consumer when needed.
+        resolved['host_os'] = resolve_os(
+            primary.get('os'), is_remote, reported=self._reported_os(primary.get('uid')))
         # The kind ITSELF and not a two-way flag: `host_exec` has three answers to give
         # now (over SSH, here, nowhere), and collapsing them to remote/local is what made a
         # device with no connection run its commands on the panel.

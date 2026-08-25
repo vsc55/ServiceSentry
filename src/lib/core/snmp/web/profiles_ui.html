@@ -1325,6 +1325,7 @@ function _snmpTestOpen(pathStr, _value, _btn, cfgProvider) {
     _snmpDeviceCfg = (typeof cfgProvider === 'function') ? cfgProvider : null;
     _snmpTestData = null;
     _snmpTestView = 'read';
+    _snmpWalkData = null;
     const set = (id, text) => { const e = _snmpTestEl(id); if (e) e.textContent = text; };
     set('snmpTestTitle', _snmpTestT('test_title', 'Test against the device'));
     set('snmpTestRunLabel', _snmpTestT('test_run', 'Test again'));
@@ -1545,17 +1546,144 @@ function _snmpTestRender() {
     const tabs = _snmpTestEl('snmpTestTabs');
     if (tabs) {
         const defs = [
-            ['read', 'bi-check2-square', _snmpTestT('test_tab_read', 'Captured'), d.metrics.length],
-            ['gap', 'bi-eye-slash', _snmpTestT('test_tab_gap', 'Not captured'), d.sweep.objects.length],
+            ['read', 'bi-check2-square', _snmpTestT('test_tab_read', 'Captured'),
+             d.metrics.length],
+            ['gap', 'bi-eye-slash', _snmpTestT('test_tab_gap', 'Not captured'),
+             d.sweep.objects.length],
+            // No count: this one has nothing until somebody asks it something.
+            ['walk', 'bi-terminal', _snmpTestT('test_tab_walk', 'Ask an OID'), null],
         ];
         tabs.innerHTML = defs.map(([k, icon, label, n]) => `
             <button type="button" class="btn ${k === _snmpTestView ? 'btn-primary' : 'btn-secondary'}"
                     onclick="_snmpTestSetView('${k}')" aria-pressed="${k === _snmpTestView}">
-                <i class="bi ${icon} me-1"></i>${esc(label)} (${n})</button>`).join('');
+                <i class="bi ${icon} me-1"></i>${esc(label)}${n === null ? '' : ` (${n})`}</button>`).join('');
     }
 
     const q = ((_snmpTestEl('snmpTestSearch') || {}).value || '').trim().toLowerCase();
-    body.innerHTML = _snmpTestView === 'gap' ? _snmpTestGapHtml(d, q) : _snmpTestReadHtml(d, q);
+    body.innerHTML = _snmpTestView === 'walk' ? _snmpTestWalkHtml()
+                   : _snmpTestView === 'gap' ? _snmpTestGapHtml(d, q)
+                   : _snmpTestReadHtml(d, q);
+}
+
+// ── Asking the device one thing ─────────────────────────────────────────────
+//
+// The question every new profile starts with, and the one thing this screen could not do:
+// **does this box serve that table?** Everything else here reads what the profiles say to
+// read, so a table nobody has written a profile for is a table the panel has no way to look
+// at — and "does RouterOS answer ifStackTable" could only be settled by somebody with a shell
+// and `snmpwalk`, which is a strange thing to need in front of a panel already talking to the
+// device.
+//
+// The INDEX is a column of its own, because for a good many tables it IS the answer:
+// `ifStackTable` is keyed by a pair of interfaces and its only value is a row status.
+
+//: The last walk: `{oid, rows, …}` as the action returned it, or `null` before the first.
+let _snmpWalkData = null;
+let _snmpWalkBusy = false;
+
+//: A few tables worth one press, because typing an OID from memory is the barrier this
+//: screen exists to remove. Their own MIB names, so the list says what it is asking for.
+const _SNMP_WALK_PRESETS = [
+    ['ifStackTable', '1.3.6.1.2.1.31.1.2.1.3'],
+    ['ifName', '1.3.6.1.2.1.31.1.1.1.1'],
+    ['ifDescr', '1.3.6.1.2.1.2.2.1.2'],
+    ['dot3adAggPortAttachedAggID', '1.2.840.10006.300.43.1.2.1.1.13'],
+    ['lldpRemSysName', '1.0.8802.1.1.2.1.4.1.1.9'],
+    ['lldpLocPortDesc', '1.0.8802.1.1.2.1.3.7.1.4'],
+];
+
+function _snmpTestWalkHtml() {
+    const d = _snmpWalkData;
+    const rows = (d && d.rows) || [];
+    const head = `<div class="px-2 pt-2 pb-1">
+        <div class="input-group input-group-sm mb-2">
+            <span class="input-group-text"><i class="bi bi-diagram-3"></i></span>
+            <input type="text" class="form-control font-monospace" id="snmpWalkOid"
+                   value="${escAttr((d && d.oid) || '')}"
+                   placeholder="1.3.6.1.2.1.31.1.2.1.3"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();_snmpTestWalk(this);}">
+            <button class="btn btn-primary" id="snmpWalkBtn" onclick="_snmpTestWalk(this)"
+                ><i class="bi bi-play-fill me-1"></i>${esc(_snmpTestT('test_walk_run', 'Ask'))}</button>
+        </div>
+        <div class="d-flex flex-wrap gap-1 mb-2">
+            ${_SNMP_WALK_PRESETS.map(([name, oid]) => `
+                <button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+                        onclick="_snmpTestWalkPreset(${jsStr(oid)})"
+                        title="${escAttr(oid)}">${esc(name)}</button>`).join('')}
+        </div>
+    </div>`;
+    if (_snmpWalkBusy) {
+        return head + `<div class="text-muted text-center py-4 small">
+            <span class="spinner-border spinner-border-sm me-2"></span>${esc(t('loading'))}</div>`;
+    }
+    if (!d) {
+        return head + `<div class="text-muted text-center py-4 small">${esc(_snmpTestT(
+            'test_walk_hint', 'Type an OID, or pick one above, to see what this device answers.'))}</div>`;
+    }
+    // "It answered nothing" and "it did not answer" are the two different results this exists
+    // to tell apart, and a list of no rows looks identical for both.
+    if (!rows.length) {
+        return head + `<div class="alert alert-${d.answered ? 'info' : 'warning'} py-2 mb-0 small mx-2">
+            <i class="bi bi-${d.answered ? 'info-circle' : 'exclamation-triangle'} me-1"></i>${esc(
+                d.answered ? _snmpTestT('test_walk_empty', 'This device serves that table and it is empty.')
+                           : (d.message || _snmpTestT('test_walk_none', 'This device did not answer that OID.')))}</div>`;
+    }
+    const obj = d.object || {};
+    return head + `<div class="px-2 pb-2">
+        <div class="d-flex align-items-center gap-2 mb-2 ss-fs-2 text-muted flex-wrap">
+            ${obj.name ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+                >${esc(obj.name)}</span>` : ''}
+            ${obj.module ? `<span>${esc(obj.module)}</span>` : ''}
+            <span>${esc(String(rows.length))} ${esc(_snmpTestT('test_walk_rows', 'rows'))}</span>
+            <span>${esc(String(d.elapsed_ms || 0))} ms</span>
+            ${d.truncated ? `<span class="badge text-bg-warning fw-normal">${esc(_snmpTestT(
+                'test_walk_more', 'there is more than this'))}</span>` : ''}
+        </div>
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="ss-thead"><tr>
+                <th style="width:14rem">${esc(_snmpTestT('test_walk_index', 'Index'))}</th>
+                <th>${esc(_snmpTestT('test_walk_value', 'Value'))}</th>
+            </tr></thead>
+            <tbody>${rows.map(r => `<tr>
+                <td class="font-monospace ss-fs-2">${esc(r.index)}</td>
+                <td class="font-monospace ss-fs-2">${esc(r.value)}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+    </div>`;
+}
+
+function _snmpTestWalkPreset(oid) {
+    const el = _snmpTestEl('snmpWalkOid');
+    if (el) el.value = oid;
+    _snmpTestWalk(_snmpTestEl('snmpWalkBtn'));
+}
+
+/** Ask, with the same server the rest of this dialog is about.
+ *
+ *  The whole server travels for the same reason it does everywhere else here: the answer
+ *  depends on the address, the version and the identity, and the route resolves the bound
+ *  host and the referenced credential exactly as it does for a check.
+ */
+async function _snmpTestWalk(btn) {
+    if (!_snmpTestPath || _snmpWalkBusy) return;
+    const oid = ((_snmpTestEl('snmpWalkOid') || {}).value || '').trim().replace(/^\.+/, '');
+    if (!oid) return;
+    const modName = _snmpTestPath.split('|')[0] || 'snmp';
+    const cfg = _snmpCfgFor(_snmpTestPath);
+    _snmpWalkBusy = true;
+    _snmpTestRender();
+    _snmpTestLog('walk', oid);
+    const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
+    try {
+        const res = await apiPost(_snmpActionUrl(modName, 'walk_oid'), {...cfg, oid});
+        _snmpWalkData = (res && res.data) || {oid, rows: [], answered: false,
+                                              message: (res && res.error) || ''};
+        _snmpTestLog('walk done', _snmpWalkData);
+    } finally {
+        _snmpWalkBusy = false;
+        done();
+    }
+    _snmpTestRender();
 }
 
 /** What the assigned profiles get, profile by profile. */

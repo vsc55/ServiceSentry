@@ -17,6 +17,16 @@
     "lldp",
     "ip_neighbours",
     "bridge_fdb",
-    "bridge_vlans"
+    "bridge_vlans",
+    "lag",
+    "if_stack"
+  ],
+  "optional": [
+    "lldp",
+    "ip_neighbours",
+    "bridge_fdb",
+    "bridge_vlans",
+    "lag",
+    "if_stack"
   ]
 }

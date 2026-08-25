@@ -176,24 +176,40 @@ function _infraIdentityHtml(d) {
     // equipment — a NAS and the UPS plugged into it both answer "vendor", "model", "version"
     // — and side by side under one heading they read as one machine with contradictory facts.
     const groups = new Map();
-    // …and, beside them, the values that answer "what is this" rather than "how is it doing".
-    // "Is there an update" is a property of the box and belongs next to the DSM version it is
-    // about, not among the temperatures on the summary. Which values those are is the
-    // profile's word (`identity`), so the panel does not learn what an update is.
-    for (const m of (d.metrics || []).filter(m => m.identity && !m.row)) {
-        const k = m.source || '';
-        if (!groups.has(k)) groups.set(k, {source: k, label: m.source_label || k,
-                                          short: m.source_short || '', facts: [], states: []});
-        groups.get(k).states.push(m);
-    }
+    // The ATTRIBUTES first, and that is not a detail of style: the server sorted them (the
+    // card about the box, then the standards, then what is plugged in) and a Map keeps what it
+    // was given. Built the other way round, a source that happens to chart an identity value
+    // jumped the queue — and, worse, its card was created without a maker, because only this
+    // second loop knew one. That is why the Synology card had no mark while the MikroTik did:
+    // one of them declares a value as identity and the other does not.
+    const group = (k, from) => {
+        if (!groups.has(k)) {
+            groups.set(k, {source: k, label: from.source_label || k,
+                           short: from.source_short || '', brand: {}, said: false,
+                           facts: [], states: []});
+        }
+        const g = groups.get(k);
+        // Whichever loop learns it first. An attribute carries it; a measurement does not.
+        if (!g.brand.name && from.source_brand && from.source_brand.name) {
+            g.brand = from.source_brand;
+            g.said = !!from.source_brand_said;
+        }
+        return g;
+    };
     for (const a of attrs.filter(a => !a.row)) {
         const k = a.source || '';
         // Insertion order IS the order: the server sorted them (standards before a vendor's
         // own MIB — see infra.service.attributes) and a Map keeps what it was given. Sorting
         // again here would be a second opinion, and the one with less to go on.
-        if (!groups.has(k)) groups.set(k, {source: k, label: a.source_label || k,
-                                          short: a.source_short || '', facts: [], states: []});
-        groups.get(k).facts.push(a);
+        group(k, a).facts.push(a);
+    }
+    // …and then the values that answer "what is this" rather than "how is it doing". "Is there
+    // an update" is a property of the box and belongs next to the DSM version it is about, not
+    // among the temperatures on the summary. Which values those are is the profile's word
+    // (`identity`), so the panel does not learn what an update is. A source with nothing but
+    // these still gets a card, at the end.
+    for (const m of (d.metrics || []).filter(m => m.identity && !m.row)) {
+        group(m.source || '', m).states.push(m);
     }
     // An unsourced pile beside sourced ones is stale, and stale here means WRONG: it was
     // written before the source was recorded, so it holds a NAS's facts and those of the UPS
@@ -238,10 +254,16 @@ function _infraIdentityHtml(d) {
                 ${m.icon ? `<i class="bi ${escAttr(m.icon)} me-1"></i>` : ''}${esc(m.label || m.field)}</div>
             <div class="d-flex align-items-baseline gap-1">${_infraValueHtml(m)}</div>
         </div>`).join('')}</div>`;
-    const block = (title, list, note, st) => `<div class="rounded-3 border px-3 py-2 mb-2">
-        <div class="d-flex align-items-baseline gap-2 mb-1">
-            <span class="fw-semibold">${esc(title)}</span>
-            ${note ? `<code class="text-muted ss-fs-2">${esc(note)}</code>` : ''}
+    // The mark, and then the heading — unless the mark IS the heading: a card headed
+    // "[Synology] Synology" says it twice, while "[MikroTik] RouterOS" says two different
+    // things. Only a real mark counts; the coloured initial drawn for a maker we have no mark
+    // for is not a name and the heading still has to carry it.
+    const block = (title, list, note, st, brand) => `<div class="rounded-3 border px-3 py-2 mb-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            ${hostBrandMarkHtml(brand, '1.5em')}
+            ${hostBrandMarkHtml(brand, '') && title === (brand || {}).name
+              ? '' : `<span class="fw-semibold">${esc(title)}</span>`}
+            ${note ? `<span class="text-muted ss-fs-2">${esc(note)}</span>` : ''}
         </div>${facts(list, st)}${states(loose(st, list))}</div>`;
     // The source is the heading: a fact about the device still belongs to whichever of its
     // parts answered it, and "the UPS says its model is X" is a different statement from
@@ -261,9 +283,25 @@ function _infraIdentityHtml(d) {
     // and wrong for the ones that describe something attached to it: "Synology — SAI" trims to
     // "Synology — SAI", and what belongs on that card is "SAI". No rule about the text can
     // tell those apart, so the profile says.
-    const head = g => g.source ? (g.short || _infraShortLabel(g.label || g.source))
-                               : t('infra_identity_unsourced');
-    const sub  = () => '';
+    // …and what to CALL it. A profile that speaks for one maker has a better word for its own
+    // card than the maker's name — "RouterOS" says which of MikroTik's two answers this is —
+    // so its own short label wins. A profile that speaks for nobody in particular has no such
+    // word: `ucd_extend` read an HP, and heading that card "Equipo" is the one line on it that
+    // carries no information. So where the maker was READ rather than declared, the maker is
+    // the heading.
+    const head = g => {
+        if (!g.source) return t('infra_identity_unsourced');
+        const said = g.said ? String((g.brand || {}).name || '') : '';
+        return said || g.short || _infraShortLabel(g.label || g.source);
+    };
+    // …and, where the maker took the heading, whatever the profile called the THING. "APC"
+    // says who made the box plugged into the NAS; "SAI" says what it is, and losing that would
+    // make the card read as a second machine. Only when the two differ: repeating "Synology"
+    // under "Synology" is the same word twice.
+    const sub = g => {
+        const said = g.said ? String((g.brand || {}).name || '') : '';
+        return said && g.short && g.short !== said ? g.short : '';
+    };
     // The registry's own record used to lead this column — address, type, how it is reached,
     // OS, description. Every one of those is already on the page or one click from it: the
     // header above carries the name, the address, the state and the tags, and the rest is the
@@ -272,7 +310,8 @@ function _infraIdentityHtml(d) {
     //
     // This column is for what the DEVICE says about itself — what its checks reported — which
     // is the half nothing else on the page shows.
-    return `${[...groups.values()].map(g => block(head(g), g.facts, sub(g), g.states)).join('')}
+    return `${[...groups.values()]
+        .map(g => block(head(g), g.facts, sub(g), g.states, g.brand)).join('')}
         ${!attrs.length && !groups.size
             ? `<div class="text-muted small">${esc(t('infra_no_identity'))}</div>` : ''}`;
 }
@@ -282,5 +321,10 @@ function _infraIdentityHtml(d) {
  *  so the core names them. An unknown role falls back to its own key: a word somebody has to
  *  guess at beats a fact that is not shown. */
 function _attrLabel(key) {
-    return t('attr_' + key) || key;
+    // `t` answers with the KEY it was given when it has no translation, so the fallback below
+    // it never fired and the screen showed `attr_mt_active_fan` — the internal name with the
+    // lookup prefix still on it. The bare key is not a good label either; it is an honest one,
+    // and it is what somebody can search the profile for.
+    const found = t('attr_' + key);
+    return found === 'attr_' + key ? key : found;
 }

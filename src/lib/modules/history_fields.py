@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import re
 
 _log = logging.getLogger(__name__)
 
@@ -67,10 +68,12 @@ _OPTIONAL_MAPS = ('states', 'headline_rows', 'present_when', 'quiet_when')
 _OPTIONAL_LISTS = ('chart_with',)
 
 
-def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -> dict:
-    """``{field: {label, unit, …}}`` the module computes now, or ``{}``.
+def _ask_module(module: str, hook: str, lang: str, var_dir: str) -> dict:
+    """Call one of a watchful's discovery hooks, and survive anything it does.
 
-    *module* is the bare watchful name (``snmp``), as the history records it.
+    One implementation because there are two of them now — the fields a module records and the
+    names of the things that produce them — and "how do you ask a module something at run time"
+    is not a question either of them should answer twice.
     """
     name = str(module or '').strip()
     if not name or name.startswith('_') or '.' in name:
@@ -79,7 +82,7 @@ def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -
         mod = importlib.import_module(f'watchfuls.{name}')
     except Exception:  # pylint: disable=broad-except
         return {}       # not a watchful, or one whose optional dependencies are absent
-    fn = getattr(mod, 'discover_history_fields', None)
+    fn = getattr(mod, hook, None)
     if not callable(fn):
         return {}
     try:
@@ -89,15 +92,78 @@ def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -
         try:
             declared = fn(lang) or {}
         except Exception as exc:  # pylint: disable=broad-except
-            _log.warning('discover_history_fields() failed for module %s: %s', name, exc)
+            _log.warning('%s() failed for module %s: %s', hook, name, exc)
             return {}
     except Exception as exc:  # pylint: disable=broad-except
-        _log.warning('discover_history_fields() failed for module %s: %s', name, exc)
+        _log.warning('%s() failed for module %s: %s', hook, name, exc)
         return {}
-
     if not isinstance(declared, dict):
-        _log.warning('discover_history_fields() for module %s did not return a map', name)
+        _log.warning('%s() for module %s did not return a map', hook, name)
         return {}
+    return declared
+
+
+#: What a brand may be, checked where a module's word crosses into the core. The shapes are
+#: the ones :mod:`lib.core.snmp.profiles` validates on the way in; this is the second door,
+#: because a module's hook is code and the first door only guards the files.
+_LOGO_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
+_ICON_RE = re.compile(r'^bi-[a-z0-9-]{1,40}$')
+_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _brand(raw: dict) -> dict:
+    """One brand declaration, checked into shape — ``{}`` when it is not usable."""
+    name = str((raw or {}).get('name') or '').strip()
+    if not name or len(name) > 48:
+        return {}
+    out = {'name': name}
+    for key, rule in (('logo', _LOGO_RE), ('icon', _ICON_RE), ('color', _COLOR_RE)):
+        val = str((raw or {}).get(key) or '').strip().lower()
+        if rule.match(val):
+            out[key] = val
+    return out
+
+
+def module_history_sources(module: str, lang: str = 'en_EN', var_dir: str = '') -> dict:
+    """``{source: {label, short, rank}}`` the module computes now, or ``{}``.
+
+    The other half of :func:`module_history_fields`. A module that fronts several answerers
+    says what to call each of them; one that does not have several says nothing, and a screen
+    that groups by source is unchanged.
+    """
+    out: dict = {}
+    for src, meta in _ask_module(module, 'discover_history_sources', lang, var_dir).items():
+        key = str(src or '').strip()
+        if not key or not isinstance(meta, dict):
+            continue
+        # A module names the facts it files that nothing else can name (see the SNMP
+        # profiles' `attrs`). Capped and stringified like everything else a module hands over:
+        # this reaches a label on a screen, and a module is a file somebody edited.
+        attrs = meta.get('attrs')
+        attrs = {str(k): str(v)[:120] for k, v in list((attrs or {}).items())[:256]
+                 if str(k or '').strip() and str(v or '').strip()}
+        brand = meta.get('brand')
+        out[key] = {'label': str(meta.get('label') or key),
+                    'short': str(meta.get('short') or ''),
+                    'rank':  int(meta.get('rank') or 0),
+                    'attrs': attrs,
+                    # …and who made it. Checked into shape here like everything else a module
+                    # hands over: this reaches an `img` URL and a `style`, and the module is a
+                    # file somebody edited.
+                    'brand': _brand(brand if isinstance(brand, dict) else {}),
+                    'brands': [{**_brand(e), 'any': [str(w).strip().lower()
+                                                     for w in (e.get('any') or [])][:12]}
+                               for e in (meta.get('brands') or [])
+                               if isinstance(e, dict) and _brand(e) and e.get('any')][:64]}
+    return out
+
+
+def module_history_fields(module: str, lang: str = 'en_EN', var_dir: str = '') -> dict:
+    """``{field: {label, unit, …}}`` the module computes now, or ``{}``.
+
+    *module* is the bare watchful name (``snmp``), as the history records it.
+    """
+    declared = _ask_module(module, 'discover_history_fields', lang, var_dir)
     out: dict = {}
     for field, meta in declared.items():
         key = str(field or '').strip()

@@ -81,17 +81,9 @@ function _srvStatusRank(host) {
     return { error: 0, warning: 1, maintenance: 2, ok: 3 }[_srvStatusOf(host)] ?? 4;
 }
 function _srvStatusBadge(host) {
-    // [badge class, extra inline style, icon, label].  Maintenance keeps its
-    // signature orange (distinct from the yellow "warning"/pending state).
-    const meta = {
-        maintenance: ['', 'background-color:#fd7e14;color:#fff', 'bi-cone-striped',     t('host_status_maintenance') || 'Maintenance'],
-        error:       ['text-bg-danger',  '', 'bi-x-circle-fill',    t('host_status_error')   || 'Error'],
-        warning:     ['text-bg-warning', '', 'bi-hourglass-split',  t('host_status_warning') || 'Warning'],
-        ok:          ['text-bg-success', '', 'bi-check-circle-fill', t('host_status_ok')      || 'OK'],
-    }[_srvStatusOf(host)];
-    if (!meta) return `<span class="text-muted small">—</span>`;
-    const sty = meta[1] ? ` style="${meta[1]}"` : '';
-    return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${esc(meta[3])}</span>`;
+    // The shared one (see `HOST_STATE_BADGES`). This screen carries maintenance AS the status
+    // rather than beside it, which the badge takes either way.
+    return hostStateBadge(_srvStatusOf(host));
 }
 
 // ── Filter helpers (the select choices come from the fleet, not a fixed list) ──────

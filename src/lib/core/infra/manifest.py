@@ -53,6 +53,10 @@ AUDIT_EVENTS = [
     # Louder than a collection: this one changes what the panel will and will not report,
     # and "why did nobody get told" is a question answered by this line.
     {'key': 'infra_watch', 'severity': 'info'},
+    # Quieter than either: where somebody dragged the boxes on a map. It is on the audit log
+    # at all because it reaches the account record, and a write to that store is worth a line
+    # even when what it holds is a picture.
+    {'key': 'infra_link_layout', 'severity': 'muted'},
 ]
 
 

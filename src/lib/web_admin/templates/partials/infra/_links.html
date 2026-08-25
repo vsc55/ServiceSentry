@@ -1,0 +1,680 @@
+{# ================================================================
+   Infrastructure — what is plugged into what.
+
+   The other map answers "who can reach whom": addresses, the networks they sit on, and the
+   way out of each. It is a map of the LAYER the panel can always see, because every machine
+   knows its own address.
+
+   This one answers the question that map cannot: **which cable goes where**. A switch's
+   neighbour table names the box on the far end and the port it answered on; its forwarding
+   table places a machine on a port by the MAC it learned there. Those are not addresses and
+   they do not belong on a diagram of networks — a lane per subnet with cables drawn across it
+   is two pictures fighting for one canvas, which is what the first attempt at this looked
+   like.
+
+   THE SERVER ALREADY BUILDS IT. `infra/topology.py` emits the adjacency alongside the
+   networks (`kind: 'lldp'` for a neighbour report, `'port'` for a machine a switch placed),
+   each with the port at each end and who said so. This is a second READING of one payload,
+   not a second endpoint: two joins over the same evidence would be two answers to "is this
+   cable there".
+
+   WHAT IT MUST KEEP SAYING is how it knows. A neighbour report both ends agree on is a fact;
+   one end saying it alone is nearly one; a machine placed by a forwarding table is an
+   inference — it says the machine is *reachable* through that port, and the port is only
+   claimed when exactly one known machine is on it. Three claims, three strokes, and the
+   legend names all three. Flattening them into "connected" is the picture claiming more than
+   the data does.
+   ================================================================ #}
+
+//: Geometry. Its own, because this layout is a different shape from the network map's — tiers
+//: outwards from whatever is most connected, rather than a lane per network — and sharing the
+//: constants would tie two pictures together that have nothing to say to each other.
+const _LNK = {
+    BOX_W: 176, BOX_H: 44, COL_GAP: 104, ROW_GAP: 18, PAD: 16, TOP: 34,
+    //: How far the pointer has to travel before a press becomes a DRAG. In screen pixels, so
+    //: it means the same thing at every zoom — three units of a picture scaled to a quarter
+    //: is a third of a millimetre, and every click on a box would move it.
+    GRIP: 3,
+};
+
+//: Where somebody has PUT each box, what the account holds and how a box is dragged all
+//: live in `_canvas.html`: both maps take an arrangement, and neither of them is about
+//: pointer capture or click-versus-drag thresholds.
+function infraLinkArrange() { ssCanvasArrange(_LNK_SVG, renderInfra); }
+function infraLinkRestore() { ssCanvasRestore(_LNK_SVG, renderInfra); }
+function infraLinkKeep() { ssCanvasKeep(_LNK_SVG, _infraLinkToolsPaint); }
+
+/** Only the links that are CABLES. The gateway arrows belong to the other map: a default
+ *  route is a statement about traffic, not about a wire, and drawing it here would put a line
+ *  between two machines that may be four hops apart. */
+function _infraLinkEdges(map) {
+    return (map.edges || []).filter(e => (e.kind === 'lldp' || e.kind === 'port')
+                                         && e.from && e.to);
+}
+
+/** The picture, before anything is drawn: tiers outwards from the most connected device.
+ *
+ *  Breadth-first from the busiest box, which on any real network is the switch — so the
+ *  drawing comes out the way somebody would draw it by hand: the switch, then what hangs off
+ *  it, then what hangs off those. Not a force layout: this page carries no layout library, and
+ *  a spring simulation on a flat rack produces the hairball the other map was rewritten to
+ *  stop producing.
+ *
+ *  A fleet can be several disconnected islands — a rack that speaks LLDP and a NAS that does
+ *  not — and each is laid out on its own and stacked. One island is the normal case; the
+ *  point of handling several is that the day it happens the map must not draw them on top of
+ *  each other.
+ */
+function _infraLinkLayout(map) {
+    const edges = _infraLinkEdges(map);
+    const byUid = Object.fromEntries((map.nodes || []).map(n => [n.uid, n]));
+    const adj = {};
+    for (const e of edges) {
+        (adj[e.from] = adj[e.from] || []).push(e.to);
+        (adj[e.to] = adj[e.to] || []).push(e.from);
+    }
+    const wired = Object.keys(adj).filter(u => byUid[u]);
+    // Busiest first, name second: the order has to be stable or the map redraws differently
+    // every refresh, which reads as movement nobody caused.
+    const rank = u => [-(adj[u] || []).length, (byUid[u].name || u).toLowerCase()];
+    const start = wired.slice().sort((a, b) => {
+        const [ra, na] = rank(a), [rb, nb] = rank(b);
+        return ra - rb || (na < nb ? -1 : na > nb ? 1 : 0);
+    });
+
+    const tierOf = {};
+    const islands = [];
+    const seen = new Set();
+    for (const root of start) {
+        if (seen.has(root)) continue;
+        const tiers = [];
+        let frontier = [root];
+        seen.add(root);
+        let depth = 0;
+        while (frontier.length) {
+            tiers.push(frontier);
+            frontier.forEach(u => { tierOf[u] = depth; });
+            const next = [];
+            for (const u of frontier) {
+                for (const v of (adj[u] || [])) {
+                    if (seen.has(v) || !byUid[v]) continue;
+                    seen.add(v);
+                    next.push(v);
+                }
+            }
+            // Stable inside a tier too, and by name: a tier is a column of boxes and the eye
+            // reads it top to bottom.
+            next.sort((a, b) => (byUid[a].name || a).localeCompare(byUid[b].name || b));
+            frontier = next;
+            depth += 1;
+        }
+        islands.push(tiers);
+    }
+
+    // Place: one column per tier, islands stacked with a gap between them.
+    const pos = {};
+    let y0 = _LNK.TOP;
+    let widest = 0;
+    for (const tiers of islands) {
+        let tallest = 0;
+        tiers.forEach((tier, col) => {
+            const x = _LNK.PAD + col * (_LNK.BOX_W + _LNK.COL_GAP);
+            tier.forEach((uid, row) => {
+                const y = y0 + row * (_LNK.BOX_H + _LNK.ROW_GAP);
+                pos[uid] = {x, y, uid, node: byUid[uid], tier: col};
+                widest = Math.max(widest, x + _LNK.BOX_W);
+            });
+            tallest = Math.max(tallest, tier.length * (_LNK.BOX_H + _LNK.ROW_GAP));
+        });
+        y0 += tallest + _LNK.BOX_H;
+    }
+    // Machines with no cable at all. Named under the picture rather than floated in it: a box
+    // with nothing attached, inside a diagram OF attachments, reads as a link that failed to
+    // draw. Which is exactly what somebody would report.
+    const loose = (map.nodes || []).filter(n => tierOf[n.uid] === undefined);
+    // Where somebody put it beats where the tiers would. Applied HERE and not at draw time,
+    // so everything downstream — the cables, the extent, the panel — is reading one set of
+    // positions: a wire computed from the tier layout while the box is drawn somewhere else
+    // is a line that ends in the air.
+    const ext = ssCanvasPlace(_LNK_SVG, Object.values(pos),
+                              {w: _LNK.BOX_W, h: _LNK.BOX_H},
+                              {pad: _LNK.PAD, width: widest + _LNK.PAD,
+                               height: y0 - _LNK.BOX_H + _LNK.PAD});
+    return {
+        pos, edges, loose,
+        x: ext.x, y: ext.y, width: ext.width, height: ext.height,
+    };
+}
+
+/** How sure the picture is about one cable — the whole reason this map is worth drawing.
+ *  `both` is an adjacency the two ends agree on; `one` is one end saying it; `learned` is a
+ *  switch having seen a MAC on a port, which is a weaker claim than either. */
+function _infraLinkClaim(e) {
+    if (e.kind === 'port') return 'learned';
+    return e.confirmed ? 'both' : 'one';
+}
+
+const _LNK_STROKE = {
+    both:    'stroke="var(--bs-success)" stroke-width="2.4"',
+    one:     'stroke="var(--bs-primary)" stroke-width="1.8"',
+    learned: 'stroke="var(--bs-secondary)" stroke-width="1.4" stroke-dasharray="5 4"',
+};
+
+/** The cables. Drawn as a curve from the right edge of one box to the left edge of the other
+ *  — the tiers run left to right, so a horizontal exit is the one that does not cross a box
+ *  it has nothing to do with. Same-tier links (two switches side by side) get a flatter one. */
+function _infraLinkWires(L) {
+    const out = [];
+    let idx = -1;
+    for (const e of L.edges) {
+        idx += 1;
+        const a = L.pos[e.from], b = L.pos[e.to];
+        if (!a || !b) continue;
+        // Left to right whichever way the edge was stored: an edge is a pair and not a
+        // direction, and a wire drawn backwards would leave the box from the wrong side.
+        const [l, r] = a.x <= b.x ? [a, b] : [b, a];
+        const x1 = l.x + _LNK.BOX_W, y1 = l.y + _LNK.BOX_H / 2;
+        const x2 = r.x,              y2 = r.y + _LNK.BOX_H / 2;
+        const dx = Math.max(28, (x2 - x1) / 2);
+        const claim = _infraLinkClaim(e);
+        const pl = (e.ports || {})[l.uid] || '';
+        const pr = (e.ports || {})[r.uid] || '';
+        const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+        // Each port label sits near ITS OWN end, not both at the midpoint. Every cable
+        // between the same two tiers crosses the same middle, so a midpoint label is three
+        // names stacked in one ten-pixel channel — reported from the screen as a map you
+        // cannot read. At the ends they spread out along the boxes they belong to, and the
+        // label answers "which port of THIS device" without the reader tracing the line.
+        // NO port names on the canvas. They were chips here, and before that captions, and
+        // both were unreadable for the same reason: every cable out of one box leaves from the
+        // same point, so four labels land in one place beside the switch — and staggering them
+        // along their curves only spreads them as far as the curves have diverged, which near
+        // the box is not far. Reported twice from the screen, with a picture each time.
+        //
+        // So the detail moved OFF the drawing and into a panel, where it has room to be the
+        // whole thing: both machines, both ports, how it is known, and a way into each of the
+        // four. The picture keeps what a picture is good at — which boxes, how many cables,
+        // and how sure — and the reading of one cable is one hover away.
+        //
+        // A transparent fat stroke UNDER the visible one, because a 1.4-pixel dashed line is
+        // not something anybody can hover on purpose.
+        out.push(`<g data-edge="${idx}" class="ss-pointer"
+                     onpointerenter="_infraLinkHover(${idx})"
+                     onpointerleave="_infraLinkHover(null)"
+                     onclick="event.stopPropagation();_infraLinkPin(${idx})">
+            <title>${escAttr(`${l.node.name || l.uid} — ${r.node.name || r.uid}`)}</title>
+            <path d="${d}" fill="none" stroke="transparent" stroke-width="14"></path>
+            <path d="${d}" fill="none" ${_LNK_STROKE[claim]}
+                  ${_lnkOn() === idx ? 'stroke-width="4"' : ''}></path>
+        </g>`);
+    }
+    return out.join('');
+}
+
+/** A device. The same shape the network map draws, so one fleet does not have two visual
+ *  languages — with the number of cables on it instead of an address, because that is the
+ *  fact this picture is about.
+ *
+ *  …and WHAT it is, as the icon the rest of the panel gives that device type. A rack drawn as
+ *  eight identical boxes makes you read every name to find the switch; the shape of the thing
+ *  is the fastest thing on a diagram to read, and this map is about how equipment is wired,
+ *  which is a question about kinds of equipment.
+ *
+ *  Through `hostTypeIcon`, so it is the SAME icon as in the list, the cards and the device
+ *  page: a second table of "what a NAS looks like" is how one screen ends up disagreeing with
+ *  the others about a device somebody just retyped.
+ *
+ *  In a `foreignObject` because these are font glyphs and SVG has no `<i>`. The alternative
+ *  is looking each class's codepoint up out of the stylesheet at draw time, which is a second
+ *  parser for something the browser already knows how to do.
+ */
+function _infraLinkBox(p, links) {
+    const tone = hostStateColor(p.node.status);
+    const type = p.node.kind || '';
+    const label = type ? hostTypeLabel(type) : t('host_type_unset');
+    return `<g class="ss-grab" data-node="${escAttr(p.uid)}"
+             onpointerenter="_infraLinkNodeHover(${jsStr(p.uid)})"
+             onpointerleave="_infraLinkNodeHover('')">
+        <title>${escAttr((p.node.name || p.uid) + ' · ' + label
+                         + ' · ' + tf('infra_link_count', links))}</title>
+        <rect x="${p.x}" y="${p.y}" width="${_LNK.BOX_W}" height="${_LNK.BOX_H}" rx="7"
+              fill="var(--bs-body-bg)" stroke="${tone}" stroke-width="1.5"></rect>
+        <rect x="${p.x}" y="${p.y}" width="4" height="${_LNK.BOX_H}" rx="2" fill="${tone}"></rect>
+        <foreignObject x="${p.x + 12}" y="${p.y + 13}" width="18" height="18">
+            <div xmlns="http://www.w3.org/1999/xhtml"
+                 style="font-size:15px;line-height:1;color:var(--bs-secondary-color)">
+                <i class="bi ${escAttr(hostTypeIcon(type))}"></i></div>
+        </foreignObject>
+        <text x="${p.x + 36}" y="${p.y + 19}" font-size="12" font-weight="600"
+              fill="currentColor">${esc(_infraMapClip(p.node.name || p.uid, 19))}</text>
+        <text x="${p.x + 36}" y="${p.y + 34}" font-size="10"
+              fill="var(--bs-secondary-color)">${esc(tf('infra_link_count', links))}</text>
+    </g>`;
+}
+
+//: The `<svg>` this map is drawn on. The window over it — pan, zoom, fit, and turning a
+//: client pixel into a coordinate — is not about cables and lives in `_canvas.html`, which
+//: the address map uses too.
+const _LNK_SVG = 'infraLinkSvg';
+function _infraLinkSvg() { return ssCanvasSvg(_LNK_SVG); }
+
+//: The drag in flight, when it is a BOX being moved. A pan is the canvas's own business.
+let _lnkDrag = null;
+
+function _infraLinkDown(ev) {
+    // A press on a BOX moves that box. Same three handlers as the pan, because they are the
+    // same gesture on a different target — and the canvas's travel threshold is what keeps
+    // "open this device" and "move this box" from being the same click.
+    const box = ev.target.closest('g[data-node]');
+    if (box) {
+        const at = (_infraLinkLayout(_infraMap || {}).pos || {})[box.dataset.node];
+        if (ssCanvasDragStart(_LNK_SVG, ev, box.dataset.node, at)) return;
+    }
+    // Only a drag of the BACKGROUND pans. Starting one on a cable would mean the click that
+    // opens its panel and the drag that moves the map share a gesture, and the map would move
+    // every time somebody misses by two pixels.
+    if (ev.target.closest('g[data-edge]')) return;
+    // A press on nothing puts the panel away: a KEPT one stays open on purpose (see
+    // `_lnkOn`), so there has to be a way to say "done with that one" that is not hunting for
+    // the ×.
+    if (_lnkPick !== null) _infraLinkHide();
+    ssCanvasPanStart(_LNK_SVG, ev);
+}
+
+function _infraLinkMove(ev) {
+    if (ssCanvasDragMove(_LNK_SVG, ev, _infraLinkRedraw)) return;
+    ssCanvasPanMove(_LNK_SVG, ev);
+}
+
+function _infraLinkUp(ev) {
+    // The TOOLBAR is repainted where a drop happens, because it is outside the picture and
+    // therefore outside the redraw the drag has been doing. Reported from the screen: the save
+    // button only turned up after leaving the section and coming back — and whether there is
+    // anything to save is a fact about the arrangement, not about the drawing.
+    const open = ssCanvasDragEnd(_LNK_SVG, _infraLinkToolsPaint);
+    ssCanvasPanEnd(ev);
+    if (open) infraOpen(open);
+}
+
+/** Repaint the toolbar in place. Its own function because the two things that change it —
+ *  dropping a box, and saving — happen at moments when rebuilding the whole section would
+ *  throw away the picture somebody is working in. */
+function _infraLinkToolsPaint() {
+    const box = document.getElementById('infraLinkTools');
+    if (box) box.innerHTML = _infraLinkTools();
+}
+
+/** Redraw what is INSIDE the picture, leaving the picture itself alone.
+ *
+ *  The `<svg>` element stays: it is what holds the pointer capture the drag is running on,
+ *  and replacing it mid-gesture drops the hand off the box being moved. */
+function _infraLinkRedraw() {
+    const svg = _infraLinkSvg();
+    if (!svg || !_infraMap) return;
+    const L = _infraLinkLayout(_infraMap);
+    svg.dataset.x = L.x;
+    svg.dataset.y = L.y;
+    svg.dataset.w = L.width;
+    svg.dataset.h = L.height;
+    svg.innerHTML = _infraLinkContent(L);
+    _infraLinkMark();
+}
+
+/** The wires and the boxes — one implementation, because the first render and every redraw
+ *  during a drag have to draw the same picture. */
+function _infraLinkContent(L) {
+    const degree = {};
+    for (const e of L.edges) {
+        degree[e.from] = (degree[e.from] || 0) + 1;
+        degree[e.to] = (degree[e.to] || 0) + 1;
+    }
+    return _infraLinkWires(L)
+           + Object.values(L.pos).map(p => _infraLinkBox(p, degree[p.uid] || 0)).join('');
+}
+
+/** Zoom in, out, and back to the whole thing. Buttons as well as the wheel: a trackpad
+ *  pinch is not something every pointer can do, and "show me all of it" has no gesture. */
+function _infraLinkTools() {
+    const btn = (fn, icon, key) => `<button class="btn btn-sm btn-secondary"
+        onclick="${fn}" title="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
+    // Both only appear once there is something to act on. A button that undoes nothing is a
+    // button somebody has to read before ignoring, on every visit.
+    const arranged = Object.keys(ssCanvasMoved(_LNK_SVG)).length > 0;
+    const dirty = ssCanvasKeptDirty(_LNK_SVG);
+    // …and the three that are about the WINDOW rather than about cables come from the canvas
+    // both maps are drawn on.
+    // …and a way BACK to what the account holds. Without it, "put them back the way the map
+    // had them" is a one-way door: it throws away the arrangement on screen, and the saved one
+    // is sitting on the account with nothing to press to fetch it.
+    const restorable = dirty && ssCanvasHasKept(_LNK_SVG);
+    return `<div class="btn-group btn-group-sm">
+        ${ssCanvasTools(_LNK_SVG)}
+        ${dirty ? `<button class="btn btn-sm btn-primary" onclick="infraLinkKeep()"
+                     title="${escAttr(t('infra_link_keep'))}"
+                     ><i class="bi bi-save"></i></button>` : ''}
+        ${restorable ? btn('infraLinkRestore()', 'bi-arrow-counterclockwise',
+                           'infra_link_restore') : ''}
+        ${arranged || dirty ? btn('infraLinkArrange()', 'bi-x-circle',
+                                  'infra_link_arrange') : ''}
+    </div>`;
+}
+
+//: Which cable is KEPT — pinned by a click, by its index in `L.edges`. `null` is none.
+let _lnkPick = null;
+//: …and which one the pointer is over right now, which is a different question.
+let _lnkHover = null;
+//: …and the BOX the pointer is over, which is a third one. A box and a cable are both things
+//: on this picture worth reading, and there is one panel: whatever the pointer is actually on
+//: wins, because that is the thing being asked about.
+let _lnkNode = '';
+
+/** The cable the panel is describing: what the pointer is on, or failing that what was
+ *  pinned.
+ *
+ *  Two states and not one, because they answer to two different gestures. A hover is a
+ *  question — "what is this line?" — and it ends when the pointer leaves. A click is a
+ *  decision, and it has to survive the pointer wandering off: the panel carries four links
+ *  (two machines, two ports) and one that vanished on the way to being clicked would be one
+ *  nobody could use. Reported from the screen, where every hover pinned itself and the map
+ *  ended up permanently wearing a panel about a cable nobody had asked about.
+ *
+ *  Hover WINS while it lasts, and falls back to the pin on leave: with a cable kept, hovering
+ *  another still reads it, and letting go returns to the one being worked on.
+ */
+function _lnkOn() {
+    return _lnkHover !== null ? _lnkHover : _lnkPick;
+}
+
+/** The pointer is over a device box, or has left one. */
+function _infraLinkNodeHover(uid) {
+    _lnkNode = String(uid || '');
+    _infraLinkPaint();
+}
+
+/** The pointer is over a cable, or has left one. */
+function _infraLinkHover(i) {
+    _lnkHover = i;
+    _infraLinkPaint();
+}
+
+/** A click KEEPS this cable — or lets go of it, if it was the one being kept. */
+function _infraLinkPin(i) {
+    _lnkPick = _lnkPick === i ? null : i;
+    _infraLinkPaint();
+}
+
+function _infraLinkPaint() {
+    const box = document.getElementById('infraLinkPanel');
+    if (box) box.innerHTML = _infraLinkPanelHtml();
+    // The chosen cable is drawn thicker, and that is in the SVG — repainted here rather than
+    // by a full render, which would rebuild the map under the pointer that is hovering it.
+    _infraLinkMark();
+}
+
+/** Put the chosen cable's thicker stroke back on. Its own function because a redraw during a
+ *  drag replaces every path in the picture, and a panel describing a cable that is no longer
+ *  drawn as chosen is a panel about nothing in particular. */
+function _infraLinkMark() {
+    const svg = _infraLinkSvg();
+    if (!svg) return;
+    const pick = _lnkOn();
+    svg.querySelectorAll('g[data-edge]').forEach(g => {
+        const on = pick !== null && +g.dataset.edge === pick;
+        const line = g.querySelectorAll('path')[1];
+        if (line) line.style.strokeWidth = on ? '4' : '';
+    });
+}
+
+function _infraLinkHide() {
+    _lnkPick = null;
+    _lnkHover = null;
+    const box = document.getElementById('infraLinkPanel');
+    if (box) box.innerHTML = '';
+    const svg = _infraLinkSvg();
+    if (svg) svg.querySelectorAll('g[data-edge] path').forEach(pth => { pth.style.strokeWidth = ''; });
+}
+
+//: What a port MAC looks like. A device with no port description reports its portId
+//: instead, and on a good many switches that is the port's hardware address — which is a true
+//: fact and not a port name: there is no interface called `00:00:5E:00:53:01` to go to.
+const _LNK_MAC = /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i;
+
+/** One end's port, as the device NAMED it — which is a path when the port sits inside things.
+ *
+ *  A MikroTik answers `bridge1/bond1/ether11`: the physical port that carried the
+ *  frame, and above it the bond it is a member of and the bridge that bond is in. Printed as
+ *  one string that reads as a port called something long, and the fact that matters — this is
+ *  ONE MEMBER of a four-port LAG — is the middle of it. Reported from the screen in those
+ *  words: "it says ether11, but it is not just ether11".
+ *
+ *  So the segments are drawn as segments. Not an inference: the device wrote the path, and
+ *  each part of it is a thing that device named. Each is its own way in, because each may be a
+ *  row on its page — the bond has counters of its own, and so does the member.
+ */
+/** One side's ports, with what they have in COMMON said once.
+ *
+ *  A four-cable trunk on a MikroTik answers four paths that differ in their last segment:
+ *  `bridge1/bond1/ether11`, `…/ether12`, `…/ether13`, `…/ether14`. Printed one
+ *  after another that is `bridge1 › bond1` four times in one line — reported from
+ *  the screen as a design that does not work, and it is the same complaint as every other
+ *  version of this: the repetition buries the thing that varies.
+ *
+ *  Factored, the shared head IS the reading somebody wants. `bridge1 › bond1 ›`
+ *  once, then the four members, says "these four ports are in that bond" at a glance — and it
+ *  says it out of what the device wrote, not out of a guess about aggregation.
+ *
+ *  A switch that names its ports flat — `gigabitethernet25…28`, with no path in them — shares
+ *  nothing, so that side had four bare chips and no answer to "which LAG are those?". The
+ *  answer is in no neighbour table: from outside, four cables and a four-port aggregate are
+ *  the same four rows. It is a configuration fact, and the device states it in
+ *  IEEE8023-LAG-MIB, which is what *lag* carries — so the aggregate joins the head on the
+ *  side that said so, and reads exactly like the path does on the side that has one.
+ */
+function _infraLinkPortHtml(uid, ports, lag) {
+    // A side is a LIST: a trunk puts several of that machine's ports on the same pair of
+    // boxes, and every one of them is something its neighbour said.
+    const list = (Array.isArray(ports) ? ports : [ports]).map(x => String(x || '').trim())
+                 .filter(Boolean);
+    if (!list.length) return `<span class="text-muted ss-fs-2">${esc(t('infra_link_no_port'))}</span>`;
+
+    // A MAC is not a path and shares nothing with one; those stay as they are.
+    const paths = list.filter(x => !_LNK_MAC.test(x)).map(x => x.split('/').filter(Boolean));
+    let head = [];
+    if (paths.length > 1) {
+        head = paths[0].slice(0, -1);         // never the port itself: that is what varies
+        for (const p of paths.slice(1)) {
+            const upto = p.slice(0, -1);
+            let i = 0;
+            while (i < head.length && i < upto.length && head[i] === upto[i]) i += 1;
+            head = head.slice(0, i);
+        }
+    }
+    // The aggregate these ports belong to, and only when the device said it of EVERY one of
+    // them: three ports out of four naming a LAG is not "these four are a LAG", and reading
+    // this MIB at all was to stop the picture claiming more than the data does.
+    const named = (() => {
+        const got = list.map(p => String((lag || {})[p] || '').trim());
+        const one = new Set(got.filter(Boolean));
+        return got.length && got.every(Boolean) && one.size === 1 ? [...one][0] : '';
+    })();
+    // Appended to the head only if the path did not already end in it — a MikroTik writes the
+    // bond into every port's name, and the same word twice reads as two different things.
+    const added = named && !head.includes(named) ? 1 : 0;
+    if (added) head = head.concat([named]);
+
+    const chip = (seg, muted) => `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2
+            ${muted ? 'opacity-75' : ''}" onclick="infraOpenPort(${jsStr(uid)},${jsStr(seg)})"
+            title="${escAttr(seg === named ? t('infra_link_lag_tt')
+                                           : tf('infra_link_goto_port', seg))}"
+            >${seg === named ? '<i class="bi bi-diagram-3 me-1"></i>' : ''}${esc(seg)}</button>`;
+    const sep = '<i class="bi bi-chevron-right text-muted ss-fs-2"></i>';
+    const shared = head.length
+        ? head.map(seg => chip(seg, seg !== named)).join(sep) + sep : '';
+    // The members drop only what the PATH head showed. An aggregate read off the LAG MIB is
+    // not a segment of anybody's name — it is a fact ABOUT them — so it takes nothing off.
+    const tails = list.map(one => _infraLinkOnePort(uid, one, head.length - added)).join('');
+    return `${shared}<span class="d-inline-flex flex-wrap align-items-center gap-1"
+                          >${tails}</span>`;
+}
+
+/** One port of one machine, as the device named it — minus the *skip* segments its siblings
+ *  already showed. */
+function _infraLinkOnePort(uid, port, skip) {
+    const raw = String(port || '').trim();
+    if (!raw) return '';
+    if (_LNK_MAC.test(raw)) {
+        // No jump: there is no port by that name to open, and a button that lands on the
+        // device's summary would be one that looks like it failed.
+        return `<code class="ss-fs-2 text-muted" title="${escAttr(t('infra_link_port_mac'))}"
+                >${esc(raw)}</code>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal ss-fs-2"
+                  >${esc(t('infra_link_port_mac_short'))}</span>`;
+    }
+    const parts = raw.split('/').filter(Boolean).slice(skip || 0);
+    return parts.map((seg, i) => `${i ? '<i class="bi bi-chevron-right text-muted ss-fs-2"></i>' : ''}
+        <button class="btn btn-sm ${i === parts.length - 1 ? 'btn-secondary' : 'btn-secondary opacity-75'}
+                       py-0 px-2 ss-fs-2" onclick="infraOpenPort(${jsStr(uid)},${jsStr(seg)})"
+                title="${escAttr(tf('infra_link_goto_port', seg))}">${esc(seg)}</button>`).join('');
+}
+
+/** One cable, in words, with a way into each of its four ends.
+ *
+ *  The four are the point. "Which port of which device" is the question this map is opened
+ *  for, and having answered it the screen should be able to take you to either side — the
+ *  machine, or the port itself. */
+function _infraLinkPanelHtml() {
+    const L = _infraLinkLayout(_infraMap || {});
+    // A box under the pointer wins over any cable: it is what is being pointed AT, and a
+    // panel describing a cable while the hand is on a machine is a panel about the wrong
+    // thing. A kept cable is still kept — it comes back the moment the box is left.
+    if (_lnkNode && L.pos[_lnkNode]) return _infraLinkNodeHtml(L, _lnkNode);
+    const e = (L.edges || [])[_lnkOn()];
+    if (!e) return '';
+    // Only a KEPT panel gets a way to close it: an unkept one is gone the moment the pointer
+    // leaves the cable, and an × on it is a button that cannot be reached to be pressed. What
+    // goes there instead is the gesture that would make it stay.
+    const kept = _lnkPick !== null && _lnkPick === _lnkOn();
+    const claim = _infraLinkClaim(e);
+    // A ROW per end, and not two ends on one line with an arrow between them: the ports of
+    // one side are as many as its cables, and a side that wraps mid-list next to a side that
+    // does not is two readings competing for one line.
+    const end = (uid) => {
+        const n = (L.pos[uid] || {}).node || {};
+        const port = (e.ports || {})[uid] || '';
+        const lag = (e.lag || {})[uid] || {};
+        // The end that reported it, marked on the end itself. "One end says so" is a claim
+        // about the EVIDENCE, and the first thing anybody asks of it is which one — the
+        // answer decides where you go looking, and the reader should not have to guess it
+        // from which side has a port name on it.
+        const told = (e.by || []).includes(uid);
+        return `<div class="d-flex align-items-center gap-2 flex-wrap py-1">
+            <i class="bi ${escAttr(hostTypeIcon(n.kind || ''))} text-muted"></i>
+            <button class="btn btn-sm btn-secondary py-0 px-2" style="min-width:9rem"
+                    onclick="infraOpen(${jsStr(uid)})">${esc(n.name || uid)}</button>
+            ${claim === 'one' ? `<span class="badge fw-normal ss-fs-2
+                    ${told ? 'text-bg-primary' : 'bg-body-secondary text-body-secondary border'}"
+                    title="${escAttr(t(told ? 'infra_link_said_tt' : 'infra_link_silent_tt'))}"
+                 >${esc(t(told ? 'infra_link_said' : 'infra_link_silent'))}</span>` : ''}
+            ${_infraLinkPortHtml(uid, port, lag)}
+        </div>`;
+    };
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"
+                 ${_LNK_STROKE[claim]}></line></svg>
+            <span class="text-muted">${esc(t('infra_link_claim_' + claim))}</span>
+            ${(e.bundle || 1) > 1
+              ? `<span class="badge text-bg-primary fw-normal ss-fs-2"
+                       title="${escAttr(t('infra_link_bundle_tt'))}"
+                 >${esc(tf('infra_link_bundle', e.bundle))}</span>` : ''}
+            ${kept ? `<button class="btn btn-sm btn-secondary py-0 px-2 ms-auto"
+                    onclick="_infraLinkHide()" title="${escAttr(t('close'))}"
+                    ><i class="bi bi-x"></i></button>`
+                   : `<span class="text-muted ss-fs-2 ms-auto"
+                    ><i class="bi bi-hand-index me-1"></i>${esc(t('infra_link_pin'))}</span>`}
+        </div>
+        ${end(e.from)}
+        ${end(e.to)}
+    </div>`;
+}
+
+/** One machine, as this picture can answer for it: the shared card, plus the two things that
+ *  are about THIS map — how many cables it has, and that a box here can also be dragged. */
+function _infraLinkNodeHtml(L, uid) {
+    const n = (L.pos[uid] || {}).node || {};
+    return ssHostCard(n, uid, {
+        hint: 'infra_link_node_hint',
+        cables: (L.edges || []).filter(e => e.from === uid || e.to === uid).length,
+    });
+}
+
+function _infraLinksBody() {
+    // Asked for once, and not awaited: the map is drawn from what this browser already has,
+    // and the account's arrangement replaces it when it arrives. A screen that waited for a
+    // round trip before drawing anything would be a blank pane for one request.
+    if (_ssKept === null) ssCanvasKeptLoad(() => {
+        if (_infraView.view().arrange) renderInfra();
+    });
+    if (!_infraMap) { _infraMapLoad(false); return _infraMapWait(); }
+    const L = _infraLinkLayout(_infraMap);
+    const links = Object.keys(L.pos).length;
+    return `<div class="px-1 pb-2 ss-mapfill">
+        ${_infraLinksNote(L)}
+        ${links ? `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+            <div id="infraLinkPanel" class="position-absolute" style="left:.5rem;bottom:.5rem;
+                 right:.5rem;z-index:2;pointer-events:auto">${_infraLinkPanelHtml()}</div>
+            <svg ${ssCanvasAttrs(_LNK_SVG, L)}
+                 onwheel="ssCanvasWheel(${jsStr(_LNK_SVG)},event)"
+                 onpointerdown="_infraLinkDown(event)"
+                 onpointermove="_infraLinkMove(event)" onpointerup="_infraLinkUp(event)"
+                 onpointercancel="_infraLinkUp(event)" onpointerleave="_infraLinkUp(event)"
+                 aria-label="${escAttr(t('infra_view_links'))}">
+                ${_infraLinkContent(L)}
+            </svg>
+        </div>` : ''}
+        ${_infraLinksLoose(L)}
+        ${links ? _infraLinksLegend() : ''}
+    </div>`;
+}
+
+/** What the picture is made of, above the picture — and, when there is nothing, WHY.
+ *
+ *  "No cables found" and "nothing here serves neighbour discovery" are the same screen and
+ *  very different problems, and only one of them is something to go and fix. So the empty
+ *  state says where the lines would come from instead of shrugging. */
+function _infraLinksNote(L) {
+    const n = L.edges.length;
+    const both = L.edges.filter(e => _infraLinkClaim(e) === 'both').length;
+    return `<div class="text-muted ss-fs-2 mb-2 d-flex align-items-center gap-2">
+        <i class="bi bi-info-circle"></i>
+        <span>${esc(n ? tf('infra_link_note', n, both) : t('infra_link_none'))}</span>
+        <span id="infraLinkTools" class="ms-auto">${_infraLinkTools()}</span>
+        <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
+            <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+    </div>`;
+}
+
+/** The machines with nothing attached, named under the picture. */
+function _infraLinksLoose(L) {
+    if (!L.loose.length) return '';
+    return `<div class="text-muted ss-fs-2 mt-2">
+        <i class="bi bi-plug me-1"></i>${esc(tf('infra_link_loose', L.loose.length))}:
+        ${L.loose.map(n => `<span class="badge bg-body-secondary text-body-secondary
+              border fw-normal me-1 ss-pointer" onclick="infraOpen(${jsStr(n.uid)})"
+              >${esc(n.name || n.uid)}</span>`).join('')}
+    </div>`;
+}
+
+/** Three strokes, three claims. The legend is not decoration here: the difference between a
+ *  cable two devices agree on and a MAC a switch happened to learn is the difference between
+ *  a fact and a good guess, and a picture that draws them alike is lying about which it has. */
+function _infraLinksLegend() {
+    const row = (claim, key) => `<span class="d-inline-flex align-items-center gap-1 me-3">
+        <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"
+             ${_LNK_STROKE[claim]}></line></svg>${esc(t(key))}</span>`;
+    return `<div class="text-muted ss-fs-2 mt-2">
+        ${row('both', 'infra_link_claim_both')}
+        ${row('one', 'infra_link_claim_one')}
+        ${row('learned', 'infra_link_claim_learned')}
+    </div>`;
+}

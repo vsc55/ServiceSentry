@@ -4,7 +4,7 @@
         "en_EN": "Storage (HOST-RESOURCES-MIB)",
         "es_ES": "Almacenamiento (HOST-RESOURCES-MIB)"
     },
-    "short_label": {"en_EN": "Memory", "es_ES": "Memoria"},
+    "short_label": {"en_EN": "Storage", "es_ES": "Almacenamiento"},
     "description": {
         "en_EN": "Usage and capacity per volume, from the standard host MIB — what makes a NAS measurable without knowing who made it. Storage only: CPU and memory belong to a system profile, and two profiles reporting the same value would chart it twice.",
         "es_ES": "Uso y capacidad por volumen, desde la MIB estándar de host — lo que hace medible un NAS sin saber quién lo fabricó. Sólo almacenamiento: la CPU y la memoria son de un perfil de sistema, y dos perfiles dando el mismo valor lo graficarían dos veces."

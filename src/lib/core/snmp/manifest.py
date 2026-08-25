@@ -125,6 +125,8 @@ ACTIONS: frozenset[str] = frozenset({
     'delete_profile', 'delete_profile_group',
     # …and asking a device about it
     'detect_profiles', 'test_profiles', 'test_profiles_start', 'test_profiles_status',
+    # …and asking it one thing directly, which is where every new profile starts
+    'walk_oid',
 })
 
 #: Operations that change nothing. They need only ``snmp_view``, and are not audited — an
@@ -136,6 +138,7 @@ READ_ONLY: frozenset[str] = frozenset({
     'diff_mib_files', 'mib_dupe_details', 'library_leftovers',
     'list_profiles',
     'detect_profiles', 'test_profiles', 'test_profiles_start', 'test_profiles_status',
+    'walk_oid',
 })
 
 

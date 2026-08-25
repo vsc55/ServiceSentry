@@ -94,29 +94,50 @@ class TestItShowsWithoutHandingOver:
     def test_the_domain_does_not_reach_the_registry(self):
         """`infra_view` must not become a way around the registry's permissions.
 
-        This is not "the section is read-only" — it has two POSTs and both are deliberate:
+        This is not "the section is read-only" — it writes, and every one is deliberate:
         "collect now" runs this device's checks, which writes no record of its own and
         produces exactly what a scheduler cycle produces; "watch" sets one flag against one
-        row. Neither stores a name, an address or a credential, and neither can create or
-        delete a machine. THAT is the property: an endpoint that edited the registry would be
-        a second way into it from a screen deliberately handed to people who may not reach it.
+        row; the map arrangement stores where the CALLER put the boxes, on their own account,
+        exactly as the dashboard layout does. None of them stores a name, an address or a
+        credential, and none can create or delete a machine. THAT is the property: an endpoint
+        that edited the registry would be a second way into it from a screen deliberately
+        handed to people who may not reach it.
 
-        So the write verbs stay out, every POST is named rather than tolerated, and each one
-        carries a flag of its own — checked below.
+        So every write is named here rather than tolerated, and each carries a flag of its
+        own — checked below. Enumerated and not banned by verb: a verb ban reads as the
+        property while only being a proxy for it, and the day a write is genuinely wanted the
+        proxy is what gets edited.
         """
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
-        for verb in ("'PUT'", "'DELETE'", "'PATCH'"):
-            assert verb not in routes, f'a {verb} route appeared in a section that edits nothing'
-        posts = re.findall(r"@app\.route\('([^']+)',\s*methods=\['POST'\]\)", routes)
-        assert sorted(posts) == sorted(['/api/v1/infra/collect',
-                                        '/api/v1/infra/hosts/<uid>/collect',
-                                        '/api/v1/infra/hosts/<uid>/watch']), (
-            f'unexpected POST route(s) in the infrastructure section: {posts}')
+        writes = set()
+        for path, verbs in re.findall(r"@app\.route\('([^']+)',\s*methods=\[([^\]]+)\]\)",
+                                      routes):
+            for verb in re.findall(r"'(\w+)'", verbs):
+                if verb != 'GET':
+                    writes.add((verb, path))
+        assert writes == {
+            ('POST', '/api/v1/infra/collect'),
+            ('POST', '/api/v1/infra/hosts/<uid>/collect'),
+            ('POST', '/api/v1/infra/hosts/<uid>/watch'),
+            ('PUT',  '/api/v1/infra/map-layout'),
+        }, f'unexpected write route(s) in the infrastructure section: {sorted(writes)}'
         # The registry's own write path is what must not be reachable from here.
         for call in ('.create(', '.update(', '.delete('):
             assert f'store{call}' not in routes, (
                 f'the section calls store{call} — that is the registry, behind its own '
                 'permission, and this screen is not it')
+
+    def test_and_the_only_account_field_it_writes_is_where_the_boxes_are(self):
+        """It reaches the user record, which is a store with a permission of its own. What
+        keeps that from being a way in is that it writes ONE key, on the caller's own record,
+        holding coordinates — and the key is named here so a second one has to be argued for.
+        """
+        routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        touched = set(re.findall(r"user\[[\'\"](\w+)[\'\"]\]", routes))
+        touched |= set(re.findall(r"user\.pop\([\'\"](\w+)[\'\"]", routes))
+        assert touched <= {'infra_map_layouts'}, touched
+        # …and it is the SESSION's user and never one named by the request.
+        assert "wa._users.get(session.get('username', ''))" in routes
 
     def test_each_write_has_its_own_permission(self):
         """Looking at a wall screen is not the same act as starting minutes of polling, nor
@@ -315,14 +336,30 @@ class TestWatchingItHappen:
         assert not os.path.exists(os.path.join(SRC, 'lib', 'core', 'infra', 'store.py'))
 
     def test_the_state_vocabulary_is_the_registry_s(self):
-        """One vocabulary for "how is this machine": the section renders `ok/warning/error`
-        and the empty string, which is what `hosts.service._host_statuses` produces. A second
-        set of names would be a second definition of a broken host."""
+        """One vocabulary for "how is this machine": `ok/warning/error` and the empty string,
+        which is what `hosts.service._host_statuses` produces. A second set of names would be
+        a second definition of a broken host.
+
+        And one BADGE for it, in the shared host vocabulary. It had its own, which is how the
+        same host in maintenance came out orange with a cone on the fleet list and grey with a
+        spanner here — reported from the screen. Two badges for one state is two states as far
+        as anybody reading them can tell.
+        """
+        shared = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                    'core', '_constants.html'))
+        body = shared.split('const HOST_STATE_BADGES')[1].split('};')[0]
+        for state in ('ok:', 'warning:', 'error:', 'maintenance:'):
+            assert state in body, state
+        # …and the two screens read it rather than each keeping one.
+        for rel, fn in ((('infra', '_render.html'), '_infraStateBadge'),
+                        (('servers', '_list.html'), '_srvStatusBadge')):
+            src = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', *rel))
+            own = src.split('function ' + fn)[1].split(chr(10) + '}')[0]
+            assert 'hostStateBadge(' in own, fn
+            assert 'text-bg-success' not in own, f'{fn} paints a state of its own again'
         render = _read(os.path.join(INFRA, '_render.html'))
-        body = render.split('function _infraStateBadge')[1].split('function ')[0]
-        for state in ('ok:', 'warning:', 'error:'):
-            assert state in body
-        assert 'infra_unwatched' in body, 'a host nobody watches has no state of its own'
+        own = render.split('function _infraStateBadge')[1].split(chr(10) + '}')[0]
+        assert 'infra_unwatched' in own, 'a host nobody watches has no state of its own'
 
 
 class TestRefreshingTheWholeFleet:
@@ -604,13 +641,23 @@ class TestACountIsAQuestion:
 
 
 class TestTheMapIsReadAtAGlanceOrItIsNothing:
-    """Reported from the screen: "no se ve la trazabilidad en absoluto".
+    """Reported from the screen twice, the second time with a picture: "eso es inusable".
 
-    A lane per network and a line per membership, down the page — which on a router that
-    declares twenty-nine routes came out as twenty-nine lanes, twenty-five of them with nobody
-    in them, 3744 px tall, every line crossing the same ten-pixel channel to place five
-    machines. Two rules replaced it: a network with nobody in it is not on the map, and
-    membership is drawn by hanging off a plate rather than by a line across the picture.
+    It is a TREE read downwards — what is outside, the way out, the networks, then what is on
+    them — and that was right the first time. What was wrong was everything around it: thirty
+    networks meant thirty columns, and the whole picture was then squashed into whatever width
+    the pane happened to have, so the more the fleet had the smaller every name got.
+
+    Three things fixed it and none of them is the shape: it is drawn on the shared canvas, so
+    it is a WINDOW and wide is fine; the columns that were not worth one are gone; and the
+    boxes can be dragged where the room actually is.
+
+    The rules about what NOT to draw are each a claim:
+
+    * a network nobody is on is a route, not a place — counted in a sentence;
+    * a network with ONE machine on it is not a place where two machines meet — folded onto
+      that machine (this is Docker's 172.17.0.0/16, which every container host has its own of);
+    * a cable is a different question with a map of its own — not drawn twice.
     """
 
     def _js(self):
@@ -618,27 +665,49 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
 
     def test_an_empty_network_is_not_a_branch(self):
         layout = _fn(self._js(), '_infraMapLayout')
-        assert "(n.members || []).some(" in layout, (
+        assert 'if (!members.length) continue;' in layout, (
             'every declared route is drawn again, whether anything lives there or not')
 
-    def test_but_the_count_of_them_is_said(self):
+    def test_a_network_of_one_is_folded_onto_the_machine_that_holds_it(self):
+        """It is not a place where two machines meet, which is the only question this map
+        exists to answer. Docker gives every host its own 172.17.0.0/16, and a router declares
+        one per VLAN: on the reported screen those were most of the picture."""
+        layout = _fn(self._js(), '_infraMapLayout')
+        assert 'members.length > 1 && !net.private' in layout
+        assert 'solo.set(' in layout, 'they are dropped rather than folded'
+
+    def test_and_a_private_range_is_not_shared_however_many_hold_it(self):
+        """Two NAS both holding 172.17.0.1 are not neighbours: either it is not one network or
+        one of them is unreachable, and in both cases joining them is a lie. The server flags
+        it; this must not undo the flag by counting members."""
+        assert '!net.private' in _fn(self._js(), '_infraMapLayout')
+
+    def test_but_the_count_of_both_is_said(self):
         """Silently dropping them would be a map that knows something and does not say it."""
         js = self._js()
-        assert 'function _infraMapFolded(' in js and 'infra_map_folded' in js
+        assert 'function _infraMapFolded(' in js
+        assert 'infra_map_folded' in js and 'infra_map_folded_solo' in js
 
     def test_the_folded_count_is_the_networks_with_nobody_in_them(self):
-        """Not "every network without a branch": a router's own network HAS a member, it is
+        """Not "every network without a column": a router's own network HAS a member, it is
         just drawn on the router. Counting it here puts a number under the picture that says
         something untrue about the fleet — which it did."""
         layout = _fn(self._js(), '_infraMapLayout')
         assert 'filter(n => !(n.members || []).length).length' in layout
-        assert 'length - nets.length' not in layout
 
     def test_a_machine_is_drawn_once(self):
         """Once per network would be four boxes with one name, and "which of these is the
-        machine" is not a question a map should raise."""
+        machine" is not a question a map should raise. The others are a thin dashed line."""
         layout = _fn(self._js(), '_infraMapLayout')
-        assert '!home.has(uid)' in layout, 'a machine on three networks is drawn three times'
+        assert 'if (!home.has(uid)) home.set(uid' in layout
+        assert 'home.get(uid) === s.net' in layout
+
+    def test_and_one_that_shares_no_network_is_still_on_the_picture(self):
+        """It has an address and a state, and dropping it would be the map quietly deciding a
+        machine does not exist because nothing else is on its subnet."""
+        layout = _fn(self._js(), '_infraMapLayout')
+        assert 'orphans' in layout
+        assert 'infra_map_no_shared' in self._js()
 
     def test_the_way_out_is_what_the_device_said_and_not_a_guess(self):
         """A machine another one points at, or one pointing at an address nobody here owns.
@@ -649,24 +718,42 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
             'the map has started deciding what a router is from the registry')
 
     def test_a_fleet_with_no_route_off_it_gets_no_cloud(self):
-        cloud = _fn(self._js(), '_infraMapCloud')
-        assert 'if (!L.exits.length) return' in cloud
+        assert 'if (!L.exits.length) return' in _fn(self._js(), '_infraMapCloud')
 
-    def test_the_lanes_are_gone(self):
+    def test_the_wires_do_not_assume_a_box_is_where_it_was_generated(self):
+        """They were orthogonal elbows — down, across, down — which is only readable while the
+        thing below IS below. A dragged box makes that false, so they are curves."""
+        wires = _fn(self._js(), '_infraMapWires')
+        assert 'function _infraMapElbow(' not in self._js()
+        assert 'const wire = (x1, y1, x2, y2, style)' in wires
+
+    def test_the_cables_are_not_drawn_twice(self):
+        """They have a map of their own now. Two pictures of one cable are two things to keep
+        in agreement, and the reported screen had both on it — the crossing lines were half of
+        why it could not be read."""
+        wires = _fn(self._js(), '_infraMapWires')
+        assert "'lldp'" not in wires and "'port'" not in wires
         js = self._js()
-        assert 'function _infraMapLane(' not in js, 'the lane layout is back'
-        assert 'function _infraMapElbow(' in js, 'the short orthogonal links are gone'
+        assert "e.kind === 'lldp'" in js and "setInfraView('links')" in js
 
     def test_the_kinds_of_line_are_still_told_apart(self):
-        """Each is a different CLAIM — an address, a statement the device made, a cable it can
-        see. Flattening them into "connected" would be the picture saying more than the data
+        """Each is a different CLAIM — an address, a statement the device made, a way off the
+        fleet. Flattening them into "connected" would be the picture saying more than the data
         does, which is the one thing a map must not do."""
-        links = _fn(self._js(), '_infraMapLinks')
-        for kind in ("'lldp'", "'port'", "'gateway'"):
-            assert kind in links, f'{kind} lines are no longer drawn as their own thing'
-        assert 'stroke-dasharray="1 4"' in links, 'a port sighting reads as a cable again'
         legend = _fn(self._js(), '_infraMapLegend')
-        assert legend.count('<svg') == 4, 'the legend stopped matching the lines'
+        assert legend.count('<svg') == 3, 'the legend stopped matching the lines'
+        for key in ('infra_map_legend_net', 'infra_map_legend_gw', 'infra_map_legend_exit'):
+            assert key in legend, key
+            for lang in ('es_ES', 'en_EN'):
+                assert f"'{key}'" in _read(os.path.join(
+                    SRC, 'lib', 'i18n', 'lang', f'{lang}.py')), (key, lang)
+
+    def test_it_is_a_window_and_not_a_picture_squashed_into_the_pane(self):
+        """The whole complaint, in one property: the old one set `max-width` to its own width
+        and let the browser shrink it, so the more the fleet had the smaller every name got."""
+        js = self._js()
+        assert 'ssCanvasAttrs(' in js and 'ss-mapfill' in js
+        assert 'overflow-x:auto' not in js and 'max-width:' not in js
 
 
 class TestTheRailReachesTheBottom:
@@ -873,3 +960,245 @@ class TestTheIdentityColumnDoesNotRepeatTheHeader:
         head = _fn(render, '_infraHostHtml')
         assert 'h.address' in head and 'h.name' in head, (
             'the device header no longer carries what the record card used to')
+
+
+class TestAFactThatIsAListOfRows:
+    """"Which ports are in that LAG" is answered, and then somebody wants to open one.
+
+    Reported from the screen: the members were there and were words. A fact whose value happens
+    to be several row names is a fact somebody wants to press.
+
+    The screen does NOT split the words to find out which rows they are — a row name may
+    contain the separator, and the side that built the list already knows. So the list travels
+    as a list beside the words it reads as.
+    """
+
+    def _det(self):
+        return _read(os.path.join(INFRA, '_details.html'))
+
+    def test_the_server_says_which_rows_the_list_is(self):
+        svc = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'service.py'))
+        body = svc.split('def _aggregate_members(')[1].split(chr(10) + 'def ')[0]
+        assert "'rows': listed" in body, 'the screen is left to split a string on a comma'
+
+    def test_and_the_screen_makes_each_one_a_way_in(self):
+        body = _fn(self._det(), '_infraRowFactsHtml')
+        assert '(a.rows || []).length' in body
+        assert 'infraGoRow(' in body
+
+    def test_landing_on_a_row_is_the_same_code_as_arriving_from_the_map(self):
+        """"Find the row called this and show it" is one behaviour, and a second implementation
+        would be free to disagree about which row `ether11` is."""
+        body = _fn(self._det(), 'infraGoRow')
+        assert '_infraPortWanted' in body and '_infraFocusPort()' in body
+
+
+class TestOneStateLooksLikeOneState:
+    """A machine's state has a colour, and it had four.
+
+    The badge, the stripe down a card, the dot beside a board column and the box on a map each
+    worked it out for themselves — so a host in maintenance came out orange on the fleet list,
+    grey in the infrastructure badge, and grey again on the board. Reported from the screen
+    twice: once for the badge, and once more for the cards after the badge was fixed, which is
+    exactly what happens when a duplicate is fixed one copy at a time.
+    """
+
+    CORE = os.path.join(TPL, 'partials', 'core', '_constants.html')
+
+    def test_there_is_one_palette(self):
+        core = _read(self.CORE)
+        assert 'const HOST_STATE_COLORS' in core and 'function hostStateColor(' in core
+        block = core.split('const HOST_STATE_COLORS')[1].split('};')[0]
+        for state in ('maintenance:', 'error:', 'warning:', 'ok:'):
+            assert state in block, state
+
+    def test_and_maintenance_is_the_orange_it_has_always_been(self):
+        """Deliberately not the yellow of a warning: "somebody switched this off on purpose"
+        and "something is wrong with it" are not the same news."""
+        block = _read(self.CORE).split('const HOST_STATE_COLORS')[1].split('};')[0]
+        assert '#fd7e14' in block
+
+    def test_nothing_in_the_section_paints_a_state_itself(self):
+        """The rule that stops this coming back one screen at a time.
+
+        A colour beside the word `status` is a screen deciding what a state looks like. The
+        cable map's own `_LNK_STROKE` is not one of those: how sure the picture is about a
+        CABLE is a different vocabulary with different words in it, and it is not about a
+        machine at all.
+        """
+        for name in ('_list.html', '_group_views.html', '_links.html', '_map.html',
+                     '_render.html'):
+            src = _strip_comments(_read(os.path.join(INFRA, name)))
+            assert '#fd7e14' not in src, f'{name} paints maintenance itself'
+            for line in src.splitlines():
+                if 'status' in line and ('bs-danger' in line or 'bs-success' in line):
+                    raise AssertionError(f'{name} decides what a state looks like: {line!r}')
+
+    def test_the_map_boxes_read_it_too(self):
+        for name, fn in (('_links.html', '_infraLinkBox'), ('_map.html', '_infraMapBox')):
+            body = _read(os.path.join(INFRA, name)).split(
+                'function ' + fn + '(')[1].split(chr(10) + '}')[0]
+            assert 'hostStateColor(' in body, name
+
+
+class TestTheReloadDoesNotFlashWhite:
+    """Reported from the screen: every refresh paints white before the page arrives.
+
+    It is not the page's white — it is the browser's own canvas, in the moment BEFORE any
+    stylesheet has been fetched and parsed. Which is why the answer cannot live in a
+    stylesheet: anything there is by definition too late.
+    """
+
+    def _base(self):
+        return _read(os.path.join(TPL, 'base.html'))
+
+    def test_the_canvas_is_told_which_scheme_it_is(self):
+        """`color-scheme` is what makes the default background, the scrollbars and the form
+        controls dark before a rule of ours is parsed."""
+        assert '<meta name="color-scheme"' in self._base()
+
+    def test_and_the_colour_is_said_before_any_stylesheet(self):
+        base = self._base()
+        style = base.index('<style>html{background:')
+        # The LINK and not the word: the note above the rule names the stylesheet it
+        # duplicates a colour out of, which is the sentence a search for the word finds.
+        for sheet in ('/static/css/bootstrap.min.css', '/static/css/web_admin.css'):
+            assert style < base.index(f'href="{sheet}'), f'the paint comes after {sheet}'
+
+    def test_it_is_the_same_flag_the_document_uses(self):
+        """No moment where the document knows the theme and the paint does not."""
+        base = self._base()
+        assert base.count("{{ 'dark' if dark_mode else 'light' }}") >= 2
+        assert "{{ '#181818' if dark_mode else '#f5f6fa' }}" in base
+
+    def test_and_it_is_the_colour_the_stylesheet_settles_on(self):
+        """The one colour duplicated out of the stylesheet, so it is pinned to it here."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '--bs-body-bg:                   #181818;' in css
+        assert '[data-bs-theme="light"] body { background-color: #f5f6fa }' in css
+
+    def test_and_nothing_is_shown_before_it_is_dressed(self):
+        """A `<link>` in the head is render-blocking in theory. In practice a browser paints
+        the document bare once its own paint-suppression window runs out, which on a slow link
+        is a screenful of serif text and bullet lists — reported from the screen, with a
+        picture of it, showing the boot splash undressed.
+
+        Held by the LAST stylesheet, which is the one that means "dressed", and released by a
+        timeout as well: a stylesheet that 404s would otherwise leave a blank page for ever,
+        and the worst case has to stay the bare document — which is what happens today.
+        """
+        base = self._base()
+        assert 'class="ss-nocss"' in base
+        assert 'html.ss-nocss body{visibility:hidden}' in base
+        assert "classList.remove('ss-nocss')" in base, 'a broken stylesheet is a blank page'
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert 'html.ss-nocss body { visibility: visible; }' in css
+
+    def test_and_the_stylesheets_are_cached_instead_of_revalidated(self):
+        """Half a megabyte of CSS costs a round trip each before anything is drawn, and that
+        wait is the whole reason the browser gives up. A versioned URL cannot go stale — a new
+        build is a new URL — so it may be kept for a year; the fonts a stylesheet pulls in
+        under a name of its own may not, because nothing can bust them."""
+        base = self._base()
+        for asset in ('bootstrap.min.css', 'bootstrap-icons.min.css', 'bootstrap.bundle.min.js'):
+            assert f'{asset}?v={{{{ asset_v }}}}' in base, asset
+        hooks = _read(os.path.join(SRC, 'lib', 'web_admin', 'mixins', 'hooks.py'))
+        body = hooks.split('def _hook_trace_end(')[1].split(chr(10) + '    def ')[0]
+        assert "request.args.get('v')" in body
+        assert 'max-age=31536000, immutable' in body and 'max-age=86400' in body
+
+
+class TestAMakersMarkFitsItsBox:
+    """A brand mark is drawn by its HEIGHT and left to work out its own width.
+
+    Which only works while each file's ``viewBox`` is the ink it holds. Upstream draws every
+    mark inside a 24x24 canvas, so a WORDMARK — Synology, HP — fills the width and leaves two
+    thirds of the height empty; fitted into a box that way it came out a third of the height of
+    the text beside it. Reported from the screen.
+
+    Silent, which is why this is a test: a logo drawn small looks like somebody's decision.
+    """
+
+    DIR = os.path.join(SRC, 'lib', 'web_admin', 'static', 'img', 'brands')
+    NUM = re.compile(r'[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?')
+    CMD = re.compile(r'([MmZzLlHhVvCcSsQqTtAa])([^MmZzLlHhVvCcSsQqTtAa]*)')
+    #: How many numbers each command takes. An arc's first five are radii and flags, not a
+    #: point — reading them as coordinates would put the box where the drawing never goes.
+    ARGS = {'M': 2, 'L': 2, 'H': 1, 'V': 1, 'C': 6, 'S': 4, 'Q': 4, 'T': 2, 'A': 7, 'Z': 0}
+
+    def _ink(self, d):
+        """The box the path visits: on-curve points plus control points, which is a superset
+        of the true outline by at most part of a curve's bulge."""
+        x = y = 0.0
+        start = (0.0, 0.0)
+        pts = []
+        for letter, rest in self.CMD.findall(d):
+            up, rel = letter.upper(), letter.islower()
+            nums = [float(n) for n in self.NUM.findall(rest)]
+            take = self.ARGS[up]
+            if take == 0:
+                x, y = start
+                pts.append((x, y))
+                continue
+            for i in range(0, len(nums) - take + 1, take):
+                arg = nums[i:i + take]
+                if up == 'H':
+                    x = x + arg[0] if rel else arg[0]
+                elif up == 'V':
+                    y = y + arg[0] if rel else arg[0]
+                elif up == 'A':
+                    x, y = (x + arg[5], y + arg[6]) if rel else (arg[5], arg[6])
+                else:
+                    base = (x, y)
+                    for j in range(0, take, 2):
+                        px, py = arg[j], arg[j + 1]
+                        if rel:
+                            px, py = base[0] + px, base[1] + py
+                        pts.append((px, py))
+                        x, y = px, py
+                pts.append((x, y))
+                if up == 'M' and i == 0:
+                    start = (x, y)
+        xs, ys = zip(*pts)
+        return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
+
+    def _marks(self):
+        return sorted(f for f in os.listdir(self.DIR) if f.endswith('.svg'))
+
+    def test_there_are_marks_to_draw(self):
+        assert len(self._marks()) >= 4
+
+    def test_every_marks_box_is_the_ink_it_holds(self):
+        """Within a tenth: the box is a superset, so a little slack is the method and not a
+        mistake. A wordmark left in the 24x24 canvas is off by a factor of four."""
+        loose = []
+        for name in self._marks():
+            src = _read(os.path.join(self.DIR, name))
+            box = [float(v) for v in re.search(r'viewBox="([^"]+)"', src).group(1).split()]
+            ink = self._ink(re.search(r'\sd="([^"]+)"', src).group(1))
+            for i, (declared, actual) in enumerate(zip(box[2:], ink[2:])):
+                if declared > actual * 1.1 + 0.05:
+                    loose.append((name, 'wh'[i], declared, actual))
+        assert not loose, f'boxes bigger than their ink (drawn small): {loose}'
+
+    def test_a_mark_takes_the_theme_and_never_paints_over_it(self):
+        """The files are black silhouettes with no colour of their own, which is right on a
+        light panel and invisible on a dark one."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        rule = css.split('.ss-brand {')[1].split('}')[0]
+        assert 'width: auto' in rule, 'a fixed width is a squashed wordmark'
+        assert '[data-bs-theme="dark"] .ss-brand { filter: invert(1); }' in css
+        for name in self._marks():
+            src = _read(os.path.join(self.DIR, name))
+            assert 'fill=' not in src, f'{name} paints itself and will not take the theme'
+
+    def test_and_where_the_mark_is_drawn_the_name_is_not(self):
+        """A logo is the maker's name written by the maker: "[Synology] Synology" is the same
+        word twice, and it was on every card of a machine whose mark we happen to ship."""
+        src = _strip_comments(_read(os.path.join(TPL, 'partials', 'core', '_constants.html')))
+        body = _fn(src, 'hostBrandHtml')
+        assert 'hostBrandMarkHtml' in body and 'if (mark) return mark;' in body
+        card = _strip_comments(_read(os.path.join(INFRA, '_tabs.html')))
+        head = card.split('const block = (title')[1].split('const facts')[0]
+        assert 'hostBrandMarkHtml(brand' in head, 'the card draws no mark'
+        assert 'title === (brand || {}).name' in head, 'the card writes the maker out twice'

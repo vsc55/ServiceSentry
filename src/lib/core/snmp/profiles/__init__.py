@@ -74,6 +74,95 @@ HEADLINE_ROLES = ('used', 'total', 'free')
 #: A Bootstrap icon name, and nothing that is not one. The value reaches a `class` attribute.
 _ICON_RE = re.compile(r'^bi-[a-z0-9-]{1,40}$')
 
+#: The file name of a shipped brand mark, and NOTHING that could be a path. The value is
+#: concatenated into a URL under the static folder, so `../../config.json` would be a request
+#: for whatever the process can read — the same shape as the MIB catalogue's traversal, and the
+#: reason this is a whitelist of characters rather than a check for the ones that are trouble.
+_LOGO_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
+
+#: A brand's own colour, as six hex digits. It reaches a `style` attribute, where a value with
+#: a bracket or a semicolon in it is no longer a colour.
+_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _brand(raw) -> dict:
+    """Who MADE the equipment this profile speaks for — ``{}`` when it does not say.
+
+    A brand is not a translation and not a label: "MikroTik" is the same word in every
+    language, and the profile that matches on `1.3.6.1.4.1.14988` is the only thing in the
+    product that knows a device under that tree was made by them. The core carries the answer
+    and never holds a list of manufacturers — the same reason it ships no string naming a
+    module.
+
+    Three parts, all optional but the name:
+
+      ``name``   what to call them. A brand with only this draws as a word, which is the right
+                 answer for the ones nobody has a redistributable mark for.
+      ``logo``   the file name of a mark under `static/img/brands` — a slug, never a path.
+      ``color``  their own colour, for the chip drawn when there is no mark.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    name = str(raw.get('name') or '').strip()
+    if not name or len(name) > 48:
+        return {}
+    out = {'name': name}
+    logo = str(raw.get('logo') or '').strip().lower()
+    if _LOGO_RE.match(logo):
+        out['logo'] = logo
+    icon = str(raw.get('icon') or '').strip().lower()
+    if _ICON_RE.match(icon):
+        # …and the mark somebody else already ships. The panel carries an icon set; a brand in
+        # it needs no file of ours, and one that has no mark we may redistribute may still have
+        # a glyph there. Beaten by `logo` when a profile declares both.
+        out['icon'] = icon
+    color = str(raw.get('color') or '').strip()
+    if _COLOR_RE.match(color):
+        out['color'] = color.lower()
+    return out
+
+
+def _brands(raw) -> list:
+    """The makers a profile can recognise in what it READS — ``[]`` when it declares none.
+
+    Two different declarations, and the difference is who the profile speaks for:
+
+      ``brand``   this profile IS a maker's. `mikrotik_routeros` matches on their tree, so a
+                  device that answers it was made by them and there is nothing to look up.
+      ``brands``  this profile reports whatever the machine says. `ucd_extend` reads DMI, which
+                  answers "HP", "Dell Inc.", "QEMU" — and the profile that reads DMI is the
+                  thing that knows what DMI answers. A table there is knowledge about that
+                  interface; the same table in the core would be a list of manufacturers.
+
+    Each entry is a brand plus ``any``: the strings that mean it, matched anywhere in what the
+    device said, in lower case. "HP" and "Hewlett-Packard" are the same maker and only the two
+    of them together cover a rack.
+    """
+    out = []
+    for entry in (raw or []):
+        if not isinstance(entry, dict):
+            continue
+        brand = _brand(entry)
+        words = [str(w).strip().lower() for w in (entry.get('any') or []) if str(w).strip()]
+        if brand and words:
+            out.append({**brand, 'any': words[:12]})
+    return out[:64]
+
+
+def brands_of(profile) -> list:
+    """The lookup table a profile declares for what it reports, or ``[]``."""
+    return _brands((profile or {}).get('brands'))
+
+
+def brand_of(profile) -> dict:
+    """The brand a profile declares, or ``{}``.
+
+    Read through a function rather than off the key so a profile that has NOT been through
+    ``normalise`` answers the same as one that has — the probe builds its catalogue from raw
+    files, which is where `label_of` was crashing before it was made to do this.
+    """
+    return _brand((profile or {}).get('brand'))
+
 
 def _label(raw, fallback: str) -> dict:
     """A metric's or profile's name per language.
@@ -142,6 +231,60 @@ def normalise_metric(raw) -> dict | None:
             idx = str(idx or '').strip()
             if idx and _OID_RE.match(idx):
                 out['index_label'] = idx
+        # …and the readings that are not in the value at all, but in the INDEX. A composite
+        # index is a fact per component, and SNMP puts real answers there — `lldpRemTable` is
+        # indexed by (time mark, MY port, neighbour), so which of the reporter's own ports saw
+        # that neighbour is knowable and is in none of the columns. The panel showed "port not
+        # identified" for a router that knows perfectly well it was ether8.
+        #
+        # One-based, because that is how a MIB writes an INDEX clause. Composes with
+        # `value_label`: component 2 is a port NUMBER, and the local-port table turns it into
+        # the name the device prints.
+        part = raw.get('from_index')
+        if isinstance(part, int) and not isinstance(part, bool) and part >= 1 and kind == 'text':
+            out['from_index'] = part
+        # …and which component says which ROW this is about, for the tables whose index is a
+        # PAIR of rows. `ifStackTable` is the case: its index is (the interface on top, the
+        # interface underneath) and its value is a row status nobody wants — the answer is
+        # entirely in the index, and it is about two different interfaces at once.
+        #
+        # Without this, such a table files one row per PAIR, named `bond.ether` or by the raw
+        # index, and none of those is a row the device reported.
+        row_at = raw.get('row_index')
+        if isinstance(row_at, int) and not isinstance(row_at, bool) and row_at >= 1:
+            out['row_index'] = row_at
+        # …and the readings whose VALUE is a path. Some agents answer a whole stack in one
+        # string: RouterOS writes `bridgeLAN/bondingTrankSW1/ether11` where a port name goes,
+        # and that single answer says which port it is AND what it is inside. It is the only
+        # place a RouterOS states its bonding — its `ifStackTable` is served and empty, which
+        # was checked against the box before this was written.
+        #
+        # Declared, with the separator and which component is which: that a slash means "inside
+        # of" is a fact about that agent's naming, and the core guessing it would be the core
+        # knowing something about one vendor.
+        pth = raw.get('path')
+        if isinstance(pth, dict) and kind == 'text':
+            sep = str(pth.get('sep') or '')
+            got = {'sep': sep} if 0 < len(sep) <= 4 else {}
+            for side in ('row', 'value'):
+                at = pth.get(side)
+                # Negative counts from the END, which is the half that is stable: a port may
+                # be two deep or four, and it is always the last thing in its own path.
+                if isinstance(at, int) and not isinstance(at, bool) and -9 <= at <= 9:
+                    got[side] = at
+            if got.get('sep') and ('row' in got or 'value' in got):
+                out['path'] = got
+        # …and the column that this reading POINTS AT, for the readings that are not a
+        # measurement but a reference. Half of SNMP is built this way: a value whose meaning is
+        # "row N of that other table". `dot3adAggPortAttachedAggID` answers 141 for a port in
+        # an aggregate, and 141 is the ifIndex of the LAG — so the port's own row can say
+        # "member of Po1" instead of "member of 141", which is the same fact and unreadable.
+        #
+        # Only for `text`: what comes out is a NAME. A gauge whose value was quietly replaced
+        # by a string is a series that stops being a number halfway down.
+        val = str(raw.get('value_label') or '').strip()
+        if val and kind == 'text' and _OID_RE.match(val):
+            out['value_label'] = val
         # The factor this reading has to be multiplied by, when the DEVICE decides it and not
         # the profile. Storage is the case that forces it: a filesystem table reports its size
         # in allocation units and puts the size of a unit in a column beside it, per row —
@@ -595,6 +738,23 @@ def normalise(raw) -> dict | None:
     }
     if includes:
         out['includes'] = includes
+        # …and which of them the family does not answer uniformly. Carried through
+        # normalisation like `includes` itself: a declaration the catalogue drops is a
+        # declaration that silently does nothing, which is how `optional` first shipped —
+        # written in five group files and read by nobody.
+        opt = [m for m in (
+            [raw['optional']] if isinstance(raw.get('optional'), str)
+            else (raw.get('optional') or [])) if str(m or '').strip().lower() in seen_i]
+        if opt:
+            out['optional'] = [str(m).strip().lower() for m in opt]
+    # Who made the box. Carried like every other declaration and for the reason `optional`
+    # taught: one that normalise drops is one that five files state and nothing reads.
+    brand = _brand(raw.get('brand'))
+    if brand:
+        out['brand'] = brand
+    table = _brands(raw.get('brands'))
+    if table:
+        out['brands'] = table
     split = _row_split(raw.get('row_split'))
     if split:
         out['row_split'] = split
@@ -604,6 +764,14 @@ def normalise(raw) -> dict | None:
     gate = _present_when(raw.get('present_when'))
     if gate:
         out['present_when'] = gate
+    # Where this profile READS in a device's identity — lower first, and only when it has an
+    # opinion. Without one the order is "a vendor's own MIB after the standards", which ties
+    # every standard profile with every other and falls back to the alphabet: the card headed
+    # "VLANs" came out above the one headed "System", which is the wrong first sentence about
+    # a switch. Declared by the profile, because which of two standard MIBs is the identity of
+    # a box is a fact about those MIBs and not something the panel can work out.
+    if isinstance(raw.get('rank'), int) and not isinstance(raw.get('rank'), bool):
+        out['rank'] = max(-9, min(9, int(raw['rank'])))
     # What this profile is FOR, and how a device is recognised as one of them. Two ways,
     # because devices answer two different questions about themselves:
     #
@@ -789,6 +957,24 @@ def reaches(profiles: dict, ids, target: str) -> bool:
     return any(walk(str(p or '').strip().lower(), 0) for p in (ids or ()))
 
 
+def optional_of(prof: dict) -> set:
+    """The members a group holds that not every device of its family answers.
+
+    A family is not uniform. Every Synology answers its disks and its volumes; whether it
+    answers LLDP depends on the DSM version and on somebody having switched it on — and the
+    same is true of a switch's neighbour table. Those belong IN the group, because a device
+    that does answer them should be sampled for them, and they must not be what stops the
+    group from standing for the rest.
+
+    Declared by the group (``"optional": [...]``) rather than inferred: which of a family's
+    profiles is universal is a fact about that equipment, and the core has no way to know it.
+    """
+    raw = (prof or {}).get('optional')
+    if isinstance(raw, str):
+        raw = [raw]
+    return {str(x).strip().lower() for x in (raw or ()) if str(x).strip()}
+
+
 def collapse(profiles: dict, ids) -> list:
     """*ids*, with every run of them that a group already covers replaced by that group.
 
@@ -797,9 +983,16 @@ def collapse(profiles: dict, ids) -> list:
     holds exactly those thirteen, the group IS the answer — same profiles sampled, one thing
     to read, and one thing to change when the family grows a fourteenth.
 
-    Only a group whose members are **all** present may stand for them. A partial cover would
-    quietly assign profiles the device did not answer, which is the failure this whole flow
-    exists to avoid: a wrong profile does not fail, it measures numbers that look fine.
+    Only a group whose REQUIRED members are all present may stand for them. A partial cover
+    would quietly assign profiles the device did not answer, which is the failure this whole
+    flow exists to avoid: a wrong profile does not fail, it measures numbers that look fine.
+
+    …and what it covers is what is actually THERE. A group's optional members (see
+    :func:`optional_of`) are the ones a family does not answer uniformly — LLDP on a NAS, a
+    forwarding table on a switch somebody has not enabled it on. Counting them as required
+    would make a whole family stop collapsing the day the group learned one, which is a
+    twenty-four-chip field for a device that is plainly a Synology; counting them as covered
+    when absent would assign a profile the device never answered.
 
     Biggest cover first, ties by id, and a member spent on one group is not available to
     another — so a device that answers both a vendor family and the generic set gets the two
@@ -816,9 +1009,11 @@ def collapse(profiles: dict, ids) -> list:
     for gid, prof in profiles.items():
         if not is_group(prof) or gid in present:
             continue
-        cover = set(expand(profiles, [gid]))
-        if cover and cover <= present:
-            covers.append((gid, cover))
+        members = set(expand(profiles, [gid]))
+        needed = members - optional_of(prof)
+        if needed and needed <= present:
+            # What this group stands for is the part of it the device actually answered.
+            covers.append((gid, members & present))
     covers.sort(key=lambda c: (-len(c[1]), c[0]))
 
     chosen: list = []
@@ -932,6 +1127,53 @@ def match_sysobjectid(profiles: dict, sysobjectid: str) -> dict | None:
     return hits[0] if hits else None
 
 
+def history_source(profile, lang: str = 'en_EN') -> dict:
+    """How to NAME and ORDER the thing this profile speaks for: ``{label, short, rank}``.
+
+    Read off the profile and not off its fields. A profile that answers only TEXT charts
+    nothing, so it contributed no field, so nothing carried its name — and the identity card it
+    fills was headed `bridge_vlans`, which is an id and not a word anybody asked to read.
+    Reported from the screen, as a card of translated VLAN names under an untranslated title.
+    """
+    return {'label': label_of(profile or {}, lang),
+            'short': short_label_of(profile or {}, lang),
+            'rank':  source_rank_of(profile),
+            # …and WHO MADE the thing. It rides with the name because it answers the same
+            # question about the same thing, and because the alternative is a second trip
+            # through the catalogue — 30 ms of file reads — to fetch one word per source.
+            # What this profile calls the facts NOBODY ELSE can name. A fact filed under a
+            # ROLE is named by the core, in every language, the same word on every device —
+            # `attr_model` is "Modelo" whoever answered it. One filed under the profile's own
+            # metric key has no such word: the recorder falls back to the key, and the key is
+            # an internal name. So the screen printed `attr_mt_active_fan` beside "n/a",
+            # reported from the screen, while the profile had "Ventilador activo" written down
+            # two lines from the OID.
+            #
+            # Only the ones with no role, and that is the whole rule: a profile does not get to
+            # rename "Model" for its own devices.
+            'attrs': {m['key']: label_of(m, lang)
+                      for m in (profile or {}).get('metrics') or ()
+                      if m.get('kind') == 'text' and not m.get('role')},
+            'brand': brand_of(profile),
+            # …and, for a profile that speaks for nobody in particular, how to recognise the
+            # maker in what it read. See `_brands`.
+            'brands': brands_of(profile)}
+
+
+def source_rank_of(profile) -> int:
+    """Where this profile reads in a device's identity: lower first.
+
+    What it declares, or — with no opinion — "a vendor's own MIB after the standards". RFC 1213
+    is what every SNMP agent answers, the vendor's MIB is what THIS box answers, and a UPS
+    profile is about something plugged into it: "from what every device is, to what this one
+    is, to what is attached" is how a person reads those three cards.
+    """
+    prof = profile or {}
+    if isinstance(prof.get('rank'), int) and not isinstance(prof.get('rank'), bool):
+        return int(prof['rank'])
+    return 1 if (prof.get('match') or {}).get('sysobjectid_prefix') else 0
+
+
 def history_fields(profile: dict, lang: str = 'en_EN') -> dict:
     """``{field: {label, unit, source, source_label}}`` for this profile's measurements.
 
@@ -982,8 +1224,7 @@ def history_fields(profile: dict, lang: str = 'en_EN') -> dict:
             # what is attached" is how a person reads those three cards, and alphabetical order
             # put the standard last. Declared by the profile (it claims a vendor tree or it
             # does not) rather than decided by a list of ids in the panel.
-            'source_rank':  1 if ((profile or {}).get('match') or {}).get('sysobjectid_prefix')
-                              else 0,
+            'source_rank':  source_rank_of(profile),
             # The flag AS DECLARED — `True`, or which half of a proportion it is. Flattened
             # to a boolean here once, and the summary drew two byte counts side by side
             # instead of one percentage: the role survived normalise and died on the way out.

@@ -164,8 +164,15 @@
 {% include "partials/infra/_details.html" %}
 {% include "partials/infra/_raw.html" %}
 {% include "partials/infra/_collect.html" %}
+{# The window over a drawing — pan, zoom, fit. Before both maps, because both are
+   drawn on it. #}
+{% include "partials/infra/_canvas.html" %}
 {% include "partials/infra/_map.html" %}
+{# After _map.html: the link map reads its loader, its cache and its drawing helpers. #}
+{% include "partials/infra/_links.html" %}
 {% include "partials/infra/_list.html" %}
+{# After _list.html: the grouping views read its cell renderer and column state. #}
+{% include "partials/infra/_group_views.html" %}
 {# ================================================================
    Cluster tab — multi-bind checks (table + edit modal).
    Thin orchestrator: includes sub-partials in order.

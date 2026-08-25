@@ -129,6 +129,10 @@ async function _infraOpenView(pane) {
         if (!_infraDetail) { _infraHost = ''; return renderInfra(); }
     }
     pane.innerHTML = _infraHostHtml(_infraDetail);
+    // …and if somebody arrived here by pressing a PORT on the link map, go to it. After the
+    // paint, because it repaints: the drill-down is a change of view over a payload that has
+    // to be in hand first.
+    if (typeof _infraFocusPort === 'function') _infraFocusPort();
 }
 
 /** Redraw the open device from the payload already in hand.
@@ -201,19 +205,19 @@ function _infraAutoTick() {
     if (saved > 0) setTimeout(() => setInfraAutoRefresh(saved), 0);
 })();
 
-/** The state of a machine, as a badge. `''` is NOT "fine": a host with no enabled check has
- *  no state at all, and painting it green would be the section telling you something nobody
- *  is checking. */
+/** The state of a machine, as a badge — the shared one (see `HOST_STATE_BADGES`).
+ *
+ *  It had its own, which is how the same host in maintenance came out orange with a cone on
+ *  the fleet list and grey with a spanner here. Two badges for one state is two states as far
+ *  as anybody reading them can tell.
+ *
+ *  What is this section's own is the LAST line: `''` is not "fine". A host with no enabled
+ *  check has no state at all, and painting it green would be the section telling you something
+ *  nobody is checking. */
 function _infraStateBadge(status, maintenance) {
-    if (maintenance)
-        return `<span class="badge text-bg-secondary"><i class="bi bi-tools me-1"></i>${esc(t('infra_maintenance'))}</span>`;
-    const map = {
-        ok:      ['text-bg-success',   'bi-check-circle',        t('status_ok')],
-        warning: ['text-bg-warning',   'bi-exclamation-triangle', t('status_warning')],
-        error:   ['text-bg-danger',    'bi-x-circle',            t('status_error')],
-    };
-    const [cls, icon, label] = map[status] || ['text-bg-secondary', 'bi-dash-circle', t('infra_unwatched')];
-    return `<span class="badge ${cls}"><i class="bi ${icon} me-1"></i>${esc(label)}</span>`;
+    return hostStateBadge(status, maintenance,
+        `<span class="badge text-bg-secondary"><i class="bi bi-dash-circle me-1"></i>${
+            esc(t('infra_unwatched'))}</span>`);
 }
 
 /** One machine: what it is, what it measures, and what its checks said. */
@@ -232,6 +236,11 @@ function _infraHostHtml(d) {
                 <i class="bi bi-arrow-left me-1"></i>${esc(t('infra_view_fleet'))}</button>
             <span class="fw-semibold ss-fs-5">${esc(h.name || '')}</span>
             <code class="text-muted">${esc(h.address || '')}</code>
+            ${/* No maker here. It was put beside the name while the identity column was
+                  still headed "Machine" and the answer was three clicks down; the column is
+                  headed by the maker now, with its mark, right under this line. Reported from
+                  the screen with the duplicate underlined. The fleet list, the board cards and
+                  the two maps keep it — none of them has a column to read. */''}
             ${_infraStateBadge(h.status, h.maintenance)}
             ${h.virtual ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"><i class="bi bi-hdd-stack me-1"></i>${esc(t('host_virtual') || 'virtual')}</span>` : ''}
             ${tags}
